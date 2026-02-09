@@ -20,6 +20,7 @@ import {
 import { StoreObjectManager } from "../src/storage/query.ts";
 import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
+import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { Immutable } from "@commontools/utils/types";
 import { ContextualFlowControl, deepEqual } from "@commontools/runner";
 import {
@@ -39,7 +40,7 @@ function getTraverser(
 }
 
 describe("SchemaObjectTraverser.traverseDAG", () => {
-  it("follows legacy cell links when traversing", () => {
+  it("follows sigil cell links when traversing", () => {
     const store = new Map<string, Revision<State>>();
     const type = "application/json" as const;
     const doc1Uri = "of:doc-1" as URI;
@@ -48,7 +49,6 @@ describe("SchemaObjectTraverser.traverseDAG", () => {
     const doc2Entity = doc2Uri as Entity;
 
     const doc1Value = { employees: [{ name: "Bob" }] };
-    const doc1EntityId = { "/": doc1Uri };
 
     const doc1Revision: Revision<State> = {
       the: type,
@@ -64,8 +64,12 @@ describe("SchemaObjectTraverser.traverseDAG", () => {
 
     const doc2Value = {
       employeeName: {
-        cell: doc1EntityId,
-        path: ["employees", "0", "name"],
+        "/": {
+          [LINK_V1_TAG]: {
+            id: doc1Uri,
+            path: ["employees", "0", "name"],
+          },
+        },
       },
       argument: {
         tools: {
@@ -144,7 +148,7 @@ describe("SchemaObjectTraverser missing value handling", () => {
     // Array with a link to a non-existent document
     const docValue = [
       "present",
-      { "/": missingUri }, // link to missing doc
+      { "/": { [LINK_V1_TAG]: { id: missingUri, path: [] } } }, // link to missing doc
       "also-present",
     ];
 
@@ -179,7 +183,7 @@ describe("SchemaObjectTraverser missing value handling", () => {
     // Object with a link to a non-existent document
     const docValue = {
       present: "here",
-      missing: { "/": missingUri }, // link to missing doc
+      missing: { "/": { [LINK_V1_TAG]: { id: missingUri, path: [] } } }, // link to missing doc
       alsoPresent: "also here",
     };
 
@@ -218,7 +222,7 @@ describe("SchemaObjectTraverser missing value handling", () => {
     // Array with a link to a non-existent document
     const docValue = [
       "present",
-      { "/": missingUri }, // link to missing doc
+      { "/": { [LINK_V1_TAG]: { id: missingUri, path: [] } } }, // link to missing doc
       "also-present",
     ];
 
@@ -262,7 +266,7 @@ describe("SchemaObjectTraverser missing value handling", () => {
     // Array with a link to a non-existent document
     const docValue = [
       "present",
-      { "/": missingUri }, // link to missing doc
+      { "/": { [LINK_V1_TAG]: { id: missingUri, path: [] } } }, // link to missing doc
       "also-present",
     ];
 

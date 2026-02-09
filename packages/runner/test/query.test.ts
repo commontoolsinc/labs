@@ -13,6 +13,7 @@ import {
   MapSet,
   SchemaObjectTraverser,
 } from "../src/traverse.ts";
+import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import type {
   MIME,
   Revision,
@@ -85,12 +86,16 @@ describe("Query", () => {
     };
     const docValue2 = {
       name: {
-        cell: entityId1,
-        path: ["employees", "0", "fullName"],
+        "/": {
+          [LINK_V1_TAG]: {
+            id: `of:${entityId1["/"]}`,
+            path: ["employees", "0", "fullName"],
+          },
+        },
       },
     };
     const testCell2 = runtime.getCell<
-      { name: { cell: { ["/"]: string }; path: string[] } }
+      { name: { ["/"]: Record<string, unknown> } }
     >(
       space,
       `query test cell 2`,
@@ -173,7 +178,7 @@ describe("Query", () => {
       since: 1,
     };
     const testCell2 = runtime.getCell<
-      { name: { cell: { ["/"]: string }; path: string[] } }
+      { name: { ["/"]: Record<string, unknown> } }
     >(
       space,
       `query test cell 2`,
@@ -182,8 +187,12 @@ describe("Query", () => {
     );
     const docValue2 = {
       name: {
-        cell: entityId1,
-        path: ["employees", "0", "name"],
+        "/": {
+          [LINK_V1_TAG]: {
+            id: `of:${entityId1["/"]}`,
+            path: ["employees", "0", "name"],
+          },
+        },
       },
     };
     testCell2.setRaw(docValue2);
@@ -252,7 +261,7 @@ describe("Query", () => {
     } as const satisfies JSONSchema;
     // Now we make the doc with the cycle
     const testCell1 = runtime.getCell<
-      { name: { cell: { ["/"]: string }; path: string[] } }
+      { name: { ["/"]: Record<string, unknown> } }
     >(
       space,
       `query test cell 1`,
@@ -261,8 +270,12 @@ describe("Query", () => {
     );
     testCell1.setRaw({
       name: {
-        cell: { "/": "<placeholder>" },
-        path: ["name"],
+        "/": {
+          [LINK_V1_TAG]: {
+            id: "of:<placeholder>",
+            path: ["name"],
+          },
+        },
       },
     });
     const entityId1 = JSON.parse(JSON.stringify(testCell1.entityId!));
@@ -272,8 +285,12 @@ describe("Query", () => {
       is: {
         value: {
           name: {
-            cell: entityId1,
-            path: ["name"],
+            "/": {
+              [LINK_V1_TAG]: {
+                id: `of:${entityId1["/"]}`,
+                path: ["name"],
+              },
+            },
           },
         },
       },
@@ -308,7 +325,7 @@ describe("Query", () => {
 
   it("detects pointer cycles when schema initially differ", () => {
     const testCell1 = runtime.getCell<
-      { name: { cell: { ["/"]: string }; path: string[] } }
+      { name: { ["/"]: Record<string, unknown> } }
     >(
       space,
       "query cycle schema test cell1",
@@ -317,7 +334,7 @@ describe("Query", () => {
     );
 
     const testCell2 = runtime.getCell<
-      { name: { cell: { ["/"]: string }; path: string[] } }
+      { name: { ["/"]: Record<string, unknown> } }
     >(
       space,
       "query cycle schema test cell2",
@@ -332,12 +349,20 @@ describe("Query", () => {
       is: {
         value: {
           self: {
-            cell: testCell1.entityId,
-            path: [],
+            "/": {
+              [LINK_V1_TAG]: {
+                id: testCell1.sourceURI,
+                path: [],
+              },
+            },
           },
           other: {
-            cell: testCell2.entityId,
-            path: [],
+            "/": {
+              [LINK_V1_TAG]: {
+                id: testCell2.sourceURI,
+                path: [],
+              },
+            },
           },
         },
       },
@@ -353,8 +378,12 @@ describe("Query", () => {
       is: {
         value: {
           self: {
-            cell: testCell2.entityId,
-            path: [],
+            "/": {
+              [LINK_V1_TAG]: {
+                id: testCell2.sourceURI,
+                path: [],
+              },
+            },
           },
         },
       },
@@ -447,8 +476,12 @@ describe("Query", () => {
     const docValue2 = {
       employees: [{
         address: {
-          cell: entityId1,
-          path: ["home"],
+          "/": {
+            [LINK_V1_TAG]: {
+              id: `of:${entityId1["/"]}`,
+              path: ["home"],
+            },
+          },
         },
       }],
     };

@@ -148,7 +148,9 @@ async function testNewLinkDiscovery() {
   // Update person to link to address using manual link format
   personCell3.withTx(tx).setRaw({
     name: "Alice",
-    address: { cell: addressEntityId, path: [] },
+    address: {
+      "/": { "link@1": { id: `of:${addressEntityId["/"]}`, path: [] } },
+    },
   });
   await tx.commit();
   await runtime3.storageManager.synced();
@@ -253,7 +255,9 @@ async function testLinkedDocumentChanges() {
   // Create a manual link to the address cell
   personCell.setRaw({
     name: "Bob",
-    address: { cell: addressEntityId, path: [] },
+    address: {
+      "/": { "link@1": { id: `of:${addressEntityId["/"]}`, path: [] } },
+    },
   });
   await tx.commit();
 
@@ -406,7 +410,9 @@ async function testDeepLinkChain() {
   );
   addressCell.setRaw({
     street: "123 Main St",
-    city: { cell: cityEntityId, path: [] },
+    city: {
+      "/": { "link@1": { id: `of:${cityEntityId["/"]}`, path: [] } },
+    },
   });
   await tx.commit();
   await addressCell.sync();
@@ -423,7 +429,9 @@ async function testDeepLinkChain() {
   );
   personCell.setRaw({
     name: "Charlie",
-    address: { cell: addressEntityId, path: [] },
+    address: {
+      "/": { "link@1": { id: `of:${addressEntityId["/"]}`, path: [] } },
+    },
   });
   await tx.commit();
 
