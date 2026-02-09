@@ -2185,7 +2185,7 @@ export class Scheduler {
     // First iteration processes initial seeds + their dirty deps.
     // Subsequent iterations process new subscriptions and re-collect dirty deps.
     logger.timeStart("scheduler", "execute", "settle");
-    const maxSettleIterations = this.pullMode ? 10 : 1;
+    const maxSettleIterations = this.pullMode ? 10 : 10;
     const EARLY_ITERATION_THRESHOLD = 5;
     const earlyIterationComputations = new Set<Action>(); // Track computations in first N iterations
     let lastWorkSet: Set<Action> = new Set();
