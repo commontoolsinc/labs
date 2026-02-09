@@ -873,9 +873,166 @@ describe("llmDialog", () => {
     // Note: Pinned cell won't appear in system prompt on first request,
     // only after it's been pinned and the next LLM request is made
   });
+
+  it("should support async tool calls that resolve after a delay", async () => {
+    const initialMessage = "What is the weather in San Francisco?";
+    const toolCallId = "call_async_123";
+    const toolResultValue = "Sunny, 25C";
+    const finalResponse = "The weather in San Francisco is sunny and 25C.";
+
+    let toolCalled = false;
+
+    // Mock initial response (Tool Call)
+    addMockResponse(
+      (req) => {
+        const lastMsg = req.messages[req.messages.length - 1];
+        return (
+          typeof lastMsg.content === "string" &&
+          lastMsg.content.includes(initialMessage)
+        );
+      },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: toolCallId,
+            toolName: "getWeatherAsync",
+            input: { location: "San Francisco" },
+          },
+        ],
+        id: "mock-async-tool-call-response",
+      },
+    );
+
+    // Mock final response (After Tool Result)
+    addMockResponse(
+      (req) => {
+        const toolMsg = req.messages.find(
+          (m) =>
+            m.role === "assistant" &&
+            Array.isArray(m.content) &&
+            m.content.some((c) =>
+              c.type === "tool-call" && c.toolName === "getWeatherAsync"
+            ),
+        );
+        return !!toolMsg;
+      },
+      {
+        role: "assistant",
+        content: finalResponse,
+        id: "mock-async-final-response",
+      },
+    );
+
+    const resultSchema = {
+      type: "object",
+      properties: {
+        addMessage: { ...LLMMessageSchema, asStream: true },
+        pending: { type: "boolean" },
+        error: { type: "object", additionalProperties: true },
+        messages: {
+          type: "array",
+          items: { type: "object", additionalProperties: true },
+        },
+      },
+      required: ["addMessage"],
+    } as const satisfies JSONSchema;
+
+    // Create a "signal" cell that the tool pattern returns immediately,
+    // but which only gets populated after a delay. This simulates async
+    // tools like fetchData where the HTTP response arrives later.
+    const signalCell = runtime.getCell(
+      space,
+      "async-tool-signal",
+      { type: "string" } as const,
+      tx,
+    );
+
+    const getWeatherAsyncTool = recipe(
+      {
+        description: "Get the weather for a location (async)",
+        type: "object",
+        properties: {
+          location: { type: "string" },
+        },
+        required: ["location"],
+      } as const satisfies JSONSchema,
+      { type: "string" },
+      ({ location: _location }: any) => {
+        toolCalled = true;
+        // Return the signal cell which starts undefined, simulating
+        // an async operation like fetchData
+        return signalCell;
+      },
+    );
+
+    const testRecipe = recipe(
+      false,
+      resultSchema,
+      () => {
+        const messages = Cell.of<BuiltInLLMMessage[]>([]);
+        const dialog = llmDialog({
+          messages,
+          tools: {
+            getWeatherAsync: patternTool(
+              getWeatherAsyncTool,
+            ) as unknown as BuiltInLLMTool,
+          },
+        });
+        return {
+          addMessage: dialog.addMessage,
+          pending: dialog.pending,
+          error: dialog.error,
+          messages,
+        };
+      },
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "llmDialog-async-tool-test",
+      resultSchema,
+      tx,
+    );
+
+    const result = runtime.run(tx, testRecipe, {}, resultCell);
+    tx.commit();
+
+    const addMessage = await result.key("addMessage").pull();
+
+    // Send the user message (triggers LLM request → tool call)
+    addMessage.send({
+      role: "user",
+      content: initialMessage,
+    });
+
+    // After a short delay, write the async tool result.
+    // This simulates an HTTP response arriving after the tool pattern
+    // has already returned its (initially undefined) result cell.
+    setTimeout(() => {
+      runtime.editWithRetry((writeTx) => {
+        signalCell.withTx(writeTx).set(toolResultValue);
+      });
+    }, 500);
+
+    // Wait with a longer timeout to account for the async delay
+    await expect(
+      waitForMessages(result, 4, 10000),
+    ).resolves.toBeUndefined();
+
+    expect(toolCalled).toBe(true);
+
+    // Verify the conversation completed successfully
+    const messages = (await result.key("messages").pull())!;
+    expect(messages).toHaveLength(4);
+    expect(messages[1].role).toBe("assistant");
+    expect(messages[3].role).toBe("assistant");
+    expect(messages[3].content).toBe(finalResponse);
+  });
 });
 
-function waitForMessages(result: any, expectedCount: number) {
+function waitForMessages(result: any, expectedCount: number, timeoutMs = 5000) {
   let cancel: () => void;
   let timeout: ReturnType<typeof setTimeout>;
   return new Promise<void>((resolve, reject) => {
@@ -885,7 +1042,7 @@ function waitForMessages(result: any, expectedCount: number) {
           `Timeout waiting for ${expectedCount} messages and pending=false`,
         ),
       );
-    }, 5000);
+    }, timeoutMs);
     cancel = result.sink(({ pending, messages }: any = {}) => {
       if (pending === false && messages?.length === expectedCount) {
         resolve();
