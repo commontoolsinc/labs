@@ -2081,7 +2081,7 @@ export class StorageManager implements IStorageManager {
       id = crypto.randomUUID(),
       settings = defaultSettings,
       spaceIdentity,
-      memoryVersion = "v1",
+      memoryVersion = "v2",
     }: Options,
   ) {
     this.address = address;
