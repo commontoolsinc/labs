@@ -325,24 +325,6 @@ export function createQueryResultProxy<T>(
           };
       }
 
-      // Before diving deeper into storage, check if the current value is a
-      // primitive. If so, access the property directly on the primitive
-      // rather than treating it as a deeper storage path. This handles
-      // cases like string.length where .length is a native JS property.
-      {
-        const currentReadTx = (tx?.status().status === "ready" && tx)
-          ? tx
-          : runtime.edit();
-        const currentValue = currentReadTx.readValueOrThrow(link);
-        if (
-          currentValue !== null &&
-          currentValue !== undefined &&
-          !isRecord(currentValue)
-        ) {
-          return (currentValue as any)[prop];
-        }
-      }
-
       return createQueryResultProxy(
         runtime,
         tx,
