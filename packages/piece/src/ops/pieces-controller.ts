@@ -48,6 +48,7 @@ export class PiecesController<T = unknown> {
     );
     await this.#manager.runtime.idle();
     await this.#manager.synced();
+    await this.#manager.runtime.recipeManager.flush();
     return new PieceController<U>(this.#manager, piece);
   }
 

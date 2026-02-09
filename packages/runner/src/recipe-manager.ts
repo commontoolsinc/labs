@@ -64,8 +64,22 @@ export class RecipeManager {
   private recipeToIdMap = new WeakMap<Recipe, string>();
   // Pending metadata set before the meta cell exists (e.g., spec, parents)
   private pendingMetaById = new Map<string, Partial<RecipeMeta>>();
+  // Pending recipe save commits (fire-and-forget in saveRecipe).
+  private pendingRecipeCommits: Promise<unknown>[] = [];
 
   constructor(readonly runtime: Runtime) {}
+
+  /**
+   * Wait for all pending recipe metadata commits to complete.
+   * Call this to ensure recipe data is persisted (especially important
+   * for v2 remote transport where commits are async WebSocket roundtrips).
+   */
+  async flush(): Promise<void> {
+    if (this.pendingRecipeCommits.length > 0) {
+      await Promise.all(this.pendingRecipeCommits);
+      this.pendingRecipeCommits = [];
+    }
+  }
 
   /**
    * Evict oldest recipes if cache exceeds MAX_RECIPE_CACHE_SIZE.
@@ -242,11 +256,12 @@ export class RecipeManager {
     recipeMetaCell.set(recipeMeta);
 
     if (!providedTx) {
-      tx.commit().then((result) => {
+      const commitPromise = tx.commit().then((result) => {
         if (result.error) {
           logger.warn("recipe", "Recipe already existed", recipeId);
         }
       });
+      this.pendingRecipeCommits.push(commitPromise);
     }
 
     this.recipeMetaCellById.set(recipeId, recipeMetaCell.withTx());
