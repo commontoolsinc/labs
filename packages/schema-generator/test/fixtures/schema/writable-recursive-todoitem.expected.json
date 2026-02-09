@@ -1,0 +1,42 @@
+{
+  "$defs": {
+    "AnonymousType_1": {
+      "items": {
+        "$ref": "#/$defs/TodoItem"
+      },
+      "type": "array"
+    },
+    "TodoItem": {
+      "properties": {
+        "done": {
+          "default": false,
+          "type": "boolean"
+        },
+        "items": {
+          "$ref": "#/$defs/AnonymousType_1",
+          "asCell": true,
+          "default": []
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "done",
+        "items",
+        "title"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "todos": {
+      "$ref": "#/$defs/AnonymousType_1",
+      "default": []
+    }
+  },
+  "required": [
+    "todos"
+  ],
+  "type": "object"
+}
