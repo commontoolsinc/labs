@@ -42,6 +42,14 @@ const diffResult = await new Deno.Command("git", {
   stderr: "piped",
 }).output();
 
+if (!diffResult.success) {
+  console.error(
+    "git diff failed — running commit without pre-commit checks:",
+    new TextDecoder().decode(diffResult.stderr),
+  );
+  Deno.exit(2);
+}
+
 const stagedFiles = new TextDecoder()
   .decode(diffResult.stdout)
   .trim()
@@ -63,10 +71,13 @@ const fmtableFiles = stagedFiles.filter((f) =>
 // For type checking, scope to containing packages (not just individual files)
 // so we catch breakage in files that depend on the staged changes.
 const affectedPackages = new Set<string>();
+const nonPackageTsFiles: string[] = [];
 for (const f of tsFiles) {
   const match = f.match(/^(packages\/[^/]+)\//);
   if (match) {
     affectedPackages.add(match[1]);
+  } else {
+    nonPackageTsFiles.push(f);
   }
 }
 
@@ -102,6 +113,17 @@ if (affectedPackages.size > 0) {
   promises.push(
     new Deno.Command("deno", {
       args: ["check", ...[...affectedPackages]],
+      stdout: "piped",
+      stderr: "piped",
+    }).output().then((result) => ({ kind: "check", result })),
+  );
+}
+
+if (nonPackageTsFiles.length > 0) {
+  // Type-check TS files outside packages/ individually
+  promises.push(
+    new Deno.Command("deno", {
+      args: ["check", ...nonPackageTsFiles],
       stdout: "piped",
       stderr: "piped",
     }).output().then((result) => ({ kind: "check", result })),
