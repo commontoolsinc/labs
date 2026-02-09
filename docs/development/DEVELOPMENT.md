@@ -402,14 +402,14 @@ deno task integration patterns counter
 
 **Advanced usage with PORT_OFFSET:**
 
-If you set `PORT_OFFSET` in the environment, the runner assumes you're managing
-servers yourself:
+If you set `PORT_OFFSET` in the environment, servers are left running after
+tests complete:
 
 ```bash
-# Stop any existing servers on this offset, start new ones, run tests,
-# but leave servers running after
+# Stop any existing servers on this offset, start fresh ones, run tests,
+# leave servers running after
 PORT_OFFSET=500 deno task integration cli
 ```
 
-This is useful when you want to keep servers running between test runs for
-faster iteration.
+This is useful when you want to inspect the servers or manually test after the
+integration tests finish.
