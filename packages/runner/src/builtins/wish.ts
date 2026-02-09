@@ -100,6 +100,23 @@ function getSpaceCell(ctx: WishContext): Cell<unknown> {
   return ctx.spaceCell;
 }
 
+function getSpaceCellForDID(
+  runtime: Runtime,
+  did: string,
+  tx: IExtendedStorageTransaction,
+): Cell<unknown> {
+  return runtime.getCell(
+    did as `did:${string}:${string}`,
+    did,
+    spaceCellSchema,
+    tx,
+  );
+}
+
+function getArbitraryDIDs(scope?: string[]): string[] {
+  return (scope ?? []).filter((s) => s !== "~" && s !== ".");
+}
+
 function resolvePath(
   base: Cell<any>,
   path: readonly string[],
@@ -154,8 +171,9 @@ async function searchMentionablesForHashtag(
   ctx: WishContext,
   searchTermWithoutHash: string,
   pathPrefix: string[],
+  spaceCell?: Cell<unknown>,
 ): Promise<BaseResolution[]> {
-  const mentionableCell = getSpaceCell(ctx)
+  const mentionableCell = (spaceCell ?? getSpaceCell(ctx))
     .key("defaultPattern")
     .key("backlinksIndex")
     .key("mentionable")
@@ -226,12 +244,28 @@ async function searchByHashtag(
     );
   }
 
+  // Search mentionables in arbitrary DID spaces
+  const arbitraryDIDs = getArbitraryDIDs(ctx.scope);
+  for (const did of arbitraryDIDs) {
+    const didSpaceCell = getSpaceCellForDID(ctx.runtime, did, ctx.tx);
+    allMatches.push(
+      ...(await searchMentionablesForHashtag(
+        ctx,
+        searchTermWithoutHash,
+        parsed.path,
+        didSpaceCell,
+      )),
+    );
+  }
+
   if (allMatches.length === 0) {
-    const scopeDesc = searchFavorites && searchMentionables
-      ? "favorites or mentionables"
-      : searchMentionables
-      ? "mentionables"
-      : "favorites";
+    const parts: string[] = [];
+    if (searchFavorites) parts.push("favorites");
+    if (searchMentionables) parts.push("mentionables");
+    if (arbitraryDIDs.length > 0) {
+      parts.push(`${arbitraryDIDs.length} space(s)`);
+    }
+    const scopeDesc = parts.join(" or ") || "favorites";
     throw new WishError(`No ${scopeDesc} found matching "${searchTerm}"`);
   }
 
@@ -349,43 +383,62 @@ function resolveSpaceTarget(
   parsed: ParsedWishTarget,
   ctx: WishContext,
 ): BaseResolution[] | null {
-  switch (parsed.key) {
-    case "/":
-      return [{ cell: getSpaceCell(ctx) }];
-    case "#default":
-      return [{ cell: getSpaceCell(ctx), pathPrefix: ["defaultPattern"] }];
-    case "#mentionable":
-      return [{
-        cell: getSpaceCell(ctx),
-        pathPrefix: ["defaultPattern", "backlinksIndex", "mentionable"],
-      }];
-    case "#allPieces":
-      return [{
-        cell: getSpaceCell(ctx),
-        pathPrefix: ["defaultPattern", "allPieces"],
-      }];
-    case "#recent":
-      return [{
-        cell: getSpaceCell(ctx),
-        pathPrefix: ["defaultPattern", "recentPieces"],
-      }];
-    case "#now": {
-      if (parsed.path.length > 0) {
-        throw new WishError(
-          `Wish now target "${formatTarget(parsed)}" is not recognized.`,
-        );
-      }
-      const nowCell = ctx.runtime.getImmutableCell(
-        ctx.parentCell.space,
-        Date.now(),
-        undefined,
-        ctx.tx,
+  // #now is special — not scope-dependent
+  if (parsed.key === "#now") {
+    if (parsed.path.length > 0) {
+      throw new WishError(
+        `Wish now target "${formatTarget(parsed)}" is not recognized.`,
       );
-      return [{ cell: nowCell }];
     }
-    default:
-      return null;
+    const nowCell = ctx.runtime.getImmutableCell(
+      ctx.parentCell.space,
+      Date.now(),
+      undefined,
+      ctx.tx,
+    );
+    return [{ cell: nowCell }];
   }
+
+  const pathForKey: Record<string, readonly string[]> = {
+    "/": [],
+    "#default": ["defaultPattern"],
+    "#mentionable": ["defaultPattern", "backlinksIndex", "mentionable"],
+    "#allPieces": ["defaultPattern", "allPieces"],
+    "#recent": ["defaultPattern", "recentPieces"],
+  };
+
+  const pathPrefix = pathForKey[parsed.key];
+  if (!pathPrefix) return null;
+
+  const results: BaseResolution[] = [];
+
+  // "." or no scope → include current space (backward compat)
+  if (!ctx.scope || ctx.scope.includes(".")) {
+    results.push({ cell: getSpaceCell(ctx), pathPrefix: [...pathPrefix] });
+  }
+
+  // "~" → include home space
+  if (ctx.scope?.includes("~") && ctx.runtime.userIdentityDID) {
+    const homeSpaceCell = ctx.runtime.getHomeSpaceCell(ctx.tx);
+    results.push({ cell: homeSpaceCell, pathPrefix: [...pathPrefix] });
+  }
+
+  // Arbitrary DIDs → include each space
+  for (const did of getArbitraryDIDs(ctx.scope)) {
+    const didSpaceCell = getSpaceCellForDID(ctx.runtime, did, ctx.tx);
+    results.push({ cell: didSpaceCell, pathPrefix: [...pathPrefix] });
+  }
+
+  if (results.length === 0) {
+    console.warn(
+      `[wish] Target "${parsed.key}" cannot resolve with scope: [${
+        ctx.scope?.join(", ")
+      }]`,
+    );
+    return null;
+  }
+
+  return results;
 }
 
 /**
@@ -671,12 +724,25 @@ export function wish(
               candidates: candidatesCell,
             }, tx);
 
-            // Return reactive references into the picker cell
-            sendResult(tx, {
-              result: wishPatternCell.key("result"),
-              candidates: candidatesCell,
-              [UI]: wishPatternCell.key(UI),
-            });
+            if (wishPattern) {
+              // Return reactive references into the picker cell
+              sendResult(tx, {
+                result: wishPatternCell.key("result"),
+                candidates: candidatesCell,
+                [UI]: wishPatternCell.key(UI),
+              });
+            } else {
+              // Picker pattern failed to load — fall back to first result
+              console.warn(
+                `[wish] Picker pattern unavailable for ${uniqueResultCells.length} candidates, falling back to first result`,
+              );
+              const resultUI = uniqueResultCells[0].key(UI).get();
+              sendResult(tx, {
+                result: uniqueResultCells[0],
+                candidates: candidatesCell,
+                [UI]: resultUI ?? cellLinkUI(uniqueResultCells[0]),
+              });
+            }
           }
         } catch (e) {
           const errorMsg = e instanceof WishError ? e.message : String(e);
