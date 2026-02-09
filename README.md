@@ -122,7 +122,7 @@ frontend together. See
 ```bash
 # Against local backend (use dev-local, NOT dev)
 cd ./packages/shell
-deno task dev-local
+TOOLSHED_PORT=8000 deno task dev-local
 ```
 
 **Important:** `deno task dev` points to the production backend. Use

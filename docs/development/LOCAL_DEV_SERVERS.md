@@ -118,7 +118,7 @@ SHELL_URL=http://localhost:5173 deno task dev
 
 # 4. Start frontend (Terminal 2)
 cd packages/shell
-deno task dev-local
+TOOLSHED_PORT=8000 deno task dev-local
 ```
 
 **Alternative: Local shell with cloud backend:**
