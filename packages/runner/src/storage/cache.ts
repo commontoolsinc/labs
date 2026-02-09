@@ -2046,7 +2046,7 @@ export interface Options {
   spaceIdentity?: Signer;
 
   /**
-   * Memory version to use. "v1" is the default (current).
+   * Memory version to use. "v2" is the default.
    * "v2" uses the new v2 storage engine with simplified selectors
    * and no MIME type dimension.
    */
@@ -2108,6 +2108,22 @@ export class StorageManager implements IStorageManager {
   }
 
   protected connect(space: MemorySpace): IStorageProviderWithReplica {
+    // v2 flag: when memoryVersion is "v2", we want to use ProviderV2.
+    // However, ProviderV2 currently only supports local (in-process)
+    // connections, not remote WebSocket connections. The production
+    // StorageManager uses WebSocket-based Consumer/Provider, so we must
+    // fall back to v1 for now.  The emulator override in cache.deno.ts
+    // handles v2 correctly for local/in-process use.
+    //
+    // TODO(@ubik2): Once ProviderV2 gains remote/WebSocket support, create a
+    // ProviderV2 here instead of falling back to v1.
+    if (this.memoryVersion === "v2") {
+      logger.info("connect-v2-fallback", () => [
+        "memoryVersion is 'v2' but remote ProviderV2 is not yet supported; " +
+        "falling back to v1 Provider for WebSocket connection",
+      ]);
+    }
+
     const { id, address, as, settings } = this;
 
     // Determine the correct spaceIdentity for this space

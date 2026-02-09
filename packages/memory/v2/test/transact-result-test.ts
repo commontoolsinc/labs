@@ -150,7 +150,7 @@ Deno.test("transact result: stacked commits with mixed operations", async () => 
   assertEquals(r3.commit.version, 3);
   assertEquals(r4.commit.version, 4);
 
-  const [c1, c2, c3, c4] = await Promise.all([
+  const [c1, _c2, _c3, c4] = await Promise.all([
     r1.confirmed,
     r2.confirmed,
     r3.confirmed,
