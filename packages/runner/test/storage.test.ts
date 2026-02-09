@@ -9,6 +9,9 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
+// v1-specific: these tests use storageManager.mount(space).query() which
+// queries the v1 memory provider session. v2 stores data in its own SpaceV2,
+// so query results are not visible through the v1 session.
 describe("Storage", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
@@ -17,7 +20,10 @@ describe("Storage", () => {
   let n = 0;
 
   beforeEach(() => {
-    storageManager = StorageManager.emulate({ as: signer });
+    storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v1",
+    });
     // Create runtime with the shared storage provider
     // We need to bypass the URL-based configuration for this test
     runtime = new Runtime({

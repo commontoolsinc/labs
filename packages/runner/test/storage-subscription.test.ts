@@ -178,7 +178,36 @@ describe("Storage Subscription", () => {
     });
   });
 
+  // v1-specific: revert/load/pull/integrate notification types only exist in v1.
+  // v2 only fires "commit" (own writes) and "integrate" (external subscription updates).
   describe("revert notifications", () => {
+    // Override with v1 storage for this describe block
+    let storageManager: ReturnType<typeof StorageManager.emulate>;
+    let runtime: Runtime;
+    let tx: IExtendedStorageTransaction;
+
+    beforeEach(() => {
+      storageManager = StorageManager.emulate({
+        as: signer,
+        memoryVersion: "v1",
+      });
+      runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+      });
+      tx = runtime.edit();
+    });
+
+    afterEach(async () => {
+      const status = tx?.status();
+      if (tx && status?.status === "ready") {
+        await tx.commit();
+      }
+      await runtime?.dispose();
+      await storageManager?.close();
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    });
+
     it("should receive revert notification on conflict", async () => {
       // Create memory from session before subscribing
       const memory = storageManager.session().mount(space);
@@ -243,6 +272,33 @@ describe("Storage Subscription", () => {
   });
 
   describe("load notifications", () => {
+    // Override with v1 storage for this describe block
+    let storageManager: ReturnType<typeof StorageManager.emulate>;
+    let runtime: Runtime;
+    let tx: IExtendedStorageTransaction;
+
+    beforeEach(() => {
+      storageManager = StorageManager.emulate({
+        as: signer,
+        memoryVersion: "v1",
+      });
+      runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+      });
+      tx = runtime.edit();
+    });
+
+    afterEach(async () => {
+      const status = tx?.status();
+      if (tx && status?.status === "ready") {
+        await tx.commit();
+      }
+      await runtime?.dispose();
+      await storageManager?.close();
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    });
+
     it("should receive load notification when data is loaded from cache", async () => {
       // Subscribe to notifications
       const subscription = new Subscription();
@@ -270,6 +326,33 @@ describe("Storage Subscription", () => {
   });
 
   describe("pull notifications", () => {
+    // Override with v1 storage for this describe block
+    let storageManager: ReturnType<typeof StorageManager.emulate>;
+    let runtime: Runtime;
+    let tx: IExtendedStorageTransaction;
+
+    beforeEach(() => {
+      storageManager = StorageManager.emulate({
+        as: signer,
+        memoryVersion: "v1",
+      });
+      runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+      });
+      tx = runtime.edit();
+    });
+
+    afterEach(async () => {
+      const status = tx?.status();
+      if (tx && status?.status === "ready") {
+        await tx.commit();
+      }
+      await runtime?.dispose();
+      await storageManager?.close();
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    });
+
     it("should receive pull notification when data is pulled from remote", async () => {
       // Put something in the memory first
       const memory = storageManager.session().mount(space);
@@ -306,6 +389,33 @@ describe("Storage Subscription", () => {
   });
 
   describe("integrate notifications", () => {
+    // Override with v1 storage for this describe block
+    let storageManager: ReturnType<typeof StorageManager.emulate>;
+    let runtime: Runtime;
+    let tx: IExtendedStorageTransaction;
+
+    beforeEach(() => {
+      storageManager = StorageManager.emulate({
+        as: signer,
+        memoryVersion: "v1",
+      });
+      runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+      });
+      tx = runtime.edit();
+    });
+
+    afterEach(async () => {
+      const status = tx?.status();
+      if (tx && status?.status === "ready") {
+        await tx.commit();
+      }
+      await runtime?.dispose();
+      await storageManager?.close();
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    });
+
     it("should receive integrate notification when data is integrated", async () => {
       // Subscribe to notifications
       const subscription = new Subscription();

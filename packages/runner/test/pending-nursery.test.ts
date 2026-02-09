@@ -13,8 +13,13 @@ describe("Provider Subscriptions", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let provider: Provider;
 
+  // v1-specific: v2 has no nursery/heap split — uses synchronous transact()
+  // with version-based validation instead.
   beforeEach(() => {
-    storageManager = StorageManager.emulate({ as: signer });
+    storageManager = StorageManager.emulate({
+      as: signer,
+      memoryVersion: "v1",
+    });
 
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),

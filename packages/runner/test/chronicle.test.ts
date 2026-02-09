@@ -842,38 +842,49 @@ describe("Chronicle", () => {
       expect(fact.is).toBeUndefined();
     });
 
+    // v1-specific: v1 commits claims-only transactions successfully even when
+    // the underlying data has changed. v2 has no equivalent concept.
     it("should fail commit when read invariants are violated", async () => {
-      await replica.commit({
-        facts: [
-          assert({
-            the: "application/json",
-            of: "test:stale",
-            is: { version: 1, data: "initial" },
-          }),
-        ],
-        claims: [],
+      const v1Storage = StorageManager.emulate({
+        as: signer,
+        memoryVersion: "v1",
       });
+      const v1Replica = v1Storage.open(space).replica;
+      try {
+        await v1Replica.commit({
+          facts: [
+            assert({
+              the: "application/json",
+              of: "test:stale",
+              is: { version: 1, data: "initial" },
+            }),
+          ],
+          claims: [],
+        });
 
-      const chronicle1 = Chronicle.open(replica);
-      chronicle1.read({
-        id: "test:stale",
-        type: "application/json",
-        path: [],
-      });
+        const chronicle1 = Chronicle.open(v1Replica);
+        chronicle1.read({
+          id: "test:stale",
+          type: "application/json",
+          path: [],
+        });
 
-      await replica.commit({
-        facts: [
-          assert({
-            the: "application/json",
-            of: "test:stale",
-            is: { version: 2, data: "updated" },
-          }),
-        ],
-        claims: [],
-      });
+        await v1Replica.commit({
+          facts: [
+            assert({
+              the: "application/json",
+              of: "test:stale",
+              is: { version: 2, data: "updated" },
+            }),
+          ],
+          claims: [],
+        });
 
-      const commitResult = chronicle1.commit();
-      expect(commitResult.ok).toBeDefined();
+        const commitResult = chronicle1.commit();
+        expect(commitResult.ok).toBeDefined();
+      } finally {
+        await v1Storage.close();
+      }
     });
 
     it("should handle partial updates with causal references", async () => {
@@ -989,40 +1000,51 @@ describe("Chronicle", () => {
       expect((writeResult.error as INotFoundError).path).toEqual([]);
     });
 
+    // v1-specific: v1 commits claims-only transactions successfully even when
+    // the underlying data has changed. v2 has no equivalent concept.
     it("should fail commit when read invariants change after initial read", async () => {
-      await replica.commit({
-        facts: [
-          assert({
-            the: "application/json",
-            of: "test:changing",
-            is: { version: 1, data: "original" },
-          }),
-        ],
-        claims: [],
+      const v1Storage = StorageManager.emulate({
+        as: signer,
+        memoryVersion: "v1",
       });
+      const v1Replica = v1Storage.open(space).replica;
+      try {
+        await v1Replica.commit({
+          facts: [
+            assert({
+              the: "application/json",
+              of: "test:changing",
+              is: { version: 1, data: "original" },
+            }),
+          ],
+          claims: [],
+        });
 
-      const chronicle = Chronicle.open(replica);
+        const chronicle = Chronicle.open(v1Replica);
 
-      const readResult = chronicle.read({
-        id: "test:changing",
-        type: "application/json",
-        path: [],
-      });
-      expect(readResult.ok?.value).toEqual({ version: 1, data: "original" });
+        const readResult = chronicle.read({
+          id: "test:changing",
+          type: "application/json",
+          path: [],
+        });
+        expect(readResult.ok?.value).toEqual({ version: 1, data: "original" });
 
-      await replica.commit({
-        facts: [
-          assert({
-            the: "application/json",
-            of: "test:changing",
-            is: { version: 2, data: "changed" },
-          }),
-        ],
-        claims: [],
-      });
+        await v1Replica.commit({
+          facts: [
+            assert({
+              the: "application/json",
+              of: "test:changing",
+              is: { version: 2, data: "changed" },
+            }),
+          ],
+          claims: [],
+        });
 
-      const commitResult = chronicle.commit();
-      expect(commitResult.ok).toBeDefined();
+        const commitResult = chronicle.commit();
+        expect(commitResult.ok).toBeDefined();
+      } finally {
+        await v1Storage.close();
+      }
     });
   });
 
