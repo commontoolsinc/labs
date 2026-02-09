@@ -182,7 +182,13 @@ Integration Test Runner
 =======================
 
 Usage:
-  deno task integration [package] [filter]
+  deno task integration [options] [package] [filter]
+
+Options:
+  --port-offset=N   Use port offset N (100-1000). Servers are left running
+                    after tests complete. If not set, picks a random offset
+                    and cleans up servers after tests.
+  --help, -h        Show this help message.
 
 Arguments:
   package   Optional. Run tests for a specific package only.
@@ -191,19 +197,15 @@ Arguments:
             Only works with deno test packages (not cli).
 
 Examples:
-  deno task integration              # Run all integration tests
-  deno task integration cli          # Run only cli integration tests
-  deno task integration patterns counter  # Run patterns tests matching "counter"
-  deno task integration shell        # Run only shell integration tests
-
-Environment:
-  PORT_OFFSET   If set, uses this offset and stops existing servers first.
-                Servers are left running after tests complete.
-                If not set, picks a random offset (100-1000) and cleans up after.
+  deno task integration                       # Run all, auto-cleanup
+  deno task integration cli                   # Run only cli tests
+  deno task integration patterns counter      # Filter by test name
+  deno task integration --port-offset=500     # Use specific port offset
+  deno task integration --port-offset=500 cli # Combine options
 
 Server ports (with offset):
-  Toolshed:  8000 + PORT_OFFSET
-  Shell:     5173 + PORT_OFFSET
+  Toolshed:  8000 + offset
+  Shell:     5173 + offset
 
 Log files (after servers start):
   packages/shell/local-dev-shell.log
@@ -220,8 +222,24 @@ async function main(): Promise<void> {
     Deno.exit(0);
   }
 
-  const packageFilter = args[0];
-  const nameFilter = args[1];
+  // Parse --port-offset argument
+  let cliPortOffset: number | undefined;
+  const positionalArgs: string[] = [];
+
+  for (const arg of args) {
+    if (arg.startsWith("--port-offset=")) {
+      cliPortOffset = parseInt(arg.split("=")[1], 10);
+      if (isNaN(cliPortOffset) || cliPortOffset < 0) {
+        console.error(`Invalid port offset: ${arg}`);
+        Deno.exit(1);
+      }
+    } else if (!arg.startsWith("-")) {
+      positionalArgs.push(arg);
+    }
+  }
+
+  const packageFilter = positionalArgs[0];
+  const nameFilter = positionalArgs[1];
 
   // Validate package filter
   if (packageFilter && !ALL_PACKAGES.includes(packageFilter)) {
@@ -231,23 +249,25 @@ async function main(): Promise<void> {
   }
 
   const rootDir = Deno.cwd();
-  const envPortOffset = Deno.env.get("PORT_OFFSET");
-  const portOffsetWasSet = envPortOffset !== undefined;
 
-  // Generate random offset if not set
-  const portOffset = portOffsetWasSet
-    ? parseInt(envPortOffset, 10)
-    : Math.floor(Math.random() * 901) + 100; // 100-1000
+  // Priority: CLI arg > env var > random
+  const envPortOffset = Deno.env.get("PORT_OFFSET");
+  const portOffsetWasSet = cliPortOffset !== undefined ||
+    envPortOffset !== undefined;
+  const portOffset = cliPortOffset ??
+    (envPortOffset ? parseInt(envPortOffset, 10) : undefined) ??
+    Math.floor(Math.random() * 901) + 100; // 100-1000
 
   const apiUrl = `http://localhost:${8000 + portOffset}`;
 
   console.log("Integration Test Runner");
   console.log("=======================");
-  console.log(
-    `PORT_OFFSET: ${portOffset}${
-      portOffsetWasSet ? " (from env)" : " (generated)"
-    }`,
-  );
+  const offsetSource = cliPortOffset !== undefined
+    ? " (from --port-offset)"
+    : envPortOffset !== undefined
+    ? " (from env)"
+    : " (generated)";
+  console.log(`PORT_OFFSET: ${portOffset}${offsetSource}`);
   console.log(`API_URL: ${apiUrl}`);
   if (packageFilter) {
     console.log(`Package filter: ${packageFilter}`);

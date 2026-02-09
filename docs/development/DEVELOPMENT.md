@@ -400,15 +400,17 @@ deno task integration patterns counter
 - `packages/shell/local-dev-shell.log`
 - `packages/toolshed/local-dev-toolshed.log`
 
-**Advanced usage with PORT_OFFSET:**
+**Advanced usage with --port-offset:**
 
-If you set `PORT_OFFSET` in the environment, servers are left running after
-tests complete:
+Use `--port-offset=N` to specify a port offset. When set, servers are left
+running after tests complete:
 
 ```bash
-# Stop any existing servers on this offset, start fresh ones, run tests,
-# leave servers running after
-PORT_OFFSET=500 deno task integration cli
+# Use port offset 500 (Toolshed on 8500, Shell on 5673)
+deno task integration --port-offset=500
+
+# Combine with package filter
+deno task integration --port-offset=500 cli
 ```
 
 This is useful when you want to inspect the servers or manually test after the
