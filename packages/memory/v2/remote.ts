@@ -285,26 +285,18 @@ export class RemoteConsumer {
     const localResult = this.localConsumer.transact(userOps, options);
 
     // Send the transact command to server (async).
-    // Convert Fact (type/ops) to Operation (op/patches) format.
+    // Forward user operations directly — no parent on the wire.
+    // The server resolves parent from its own head state.
     const id = this.nextId();
-    const operations = localResult.commit.facts.map((sf) => {
-      const f = sf.fact;
-      if (f.type === "set") {
-        return {
-          op: "set" as const,
-          id: f.id,
-          value: f.value,
-          parent: f.parent,
-        };
-      } else if (f.type === "patch") {
-        return {
-          op: "patch" as const,
-          id: f.id,
-          patches: f.ops,
-          parent: f.parent,
-        };
+    const operations = userOps.map((op) => {
+      if (op.op === "patch") {
+        return { op: "patch" as const, id: op.id, patches: op.patches };
+      } else if (op.op === "set") {
+        return { op: "set" as const, id: op.id, value: op.value };
+      } else if (op.op === "delete") {
+        return { op: "delete" as const, id: op.id };
       } else {
-        return { op: "delete" as const, id: f.id, parent: f.parent };
+        return { op: "claim" as const, id: op.id };
       }
     });
     const serverPromise = this.connection.send(id, {

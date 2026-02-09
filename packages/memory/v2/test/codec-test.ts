@@ -11,7 +11,6 @@ import {
   encodeMessage,
 } from "../codec.ts";
 import type { InvocationId, ProviderMessage } from "../protocol.ts";
-import type { Reference } from "../types.ts";
 
 Deno.test("codec: round-trip transact command", () => {
   const id: InvocationId = "job:0";
@@ -25,7 +24,6 @@ Deno.test("codec: round-trip transact command", () => {
           op: "set" as const,
           id: "e1",
           value: "hello",
-          parent: "ref:empty" as unknown as Reference,
         },
       ],
     },
@@ -238,7 +236,6 @@ Deno.test("codec: handles nested objects and arrays", () => {
             bool: false,
             nullVal: null,
           },
-          parent: "ref:empty" as unknown as Reference,
         },
       ],
     },
@@ -284,13 +281,11 @@ Deno.test("codec: preserves empty strings and zero values", () => {
           op: "set" as const,
           id: "",
           value: "",
-          parent: "" as unknown as Reference,
         },
         {
           op: "set" as const,
           id: "zero",
           value: 0,
-          parent: "ref:zero" as unknown as Reference,
         },
       ],
       branch: "",

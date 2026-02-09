@@ -141,26 +141,26 @@ export interface SetOperation {
   op: "set";
   id: EntityId;
   value: JSONValue;
-  parent: Reference;
+  parent?: Reference;
 }
 
 export interface PatchWriteOperation {
   op: "patch";
   id: EntityId;
   patches: PatchOp[];
-  parent: Reference;
+  parent?: Reference;
 }
 
 export interface DeleteOperation {
   op: "delete";
   id: EntityId;
-  parent: Reference;
+  parent?: Reference;
 }
 
 export interface ClaimOperation {
   op: "claim";
   id: EntityId;
-  parent: Reference;
+  parent?: Reference;
 }
 
 export type Operation =

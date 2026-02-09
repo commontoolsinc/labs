@@ -154,6 +154,14 @@ interface TransactCommand {
 // The `args` field carries a ClientCommit (see §3.4). The Transaction type
 // from §3.2 is a simplified form used for documentation; the wire format
 // always includes the `reads` field.
+//
+// Wire operations are parent-free (UserOperation format):
+//   { op: "set", id, value }
+//   { op: "patch", id, patches }
+//   { op: "delete", id }
+//   { op: "claim", id }
+// The server resolves `parent` from its own head state when constructing
+// facts. This eliminates branded Reference objects from the wire protocol.
 
 // Success response
 interface TransactSuccess {

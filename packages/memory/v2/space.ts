@@ -11,6 +11,8 @@ import { refer } from "../reference.ts";
 import { applyPatch } from "./patch.ts";
 import {
   EMPTY_VALUE_HASH,
+  emptyRef,
+  fromString,
   hashCommit,
   hashFact,
   refToString,
@@ -737,9 +739,12 @@ export class SpaceV2 {
     version: number,
     commitHashStr: string,
   ): StoredFact {
-    // Get current head to use as parent in the fact
+    // Resolve parent from server head state (authoritative)
     const currentHead = this.getHead(op.id, branch);
-    const parentForFact = currentHead ? currentHead.fact_hash : null; // NULL for first write
+    const parentRef: Reference = currentHead
+      ? fromString(currentHead.fact_hash) as unknown as Reference
+      : emptyRef(op.id);
+    const parentForDb = currentHead ? currentHead.fact_hash : null; // NULL for first write
 
     switch (op.op) {
       case "set": {
@@ -751,12 +756,12 @@ export class SpaceV2 {
           data: valueJson,
         });
 
-        // Create the fact
+        // Create the fact using server-resolved parent
         const fact: SetWrite = {
           type: "set",
           id: op.id,
           value: op.value,
-          parent: op.parent,
+          parent: parentRef,
         };
         const factHash = hashFact(fact);
         const factHashStr = refToString(factHash);
@@ -765,7 +770,7 @@ export class SpaceV2 {
           hash: factHashStr,
           id: op.id,
           value_ref: valueHash,
-          parent: parentForFact,
+          parent: parentForDb,
           branch,
           version,
           commit_ref: commitHashStr,
@@ -794,12 +799,12 @@ export class SpaceV2 {
         const opsHash = refToString(refer(op.patches));
         getStmt(this.db, "insertValue").run({ hash: opsHash, data: opsJson });
 
-        // Create the fact
+        // Create the fact using server-resolved parent
         const fact: PatchWrite = {
           type: "patch",
           id: op.id,
           ops: op.patches,
-          parent: op.parent,
+          parent: parentRef,
         };
         const factHash = hashFact(fact);
         const factHashStr = refToString(factHash);
@@ -808,7 +813,7 @@ export class SpaceV2 {
           hash: factHashStr,
           id: op.id,
           value_ref: opsHash,
-          parent: parentForFact,
+          parent: parentForDb,
           branch,
           version,
           commit_ref: commitHashStr,
@@ -832,11 +837,11 @@ export class SpaceV2 {
       }
 
       case "delete": {
-        // Create the fact
+        // Create the fact using server-resolved parent
         const fact: Delete = {
           type: "delete",
           id: op.id,
-          parent: op.parent,
+          parent: parentRef,
         };
         const factHash = hashFact(fact);
         const factHashStr = refToString(factHash);
@@ -845,7 +850,7 @@ export class SpaceV2 {
           hash: factHashStr,
           id: op.id,
           value_ref: EMPTY_VALUE_HASH,
-          parent: parentForFact,
+          parent: parentForDb,
           branch,
           version,
           commit_ref: commitHashStr,
