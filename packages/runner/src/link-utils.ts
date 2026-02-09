@@ -209,9 +209,7 @@ export function createSigilLinkFromParsedLink(
     baseSpace?: MemorySpace;
     includeSchema?: boolean;
     overwrite?: "redirect" | "this"; // default is "this"
-    keepStreams?: boolean;
-    keepAsCell?: boolean;
-  } = {},
+  } & SanitizeSchemaForLinksOptions = {},
 ): SigilLink {
   // Create the base structure
   const sigil: SigilLink = {
@@ -381,6 +379,12 @@ export function createDataCellURI(
   return `data:application/json,${encodeURIComponent(json)}` as URI;
 }
 
+export type SanitizeSchemaForLinksOptions = {
+  keepAsCell?: boolean;
+  keepStreams?: boolean;
+  keepAsOpaque?: boolean;
+};
+
 /**
  * Traverse schema and remove all asCell and asStream flags.
  * Also handles circular references by using JSON Schema $ref.
@@ -392,15 +396,15 @@ export function createDataCellURI(
  */
 export function sanitizeSchemaForLinks(
   schema: JSONSchema,
-  options?: { keepAsCell?: boolean; keepStreams?: boolean },
+  options?: SanitizeSchemaForLinksOptions,
 ): JSONSchema;
 export function sanitizeSchemaForLinks(
   schema: JSONSchema | undefined,
-  options?: { keepAsCell?: boolean; keepStreams?: boolean },
+  options?: SanitizeSchemaForLinksOptions,
 ): JSONSchema | undefined;
 export function sanitizeSchemaForLinks(
   schema: JSONSchema | undefined,
-  options?: { keepAsCell?: boolean; keepStreams?: boolean },
+  options?: SanitizeSchemaForLinksOptions,
 ): JSONSchema | undefined {
   if (
     schema === null ||
@@ -431,7 +435,11 @@ export function sanitizeSchemaForLinks(
     options: options ?? {},
   };
 
-  const result = recursiveStripAsCellAndStreamFromSchema(schema, context, 0);
+  const result = recursiveStripAsCellStreamOrOpaqueFromSchema(
+    schema,
+    context,
+    0,
+  );
 
   // If we generated any $defs, add them to the root schema
   if (Object.keys(context.defs).length > 0) {
@@ -458,10 +466,10 @@ interface SanitizeContext {
   // Reserved def names (from existing $defs in input schema)
   reservedNames: Set<string>;
   // Options
-  options: { keepStreams?: boolean; keepAsCell?: boolean };
+  options: SanitizeSchemaForLinksOptions;
 }
 
-function recursiveStripAsCellAndStreamFromSchema(
+function recursiveStripAsCellStreamOrOpaqueFromSchema(
   schema: any,
   context: SanitizeContext,
   depth: number,
@@ -511,6 +519,7 @@ function recursiveStripAsCellAndStreamFromSchema(
   // Remove asCell and asStream flags from this level
   if (!context.options.keepAsCell) delete result.asCell;
   if (!context.options.keepStreams) delete result.asStream;
+  if (!context.options.keepAsOpaque) delete result.asOpaque;
 
   // Recursively process all object properties
   for (const [key, value] of Object.entries(result)) {
@@ -527,11 +536,12 @@ function recursiveStripAsCellAndStreamFromSchema(
           )
         ) {
           if (defSchema && typeof defSchema === "object") {
-            processedDefs[defName] = recursiveStripAsCellAndStreamFromSchema(
-              defSchema,
-              context,
-              depth + 1,
-            );
+            processedDefs[defName] =
+              recursiveStripAsCellStreamOrOpaqueFromSchema(
+                defSchema,
+                context,
+                depth + 1,
+              );
           } else {
             processedDefs[defName] = defSchema;
           }
@@ -541,12 +551,16 @@ function recursiveStripAsCellAndStreamFromSchema(
         // Handle arrays
         result[key] = value.map((item) =>
           typeof item === "object" && item !== null
-            ? recursiveStripAsCellAndStreamFromSchema(item, context, depth + 1)
+            ? recursiveStripAsCellStreamOrOpaqueFromSchema(
+              item,
+              context,
+              depth + 1,
+            )
             : item
         );
       } else {
         // Handle objects
-        result[key] = recursiveStripAsCellAndStreamFromSchema(
+        result[key] = recursiveStripAsCellStreamOrOpaqueFromSchema(
           value,
           context,
           depth + 1,
