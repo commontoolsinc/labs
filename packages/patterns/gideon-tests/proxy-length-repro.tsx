@@ -13,7 +13,6 @@ import {
   NAME,
   pattern,
   Stream,
-  type VNode,
   Writable,
 } from "commontools";
 
