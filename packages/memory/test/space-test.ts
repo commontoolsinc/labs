@@ -2120,16 +2120,24 @@ test(
       is: {
         "value": [
           {
-            "space": space.did(),
-            "cell": { "/": doc1.slice(3) },
-            "path": [],
-            "schema": pieceSchema,
+            "/": {
+              "link@1": {
+                id: doc1,
+                path: [],
+                space: space.did(),
+                schema: pieceSchema,
+              },
+            },
           },
           {
-            "space": space.did(),
-            "cell": { "/": doc2.slice(3) },
-            "path": [],
-            "schema": pieceSchema,
+            "/": {
+              "link@1": {
+                id: doc2,
+                path: [],
+                space: space.did(),
+                schema: pieceSchema,
+              },
+            },
           },
         ],
       },
