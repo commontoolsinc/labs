@@ -98,8 +98,12 @@ Starting from a set of root entities, the server follows references embedded in
 entity values, guided by a schema that constrains which paths to explore and
 which linked entities to include.
 
-This reuses the traversal architecture from `packages/runner/src/traverse.ts`,
-adapting its patterns for the Memory v2 data model.
+The traversal code in `packages/runner/src/traverse.ts` is **shared between
+client and server**. The v1 server (`space-schema.ts`) imports
+`SchemaObjectTraverser` from `@commontools/runner/traverse`, and the client
+(`schema.ts`) uses the same code for validation and transformation. This
+ensures identical traversal behavior on both sides. The v2 implementation MUST
+preserve this shared-code property.
 
 ### 5.3.1 Schema Query Structure
 
@@ -777,3 +781,41 @@ cell" is determined by the schema:
 - **Schema-aware subscriptions** (section 5.4.3) bridge this boundary: the
   schema tracker monitors all reachable entities, so the subscription stream
   emits updates for any change in the reachable graph.
+
+---
+
+## 5.12 Implementation Notes
+
+This section documents constraints and considerations discovered during an
+initial v1 → v2 migration that affect how queries and subscriptions are
+implemented.
+
+### 5.12.1 Schema Traversal Is a Server-Side Function
+
+In v1, schema-guided graph traversal happens on the **server** via
+`space-schema.ts` → `selectSchema()`. The server walks from root entities
+through `{"/": { "link@1": {...} } }` references, guided by the JSON schema,
+and returns ALL linked entities in a single query response. The client never
+needs to "discover" linked entities — the server already includes them.
+
+The client-side `SchemaObjectTraverser` in `traverse.ts` is used for
+**validating and transforming** already-loaded data (e.g., in `schema.ts`),
+not for discovering what to subscribe to. Any v2 query implementation must
+preserve this server-side traversal pattern.
+
+### 5.12.2 Schema Availability
+
+Not all cells carry schemas. In the runner's `StorageManager.syncCell()`, the
+selector is built as:
+
+```typescript
+const selector = {
+  path: cell.path.map((p) => p.toString()),
+  schema: schema ?? false,
+};
+```
+
+When a cell has no schema (common for many cell types), the selector becomes
+`{ path: [...], schema: false }`. Per section 5.3.2, `schema: false` means
+"reject — skip this subtree." A traverser with `schema: false` will not follow
+any references or discover any linked entities.

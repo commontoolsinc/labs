@@ -534,7 +534,19 @@ For schema-based subscriptions (`graph.query` with `subscribe: true`), the
 server also re-evaluates the schema graph to discover newly reachable entities
 and includes those in the update.
 
-### 4.6.2 Deduplication
+### 4.6.2 Cross-Session Delivery
+
+When multiple WebSocket connections (sessions) subscribe to the same space, a
+commit from one session MUST trigger subscription updates on ALL other sessions
+whose subscriptions match the committed entities. The server achieves this by
+maintaining a space-level commit listener that fans out notifications to every
+active session on that space, not just the committing session.
+
+This is in contrast to a naive implementation where each session has its own
+isolated subscription manager — such an implementation would miss cross-session
+updates entirely.
+
+### 4.6.3 Deduplication
 
 The server tracks the last version sent to each subscription. If a fact was
 already sent in a previous update (same entity, same or older version), it is
@@ -549,7 +561,37 @@ interface SessionState {
 }
 ```
 
-### 4.6.3 Classified Content
+### 4.6.4 Commit Notification Model
+
+`transaction.commit()` commits **locally** (optimistic) and returns a promise
+that resolves with the server's verdict (ok or error). This behavior is
+identical to v1 and MUST be preserved in v2.
+
+The scheduler receives notifications as follows:
+
+1. **On successful commit**: A single "commit" notification fires
+   **synchronously** (not via microtask) within the `.commit()` call. This
+   notification contains the `IMergedChanges` with entity-level before/after
+   diffs. The scheduler uses these diffs to determine which cells need
+   re-evaluation — empty changes cause it to believe nothing changed, silently
+   breaking reactivity.
+
+2. **On server rejection**: The optimistic local state is reverted to the
+   correct state (base state or whatever the server says is current), and a
+   second notification fires with the revert changes. This is the only case
+   where a second notification occurs for the same transaction.
+
+3. **On external changes** (subscription updates from other clients): An
+   "integrate" notification fires when server data arrives, so the scheduler
+   re-evaluates affected cells.
+
+The key invariant: for a successful local commit, there is exactly ONE
+synchronous notification. The provider must suppress any additional
+notifications that the underlying v2 subscription system fires during
+`transact()` (since v2's local mode fires subscription callbacks synchronously
+within the same call stack).
+
+### 4.6.5 Classified Content
 
 Facts with classification labels may be redacted before delivery. If a
 subscriber lacks the appropriate claims for a classification level, the

@@ -101,6 +101,14 @@ transactional, content-addressed store that underlies the Common Tools runtime.
 | 5 | [05-queries.md](./05-queries.md) | Simple queries, Schema traversal, Cycle detection, Subscriptions, Point-in-time, Classification/redaction, Entity references, Reactivity boundaries |
 | 6 | [06-branching.md](./06-branching.md) | Branch lifecycle, Isolation, Merging, Conflict resolution, Point-in-time on branches, Branch diff, Depth limits |
 
+## Implementation Materials
+
+| File | Content |
+|------|---------|
+| [IMPLEMENTATION-GUIDE.md](./IMPLEMENTATION-GUIDE.md) | Build order, testing strategy, common pitfalls, spec gap tracking |
+| [LEARNINGS.md](./LEARNINGS.md) | 20 lessons learned during v1 → v2 migration |
+| [ARCHITECTURE-DIFF.md](./ARCHITECTURE-DIFF.md) | Key architectural differences between v1 and v2 |
+
 ## Key Type Summary
 
 ```typescript

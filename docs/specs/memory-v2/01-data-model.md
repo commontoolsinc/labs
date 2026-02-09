@@ -31,6 +31,44 @@ Key properties:
 - An entity that has never been written to is in the **Empty** state. The Empty
   state is represented by a well-known sentinel reference (see §3 References).
 
+### 1.1 Entity Document Structure
+
+Entity values are stored in an **envelope** with well-known top-level keys:
+
+```typescript
+interface EntityDocument {
+  value?: JSONValue;    // The cell's data. Omitting means "undefined" (deleted).
+  source?: EntityLink;  // Link to a "process" entity (recipe, provenance).
+  // Future: labels, schema, etc.
+}
+```
+
+The `value` property holds the cell's actual data. Storing it under a key
+(rather than as the top-level value) serves two purposes:
+
+1. **Representing `undefined`**: Omitting the `value` property signals that the
+   entity's value is `undefined`, without requiring a separate "deleted" fact
+   type for the soft-delete case.
+2. **Companion metadata**: The envelope holds sibling properties like `source`
+   that travel with the value but are not part of it.
+
+**Source links**: The `source` property is a `{"/": entityId}` reference to the
+entity's provenance — typically a "process cell" that describes which recipe
+produced the value. When the server executes a subscription with graph
+traversal, it MUST follow `source` links transitively (and any `source` links
+on those entities, etc.) to include the full provenance chain. This is required
+so the client can resolve the recipe that produced any piece of data.
+
+**Fact paths**: Because the envelope wraps the cell value under `"value"`,
+fact paths include a `"value"` prefix. For example, accessing `items[0]`
+on a cell corresponds to the fact path `["value", "items", "0"]`. The
+`readValueOrThrow()` API automatically prepends `"value"` to client paths.
+
+**SchemaPathSelector paths**: The selector's `path` field is relative to the
+cell value (e.g., `[]` for the root cell, `["items"]` for a sub-path). The
+server-side traversal code re-roots this to `["value", ...path]` before walking
+the entity document.
+
 ---
 
 ## 2. Facts
@@ -176,6 +214,19 @@ in SQL corresponds to the Empty reference in TypeScript.
 References are serialized as multibase base32-lower strings (prefix `b`). In
 JSON contexts, they appear as plain strings. In the database, they are stored as
 `TEXT`.
+
+References appear in three formats depending on context:
+
+| Context | Format | Example |
+|---------|--------|---------|
+| In-memory (TypeScript) | Branded `Reference` object | `refer({ type: "set", id, value, parent })` |
+| Database / plain string | Raw hash string | `"baedreig..."` |
+| JSON wire protocol | CID link object | `{ "/": "baedreig..." }` |
+
+Code that crosses process boundaries (WebSocket, JSON serialization) must handle
+the JSON wire format. Use `fromJSON({ "/": hash })` to reconstruct a branded
+Reference from a deserialized wire message — not `fromString()`, which expects
+the raw hash without the CID wrapper.
 
 ---
 
@@ -537,7 +588,7 @@ type SpaceId = `did:${string}`;
 /** A decentralized identifier (generic). */
 type DID = `did:${string}`;
 
-/** Any valid JSON value. */
+/** Any valid JSON value. Use `refer` from `merkle-reference/json`. */
 type JSONValue =
   | null
   | boolean
