@@ -188,10 +188,23 @@ export class PieceManager {
       );
     }
 
-    // Send each piece and wait for transaction commit
+    // Send each piece and wait for transaction commit.
+    // The onCommit callback fires both on success AND when retries are
+    // exhausted (scheduler.ts ~line 2089). We must check tx.status() to
+    // distinguish the two — otherwise pieces are silently dropped.
     for (const piece of newPieces) {
-      await new Promise<void>((resolve) => {
-        addPieceHandler.send({ piece }, () => resolve());
+      await new Promise<void>((resolve, reject) => {
+        addPieceHandler.send({ piece }, (tx) => {
+          if (tx.status().status === "error") {
+            reject(
+              new Error(
+                "Piece registration failed: addPiece transaction aborted after retries",
+              ),
+            );
+          } else {
+            resolve();
+          }
+        });
       });
     }
 
