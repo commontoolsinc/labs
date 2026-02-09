@@ -37,10 +37,17 @@ export class ProviderSession {
   private subscriptions: SubscriptionManager;
   private responseQueue: ProviderMessage[] = [];
   private effectListeners: Set<(msg: ProviderMessage) => void> = new Set();
+  private cleanupCommitListener: () => void;
 
   constructor(space: SpaceV2) {
     this.space = space;
     this.subscriptions = new SubscriptionManager();
+
+    // Listen for ALL commits on the shared space (including from other sessions).
+    // This enables cross-connection subscription updates.
+    this.cleanupCommitListener = space.onCommit((commit) => {
+      this.subscriptions.notify(commit);
+    });
   }
 
   /**
@@ -94,6 +101,7 @@ export class ProviderSession {
    * Close the session and clean up subscriptions.
    */
   close(): void {
+    this.cleanupCommitListener();
     this.subscriptions.clear();
     this.effectListeners.clear();
   }
@@ -107,8 +115,8 @@ export class ProviderSession {
     try {
       const commit = this.space.commit(args);
 
-      // Notify subscriptions about the new commit
-      this.subscriptions.notify(commit);
+      // Subscriptions are notified via the space's onCommit listener,
+      // which fires for ALL sessions sharing this space.
 
       return {
         the: "task/return",

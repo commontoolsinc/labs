@@ -34,9 +34,14 @@ import type {
   StorableValue,
 } from "@commontools/memory/interface";
 import type { Result, Unit } from "@commontools/memory/interface";
-import { SpaceV2 } from "@commontools/memory/v2/space";
-import { ProviderSession } from "@commontools/memory/v2/provider";
-import { connectLocal, ConsumerSession } from "@commontools/memory/v2/consumer";
+// SpaceV2, ProviderSession, and connectLocal are only needed for the
+// in-process emulation path (ProviderV2.open). They import @db/sqlite
+// which is Deno-only. Use dynamic import to avoid pulling them into
+// browser bundles (worker-runtime.js).
+// Type-only imports are safe — they're erased at compile time.
+import type { SpaceV2 } from "@commontools/memory/v2/space";
+import type { ProviderSession } from "@commontools/memory/v2/provider";
+import type { ConsumerSession } from "@commontools/memory/v2/consumer";
 import type {
   ConsumerTransactResult,
   SubscriptionCallback,
@@ -384,14 +389,24 @@ class ReplicaV2 implements ISpaceReplica {
 
   /**
    * Apply a FactSet from query/subscribe to local state.
+   * When called with actual data (e.g. from server initial state),
+   * fires subscription.next() so the scheduler re-runs affected computations.
    */
   private applyFactSet(facts: FactSet): void {
+    const changes: IMemoryChange[] = [];
+
     for (const [entityId, entry] of Object.entries(facts)) {
-      const state = (entry.value !== undefined
+      const before = this.localState.get(entityId)?.is as
+        | StorableDatum
+        | undefined;
+      const value = entry.value;
+      const after = value as StorableDatum | undefined;
+
+      const state = (value !== undefined
         ? {
           the: V2_MIME,
           of: entityId as URI,
-          is: entry.value as StorableDatum,
+          is: value as StorableDatum,
           cause: toV1Cause(entry.hash),
           since: entry.version,
         }
@@ -403,7 +418,20 @@ class ReplicaV2 implements ISpaceReplica {
         }) as Revision<Fact>;
 
       this.localState.set(entityId, state);
+      changes.push(makeChange(entityId, before, after));
       this.notifySubscribers(entityId, state);
+    }
+
+    // Notify the scheduler so it re-runs affected computations.
+    // Without this, data arriving from the server after a non-awaited
+    // cell.sync() would silently update localState but never trigger
+    // re-rendering.
+    if (changes.length > 0) {
+      this.subscription.next({
+        type: "integrate",
+        space: this.spaceId,
+        changes: asChanges(changes),
+      });
     }
   }
 
@@ -557,20 +585,21 @@ export class ProviderV2 implements IStorageProviderWithReplica {
 
   /**
    * Factory: create a local (in-process) v2 provider for a space.
+   *
+   * Only callable from Deno (requires SQLite). Browser code should
+   * use ProviderV2.connectRemote() instead.
+   *
+   * Takes pre-created consumer + space to avoid importing @db/sqlite
+   * at the module level (which would break browser bundles).
    */
   static open(options: {
     spaceId: MemorySpace;
+    consumer: ConsumerLike;
     subscription: IStorageSubscription;
+    space?: SpaceV2 | null;
+    providerSession?: ProviderSession | null;
   }): ProviderV2 {
-    const space = SpaceV2.open({ url: new URL("memory:v2") });
-    const providerSession = new ProviderSession(space);
-    const consumer = connectLocal(providerSession);
-    return new ProviderV2({
-      ...options,
-      consumer,
-      space,
-      providerSession,
-    });
+    return new ProviderV2(options);
   }
 
   /**

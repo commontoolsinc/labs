@@ -291,6 +291,7 @@ export interface SpaceV2Options {
 export class SpaceV2 {
   readonly db: Database;
   readonly snapshotInterval: number;
+  private commitListeners = new Set<(commit: Commit) => void>();
 
   private constructor(db: Database, snapshotInterval: number) {
     this.db = db;
@@ -329,9 +330,19 @@ export class SpaceV2 {
   }
 
   /**
+   * Register a listener for commit events.
+   * Returns a cleanup function.
+   */
+  onCommit(listener: (commit: Commit) => void): () => void {
+    this.commitListeners.add(listener);
+    return () => this.commitListeners.delete(listener);
+  }
+
+  /**
    * Close the database connection.
    */
   close(): void {
+    this.commitListeners.clear();
     finalizeStatements(this.db);
     this.db.close();
   }
@@ -531,7 +542,15 @@ export class SpaceV2 {
       } satisfies Commit;
     });
 
-    return dbTransaction();
+    const commit = dbTransaction();
+
+    // Notify all commit listeners (used by ProviderSession for cross-session
+    // subscription updates).
+    for (const listener of this.commitListeners) {
+      listener(commit);
+    }
+
+    return commit;
   }
 
   // ─── Branch Operations ──────────────────────────────────────────────────

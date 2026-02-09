@@ -9,6 +9,10 @@ import * as StorageSubscription from "./subscription.ts";
 import type { MemorySpace } from "@commontools/memory/interface";
 import type { IStorageSubscription } from "./interface.ts";
 import { ProviderV2 } from "./v2/provider.ts";
+// Deno-only imports — safe here since cache.deno.ts is never bundled for browser
+import { SpaceV2 } from "@commontools/memory/v2/space";
+import { ProviderSession } from "@commontools/memory/v2/provider";
+import { connectLocal } from "@commontools/memory/v2/consumer";
 export * from "./cache.ts";
 
 export class StorageManagerEmulator extends BaseStorageManager {
@@ -30,9 +34,15 @@ export class StorageManagerEmulator extends BaseStorageManager {
   override connect(space: MemorySpace) {
     // v2 flag: create a v2 provider instead of v1
     if (this.memoryVersion === "v2") {
+      const v2Space = SpaceV2.open({ url: new URL("memory:v2") });
+      const providerSession = new ProviderSession(v2Space);
+      const consumer = connectLocal(providerSession);
       return ProviderV2.open({
         spaceId: space,
+        consumer,
         subscription: this.#subscription,
+        space: v2Space,
+        providerSession,
       });
     }
     return Provider.open({

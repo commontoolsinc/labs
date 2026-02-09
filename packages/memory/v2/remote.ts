@@ -3,17 +3,25 @@
  *
  * WebSocket transport for v2 memory protocol.
  * Provides optimistic local state with deferred server confirmation.
+ *
+ * Uses an in-memory shadow (no SQLite) so it works in both Deno and browser.
  */
 
-import { SpaceV2 } from "./space.ts";
-import { ProviderSession } from "./provider.ts";
-import { connectLocal, ConsumerSession } from "./consumer.ts";
 import type {
   ConsumerTransactResult,
   SubscriptionCallback,
   UserOperation,
 } from "./consumer.ts";
-import type { FactSet, Selector } from "./types.ts";
+import type {
+  Commit,
+  EntityId,
+  FactSet,
+  JSONValue,
+  Reference,
+  Selector,
+  StoredFact,
+} from "./types.ts";
+import { DEFAULT_BRANCH } from "./types.ts";
 import type {
   Command,
   InvocationId,
@@ -23,6 +31,8 @@ import type {
   TransactResult,
 } from "./protocol.ts";
 import { decodeMessage, encodeCommand } from "./codec.ts";
+import { emptyRef, hashCommit, hashFact } from "./reference.ts";
+import { applyPatch } from "./patch.ts";
 
 // ─── Deferred ─────────────────────────────────────────────────────────────
 
@@ -40,6 +50,211 @@ function deferred<T>(): Deferred<T> {
     reject = rej;
   });
   return { promise, resolve, reject };
+}
+
+// ─── In-Memory Shadow ────────────────────────────────────────────────────
+// Lightweight local state that works in both Deno and browser (no SQLite).
+
+interface EntityState {
+  value?: JSONValue;
+  version: number;
+  hash: Reference;
+}
+
+/**
+ * In-memory shadow for optimistic local state.
+ * Replaces SpaceV2 + ProviderSession + ConsumerSession chain to avoid
+ * SQLite dependency (which doesn't work in browser WebWorkers).
+ */
+class InMemoryShadow {
+  private entities = new Map<string, EntityState>();
+  private version = 0;
+  private subscriptions = new Map<
+    InvocationId,
+    { select: Selector; branch: string; callback: SubscriptionCallback }
+  >();
+  private nextSubId = 0;
+  /** Flag to suppress subscription notifications during own transact(). */
+  private suppressNotifications = false;
+
+  transact(
+    userOps: UserOperation[],
+    options?: { branch?: string },
+  ): { commit: Commit } {
+    const branch = options?.branch ?? DEFAULT_BRANCH;
+    this.version++;
+    const storedFacts: StoredFact[] = [];
+
+    for (const op of userOps) {
+      const key = `${branch}:${op.id}`;
+      const current = this.entities.get(key);
+      const parent: Reference = current?.hash ?? emptyRef(op.id);
+
+      let fact;
+      let newValue: JSONValue | undefined;
+
+      if (op.op === "set") {
+        fact = { type: "set" as const, id: op.id, value: op.value, parent };
+        newValue = op.value;
+      } else if (op.op === "patch") {
+        const currentValue = current?.value;
+        newValue = applyPatch(
+          currentValue !== undefined ? currentValue : {},
+          op.patches,
+        );
+        fact = {
+          type: "patch" as const,
+          id: op.id,
+          ops: op.patches,
+          parent,
+        };
+      } else if (op.op === "delete") {
+        fact = { type: "delete" as const, id: op.id, parent };
+        newValue = undefined;
+      } else {
+        // claim — no value change, treat as set with current value (or null)
+        const claimValue = current?.value ?? null;
+        fact = { type: "set" as const, id: op.id, value: claimValue, parent };
+        newValue = claimValue;
+      }
+
+      const hash = hashFact(fact);
+      const commitHash = hash; // approximate
+      storedFacts.push({ hash, fact, version: this.version, commitHash });
+      this.entities.set(key, {
+        value: newValue,
+        version: this.version,
+        hash,
+      });
+    }
+
+    const commit: Commit = {
+      hash: hashCommit({
+        version: this.version,
+        branch,
+        operations: userOps,
+        reads: { confirmed: [], pending: [] },
+      }),
+      version: this.version,
+      branch,
+      facts: storedFacts,
+      createdAt: new Date().toISOString(),
+    };
+
+    // Notify local subscriptions
+    if (!this.suppressNotifications) {
+      this.notifySubscriptions(commit, branch);
+    }
+
+    return { commit };
+  }
+
+  query(
+    select: Selector,
+    options?: { since?: number; branch?: string },
+  ): FactSet {
+    const branch = options?.branch ?? DEFAULT_BRANCH;
+    const result: FactSet = {};
+
+    if ("*" in select) {
+      for (const [key, state] of this.entities) {
+        if (key.startsWith(`${branch}:`)) {
+          const entityId = key.slice(branch.length + 1);
+          if (options?.since && state.version <= options.since) continue;
+          result[entityId] = {
+            value: state.value,
+            version: state.version,
+            hash: state.hash,
+          };
+        }
+      }
+    } else {
+      for (const entityId of Object.keys(select)) {
+        const key = `${branch}:${entityId}`;
+        const state = this.entities.get(key);
+        if (state) {
+          if (options?.since && state.version <= options.since) continue;
+          result[entityId] = {
+            value: state.value,
+            version: state.version,
+            hash: state.hash,
+          };
+        }
+      }
+    }
+
+    return result;
+  }
+
+  subscribe(
+    select: Selector,
+    callback: SubscriptionCallback,
+    options?: { since?: number; branch?: string },
+  ): { facts: FactSet; subscriptionId: InvocationId } {
+    const branch = options?.branch ?? DEFAULT_BRANCH;
+    const subscriptionId = `sub:${this.nextSubId++}` as InvocationId;
+    this.subscriptions.set(subscriptionId, { select, branch, callback });
+    const facts = this.query(select, options);
+    return { facts, subscriptionId };
+  }
+
+  unsubscribe(subscriptionId: InvocationId): void {
+    this.subscriptions.delete(subscriptionId);
+  }
+
+  getConfirmed(
+    entityId: EntityId,
+    branch: string = DEFAULT_BRANCH,
+  ): EntityState | null {
+    return this.entities.get(`${branch}:${entityId}`) ?? null;
+  }
+
+  /**
+   * Apply a FactSet from the server into local state and notify subscribers.
+   */
+  applyFactSet(facts: FactSet, branch: string = DEFAULT_BRANCH): void {
+    for (const [entityId, entry] of Object.entries(facts)) {
+      const key = `${branch}:${entityId}`;
+      this.entities.set(key, {
+        value: entry.value,
+        version: entry.version,
+        hash: entry.hash,
+      });
+      if (entry.version > this.version) {
+        this.version = entry.version;
+      }
+    }
+  }
+
+  reset(): void {
+    this.entities.clear();
+    this.subscriptions.clear();
+    this.version = 0;
+  }
+
+  close(): void {
+    this.entities.clear();
+    this.subscriptions.clear();
+  }
+
+  private notifySubscriptions(commit: Commit, branch: string): void {
+    for (const [_, sub] of this.subscriptions) {
+      if (sub.branch !== branch) continue;
+      // Check if any committed facts match the subscription selector
+      const matchingRevisions: StoredFact[] = [];
+      for (const sf of commit.facts) {
+        if ("*" in sub.select || sf.fact.id in sub.select) {
+          matchingRevisions.push(sf);
+        }
+      }
+      if (matchingRevisions.length > 0) {
+        sub.callback({
+          commit,
+          revisions: matchingRevisions,
+        });
+      }
+    }
+  }
 }
 
 // ─── Remote Connection ────────────────────────────────────────────────────
@@ -230,25 +445,28 @@ export interface ConnectRemoteOptions {
 }
 
 /**
- * Consumer session backed by both local shadow state and remote WebSocket.
+ * Consumer session backed by both in-memory shadow state and remote WebSocket.
  *
  * transact(): applies locally (sync), returns deferred server confirmation
  * query(): applies locally (sync), also sends to server
  * subscribe(): registers locally, also subscribes on server
+ *
+ * Uses InMemoryShadow instead of SpaceV2 so it works in browser WebWorkers.
  */
 export class RemoteConsumer {
   readonly connection: RemoteConnection;
 
-  private localSpace: SpaceV2;
-  private localProvider: ProviderSession;
-  private localConsumer: ConsumerSession;
+  private shadow: InMemoryShadow;
   private nextInvocationId = 0;
 
-  /** Subscription callbacks registered by the user */
+  /** Subscription callbacks keyed by server invocation ID ("job:N") */
   private subscriptionCallbacks = new Map<
     InvocationId,
     SubscriptionCallback
   >();
+
+  /** Map from local subscription ID ("sub:N") to server invocation ID ("job:N") */
+  private localToServerSubId = new Map<InvocationId, InvocationId>();
 
   /** Cleanup for effect listener */
   private cleanupEffectListener: (() => void) | null = null;
@@ -256,10 +474,8 @@ export class RemoteConsumer {
   constructor(connection: RemoteConnection) {
     this.connection = connection;
 
-    // Create local shadow for optimistic state
-    this.localSpace = SpaceV2.open({ url: new URL("memory:remote-shadow") });
-    this.localProvider = new ProviderSession(this.localSpace);
-    this.localConsumer = connectLocal(this.localProvider);
+    // Create lightweight in-memory shadow for optimistic state (no SQLite)
+    this.shadow = new InMemoryShadow();
 
     // Listen for subscription effects from server
     this.cleanupEffectListener = this.connection.onEffect((msg) => {
@@ -286,7 +502,7 @@ export class RemoteConsumer {
     options?: { branch?: string },
   ): ConsumerTransactResult {
     // Apply locally — this is synchronous and updates local state
-    const localResult = this.localConsumer.transact(userOps, options);
+    const localResult = this.shadow.transact(userOps, options);
 
     // Send the transact command to server (async).
     // Forward user operations directly — no parent on the wire.
@@ -339,7 +555,7 @@ export class RemoteConsumer {
     select: Selector,
     options?: { since?: number; branch?: string },
   ): FactSet {
-    return this.localConsumer.query(select, options);
+    return this.shadow.query(select, options);
   }
 
   /**
@@ -356,19 +572,23 @@ export class RemoteConsumer {
     ready: Promise<FactSet | undefined>;
   } {
     // Subscribe locally for optimistic updates
-    const localResult = this.localConsumer.subscribe(
+    const localResult = this.shadow.subscribe(
       select,
       callback,
       options,
     );
 
-    // Also register callback for remote subscription effects
-    this.subscriptionCallbacks.set(localResult.subscriptionId, callback);
-
     // Send subscribe command to server — returns initial state asynchronously.
     // We don't transact into local shadow (that would fire spurious callbacks).
     // Instead, the caller (ReplicaV2) applies the FactSet via ready promise.
     const id = this.nextId();
+
+    // Register callback for remote subscription effects under the server's
+    // invocation ID (= "job:N"), since that's what the server uses in
+    // task/effect messages. The local shadow already handles optimistic
+    // notifications via its own "sub:N" subscription.
+    this.subscriptionCallbacks.set(id, callback);
+    this.localToServerSubId.set(localResult.subscriptionId, id);
     const ready = this.connection.send(id, {
       cmd: "/memory/query/subscribe",
       sub: "did:key:consumer" as `did:${string}`,
@@ -382,9 +602,9 @@ export class RemoteConsumer {
       return undefined;
     });
 
-    // Track for reconnection
+    // Track for reconnection using the server invocation ID
     this.connection.trackSubscription(
-      localResult.subscriptionId,
+      id,
       select,
       options?.branch,
       callback,
@@ -397,42 +617,41 @@ export class RemoteConsumer {
    * Unsubscribe from a subscription.
    */
   unsubscribe(subscriptionId: InvocationId): void {
-    this.subscriptionCallbacks.delete(subscriptionId);
-    this.localConsumer.unsubscribe(subscriptionId);
-    this.connection.untrackSubscription(subscriptionId);
+    // subscriptionId is the local "sub:N" ID. Look up the server "job:N" ID.
+    const serverSubId = this.localToServerSubId.get(subscriptionId);
+    if (serverSubId) {
+      this.subscriptionCallbacks.delete(serverSubId);
+      this.connection.untrackSubscription(serverSubId);
+      this.localToServerSubId.delete(subscriptionId);
 
-    // Send unsubscribe to server
-    const id = this.nextId();
-    this.connection.send(id, {
-      cmd: "/memory/query/unsubscribe",
-      sub: "did:key:consumer" as `did:${string}`,
-      args: { source: subscriptionId },
-    });
+      // Send unsubscribe to server using the server's invocation ID
+      const id = this.nextId();
+      this.connection.send(id, {
+        cmd: "/memory/query/unsubscribe",
+        sub: "did:key:consumer" as `did:${string}`,
+        args: { source: serverSubId },
+      });
+    }
+
+    this.shadow.unsubscribe(subscriptionId);
   }
 
   /**
    * Read confirmed state from local cache.
    */
   getConfirmed(entityId: string, branch?: string) {
-    return this.localConsumer.getConfirmed(entityId, branch);
+    return this.shadow.getConfirmed(entityId, branch);
   }
 
   /**
    * Reset local state (for reconnection scenarios).
    */
   reset(): void {
-    this.localConsumer.close();
-    this.localProvider.close();
-    this.localSpace.close();
-    this.localSpace = SpaceV2.open({ url: new URL("memory:remote-shadow") });
-    this.localProvider = new ProviderSession(this.localSpace);
-    this.localConsumer = connectLocal(this.localProvider);
+    this.shadow.reset();
   }
 
   close(): void {
-    this.localConsumer.close();
-    this.localProvider.close();
-    this.localSpace.close();
+    this.shadow.close();
     if (this.cleanupEffectListener) {
       this.cleanupEffectListener();
       this.cleanupEffectListener = null;
