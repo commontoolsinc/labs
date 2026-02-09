@@ -58,9 +58,9 @@ export default pattern(() => {
                         properties: {}
                     }]
             } as const satisfies __ctHelpers.JSONSchema, {
-                $ref: "#/$defs/AnonymousType_1",
+                $ref: "#/$defs/AnonymousType_6",
                 $defs: {
-                    AnonymousType_1: {
+                    AnonymousType_6: {
                         $ref: "#/$defs/UIRenderable",
                         asOpaque: true
                     },
@@ -179,9 +179,12 @@ export default pattern(() => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/AnonymousType_6"
                 }]
+        },
+        AnonymousType_6: {
+            $ref: "#/$defs/UIRenderable",
+            asOpaque: true
         },
         UIRenderable: {
             type: "object",
@@ -231,8 +234,7 @@ export default pattern(() => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/AnonymousType_6"
                 }, {
                     type: "object",
                     properties: {}
