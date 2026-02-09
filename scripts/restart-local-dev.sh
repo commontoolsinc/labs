@@ -12,6 +12,7 @@ TOOLSHED_PORT=${TOOLSHED_PORT:-}
 CLEAR_CACHE=false
 CLEAR_ALL_SPACES=false
 FORCE=false
+WATCH=false
 while [[ $# -gt 0 ]]; do
     case $1 in
         --clear-cache)
@@ -24,6 +25,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --force)
             FORCE=true
+            shift
+            ;;
+        --watch)
+            WATCH=true
             shift
             ;;
         --port-offset)
@@ -52,7 +57,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: $0 [--clear-cache] [--dangerously-clear-all-spaces] [--force] [--port-offset N] [--shell-port PORT] [--toolshed-port PORT]"
+            echo "Usage: $0 [--clear-cache] [--dangerously-clear-all-spaces] [--force] [--watch] [--port-offset N] [--shell-port PORT] [--toolshed-port PORT]"
             exit 1
             ;;
     esac
@@ -92,8 +97,11 @@ if [[ "$CLEAR_ALL_SPACES" == "true" ]]; then
 fi
 
 echo "Starting local dev servers..."
+START_ARGS="--shell-port $SHELL_PORT --toolshed-port $TOOLSHED_PORT"
 if [[ "$FORCE" == "true" ]]; then
-    ./scripts/start-local-dev.sh --force --shell-port "$SHELL_PORT" --toolshed-port "$TOOLSHED_PORT"
-else
-    ./scripts/start-local-dev.sh --shell-port "$SHELL_PORT" --toolshed-port "$TOOLSHED_PORT"
+    START_ARGS="$START_ARGS --force"
 fi
+if [[ "$WATCH" == "true" ]]; then
+    START_ARGS="$START_ARGS --watch"
+fi
+./scripts/start-local-dev.sh $START_ARGS
