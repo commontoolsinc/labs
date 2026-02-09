@@ -68,11 +68,10 @@ async function runCommand(
 
 async function stopServers(portOffset: number, rootDir: string): Promise<void> {
   console.log(`Stopping servers with PORT_OFFSET=${portOffset}...`);
-  await runCommand(["bash", "scripts/stop-local-dev.sh"], {
-    cwd: rootDir,
-    env: { PORT_OFFSET: String(portOffset) },
-    inheritStdio: true,
-  });
+  await runCommand(
+    ["bash", "scripts/stop-local-dev.sh", `--port-offset=${portOffset}`],
+    { cwd: rootDir, inheritStdio: true },
+  );
 }
 
 async function startServers(
@@ -80,11 +79,10 @@ async function startServers(
   rootDir: string,
 ): Promise<boolean> {
   console.log(`Starting servers with PORT_OFFSET=${portOffset}...`);
-  const result = await runCommand(["bash", "scripts/start-local-dev.sh"], {
-    cwd: rootDir,
-    env: { PORT_OFFSET: String(portOffset) },
-    inheritStdio: true,
-  });
+  const result = await runCommand(
+    ["bash", "scripts/start-local-dev.sh", `--port-offset=${portOffset}`],
+    { cwd: rootDir, inheritStdio: true },
+  );
 
   if (!result.success) {
     console.error("Failed to start servers");
