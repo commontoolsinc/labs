@@ -503,7 +503,7 @@ Deno.test("remote: close cleans up connection", async () => {
   cleanup();
 });
 
-Deno.test("remote: close with pending transacts rejects confirmations", async () => {
+Deno.test("remote: close with pending transacts resolves confirmations", async () => {
   const { consumer, pendingResponses, cleanup } = createMockRemoteSetup({
     manualConfirmation: true,
   });
@@ -512,16 +512,11 @@ Deno.test("remote: close with pending transacts rejects confirmations", async ()
   const result = consumer.transact([{ op: "set", id: "e1", value: "hi" }]);
   assertEquals(pendingResponses.length, 1);
 
-  // Close without confirming — confirmed promise should reject
+  // Close without confirming — confirmed promise resolves (local state committed)
   consumer.close();
 
-  let rejected = false;
-  try {
-    await result.confirmed;
-  } catch {
-    rejected = true;
-  }
-  assertEquals(rejected, true);
+  // Should resolve without error (not reject)
+  await result.confirmed;
 
   // cleanup is idempotent, handles already-closed resources
   cleanup();

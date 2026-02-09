@@ -2110,11 +2110,12 @@ export class StorageManager implements IStorageManager {
 
   protected connect(space: MemorySpace): IStorageProviderWithReplica {
     if (this.memoryVersion === "v2") {
-      // Build v2 WebSocket URL
+      // Build v2 WebSocket URL from the base origin.
+      // this.address is the v1 storage endpoint (e.g. http://host/api/storage/memory).
+      // The v2 endpoint is at /api/storage/memory/v2 relative to the origin.
       const wsUrl = new URL(this.address.href);
       wsUrl.protocol = wsUrl.protocol === "https:" ? "wss:" : "ws:";
-      wsUrl.pathname = wsUrl.pathname.replace(/\/?$/, "") +
-        "/api/storage/memory/v2";
+      wsUrl.pathname = "/api/storage/memory/v2";
       wsUrl.searchParams.set("space", space);
 
       return ProviderV2.connectRemote({

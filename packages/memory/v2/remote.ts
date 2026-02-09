@@ -18,6 +18,7 @@ import type {
   Command,
   InvocationId,
   ProviderMessage,
+  QueryResult,
   SubscriptionUpdate,
   TransactResult,
 } from "./protocol.ts";
@@ -189,8 +190,11 @@ export class RemoteConnection {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+    // Resolve (not reject) pending deferreds on intentional close.
+    // Local state is already committed; rejecting causes uncaught promise errors
+    // when callers don't explicitly catch the confirmed promise.
     for (const d of this.pending.values()) {
-      d.reject(new Error("Connection closed"));
+      d.resolve(undefined as any);
     }
     this.pending.clear();
     this.queue = [];
@@ -311,6 +315,8 @@ export class RemoteConsumer {
 
     // Wire server response to deferred confirmation
     const confirmed = serverPromise.then((response) => {
+      // response is undefined when connection closed during cleanup
+      if (!response) return localResult.commit;
       const result = response.is as TransactResult;
       if ("error" in result) {
         const err = new Error(
@@ -344,7 +350,11 @@ export class RemoteConsumer {
     select: Selector,
     callback: SubscriptionCallback,
     options?: { since?: number; branch?: string },
-  ): { facts: FactSet; subscriptionId: InvocationId } {
+  ): {
+    facts: FactSet;
+    subscriptionId: InvocationId;
+    ready: Promise<FactSet | undefined>;
+  } {
     // Subscribe locally for optimistic updates
     const localResult = this.localConsumer.subscribe(
       select,
@@ -355,12 +365,21 @@ export class RemoteConsumer {
     // Also register callback for remote subscription effects
     this.subscriptionCallbacks.set(localResult.subscriptionId, callback);
 
-    // Send subscribe command to server
+    // Send subscribe command to server — returns initial state asynchronously.
+    // We don't transact into local shadow (that would fire spurious callbacks).
+    // Instead, the caller (ReplicaV2) applies the FactSet via ready promise.
     const id = this.nextId();
-    this.connection.send(id, {
+    const ready = this.connection.send(id, {
       cmd: "/memory/query/subscribe",
       sub: "did:key:consumer" as `did:${string}`,
       args: { select, since: options?.since, branch: options?.branch },
+    }).then((response) => {
+      if (!response) return undefined;
+      const result = response.is as QueryResult;
+      if ("ok" in result) {
+        return result.ok as FactSet;
+      }
+      return undefined;
     });
 
     // Track for reconnection
@@ -371,7 +390,7 @@ export class RemoteConsumer {
       callback,
     );
 
-    return localResult;
+    return { ...localResult, ready };
   }
 
   /**

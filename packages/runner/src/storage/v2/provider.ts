@@ -53,7 +53,11 @@ import type {
 } from "@commontools/memory/v2/protocol";
 import { connectRemote, RemoteConsumer } from "@commontools/memory/v2/remote";
 import { BaseMemoryAddress } from "../../traverse.ts";
-import { fromString, is as isV1Reference } from "@commontools/memory/reference";
+import {
+  fromJSON,
+  fromString,
+  is as isV1Reference,
+} from "@commontools/memory/reference";
 
 /**
  * The fixed MIME type used for v2 provider.
@@ -69,6 +73,13 @@ const V2_MIME = "application/json" as const;
 function toV1Cause(hash: unknown): State["cause"] {
   if (hash == null) return undefined;
   if (isV1Reference(hash)) return hash as State["cause"];
+  // Handle JSON-deserialized reference objects ({"/": "baedrei..."})
+  // that lost their branded View type during wire transport.
+  if (typeof hash === "object" && hash !== null && "/" in hash) {
+    return fromJSON(
+      hash as { "/": string },
+    ) as unknown as State["cause"];
+  }
   return fromString(String(hash)) as unknown as State["cause"];
 }
 
@@ -115,7 +126,11 @@ interface ConsumerLike {
     select: Selector,
     callback: SubscriptionCallback,
     options?: { since?: number; branch?: string },
-  ): { facts: FactSet; subscriptionId: InvocationId };
+  ): {
+    facts: FactSet;
+    subscriptionId: InvocationId;
+    ready?: Promise<FactSet | undefined>;
+  };
   unsubscribe(subscriptionId: InvocationId): void;
   getConfirmed(
     entityId: string,
@@ -139,6 +154,7 @@ class ReplicaV2 implements ISpaceReplica {
   >();
   private localState = new Map<string, Revision<State>>();
   private subscriptionIds = new Map<string, InvocationId>();
+  private pendingReady: Promise<void>[] = [];
   suppressSubscriptionUpdates = false;
 
   constructor(
@@ -344,7 +360,7 @@ class ReplicaV2 implements ISpaceReplica {
     if (this.subscriptionIds.has(entityId)) return;
 
     const selector = { [entityId]: {} } as unknown as Selector;
-    const { facts, subscriptionId } = this.consumer.subscribe(
+    const { facts, subscriptionId, ready } = this.consumer.subscribe(
       selector,
       (update: SubscriptionUpdate) => {
         this.handleSubscriptionUpdate(update);
@@ -353,6 +369,17 @@ class ReplicaV2 implements ISpaceReplica {
 
     this.subscriptionIds.set(entityId, subscriptionId);
     this.applyFactSet(facts);
+
+    // For remote consumers: apply server initial state when it arrives
+    if (ready) {
+      this.pendingReady.push(
+        ready.then((serverFacts) => {
+          if (serverFacts) {
+            this.applyFactSet(serverFacts);
+          }
+        }),
+      );
+    }
   }
 
   /**
@@ -446,6 +473,16 @@ class ReplicaV2 implements ISpaceReplica {
   updateLocalState(entityId: string, state: Revision<State>): void {
     this.localState.set(entityId, state);
     this.notifySubscribers(entityId, state);
+  }
+
+  /**
+   * Wait for all pending server state loads to complete.
+   */
+  async synced(): Promise<void> {
+    if (this.pendingReady.length > 0) {
+      await Promise.all(this.pendingReady);
+      this.pendingReady = [];
+    }
   }
 
   /**
@@ -634,6 +671,7 @@ export class ProviderV2 implements IStorageProviderWithReplica {
 
   /**
    * Sync an entity from storage.
+   * For remote mode, waits for the server's initial state to arrive.
    */
   async sync(
     uri: URI,
@@ -647,14 +685,18 @@ export class ProviderV2 implements IStorageProviderWithReplica {
 
     // Set up a subscription for future updates
     this.replica.setupSubscription(uri);
+
+    // Wait for server initial state (no-op for local mode)
+    await this.replica.synced();
+
     return { ok: {} as Unit };
   }
 
   /**
-   * Wait for all pending syncs.
+   * Wait for all pending syncs (server state loads for remote mode).
    */
   async synced(): Promise<void> {
-    // v2 is synchronous for local provider — nothing to wait for
+    await this.replica.synced();
   }
 
   /**
