@@ -37,9 +37,9 @@ type StorableValue =
   // (a) Primitives
   | null
   | boolean
-  | number    // finite only; NaN and Infinity rejected
+  | number    // finite only; `NaN` and `Infinity` rejected
   | string
-  | undefined // deletion at top level; absent in objects; null in arrays
+  | undefined // deletion at top level; absent in objects; `null` in arrays
   | bigint    // large integers
 
   // (b) Built-in JS types (require explicit serialization handling)
@@ -151,7 +151,7 @@ export const RECONSTRUCT = Symbol.for('common.reconstruct');
 
 /**
  * A value that knows how to deconstruct itself into essential state
- * for serialization. The presence of [DECONSTRUCT] serves as the brand --
+ * for serialization. The presence of `[DECONSTRUCT]` serves as the brand --
  * no separate marker is needed.
  */
 export interface StorableInstance {
@@ -174,10 +174,10 @@ export interface StorableInstance {
  * A class that can reconstruct instances from essential state. This is a
  * static method, separate from the constructor, for two reasons:
  *
- * 1. Reconstruction-specific context: receives the Runtime (and potentially
+ * 1. Reconstruction-specific context: receives the `Runtime` (and potentially
  *    other context) which shouldn't be mandated in a constructor signature.
  * 2. Instance interning: can return existing instances rather than always
- *    creating new ones -- essential for types like Cell where identity matters.
+ *    creating new ones -- essential for types like `Cell` where identity matters.
  */
 export interface StorableClass<T extends StorableInstance> {
   /**
@@ -196,7 +196,7 @@ export interface StorableClass<T extends StorableInstance> {
 
 /**
  * Type guard: checks whether a value implements the storable protocol.
- * The presence of [DECONSTRUCT] is the brand.
+ * The presence of `[DECONSTRUCT]` is the brand.
  */
 export function isStorable(value: unknown): value is StorableInstance {
   return value != null
@@ -230,7 +230,7 @@ class Cell<T> implements StorableInstance {
     state: { id: string; path: string[]; space: string },
     runtime: Runtime,
   ): Cell<unknown> {
-    // May return an existing Cell instance (interning).
+    // May return an existing `Cell` instance (interning).
     return runtime.getCell(state);
   }
 }
@@ -388,7 +388,7 @@ export function serialize(
     return context.wrap(tag, serializedState);
   }
 
-  // Handle built-in JS types (Error, Map, Set, Uint8Array, Date)
+  // Handle built-in JS types (`Error`, `Map`, `Set`, `Uint8Array`, `Date`).
   // Each is converted via the context using a well-known tag.
   // ...
 
@@ -400,7 +400,7 @@ export function serialize(
 
 /**
  * Deserialize a wire-format value back into rich runtime types. Requires
- * a Runtime for reconstituting types that need runtime context (e.g., Cell
+ * a `Runtime` for reconstituting types that need runtime context (e.g., `Cell`
  * interning).
  */
 export function deserialize(
@@ -416,7 +416,7 @@ export function deserialize(
     if (cls) {
       return cls[RECONSTRUCT](deserializedState, runtime);
     }
-    // Unknown type: preserve for round-tripping.
+    // Unknown type: preserve for round-tripping via `UnknownStorable`.
     return UnknownStorable[RECONSTRUCT](
       { type: tag, state: deserializedState },
       runtime,
@@ -594,9 +594,9 @@ round-tripping.
 
 ### 6.1 Overview
 
-The system uses canonical hashing for content-based identity. This replaces the
-previous `merkle-reference` approach with a simpler scheme that operates
-directly on the natural data structure.
+The system uses canonical hashing for content-based identity. The hashing
+scheme operates directly on the natural data structure without intermediate
+tree construction.
 
 ### 6.2 Design Principles
 
@@ -623,20 +623,20 @@ directly on the natural data structure.
 export function canonicalHash(value: StorableValue): string {
   // Implementation feeds type-tagged data into a SHA-256 hasher:
   //
-  // - null:        hash(TAG_NULL)
-  // - boolean:     hash(TAG_BOOL, boolByte)
-  // - number:      hash(TAG_NUMBER, float64Bytes)
-  // - string:      hash(TAG_STRING, utf8Bytes)
-  // - bigint:      hash(TAG_BIGINT, signedBytes)
-  // - undefined:   hash(TAG_UNDEFINED)
-  // - Uint8Array:  hash(TAG_BYTES, rawBytes)
-  // - Date:        hash(TAG_DATE, millisSinceEpoch)
-  // - Error:       hash(TAG_ERROR, canonicalHash(errorState))
-  // - Map:         hash(TAG_MAP, sorted entries by canonicalHash(key))
-  // - Set:         hash(TAG_SET, sorted by canonicalHash(element))
-  // - array:       hash(TAG_ARRAY, length, ...canonicalHash(element))
-  // - object:      hash(TAG_OBJECT, sorted keys, ...canonicalHash(value))
-  // - StorableInstance: hash(TAG_STORABLE, typeTag, canonicalHash(deconstructedState))
+  // - `null`:              `hash(TAG_NULL)`
+  // - `boolean`:           `hash(TAG_BOOL, boolByte)`
+  // - `number`:            `hash(TAG_NUMBER, float64Bytes)`
+  // - `string`:            `hash(TAG_STRING, utf8Bytes)`
+  // - `bigint`:            `hash(TAG_BIGINT, signedBytes)`
+  // - `undefined`:         `hash(TAG_UNDEFINED)`
+  // - `Uint8Array`:        `hash(TAG_BYTES, rawBytes)`
+  // - `Date`:              `hash(TAG_DATE, millisSinceEpoch)`
+  // - `Error`:             `hash(TAG_ERROR, canonicalHash(errorState))`
+  // - `Map`:               `hash(TAG_MAP, sorted entries by canonicalHash(key))`
+  // - `Set`:               `hash(TAG_SET, sorted by canonicalHash(element))`
+  // - array:               `hash(TAG_ARRAY, length, ...canonicalHash(element))`
+  // - object:              `hash(TAG_OBJECT, sorted keys, ...canonicalHash(value))`
+  // - `StorableInstance`:  `hash(TAG_STORABLE, typeTag, canonicalHash(deconstructedState))`
   //
   // Each type is tagged to prevent collisions between types with
   // identical content representations.
@@ -663,38 +663,36 @@ most current version of the data. Hashes are not used as entity addresses.
 
 ---
 
-## 7. Migration Notes
+## 7. Implementation Guidance
 
-### 7.1 From Early to Late Conversion
+### 7.1 Adopting Late Serialization
 
-The current system converts to JSON forms early (`isSigilLink()`,
-`isStreamValue()`, `isErrorWrapper()` checks are scattered throughout). The
-migration to late serialization involves:
+Migration to the spec involves replacing early JSON-form conversion with
+boundary-only serialization:
 
-1. Expanding `StorableValue` to include rich types.
-2. Removing early conversion points (`convertCellsToLinks()`,
-   `toStorableValue()` wrapping Errors as `{ "@Error": ... }`, etc.).
-3. Introducing serialization contexts at each boundary.
-4. Updating internal code to work with rich types instead of JSON shapes.
+1. Expand `StorableValue` to include rich types (Section 1.2).
+2. Remove early conversion points (e.g., `convertCellsToLinks()`,
+   `toStorableValue()` wrapping `Error` as `{ "@Error": ... }`).
+3. Introduce `SerializationContext` at each boundary (Section 4.6).
+4. Update internal code to work with rich types rather than JSON shapes.
 
-### 7.2 From Current JSON Formats
+### 7.2 Unifying JSON Encoding
 
-The current system uses three inconsistent conventions:
+Three legacy conventions must be migrated to the unified
+`/<Type>@<Version>` format:
 
-| Current Convention | Example | Replacement |
-|-------------------|---------|-------------|
+| Legacy Convention | Example | New Form |
+|-------------------|---------|----------|
 | IPLD sigil | `{ "/": { "link@1": {...} } }` | `{ "/Link@1": {...} }` |
 | `@` prefix | `{ "@Error": {...} }` | `{ "/Error@1": {...} }` |
 | `$` prefix | `{ "$stream": true }` | `{ "/Stream@1": null }` |
 
-All three are unified under the `/<Type>@<Version>` convention.
+### 7.3 Replacing CID-Based Hashing
 
-### 7.3 From CID-Based Hashing
-
-The current merkle-tree/CID-based hashing is replaced with the simpler
-canonical hashing approach (Section 6). The system does not participate in the
-IPFS network, so CID formatting is unnecessary overhead. The new approach hashes
-the logical content directly.
+The canonical hashing approach (Section 6) replaces `merkle-reference` /
+CID-based hashing. Since the system does not participate in the IPFS network,
+CID formatting adds overhead without interoperability benefit. The canonical
+hash operates on the logical data structure directly.
 
 ---
 
