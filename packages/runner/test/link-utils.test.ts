@@ -980,6 +980,21 @@ describe("link-utils", () => {
       ).toBeDefined();
       expect(() => JSON.stringify(result)).not.toThrow();
     });
+
+    it("should handle keepAsOpaque option", () => {
+      const schema: any = {
+        type: "object",
+        asOpaque: true,
+      };
+
+      // By default, asOpaque should be removed
+      const resultDefault = sanitizeSchemaForLinks(schema);
+      expect((resultDefault as any).asOpaque).toBeUndefined();
+
+      // With keepAsOpaque: true, it should be preserved
+      const resultKept = sanitizeSchemaForLinks(schema, { keepAsOpaque: true });
+      expect((resultKept as any).asOpaque).toBe(true);
+    });
   });
 
   describe("createDataCellURI", () => {
