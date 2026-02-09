@@ -24,3 +24,6 @@ system, schemas.
 - [1-storable-values.md](./1-storable-values.md) -- The complete data model
   specification covering storable value types, the storable protocol,
   serialization contexts, JSON encoding, and canonical hashing.
+
+> **Note:** All topics listed in the scope above are covered in the single
+> document `1-storable-values.md`.

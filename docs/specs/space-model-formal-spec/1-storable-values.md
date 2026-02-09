@@ -26,6 +26,11 @@ boundary crossings (persistence, IPC, network).
 
 A `StorableValue` is defined as the following union:
 
+> **Package note:** The TypeScript stubs in this spec use `packages/common/` as
+> the proposed target location for these types. In the current codebase, many of
+> these types live in `packages/memory/`. The migration to `packages/common/` is
+> part of the implementation work.
+
 ```typescript
 // file: packages/common/storable-value.ts
 
@@ -65,8 +70,19 @@ type StorableValue =
 | `boolean` | None | `true` or `false` |
 | `number` | Must be finite | `-0` normalized to `0`; `NaN`/`Infinity` rejected |
 | `string` | None | Unicode text |
-| `undefined` | Context-dependent | Top-level: deletion. Object property: absent. Array element: `null` |
+| `undefined` | Context-dependent | Top-level: deletion. Object property: absent. Array element: `null` (see note below) |
 | `bigint` | None | Serialized as string in JSON encoding |
+
+> **`undefined` semantics:** The context-dependent behavior of `undefined` is
+> preserved from the current implementation: at top level it signals deletion
+> (removing a cell's value), as an object property value it means that property
+> is absent (omitted during serialization), and as an array element it is
+> converted to `null` (since JSON arrays cannot represent `undefined`).
+
+> **`-0` normalization:** Negative zero (`-0`) is normalized to positive zero
+> (`0`) during serialization, at the boundary crossing. This matches
+> `JSON.stringify` behavior and ensures that `0` and `-0` produce the same
+> serialized form and canonical hash.
 
 ### 1.4 Built-in JS Types
 
@@ -234,6 +250,12 @@ class Cell<T> implements StorableInstance {
     return runtime.getCell(state);
   }
 }
+
+// Note: `Runtime` comes from `packages/runtime/` and provides the execution
+// context needed for reconstruction. The minimal interface required by
+// [RECONSTRUCT] includes at least `getCell(state)` for resolving cell
+// references, as shown above. Other storable types may depend on additional
+// `Runtime` methods as needed.
 ```
 
 ### 2.7 Deconstructed State and Recursion
@@ -335,6 +357,12 @@ encoding/decoding.
 
 ### 4.2 Interface
 
+> **`SerializedForm`:** Throughout this section, `SerializedForm` is a type
+> alias for the wire format representation. For JSON contexts, this is any
+> JSON-compatible value (i.e., `null | boolean | number | string | JsonArray |
+> JsonObject`). Other contexts (e.g., CBOR) would define their own
+> `SerializedForm`.
+
 ```typescript
 // file: packages/common/serialization-context.ts
 
@@ -390,6 +418,30 @@ export function serialize(
 
   // Handle built-in JS types (`Error`, `Map`, `Set`, `Uint8Array`, `Date`).
   // Each is converted via the context using a well-known tag.
+  //
+  // For example, `Error` (which cannot implement [DECONSTRUCT] via symbol):
+  //
+  //   if (value instanceof Error) {
+  //     const state: Record<string, StorableValue> = {
+  //       name:    value.name,
+  //       message: value.message,
+  //     };
+  //     if (value.stack) state.stack = value.stack;
+  //     if (value.cause !== undefined) {
+  //       state.cause = serialize(value.cause, context); // recursive
+  //     }
+  //     // Copy custom enumerable properties
+  //     for (const key of Object.keys(value)) {
+  //       if (!(key in state)) {
+  //         state[key] = serialize((value as any)[key], context); // recursive
+  //       }
+  //     }
+  //     return context.wrap('Error@1', state);
+  //   }
+  //
+  // The same pattern applies to Map, Set, Uint8Array, and Date -- each is
+  // decomposed into its essential state, nested values are recursively
+  // serialized, and the result is wrapped with the appropriate tag.
   // ...
 
   // Handle primitives: pass through.
@@ -675,6 +727,14 @@ boundary-only serialization:
    `toStorableValue()` wrapping `Error` as `{ "@Error": ... }`).
 3. Introduce `SerializationContext` at each boundary (Section 4.6).
 4. Update internal code to work with rich types rather than JSON shapes.
+
+> **`toJSON()` migration:** Types that currently use `toJSON()` for
+> serialization will need to implement the storable protocol
+> (`[DECONSTRUCT]`/`[RECONSTRUCT]`) instead. The `toJSON()` approach eagerly
+> converts to JSON-compatible shapes, which is incompatible with late
+> serialization. Implementors should replace `toJSON()` methods with
+> `[DECONSTRUCT]` (returning essential state as rich types) and add a static
+> `[RECONSTRUCT]` method on the class.
 
 ### 7.2 Unifying JSON Encoding
 
