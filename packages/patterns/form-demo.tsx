@@ -13,6 +13,7 @@ import {
   action,
   computed,
   Default,
+  equals,
   handler,
   ifElse,
   NAME,
@@ -40,46 +41,6 @@ interface FormDemoOutput {
   people: Person[];
 }
 
-// ===== Module-scope handlers =====
-
-const startEdit = handler<
-  unknown,
-  {
-    index: number;
-    people: Writable<Person[]>;
-    formData: Writable<Person>;
-    editingIndex: Writable<number | null>;
-    showModal: Writable<boolean>;
-  }
->((_event, { index, people, formData, editingIndex, showModal }) => {
-  const list = people.get();
-  const person = list[index];
-  if (person) {
-    formData.set({
-      name: person.name,
-      email: person.email,
-      role: person.role,
-    });
-    editingIndex.set(index);
-    showModal.set(true);
-  }
-});
-
-const deletePerson = handler<
-  Event,
-  {
-    index: number;
-    people: Writable<Person[]>;
-  }
->((event, { index, people }) => {
-  // Stop propagation to prevent card's onClick (startEdit) from firing
-  event?.stopPropagation?.();
-  const current = people.get();
-  if (index >= 0 && index < current.length) {
-    people.set(current.toSpliced(index, 1));
-  }
-});
-
 // Form submit handler - must be at module scope
 // ct-form flushes buffered values to bound cells before emitting ct-submit,
 // so handlers read from the cells directly (type-safe, no reconstruction needed)
@@ -87,71 +48,164 @@ const handleFormSubmit = handler<
   unknown,
   {
     formData: Writable<Person>;
+    editing: Writable<{ editing: Writable<Person | null> }>;
     people: Writable<Person[]>;
-    editingIndex: Writable<number | null>;
-    showModal: Writable<boolean>;
   }
->((_, { formData, people, editingIndex, showModal }) => {
-  // Read person directly from the bound cell (already flushed by ct-form)
-  // Create a copy to avoid sharing the same object reference across array items
-  const person: Person = { ...formData.get() };
-
-  const idx = editingIndex.get();
-
-  if (idx !== null) {
+>((_, { formData, editing, people }) => {
+  if (editing.get().editing) {
     // Edit mode - update existing person
-    const list = people.get();
-    const updated = [...list];
-    updated[idx] = person;
-    people.set(updated);
+    editing.get().editing.set(formData.get());
   } else {
     // Create mode - add new person
-    people.push(person);
+    people.push(formData.get());
   }
 
-  // Close modal
-  showModal.set(false);
-  editingIndex.set(null);
+  editing.set({ editing: null });
+});
+
+export const EditPerson = pattern<
+  { editing: Writable<{ editing: Person | null }>; people: Writable<Person[]> },
+  { [UI]: VNode }
+>(
+  ({ editing, people }) => {
+    const formData = Writable.of<Person>(
+      editing.get().editing || { name: "", email: "", role: "user" },
+    );
+
+    const isEditMode = computed(() => editing.get().editing !== null);
+
+    // Cancel handler - close modal without saving
+    const handleCancel = action(() => {
+      editing.set({ editing: null });
+      // Form fields automatically reset via form.reset()
+    });
+
+    return {
+      [UI]: (
+        <ct-form
+          onct-submit={handleFormSubmit({
+            formData,
+            editing,
+            people,
+          })}
+        >
+          <ct-vstack gap="3">
+            {/* Name field */}
+            <ct-vstack gap="1">
+              <label style="font-weight: 500; font-size: 0.875rem;">
+                Name *
+              </label>
+              <ct-input
+                name="name"
+                $value={formData.key("name")}
+                placeholder="Enter full name"
+                required
+              />
+            </ct-vstack>
+
+            {/* Email field */}
+            <ct-vstack gap="1">
+              <label style="font-weight: 500; font-size: 0.875rem;">
+                Email *
+              </label>
+              <ct-input
+                name="email"
+                $value={formData.key("email")}
+                type="email"
+                placeholder="email@example.com"
+                required
+              />
+            </ct-vstack>
+
+            {/* Role field */}
+            <ct-vstack gap="1">
+              <label style="font-weight: 500; font-size: 0.875rem;">
+                Role
+              </label>
+              <ct-select
+                name="role"
+                $value={formData.key("role")}
+                items={[
+                  { label: "User", value: "user" },
+                  { label: "Admin", value: "admin" },
+                ]}
+              />
+            </ct-vstack>
+
+            {/* Form actions */}
+            <ct-hstack gap="2" style="margin-top: 1rem;">
+              <ct-button
+                type="button"
+                variant="secondary"
+                onClick={handleCancel}
+                style="flex: 1;"
+              >
+                Cancel
+              </ct-button>
+              <ct-button
+                type="submit"
+                variant="primary"
+                style="flex: 1;"
+              >
+                {isEditMode ? "Save" : "Create"}
+              </ct-button>
+            </ct-hstack>
+          </ct-vstack>
+        </ct-form>
+      ),
+    };
+  },
+);
+
+// ===== Module-scope handlers =====
+
+const startEdit = handler<
+  unknown,
+  {
+    person: Writable<Person>;
+    editing: Writable<{ editing: Person | null }>;
+    showModal: Writable<boolean>;
+  }
+>((_event, { person, editing, showModal }) => {
+  editing.set({ editing: person });
+  showModal.set(true);
+});
+
+const deletePerson = handler<
+  Event,
+  {
+    person: Person;
+    people: Writable<Person[]>;
+  }
+>((event, { person, people }) => {
+  // Stop propagation to prevent card's onClick (startEdit) from firing
+  event?.stopPropagation?.();
+  const current = people.get();
+  const filteredPeople = current.filter((p) => equals(p, person));
+  people.set(filteredPeople);
 });
 
 // ===== Pattern =====
 
 export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
-  // State for modal visibility
-  const showModal = Writable.of(false);
-
-  // State for edit vs create mode (null = create, number = edit index)
-  const editingIndex = Writable.of<number | null>(null);
-
-  // Draft cell for form data - this will be bound to form inputs
-  const formData = Writable.of<Person>({
-    name: "",
-    email: "",
-    role: "user",
-  });
+  const editing = Writable.of<{ editing: Person | null }>({ editing: null });
 
   // Computed values
   const peopleCount = computed(() => people.get().length);
-  const isEditMode = computed(() => editingIndex.get() !== null);
+  const isEditMode = computed(() => editing.get().editing !== null);
   const modalTitle = ifElse(isEditMode, "Edit Person", "Add Person");
 
-  // Cancel handler - close modal without saving
-  const handleCancel = action(() => {
-    showModal.set(false);
-    editingIndex.set(null);
-    // Form fields automatically reset via form.reset()
-  });
+  const showModal = computed(() => isEditMode);
 
   // Open modal in create mode
   const startCreate = action(() => {
-    // Reset form data to defaults
-    formData.set({
-      name: "",
-      email: "",
-      role: "user",
+    editing.set({
+      editing: Writable.of<Person>({
+        name: "",
+        email: "",
+        role: "user",
+      }),
     });
-    editingIndex.set(null);
-    showModal.set(true);
   });
 
   return {
@@ -176,10 +230,8 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
               <ct-card
                 style="cursor: pointer;"
                 onClick={startEdit({
-                  index,
-                  people,
-                  formData,
-                  editingIndex,
+                  person,
+                  editing,
                   showModal,
                 })}
               >
@@ -214,7 +266,7 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
                   </ct-vstack>
                   <ct-button
                     variant="ghost"
-                    onClick={deletePerson({ index, people })}
+                    onClick={deletePerson({ person, people })}
                   >
                     ×
                   </ct-button>
@@ -246,78 +298,7 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
         {/* Modal form */}
         <ct-modal $open={showModal} dismissable size="md">
           <span slot="header">{modalTitle}</span>
-
-          <ct-form
-            onct-submit={handleFormSubmit({
-              formData,
-              people,
-              editingIndex,
-              showModal,
-            })}
-          >
-            <ct-vstack gap="3">
-              {/* Name field */}
-              <ct-vstack gap="1">
-                <label style="font-weight: 500; font-size: 0.875rem;">
-                  Name *
-                </label>
-                <ct-input
-                  name="name"
-                  $value={formData.key("name")}
-                  placeholder="Enter full name"
-                  required
-                />
-              </ct-vstack>
-
-              {/* Email field */}
-              <ct-vstack gap="1">
-                <label style="font-weight: 500; font-size: 0.875rem;">
-                  Email *
-                </label>
-                <ct-input
-                  name="email"
-                  $value={formData.key("email")}
-                  type="email"
-                  placeholder="email@example.com"
-                  required
-                />
-              </ct-vstack>
-
-              {/* Role field */}
-              <ct-vstack gap="1">
-                <label style="font-weight: 500; font-size: 0.875rem;">
-                  Role
-                </label>
-                <ct-select
-                  name="role"
-                  $value={formData.key("role")}
-                  items={[
-                    { label: "User", value: "user" },
-                    { label: "Admin", value: "admin" },
-                  ]}
-                />
-              </ct-vstack>
-
-              {/* Form actions */}
-              <ct-hstack gap="2" style="margin-top: 1rem;">
-                <ct-button
-                  type="button"
-                  variant="secondary"
-                  onClick={handleCancel}
-                  style="flex: 1;"
-                >
-                  Cancel
-                </ct-button>
-                <ct-button
-                  type="submit"
-                  variant="primary"
-                  style="flex: 1;"
-                >
-                  {isEditMode ? "Save" : "Create"}
-                </ct-button>
-              </ct-hstack>
-            </ct-vstack>
-          </ct-form>
+          <EditPerson editing={editing} people={people} />
         </ct-modal>
       </ct-screen>
     ),
