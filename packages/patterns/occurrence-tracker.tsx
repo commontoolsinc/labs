@@ -132,7 +132,7 @@ const formatFrequencyFromList = lift((list: Occurrence[]): string => {
 // ===== Handlers =====
 
 // TODO(future): Replace Date.now()/new Date() with proper time service when available.
-// Date.now() will be blocked in patterns in the future. The wish("#now") mechanism
+// Date.now() will be blocked in patterns in the future. The wish({ query: "#now" }) mechanism
 // only captures time once at pattern creation, so it doesn't work for fresh timestamps
 // in handlers. When a handler-compatible time service is available (e.g., clock builtin
 // or transaction timestamp), update these handlers to use it instead.

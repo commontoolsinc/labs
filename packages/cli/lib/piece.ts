@@ -111,17 +111,26 @@ async function getProgramFromFile(
 // Returns an array of metadata about pieces to display.
 export async function listPieces(
   config: SpaceConfig,
-): Promise<{ id: string; name?: string; recipeName?: string }[]> {
+): Promise<
+  { id: string; name?: string; recipeName?: string; error?: string }[]
+> {
   const manager = await loadManager(config);
   const pieces = new PiecesController(manager);
   const allPieces = await pieces.getAllPieces();
   return Promise.all(
     allPieces.map(async (piece) => {
-      return {
-        id: piece.id,
-        name: piece.name(),
-        recipeName: (await piece.getRecipeMeta()).recipeName,
-      };
+      try {
+        return {
+          id: piece.id,
+          name: piece.name(),
+          recipeName: (await piece.getRecipeMeta()).recipeName,
+        };
+      } catch (err) {
+        return {
+          id: piece.id,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
     }),
   );
 }
@@ -145,7 +154,7 @@ export async function newPiece(
       }`,
     );
     console.warn(
-      "Patterns using wish('#mentionable') or wish('#default') may not work.",
+      "Patterns using wish({ query: '#mentionable' }) or wish({ query: '#default' }) may not work.",
     );
     // Continue anyway - user's pattern might not need defaultPattern
   }

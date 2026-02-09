@@ -26,6 +26,24 @@ export function parseCaptureExpression(
     let current: ts.Expression = expr;
 
     while (ts.isPropertyAccessExpression(current)) {
+      // If we encounter optional chaining (e.g., foo?.bar), stop here and
+      // capture just the expression before the optional chain.
+      // This preserves nullability in the schema - the root object might be
+      // null/undefined, so we shouldn't descend into its properties.
+      if (ts.isPropertyAccessChain(current)) {
+        // The expression before the ?. is our capture target
+        const beforeChain = current.expression;
+        if (ts.isIdentifier(beforeChain)) {
+          return { root: beforeChain.text, path: [], expression: beforeChain };
+        }
+        // If it's a nested property access before the chain (e.g., a.b?.c),
+        // recursively parse that part
+        if (ts.isPropertyAccessExpression(beforeChain)) {
+          return parseCaptureExpression(beforeChain);
+        }
+        // Can't parse this expression
+        return undefined;
+      }
       segments.unshift(current.name.text);
       current = current.expression;
     }

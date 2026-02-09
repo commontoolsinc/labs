@@ -6,7 +6,7 @@
     "production": "deno task clean && PRODUCTION=1 deno run -A ../felt/cli.ts build .",
     "serve": "deno run -A ../felt/cli.ts serve .",
     "dev": "deno task clean && API_URL=https://toolshed.saga-castor.ts.net deno run -A ../felt/cli.ts dev .",
-    "dev-local": "deno task clean && API_URL=http://localhost:8000 deno run -A ../felt/cli.ts dev .",
+    "dev-local": "deno task clean && API_URL=http://localhost:$TOOLSHED_PORT deno run -A ../felt/cli.ts dev .",
     "dev-clusterduck": "deno task clean && API_URL='http://localhost:7001' deno run -A ../felt/cli.ts dev .",
     "integration": "LOG_LEVEL=warn deno test -A ./integration/*.test.ts",
     "test": "deno test test/*.test.ts"

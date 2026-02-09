@@ -499,9 +499,9 @@ export default recipe({
                         properties: {}
                     }]
             } as const satisfies __ctHelpers.JSONSchema, {
-                $ref: "#/$defs/AnonymousType_1",
+                $ref: "#/$defs/AnonymousType_2",
                 $defs: {
-                    AnonymousType_1: {
+                    AnonymousType_2: {
                         $ref: "#/$defs/UIRenderable",
                         asOpaque: true
                     },
@@ -591,9 +591,9 @@ export default recipe({
                     properties: {}
                 }]
         } as const satisfies __ctHelpers.JSONSchema, {
-            $ref: "#/$defs/AnonymousType_1",
+            $ref: "#/$defs/AnonymousType_2",
             $defs: {
-                AnonymousType_1: {
+                AnonymousType_2: {
                     $ref: "#/$defs/UIRenderable",
                     asOpaque: true
                 },

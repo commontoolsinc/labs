@@ -7,7 +7,7 @@ import { createBuilder } from "../src/builder/factory.ts";
 import { Runtime } from "../src/runtime.ts";
 import { ALL_PIECES_ID } from "../src/builtins/well-known.ts";
 import { NAME, UI } from "../src/builder/types.ts";
-import { parseWishTarget } from "../src/builtins/wish.ts";
+import { parseWishTarget, tagMatchesHashtag } from "../src/builtins/wish.ts";
 
 const signer = await Identity.fromPassphrase("wish built-in tests");
 const space = signer.did();
@@ -59,14 +59,16 @@ describe("wish built-in", () => {
     tx = runtime.edit();
 
     const wishRecipe = recipe("wish resolves all pieces", () => {
-      const allPieces = wish<Array<Record<string, unknown>>>("/allPieces");
-      const firstPieceTitle = wish("/allPieces/0/title");
+      const allPieces = wish<Array<Record<string, unknown>>>({
+        query: "/allPieces",
+      });
+      const firstPieceTitle = wish({ query: "/allPieces/0/title" });
       return { allPieces, firstPieceTitle };
     });
 
     const resultCell = runtime.getCell<{
-      allPieces?: unknown[];
-      firstPieceTitle?: string;
+      allPieces?: { result?: unknown[] };
+      firstPieceTitle?: { result?: string };
     }>(
       space,
       "wish built-in result",
@@ -80,16 +82,19 @@ describe("wish built-in", () => {
     // Pull to trigger computation
     await result.pull();
 
-    const actualCell = result.key("allPieces");
-    const rawValue = actualCell.getRaw() as
+    const wishResultCell = result.key("allPieces");
+    const allPiecesResultCell = wishResultCell.key("result");
+    const rawValue = allPiecesResultCell.getRaw() as
       | { ["/"]: Record<string, unknown> }
       | undefined;
     const linkData = rawValue?.["/"]?.[LINK_V1_TAG] as
       | { id?: string; overwrite?: string }
       | undefined;
 
-    expect(result.key("allPieces").get()).toEqual(piecesData);
-    expect(result.key("firstPieceTitle").get()).toEqual(piecesData[0].title);
+    expect(result.key("allPieces").get()?.result).toEqual(piecesData);
+    expect(result.key("firstPieceTitle").get()?.result).toEqual(
+      piecesData[0].title,
+    );
     expect(linkData?.id).toEqual(`of:${ALL_PIECES_ID}`);
   });
 
@@ -121,14 +126,14 @@ describe("wish built-in", () => {
 
     const wishRecipe = recipe("wish semantic target", () => {
       return {
-        semanticAllPieces: wish("#allPieces"),
-        semanticFirstTitle: wish("#allPieces/0/title"),
+        semanticAllPieces: wish({ query: "#allPieces" }),
+        semanticFirstTitle: wish({ query: "#allPieces/0/title" }),
       };
     });
 
     const resultCell = runtime.getCell<{
-      semanticAllPieces?: unknown[];
-      semanticFirstTitle?: string;
+      semanticAllPieces?: { result?: unknown[] };
+      semanticFirstTitle?: { result?: string };
     }>(
       space,
       "wish semantic",
@@ -142,8 +147,8 @@ describe("wish built-in", () => {
     // Pull to trigger computation
     await result.pull();
 
-    expect(result.key("semanticAllPieces").get()).toEqual(piecesData);
-    expect(result.key("semanticFirstTitle").get()).toEqual("Alpha");
+    expect(result.key("semanticAllPieces").get()?.result).toEqual(piecesData);
+    expect(result.key("semanticFirstTitle").get()?.result).toEqual("Alpha");
   });
 
   it("resolves the default pattern with #default", async () => {
@@ -164,14 +169,14 @@ describe("wish built-in", () => {
 
     const wishRecipe = recipe("wish default pattern", () => {
       return {
-        defaultTitle: wish("#default/title"),
-        defaultGreeting: wish("#default/argument/greeting"),
+        defaultTitle: wish({ query: "#default/title" }),
+        defaultGreeting: wish({ query: "#default/argument/greeting" }),
       };
     });
 
     const resultCell = runtime.getCell<{
-      defaultTitle?: string;
-      defaultGreeting?: string;
+      defaultTitle?: { result?: string };
+      defaultGreeting?: { result?: string };
     }>(
       space,
       "wish default pattern result",
@@ -185,8 +190,8 @@ describe("wish built-in", () => {
     // Pull to trigger computation
     await result.pull();
 
-    expect(result.key("defaultTitle").get()).toEqual("Default App");
-    expect(result.key("defaultGreeting").get()).toEqual("hello");
+    expect(result.key("defaultTitle").get()?.result).toEqual("Default App");
+    expect(result.key("defaultGreeting").get()?.result).toEqual("hello");
   });
 
   it("resolves mentionable backlinks via #mentionable", async () => {
@@ -207,14 +212,14 @@ describe("wish built-in", () => {
 
     const wishRecipe = recipe("wish mentionable", () => {
       return {
-        mentionable: wish("#mentionable"),
-        firstMentionable: wish("#mentionable/0/name"),
+        mentionable: wish({ query: "#mentionable" }),
+        firstMentionable: wish({ query: "#mentionable/0/name" }),
       };
     });
 
     const resultCell = runtime.getCell<{
-      mentionable?: unknown[];
-      firstMentionable?: string;
+      mentionable?: { result?: unknown[] };
+      firstMentionable?: { result?: string };
     }>(
       space,
       "wish mentionable result",
@@ -227,11 +232,11 @@ describe("wish built-in", () => {
 
     await result.pull();
 
-    expect(result.key("mentionable").get()).toEqual([
+    expect(result.key("mentionable").get()?.result).toEqual([
       { name: "Alpha" },
       { name: "Beta" },
     ]);
-    expect(result.key("firstMentionable").get()).toEqual("Alpha");
+    expect(result.key("firstMentionable").get()?.result).toEqual("Alpha");
   });
 
   it("resolves recent pieces via #recent", async () => {
@@ -256,14 +261,14 @@ describe("wish built-in", () => {
 
     const wishRecipe = recipe("wish recent pieces", () => {
       return {
-        recent: wish("#recent"),
-        recentFirst: wish("#recent/0/name"),
+        recent: wish({ query: "#recent" }),
+        recentFirst: wish({ query: "#recent/0/name" }),
       };
     });
 
     const resultCell = runtime.getCell<{
-      recent?: unknown[];
-      recentFirst?: string;
+      recent?: { result?: unknown[] };
+      recentFirst?: { result?: string };
     }>(
       space,
       "wish recent pieces result",
@@ -276,16 +281,16 @@ describe("wish built-in", () => {
 
     await result.pull();
 
-    expect(result.key("recent").get()).toEqual(recentData);
-    expect(result.key("recentFirst").get()).toEqual("Piece A");
+    expect(result.key("recent").get()?.result).toEqual(recentData);
+    expect(result.key("recentFirst").get()?.result).toEqual("Piece A");
   });
 
   it("returns current timestamp via #now", async () => {
     const wishRecipe = recipe("wish now", () => {
-      return { nowValue: wish("#now") };
+      return { nowValue: wish({ query: "#now" }) };
     });
 
-    const resultCell = runtime.getCell<{ nowValue?: number }>(
+    const resultCell = runtime.getCell<{ nowValue?: { result?: number } }>(
       space,
       "wish now result",
       undefined,
@@ -299,7 +304,7 @@ describe("wish built-in", () => {
     await result.pull();
 
     const after = Date.now();
-    const nowValue = result.key("nowValue").get();
+    const nowValue = result.key("nowValue").get()?.result;
     expect(typeof nowValue).toBe("number");
     expect(nowValue).toBeGreaterThanOrEqual(before);
     expect(nowValue).toBeLessThanOrEqual(after);
@@ -317,11 +322,11 @@ describe("wish built-in", () => {
     spaceCell.withTx(tx).set(spaceData);
 
     const wishRecipe = recipe("wish space cell", () => {
-      const spaceResult = wish("/");
+      const spaceResult = wish({ query: "/" });
       return { spaceResult };
     });
 
-    const resultCell = runtime.getCell<{ spaceResult?: unknown }>(
+    const resultCell = runtime.getCell<{ spaceResult?: { result?: unknown } }>(
       space,
       "wish built-in space",
       undefined,
@@ -336,7 +341,7 @@ describe("wish built-in", () => {
     const readTx = runtime.readTx();
     const spaceResultCell = result.withTx(readTx).key("spaceResult");
 
-    expect(spaceResultCell.get()).toEqual(spaceData);
+    expect(spaceResultCell.get()?.result).toEqual(spaceData);
   });
 
   it("resolves space cell subpaths using slash notation", async () => {
@@ -352,14 +357,14 @@ describe("wish built-in", () => {
 
     const wishRecipe = recipe("wish space subpaths", () => {
       return {
-        configLink: wish("/config"),
-        dataLink: wish("/nested/deep/data"),
+        configLink: wish({ query: "/config" }),
+        dataLink: wish({ query: "/nested/deep/data" }),
       };
     });
 
     const resultCell = runtime.getCell<{
-      configLink?: unknown;
-      dataLink?: unknown;
+      configLink?: { result?: unknown };
+      dataLink?: { result?: unknown };
     }>(
       space,
       "wish built-in space subpaths",
@@ -375,15 +380,15 @@ describe("wish built-in", () => {
     const readTx = runtime.readTx();
 
     const configCell = result.withTx(readTx).key("configLink");
-    expect(configCell.get()).toEqual({ setting: "value" });
+    expect(configCell.get()?.result).toEqual({ setting: "value" });
 
     const dataCell = result.withTx(readTx).key("dataLink");
-    expect(dataCell.get()).toEqual(["Alpha"]);
+    expect(dataCell.get()?.result).toEqual(["Alpha"]);
   });
 
   it("returns error for unknown wishes", async () => {
     const wishRecipe = recipe("wish unknown target", () => {
-      const missing = wish("commontools://unknown");
+      const missing = wish({ query: "" });
       return { missing };
     });
 
@@ -400,8 +405,8 @@ describe("wish built-in", () => {
     await result.pull();
 
     const missingResult = result.key("missing").get();
-    // Unknown wish targets now return an error object for better UX
-    expect(missingResult?.error).toMatch(/not recognized/);
+    // Empty query returns an error object
+    expect(missingResult?.error).toMatch(/no query/);
   });
 
   describe("object-based wish syntax", () => {
@@ -493,6 +498,58 @@ describe("wish built-in", () => {
       }>(
         space,
         "wish object syntax path result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+
+      await result.pull();
+
+      expect(result.key("firstTitle").get()?.result).toEqual("First Title");
+    });
+
+    it("resolves slashed path embedded in tag query", async () => {
+      const allPiecesCell = runtime.getCellFromEntityId<unknown[]>(
+        space,
+        { "/": ALL_PIECES_ID },
+        [],
+        undefined,
+        tx,
+      );
+      const piecesData = [
+        { name: "Alpha", title: "First Title" },
+        { name: "Beta", title: "Second Title" },
+      ];
+      allPiecesCell.withTx(tx).set(piecesData);
+
+      // Set up defaultPattern to own allPieces
+      const spaceCell = runtime.getCell<{ allPieces?: unknown[] }>(space, space)
+        .withTx(tx);
+      const defaultPatternCell = runtime.getCell(space, "default-pattern")
+        .withTx(tx);
+      (defaultPatternCell as any).key("allPieces").set(
+        allPiecesCell.withTx(tx),
+      );
+      (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const wishRecipe = recipe("wish object syntax slashed query", () => {
+        const firstTitle = wish<string>({
+          query: "#allPieces/0/title",
+        });
+        return { firstTitle };
+      });
+
+      const resultCell = runtime.getCell<{
+        firstTitle?: { result?: string };
+      }>(
+        space,
+        "wish object syntax slashed query result",
         undefined,
         tx,
       );
@@ -651,7 +708,7 @@ describe("wish built-in", () => {
       expect(missingResult?.error).toMatch(/no query/);
     });
 
-    it("returns UI with ct-cell-link on success", async () => {
+    it("returns cell UI or ct-cell-link fallback on success", async () => {
       const spaceCell = runtime.getCell(space, space).withTx(tx);
       const spaceData = { testField: "space cell value" };
       spaceCell.set(spaceData);
@@ -686,6 +743,7 @@ describe("wish built-in", () => {
       expect(wishResult?.error).toBeUndefined();
       expect(wishResult?.result).toEqual(spaceData);
 
+      // Plain data has no [UI], so falls back to ct-cell-link
       const ui = wishResult?.[UI] as { type: string; name: string; props: any };
       expect(ui?.type).toEqual("vnode");
       expect(ui?.name).toEqual("ct-cell-link");
@@ -740,6 +798,46 @@ describe("wish built-in", () => {
       } finally {
         console.error = originalError;
       }
+    });
+
+    it("returns unified shape with candidates for single result", async () => {
+      const spaceCell = runtime.getCell(space, space).withTx(tx);
+      const spaceData = { testField: "unified shape test" };
+      spaceCell.set(spaceData);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const wishRecipe = recipe("wish unified shape candidates", () => {
+        const spaceResult = wish({ query: "/" });
+        return { spaceResult };
+      });
+
+      const resultCell = runtime.getCell<{
+        spaceResult?: { result?: unknown; candidates?: unknown[] };
+      }>(
+        space,
+        "wish unified shape result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+
+      await result.pull();
+
+      const wishResult = result.key("spaceResult").get() as Record<
+        string | symbol,
+        unknown
+      >;
+      // Unified shape: result is present
+      expect(wishResult?.result).toEqual(spaceData);
+      // Unified shape: candidates is present (array containing the single match)
+      expect(wishResult?.candidates).toBeDefined();
+      expect(Array.isArray(wishResult?.candidates)).toBe(true);
+      expect((wishResult?.candidates as unknown[]).length).toBe(1);
     });
   });
 
@@ -1290,6 +1388,654 @@ describe("wish built-in", () => {
       const resultData = result.key("result").get();
       expect(resultData?.error).toBeDefined();
       expect(resultData?.error).toMatch(/No mentionables found matching/i);
+    });
+
+    it('#default with scope: ["~"] resolves against home space', async () => {
+      // Setup: Add default pattern to home space
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const homeDefaultPatternCell = runtime.getCell(
+        userIdentity.did(),
+        "home-default-pattern-tilde",
+        undefined,
+        tx,
+      );
+      homeDefaultPatternCell.set({
+        title: "Home Default",
+        value: "from-home",
+      });
+      (homeSpaceCell as any).key("defaultPattern").set(
+        homeDefaultPatternCell,
+      );
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Setup: Add different default pattern to current space
+      const spaceCell = runtime.getCell(
+        patternSpace.did(),
+        patternSpace.did(),
+      ).withTx(tx);
+      const currentDefaultPattern = runtime.getCell(
+        patternSpace.did(),
+        "current-default-pattern-tilde",
+        undefined,
+        tx,
+      );
+      currentDefaultPattern.set({
+        title: "Current Default",
+        value: "from-current",
+      });
+      (spaceCell as any).key("defaultPattern").set(currentDefaultPattern);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Execute: #default with scope: ["~"] should resolve from home space
+      const wishRecipe = recipe("default with tilde scope", () => {
+        return {
+          result: wish({
+            query: "#default",
+            scope: ["~"],
+          }),
+        };
+      });
+
+      const resultCell = runtime.getCell<{
+        result?: { result?: unknown };
+      }>(
+        patternSpace.did(),
+        "default-tilde-scope-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+
+      await result.pull();
+
+      // Verify: Should return home space's default pattern, not current space's
+      const wishResult = result.key("result").get();
+      expect(wishResult?.error).toBeUndefined();
+      const defaultData = wishResult?.result;
+      expect(defaultData).toBeDefined();
+      expect((defaultData as any)?.title).toBe("Home Default");
+      expect((defaultData as any)?.value).toBe("from-home");
+    });
+
+    describe("arbitrary DID scope", () => {
+      let otherSpace: Identity;
+
+      beforeEach(async () => {
+        otherSpace = await Identity.fromPassphrase("other-space-arbitrary");
+      });
+
+      it("searches mentionables in arbitrary DID space with scope: [did]", async () => {
+        // Setup: Add mentionables to the "other" space
+        const otherSpaceCell = runtime.getCell(
+          otherSpace.did(),
+          otherSpace.did(),
+        ).withTx(tx);
+        const otherDefaultPattern = runtime.getCell(
+          otherSpace.did(),
+          "other-default-pattern",
+          undefined,
+          tx,
+        );
+        const otherBacklinksIndex = runtime.getCell(
+          otherSpace.did(),
+          "other-backlinks-index",
+          undefined,
+          tx,
+        );
+        const otherMentionable = runtime.getCell(
+          otherSpace.did(),
+          "other-mentionable-item",
+          undefined,
+          tx,
+        );
+        const mentionableData: any = { type: "from-other-space" };
+        mentionableData[NAME] = "arb-tag";
+        otherMentionable.set(mentionableData);
+        otherBacklinksIndex.set({
+          mentionable: [otherMentionable],
+        });
+        otherDefaultPattern.set({
+          backlinksIndex: otherBacklinksIndex,
+        });
+        (otherSpaceCell as any).key("defaultPattern").set(otherDefaultPattern);
+
+        await tx.commit();
+        await runtime.idle();
+        tx = runtime.edit();
+
+        // Execute: Search with scope containing the arbitrary DID
+        const wishRecipe = recipe("scope arbitrary did", () => {
+          return {
+            result: wish({
+              query: "#arb-tag",
+              scope: [otherSpace.did()],
+            }),
+          };
+        });
+
+        const resultCell = runtime.getCell<{
+          result?: { result?: unknown };
+        }>(
+          patternSpace.did(),
+          "scope-arb-did-result",
+          undefined,
+          tx,
+        );
+        const result = runtime.run(tx, wishRecipe, {}, resultCell);
+        await tx.commit();
+        tx = runtime.edit();
+
+        await result.pull();
+
+        // Verify: Should find the mentionable from the other space
+        const wishResult = result.key("result").get();
+        if (wishResult?.error) {
+          console.log("Error in arbitrary DID scope test:", wishResult.error);
+        }
+        const foundItem = wishResult?.result;
+        expect(foundItem).toBeDefined();
+        const data = (foundItem as any).get?.() ?? foundItem;
+        expect(data.type).toBe("from-other-space");
+      });
+
+      it('searches both current space and arbitrary DID with scope: [".", did]', async () => {
+        // Setup: Add mentionables to pattern space (current space)
+        const spaceCell = runtime.getCell(
+          patternSpace.did(),
+          patternSpace.did(),
+        ).withTx(tx);
+        const defaultPatternCell = runtime.getCell(
+          patternSpace.did(),
+          "space-default-pattern-arb",
+          undefined,
+          tx,
+        );
+        const backlinksIndexCell = runtime.getCell(
+          patternSpace.did(),
+          "backlinks-index-arb",
+          undefined,
+          tx,
+        );
+        const currentMentionable = runtime.getCell(
+          patternSpace.did(),
+          "current-mentionable",
+          undefined,
+          tx,
+        );
+        const currentData: any = { type: "from-current-space" };
+        currentData[NAME] = "multi-tag";
+        currentMentionable.set(currentData);
+        backlinksIndexCell.set({
+          mentionable: [currentMentionable],
+        });
+        defaultPatternCell.set({
+          backlinksIndex: backlinksIndexCell,
+        });
+        (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
+
+        await tx.commit();
+        await runtime.idle();
+        tx = runtime.edit();
+
+        // Setup: Add mentionables to other space with same tag
+        const otherSpaceCell = runtime.getCell(
+          otherSpace.did(),
+          otherSpace.did(),
+        ).withTx(tx);
+        const otherDefaultPattern = runtime.getCell(
+          otherSpace.did(),
+          "other-default-pattern-multi",
+          undefined,
+          tx,
+        );
+        const otherBacklinksIndex = runtime.getCell(
+          otherSpace.did(),
+          "other-backlinks-index-multi",
+          undefined,
+          tx,
+        );
+        const otherMentionable = runtime.getCell(
+          otherSpace.did(),
+          "other-mentionable-multi",
+          undefined,
+          tx,
+        );
+        const otherData: any = { type: "from-other-space" };
+        otherData[NAME] = "multi-tag";
+        otherMentionable.set(otherData);
+        otherBacklinksIndex.set({
+          mentionable: [otherMentionable],
+        });
+        otherDefaultPattern.set({
+          backlinksIndex: otherBacklinksIndex,
+        });
+        (otherSpaceCell as any).key("defaultPattern").set(otherDefaultPattern);
+
+        await tx.commit();
+        await runtime.idle();
+        tx = runtime.edit();
+
+        // Execute: Search with scope: [".", otherSpace.did()]
+        const wishRecipe = recipe("scope dot and did", () => {
+          return {
+            result: wish({
+              query: "#multi-tag",
+              scope: [".", otherSpace.did()],
+            }),
+          };
+        });
+
+        const resultCell = runtime.getCell<{
+          result?: { result?: unknown; candidates?: unknown[] };
+        }>(
+          patternSpace.did(),
+          "scope-dot-and-did-result",
+          undefined,
+          tx,
+        );
+        const result = runtime.run(tx, wishRecipe, {}, resultCell);
+        await tx.commit();
+        tx = runtime.edit();
+
+        await result.pull();
+
+        // Verify: Should find matches (candidates from both spaces)
+        const wishResult = result.key("result").get();
+        expect(wishResult?.error).toBeUndefined();
+        // The result should be defined (first match = current space due to ordering)
+        expect(wishResult?.result).toBeDefined();
+        const resultData = (wishResult?.result as any)?.get?.() ??
+          wishResult?.result;
+        // Current space match should be preferred (comes first in ordering)
+        expect(resultData.type).toBe("from-current-space");
+      });
+
+      it('searches favorites and arbitrary DID with scope: ["~", did]', async () => {
+        // Setup: Add favorites to home space
+        const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+        const homeDefaultPatternCell = runtime.getCell(
+          userIdentity.did(),
+          "default-pattern-arb-fav",
+          undefined,
+          tx,
+        );
+        const favoritesCell = homeDefaultPatternCell.key("favorites");
+        const favoriteItem = runtime.getCell(
+          userIdentity.did(),
+          "favorite-arb-item",
+          undefined,
+          tx,
+        );
+        favoriteItem.set({ type: "from-favorites" });
+        favoritesCell.set([{ cell: favoriteItem, tag: "#combo-tag" }]);
+        (homeSpaceCell as any).key("defaultPattern").set(
+          homeDefaultPatternCell,
+        );
+
+        await tx.commit();
+        await runtime.idle();
+        tx = runtime.edit();
+
+        // Setup: Add mentionables to other space with same tag
+        const otherSpaceCell = runtime.getCell(
+          otherSpace.did(),
+          otherSpace.did(),
+        ).withTx(tx);
+        const otherDefaultPattern = runtime.getCell(
+          otherSpace.did(),
+          "other-default-pattern-combo",
+          undefined,
+          tx,
+        );
+        const otherBacklinksIndex = runtime.getCell(
+          otherSpace.did(),
+          "other-backlinks-index-combo",
+          undefined,
+          tx,
+        );
+        const otherMentionable = runtime.getCell(
+          otherSpace.did(),
+          "other-mentionable-combo",
+          undefined,
+          tx,
+        );
+        const otherData: any = { type: "from-other-space" };
+        otherData[NAME] = "combo-tag";
+        otherMentionable.set(otherData);
+        otherBacklinksIndex.set({
+          mentionable: [otherMentionable],
+        });
+        otherDefaultPattern.set({
+          backlinksIndex: otherBacklinksIndex,
+        });
+        (otherSpaceCell as any).key("defaultPattern").set(otherDefaultPattern);
+
+        await tx.commit();
+        await runtime.idle();
+        tx = runtime.edit();
+
+        // Execute: Search with scope: ["~", otherSpace.did()]
+        const wishRecipe = recipe("scope tilde and did", () => {
+          return {
+            result: wish({
+              query: "#combo-tag",
+              scope: ["~", otherSpace.did()],
+            }),
+          };
+        });
+
+        const resultCell = runtime.getCell<{
+          result?: { result?: unknown; candidates?: unknown[] };
+        }>(
+          patternSpace.did(),
+          "scope-tilde-and-did-result",
+          undefined,
+          tx,
+        );
+        const result = runtime.run(tx, wishRecipe, {}, resultCell);
+        await tx.commit();
+        tx = runtime.edit();
+
+        await result.pull();
+
+        // Verify: Should find matches, favorites first
+        const wishResult = result.key("result").get();
+        expect(wishResult?.error).toBeUndefined();
+        expect(wishResult?.result).toBeDefined();
+        const resultData = (wishResult?.result as any)?.get?.() ??
+          wishResult?.result;
+        // Favorites match should be preferred (comes first in ordering)
+        expect(resultData.type).toBe("from-favorites");
+      });
+
+      it("#default with scope: [did] returns that space's default pattern", async () => {
+        // Setup: Add default pattern data to the other space
+        const otherSpaceCell = runtime.getCell(
+          otherSpace.did(),
+          otherSpace.did(),
+        ).withTx(tx);
+        const otherDefaultPattern = runtime.getCell(
+          otherSpace.did(),
+          "other-default-for-target",
+          undefined,
+          tx,
+        );
+        otherDefaultPattern.set({
+          title: "Other Space Default",
+          value: "other",
+        });
+        (otherSpaceCell as any).key("defaultPattern").set(otherDefaultPattern);
+
+        await tx.commit();
+        await runtime.idle();
+        tx = runtime.edit();
+
+        // Also set up current space with different data (separate tx for write isolation)
+        const currentSpaceCell = runtime.getCell(
+          patternSpace.did(),
+          patternSpace.did(),
+        ).withTx(tx);
+        const currentDefaultPattern = runtime.getCell(
+          patternSpace.did(),
+          "current-default-for-target",
+          undefined,
+          tx,
+        );
+        currentDefaultPattern.set({
+          title: "Current Space Default",
+          value: "current",
+        });
+        (currentSpaceCell as any).key("defaultPattern").set(
+          currentDefaultPattern,
+        );
+
+        await tx.commit();
+        await runtime.idle();
+        tx = runtime.edit();
+
+        // Execute: #default with scope: [otherSpace.did()]
+        const wishRecipe = recipe("default with did scope", () => {
+          return {
+            result: wish({
+              query: "#default",
+              scope: [otherSpace.did()],
+            }),
+          };
+        });
+
+        const resultCell = runtime.getCell<{
+          result?: { result?: unknown };
+        }>(
+          patternSpace.did(),
+          "default-did-scope-result",
+          undefined,
+          tx,
+        );
+        const result = runtime.run(tx, wishRecipe, {}, resultCell);
+        await tx.commit();
+        tx = runtime.edit();
+
+        await result.pull();
+
+        // Verify: Should return the other space's default, not current space's
+        const wishResult = result.key("result").get();
+        expect(wishResult?.error).toBeUndefined();
+        const defaultData = wishResult?.result;
+        expect(defaultData).toBeDefined();
+        expect((defaultData as any)?.title).toBe("Other Space Default");
+        expect((defaultData as any)?.value).toBe("other");
+      });
+
+      it("#allPieces with scope: [did] returns that space's allPieces", async () => {
+        // Setup: Add allPieces data to the other space
+        const otherSpaceCell = runtime.getCell(
+          otherSpace.did(),
+          otherSpace.did(),
+        ).withTx(tx);
+        const otherDefaultPattern = runtime.getCell(
+          otherSpace.did(),
+          "other-default-allpieces",
+          undefined,
+          tx,
+        );
+        const otherAllPieces = runtime.getCell(
+          otherSpace.did(),
+          "other-allpieces-data",
+          undefined,
+          tx,
+        );
+        otherAllPieces.set([
+          { name: "Piece A" },
+          { name: "Piece B" },
+        ]);
+        otherDefaultPattern.set({
+          allPieces: otherAllPieces,
+        });
+        (otherSpaceCell as any).key("defaultPattern").set(otherDefaultPattern);
+
+        await tx.commit();
+        await runtime.idle();
+        tx = runtime.edit();
+
+        // Execute: #allPieces with scope: [otherSpace.did()]
+        const wishRecipe = recipe("allPieces with did scope", () => {
+          return {
+            result: wish({
+              query: "#allPieces",
+              scope: [otherSpace.did()],
+            }),
+          };
+        });
+
+        const resultCell = runtime.getCell<{
+          result?: { result?: unknown };
+        }>(
+          patternSpace.did(),
+          "allpieces-did-scope-result",
+          undefined,
+          tx,
+        );
+        const result = runtime.run(tx, wishRecipe, {}, resultCell);
+        await tx.commit();
+        tx = runtime.edit();
+
+        await result.pull();
+
+        // Verify: Should return the other space's allPieces
+        const wishResult = result.key("result").get();
+        expect(wishResult?.error).toBeUndefined();
+        const allPieces = wishResult?.result;
+        expect(allPieces).toBeDefined();
+        expect(Array.isArray(allPieces)).toBe(true);
+        expect((allPieces as any[])[0]?.name).toBe("Piece A");
+      });
+
+      it("error message includes space count for arbitrary DID scope", async () => {
+        // Setup: Empty mentionables in other space
+        const otherSpaceCell = runtime.getCell(
+          otherSpace.did(),
+          otherSpace.did(),
+        ).withTx(tx);
+        const otherDefaultPattern = runtime.getCell(
+          otherSpace.did(),
+          "other-default-error",
+          undefined,
+          tx,
+        );
+        otherDefaultPattern.set({
+          backlinksIndex: {
+            mentionable: [],
+          },
+        });
+        (otherSpaceCell as any).key("defaultPattern").set(otherDefaultPattern);
+
+        await tx.commit();
+        await runtime.idle();
+        tx = runtime.edit();
+
+        // Execute: Search with only an arbitrary DID scope, no matches
+        const wishRecipe = recipe("arb did error message", () => {
+          return {
+            result: wish({
+              query: "#nonexistent",
+              scope: [otherSpace.did()],
+            }),
+          };
+        });
+
+        const resultCell = runtime.getCell<{
+          result?: { error?: string };
+        }>(
+          patternSpace.did(),
+          "arb-did-error-result",
+          undefined,
+          tx,
+        );
+        const result = runtime.run(tx, wishRecipe, {}, resultCell);
+        await tx.commit();
+        tx = runtime.edit();
+
+        await result.pull();
+
+        // Verify: Error message mentions space count
+        const resultData = result.key("result").get();
+        expect(resultData?.error).toBeDefined();
+        expect(resultData?.error).toContain("1 space(s)");
+        expect(resultData?.error).not.toContain("favorites");
+      });
+    });
+
+    it("deduplicates results that appear in both favorites and mentionables", async () => {
+      // Setup: Create a single piece cell in pattern space
+      const sharedPiece = runtime.getCell(
+        patternSpace.did(),
+        "shared-piece",
+        undefined,
+        tx,
+      );
+      const mentionableData: any = { type: "shared" };
+      mentionableData[NAME] = "shared-tag";
+      sharedPiece.set(mentionableData);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Setup: Add piece to favorites in home space
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const homeDefaultPatternCell = runtime.getCell(
+        userIdentity.did(),
+        "default-pattern-dedup",
+        undefined,
+        tx,
+      );
+      const favoritesCell = homeDefaultPatternCell.key("favorites");
+      favoritesCell.set([{ cell: sharedPiece.withTx(tx), tag: "#shared-tag" }]);
+      (homeSpaceCell as any).key("defaultPattern").set(homeDefaultPatternCell);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Setup: Add same piece to mentionables in pattern space
+      const spaceCell = runtime.getCell(
+        patternSpace.did(),
+        patternSpace.did(),
+      ).withTx(tx);
+      const defaultPatternCell = runtime.getCell(
+        patternSpace.did(),
+        "space-default-pattern-dedup",
+        undefined,
+        tx,
+      );
+      const backlinksIndexCell = runtime.getCell(
+        patternSpace.did(),
+        "backlinks-index-dedup",
+        undefined,
+        tx,
+      );
+      backlinksIndexCell.set({
+        mentionable: [sharedPiece.withTx(tx)],
+      });
+      defaultPatternCell.set({
+        backlinksIndex: backlinksIndexCell,
+      });
+      (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Execute: Search both with scope: ["~", "."]
+      const wishRecipe = recipe("scope dedup test", () => {
+        return { result: wish({ query: "#shared-tag", scope: ["~", "."] }) };
+      });
+
+      const resultCell = runtime.getCell<{
+        result?: { result?: unknown; candidates?: unknown[] };
+      }>(
+        patternSpace.did(),
+        "scope-dedup-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+
+      await result.pull();
+
+      // Verify: Should get a single result (deduplicated), not trigger picker
+      const wishResult = result.key("result").get();
+      expect(wishResult?.result).toBeDefined();
     });
   });
 
@@ -1853,5 +2599,45 @@ describe("parseWishTarget", () => {
 
   it("throws on hash-only target", () => {
     expect(() => parseWishTarget("#")).toThrow("is not recognized");
+  });
+});
+
+describe("tagMatchesHashtag", () => {
+  it("matches exact hashtag in tag string", () => {
+    expect(tagMatchesHashtag("#todo items", "todo")).toBe(true);
+  });
+
+  it("does not match partial hashtag", () => {
+    expect(tagMatchesHashtag("#todolist", "todo")).toBe(false);
+  });
+
+  it("matches among multiple hashtags", () => {
+    expect(tagMatchesHashtag("some #alpha and #beta text", "beta")).toBe(true);
+  });
+
+  it("is case insensitive", () => {
+    expect(tagMatchesHashtag("#Todo", "todo")).toBe(true);
+  });
+
+  it("returns false for undefined tag", () => {
+    expect(tagMatchesHashtag(undefined, "todo")).toBe(false);
+  });
+
+  it("returns false for empty tag", () => {
+    expect(tagMatchesHashtag("", "todo")).toBe(false);
+  });
+
+  it("ignores non-hashtag text", () => {
+    expect(tagMatchesHashtag("todo without hash", "todo")).toBe(false);
+  });
+
+  it("matches hashtag at start of string", () => {
+    expect(tagMatchesHashtag("#recipe for dinner", "recipe")).toBe(true);
+  });
+
+  it("matches hashtag portion before special characters", () => {
+    // The hashtag #todo_list is parsed as #todo (underscore ends the hashtag)
+    expect(tagMatchesHashtag("#todo_list", "todo")).toBe(true);
+    expect(tagMatchesHashtag("#todo_list", "todo_list")).toBe(false);
   });
 });

@@ -275,7 +275,7 @@ export const listPatternIndex = pattern<ListPatternIndexInput>(
 
     const { pending, result } = fetchData({
       url: computed(() =>
-        patternIndexUrl.result.url ?? "/api/patterns/index.md"
+        patternIndexUrl?.result?.url ?? "/api/patterns/index.md"
       ),
       mode: "text",
     });

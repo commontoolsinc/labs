@@ -3,6 +3,11 @@
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$SCRIPT_DIR/.."
 
+# Default ports and offset
+PORT_OFFSET=${PORT_OFFSET:-0}
+SHELL_PORT=${SHELL_PORT:-}
+TOOLSHED_PORT=${TOOLSHED_PORT:-}
+
 # Parse command line arguments
 CLEAR_CACHE=false
 CLEAR_ALL_SPACES=false
@@ -21,16 +26,49 @@ while [[ $# -gt 0 ]]; do
             FORCE=true
             shift
             ;;
+        --port-offset)
+            PORT_OFFSET="$2"
+            shift 2
+            ;;
+        --port-offset=*)
+            PORT_OFFSET="${1#*=}"
+            shift
+            ;;
+        --shell-port)
+            SHELL_PORT="$2"
+            shift 2
+            ;;
+        --shell-port=*)
+            SHELL_PORT="${1#*=}"
+            shift
+            ;;
+        --toolshed-port)
+            TOOLSHED_PORT="$2"
+            shift 2
+            ;;
+        --toolshed-port=*)
+            TOOLSHED_PORT="${1#*=}"
+            shift
+            ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: $0 [--clear-cache] [--dangerously-clear-all-spaces] [--force]"
+            echo "Usage: $0 [--clear-cache] [--dangerously-clear-all-spaces] [--force] [--port-offset N] [--shell-port PORT] [--toolshed-port PORT]"
             exit 1
             ;;
     esac
 done
 
+# Apply offset to default ports if not explicitly set
+SHELL_PORT=${SHELL_PORT:-$((5173 + PORT_OFFSET))}
+TOOLSHED_PORT=${TOOLSHED_PORT:-$((8000 + PORT_OFFSET))}
+
+# Export for child scripts
+export SHELL_PORT
+export TOOLSHED_PORT
+export PORT_OFFSET
+
 echo "Stopping local dev servers..."
-./scripts/stop-local-dev.sh
+./scripts/stop-local-dev.sh --shell-port "$SHELL_PORT" --toolshed-port "$TOOLSHED_PORT"
 
 CACHE_DIR="packages/toolshed/cache"
 
@@ -55,7 +93,7 @@ fi
 
 echo "Starting local dev servers..."
 if [[ "$FORCE" == "true" ]]; then
-    ./scripts/start-local-dev.sh --force
+    ./scripts/start-local-dev.sh --force --shell-port "$SHELL_PORT" --toolshed-port "$TOOLSHED_PORT"
 else
-    ./scripts/start-local-dev.sh
+    ./scripts/start-local-dev.sh --shell-port "$SHELL_PORT" --toolshed-port "$TOOLSHED_PORT"
 fi

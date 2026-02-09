@@ -21,6 +21,7 @@ export class PrimitiveFormatter implements TypeFormatter {
       (flags & ts.TypeFlags.NumberLiteral) !== 0 ||
       (flags & ts.TypeFlags.BigInt) !== 0 ||
       (flags & ts.TypeFlags.BigIntLiteral) !== 0 ||
+      (flags & ts.TypeFlags.TemplateLiteral) !== 0 ||
       (flags & ts.TypeFlags.Null) !== 0 ||
       (flags & ts.TypeFlags.Undefined) !== 0 ||
       (flags & ts.TypeFlags.Void) !== 0 ||
@@ -69,6 +70,11 @@ export class PrimitiveFormatter implements TypeFormatter {
         type: "integer",
         enum: [Number((type as ts.BigIntLiteralType).value.base10Value)],
       };
+    }
+
+    // Template literal types (e.g. `did:${string}:${string}`) are strings
+    if (flags & ts.TypeFlags.TemplateLiteral) {
+      return { type: "string" };
     }
 
     // Handle general primitive types

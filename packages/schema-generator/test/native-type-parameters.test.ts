@@ -20,6 +20,50 @@ interface Wrapper {
     expect((schema as Record<string, unknown>).$defs).toBeUndefined();
   });
 
+  it("treats ArrayBufferView as native type", async () => {
+    const code = `
+interface DataContainer {
+  buffer: ArrayBufferView;
+  metadata: string;
+  optional?: ArrayBufferView;
+}
+`;
+    const { type, checker } = await getTypeFromCode(code, "DataContainer");
+    const generator = new SchemaGenerator();
+    const schema = asObjectSchema(generator.generateSchema(type, checker));
+    const props = schema.properties as Record<string, unknown> | undefined;
+
+    // ArrayBufferView should resolve to true (opaque native type)
+    expect(props?.buffer).toBe(true);
+    expect(props?.optional).toBe(true);
+
+    // Regular types should still work normally
+    expect(props?.metadata).toEqual({ type: "string" });
+
+    // Native types should not generate $defs
+    expect((schema as Record<string, unknown>).$defs).toBeUndefined();
+  });
+
+  it("treats JSONSchemaObj and JSONSchema as native types", async () => {
+    const code = `
+interface Recipe {
+  argumentSchema: JSONSchema;
+  testSchema: JSONSchemaObj;
+}
+`;
+    const { type, checker } = await getTypeFromCode(code, "Recipe");
+    const generator = new SchemaGenerator();
+    const schema = asObjectSchema(generator.generateSchema(type, checker));
+    const props = schema.properties as Record<string, unknown> | undefined;
+
+    // These should just be replaced by true
+    expect(props?.argumentSchema).toBe(true);
+    expect(props?.testSchema).toBe(true);
+
+    // Native types should not generate $defs
+    expect((schema as Record<string, unknown>).$defs).toBeUndefined();
+  });
+
   it("generates VNode type as an absolute schema ref", async () => {
     // Use a fake VNode type for test
     const code = `
@@ -38,12 +82,15 @@ interface ClientView {
     const schema = asObjectSchema(generator.generateSchema(type, checker));
     const props = schema.properties as Record<string, unknown> | undefined;
 
-    // ArrayBufferView should resolve to true (opaque native type)
-    expect(props?.view).toBe({
+    console.log("Schema:", schema);
+
+    expect(props?.view).toEqual({
       $ref: "https://commontools.dev/schemas/vdom.json",
     });
 
     // Native types should not generate $defs
     expect(schema.$defs).toBeUndefined();
+    // Native types should not generate $defs
+    expect((schema as Record<string, unknown>).$defs).toBeUndefined();
   });
 });

@@ -351,9 +351,9 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                     properties: {}
                 }]
         } as const satisfies __ctHelpers.JSONSchema, {
-            $ref: "#/$defs/AnonymousType_1",
+            $ref: "#/$defs/AnonymousType_4",
             $defs: {
-                AnonymousType_1: {
+                AnonymousType_4: {
                     $ref: "#/$defs/UIRenderable",
                     asOpaque: true
                 },
@@ -432,21 +432,15 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
             type: "object",
             properties: {
                 typedCellRef: {
-                    type: "object",
-                    properties: {
-                        length: {
-                            type: "number"
-                        }
-                    },
-                    required: ["length"]
+                    type: "array",
+                    items: true,
+                    asOpaque: true
                 }
             },
             required: ["typedCellRef"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { typedCellRef: {
-                length: typedCellRef?.length
-            } }, ({ typedCellRef }) => !typedCellRef?.length), <div>No charms created yet</div>, <ul>
+        } as const satisfies __ctHelpers.JSONSchema, { typedCellRef: typedCellRef }, ({ typedCellRef }) => !typedCellRef?.length), <div>No charms created yet</div>, <ul>
             {typedCellRef.mapWithPattern(__ctHelpers.recipe({
                 type: "object",
                 properties: {
@@ -467,10 +461,13 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                         type: "object",
                         properties: {}
                     }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
+                        $ref: "#/$defs/AnonymousType_4"
                     }],
                 $defs: {
+                    AnonymousType_4: {
+                        $ref: "#/$defs/UIRenderable",
+                        asOpaque: true
+                    },
                     UIRenderable: {
                         type: "object",
                         properties: {
@@ -519,8 +516,7 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                                 type: "object",
                                 properties: {}
                             }, {
-                                $ref: "#/$defs/UIRenderable",
-                                asOpaque: true
+                                $ref: "#/$defs/AnonymousType_4"
                             }, {
                                 type: "object",
                                 properties: {}

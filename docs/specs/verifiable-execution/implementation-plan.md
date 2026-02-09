@@ -1,0 +1,440 @@
+# CT Protocol Implementation Plan
+
+This document tracks implementation status of the CT Protocol specification.
+See `docs/specs/verifiable-execution/README.md` for the spec index.
+
+## Status Legend
+
+- [x] Done
+- [ ] Not started
+- [~] Partial / in progress
+
+---
+
+## Phase 1: Core Infrastructure (Mostly Complete)
+
+### 1.1 Append-Only Log
+
+- [x] SQLite-based fact storage (`packages/memory/space.ts`)
+- [x] Content-addressed facts via `merkle-reference`
+- [x] Causal chains via `cause` field linking facts
+- [x] Lamport clock sequencing (`since` field)
+- [x] Fact table with `{this, the, of, is, cause, since}` schema
+- [ ] Merkle inclusion proofs for log entries
+- [ ] Log root computation (MMR or equivalent)
+- [ ] Checkpoint generation with signed log roots
+
+### 1.2 Identity & Authorization
+
+- [x] DID-based principals (`Principal`, `Signer`, `Verifier` interfaces)
+- [x] Space identification via `did:key` (`MemorySpace` type)
+- [x] ACL with capability levels (`READ`, `WRITE`, `OWNER`)
+- [x] UCAN-based authorization structure
+- [x] Signature verification via `Verifier` interface
+- [x] Access checking in `packages/memory/access.ts`
+- [ ] ACL state stored as receipts in the log
+- [ ] Authorization binding in commit records
+
+### 1.3 Transaction System
+
+- [x] Storage transactions (`IStorageTransaction`)
+- [x] Read/write tracking via `Journal` and `Chronicle`
+- [x] Activity recording (`Activity` type with read/write variants)
+- [x] Path-level addressing (`IMemoryAddress` with `{id, type, path}`)
+- [x] Consistency checking via attestations
+- [x] Commit records with transaction data
+
+### 1.4 Document → Commit Provenance
+
+- [x] `since` field links facts to their producing commit
+- [x] Index on `since` for range queries (`fact_since`)
+- [ ] Add compound index `(the, since)` for fast commit lookup:
+
+```sql
+CREATE INDEX fact_the_since ON fact (the, since);
+```
+
+- [ ] Query/subscription responses include commits for all returned facts
+- [ ] Include older commits if client hasn't seen them yet
+
+**Files to modify:**
+
+- `packages/memory/space.ts` - add compound index in schema
+- `packages/memory/migrations/` - migration for existing databases
+- `packages/memory/provider.ts` - include producing commits in responses
+
+### 1.5 Scheduler Staleness Detection
+
+Works with current CAS semantics - no commit model changes required.
+**Requires activity tracking (2.1)** for path-level granularity.
+
+**Required changes:**
+
+- [ ] Scheduler tracks `since` of each path it reads (from commit activity)
+- [ ] On incoming commit, compare commit's write paths against tracked inputs
+- [ ] Mark computation stale if `commit.since > tracked_input.since` for same path
+- [ ] Re-run only stale computations
+
+```typescript
+interface TrackedInput {
+  address: IMemoryAddress; // {id, type, path} - path-level!
+  since: number; // When this input was read
+}
+
+// On commit received (using activity from 2.1):
+for (const writePath of commit.activity.writes) {
+  if (trackedInputs.has(writePath) &&
+      commit.since > trackedInputs.get(writePath).since) {
+    markStale(computationsUsing(writePath));
+  }
+}
+```
+
+Without path-level tracking, any change to entity X invalidates ALL computations
+reading ANY part of X - too coarse for efficient scheduling.
+
+**Files to modify:**
+
+- `packages/runner/src/scheduler/` - staleness tracking and comparison
+- `packages/runner/src/storage/transaction.ts` - expose `since` with reads
+
+---
+
+## Phase 2: Enhanced Receipts (Priority: High)
+
+This is the next major milestone. The goal is to enhance commit/receipt
+structure to capture computation metadata for verifiability and reactive
+scheduling.
+
+### 2.1 Address-Level Activity in Receipts
+
+Currently, the `Journal` tracks activities with `IMemoryAddress` including
+paths, but this is not persisted in the commit structure.
+
+**Required changes:**
+
+- [ ] Extend `CommitData` to include address-level reads/writes:
+
+```typescript
+interface CommitData {
+  since: number;
+  transaction: Transaction;
+  labels?: FactSelection;
+  // NEW: Activity tracking
+  activity?: {
+    reads: SerializedAddress[]; // [{id, type, path}]
+    writes: SerializedAddress[];
+  };
+}
+```
+
+- [ ] Serialize `IMemoryAddress` in commit creation (`packages/memory/commit.ts`)
+- [ ] Capture journal activity when creating commits
+- [ ] Add activity to `ITransactionJournal.activity()` serialization
+
+**Files to modify:**
+
+- `packages/memory/interface.ts` - extend `CommitData` type
+- `packages/memory/commit.ts` - serialize activity in `create()`
+- `packages/runner/src/storage/interface.ts` - activity export
+- `packages/runner/src/storage/transaction/journal.ts` - activity serialization
+
+### 2.2 Code Bundle References
+
+Track which code produced each computation.
+
+**Required changes:**
+
+- [ ] Define `CodeBundle` reference type
+- [ ] Add `codeCID` field to receipt structure
+- [ ] Capture pattern/handler identifier during execution
+- [ ] Pass code reference through transaction pipeline
+
+```typescript
+interface ComputationContext {
+  codeCID: Reference<CodeBundle>; // Hash of code that ran
+  handlerId?: string; // Handler name within bundle
+  version?: string; // Code version
+}
+```
+
+**Files to modify:**
+
+- `packages/memory/interface.ts` - add computation context types
+- `packages/runner/src/storage/transaction.ts` - capture code context
+- `packages/runner/src/runtime/` - pass code identity to transactions
+
+### 2.3 Input Provenance References
+
+Link outputs to their input sources for provenance chains.
+
+**Required changes:**
+
+- [ ] Capture `inputRefs` as references to source facts
+- [ ] Distinguish between:
+  - Direct reads (facts read during computation)
+  - Derived inputs (computed from other sources)
+- [ ] Add input references to commit structure
+
+```typescript
+interface ProvenanceData {
+  inputRefs: Reference<Fact>[]; // Source facts
+  inputCommitments?: Hash[]; // H(salt || input) for privacy
+}
+```
+
+**Files to modify:**
+
+- `packages/memory/interface.ts` - provenance types
+- `packages/runner/src/storage/transaction/chronicle.ts` - track input sources
+
+### 2.4 Receipt Serialization
+
+Create a unified receipt format that combines current structures.
+
+**Required changes:**
+
+- [ ] Define `Receipt` type combining Fact + computation metadata
+- [ ] Implement receipt creation from transaction + journal
+- [ ] Add receipt verification functions
+
+```typescript
+interface Receipt {
+  // Core fact
+  fact: Fact;
+
+  // Computation metadata
+  computation?: {
+    codeCID: Reference<CodeBundle>;
+    activity: { reads: Address[]; writes: Address[] };
+    inputRefs: Reference<Fact>[];
+  };
+
+  // Signature
+  signature: Signature<Receipt>;
+  issuer: DID;
+}
+```
+
+**Files to modify:**
+
+- `packages/memory/receipt.ts` - full receipt implementation (currently minimal)
+- `packages/memory/interface.ts` - Receipt type definition
+
+### 2.5 Client State & Commit Validation
+
+Implement the nursery/heap model for client-side state and relaxed commit
+validation.
+
+**Required changes:**
+
+- [ ] Define `ClientCommit` structure with confirmed/pending read separation:
+
+```typescript
+interface ClientCommit {
+  reads: {
+    confirmed: Array<{ address: Address; hash: Hash; since: number }>;
+    pending: Array<{ address: Address; hash: Hash; fromCommit: Reference<Commit> }>;
+  };
+  writes: Array<{ address: Address; value: JSONValue; cause: Hash }>;
+  codeCID?: Reference<CodeBundle>;
+  activity?: ReceiptActivity;
+}
+```
+
+- [ ] Define `CommitLogEntry` structure preserving original + resolution:
+
+```typescript
+interface CommitLogEntry {
+  original: SignedClientCommit;
+  resolution: {
+    since: number;
+    commitResolutions: Map<Reference<Commit>, number>;
+    hashMappings?: Map<Hash, Hash>; // provisional → final
+  };
+}
+```
+
+- [ ] Implement `since`-based validation (not hash-chain validation):
+  - Reads must record `since` of what was read
+  - Validation: `new_commit.reads[entity].since >= prior_commit.writes[entity].since`
+
+- [ ] Track hash mappings when provisional hashes differ from final
+
+- [ ] Implement server-side commit processing:
+  - Validate confirmed reads against current `since`
+  - Resolve pending reads via `fromCommit` → assigned `since`
+  - Assign next `since` to commit
+  - Compute final hashes and record mappings
+  - Store both original and resolution
+
+**Files to modify:**
+
+- `packages/memory/interface.ts` - `ClientCommit`, `CommitLogEntry` types
+- `packages/memory/commit.ts` - commit processing with validation
+- `packages/memory/space.ts` - commit log storage with original + resolution
+- `packages/runner/src/storage/transaction.ts` - client-side commit building
+
+---
+
+## Phase 3: Reactive Scheduling Integration
+
+The activity tracking from Phase 2 enables intelligent reactive scheduling.
+
+### 3.1 Dependency Graph
+
+- [ ] Build dependency graph from receipt activity
+- [ ] Track which addresses each computation reads/writes
+- [ ] Compute transitive dependencies
+
+### 3.2 Minimal Invalidation
+
+- [ ] On fact change, identify affected computations via read addresses
+- [ ] Use path-level granularity for precise invalidation
+- [ ] Only re-run computations whose inputs changed
+
+### 3.3 Scheduler Hooks
+
+- [ ] Integrate with pull-based scheduler (see `docs/specs/pull-based-scheduler/`)
+- [ ] Provide activity data to scheduler for dependency tracking
+- [ ] Support partial re-execution based on changed paths
+
+---
+
+## Phase 4: IFC Labels (Future)
+
+### 4.1 Label Infrastructure
+
+- [~] Basic label type exists (`Labels` with `classification`)
+- [ ] Full IFC label model (confidentiality + integrity)
+- [ ] Label commitment hashing
+- [ ] Policy CID references
+
+### 4.2 Label Propagation
+
+- [ ] Track labels through computations
+- [ ] Verify label constraints at commit time
+- [ ] Label-based access control
+
+### 4.3 Attested Enforcement
+
+- [ ] TEE integration for policy enforcement
+- [ ] IFC result generation
+- [ ] Attestation binding
+
+---
+
+## Phase 5: Merkle Proofs & Checkpoints (Future)
+
+### 5.1 Log Proofs
+
+- [ ] Merkle tree or MMR for log structure
+- [ ] Inclusion proof generation
+- [ ] Proof verification API
+
+### 5.2 Checkpoints
+
+- [ ] Checkpoint generation (periodic or on-demand)
+- [ ] Signed checkpoint structure
+- [ ] Checkpoint chain verification
+
+### 5.3 Latest Entity Map
+
+- [ ] Sparse Merkle Tree for heads
+- [ ] Heads inclusion proofs
+- [ ] Efficient latest-state queries
+
+---
+
+## Phase 6: Verifiable Credentials (Future)
+
+- [ ] VC issuance from receipts
+- [ ] Trust profile verification
+- [ ] VC serialization (JWT/CBOR)
+
+---
+
+## Phase 7: Domain Bootstrap (Future)
+
+- [ ] DNS TXT record support (`_ct.domain.com`)
+- [ ] Well-known endpoint (`/.well-known/ct-space-did`)
+- [ ] did:web document generation
+- [ ] Domain verification algorithm
+
+---
+
+## Phase 8: Time Bounds (Future)
+
+- [ ] Beacon integration for lower bounds
+- [ ] RFC 3161 timestamp support for upper bounds
+- [ ] Time-bound verification
+
+---
+
+## Implementation Priority
+
+### Immediate - Quick Wins (works with current CAS semantics)
+
+1. **Document → Commit provenance** (Phase 1.4)
+   - Add compound index `(the, since)` for fast commit lookup
+   - Query/subscription responses include producing commits
+   - Foundation for scheduler and client verification
+
+2. **Activity in receipts** (Phase 2.1)
+   - Extend `CommitData` with address-level reads/writes
+   - Serialize journal activity to commits
+   - **Required for efficient scheduler** - without paths, any entity change
+     invalidates all computations touching that entity
+
+3. **Scheduler staleness detection** (Phase 1.5 + 3)
+   - Compare `since` values at path level to detect stale data
+   - Scheduler tracks `since` of each path it reads
+   - Re-run computations only when their specific paths are newer
+   - **High impact**: Efficient invalidation with path granularity
+
+### Then - Enhanced Commit Model (Phase 2.5)
+
+4. **Client state & commit validation**
+   - Nursery/heap model for pending vs confirmed commits
+   - `since`-based validation rules (relaxed from strict CAS)
+   - CommitLogEntry with original + resolution
+   - Hash mapping for provisional → final resolution
+   - Enables offline operation and stacked commits
+
+### Later - Auditing & Reproducibility (Phase 2.2-2.3)
+
+5. **Code bundle references**
+   - Track which code produced each output
+   - Essential for reproducibility and auditing
+
+6. **Input provenance**
+   - Link outputs to input sources
+   - Enables provenance chain verification
+
+### Medium-term (Phases 4-5)
+
+7. **IFC labels** - Build on existing `Labels` type
+8. **Merkle proofs** - Enable verification without full log
+
+### Long-term (Phases 6-8)
+
+9. **VCs, Domain bootstrap, Time bounds** - Optional add-ons
+
+---
+
+## Key Files Reference
+
+| Area | Primary Files |
+|------|---------------|
+| Fact/Receipt types | `packages/memory/interface.ts` |
+| Commit creation | `packages/memory/commit.ts` |
+| Fact operations | `packages/memory/fact.ts` |
+| Merkle hashing | `packages/memory/reference.ts` |
+| Transaction interface | `packages/runner/src/storage/interface.ts` |
+| Transaction impl | `packages/runner/src/storage/transaction.ts` |
+| Journal | `packages/runner/src/storage/transaction/journal.ts` |
+| Chronicle | `packages/runner/src/storage/transaction/chronicle.ts` |
+| Address operations | `packages/runner/src/storage/transaction/address.ts` |
+| Attestation | `packages/runner/src/storage/transaction/attestation.ts` |
+| ACL | `packages/memory/acl.ts`, `packages/memory/access.ts` |
+| Space/SQLite | `packages/memory/space.ts` |

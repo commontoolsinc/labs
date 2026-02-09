@@ -974,7 +974,10 @@ function followPointer(
       ? error.path
       : valueEntry.address.path;
     if (valueEntry === undefined || valueEntry.value === undefined) {
-      const lastExisting = lastPath.slice(0, -1);
+      // Never slice below "value" - it's the minimum valid path for getNormalizedLink
+      const lastExisting = lastPath.length <= 1
+        ? ["value"]
+        : lastPath.slice(0, -1);
       const remaining = target.path.slice(lastExisting.length);
       const partialTarget = { ...target, path: lastExisting };
       const lastValue = tx.readOrThrow(partialTarget)!;
@@ -1612,7 +1615,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
           return merged;
         }
         // None of the anyOf patterns matched
-        logger.debug(
+        logger.info(
           "traverse",
           () => [
             "No matching anyOf",
@@ -1888,7 +1891,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
         curDoc = linkDoc;
         curSelector = linkSelector!;
         if (curDoc.value === undefined) {
-          logger.debug(
+          logger.info(
             "traverse",
             () => ["Value is undefined following array element link", curDoc],
           );
@@ -1929,65 +1932,40 @@ export class SchemaObjectTraverser<V extends JSONValue>
         !this.traverseCells &&
         SchemaObjectTraverser.asCellOrStream(curSelector.schema)
       ) {
-        // For values where curDoc.address.path doesn't start with "value",
-        // we need to create a DataCellURI-style address so that getNextCellLink
-        // can generate a proper normalized link via getNormalizedLink.
-        // This handles:
-        // 1. Inline objects/primitives (item was never a link)
-        // 2. Links that resolved to a doc whose path doesn't start with "value"
-        // We skip this when the path already starts with "value" to preserve
-        // the original link's identity.
-        if (curDoc.address.path[0] !== "value") {
-          const elementLink: NormalizedFullLink = {
-            space: curDoc.address.space,
-            id: curDoc.address.id,
-            type: curDoc.address.type,
-            path: curDoc.address.path.slice(
-              curDoc.address.path[0] === "value" ? 1 : 0,
-            ),
-            schema: curSelector.schema,
-          };
-          curDoc = {
-            ...curDoc,
-            address: {
-              ...curDoc.address,
-              id: createDataCellURI(curDoc.value, elementLink),
-              path: ["value"],
-            },
-          };
-          curSelector.path = curDoc.address.path;
+        if (curDoc.value === undefined) {
+          // If we hit a broken link following write redirects, I think we have
+          // to abort.
+          logger.info(
+            "traverse",
+            () => ["Encountered broken redirect", doc, curDoc],
+          );
+          return undefined;
         }
-        // For my cell link, lastRedirDoc currently points to the last redirect
-        // target, but we want cell properties to be based on the link value at
-        // that location, so we effectively follow one more link if available.
-        // TODO(@ubik2): Verify that this is what main does -- resolving two
-        // steps when we have an array of cells (and also that the array
-        // follow precedes the cell follow)
-        const cellLink = getNextCellLink(
-          curDoc,
-          itemSchema,
-        );
+        // For my cell link, curDoc currently points to the last
+        // redirect target, but we want cell properties to be based on the
+        // link value at that location, so we effectively follow one more
+        // link if available.
+        // If we have a value instead of a link, create a link to the element
+        // We don't traverse and validate, since this is an asCell boundary.
+        const cellLink = isPrimitiveCellLink(curDoc.value)
+          ? getNextCellLink(curDoc, curSelector.schema!)
+          : getNormalizedLink(curDoc.address, curSelector.schema);
         const val = this.objectCreator.createObject(cellLink, undefined);
         arrayObj.push(val);
       } else {
-        // We want those links to point directly at the linked cells, instead of
-        // using our path (e.g. ["items", "0"]), so don't pass in a modified link.
+        // We want those links to point directly at the linked cells, instead
+        // of using our path (e.g. ["items", "0"]), so don't pass in a
+        // modified link.
         const val = this.traverseWithSelector(curDoc, curSelector);
-        // If our item doesn't match our schema, we may be able to use null
         if (val !== undefined) {
           arrayObj.push(val);
         } else {
-          const schema = curSelector.schema!;
-          const isNullValid = [
-            schema,
-            ...getSchemaOptions(schema, "anyOf"),
-            ...getSchemaOptions(schema, "oneOf"),
-          ].some((schemaOption) => this.isValidType(schemaOption, "null"));
-          if (isNullValid) {
+          // If our item doesn't match our schema, we may be able to use null
+          if (this.isValidType(curSelector.schema!, "null")) {
             arrayObj.push(null);
           } else {
-            // this array is invalid, since one or more items do not match the schema
-            logger.debug(
+            // this array is invalid; one or more items do not match the schema
+            logger.info(
               "traverse",
               () => ["Item doesn't match array schema", curDoc, curSelector],
             );
@@ -2050,16 +2028,28 @@ export class SchemaObjectTraverser<V extends JSONValue>
         this.objectCreator.addOptionalProperty(filteredObj, propKey, propValue);
         continue;
       }
-      const elementDoc = {
-        address: {
-          ...doc.address,
-          path: [...doc.address.path, propKey],
-        },
-        value: propValue,
+      const propAddress = {
+        ...doc.address,
+        path: [...doc.address.path, propKey],
       };
-      const val = this.traverseWithSchema(elementDoc, propSchema);
-      if (val !== undefined) {
+      // If we have a link, the traverseWithSchema will handle that for us.
+      // If we have a value, we instead need to handle it ourselves
+      if (
+        !this.traverseCells &&
+        SchemaObjectTraverser.asCellOrStream(propSchema) &&
+        !isPrimitiveCellLink(propValue)
+      ) {
+        // If we have a value instead of a link, create a link to the value
+        // We don't traverse and validate, since this is an asCell boundary.
+        const cellLink = getNormalizedLink(propAddress, propSchema);
+        const val = this.objectCreator.createObject(cellLink, undefined);
         filteredObj[propKey] = val;
+      } else {
+        const propDoc = { address: propAddress, value: propValue };
+        const val = this.traverseWithSchema(propDoc, propSchema);
+        if (val !== undefined) {
+          filteredObj[propKey] = val;
+        }
       }
     }
 
@@ -2081,7 +2071,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
           ...doc.address,
           path: [...doc.address.path, propKey],
         };
-        if (propSchema.asCell || propSchema.asStream) {
+        if (SchemaObjectTraverser.asCellOrStream(propSchema)) {
           const val = this.traverseWithSchema({
             address: propAddress,
             value: undefined,
@@ -2116,7 +2106,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
       if (Array.isArray(required)) {
         for (const requiredProperty of required) {
           if (!(requiredProperty in filteredObj)) {
-            logger.debug("traverse", () => [
+            logger.info("traverse", () => [
               "Missing required property",
               requiredProperty,
               "in object",
@@ -2149,7 +2139,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
       "writeRedirect",
     );
     if (redirDoc.value === undefined) {
-      logger.debug(
+      logger.info(
         "traversePointerWithSchema",
         () => [
           "Encountered link to undefined value",
@@ -2275,25 +2265,6 @@ export class SchemaObjectTraverser<V extends JSONValue>
 }
 
 /**
- * Is schemaA a superset of schemaB.
- * That is, will every object matched by schema B also be matched by schemaA.
- *
- * @param schemaA
- * @param schemaB
- * @returns true if schemaA is a superset, or false if it cannot be determined.
- */
-// TDDO(@ubik2): In cache.ts, we have a SelectorTracker which does more
-// sophisticated matching. Break that out into a schema module so we can use
-// that logic here.
-export function isSchemaSuperset(
-  schemaA: JSONSchema,
-  schemaB: JSONSchema,
-) {
-  return (ContextualFlowControl.isTrueSchema(schemaA)) ||
-    deepEqual(schemaA, schemaB) || (schemaB === false);
-}
-
-/**
  * When we have anyOf/allOf/oneOf schemas, the outer portion may contain some
  * of our shared information, while the inner portion contains other parts.
  *
@@ -2367,38 +2338,4 @@ function getNextCellLink(
     doc.value,
   ]);
   return getNormalizedLink(doc.address, schema);
-}
-
-function getSchemaOptions(
-  schema: JSONSchema,
-  type: "anyOf" | "oneOf",
-): JSONSchema[] {
-  if (schema === true) {
-    return [true];
-  } else if (schema === false) {
-    return [];
-  } else {
-    const rv = [];
-    // There are a lot of valid logical schema flags, and we only handle
-    // a very limited set here, with no support for combinations.
-    const { anyOf, oneOf, ...restSchema } = schema;
-    const options =
-      (type === "anyOf" ? anyOf : type === "oneOf" ? oneOf : []) ?? [];
-    // Consider items without asCell or asStream first, since if we aren't
-    // traversing cells, we consider them a match.
-    const sortedOptions = [
-      ...options.filter((option) =>
-        !SchemaObjectTraverser.asCellOrStream(option)
-      ),
-      ...options.filter(SchemaObjectTraverser.asCellOrStream),
-    ];
-    for (const optionSchema of sortedOptions) {
-      if (ContextualFlowControl.isFalseSchema(optionSchema)) {
-        continue;
-      }
-      const mergedSchema = mergeSchemaOption(restSchema, optionSchema);
-      rv.push(mergedSchema);
-    }
-    return rv;
-  }
 }

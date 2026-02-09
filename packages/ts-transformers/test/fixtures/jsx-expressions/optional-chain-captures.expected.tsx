@@ -304,10 +304,11 @@ export default recipe({
                                 type: "object",
                                 properties: {
                                     value: {
-                                        type: "number",
-                                        asOpaque: true
+                                        type: "number"
                                     }
-                                }
+                                },
+                                required: ["value"],
+                                asOpaque: true
                             }
                         }
                     }
@@ -322,9 +323,7 @@ export default recipe({
                         asOpaque: true
                     }]
             } as const satisfies __ctHelpers.JSONSchema, { item: {
-                    maybe: {
-                        value: item.maybe?.value
-                    }
+                    maybe: item.maybe
                 } }, ({ item }) => item.maybe?.value ?? 0)}</span>)), {})}
       </div>),
     };

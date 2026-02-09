@@ -1651,6 +1651,7 @@ export type WishParams = {
 
 export type WishState<T> = {
   result?: T;
+  candidates?: T[];
   error?: any;
   [UI]?: VNode;
 };
@@ -1658,9 +1659,6 @@ export type WishState<T> = {
 export type NavigateToFunction = (cell: OpaqueRef<any>) => OpaqueRef<boolean>;
 export interface WishFunction {
   <T = unknown>(target: Opaque<WishParams>): OpaqueRef<Required<WishState<T>>>;
-
-  // TODO(seefeld): Remove old interface mid December 2025
-  <T = unknown>(target: Opaque<string>): OpaqueRef<T>;
 }
 
 export type CreateNodeFactoryFunction = <T = any, R = any>(

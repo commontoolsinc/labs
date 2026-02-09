@@ -67,7 +67,7 @@ export function parseWishTarget(target: string): ParsedWishTarget {
  * Check if a tag string contains a hashtag matching the search term.
  * Extracts all #hashtags from the tag and checks for exact match.
  */
-function tagMatchesHashtag(
+export function tagMatchesHashtag(
   tag: string | undefined,
   searchTermWithoutHash: string,
 ): boolean {
@@ -98,6 +98,23 @@ function getSpaceCell(ctx: WishContext): Cell<unknown> {
     );
   }
   return ctx.spaceCell;
+}
+
+function getSpaceCellForDID(
+  runtime: Runtime,
+  did: string,
+  tx: IExtendedStorageTransaction,
+): Cell<unknown> {
+  return runtime.getCell(
+    did as `did:${string}:${string}`,
+    did,
+    spaceCellSchema,
+    tx,
+  );
+}
+
+function getArbitraryDIDs(scope?: string[]): string[] {
+  return (scope ?? []).filter((s) => s !== "~" && s !== ".");
 }
 
 function resolvePath(
@@ -150,19 +167,20 @@ function searchFavoritesForHashtag(
 /**
  * Search mentionables in current space for pieces matching a hashtag.
  */
-function searchMentionablesForHashtag(
+async function searchMentionablesForHashtag(
   ctx: WishContext,
   searchTermWithoutHash: string,
   pathPrefix: string[],
-): BaseResolution[] {
-  const mentionableCell = getSpaceCell(ctx)
+  spaceCell?: Cell<unknown>,
+): Promise<BaseResolution[]> {
+  const mentionableCell = (spaceCell ?? getSpaceCell(ctx))
     .key("defaultPattern")
     .key("backlinksIndex")
     .key("mentionable")
     .resolveAsCell()
     .asSchema(mentionableListSchema);
   // Sync to ensure data is loaded
-  mentionableCell.sync();
+  await mentionableCell.sync();
   const mentionables = (mentionableCell.get() || []) as Cell<any>[];
 
   const matches = mentionables.filter((pieceCell: Cell<any>) => {
@@ -196,10 +214,10 @@ function searchMentionablesForHashtag(
 /**
  * Search for pieces by hashtag across favorites and/or mentionables based on scope.
  */
-function searchByHashtag(
+async function searchByHashtag(
   parsed: ParsedWishTarget,
   ctx: WishContext,
-): BaseResolution[] {
+): Promise<BaseResolution[]> {
   const searchTerm = parsed.key.toLowerCase();
   const searchTermWithoutHash = searchTerm.slice(1);
 
@@ -218,16 +236,36 @@ function searchByHashtag(
 
   if (searchMentionables) {
     allMatches.push(
-      ...searchMentionablesForHashtag(ctx, searchTermWithoutHash, parsed.path),
+      ...(await searchMentionablesForHashtag(
+        ctx,
+        searchTermWithoutHash,
+        parsed.path,
+      )),
+    );
+  }
+
+  // Search mentionables in arbitrary DID spaces
+  const arbitraryDIDs = getArbitraryDIDs(ctx.scope);
+  for (const did of arbitraryDIDs) {
+    const didSpaceCell = getSpaceCellForDID(ctx.runtime, did, ctx.tx);
+    allMatches.push(
+      ...(await searchMentionablesForHashtag(
+        ctx,
+        searchTermWithoutHash,
+        parsed.path,
+        didSpaceCell,
+      )),
     );
   }
 
   if (allMatches.length === 0) {
-    const scopeDesc = searchFavorites && searchMentionables
-      ? "favorites or mentionables"
-      : searchMentionables
-      ? "mentionables"
-      : "favorites";
+    const parts: string[] = [];
+    if (searchFavorites) parts.push("favorites");
+    if (searchMentionables) parts.push("mentionables");
+    if (arbitraryDIDs.length > 0) {
+      parts.push(`${arbitraryDIDs.length} space(s)`);
+    }
+    const scopeDesc = parts.join(" or ") || "favorites";
     throw new WishError(`No ${scopeDesc} found matching "${searchTerm}"`);
   }
 
@@ -345,43 +383,62 @@ function resolveSpaceTarget(
   parsed: ParsedWishTarget,
   ctx: WishContext,
 ): BaseResolution[] | null {
-  switch (parsed.key) {
-    case "/":
-      return [{ cell: getSpaceCell(ctx) }];
-    case "#default":
-      return [{ cell: getSpaceCell(ctx), pathPrefix: ["defaultPattern"] }];
-    case "#mentionable":
-      return [{
-        cell: getSpaceCell(ctx),
-        pathPrefix: ["defaultPattern", "backlinksIndex", "mentionable"],
-      }];
-    case "#allPieces":
-      return [{
-        cell: getSpaceCell(ctx),
-        pathPrefix: ["defaultPattern", "allPieces"],
-      }];
-    case "#recent":
-      return [{
-        cell: getSpaceCell(ctx),
-        pathPrefix: ["defaultPattern", "recentPieces"],
-      }];
-    case "#now": {
-      if (parsed.path.length > 0) {
-        throw new WishError(
-          `Wish now target "${formatTarget(parsed)}" is not recognized.`,
-        );
-      }
-      const nowCell = ctx.runtime.getImmutableCell(
-        ctx.parentCell.space,
-        Date.now(),
-        undefined,
-        ctx.tx,
+  // #now is special — not scope-dependent
+  if (parsed.key === "#now") {
+    if (parsed.path.length > 0) {
+      throw new WishError(
+        `Wish now target "${formatTarget(parsed)}" is not recognized.`,
       );
-      return [{ cell: nowCell }];
     }
-    default:
-      return null;
+    const nowCell = ctx.runtime.getImmutableCell(
+      ctx.parentCell.space,
+      Date.now(),
+      undefined,
+      ctx.tx,
+    );
+    return [{ cell: nowCell }];
   }
+
+  const pathForKey: Record<string, readonly string[]> = {
+    "/": [],
+    "#default": ["defaultPattern"],
+    "#mentionable": ["defaultPattern", "backlinksIndex", "mentionable"],
+    "#allPieces": ["defaultPattern", "allPieces"],
+    "#recent": ["defaultPattern", "recentPieces"],
+  };
+
+  const pathPrefix = pathForKey[parsed.key];
+  if (!pathPrefix) return null;
+
+  const results: BaseResolution[] = [];
+
+  // "." or no scope → include current space (backward compat)
+  if (!ctx.scope || ctx.scope.includes(".")) {
+    results.push({ cell: getSpaceCell(ctx), pathPrefix: [...pathPrefix] });
+  }
+
+  // "~" → include home space
+  if (ctx.scope?.includes("~") && ctx.runtime.userIdentityDID) {
+    const homeSpaceCell = ctx.runtime.getHomeSpaceCell(ctx.tx);
+    results.push({ cell: homeSpaceCell, pathPrefix: [...pathPrefix] });
+  }
+
+  // Arbitrary DIDs → include each space
+  for (const did of getArbitraryDIDs(ctx.scope)) {
+    const didSpaceCell = getSpaceCellForDID(ctx.runtime, did, ctx.tx);
+    results.push({ cell: didSpaceCell, pathPrefix: [...pathPrefix] });
+  }
+
+  if (results.length === 0) {
+    console.warn(
+      `[wish] Target "${parsed.key}" cannot resolve with scope: [${
+        ctx.scope?.join(", ")
+      }]`,
+    );
+    return null;
+  }
+
+  return results;
 }
 
 /**
@@ -392,10 +449,10 @@ function resolveSpaceTarget(
  * 2. Well-known home space targets (#favorites, #journal, #learned, #profile)
  * 3. Hashtag search (arbitrary #tags in favorites/mentionables)
  */
-function resolveBase(
+async function resolveBase(
   parsed: ParsedWishTarget,
   ctx: WishContext,
-): BaseResolution[] {
+): Promise<BaseResolution[]> {
   // Try space targets first (most common)
   const spaceResult = resolveSpaceTarget(parsed, ctx);
   if (spaceResult) return spaceResult;
@@ -406,7 +463,7 @@ function resolveBase(
 
   // Hashtag search
   if (parsed.key.startsWith("#")) {
-    return searchByHashtag(parsed, ctx);
+    return await searchByHashtag(parsed, ctx);
   }
 
   throw new WishError(`Wish target "${parsed.key}" is not recognized.`);
@@ -468,25 +525,19 @@ function errorUI(message: string): VNode {
   return h("span", { style: "color: red" }, `⚠️ ${message}`);
 }
 
-// TODO(seefeld): Add button to replace this with wish.tsx getting more options
 function cellLinkUI(cell: Cell<unknown>): VNode {
   return h("ct-cell-link", { $cell: cell });
 }
 
 const TARGET_SCHEMA = {
-  anyOf: [{
-    type: "string",
-    default: "",
-  }, {
-    type: "object",
-    properties: {
-      query: { type: "string" },
-      path: { type: "array", items: { type: "string" } },
-      context: { type: "object", additionalProperties: { asCell: true } },
-      scope: { type: "array", items: { type: "string" } },
-    },
-    required: ["query"],
-  }],
+  type: "object",
+  properties: {
+    query: { type: "string" },
+    path: { type: "array", items: { type: "string" } },
+    context: { type: "object", additionalProperties: { asCell: true } },
+    scope: { type: "array", items: { type: "string" } },
+  },
+  required: ["query"],
 } as const satisfies JSONSchema;
 
 export function wish(
@@ -609,57 +660,7 @@ export function wish(
     const inputsWithTx = inputsCell.withTx(tx);
     const targetValue = inputsWithTx.asSchema(TARGET_SCHEMA).get();
 
-    // TODO(seefeld): Remove legacy wish string support mid December 2025
-    if (typeof targetValue === "string") {
-      const wishTarget = targetValue.trim();
-      if (!wishTarget) {
-        sendResult(tx, undefined);
-        return;
-      }
-      try {
-        const parsed = parseWishTarget(wishTarget);
-        const ctx: WishContext = { runtime, tx, parentCell };
-        const baseResolutions = resolveBase(parsed, ctx);
-
-        // Just use the first result (if there aren't any, the above throws)
-        const combinedPath = baseResolutions[0].pathPrefix
-          ? [...baseResolutions[0].pathPrefix, ...parsed.path]
-          : parsed.path;
-        const resolvedCell = resolvePath(baseResolutions[0].cell, combinedPath);
-        // Sync the cell to ensure data is loaded (required for pull-based scheduler)
-        await resolvedCell.sync();
-        sendResult(tx, resolvedCell);
-      } catch (e) {
-        // Provide helpful feedback for common defaultPattern issues
-        if (
-          wishTarget.startsWith("#mentionable") ||
-          wishTarget.startsWith("#default")
-        ) {
-          const errorMsg =
-            `${wishTarget} failed: ${
-              e instanceof Error ? e.message : String(e)
-            }. This usually means the space's defaultPattern is not initialized. ` +
-            `Visit the space in browser first, or ensure ensureDefaultPattern() is called.`;
-          console.warn(errorMsg);
-          // Return error state instead of undefined for better UX
-          sendResult(
-            tx,
-            { error: errorMsg, [UI]: errorUI(errorMsg) } satisfies WishState<
-              any
-            >,
-          );
-          return;
-        }
-
-        // For other errors, also return error state
-        const errorMsg = e instanceof Error ? e.message : String(e);
-        sendResult(
-          tx,
-          { error: errorMsg, [UI]: errorUI(errorMsg) } satisfies WishState<any>,
-        );
-      }
-      return;
-    } else if (typeof targetValue === "object") {
+    if (typeof targetValue === "object") {
       const { query, path, schema, context, scope } = targetValue as WishParams;
 
       if (query === undefined || query === null || query === "") {
@@ -674,50 +675,74 @@ export function wish(
       }
 
       // If the query is a path or a hash tag, resolve it directly
-      if (query.startsWith("/") || /^#[a-zA-Z0-9-]+$/.test(query)) {
+      if (query.startsWith("/") || /^#[a-zA-Z0-9-]+/.test(query)) {
         try {
-          const parsed: ParsedWishTarget = {
-            key: query as WishTag,
-            path: path ?? [],
-          };
+          const parsed = parseWishTarget(query);
+          parsed.path = [...parsed.path, ...(path ?? [])];
           const ctx: WishContext = { runtime, tx, parentCell, scope };
-          const baseResolutions = resolveBase(parsed, ctx);
+          const baseResolutions = await resolveBase(parsed, ctx);
           const resultCells = baseResolutions.map((baseResolution) => {
             const combinedPath = baseResolution.pathPrefix
-              ? [...baseResolution.pathPrefix, ...(path ?? [])]
-              : path ?? [];
+              ? [...baseResolution.pathPrefix, ...parsed.path]
+              : parsed.path;
             const resolvedCell = resolvePath(baseResolution.cell, combinedPath);
             return schema ? resolvedCell.asSchema(schema) : resolvedCell;
           });
-          // Sync all result cells to ensure data is loaded
-          await Promise.all(resultCells.map((cell) => cell.sync()));
 
-          if (resultCells.length === 1) {
-            // Single result - return directly
+          // Deduplicate result cells using Cell.equals()
+          const uniqueResultCells = resultCells.filter(
+            (cell, index) =>
+              resultCells.findIndex((c) => c.equals(cell)) === index,
+          );
+
+          // Sync all result cells to ensure data is loaded
+          await Promise.all(uniqueResultCells.map((cell) => cell.sync()));
+
+          // Unified shape: always return { result, candidates, [UI] }
+          // For single result, use fast path (no picker needed)
+          // For multiple results, launch wish pattern for picker
+          const candidatesCell = runtime.getImmutableCell(
+            parentCell.space,
+            uniqueResultCells,
+            undefined,
+            tx,
+          );
+
+          if (uniqueResultCells.length === 1) {
+            // Single result - fast path with unified shape
+            // Prefer the result cell's own [UI]; fall back to ct-cell-link
+            const resultUI = resultCells[0].key(UI).get();
             sendResult(tx, {
-              result: resultCells[0],
-              [UI]: cellLinkUI(resultCells[0]),
+              result: uniqueResultCells[0],
+              candidates: candidatesCell,
+              [UI]: resultUI ?? cellLinkUI(uniqueResultCells[0]),
             });
           } else {
-            // Multiple results - show picker for user to choose
-            const candidatesCell = runtime.getImmutableCell(
-              parentCell.space,
-              resultCells,
-              undefined,
-              tx,
-            );
-
-            const pickerCell = await launchWishPattern({
+            // Multiple results - launch picker pattern
+            const wishPatternCell = await launchWishPattern({
               ...targetValue as WishParams,
               candidates: candidatesCell,
             }, tx);
 
-            // Return the picker pattern - its [UI] shows picker, then chosen cell
-            // After confirmation: wishResult.result.result gives the chosen cell
-            sendResult(tx, {
-              result: pickerCell,
-              [UI]: pickerCell.get()[UI],
-            });
+            if (wishPattern) {
+              // Return reactive references into the picker cell
+              sendResult(tx, {
+                result: wishPatternCell.key("result"),
+                candidates: candidatesCell,
+                [UI]: wishPatternCell.key(UI),
+              });
+            } else {
+              // Picker pattern failed to load — fall back to first result
+              console.warn(
+                `[wish] Picker pattern unavailable for ${uniqueResultCells.length} candidates, falling back to first result`,
+              );
+              const resultUI = uniqueResultCells[0].key(UI).get();
+              sendResult(tx, {
+                result: uniqueResultCells[0],
+                candidates: candidatesCell,
+                [UI]: resultUI ?? cellLinkUI(uniqueResultCells[0]),
+              });
+            }
           }
         } catch (e) {
           const errorMsg = e instanceof WishError ? e.message : String(e);

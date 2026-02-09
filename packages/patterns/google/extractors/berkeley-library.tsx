@@ -605,7 +605,10 @@ export default pattern<PatternInput, PatternOutput>(
       const overrides = dueDateOverrides.get() || {};
 
       // Sort emails by date (newest first) so we keep most recent data
-      const sortedAnalyses = [...(rawAnalyses || [])]
+      if (!rawAnalyses || rawAnalyses.length === 0) {
+        return [];
+      }
+      const sortedAnalyses = [...rawAnalyses]
         .filter((a) => a?.analysis?.result?.items)
         .sort((a, b) => {
           const dateA = new Date(a.emailDate || 0).getTime();
@@ -673,7 +676,10 @@ export default pattern<PatternInput, PatternOutput>(
       // dismissedHolds is a Writable Cell, get the actual array value
       const dismissedKeys = dismissedHolds.get() || [];
 
-      for (const analysisItem of rawAnalyses || []) {
+      if (!rawAnalyses) {
+        return [];
+      }
+      for (const analysisItem of rawAnalyses) {
         const result = analysisItem.analysis?.result;
         if (!result?.items) continue;
 
@@ -712,9 +718,10 @@ export default pattern<PatternInput, PatternOutput>(
     );
 
     // Historical items (manually marked as returned)
-    const historicalItems = computed(() =>
-      (trackedItems || []).filter((item) => item.isManuallyReturned)
-    );
+    const historicalItems = computed(() => {
+      if (!trackedItems || trackedItems.length === 0) return [];
+      return trackedItems.filter((item) => item.isManuallyReturned);
+    });
 
     // Dismissed holds (manually dismissed)
     const dismissedHoldsItems = computed(() => {
@@ -722,7 +729,8 @@ export default pattern<PatternInput, PatternOutput>(
       const items: TrackedItem[] = [];
       const dismissedKeys = dismissedHolds.get() || [];
 
-      for (const analysisItem of rawAnalyses || []) {
+      if (!rawAnalyses) return items;
+      for (const analysisItem of rawAnalyses) {
         const result = analysisItem.analysis?.result;
         if (!result?.items) continue;
 
