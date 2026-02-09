@@ -35,6 +35,10 @@ export class SchemaGenerator implements ISchemaGenerator {
     new PrimitiveFormatter(),
     new ObjectFormatter(this),
   ];
+  /** Synthetic names for anonymous recursive types */
+  private anonymousNames: WeakMap<ts.Type, string> = new WeakMap();
+  /** Counter to generate stable synthetic identifiers */
+  private anonymousNameCounter: number = 0;
 
   /**
    * Generate JSON Schema for a TypeScript type.
@@ -105,8 +109,6 @@ export class SchemaGenerator implements ISchemaGenerator {
       // Accumulating state
       definitions: {},
       emittedRefs: new Set(),
-      anonymousNames: new WeakMap(),
-      anonymousNameCounter: 0,
 
       // Stack state
       definitionStack: new Set(),
@@ -241,12 +243,11 @@ export class SchemaGenerator implements ISchemaGenerator {
 
   private ensureSyntheticName(
     type: ts.Type,
-    context: GenerationContext,
   ): string {
-    const existing = context.anonymousNames.get(type);
+    const existing = this.anonymousNames.get(type);
     if (existing) return existing;
-    const synthetic = `AnonymousType_${++context.anonymousNameCounter}`;
-    context.anonymousNames.set(type, synthetic);
+    const synthetic = `AnonymousType_${++this.anonymousNameCounter}`;
+    this.anonymousNames.set(type, synthetic);
     return synthetic;
   }
 
@@ -299,7 +300,7 @@ export class SchemaGenerator implements ISchemaGenerator {
 
     if (!namedKey && !isWrapperContext) {
       // Only use synthetic names if we're not processing a wrapper type
-      const synthetic = context.anonymousNames.get(type);
+      const synthetic = this.anonymousNames.get(type);
       if (synthetic) namedKey = synthetic;
     }
 
@@ -327,7 +328,7 @@ export class SchemaGenerator implements ISchemaGenerator {
         context.emittedRefs.add(namedKey);
         return { "$ref": `#/$defs/${namedKey}` };
       }
-      const syntheticKey = this.ensureSyntheticName(type, context);
+      const syntheticKey = this.ensureSyntheticName(type);
       context.inProgressNames.add(syntheticKey);
       context.emittedRefs.add(syntheticKey);
       return { "$ref": `#/$defs/${syntheticKey}` };
@@ -348,7 +349,7 @@ export class SchemaGenerator implements ISchemaGenerator {
         // Only look up synthetic names if namedKey wasn't already set and we're
         // not in a wrapper context (to avoid storing wrapper results).
         const keyForDef = namedKey ??
-          (isWrapperContext ? undefined : context.anonymousNames.get(type));
+          (isWrapperContext ? undefined : this.anonymousNames.get(type));
         if (keyForDef) {
           context.definitions[keyForDef] = result;
           context.inProgressNames.delete(keyForDef);
@@ -401,7 +402,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     }
 
     // Decide if we promote root to a $ref
-    const namedKey = getNamedTypeKey(type) ?? context.anonymousNames.get(type);
+    const namedKey = getNamedTypeKey(type) ?? this.anonymousNames.get(type);
     const shouldPromoteRoot = this.shouldPromoteToRef(namedKey, context);
 
     let base: SchemaDefinition;
