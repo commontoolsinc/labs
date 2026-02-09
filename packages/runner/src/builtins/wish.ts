@@ -709,12 +709,25 @@ export function wish(
               candidates: candidatesCell,
             }, tx);
 
-            // Return reactive references into the picker cell
-            sendResult(tx, {
-              result: wishPatternCell.key("result"),
-              candidates: candidatesCell,
-              [UI]: wishPatternCell.key(UI),
-            });
+            if (wishPattern) {
+              // Return reactive references into the picker cell
+              sendResult(tx, {
+                result: wishPatternCell.key("result"),
+                candidates: candidatesCell,
+                [UI]: wishPatternCell.key(UI),
+              });
+            } else {
+              // Picker pattern failed to load — fall back to first result
+              console.warn(
+                `[wish] Picker pattern unavailable for ${uniqueResultCells.length} candidates, falling back to first result`,
+              );
+              const resultUI = uniqueResultCells[0].key(UI).get();
+              sendResult(tx, {
+                result: uniqueResultCells[0],
+                candidates: candidatesCell,
+                [UI]: resultUI ?? cellLinkUI(uniqueResultCells[0]),
+              });
+            }
           }
         } catch (e) {
           const errorMsg = e instanceof WishError ? e.message : String(e);
