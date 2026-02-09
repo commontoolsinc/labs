@@ -94,8 +94,12 @@ SHELL_PID=$!
 sleep 2
 
 # Start toolshed dev server in background
+# NOTE: We run directly without --watch because deno's --watch flag doesn't
+# pass environment variables to the subprocess it spawns. This is needed
+# for PORT_OFFSET to work correctly.
 cd ../toolshed
-SHELL_URL="http://localhost:$SHELL_PORT" PORT="$TOOLSHED_PORT" deno task dev > local-dev-toolshed.log 2>&1 &
+SHELL_URL="http://localhost:$SHELL_PORT" PORT="$TOOLSHED_PORT" \
+    deno run --unstable-otel -A --env-file=.env index.ts > local-dev-toolshed.log 2>&1 &
 TOOLSHED_PID=$!
 
 # # Function to cleanup background processes
