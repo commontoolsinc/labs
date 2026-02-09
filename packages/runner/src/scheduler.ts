@@ -23,7 +23,7 @@ import type {
   ChangeGroup,
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
-  IStorageSubscription,
+  IStorageNotificationSink,
   MediaType,
   MemoryAddressPathComponent,
   Metadata,
@@ -876,11 +876,11 @@ export class Scheduler {
   }
 
   /**
-   * Creates and returns a new storage subscription that can be used to receive storage notifications.
+   * Creates and returns a new notification sink for storage notifications.
    *
-   * @returns A new IStorageSubscription instance
+   * @returns A new IStorageNotificationSink instance
    */
-  private createStorageSubscription(): IStorageSubscription {
+  private createStorageSubscription(): IStorageNotificationSink {
     return {
       next: (notification) => {
         const space = notification.space;
@@ -990,7 +990,7 @@ export class Scheduler {
         }
         return { done: false };
       },
-    } satisfies IStorageSubscription;
+    } satisfies IStorageNotificationSink;
   }
 
   queueExecution(): void {

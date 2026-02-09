@@ -18,11 +18,12 @@ import type {
 } from "@commontools/memory/interface";
 import type { Cancel } from "@commontools/runner";
 import type {
+  ChangeGroup,
   IMemoryChange,
   IMergedChanges,
   ISpaceReplica,
+  IStorageNotificationSink,
   IStorageProviderWithReplica,
-  IStorageSubscription,
   IStorageTransaction,
   ITransaction,
   OptStorageValue,
@@ -57,7 +58,21 @@ import type {
   SubscriptionUpdate,
 } from "@commontools/memory/v2/protocol";
 import { connectRemote, RemoteConsumer } from "@commontools/memory/v2/remote";
-import { BaseMemoryAddress } from "../../traverse.ts";
+import {
+  BaseMemoryAddress,
+  ManagedStorageTransaction,
+  MapSet,
+  type ObjectStorageManager,
+  SchemaObjectTraverser,
+} from "../../traverse.ts";
+import type {
+  IAttestation,
+  IExtendedStorageTransaction,
+  IMemorySpaceAddress,
+  IReadOptions,
+  StorageTransactionStatus,
+} from "../interface.ts";
+import { deepEqual } from "@commontools/utils/deep-equal";
 import {
   fromJSON,
   fromString,
@@ -115,6 +130,116 @@ function asChanges(items: IMemoryChange[]): IMergedChanges {
 }
 
 /**
+ * Read-only ObjectStorageManager backed by v2 localState.
+ * Provides the `load()` method that SchemaObjectTraverser needs
+ * to resolve entity references during traversal.
+ */
+class V2ObjectStorageManager implements ObjectStorageManager {
+  constructor(
+    private spaceId: MemorySpace,
+    private localState: Map<string, Revision<State>>,
+  ) {}
+
+  load(address: BaseMemoryAddress): IAttestation | null {
+    const state = this.localState.get(address.id);
+    if (!state || state.is === undefined) return null;
+    return {
+      address: {
+        space: this.spaceId,
+        id: address.id,
+        type: address.type,
+        path: [],
+      } as IMemorySpaceAddress,
+      value: { value: state.is },
+    };
+  }
+}
+
+/**
+ * Read-only IExtendedStorageTransaction adapter for v2 localState.
+ * Used by SchemaObjectTraverser to read entity data during traversal.
+ */
+class V2ReadOnlyTransaction implements IExtendedStorageTransaction {
+  tx: IStorageTransaction;
+  private managed: ManagedStorageTransaction;
+
+  constructor(manager: V2ObjectStorageManager) {
+    this.managed = new ManagedStorageTransaction(manager);
+    this.tx = this.managed;
+  }
+
+  get changeGroup() {
+    return undefined;
+  }
+  set changeGroup(_: ChangeGroup | undefined) {
+    // Read-only — ignore
+  }
+  get journal() {
+    return this.managed.journal;
+  }
+
+  read(address: IMemorySpaceAddress, options?: IReadOptions) {
+    return this.managed.read(address, options);
+  }
+  status(): StorageTransactionStatus {
+    return this.managed.status();
+  }
+
+  readOrThrow(
+    address: IMemorySpaceAddress,
+    _options?: IReadOptions,
+  ): StorableValue {
+    const result = this.managed.read(address);
+    if ("error" in result && result.error) {
+      if (result.error.name === "NotFoundError") return undefined;
+      throw new Error(result.error.message);
+    }
+    return result.ok.value;
+  }
+
+  readValueOrThrow(
+    address: IMemorySpaceAddress,
+    options?: IReadOptions,
+  ): StorableValue {
+    return this.readOrThrow(
+      { ...address, path: ["value", ...address.path] },
+      options,
+    );
+  }
+
+  addCommitCallback() {}
+  writer(_space: MemorySpace): never {
+    throw new Error("Read-only");
+  }
+  write(
+    _address: IMemorySpaceAddress,
+    _value?: StorableDatum,
+  ): never {
+    throw new Error("Read-only");
+  }
+  writeOrThrow(_address: IMemorySpaceAddress, _value: StorableValue): never {
+    throw new Error("Read-only");
+  }
+  writeValueOrThrow(
+    _address: IMemorySpaceAddress,
+    _value: StorableValue,
+  ): never {
+    throw new Error("Read-only");
+  }
+  reader(
+    _space: MemorySpace,
+  ): never {
+    throw new Error("Read-only");
+  }
+  abort(_reason?: unknown): never {
+    throw new Error("Read-only");
+  }
+  commit(): never {
+    throw new Error("Read-only");
+  }
+}
+
+/**
  * Shared consumer interface used by ReplicaV2.
  * Both ConsumerSession (local) and RemoteConsumer (WebSocket) implement this.
  */
@@ -158,15 +283,18 @@ class ReplicaV2 implements ISpaceReplica {
     Set<(revision?: Revision<State>) => void>
   >();
   private localState = new Map<string, Revision<State>>();
-  private subscriptionIds = new Map<string, InvocationId>();
-  private hasWildcardSubscription = false;
+  private subscriptionIds = new Set<string>();
+  private rootSelectors = new Map<string, SchemaPathSelector>();
+  private activeSubscriptionId: InvocationId | null = null;
+  private pendingNewEntityIds = new Set<string>();
+  private flushScheduled = false;
   private pendingReady: Promise<void>[] = [];
   suppressSubscriptionUpdates = false;
 
   constructor(
     spaceId: MemorySpace,
     consumer: ConsumerLike,
-    private subscription: IStorageSubscription,
+    private notifications: IStorageNotificationSink,
   ) {
     this.spaceId = spaceId;
     this.consumer = consumer;
@@ -295,7 +423,7 @@ class ReplicaV2 implements ISpaceReplica {
     }
 
     // Notify the storage subscription with actual changes
-    this.subscription.next({
+    this.notifications.next({
       type: "commit",
       space: this.spaceId,
       changes: asChanges(changes),
@@ -362,36 +490,76 @@ class ReplicaV2 implements ISpaceReplica {
   /**
    * Set up a v2 subscription for an entity and start receiving updates.
    *
-   * Uses a single wildcard subscription per space to fetch all entities,
-   * matching v1's graph-query behavior where related entities (nested
-   * objects stored as separate docs) are returned together.
+   * Uses schema-based traversal to discover linked entities (like v1's
+   * SchemaObjectTraverser), then subscribes to all discovered entities
+   * using a single consolidated subscription. New entities discovered
+   * after data arrives trigger subscription expansion.
    */
-  setupSubscription(entityId: string): void {
+  setupSubscription(entityId: string, selector?: SchemaPathSelector): void {
+    // Store root selector if this is a root entity from sync()
+    if (selector) {
+      this.rootSelectors.set(entityId, selector);
+    }
+
     if (this.subscriptionIds.has(entityId)) return;
 
-    // Mark as subscribed (even before the actual subscribe call completes).
-    this.subscriptionIds.set(entityId, entityId as InvocationId);
+    this.pendingNewEntityIds.add(entityId);
+    this.scheduleFlush();
+  }
 
-    // Use a single wildcard "*" subscription for the whole space.
-    // The cell framework stores nested objects as separate entities linked
-    // by {"/": id} references. A per-entity subscription would miss these
-    // linked entities, causing data like recipe metadata (with nested
-    // program/files) to appear incomplete. The wildcard subscription matches
-    // v1's graph-query behavior which returns all related entities.
-    if (this.hasWildcardSubscription) return;
-    this.hasWildcardSubscription = true;
+  /**
+   * Schedule a microtask to batch subscription creation.
+   * Multiple setupSubscription() calls in the same tick get consolidated.
+   */
+  private scheduleFlush(): void {
+    if (this.flushScheduled) return;
+    this.flushScheduled = true;
+    queueMicrotask(() => {
+      this.flushScheduled = false;
+      this.flushSubscription();
+    });
+  }
 
-    const selector = { "*": {} } as unknown as Selector;
+  /**
+   * Create/recreate the consolidated subscription with all tracked entity IDs.
+   * After initial data arrives, runs traversal to discover linked entities
+   * and expands the subscription if new ones are found.
+   */
+  private flushSubscription(): void {
+    // Collect all entity IDs to subscribe to
+    const newIds = [...this.pendingNewEntityIds];
+    this.pendingNewEntityIds.clear();
+    if (newIds.length === 0) return;
+
+    // Mark them all as subscribed
+    for (const id of newIds) {
+      this.subscriptionIds.add(id);
+    }
+
+    // Unsubscribe old consolidated subscription
+    if (this.activeSubscriptionId) {
+      this.consumer.unsubscribe(this.activeSubscriptionId);
+      this.activeSubscriptionId = null;
+    }
+
+    // Build selector for all tracked entities
+    const selector: Record<string, Record<string, never>> = {};
+    for (const id of this.subscriptionIds) {
+      selector[id] = {};
+    }
+
     const { facts, subscriptionId, ready } = this.consumer.subscribe(
-      selector,
+      selector as unknown as Selector,
       (update: SubscriptionUpdate) => {
         this.handleSubscriptionUpdate(update);
       },
     );
 
-    // Store under a sentinel key
-    this.subscriptionIds.set("*", subscriptionId);
+    this.activeSubscriptionId = subscriptionId;
     this.applyFactSet(facts);
+
+    // After initial data, run traversal to discover linked entities
+    this.expandViaTraversal();
 
     // For remote consumers: apply server initial state when it arrives
     if (ready) {
@@ -399,6 +567,8 @@ class ReplicaV2 implements ISpaceReplica {
         ready.then((serverFacts) => {
           if (serverFacts) {
             this.applyFactSet(serverFacts);
+            // Re-run traversal after server data arrives
+            this.expandViaTraversal();
           }
         }),
       );
@@ -406,9 +576,94 @@ class ReplicaV2 implements ISpaceReplica {
   }
 
   /**
+   * Run SchemaObjectTraverser over localState for all root selectors.
+   * If new entities are discovered, add them to pending and schedule a flush.
+   */
+  private expandViaTraversal(): void {
+    const discovered = this.discoverLinkedEntities();
+    if (discovered.size > 0) {
+      for (const id of discovered) {
+        this.pendingNewEntityIds.add(id);
+      }
+      this.scheduleFlush();
+    }
+  }
+
+  /**
+   * Run SchemaObjectTraverser over localState for all root selectors.
+   * Returns entity IDs discovered that are not yet subscribed.
+   */
+  private discoverLinkedEntities(): Set<string> {
+    const manager = new V2ObjectStorageManager(this.spaceId, this.localState);
+    const tx = new V2ReadOnlyTransaction(manager);
+    const discovered = new Set<string>();
+
+    const prefix = `${this.spaceId}/`;
+    const suffix = `/${V2_MIME}`;
+
+    for (const [rootEntityId, selector] of this.rootSelectors) {
+      const schemaTracker = new MapSet<string, SchemaPathSelector>(deepEqual);
+
+      // Re-root selector to include "value" prefix, matching v1 convention
+      // where data is stored as { value: actualData }. The selector from
+      // sync() uses cell.path which may be [] or ["value", ...] depending
+      // on the cell. SchemaObjectTraverser expects paths starting with "value".
+      const selectorPath = selector.path.length > 0 &&
+          selector.path[0] === "value"
+        ? selector.path
+        : ["value", ...selector.path];
+      const rerooted = { ...selector, path: selectorPath };
+
+      const traverser = new SchemaObjectTraverser(
+        tx,
+        rerooted,
+        undefined,
+        schemaTracker,
+      );
+
+      // Build attestation for root entity from localState.
+      // Use path: [] and wrap value as { value: actualData } to match v1
+      // storage envelope. The traverser navigates from path [] through
+      // the selector path (starting with "value") into the actual data.
+      const rootState = this.localState.get(rootEntityId);
+      if (!rootState || rootState.is === undefined) continue;
+      const rootDoc = {
+        address: {
+          space: this.spaceId,
+          id: rootEntityId,
+          type: V2_MIME,
+          path: [] as string[],
+        } as IMemorySpaceAddress,
+        value: { value: rootState.is },
+      };
+
+      // Traverse — this populates schemaTracker with all linked entities
+      try {
+        traverser.traverse(rootDoc);
+      } catch {
+        // Traversal can fail if schemas/data don't align (e.g. stale data).
+        // Fall back gracefully — don't let traversal errors block the system.
+        continue;
+      }
+
+      // Extract entity IDs from schemaTracker keys
+      // getTrackerKey format: "${space}/${id}/${type}"
+      for (const [key] of schemaTracker) {
+        if (key.startsWith(prefix) && key.endsWith(suffix)) {
+          const entityId = key.slice(prefix.length, key.length - suffix.length);
+          if (entityId && !this.subscriptionIds.has(entityId)) {
+            discovered.add(entityId);
+          }
+        }
+      }
+    }
+    return discovered;
+  }
+
+  /**
    * Apply a FactSet from query/subscribe to local state.
    * When called with actual data (e.g. from server initial state),
-   * fires subscription.next() so the scheduler re-runs affected computations.
+   * fires notifications.next() so the scheduler re-runs affected computations.
    */
   private applyFactSet(facts: FactSet): void {
     const changes: IMemoryChange[] = [];
@@ -445,7 +700,7 @@ class ReplicaV2 implements ISpaceReplica {
     // cell.sync() would silently update localState but never trigger
     // re-rendering.
     if (changes.length > 0) {
-      this.subscription.next({
+      this.notifications.next({
         type: "integrate",
         space: this.spaceId,
         changes: asChanges(changes),
@@ -493,11 +748,14 @@ class ReplicaV2 implements ISpaceReplica {
       this.notifySubscribers(entityId, state);
     }
 
-    this.subscription.next({
+    this.notifications.next({
       type: "integrate",
       space: this.spaceId,
       changes: asChanges(changes),
     });
+
+    // After integrating external changes, check if new entities need subscribing
+    this.expandViaTraversal();
   }
 
   /**
@@ -523,11 +781,13 @@ class ReplicaV2 implements ISpaceReplica {
 
   /**
    * Wait for all pending server state loads to complete.
+   * Loops to handle cascading subscriptions from traversal expansion.
    */
   async synced(): Promise<void> {
-    if (this.pendingReady.length > 0) {
-      await Promise.all(this.pendingReady);
+    while (this.pendingReady.length > 0) {
+      const batch = [...this.pendingReady];
       this.pendingReady = [];
+      await Promise.all(batch);
     }
   }
 
@@ -541,11 +801,14 @@ class ReplicaV2 implements ISpaceReplica {
     // Clear all state
     this.localState.clear();
     this.subscriptionIds.clear();
-    this.hasWildcardSubscription = false;
+    this.rootSelectors.clear();
+    this.activeSubscriptionId = null;
+    this.pendingNewEntityIds.clear();
+    this.flushScheduled = false;
     // Restore subscribers
     this.subscribers = savedSubscribers;
 
-    this.subscription.next({
+    this.notifications.next({
       type: "reset",
       space: this.spaceId,
     });
@@ -555,10 +818,13 @@ class ReplicaV2 implements ISpaceReplica {
    * Clean up all subscriptions.
    */
   close(): void {
-    for (const [_, subId] of this.subscriptionIds) {
-      this.consumer.unsubscribe(subId);
+    if (this.activeSubscriptionId) {
+      this.consumer.unsubscribe(this.activeSubscriptionId);
+      this.activeSubscriptionId = null;
     }
     this.subscriptionIds.clear();
+    this.rootSelectors.clear();
+    this.pendingNewEntityIds.clear();
     this.subscribers.clear();
     this.localState.clear();
   }
@@ -586,7 +852,7 @@ export class ProviderV2 implements IStorageProviderWithReplica {
   constructor(options: {
     spaceId: MemorySpace;
     consumer: ConsumerLike;
-    subscription: IStorageSubscription;
+    subscription: IStorageNotificationSink;
     space?: SpaceV2 | null;
     providerSession?: ProviderSession | null;
     remoteConsumer?: RemoteConsumer | null;
@@ -614,7 +880,7 @@ export class ProviderV2 implements IStorageProviderWithReplica {
   static open(options: {
     spaceId: MemorySpace;
     consumer: ConsumerLike;
-    subscription: IStorageSubscription;
+    subscription: IStorageNotificationSink;
     space?: SpaceV2 | null;
     providerSession?: ProviderSession | null;
   }): ProviderV2 {
@@ -627,7 +893,7 @@ export class ProviderV2 implements IStorageProviderWithReplica {
   static connectRemote(options: {
     spaceId: MemorySpace;
     wsUrl: URL;
-    subscription: IStorageSubscription;
+    subscription: IStorageNotificationSink;
     connectionTimeout?: number;
   }): ProviderV2 {
     const remoteConsumer = connectRemote(options.wsUrl, {
@@ -731,8 +997,8 @@ export class ProviderV2 implements IStorageProviderWithReplica {
       return result;
     }
 
-    // Set up a subscription for future updates
-    this.replica.setupSubscription(uri);
+    // Set up a subscription for future updates (pass selector for traversal)
+    this.replica.setupSubscription(uri, selector);
 
     // Wait for server initial state (no-op for local mode)
     await this.replica.synced();

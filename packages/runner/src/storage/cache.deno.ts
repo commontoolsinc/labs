@@ -7,7 +7,7 @@ import {
 } from "./cache.ts";
 import * as StorageSubscription from "./subscription.ts";
 import type { MemorySpace } from "@commontools/memory/interface";
-import type { IStorageSubscription } from "./interface.ts";
+import type { IStorageNotificationSink } from "./interface.ts";
 import { ProviderV2 } from "./v2/provider.ts";
 // Deno-only imports — safe here since cache.deno.ts is never bundled for browser
 import { SpaceV2 } from "@commontools/memory/v2/space";
@@ -59,8 +59,8 @@ export class StorageManagerEmulator extends BaseStorageManager {
   /**
    * Subscribes to changes in the storage.
    */
-  override subscribe(subscription: IStorageSubscription): void {
-    this.#subscription.subscribe(subscription);
+  override subscribe(sink: IStorageNotificationSink): void {
+    this.#subscription.subscribe(sink);
   }
 }
 

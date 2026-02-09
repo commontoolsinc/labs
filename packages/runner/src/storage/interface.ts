@@ -85,7 +85,7 @@ export type OptStorageValue<T extends StorableValue = StorableValue> =
   | StorageValue<T>
   | undefined;
 
-export interface IStorageManager extends IStorageSubscriptionCapability {
+export interface IStorageManager extends IStorageNotificationSource {
   id: string;
 
   /**
@@ -234,7 +234,7 @@ export interface IStorageProviderWithReplica extends IStorageProvider {
  * {@link IStorageManager} in the future. It provides capability to subscribe
  * to the storage notifications.
  */
-export interface IStorageSubscriptionCapability {
+export interface IStorageNotificationSource {
   /**
    * Subscribes to the storage manager's notifications.
    *
@@ -262,24 +262,29 @@ export interface IStorageSubscriptionCapability {
    * storage.subscribe(log(5));
    * ```
    */
-  subscribe(subscription: IStorageSubscription): void;
+  subscribe(sink: IStorageNotificationSink): void;
 }
 
 /**
- * Subscription that can be used to receive storage notifications.
+ * Notification sink that receives storage notifications.
  */
-export interface IStorageSubscription {
+export interface IStorageNotificationSink {
   /**
    * Called with a next notification, if returns `{ done: true }` or throws an
    * exception, subscription will be cancelled and method will not be called
    * again until re-subscribed through another `subscribe` on
-   * `IStorageSubscriptionCapability`. Returning any other return value implies
+   * `IStorageNotificationSource`. Returning any other return value implies
    * continued subscription.
    */
   next(
     notification: StorageNotification,
   ): Omit<IteratorResult<unknown, unknown>, "value"> | undefined;
 }
+
+/** @deprecated Use IStorageNotificationSource */
+export type IStorageSubscriptionCapability = IStorageNotificationSource;
+/** @deprecated Use IStorageNotificationSink */
+export type IStorageSubscription = IStorageNotificationSink;
 
 /**
  * Notification produced by the underlying storage. It is a variant type

@@ -44,9 +44,9 @@ import type {
   Claim,
   IRemoteStorageProviderSettings,
   IStorageManager,
+  IStorageNotificationSink,
   IStorageProvider,
   IStorageProviderWithReplica,
-  IStorageSubscription,
   IStorageTransaction,
   IStoreError,
   ITransaction,
@@ -635,7 +635,7 @@ export class Replica {
      * Storage subscription that needs to be notified when state of the replica
      * changes.
      */
-    public subscription: IStorageSubscription,
+    public notifications: IStorageNotificationSink,
     /**
      * Represents persisted cache of the memory state that was fetched in one
      * of the sessions. If IDB is not available in this runtime we do not have
@@ -958,7 +958,7 @@ export class Replica {
     changes.set(notFound);
 
     // Notify storage subscription about changes that were pulled from the remote
-    this.subscription.next({
+    this.notifications.next({
       type: "pull",
       space: this.did(),
       changes: changes.close(),
@@ -1023,7 +1023,7 @@ export class Replica {
       this.heap.merge(pulled.values(), Replica.put);
 
       // Notify storage subscribers that we have loaded some data.
-      this.subscription.next({
+      this.notifications.next({
         type: "load",
         space: this.did(),
         changes: Differential.load(values),
@@ -1090,7 +1090,7 @@ export class Replica {
     const changedFacts = changedFactEntries.map(([_addr, fact]) => fact);
     this.nursery.merge(changedFacts, Nursery.put);
     // Notify storage subscribers about the committed changes.
-    this.subscription.next({
+    this.notifications.next({
       type: "commit",
       space: this.did(),
       changes,
@@ -1170,7 +1170,7 @@ export class Replica {
       }
 
       // Notify storage subscribers about the reverted transaction.
-      this.subscription.next({
+      this.notifications.next({
         type: "revert",
         space: this.did(),
         changes: checkout.compare(this),
@@ -1253,7 +1253,7 @@ export class Replica {
       (state) => state === undefined || !resolved.has(state),
     );
 
-    this.subscription.next({
+    this.notifications.next({
       type: "integrate",
       space: this.did(),
       changes: checkout.compare(this),
@@ -1345,7 +1345,7 @@ export class Replica {
     // Clear the pull queue
     this.queue = new PullQueue();
 
-    this.subscription.next({
+    this.notifications.next({
       type: "reset",
       space: this.did(),
     });
@@ -1422,7 +1422,7 @@ export interface RemoteStorageProviderSettings {
 
 export interface RemoteStorageProviderOptions {
   session: Consumer.MemoryConsumer<MemorySpace>;
-  subscription: IStorageSubscription;
+  subscription: IStorageNotificationSink;
   space: MemorySpace;
   the?: string;
   settings?: IRemoteStorageProviderSettings;
@@ -1762,7 +1762,7 @@ export class Provider implements IStorageProvider {
   session: Consumer.MemoryConsumer<MemorySpace>;
   spaces: Map<string, Replica>;
   settings: IRemoteStorageProviderSettings;
-  subscription: IStorageSubscription;
+  subscription: IStorageNotificationSink;
   spaceIdentity?: Signer;
 
   subscribers: Map<
@@ -2167,8 +2167,8 @@ export class StorageManager implements IStorageManager {
   /**
    * Subscribes to changes in the storage.
    */
-  subscribe(subscription: IStorageSubscription): void {
-    this.#subscription.subscribe(subscription);
+  subscribe(sink: IStorageNotificationSink): void {
+    this.#subscription.subscribe(sink);
   }
 
   /**

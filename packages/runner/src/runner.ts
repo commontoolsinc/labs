@@ -52,7 +52,7 @@ import { LINK_V1_TAG, SigilLink } from "./sigil-types.ts";
 import type { Runtime } from "./runtime.ts";
 import type {
   IExtendedStorageTransaction,
-  IStorageSubscription,
+  IStorageNotificationSink,
   MemorySpace,
   URI,
 } from "./storage/interface.ts";
@@ -80,15 +80,15 @@ export class Runner {
   }
 
   /**
-   * Creates and returns a new storage subscription.
+   * Creates and returns a new notification sink for storage notifications.
    *
    * This will be used to remove the cached recipe information when the result
    * cell changes. As a result, if we are scheduled, we will run that recipe
    * and regenerate the result.
    *
-   * @returns A new IStorageSubscription instance
+   * @returns A new IStorageNotificationSink instance
    */
-  private createStorageSubscription(): IStorageSubscription {
+  private createStorageSubscription(): IStorageNotificationSink {
     return {
       next: (notification) => {
         const space = notification.space;
