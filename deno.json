@@ -36,7 +36,8 @@
     "test": "./tasks/test.ts",
     "test-all": "echo \"Use 'deno task test' instead.\" && exit 1",
     "build-binaries": "./tasks/build-binaries.ts",
-    "initialize-db": "./tasks/initialize-db.sh"
+    "initialize-db": "./tasks/initialize-db.sh",
+    "integration": "./tasks/integration.ts"
   },
   "compilerOptions": {
     "jsx": "react-jsx",
