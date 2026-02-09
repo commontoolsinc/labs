@@ -19,8 +19,9 @@ transactional, content-addressed store that underlies the Common Tools runtime.
    on any branch.
 6. **Branching** — Lightweight branches with isolation, merging, and conflict
    detection. Branches share the fact history (O(1) creation).
-7. **Future commit model** — Implements the confirmed/pending (was heap/nursery)
-   client state model with version-based validation (replacing strict CAS).
+7. **Optimistic commit model** — Local commits are synchronous and optimistic.
+   The server confirms asynchronously, with version-based validation (replacing
+   strict CAS). See §03 for the confirmed/pending model.
 8. **Schema-based traversal** — Graph queries follow JSON Schema-defined
    references, reusing `traverse.ts` patterns (cycle detection, schema
    narrowing).
@@ -44,6 +45,8 @@ transactional, content-addressed store that underlies the Common Tools runtime.
 | `memory` table | `head` table | Current state pointer per entity per branch |
 | Heap | Confirmed | Server-acknowledged client state |
 | Nursery | Pending | Optimistic unconfirmed client state |
+| `IStorageSubscription` | `IStorageNotificationSink` | Scheduler notification interface (commit/integrate events). Renamed to avoid confusion with v2 data subscriptions. |
+| `StorageSubscription` | `StorageNotificationRelay` | Implementation class for scheduler notifications |
 
 ## Architecture
 
@@ -112,8 +115,8 @@ transactional, content-addressed store that underlies the Common Tools runtime.
 ## Key Type Summary
 
 ```typescript
-// Entity identifier
-type EntityId = `${string}:${string}`;
+// Entity identifier (plain string — no format constraint enforced)
+type EntityId = string;
 
 // Content-addressed reference (SHA-256, base32-lower)
 type Reference = string & { readonly __brand: unique symbol };
@@ -124,11 +127,11 @@ interface PatchWrite { type: "patch";  id: EntityId; ops: PatchOp[];   parent: R
 interface Delete    { type: "delete"; id: EntityId;                    parent: Reference; }
 type Fact = SetWrite | PatchWrite | Delete;
 
-// Operations in transactions
-interface SetOperation        { op: "set";    id: EntityId; value: JSONValue;   parent: Reference; }
-interface PatchWriteOperation { op: "patch";  id: EntityId; patches: PatchOp[]; parent: Reference; }
-interface DeleteOperation     { op: "delete"; id: EntityId;                     parent: Reference; }
-interface ClaimOperation      { op: "claim";  id: EntityId;                     parent: Reference; }
+// Operations in transactions (parent is optional — server resolves from head)
+interface SetOperation        { op: "set";    id: EntityId; value: JSONValue;   parent?: Reference; }
+interface PatchWriteOperation { op: "patch";  id: EntityId; patches: PatchOp[]; parent?: Reference; }
+interface DeleteOperation     { op: "delete"; id: EntityId;                     parent?: Reference; }
+interface ClaimOperation      { op: "claim";  id: EntityId;                     parent?: Reference; }
 type Operation = SetOperation | PatchWriteOperation | DeleteOperation | ClaimOperation;
 
 // Transaction
@@ -149,9 +152,22 @@ interface ClientCommit {
   branch?: string;
 }
 
+// Entity values are stored in an envelope (not bare JSON)
+interface EntityDocument {
+  value?: JSONValue;    // The cell's data. Omitting = undefined.
+  source?: EntityLink;  // {"/": entityId} link to process/provenance.
+}
+
 // Validation rule (replaces strict CAS):
 //   For each entity read: read.version >= server.head[entity].version
 ```
+
+**Two kinds of "subscription"**: The v2 protocol defines *data subscriptions*
+(§04-05) — server-to-client streams of entity updates. Separately, the runner's
+scheduler uses *storage notifications* (`IStorageNotificationSink`) — local
+callbacks that fire on commit/integrate events. These are distinct systems; the
+rename from `IStorageSubscription` to `IStorageNotificationSink` makes this
+explicit.
 
 ## System Entity Conventions
 
