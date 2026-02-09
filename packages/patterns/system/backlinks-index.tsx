@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { lift, NAME, pattern, UI, Writable } from "commontools";
+import { equals, lift, NAME, pattern, UI, Writable } from "commontools";
 
 /**
  * Type for pieces used in the mentionable/backlinks system.
@@ -98,7 +98,10 @@ const computeMentionable = lift<
       for (const m of arr) if (m && m.isMentionable !== false) out.push(m);
     }
   }
-  return out;
+  // Deduplicate using equals()
+  return out.filter(
+    (item, index) => out.findIndex((other) => equals(item, other)) === index,
+  );
 });
 
 const BacklinksIndex = pattern<Input, Output>(({ allPieces }) => {

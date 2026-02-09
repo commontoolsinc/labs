@@ -7,7 +7,7 @@ import { createBuilder } from "../src/builder/factory.ts";
 import { Runtime } from "../src/runtime.ts";
 import { ALL_PIECES_ID } from "../src/builtins/well-known.ts";
 import { NAME, UI } from "../src/builder/types.ts";
-import { parseWishTarget } from "../src/builtins/wish.ts";
+import { parseWishTarget, tagMatchesHashtag } from "../src/builtins/wish.ts";
 
 const signer = await Identity.fromPassphrase("wish built-in tests");
 const space = signer.did();
@@ -1389,6 +1389,91 @@ describe("wish built-in", () => {
       expect(resultData?.error).toBeDefined();
       expect(resultData?.error).toMatch(/No mentionables found matching/i);
     });
+
+    it("deduplicates results that appear in both favorites and mentionables", async () => {
+      // Setup: Create a single piece cell in pattern space
+      const sharedPiece = runtime.getCell(
+        patternSpace.did(),
+        "shared-piece",
+        undefined,
+        tx,
+      );
+      const mentionableData: any = { type: "shared" };
+      mentionableData[NAME] = "shared-tag";
+      sharedPiece.set(mentionableData);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Setup: Add piece to favorites in home space
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const homeDefaultPatternCell = runtime.getCell(
+        userIdentity.did(),
+        "default-pattern-dedup",
+        undefined,
+        tx,
+      );
+      const favoritesCell = homeDefaultPatternCell.key("favorites");
+      favoritesCell.set([{ cell: sharedPiece.withTx(tx), tag: "#shared-tag" }]);
+      (homeSpaceCell as any).key("defaultPattern").set(homeDefaultPatternCell);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Setup: Add same piece to mentionables in pattern space
+      const spaceCell = runtime.getCell(
+        patternSpace.did(),
+        patternSpace.did(),
+      ).withTx(tx);
+      const defaultPatternCell = runtime.getCell(
+        patternSpace.did(),
+        "space-default-pattern-dedup",
+        undefined,
+        tx,
+      );
+      const backlinksIndexCell = runtime.getCell(
+        patternSpace.did(),
+        "backlinks-index-dedup",
+        undefined,
+        tx,
+      );
+      backlinksIndexCell.set({
+        mentionable: [sharedPiece.withTx(tx)],
+      });
+      defaultPatternCell.set({
+        backlinksIndex: backlinksIndexCell,
+      });
+      (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Execute: Search both with scope: ["~", "."]
+      const wishRecipe = recipe("scope dedup test", () => {
+        return { result: wish({ query: "#shared-tag", scope: ["~", "."] }) };
+      });
+
+      const resultCell = runtime.getCell<{
+        result?: { result?: unknown; candidates?: unknown[] };
+      }>(
+        patternSpace.did(),
+        "scope-dedup-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+
+      await result.pull();
+
+      // Verify: Should get a single result (deduplicated), not trigger picker
+      const wishResult = result.key("result").get();
+      expect(wishResult?.result).toBeDefined();
+    });
   });
 
   describe("compiled pattern with object-based wish syntax", () => {
@@ -1951,5 +2036,45 @@ describe("parseWishTarget", () => {
 
   it("throws on hash-only target", () => {
     expect(() => parseWishTarget("#")).toThrow("is not recognized");
+  });
+});
+
+describe("tagMatchesHashtag", () => {
+  it("matches exact hashtag in tag string", () => {
+    expect(tagMatchesHashtag("#todo items", "todo")).toBe(true);
+  });
+
+  it("does not match partial hashtag", () => {
+    expect(tagMatchesHashtag("#todolist", "todo")).toBe(false);
+  });
+
+  it("matches among multiple hashtags", () => {
+    expect(tagMatchesHashtag("some #alpha and #beta text", "beta")).toBe(true);
+  });
+
+  it("is case insensitive", () => {
+    expect(tagMatchesHashtag("#Todo", "todo")).toBe(true);
+  });
+
+  it("returns false for undefined tag", () => {
+    expect(tagMatchesHashtag(undefined, "todo")).toBe(false);
+  });
+
+  it("returns false for empty tag", () => {
+    expect(tagMatchesHashtag("", "todo")).toBe(false);
+  });
+
+  it("ignores non-hashtag text", () => {
+    expect(tagMatchesHashtag("todo without hash", "todo")).toBe(false);
+  });
+
+  it("matches hashtag at start of string", () => {
+    expect(tagMatchesHashtag("#recipe for dinner", "recipe")).toBe(true);
+  });
+
+  it("matches hashtag portion before special characters", () => {
+    // The hashtag #todo_list is parsed as #todo (underscore ends the hashtag)
+    expect(tagMatchesHashtag("#todo_list", "todo")).toBe(true);
+    expect(tagMatchesHashtag("#todo_list", "todo_list")).toBe(false);
   });
 });
