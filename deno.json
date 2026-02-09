@@ -63,6 +63,7 @@
   ],
   "lint": {
     "exclude": [
+      ".agents/",
       ".beads/",
       "./packages/static/assets",
       "./packages/ui/src/v2/components/ct-outliner",
@@ -97,6 +98,7 @@
     "singleQuote": false,
     "proseWrap": "always",
     "exclude": [
+      ".agents/",
       ".beads/",
       ".claude/",
       "docs/",
