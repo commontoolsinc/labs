@@ -266,8 +266,14 @@ export class CellHandle<T = unknown> {
     };
   }
 
-  toJSON(): CellRef {
-    return { ...this.ref() };
+  toJSON() {
+    // Wrap in sigil link format so the runtime recognizes this as a link
+    // and dereferences it (e.g., when passed through event.detail.sourceCell)
+    return {
+      "/": {
+        [LINK_V1_TAG]: { ...this.ref() },
+      },
+    };
   }
 
   // Called when cell has been updated from the backend with

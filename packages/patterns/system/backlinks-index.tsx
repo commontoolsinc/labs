@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { lift, NAME, pattern, UI, Writable } from "commontools";
+import { equals, lift, NAME, pattern, UI, Writable } from "commontools";
 
 /**
  * Type for pieces used in the mentionable/backlinks system.
@@ -75,29 +75,43 @@ const computeIndex = lift<
  * its `[NAME]`). This mirrors how existing note patterns identify notes when
  * computing backlinks locally.
  */
+const MAX_MENTIONABLE_DEPTH = 5;
+
 const computeMentionable = lift<
   { allPieces: MentionablePiece[] },
   MentionablePiece[]
 >(({ allPieces: pieceList }) => {
   const cs = pieceList ?? [];
   const out: MentionablePiece[] = [];
-  for (const c of cs) {
-    // Skip undefined/null entries that may exist in the array
-    if (!c) continue;
-    // Skip pieces explicitly marked as not mentionable (like note-md viewer pieces)
-    // Note: We check isMentionable === false, not isHidden, because notes in
-    // notebooks are hidden but should still be mentionable
-    if (c.isMentionable === false) continue;
-    out.push(c);
-    const exported = c.mentionable;
+
+  function isVisited(piece: MentionablePiece): boolean {
+    return out.some((other) => equals(piece, other));
+  }
+
+  function collect(piece: MentionablePiece, depth: number) {
+    if (!piece || piece.isMentionable === false) return;
+    if (isVisited(piece)) return;
+    out.push(piece);
+
+    if (depth >= MAX_MENTIONABLE_DEPTH) return;
+
+    const exported = piece.mentionable;
+    let items: MentionablePiece[] = [];
     if (Array.isArray(exported)) {
-      for (const m of exported) if (m && m.isMentionable !== false) out.push(m);
+      items = exported;
     } else if (exported && typeof (exported as any).get === "function") {
-      const arr = (exported as { get: () => MentionablePiece[] }).get() ??
-        [];
-      for (const m of arr) if (m && m.isMentionable !== false) out.push(m);
+      items = (exported as { get: () => MentionablePiece[] }).get() ?? [];
+    }
+
+    for (const m of items) {
+      collect(m, depth + 1);
     }
   }
+
+  for (const c of cs) {
+    collect(c, 0);
+  }
+
   return out;
 });
 
