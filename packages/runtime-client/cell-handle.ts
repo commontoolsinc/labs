@@ -237,6 +237,26 @@ export class CellHandle<T = unknown> {
     return new CellHandle<T>(this.#rt, response.cell);
   }
 
+  /**
+   * Get the source/process cell for this cell if it exists.
+   * The source cell contains the pattern's argument and internal state.
+   * Returns undefined if this cell doesn't have a source (not a pattern result).
+   */
+  async getSourceCell(): Promise<CellHandle<unknown> | undefined> {
+    const response = await this.#conn.request<
+      RequestType.CellGetSourceCell
+    >({
+      type: RequestType.CellGetSourceCell,
+      cell: this.ref(),
+    });
+
+    if (!response || !response.cell) {
+      return undefined;
+    }
+
+    return new CellHandle(this.#rt, response.cell);
+  }
+
   equals(other: unknown): boolean {
     if (this === other) return true;
     if (!isCellHandle(other)) return false;
