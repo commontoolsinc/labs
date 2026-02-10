@@ -25,6 +25,7 @@ import {
   EMPTY,
 } from "./v2-reference.ts";
 import { V2Space } from "./v2-space.ts";
+import { createSnapshot, shouldCreateSnapshot } from "./v2-snapshot.ts";
 
 // ---------------------------------------------------------------------------
 // Error types
@@ -205,6 +206,14 @@ export function applyCommit(
 
             // Update head
             space.updateHead(branch, op.id, factHashStr, version);
+
+            // Check if we should create a snapshot
+            if (shouldCreateSnapshot(store, branch, op.id, version)) {
+              const currentValue = space.readEntity(branch, op.id);
+              if (currentValue !== null) {
+                createSnapshot(space, branch, op.id, version, currentValue);
+              }
+            }
 
             facts.push({
               hash: factHash,
