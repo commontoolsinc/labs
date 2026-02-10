@@ -113,7 +113,30 @@ export async function runTestPattern(
       );
     }
 
-    // 3. Instantiate the test pattern using runtime.run() for proper space context
+    // 3. Set up defaultPattern so wish({ query: "#default" }) resolves.
+    // In production, default-app.tsx provides this. The test harness must
+    // create a minimal equivalent so patterns that use wish("#default") to
+    // access allPieces, recentPieces, etc. work correctly.
+    {
+      const setupTx = runtime.edit();
+      const spaceCell = runtime.getCell(space, space, undefined, setupTx);
+      const defaultPatternCell = runtime.getCell(
+        space,
+        "default-pattern",
+        undefined,
+        setupTx,
+      );
+      (defaultPatternCell as any).key("allPieces").set([]);
+      (defaultPatternCell as any).key("recentPieces").set([]);
+      (defaultPatternCell as any).key("backlinksIndex").set({
+        mentionable: [],
+      });
+      (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
+      await setupTx.commit();
+      await runtime.idle();
+    }
+
+    // 4. Instantiate the test pattern using runtime.run() for proper space context
     const tx = runtime.edit();
 
     // Create a result cell for the pattern
