@@ -4,7 +4,6 @@ import type {
   SchemaDefinition,
   TypeFormatter,
 } from "../interface.ts";
-import type { SchemaGenerator } from "../schema-generator.ts";
 
 const NATIVE_TYPE_SCHEMAS: Record<string, SchemaDefinition | boolean> = {
   VNode: { $ref: "https://commontools.dev/schemas/vdom.json" },
