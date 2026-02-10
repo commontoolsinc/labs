@@ -27,9 +27,12 @@ boundary crossings (persistence, IPC, network).
 A `StorableValue` is defined as the following union:
 
 > **Package note:** The TypeScript stubs in this spec use `packages/common/` as
-> the proposed target location for these types. In the current codebase, many of
-> these types live in `packages/memory/`. The migration to `packages/common/` is
-> part of the implementation work.
+> the proposed target location for shared storable-value types. This package does
+> not exist yet and would be created as part of implementation. In the current
+> codebase, the storable-value types live in `packages/memory/interface.ts` and
+> the conversion functions in `packages/memory/storable-value.ts`. The final
+> package location is an implementation decision; nothing in this spec depends on
+> it.
 
 ```typescript
 // file: packages/common/storable-value.ts
@@ -80,9 +83,11 @@ type StorableValue =
 > converted to `null` (since JSON arrays cannot represent `undefined`).
 
 > **`-0` normalization:** Negative zero (`-0`) is normalized to positive zero
-> (`0`) during serialization, at the boundary crossing. This matches
-> `JSON.stringify` behavior and ensures that `0` and `-0` produce the same
-> serialized form and canonical hash.
+> (`0`) during storable-value conversion (i.e., `toStorableValue()`), before the
+> value reaches a serialization boundary. This matches `JSON.stringify` behavior
+> and ensures that `0` and `-0` produce the same serialized form and canonical
+> hash. In the current codebase, this normalization happens in
+> `packages/memory/storable-value.ts` at the `toStorableValue()` call site.
 
 ### 1.4 Built-in JS Types
 
@@ -92,11 +97,18 @@ explicitly.
 
 | Type | JSON Encoding | Notes |
 |------|---------------|-------|
-| `Error` | `{ "/Error@1": { name, message, stack, cause, ... } }` | Captures name, message, stack, cause, and custom enumerable properties. `cause` is recursively converted. |
-| `Map` | `{ "/Map@1": [[key, value], ...] }` | Entry order is preserved. Keys and values are recursively converted. |
-| `Set` | `{ "/Set@1": [value, ...] }` | Iteration order is preserved. Values are recursively converted. |
+| `Error` | `{ "/Error@1": { name, message, stack, cause, ... } }` | Captures `name`, `message`, `stack`, `cause`, and custom enumerable properties. Nested values (including `cause`) are recursively serialized by the serialization system -- see Section 4.4 for the recursion model. |
+| `Map` | `{ "/Map@1": [[key, value], ...] }` | Entry order is preserved in serialized form. Keys and values are recursively serialized. (For canonical hashing, entries are sorted by key hash -- see Section 6.3.) |
+| `Set` | `{ "/Set@1": [value, ...] }` | Iteration order is preserved in serialized form. Values are recursively serialized. (For canonical hashing, elements are sorted by hash -- see Section 6.3.) |
 | `Uint8Array` | `{ "/Bytes@1": "base64..." }` | Base64-encoded binary data. |
 | `Date` | `{ "/Date@1": "ISO-8601-string" }` | ISO 8601 UTC format. |
+
+> **Built-in types vs. the storable protocol:** Built-in JS types like `Error`
+> cannot have `Symbol`-keyed methods added via prototype patching in a reliable,
+> cross-realm way. The serialization system therefore has hardcoded knowledge of
+> how to decompose these types. This is distinct from user-defined
+> `StorableInstance` types, which participate via the `[DECONSTRUCT]` /
+> `[RECONSTRUCT]` protocol (Section 2).
 
 ### 1.5 Recursive Containers
 
@@ -113,12 +125,17 @@ explicitly.
 - No distinction between regular and null-prototype objects; reconstruction
   produces regular plain objects
 
-### 1.6 Circular References
+### 1.6 Circular References and Shared References
 
 Within a single document, circular references are detected and throw an error.
 The system does not support storing cyclic data within a document's value.
-Shared references (the same object appearing multiple times) are preserved
-correctly.
+
+**Shared references** (the same object instance appearing multiple times within
+a value tree) are handled correctly during conversion: the converted form for a
+given original object is cached and reused, so structural sharing is maintained
+in the output. Note that this preserves _structural_ sharing (the same converted
+subtree appears at multiple positions), not JS _identity_ sharing (the converted
+objects may not be `===` to each other in all serialization paths).
 
 Cycles *across* documents are supported via explicit links (storable instances
 that reference other documents). Two cells can reference each other, forming a
@@ -145,8 +162,8 @@ deserialize custom types without central registration at the type level.
 
 /**
  * Well-known symbol for deconstructing a storable instance into its
- * essential state. The returned value may contain nested StorableValues
- * (including other StorableInstances); the serialization system handles
+ * essential state. The returned value may contain nested `StorableValue`s
+ * (including other `StorableInstance`s); the serialization system handles
  * recursion.
  */
 export const DECONSTRUCT = Symbol.for('common.deconstruct');
@@ -172,14 +189,22 @@ export const RECONSTRUCT = Symbol.for('common.reconstruct');
  */
 export interface StorableInstance {
   /**
-   * Returns the essential state of this instance. The returned value may
-   * contain any StorableValue, including other StorableInstances. The
-   * implementation must NOT recursively deconstruct nested values -- the
-   * serialization system handles that.
+   * Returns the essential state of this instance as a `StorableValue`. The
+   * returned value may contain any `StorableValue`, including other
+   * `StorableInstance`s, built-in JS types, primitives, and plain
+   * objects/arrays.
+   *
+   * The implementation must NOT recursively deconstruct nested values --
+   * the serialization system handles that.
    */
-  [DECONSTRUCT](): unknown;
+  [DECONSTRUCT](): StorableValue;
 }
 ```
+
+> **Return type rationale:** The return type is `StorableValue` rather than
+> `unknown` to make the contract explicit: a deconstructor must return a value
+> that the serialization system can process. Returning a non-storable value
+> (e.g., a `WeakMap` or a DOM node) would be a bug.
 
 ### 2.4 Class Protocol
 
@@ -190,10 +215,12 @@ export interface StorableInstance {
  * A class that can reconstruct instances from essential state. This is a
  * static method, separate from the constructor, for two reasons:
  *
- * 1. Reconstruction-specific context: receives the `Runtime` (and potentially
- *    other context) which shouldn't be mandated in a constructor signature.
+ * 1. Reconstruction-specific context: receives a `ReconstructionContext`
+ *    (and potentially other context) which shouldn't be mandated in a
+ *    constructor signature.
  * 2. Instance interning: can return existing instances rather than always
- *    creating new ones -- essential for types like `Cell` where identity matters.
+ *    creating new ones -- essential for types like `Cell` where identity
+ *    matters.
  */
 export interface StorableClass<T extends StorableInstance> {
   /**
@@ -201,11 +228,43 @@ export interface StorableClass<T extends StorableInstance> {
    * have already been reconstructed by the serialization system. May return
    * an existing instance (interning) rather than creating a new one.
    */
-  [RECONSTRUCT](state: unknown, runtime: Runtime): T;
+  [RECONSTRUCT](state: StorableValue, context: ReconstructionContext): T;
 }
 ```
 
-### 2.5 Brand Detection
+### 2.5 Reconstruction Context
+
+```typescript
+// file: packages/common/storable-protocol.ts
+
+/**
+ * The minimal interface that `[RECONSTRUCT]` implementations may depend on.
+ * In practice this is provided by the `Runtime` class from
+ * `packages/runner/src/runtime.ts`, but defining it as an interface here
+ * avoids a circular dependency between the storable protocol and the runner.
+ *
+ * Implementors of `[RECONSTRUCT]` should depend on this interface, not on
+ * the concrete `Runtime` class.
+ */
+export interface ReconstructionContext {
+  /**
+   * Resolve a cell reference. Used by `Cell[RECONSTRUCT]` and similar types
+   * that need to intern or look up existing instances.
+   */
+  getCell(ref: { id: string; path: string[]; space: string }): StorableInstance;
+}
+```
+
+> **Why an interface, not the concrete `Runtime`?** The storable protocol is
+> intended to live in a foundational package (`packages/common/` or
+> `packages/memory/`). If `[RECONSTRUCT]` depended on the full `Runtime` type
+> from `packages/runner/`, it would create a circular dependency. The
+> `ReconstructionContext` interface captures the minimal surface needed for
+> reconstruction. The `Runtime` class satisfies this interface. Future
+> storable types may extend `ReconstructionContext` if they need additional
+> capabilities beyond `getCell`.
+
+### 2.6 Brand Detection
 
 ```typescript
 // file: packages/common/storable-protocol.ts
@@ -221,16 +280,18 @@ export function isStorable(value: unknown): value is StorableInstance {
 }
 ```
 
-### 2.6 Example: Cell
+### 2.7 Example: Cell
 
 ```typescript
-// file: packages/runtime/cell.ts (illustrative stub)
+// file: packages/runner/src/cell.ts (illustrative stub -- simplified from the
+// actual `Cell` class, which has additional overloads and parameters)
 
 import {
   DECONSTRUCT,
   RECONSTRUCT,
   type StorableInstance,
   type StorableClass,
+  type ReconstructionContext,
 } from '@common/storable-protocol';
 
 class Cell<T> implements StorableInstance {
@@ -244,21 +305,15 @@ class Cell<T> implements StorableInstance {
 
   static [RECONSTRUCT](
     state: { id: string; path: string[]; space: string },
-    runtime: Runtime,
+    context: ReconstructionContext,
   ): Cell<unknown> {
     // May return an existing `Cell` instance (interning).
-    return runtime.getCell(state);
+    return context.getCell(state) as Cell<unknown>;
   }
 }
-
-// Note: `Runtime` comes from `packages/runtime/` and provides the execution
-// context needed for reconstruction. The minimal interface required by
-// [RECONSTRUCT] includes at least `getCell(state)` for resolving cell
-// references, as shown above. Other storable types may depend on additional
-// `Runtime` methods as needed.
 ```
 
-### 2.7 Deconstructed State and Recursion
+### 2.8 Deconstructed State and Recursion
 
 The value returned by `[DECONSTRUCT]()` can contain any value that is itself
 storable -- including other `StorableInstance`s, built-in types like `Error` or
@@ -273,7 +328,7 @@ violation.
 Similarly, `[RECONSTRUCT]` receives state where nested values have already been
 reconstructed by the serialization system.
 
-### 2.8 Reconstruction Guarantees
+### 2.9 Reconstruction Guarantees
 
 The system follows an **immutable-forward** design:
 
@@ -306,20 +361,21 @@ import {
   DECONSTRUCT,
   RECONSTRUCT,
   type StorableInstance,
+  type ReconstructionContext,
 } from './storable-protocol';
 
 /**
  * Holds an unrecognized type's data for round-tripping. The serialization
  * system has special knowledge of this class: on deserialization of an unknown
  * tag, it wraps the tag and state here; on re-serialization, it uses the
- * preserved typeTag to produce the original wire format.
+ * preserved `typeTag` to produce the original wire format.
  */
 export class UnknownStorable implements StorableInstance {
   constructor(
-    /** The original type tag, e.g. "FutureType@2". */
+    /** The original type tag, e.g. `"FutureType@2"`. */
     readonly typeTag: string,
     /** The raw state, already recursively processed by the serializer. */
-    readonly state: unknown,
+    readonly state: StorableValue,
   ) {}
 
   [DECONSTRUCT]() {
@@ -327,8 +383,8 @@ export class UnknownStorable implements StorableInstance {
   }
 
   static [RECONSTRUCT](
-    state: { type: string; state: unknown },
-    _runtime: Runtime,
+    state: { type: string; state: StorableValue },
+    _context: ReconstructionContext,
   ): UnknownStorable {
     return new UnknownStorable(state.type, state.state);
   }
@@ -355,13 +411,25 @@ they don't own the wire format. A **serialization context** owns the mapping
 between classes and wire format tags, and handles format-specific
 encoding/decoding.
 
-### 4.2 Interface
+### 4.2 SerializedForm
 
-> **`SerializedForm`:** Throughout this section, `SerializedForm` is a type
-> alias for the wire format representation. For JSON contexts, this is any
-> JSON-compatible value (i.e., `null | boolean | number | string | JsonArray |
-> JsonObject`). Other contexts (e.g., CBOR) would define their own
-> `SerializedForm`.
+Each serialization context defines a `SerializedForm` -- the type of values in
+its wire format. For the JSON context, this is:
+
+```typescript
+// file: packages/common/serialization-context.ts
+
+/** JSON-compatible wire format value. */
+type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
+
+/**
+ * The wire format for the JSON serialization context. Other contexts (e.g.,
+ * CBOR) would define their own `SerializedForm`.
+ */
+type SerializedForm = JsonValue;
+```
+
+### 4.3 Interface
 
 ```typescript
 // file: packages/common/serialization-context.ts
@@ -378,27 +446,30 @@ export interface SerializationContext {
   getClassFor(tag: string): StorableClass<StorableInstance> | undefined;
 
   /** Wrap a tag and state into the format's wire representation. */
-  wrap(tag: string, state: unknown): SerializedForm;
+  wrap(tag: string, state: SerializedForm): SerializedForm;
 
-  /** Unwrap a wire representation into tag and state. */
-  unwrap(data: SerializedForm): { tag: string; state: unknown } | null;
+  /** Unwrap a wire representation into tag and state, or `null` if not a tagged value. */
+  unwrap(data: SerializedForm): { tag: string; state: SerializedForm } | null;
 }
 ```
 
-### 4.3 Serialization Flow
+### 4.4 Serialization Flow
 
 ```
 Serialize:   instance.[DECONSTRUCT]() -> state -> context.wrap(tag, state) -> wire
 Deserialize: wire -> context.unwrap() -> { tag, state } -> Class[RECONSTRUCT](state) -> instance
 ```
 
-### 4.4 Top-Level Serialize/Deserialize
+The recursive descent is handled by top-level `serialize()` and `deserialize()`
+functions, not by the context or by individual types. See Section 4.5.
+
+### 4.5 Top-Level Serialize/Deserialize
 
 ```typescript
 // file: packages/common/serialization.ts
 
 import { DECONSTRUCT, RECONSTRUCT, isStorable } from './storable-protocol';
-import type { SerializationContext } from './serialization-context';
+import type { SerializationContext, SerializedForm } from './serialization-context';
 import { UnknownStorable } from './unknown-storable';
 
 /**
@@ -409,6 +480,7 @@ export function serialize(
   value: StorableValue,
   context: SerializationContext,
 ): SerializedForm {
+  // --- StorableInstance ---
   if (isStorable(value)) {
     const state = value[DECONSTRUCT]();
     const tag = context.getTagFor(value);
@@ -416,49 +488,89 @@ export function serialize(
     return context.wrap(tag, serializedState);
   }
 
-  // Handle built-in JS types (`Error`, `Map`, `Set`, `Uint8Array`, `Date`).
-  // Each is converted via the context using a well-known tag.
-  //
-  // For example, `Error` (which cannot implement [DECONSTRUCT] via symbol):
-  //
-  //   if (value instanceof Error) {
-  //     const state: Record<string, StorableValue> = {
-  //       name:    value.name,
-  //       message: value.message,
-  //     };
-  //     if (value.stack) state.stack = value.stack;
-  //     if (value.cause !== undefined) {
-  //       state.cause = serialize(value.cause, context); // recursive
-  //     }
-  //     // Copy custom enumerable properties
-  //     for (const key of Object.keys(value)) {
-  //       if (!(key in state)) {
-  //         state[key] = serialize((value as any)[key], context); // recursive
-  //       }
-  //     }
-  //     return context.wrap('Error@1', state);
-  //   }
-  //
-  // The same pattern applies to Map, Set, Uint8Array, and Date -- each is
-  // decomposed into its essential state, nested values are recursively
-  // serialized, and the result is wrapped with the appropriate tag.
-  // ...
+  // --- Built-in JS types ---
+  // These types cannot implement [DECONSTRUCT] via symbol, so the serializer
+  // handles them explicitly. Each is decomposed into essential state, nested
+  // values are recursively serialized, and the result is wrapped with the
+  // appropriate tag.
 
-  // Handle primitives: pass through.
-  // Handle arrays: recursively serialize elements.
-  // Handle plain objects: recursively serialize values.
-  // ...
+  if (value instanceof Error) {
+    const state: Record<string, SerializedForm> = {
+      name:    serialize(value.name, context),
+      message: serialize(value.message, context),
+    };
+    if (value.stack !== undefined) {
+      state.stack = serialize(value.stack, context);
+    }
+    if (value.cause !== undefined) {
+      state.cause = serialize(value.cause as StorableValue, context);
+    }
+    // Copy custom enumerable properties.
+    for (const key of Object.keys(value)) {
+      if (!(key in state)) {
+        state[key] = serialize((value as Record<string, unknown>)[key] as StorableValue, context);
+      }
+    }
+    return context.wrap('Error@1', state);
+  }
+
+  if (value instanceof Map) {
+    const entries = [...value.entries()].map(
+      ([k, v]) => [serialize(k, context), serialize(v, context)] as SerializedForm,
+    );
+    return context.wrap('Map@1', entries);
+  }
+
+  if (value instanceof Set) {
+    const elements = [...value].map((v) => serialize(v, context));
+    return context.wrap('Set@1', elements);
+  }
+
+  if (value instanceof Uint8Array) {
+    // Base64 encoding produces a string; no recursion needed.
+    return context.wrap('Bytes@1', base64Encode(value));
+  }
+
+  if (value instanceof Date) {
+    return context.wrap('Date@1', value.toISOString());
+  }
+
+  if (typeof value === 'bigint') {
+    return context.wrap('BigInt@1', value.toString());
+  }
+
+  // --- Primitives ---
+  if (value === null || value === undefined || typeof value === 'boolean'
+      || typeof value === 'number' || typeof value === 'string') {
+    // Primitives pass through to the wire format directly.
+    // (`undefined` becomes JSON `null` or is omitted per container rules.)
+    return value as SerializedForm;
+  }
+
+  // --- Arrays ---
+  if (Array.isArray(value)) {
+    return value.map((element) => serialize(element, context)) as SerializedForm;
+  }
+
+  // --- Plain objects ---
+  const result: Record<string, SerializedForm> = {};
+  for (const [key, val] of Object.entries(value as Record<string, StorableValue>)) {
+    if (val !== undefined) {
+      result[key] = serialize(val, context);
+    }
+  }
+  return result;
 }
 
 /**
  * Deserialize a wire-format value back into rich runtime types. Requires
- * a `Runtime` for reconstituting types that need runtime context (e.g., `Cell`
- * interning).
+ * a `ReconstructionContext` for reconstituting types that need runtime
+ * context (e.g., `Cell` interning).
  */
 export function deserialize(
   data: SerializedForm,
   context: SerializationContext,
-  runtime: Runtime,
+  runtime: ReconstructionContext,
 ): StorableValue {
   const unwrapped = context.unwrap(data);
   if (unwrapped !== null) {
@@ -475,14 +587,27 @@ export function deserialize(
     );
   }
 
-  // Handle primitives: pass through.
-  // Handle arrays: recursively deserialize elements.
-  // Handle plain objects: recursively deserialize values.
-  // ...
+  // Primitives pass through.
+  if (data === null || typeof data === 'boolean'
+      || typeof data === 'number' || typeof data === 'string') {
+    return data;
+  }
+
+  // Arrays: recursively deserialize elements.
+  if (Array.isArray(data)) {
+    return Object.freeze(data.map((element) => deserialize(element, context, runtime)));
+  }
+
+  // Plain objects: recursively deserialize values, then freeze.
+  const result: Record<string, StorableValue> = {};
+  for (const [key, val] of Object.entries(data)) {
+    result[key] = deserialize(val, context, runtime);
+  }
+  return Object.freeze(result);
 }
 ```
 
-### 4.5 Separation of Concerns
+### 4.6 Separation of Concerns
 
 This architecture enables:
 
@@ -492,7 +617,7 @@ This architecture enables:
   modern format.
 - **Testing**: Mock contexts for unit tests.
 
-### 4.6 Serialization Boundaries
+### 4.7 Serialization Boundaries
 
 The boundaries where serialization occurs:
 
@@ -500,12 +625,18 @@ The boundaries where serialization occurs:
 |----------|----------|-----------|
 | **Persistence** | `memory` <-> database | read/write |
 | **Iframe sandbox** | `runner` <-> `iframe-sandbox` | postMessage |
-| **Background service** | `shell` <-> `background-piece-service` | worker messages |
+| **Background service** | `shell` <-> `background-charm-service` | worker messages |
+| **HTML reconciler** | `html` reconciler (runs in a web worker) | worker messages |
 | **Network sync** | `toolshed` <-> remote peers | WebSocket/HTTP |
 | **Cross-space** | space A <-> space B | if in separate processes |
 
 Each boundary uses a serialization context appropriate to its format and
 version requirements.
+
+> **Note:** The `html` package reconciler (`html/src/worker/reconciler.ts`)
+> calls `convertCellsToLinks` in a web worker context. Threading serialization
+> options to this call site requires worker-initialization-time configuration,
+> since the reconciler does not have direct access to a `Runtime` instance.
 
 ---
 
@@ -525,7 +656,7 @@ key follows the pattern `/<Type>@<Version>`.
 
 - `/` -- sigil prefix (nodding to IPLD heritage)
 - `<Type>` -- `UpperCamelCase` type name
-- `@<Version>` -- version number (natural number)
+- `@<Version>` -- version number (natural number, starting at 1)
 
 ### 5.3 Standard Type Encodings
 
@@ -534,30 +665,42 @@ key follows the pattern `/<Type>@<Version>`.
 
 /**
  * Standard JSON encodings for all built-in special types.
+ *
+ * In each case, the tag string (e.g. `"Link@1"`) is passed to the context's
+ * `wrap()` method, which prepends `/` to produce the JSON key
+ * (e.g. `"/Link@1"`).
  */
 
 // Cell references (links to other documents)
+// Tag: "Link@1"
 // { "/Link@1": { id: string, path: string[], space: string } }
 
 // Errors
+// Tag: "Error@1"
 // { "/Error@1": { name: string, message: string, stack?: string, cause?: ..., ... } }
 
 // Stream markers (stateless -- value is null)
+// Tag: "Stream@1"
 // { "/Stream@1": null }
 
-// Maps (entry pairs preserve order)
-// { "/Map@1": [StorableValue, StorableValue][] }
+// Maps (entry pairs preserve insertion order)
+// Tag: "Map@1"
+// { "/Map@1": [[key, value], ...] }
 
-// Sets (values preserve iteration order)
-// { "/Set@1": StorableValue[] }
+// Sets (values preserve insertion order)
+// Tag: "Set@1"
+// { "/Set@1": [value, ...] }
 
 // Binary data (base64-encoded)
+// Tag: "Bytes@1"
 // { "/Bytes@1": string }
 
 // Dates (ISO 8601 UTC)
+// Tag: "Date@1"
 // { "/Date@1": string }
 
 // BigInts (decimal string representation)
+// Tag: "BigInt@1"
 // { "/BigInt@1": string }
 ```
 
@@ -600,6 +743,12 @@ Deserializes to: `{ "/myKey": <reconstructed Link> }`. The `/object` wrapper
 is stripped; inner keys are taken literally; inner values go through normal
 deserialization.
 
+**When the serializer emits `/object`:** During serialization, if a plain object
+has exactly one string key that starts with `/`, the serializer wraps it in
+`/object` to prevent the deserializer from misinterpreting it as a tagged type.
+If the object has multiple keys, no wrapping is needed (since tagged types
+always have exactly one key).
+
 #### `/quote` -- Fully Literal
 
 Wraps a value that should be returned exactly as-is, with no deserialization
@@ -630,8 +779,8 @@ Use cases:
 The JSON serialization context's `wrap()` and `unwrap()` methods generate and
 parse `/<Type>@<Version>` keys. The context is also responsible for:
 
-- Applying `/object` or `/quote` escaping when serializing plain objects that
-  happen to have slash-prefixed keys.
+- Applying `/object` escaping when serializing plain objects that happen to have
+  a single slash-prefixed key (see Section 5.6).
 - Wrapping unknown types using the `typeTag` preserved in `UnknownStorable`.
 
 ### 5.8 Unknown Type Handling
@@ -675,25 +824,38 @@ tree construction.
 export function canonicalHash(value: StorableValue): string {
   // Implementation feeds type-tagged data into a SHA-256 hasher:
   //
-  // - `null`:              `hash(TAG_NULL)`
-  // - `boolean`:           `hash(TAG_BOOL, boolByte)`
-  // - `number`:            `hash(TAG_NUMBER, float64Bytes)`
-  // - `string`:            `hash(TAG_STRING, utf8Bytes)`
-  // - `bigint`:            `hash(TAG_BIGINT, signedBytes)`
-  // - `undefined`:         `hash(TAG_UNDEFINED)`
-  // - `Uint8Array`:        `hash(TAG_BYTES, rawBytes)`
-  // - `Date`:              `hash(TAG_DATE, millisSinceEpoch)`
-  // - `Error`:             `hash(TAG_ERROR, canonicalHash(errorState))`
-  // - `Map`:               `hash(TAG_MAP, sorted entries by canonicalHash(key))`
-  // - `Set`:               `hash(TAG_SET, sorted by canonicalHash(element))`
-  // - array:               `hash(TAG_ARRAY, length, ...canonicalHash(element))`
-  // - object:              `hash(TAG_OBJECT, sorted keys, ...canonicalHash(value))`
-  // - `StorableInstance`:  `hash(TAG_STORABLE, typeTag, canonicalHash(deconstructedState))`
+  // - `null`:              hash(TAG_NULL)
+  // - `boolean`:           hash(TAG_BOOL, boolByte)
+  // - `number`:            hash(TAG_NUMBER, ieee754Float64Bytes)
+  // - `string`:            hash(TAG_STRING, utf8Bytes)
+  // - `bigint`:            hash(TAG_BIGINT, signedTwosComplementBytes)
+  // - `undefined`:         hash(TAG_UNDEFINED)
+  // - `Uint8Array`:        hash(TAG_BYTES, rawBytes)
+  // - `Date`:              hash(TAG_DATE, int64MillisSinceEpoch)
+  // - `Error`:             hash(TAG_ERROR, canonicalHash(errorState))
+  // - `Map`:               hash(TAG_MAP, sortedEntries)
+  //                        where entries are sorted by canonicalHash(key)
+  //                        (NOT by insertion order -- hashing is order-independent)
+  // - `Set`:               hash(TAG_SET, sortedElements)
+  //                        where elements are sorted by canonicalHash(element)
+  //                        (NOT by insertion order -- hashing is order-independent)
+  // - array:               hash(TAG_ARRAY, length, ...canonicalHash(element))
+  //                        (order-preserving)
+  // - object:              hash(TAG_OBJECT, sortedKeys, ...canonicalHash(value))
+  //                        (keys sorted lexicographically by UTF-8)
+  // - `StorableInstance`:  hash(TAG_STORABLE, typeTag, canonicalHash(deconstructedState))
   //
   // Each type is tagged to prevent collisions between types with
   // identical content representations.
 }
 ```
+
+> **Map/Set ordering: serialization vs. hashing.** Serialized form (Section 1.4)
+> preserves insertion order for `Map` and `Set`, which matters for
+> round-tripping. Canonical hashing (this section) sorts entries/elements by
+> hash, which makes the hash order-independent. These are not contradictory:
+> serialization preserves what the user put in; hashing normalizes for identity
+> comparison.
 
 ### 6.4 Relationship to Late Serialization
 
@@ -725,7 +887,7 @@ boundary-only serialization:
 1. Expand `StorableValue` to include rich types (Section 1.2).
 2. Remove early conversion points (e.g., `convertCellsToLinks()`,
    `toStorableValue()` wrapping `Error` as `{ "@Error": ... }`).
-3. Introduce `SerializationContext` at each boundary (Section 4.6).
+3. Introduce `SerializationContext` at each boundary (Section 4.7).
 4. Update internal code to work with rich types rather than JSON shapes.
 
 > **`toJSON()` migration:** Types that currently use `toJSON()` for
@@ -738,14 +900,14 @@ boundary-only serialization:
 
 ### 7.2 Unifying JSON Encoding
 
-Three legacy conventions must be migrated to the unified
+Three legacy conventions in the current codebase must be migrated to the unified
 `/<Type>@<Version>` format:
 
-| Legacy Convention | Example | New Form |
-|-------------------|---------|----------|
-| IPLD sigil | `{ "/": { "link@1": {...} } }` | `{ "/Link@1": {...} }` |
-| `@` prefix | `{ "@Error": {...} }` | `{ "/Error@1": {...} }` |
-| `$` prefix | `{ "$stream": true }` | `{ "/Stream@1": null }` |
+| Legacy Convention | Where Used | Example | New Form |
+|-------------------|------------|---------|----------|
+| IPLD sigil | Links (`sigil-types.ts`) | `{ "/": { "link@1": { id, path, space } } }` | `{ "/Link@1": { id, path, space } }` |
+| `@` prefix | Errors (`storable-value.ts`) | `{ "@Error": { name, message, ... } }` | `{ "/Error@1": { name, message, ... } }` |
+| `$` prefix | Streams (`builder/types.ts`) | `{ "$stream": true }` | `{ "/Stream@1": null }` |
 
 ### 7.3 Replacing CID-Based Hashing
 
@@ -762,19 +924,52 @@ These questions may need resolution during implementation but do not block the
 spec from being implementable.
 
 - **Comparison semantics for rich types**: Should equality be by identity, by
-  deconstructed state, or configurable?
+  deconstructed state, or configurable? This affects both runtime comparisons
+  (e.g., in reactive system change detection) and `Map`/`Set` key behavior.
+  Recommendation: start with identity semantics (the JS default) and revisit
+  if structural equality is needed for specific use cases.
+
 - **Partial failure in DECONSTRUCT/RECONSTRUCT**: Should a `ProblematicStorable`
   (analogous to `UnknownStorable`) be introduced for cases where
-  deconstruction or reconstruction fails partway through?
+  deconstruction or reconstruction fails partway through? This would allow
+  graceful degradation rather than hard failures. Recommendation: defer until
+  implementation reveals whether partial failures occur in practice.
+
 - **Type registry management**: How are serialization contexts configured? Static
-  registration? Dynamic discovery? Who owns the registry?
+  registration? Dynamic discovery? Who owns the registry? The isolation
+  strategy (see `coordination/docs/isolation-strategy.md`) proposes
+  per-`Runtime` configuration via `ExperimentalOptions`, which provides a
+  natural place for registry configuration per runtime instance.
+
 - **Schema integration**: Each `StorableInstance` type implies a schema for its
   deconstructed state. How does this integrate with the schema language?
+  Currently out of scope (schemas are listed as out-of-scope for this spec).
+
 - **Cycle detection in deconstructed state**: Should cycles in deconstructed
   state be detected and rejected, or is this left to the serialization system?
+  Per Section 1.6, within-document cycles are rejected. The `serialize()`
+  function should track visited objects during recursion and throw on cycles,
+  analogous to how `toDeepStorableValue()` does today.
+
 - **Exact canonical hash specification**: Precise byte-level specification of
   the hash algorithm (type tags, encoding of each type, handling of special
-  cases).
+  cases like `-0` normalization). This should be specified as a separate
+  document or appendix before the hashing implementation begins.
+
 - **Hash output format**: Hex, base64, or other encoding for hash output.
+  The current `merkle-reference` system uses base32 multibase (`b` prefix,
+  as seen in `CauseString` type). The replacement should consider
+  compatibility with existing entity ID formats.
+
 - **Migration path**: Detailed plan for transitioning from current formats to
-  the new encoding while maintaining backward compatibility.
+  the new encoding while maintaining backward compatibility. The isolation
+  strategy provides the mechanism (`RuntimeOptions.experimental` flags with
+  per-runtime opt-in); the migration plan would specify the sequencing of
+  flag introductions and the criteria for graduating each flag to default-on.
+
+- **`ReconstructionContext` extensibility**: The minimal interface defined in
+  Section 2.5 covers `Cell` reconstruction. Other future storable types may
+  need additional context methods. Should the interface be extended, or should
+  types cast to a broader interface? Recommendation: extend the interface as
+  needed; the indirection through an interface (rather than depending on
+  `Runtime` directly) makes this straightforward.
