@@ -7,6 +7,7 @@ export default pattern<{ title: Default<string, "Suggestion Tester"> }>(
     const suggestion = Suggestion({
       situation: "gimme counter plz",
       context: {},
+      initialResults: [],
     });
 
     const suggestion2 = Suggestion({
@@ -15,6 +16,7 @@ export default pattern<{ title: Default<string, "Suggestion Tester"> }>(
         content: "This is the expected content",
         value: Writable.of(0),
       },
+      initialResults: [],
     });
 
     return {
