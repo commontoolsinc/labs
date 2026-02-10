@@ -85,7 +85,7 @@ interface ClientView {
     console.log("Schema:", schema);
 
     expect(props?.view).toEqual({
-      $ref: "https://commontools.dev/schemas/vdom.json",
+      $ref: "https://commonfabric.org/schemas/vnode.json",
     });
 
     // Native types should not generate $defs
