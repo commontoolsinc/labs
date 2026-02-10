@@ -52,19 +52,20 @@ Example:
 }
 ```
 
-#### Legacy Formats (Still in Use)
+#### Legacy Formats
 
 **`$alias` format** — still actively produced by recipe serialization:
 ```json
 { "$alias": { "cell": { "/": "abc123" }, "path": ["value"] } }
 ```
 
-**`LegacyJSONCellLink`**:
-```json
-{ "cell": { "/": "abc123" }, "path": ["items", 0] }
-```
+**`LegacyJSONCellLink`** (`{ cell: { "/": string }, path: [...] }`) — removed
+from write and recognition code paths. The type definition still exists in
+`sigil-types.ts`, and backwards-compatible reading of previously persisted data
+is retained, but no code produces or actively recognizes this format.
 
-These are marked deprecated but remain in active use during recipe serialization.
+**Bare string link** (`{ "/": string }` with a plain string value) — removed
+from recognition entirely.
 
 ### Entity Identifiers
 
@@ -109,14 +110,17 @@ proposal to simplify content addressing.
 
 ### Legacy Format Deprecation
 
-The `$alias` and `LegacyJSONCellLink` formats should eventually be removed once
-all serialization paths produce `link@1` format.
+`LegacyJSONCellLink` and bare string links (`{ "/": string }`) have been removed
+from write and recognition code paths. `LegacyJSONCellLink` retains
+backwards-compatible reading for previously persisted data, but is otherwise
+inactive. The `$alias` format remains in active use by recipe serialization and
+should be removed once that path produces `link@1` format.
 
 ---
 
 ## Open Questions
 
-- When can legacy formats be removed?
+- When can the `$alias` format be removed?
 - How do cross-space references interact with permissions?
 - Should `toJSON()` on cells be removed once JSON is no longer the primary format?
 
