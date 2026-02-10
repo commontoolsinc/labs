@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 set -e
+
+# Redirect logs to stderr so they don't pollute stdout (used for machine-readable output)
+export LOG_TO_STDERR=1
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 error () {
   >&2 echo $1

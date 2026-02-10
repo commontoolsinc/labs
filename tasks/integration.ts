@@ -134,8 +134,6 @@ async function runPackageIntegration(
   if (pkg === "cli") {
     // CLI uses a special shell script
     env.CT_CLI_INTEGRATION_USE_LOCAL = "1";
-    // Redirect logs to stderr so they don't pollute stdout (used for machine-readable output)
-    env.LOG_TO_STDERR = "1";
     result = await runCommand(
       ["bash", "./integration/integration.sh"],
       { cwd: packageDir, env, inheritStdio: true },
