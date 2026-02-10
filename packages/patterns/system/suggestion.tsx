@@ -3,6 +3,7 @@ import {
   computed,
   type Default,
   generateObject,
+  ifElse,
   pattern,
   patternTool,
   toSchema,
@@ -71,14 +72,41 @@ Use the user context above to personalize your suggestions when relevant.`;
     return llmResult;
   });
 
+  // Pre-create VNodes outside the computed so they're stable across
+  // re-evaluations (creating VNodes inside a computed causes the
+  // reconciler to re-mount the DOM, losing inner subscriptions).
+  const freeformUI = (
+    <ct-cell-context $cell={llmResult}>
+      {computed(() => llmResult ?? "Searching...")}
+    </ct-cell-context>
+  );
+
+  const pickerUI = (
+    <ct-card>
+      <h2>Choose Result ({initialResults.length})</h2>
+      <ct-picker $items={initialResults} $selectedIndex={selectedIndex} />
+      <ct-button
+        variant="primary"
+        onClick={() => userConfirmedIndex.set(selectedIndex.get())}
+      >
+        Confirm Selection
+      </ct-button>
+    </ct-card>
+  );
+
   return {
     result,
     candidates: initialResults,
-    // [UI] still uses llmResult directly (same as original's `result`)
+    // [UI] must be a static VNode — the reconciler breaks if it's a computed.
+    // Use ifElse as a child to switch between modes at the reactive level.
     [UI]: (
-      <ct-cell-context $cell={llmResult}>
-        {computed(() => llmResult ?? "Searching...")}
-      </ct-cell-context>
+      <div style="display:contents">
+        {ifElse(
+          computed(() => initialResults.length > 0),
+          pickerUI,
+          freeformUI,
+        )}
+      </div>
     ),
   };
 });
