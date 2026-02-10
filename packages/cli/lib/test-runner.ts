@@ -132,6 +132,11 @@ export async function runTestPattern(
 
     // Wait for initial setup to complete
     await runtime.idle();
+    // Also wait for all in-flight storage subscriptions to settle.
+    // replica.poll() fires without await during mount(), so subscription
+    // updates can arrive after idle() resolves, scheduling more work.
+    await storageManager.synced();
+    await runtime.idle();
 
     // Keep the pattern reactive - store cancel function for cleanup
     sinkCancel = patternResult.sink(() => {});
