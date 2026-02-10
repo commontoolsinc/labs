@@ -2055,6 +2055,7 @@ export class StorageManager implements IStorageManager {
   #providers: Map<string, IStorageProviderWithReplica> = new Map();
   #subscription = SubscriptionManager.create();
   #crossSpacesPromises: Set<Promise<void>> = new Set();
+  private memoryV2 = false;
 
   static open(options: Options) {
     if (options.address.protocol === "memory:") {
@@ -2200,6 +2201,18 @@ export class StorageManager implements IStorageManager {
 
     await storageProvider.sync(id, selector);
     return cell;
+  }
+
+  enableMemoryV2(): void {
+    this.memoryV2 = true;
+  }
+
+  disableMemoryV2(): void {
+    this.memoryV2 = false;
+  }
+
+  isMemoryV2Enabled(): boolean {
+    return this.memoryV2;
   }
 }
 

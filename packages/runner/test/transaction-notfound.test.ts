@@ -68,6 +68,14 @@ class MockStorageManager implements IStorageManager {
 
   subscribe() {}
 
+  enableMemoryV2() {}
+
+  disableMemoryV2() {}
+
+  isMemoryV2Enabled() {
+    return false;
+  }
+
   close(): Promise<void> {
     return Promise.resolve();
   }

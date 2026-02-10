@@ -500,6 +500,18 @@ export class Runtime {
     return this.runner.start(resultCell);
   }
 
+  enableMemoryV2(): void {
+    this.storageManager.enableMemoryV2();
+  }
+
+  disableMemoryV2(): void {
+    this.storageManager.disableMemoryV2();
+  }
+
+  isMemoryV2Enabled(): boolean {
+    return this.storageManager.isMemoryV2Enabled();
+  }
+
   async healthCheck(): Promise<boolean> {
     try {
       const url = new URL("/_health", this.apiUrl);

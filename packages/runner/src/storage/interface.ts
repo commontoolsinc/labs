@@ -135,6 +135,21 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * @returns Promise that resolves when the cell sync is complete.
    */
   syncCell<T>(cell: Cell<T>): Promise<Cell<T>>;
+
+  /**
+   * Enable memory v2 mode.
+   */
+  enableMemoryV2(): void;
+
+  /**
+   * Disable memory v2 mode.
+   */
+  disableMemoryV2(): void;
+
+  /**
+   * Returns whether memory v2 mode is enabled.
+   */
+  isMemoryV2Enabled(): boolean;
 }
 
 export interface IRemoteStorageProviderSettings {

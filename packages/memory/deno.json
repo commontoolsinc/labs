@@ -42,7 +42,9 @@
     "./codec": "./codec.ts",
     "./reference": "./reference.ts",
     "./schema": "./schema.ts",
-    "./storable-value": "./storable-value.ts"
+    "./storable-value": "./storable-value.ts",
+    "./v2-types": "./v2-types.ts",
+    "./v2-reference": "./v2-reference.ts"
   },
   "imports": {
     "@db/sqlite": "jsr:@db/sqlite@^0.12.0",

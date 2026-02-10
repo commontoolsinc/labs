@@ -48,6 +48,11 @@ describe.skip("Push conflict", () => {
     syncCell<T>(cell: Cell<T>) {
       return Promise.resolve(cell);
     },
+    enableMemoryV2() {},
+    disableMemoryV2() {},
+    isMemoryV2Enabled() {
+      return false;
+    },
     close() {
       return Promise.resolve();
     },
