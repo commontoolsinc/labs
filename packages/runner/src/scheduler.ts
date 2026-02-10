@@ -704,53 +704,62 @@ export class Scheduler {
             this.handleError(error as Error, action);
           }
         } finally {
-          // Set up new reactive subscriptions after the action runs
+          // Set up new reactive subscriptions after the action runs.
+          // The inner try/catch guarantees resolve() is always called even if
+          // commit rejects or resubscribe throws, preventing a scheduler
+          // deadlock (runningPromise would never resolve otherwise).
+          try {
+            // Commit the transaction and wait for it to complete before
+            // resolving. Previously this was fire-and-forget, which caused
+            // commit promise callbacks to accumulate and block the event loop
+            // for seconds after execute() finished (see multi-push-action-timeout.md).
+            logger.timeStart("scheduler", "run", "commit");
+            const commitResult = await tx.commit();
+            logger.timeEnd("scheduler", "run", "commit");
 
-          // Commit the transaction and wait for it to complete before
-          // resolving. Previously this was fire-and-forget, which caused
-          // commit promise callbacks to accumulate and block the event loop
-          // for seconds after execute() finished (see multi-push-action-timeout.md).
-          logger.timeStart("scheduler", "run", "commit");
-          const commitResult = await tx.commit();
-          logger.timeEnd("scheduler", "run", "commit");
+            const log = txToReactivityLog(tx);
 
-          const log = txToReactivityLog(tx);
+            // Handle commit result synchronously now that we've awaited it.
+            if (commitResult.error) {
+              // On error, retry up to MAX_RETRIES_FOR_REACTIVE times. Note that
+              // on every attempt we still call the re-subscribe below, so that
+              // even after we run out of retries, this will be re-triggered when
+              // input data changes.
+              logger.info(
+                "schedule-run-error",
+                "Error committing transaction",
+                commitResult.error,
+              );
 
-          // Handle commit result synchronously now that we've awaited it.
-          if (commitResult.error) {
-            // On error, retry up to MAX_RETRIES_FOR_REACTIVE times. Note that
-            // on every attempt we still call the re-subscribe below, so that
-            // even after we run out of retries, this will be re-triggered when
-            // input data changes.
-            logger.info(
-              "schedule-run-error",
-              "Error committing transaction",
-              commitResult.error,
-            );
-
-            this.retries.set(action, (this.retries.get(action) ?? 0) + 1);
-            if (this.retries.get(action)! < MAX_RETRIES_FOR_REACTIVE) {
-              // Re-schedule the action to run again on conflict failure.
-              // Use resubscribe to set up dependencies/triggers from the log,
-              // then mark as dirty/pending to ensure it runs again.
-              this.resubscribe(action, log);
-              this.dirty.add(action);
-              this.pending.add(action);
-              this.queueExecution();
+              this.retries.set(action, (this.retries.get(action) ?? 0) + 1);
+              if (this.retries.get(action)! < MAX_RETRIES_FOR_REACTIVE) {
+                // Re-schedule the action to run again on conflict failure.
+                // Use resubscribe to set up dependencies/triggers from the log,
+                // then mark as dirty/pending to ensure it runs again.
+                this.resubscribe(action, log);
+                this.dirty.add(action);
+                this.pending.add(action);
+                this.queueExecution();
+              }
+            } else {
+              // Clear retries after successful commit.
+              this.retries.delete(action);
             }
-          } else {
-            // Clear retries after successful commit.
-            this.retries.delete(action);
+
+            logger.debug("schedule-run-complete", () => [
+              `[RUN] Action completed: ${actionId}`,
+              `Reads: ${log.reads.length}`,
+              `Writes: ${log.writes.length}`,
+              `Elapsed: ${elapsed.toFixed(2)}ms`,
+            ]);
+
+            this.resubscribe(action, log);
+          } catch (finalizeError) {
+            logger.error("schedule-finalize-error", () => [
+              `[RUN] Error finalizing action: ${actionId}`,
+              `${finalizeError}`,
+            ]);
           }
-
-          logger.debug("schedule-run-complete", () => [
-            `[RUN] Action completed: ${actionId}`,
-            `Reads: ${log.reads.length}`,
-            `Writes: ${log.writes.length}`,
-            `Elapsed: ${elapsed.toFixed(2)}ms`,
-          ]);
-
-          this.resubscribe(action, log);
           resolve(result);
         }
       };
