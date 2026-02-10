@@ -1,6 +1,6 @@
 import { beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Database } from "@db/sqlite";
+import type { Database } from "@db/sqlite";
 import { openV2Space, V2Space } from "../v2-space.ts";
 import { createBranch, DEFAULT_BRANCH } from "../v2-branch.ts";
 import { mergeBranch } from "../v2-merge.ts";
@@ -10,14 +10,13 @@ import { BranchDeletedError, BranchNotFoundError } from "../v2-branch.ts";
 
 const ENTITY_A: EntityId = "urn:entity:merge-a";
 const ENTITY_B: EntityId = "urn:entity:merge-b";
-const ENTITY_C: EntityId = "urn:entity:merge-c";
 
 /**
  * Helper: write a set fact on a branch, advance version, and update head.
  */
 function writeEntity(
   space: V2Space,
-  db: Database,
+  _db: Database,
   branch: string,
   entityId: EntityId,
   value: JSONValue,

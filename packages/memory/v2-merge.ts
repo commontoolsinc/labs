@@ -11,13 +11,11 @@
 
 import type { Database } from "@db/sqlite";
 import type { Commit, EntityId, JSONValue, StoredFact } from "./v2-types.ts";
-import type { Reference } from "merkle-reference";
 import { V2Space } from "./v2-space.ts";
 import {
   BranchDeletedError,
   BranchError,
   BranchNotFoundError,
-  DEFAULT_BRANCH,
   type ResolvedHead,
   resolveHead,
 } from "./v2-branch.ts";

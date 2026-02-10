@@ -27,6 +27,25 @@ export interface SimpleQuery extends QueryOptions {
 }
 
 // ---------------------------------------------------------------------------
+// Paginated query types
+// ---------------------------------------------------------------------------
+
+export interface PaginatedQuery extends SimpleQuery {
+  /** Max number of entities to return. */
+  limit: number;
+  /** Cursor: entity ID to start after (exclusive). */
+  cursor?: EntityId;
+}
+
+export interface PaginatedResult {
+  facts: FactSet;
+  /** Next cursor (entity ID), or undefined if no more results. */
+  nextCursor?: EntityId;
+  /** Total number of matching entities (if available). */
+  total?: number;
+}
+
+// ---------------------------------------------------------------------------
 // SQL
 // ---------------------------------------------------------------------------
 
@@ -44,6 +63,26 @@ FROM head h
 JOIN fact f ON f.hash = h.fact_hash
 JOIN value v ON v.hash = f.value_ref
 WHERE h.branch = ? AND h.version > ?;
+`;
+
+const LIST_HEADS_PAGINATED = `
+SELECT h.id, h.version, h.fact_hash, f.fact_type, v.data
+FROM head h
+JOIN fact f ON f.hash = h.fact_hash
+JOIN value v ON v.hash = f.value_ref
+WHERE h.branch = ? AND h.id > ?
+ORDER BY h.id ASC
+LIMIT ?;
+`;
+
+const LIST_HEADS_SINCE_PAGINATED = `
+SELECT h.id, h.version, h.fact_hash, f.fact_type, v.data
+FROM head h
+JOIN fact f ON f.hash = h.fact_hash
+JOIN value v ON v.hash = f.value_ref
+WHERE h.branch = ? AND h.version > ? AND h.id > ?
+ORDER BY h.id ASC
+LIMIT ?;
 `;
 
 // ---------------------------------------------------------------------------
@@ -143,4 +182,67 @@ export function executeSimpleQuery(
   }
 
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// Paginated query execution
+// ---------------------------------------------------------------------------
+
+/**
+ * Execute a paginated wildcard query.
+ * Returns a page of entities with a cursor for the next page.
+ *
+ * The cursor is entity-ID based (lexicographic ordering on `h.id`),
+ * ensuring version-consistent pagination when combined with `since`.
+ */
+export function executePaginatedQuery(
+  space: V2Space,
+  query: PaginatedQuery,
+): PaginatedResult {
+  const branch = query.branch ?? "";
+  const cursor = query.cursor ?? "";
+  const limit = query.limit + 1; // Fetch one extra to detect next page
+  const result: FactSet = {};
+
+  const sql = query.since !== undefined
+    ? LIST_HEADS_SINCE_PAGINATED
+    : LIST_HEADS_PAGINATED;
+  const params = query.since !== undefined
+    ? [branch, query.since, cursor, limit]
+    : [branch, cursor, limit];
+
+  const rows = space.store.prepare(sql).all(...params) as Array<{
+    id: string;
+    version: number;
+    fact_hash: string;
+    fact_type: string;
+    data: string | null;
+  }>;
+
+  const hasMore = rows.length > query.limit;
+  const pageRows = hasMore ? rows.slice(0, query.limit) : rows;
+
+  for (const row of pageRows) {
+    if (row.fact_type === "delete") continue;
+
+    let value: JSONValue | undefined;
+    if (row.fact_type === "set") {
+      value = row.data !== null ? JSON.parse(row.data) : undefined;
+    } else {
+      value = space.readEntity(branch, row.id as EntityId) ?? undefined;
+    }
+
+    result[row.id as EntityId] = {
+      value,
+      version: row.version,
+      hash: row.fact_hash as unknown as Reference,
+    };
+  }
+
+  return {
+    facts: result,
+    nextCursor: hasMore
+      ? (pageRows[pageRows.length - 1].id as EntityId)
+      : undefined,
+  };
 }

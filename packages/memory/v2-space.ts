@@ -203,10 +203,6 @@ INSERT INTO "commit" (hash, version, branch, reads)
 VALUES (?, ?, ?, ?);
 `;
 
-const GET_BRANCH_HEAD_VERSION = `
-SELECT head_version FROM branch WHERE name = ?;
-`;
-
 const GET_MAX_VERSION = `
 SELECT COALESCE(MAX(head_version), 0) AS max_version FROM branch;
 `;

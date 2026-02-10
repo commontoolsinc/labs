@@ -49,7 +49,8 @@
     "./v2-codec": "./v2-codec.ts",
     "./v2-branch": "./v2-branch.ts",
     "./v2-merge": "./v2-merge.ts",
-    "./v2-subscription": "./v2-subscription.ts"
+    "./v2-subscription": "./v2-subscription.ts",
+    "./v2-gc": "./v2-gc.ts"
   },
   "imports": {
     "@db/sqlite": "jsr:@db/sqlite@^0.12.0",
