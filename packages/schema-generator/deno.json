@@ -5,7 +5,8 @@
     ".": "./src/index.ts",
     "./interface": "./src/interface.ts",
     "./cell-brand": "./src/typescript/cell-brand.ts",
-    "./type-traversal": "./src/typescript/type-traversal.ts"
+    "./type-traversal": "./src/typescript/type-traversal.ts",
+    "./property-optionality": "./src/typescript/property-optionality.ts"
   },
   "imports": {
     "typescript": "npm:typescript"
