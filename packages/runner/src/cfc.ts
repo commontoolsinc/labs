@@ -238,6 +238,10 @@ export class ContextualFlowControl {
         schema,
         fullSchema,
       );
+      if (schema.$ref in embeddedSchemas) {
+        // Absolute $ref means we should reset our fullSchema
+        fullSchema = resolvedSchema;
+      }
       ContextualFlowControl.joinSchema(
         joined,
         resolvedSchema,
