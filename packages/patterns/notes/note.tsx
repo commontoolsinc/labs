@@ -161,6 +161,21 @@ const Note = pattern<NoteInput, NoteOutput>(
     parentNotebook,
     [SELF]: self,
   }) => {
+    // Type-based discovery for notebooks and "All Notes" piece
+    const notebookWish = wish<NotebookPiece>({
+      query: "#notebook",
+      scope: ["."],
+    });
+    const allNotesWish = wish<MinimalPiece>({
+      query: "#allNotes",
+      scope: ["."],
+    });
+
+    // Notebooks and "All Notes" from wish scope (must be before actions that reference them)
+    const notebooks = notebookWish.candidates;
+    const allNotesPiece = allNotesWish.result;
+
+    // Still need allPieces for write operations (push new notes, push backlinks)
     const { allPieces } =
       wish<{ allPieces: MinimalPiece[] }>({ query: "#default" }).result;
     const mentionable = wish<Default<MentionablePiece[], []>>(
@@ -233,12 +248,8 @@ const Note = pattern<NoteInput, NoteOutput>(
 
     const menuAllNotebooks = action(() => {
       menuOpen.set(false);
-      const existing = allPieces.find((piece: any) => {
-        const name = piece?.[NAME];
-        return typeof name === "string" && name.startsWith("All Notes");
-      });
-      if (existing) {
-        return navigateTo(existing);
+      if (allNotesPiece) {
+        return navigateTo(allNotesPiece);
       }
     });
 
@@ -248,24 +259,6 @@ const Note = pattern<NoteInput, NoteOutput>(
         content.set(detail.value);
       },
     );
-
-    // LAZY: Only filter notebooks when menu is open
-    const notebooks = computed(() => {
-      if (!menuOpen.get()) return [];
-      return allPieces.filter((piece: any) => {
-        const name = piece?.[NAME];
-        return typeof name === "string" && name.startsWith("📓");
-      });
-    });
-
-    // LAZY: Only check for "All Notes" piece when menu is open
-    const allNotesPiece = computed(() => {
-      if (!menuOpen.get()) return null;
-      return allPieces.find((piece: any) => {
-        const name = piece?.[NAME];
-        return typeof name === "string" && name.startsWith("All Notes");
-      });
-    });
 
     // LAZY: Only compute which notebooks contain this note when menu is open
     const containingNotebookNames = computed(() => {
