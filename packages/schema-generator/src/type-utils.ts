@@ -1,6 +1,7 @@
 import ts from "typescript";
 
 import type { SchemaDefinition } from "./interface.ts";
+import { NativeTypeFormatter } from "./formatters/native-type-formatter.ts";
 
 /**
  * Names that should be treated as Cell-like wrapper types.
@@ -224,30 +225,6 @@ export interface TypeWithInternals extends ts.Type {
   intrinsicName?: string;
 }
 
-const NATIVE_TYPE_SCHEMAS: Record<string, SchemaDefinition | boolean> = {
-  VNode: { $ref: "https://commontools.dev/schemas/vdom.json" },
-  Date: { type: "string", format: "date-time" },
-  URL: { type: "string", format: "uri" },
-  ArrayBuffer: true,
-  ArrayBufferLike: true,
-  SharedArrayBuffer: true,
-  ArrayBufferView: true,
-  Uint8Array: true,
-  Uint8ClampedArray: true,
-  Int8Array: true,
-  Uint16Array: true,
-  Int16Array: true,
-  Uint32Array: true,
-  Int32Array: true,
-  Float32Array: true,
-  Float64Array: true,
-  BigInt64Array: true,
-  BigUint64Array: true,
-  JSONSchemaObj: true,
-};
-
-const NATIVE_TYPE_NAMES = new Set(Object.keys(NATIVE_TYPE_SCHEMAS));
-
 /**
  * Resolve the most relevant symbol for a type, accounting for references,
  * aliases, and internal helper accessors exposed on some compiler objects.
@@ -319,11 +296,6 @@ export function getNativeTypeSchema(
           `Use Array<T> instead.`,
       );
     }
-
-    if (name && NATIVE_TYPE_NAMES.has(name)) {
-      return cloneSchemaDefinition(NATIVE_TYPE_SCHEMAS[name]!);
-    }
-
     return undefined;
   };
 
@@ -423,8 +395,12 @@ export function getNamedTypeKey(
   ) {
     return undefined;
   }
-  if (name && NATIVE_TYPE_NAMES.has(name)) return undefined;
 
+  // If we are overriding the type, don't return a named type key.
+  // This makes it so we include these inline instead of as $defs
+  if (NativeTypeFormatter.isNativeType(name)) {
+    return undefined;
+  }
   // Don't hoist generic type instantiations (Record<K,V>, Partial<T>, Box<T>, etc.)
   // These have aliasTypeArguments, meaning they're a generic type applied to specific type arguments
   // The name "Record" or "Box" is meaningless without the type parameters - what matters is the

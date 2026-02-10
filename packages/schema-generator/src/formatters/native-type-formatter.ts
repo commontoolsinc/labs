@@ -39,17 +39,9 @@ const NATIVE_TYPE_NAMES = new Set(Object.keys(NATIVE_TYPE_SCHEMAS));
  * for referencing embedded schema definitions.
  */
 export class NativeTypeFormatter implements TypeFormatter {
-  constructor(private schemaGenerator: SchemaGenerator) {
-    if (!schemaGenerator) {
-      throw new Error(
-        "NativeTypeFormatter requires a SchemaGenerator instance",
-      );
-    }
-  }
-
   supportsType(type: ts.Type, _context: GenerationContext): boolean {
     const typeName = NativeTypeFormatter.getTypeName(type);
-    return typeName !== undefined && NATIVE_TYPE_NAMES.has(typeName);
+    return NativeTypeFormatter.isNativeType(typeName);
   }
 
   formatType(type: ts.Type, _context: GenerationContext): SchemaDefinition {
@@ -96,5 +88,10 @@ export class NativeTypeFormatter implements TypeFormatter {
     }
 
     return name;
+  }
+
+  // We expose this so type-utils can skip generating $defs for these
+  public static isNativeType(typeName: string | undefined): boolean {
+    return typeName !== undefined && NATIVE_TYPE_NAMES.has(typeName);
   }
 }

@@ -93,4 +93,25 @@ interface ClientView {
     // Native types should not generate $defs
     expect((schema as Record<string, unknown>).$defs).toBeUndefined();
   });
+
+  it("treats JSONSchema as a native type when nested in Array", async () => {
+    const code = `
+interface Recipe {
+  argumentSchemas: Array<JSONSchema>;
+  testSchemas: JSONSchema[];
+}
+`;
+    const { type, checker } = await getTypeFromCode(code, "Recipe");
+    const generator = new SchemaGenerator();
+    const schema = asObjectSchema(generator.generateSchema(type, checker));
+    const props = schema.properties as Record<string, unknown> | undefined;
+
+    console.log(schema);
+    // These should just be replaced by true
+    expect(props?.argumentSchemas).toEqual({ type: "array", items: true });
+    expect(props?.testSchemas).toEqual({ type: "array", items: true });
+
+    // Native types should not generate $defs
+    expect((schema as Record<string, unknown>).$defs).toBeUndefined();
+  });
 });

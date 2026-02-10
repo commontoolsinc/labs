@@ -29,7 +29,7 @@ import { extractDocFromType } from "./doc-utils.ts";
 export class SchemaGenerator implements ISchemaGenerator {
   private formatters: TypeFormatter[] = [
     new CommonToolsFormatter(this),
-    new NativeTypeFormatter(this),
+    new NativeTypeFormatter(),
     new UnionFormatter(this),
     new IntersectionFormatter(this),
     // Prefer array detection before primitives to avoid Any-flag misrouting
@@ -284,9 +284,9 @@ export class SchemaGenerator implements ISchemaGenerator {
     }
 
     // All-named strategy:
-    // Hoist every named type (excluding wrappers filtered by getNamedTypeKey)
-    // into definitions and return $ref for non-root uses. Cycle detection
-    // still applies via definitionStack.
+    // Hoist every named type (excluding wrappers and native types filtered
+    // by getNamedTypeKey) into definitions and return $ref for non-root uses.
+    // Cycle detection still applies via definitionStack.
 
     // Check if we're in a wrapper context (Default/Cell/Stream/OpaqueRef).
     // Wrapper types erase to their inner type, so we must check typeNode to
