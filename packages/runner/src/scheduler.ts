@@ -47,8 +47,8 @@ import { ensureNotRenderThread } from "@commontools/utils/env";
 ensureNotRenderThread();
 
 const logger = getLogger("scheduler", {
-  enabled: false,
-  level: "debug",
+  enabled: true,
+  level: "warn",
 });
 
 // Re-export types that tests expect from scheduler
