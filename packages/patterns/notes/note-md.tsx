@@ -6,6 +6,7 @@ import {
   NAME,
   navigateTo,
   pattern,
+  type Stream,
   UI,
   type VNode,
   wish,
@@ -36,6 +37,10 @@ interface NoteMdOutput {
   isMentionable: false;
   /** Minimal UI for embedding in other patterns */
   embeddedUI: VNode;
+  /** Processed content with wiki-links converted to markdown links */
+  processedContent: string;
+  /** Stream to toggle checkboxes in content */
+  checkboxToggle: Stream<{ detail: { index: number; checked: boolean } }>;
 }
 
 export default pattern<NoteMdInput, NoteMdOutput>(
@@ -187,6 +192,8 @@ export default pattern<NoteMdInput, NoteMdOutput>(
       isHidden: true,
       isMentionable: false,
       embeddedUI: markdownViewer,
+      processedContent,
+      checkboxToggle: handleCheckboxToggle,
     };
   },
 );

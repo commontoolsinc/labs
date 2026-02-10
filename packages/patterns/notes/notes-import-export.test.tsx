@@ -220,6 +220,53 @@ export default pattern(() => {
     );
   });
 
+  // Create a second existing note for multi-note selection tests
+  const action_create_second_note = action(() => {
+    const note = Note({
+      title: "Second Note",
+      content: "Second note content",
+      noteId: "existing-note-2",
+    });
+    allPieces.push(note);
+  });
+
+  // Create a second existing notebook for multi-notebook selection tests
+  const action_create_second_notebook = action(() => {
+    const notebook = Notebook({
+      title: "Second Notebook",
+      notes: [],
+    });
+    allPieces.push(notebook);
+  });
+
+  // Set up import markdown with nested notebooks (parent containing child references)
+  const action_set_nested_notebook_markdown = action(() => {
+    importMarkdown.set(
+      makeExportMarkdown(
+        [
+          {
+            title: "Nested Note",
+            content: "Note in parent notebook",
+            noteId: "nested-note-1",
+            notebooks: "Parent Notebook",
+          },
+        ],
+        [
+          {
+            title: "Parent Notebook",
+            noteIds: ["nested-note-1"],
+            childNotebooks: ["Child Notebook"],
+          },
+          {
+            title: "Child Notebook",
+            noteIds: [],
+            childNotebooks: [],
+          },
+        ],
+      ),
+    );
+  });
+
   // Set up import markdown with mix of fresh and duplicate
   const action_set_mixed_markdown = action(() => {
     importMarkdown.set(
@@ -257,13 +304,34 @@ export default pattern(() => {
     instance.cancelImport.send();
   });
 
-  // Modal actions (unused but kept for future tests)
   const _action_open_import_modal = action(() => {
     instance.openImportModal.send();
   });
 
   const _action_close_import_modal = action(() => {
     instance.closeImportModal.send();
+  });
+
+  // Export actions
+  const action_open_export_all_modal = action(() => {
+    instance.openExportAllModal.send();
+  });
+
+  // Selection actions
+  const action_select_all_notes = action(() => {
+    instance.selectAllNotes.send();
+  });
+
+  const action_deselect_all_notes = action(() => {
+    instance.deselectAllNotes.send();
+  });
+
+  const action_select_all_notebooks = action(() => {
+    instance.selectAllNotebooks.send();
+  });
+
+  const action_deselect_all_notebooks = action(() => {
+    instance.deselectAllNotebooks.send();
   });
 
   const action_create_note = action(() => {
@@ -403,13 +471,77 @@ export default pattern(() => {
   // Assertions - Cancel import flow
   // ==========================================================================
 
-  // Cancel assertion (unused but kept for future tests)
-  const _assert_after_cancel_state_unchanged = computed(
+  const assert_after_cancel_state_unchanged = computed(
     () =>
       instance.noteCount === 1 &&
       instance.notebookCount === 1 &&
       [...instance.detectedDuplicates].length === 0 &&
       !instance.showDuplicateModal,
+  );
+
+  // ==========================================================================
+  // Assertions - Export all
+  // ==========================================================================
+
+  // After export: exportedMarkdown should contain v2 format header and note/notebook markers
+  const assert_export_has_v2_header = computed(
+    () => instance.exportedMarkdown.includes("Format: v2 (hierarchical)"),
+  );
+
+  const assert_export_has_notes_section = computed(
+    () => instance.exportedMarkdown.includes("<!-- === NOTES === -->"),
+  );
+
+  const assert_export_has_note_content = computed(
+    () =>
+      instance.exportedMarkdown.includes("COMMON_NOTE_START") &&
+      instance.exportedMarkdown.includes("Existing Note"),
+  );
+
+  const assert_export_has_notebooks_section = computed(
+    () => instance.exportedMarkdown.includes("<!-- === NOTEBOOKS === -->"),
+  );
+
+  const assert_export_has_notebook_content = computed(
+    () =>
+      instance.exportedMarkdown.includes("COMMON_NOTEBOOK_START") &&
+      instance.exportedMarkdown.includes("Existing Notebook"),
+  );
+
+  // ==========================================================================
+  // Assertions - Selection actions
+  // ==========================================================================
+
+  const assert_has_two_notes = computed(() => instance.noteCount === 2);
+  const assert_has_two_notebooks = computed(() => instance.notebookCount === 2);
+
+  const assert_all_notes_selected = computed(
+    () => [...instance.selectedNoteIndices].length === 2,
+  );
+
+  const assert_no_notes_selected = computed(
+    () => [...instance.selectedNoteIndices].length === 0,
+  );
+
+  const assert_all_notebooks_selected = computed(
+    () => [...instance.selectedNotebookIndices].length === 2,
+  );
+
+  const assert_no_notebooks_selected = computed(
+    () => [...instance.selectedNotebookIndices].length === 0,
+  );
+
+  // ==========================================================================
+  // Assertions - Nested notebook import
+  // ==========================================================================
+
+  // After importing nested notebooks: should have 1 note + 2 notebooks
+  const assert_nested_note_imported = computed(
+    () => instance.noteCount === 1,
+  );
+
+  const assert_nested_notebooks_imported = computed(
+    () => instance.notebookCount === 2,
   );
 
   // ==========================================================================
@@ -513,6 +645,58 @@ export default pattern(() => {
       { assertion: assert_duplicates_cleared },
       { assertion: assert_duplicate_modal_closed },
       { assertion: assert_all_items_imported },
+      { action: action_reset },
+
+      // === Test 8: Cancel import preserves state ===
+      { action: action_create_existing_note },
+      { action: action_create_existing_notebook },
+      { action: action_set_duplicate_both_markdown },
+      { action: action_analyze_import },
+      { assertion: assert_both_duplicates_detected },
+      { assertion: assert_duplicate_modal_shown },
+      { action: action_cancel_import },
+      { assertion: assert_after_cancel_state_unchanged },
+      { action: action_reset },
+
+      // === Test 9: Export all generates v2 format with notes and notebooks ===
+      { action: action_create_existing_note },
+      { action: action_create_existing_notebook },
+      { assertion: assert_has_one_note },
+      { assertion: assert_has_one_notebook },
+      { action: action_open_export_all_modal },
+      { assertion: assert_export_has_v2_header },
+      { assertion: assert_export_has_notes_section },
+      { assertion: assert_export_has_note_content },
+      { assertion: assert_export_has_notebooks_section },
+      { assertion: assert_export_has_notebook_content },
+      { action: action_reset },
+
+      // === Test 10: Select all / deselect all notes ===
+      { action: action_create_existing_note },
+      { action: action_create_second_note },
+      { action: action_create_existing_notebook },
+      { action: action_create_second_notebook },
+      { assertion: assert_has_two_notes },
+      { assertion: assert_has_two_notebooks },
+      // Select all notes
+      { action: action_select_all_notes },
+      { assertion: assert_all_notes_selected },
+      // Deselect all notes
+      { action: action_deselect_all_notes },
+      { assertion: assert_no_notes_selected },
+      // Select all notebooks
+      { action: action_select_all_notebooks },
+      { assertion: assert_all_notebooks_selected },
+      // Deselect all notebooks
+      { action: action_deselect_all_notebooks },
+      { assertion: assert_no_notebooks_selected },
+      { action: action_reset },
+
+      // === Test 11: Import nested notebooks ===
+      { action: action_set_nested_notebook_markdown },
+      { action: action_analyze_import },
+      { assertion: assert_nested_note_imported },
+      { assertion: assert_nested_notebooks_imported },
     ],
     // Expose for debugging
     instance,

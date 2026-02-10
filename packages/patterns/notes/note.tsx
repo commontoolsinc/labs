@@ -42,6 +42,8 @@ interface NoteOutput {
   grep: PatternToolResult<{ content: string }>;
   translate: PatternToolResult<{ content: string }>;
   editContent: Stream<{ detail: { value: string } }>;
+  /** Parent notebook reference, null if not in a notebook */
+  parentNotebook: NotebookPiece | null;
   /** Minimal UI for embedding in containers like Record. Use via ct-render variant="embedded". */
   embeddedUI: VNode;
 }
@@ -529,6 +531,7 @@ const Note = pattern<NoteInput, NoteOutput>(
       backlinks,
       isHidden,
       noteId,
+      parentNotebook,
       grep: patternTool(grepFn, { content }),
       translate: patternTool(translateFn, { content }),
       editContent,
