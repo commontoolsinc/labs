@@ -2055,7 +2055,7 @@ export class StorageManager implements IStorageManager {
   #providers: Map<string, IStorageProviderWithReplica> = new Map();
   #subscription = SubscriptionManager.create();
   #crossSpacesPromises: Set<Promise<void>> = new Set();
-  private memoryV2 = false;
+  private memoryV2 = true;
 
   static open(options: Options) {
     if (options.address.protocol === "memory:") {

@@ -65,74 +65,104 @@ export type * from "./interface.ts";
 export const PREPARE = `
 BEGIN TRANSACTION;
 
--- Create table for storing JSON data.
--- ⚠️ We need make this NOT NULL because SQLite does not uphold uniqueness on NULL
-CREATE TABLE IF NOT EXISTS datum (
-  this TEXT NOT NULL PRIMARY KEY,     -- Merkle reference for this JSON
-  source JSON                         -- Source for this JSON
+-- Value store (replaces v1 datum)
+CREATE TABLE IF NOT EXISTS value (
+  hash  TEXT NOT NULL PRIMARY KEY,
+  data  JSON
 );
+INSERT OR IGNORE INTO value (hash, data) VALUES ('undefined', NULL);
+INSERT OR IGNORE INTO value (hash, data) VALUES ('__empty__', NULL);
 
--- We create special record to represent "undefined" which does not a valid
--- JSON data type. We need this record to join fact.is on datum.this
-INSERT OR IGNORE INTO datum (this, source) VALUES ('undefined', NULL);
+-- Commit log
+CREATE TABLE IF NOT EXISTS "commit" (
+  hash        TEXT    NOT NULL PRIMARY KEY,
+  version     INTEGER NOT NULL,
+  branch      TEXT    NOT NULL DEFAULT '',
+  reads       JSON,
+  created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_commit_version ON "commit" (version);
+CREATE INDEX IF NOT EXISTS idx_commit_branch ON "commit" (branch);
 
--- Fact table holds complete history of assertions and retractions. It has
--- n:1 mapping with datum table implying that we could have multiple entity
--- assertions with a same JSON value. Claimed n:1 mapping is guaranteed through
--- a foreign key constraint.
+-- Fact history (replaces v1 fact, adds branch/commit_ref/fact_type/type)
 CREATE TABLE IF NOT EXISTS fact (
-  this    TEXT NOT NULL PRIMARY KEY,  -- Merkle reference for { the, of, is, cause }
-  the     TEXT NOT NULL,              -- Kind of a fact e.g. "application/json"
-  of      TEXT NOT NULL,              -- Entity identifier fact is about
-  'is'    TEXT NOT NULL,              -- Merkle reference of asserted value or "undefined" if retraction
-  cause   TEXT,                       -- Causal reference to prior fact (It is NULL for a first assertion)
-  since   INTEGER NOT NULL,           -- Lamport clock since when this fact was in effect
-  FOREIGN KEY('is') REFERENCES datum(this)
+  hash        TEXT    NOT NULL PRIMARY KEY,
+  type        TEXT    NOT NULL DEFAULT 'application/json',
+  id          TEXT    NOT NULL,
+  value_ref   TEXT    NOT NULL,
+  parent      TEXT,
+  branch      TEXT    NOT NULL DEFAULT '',
+  version     INTEGER NOT NULL,
+  commit_ref  TEXT    NOT NULL,
+  fact_type   TEXT    NOT NULL DEFAULT 'set',
+  FOREIGN KEY (value_ref)  REFERENCES value(hash),
+  FOREIGN KEY (commit_ref) REFERENCES "commit"(hash)
 );
--- Index via "since" field to allow for efficient time queries
-CREATE INDEX IF NOT EXISTS fact_since ON fact (since); -- Index to query by "since" field
+CREATE INDEX IF NOT EXISTS idx_fact_version    ON fact (version);
+CREATE INDEX IF NOT EXISTS idx_fact_id         ON fact (id);
+CREATE INDEX IF NOT EXISTS idx_fact_id_version ON fact (id, version);
+CREATE INDEX IF NOT EXISTS idx_fact_commit     ON fact (commit_ref);
+CREATE INDEX IF NOT EXISTS idx_fact_branch     ON fact (branch);
 
--- Memory table holds latest assertion / retraction for each entity. In theory
--- it has n:1 mapping with fact table, but in practice it is 1:1 mapping because
--- initial cause is derived from {the, of} seed and there for it is practically
--- guaranteed to be unique if we disregard astronomically tiny chance of hash
--- collision. Claimed n:1 mapping is guaranteed through a foreign key constraint.
-CREATE TABLE IF NOT EXISTS memory (
-  the     TEXT NOT NULL,        -- Kind of a fact e.g. "application/json"
-  of      TEXT NOT NULL,        -- Entity identifier fact is about
-  fact    TEXT NOT NULL,        -- Reference to the fact
-  FOREIGN KEY(fact) REFERENCES fact(this),
-  PRIMARY KEY (the, of)         -- Ensure that we have only one fact per entity
+-- Current head per entity (replaces v1 memory, adds branch/version)
+CREATE TABLE IF NOT EXISTS head (
+  branch    TEXT    NOT NULL DEFAULT '',
+  type      TEXT    NOT NULL DEFAULT 'application/json',
+  id        TEXT    NOT NULL,
+  fact_hash TEXT    NOT NULL,
+  version   INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (branch, type, id),
+  FOREIGN KEY (fact_hash) REFERENCES fact(hash)
+);
+CREATE INDEX IF NOT EXISTS idx_head_branch ON head (branch);
+CREATE INDEX IF NOT EXISTS idx_head_type   ON head (type);
+CREATE INDEX IF NOT EXISTS idx_head_id     ON head (id);
+
+-- Snapshots for patch acceleration
+CREATE TABLE IF NOT EXISTS snapshot (
+  id         TEXT    NOT NULL,
+  version    INTEGER NOT NULL,
+  value_ref  TEXT    NOT NULL,
+  branch     TEXT    NOT NULL DEFAULT '',
+  PRIMARY KEY (branch, id, version),
+  FOREIGN KEY (value_ref) REFERENCES value(hash)
+);
+CREATE INDEX IF NOT EXISTS idx_snapshot_lookup ON snapshot (branch, id, version);
+
+-- Branch metadata
+CREATE TABLE IF NOT EXISTS branch (
+  name            TEXT    NOT NULL PRIMARY KEY,
+  parent_branch   TEXT,
+  fork_version    INTEGER,
+  head_version    INTEGER NOT NULL DEFAULT 0,
+  created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+  deleted_at      TEXT,
+  FOREIGN KEY (parent_branch) REFERENCES branch(name)
+);
+INSERT OR IGNORE INTO branch (name, head_version) VALUES ('', 0);
+
+-- Blob storage
+CREATE TABLE IF NOT EXISTS blob_store (
+  hash          TEXT    NOT NULL PRIMARY KEY,
+  data          BLOB    NOT NULL,
+  content_type  TEXT    NOT NULL,
+  size          INTEGER NOT NULL
 );
 
--- Index so we can efficiently search by "the" field.
-CREATE INDEX IF NOT EXISTS memory_the ON memory (the);
--- Index so we can efficiently search by "of" field.
-CREATE INDEX IF NOT EXISTS memory_of ON memory (of);
-
--- State view is effectively a memory table with all the foreign keys resolved
--- Note we use a view because we have 1:n:m relation among memory:fact:datum
--- in order to deduplicate data.
+-- Backward-compatible state view (v1 column aliases, default branch only)
 CREATE VIEW IF NOT EXISTS state AS
 SELECT
-  memory.the AS the,
-  memory.of AS of,
-  datum.source AS 'is',
-  fact.cause AS cause,
-  memory.fact AS fact,
-  datum.this AS proof,
-  fact.since AS since
-FROM
-  memory
-JOIN
-  -- We use inner join because we have 1:n mapping between memory:fact tables
-  -- guaranteed through foreign key constraint.
-  fact ON memory.fact = fact.this
-  -- We use inner join here because we have 1:n mapping between fact:datum
-  -- tables guaranteed through a foreign key constraint. We also prefer inner
-  -- join because it's generally more efficient that outer join.
-JOIN
-  datum ON datum.this = fact.'is';
+  h.type AS the,
+  h.id AS of,
+  v.data AS 'is',
+  f.parent AS cause,
+  h.fact_hash AS fact,
+  v.hash AS proof,
+  f.version AS since
+FROM head h
+JOIN fact f ON h.fact_hash = f.hash
+JOIN value v ON f.value_ref = v.hash
+WHERE h.branch = '';
 
 COMMIT;
 `;
@@ -154,20 +184,21 @@ const NEW_DB_PRAGMAS = `
 `;
 
 const IMPORT_DATUM =
-  `INSERT OR IGNORE INTO datum (this, source) VALUES (:this, :source);`;
+  `INSERT OR IGNORE INTO value (hash, data) VALUES (:hash, :data);`;
 
 const IMPORT_FACT =
-  `INSERT OR IGNORE INTO fact (this, the, of, 'is', cause, since) VALUES (:this, :the, :of, :is, :cause, :since);`;
+  `INSERT OR IGNORE INTO fact (hash, type, id, value_ref, parent, branch, version, commit_ref, fact_type) VALUES (:hash, :type, :id, :value_ref, :parent, '', :version, :commit_ref, :fact_type);`;
 
 const IMPORT_MEMORY =
-  `INSERT OR IGNORE INTO memory (the, of, fact) VALUES (:the, :of, :fact);`;
+  `INSERT OR IGNORE INTO head (branch, type, id, fact_hash, version) VALUES ('', :type, :id, :fact_hash, :version);`;
 
-const SWAP = `UPDATE memory
-  SET fact = :fact
+const SWAP = `UPDATE head
+  SET fact_hash = :fact_hash, version = :version
 WHERE
-  the = :the
-  AND of = :of
-  AND fact = :cause;
+  branch = ''
+  AND type = :type
+  AND id = :id
+  AND fact_hash = :parent;
 `;
 
 const EXPORT = `SELECT
@@ -191,28 +222,28 @@ ORDER BY
 
 // Needs `of` and `the`
 const CAUSE_CHAIN = `WITH RECURSIVE cause_of(c, f) AS (
-    SELECT cause, this FROM fact WHERE fact.of = :of AND fact.the = :the
+    SELECT parent, hash FROM fact WHERE fact.id = :of AND fact.type = :the
     UNION
-    SELECT cause, this FROM fact, cause_of WHERE fact.this = cause_of.c
+    SELECT parent, hash FROM fact, cause_of WHERE fact.hash = cause_of.c
   )
   SELECT c as cause, f as fact FROM cause_of
 `;
 
 // Needs `fact`
 const GET_FACT = `SELECT
-  fact.the AS the,
-  fact.of AS of,
-  datum.source AS 'is',
-  fact.cause AS cause,
-  fact.this AS fact,
-  datum.this AS proof,
-  fact.since AS since
+  fact.type AS the,
+  fact.id AS of,
+  value.data AS 'is',
+  fact.parent AS cause,
+  fact.hash AS fact,
+  value.hash AS proof,
+  fact.version AS since
 FROM
   fact
 JOIN
-  datum ON datum.this = fact.'is'
+  value ON value.hash = fact.value_ref
 WHERE
-  fact.this = :fact;
+  fact.hash = :fact;
 `;
 
 // Batch query for labels using json_each() to handle array of 'of' values
@@ -246,6 +277,8 @@ type PreparedStatements = {
   importFact?: Statement;
   importMemory?: Statement;
   swap?: Statement;
+  insertCommit?: Statement;
+  updateBranchHead?: Statement;
 };
 
 const preparedStatementsCache = new WeakMap<Database, PreparedStatements>();
@@ -415,6 +448,24 @@ const readAddress = (
 };
 
 /**
+ * Detect v1 schema (datum table) and drop old tables to allow v2 schema
+ * creation. Data is not migrated — old databases start fresh with v2.
+ */
+const migrateV1ToV2 = (database: Database): void => {
+  const hasV1 = database.prepare(
+    "SELECT COUNT(*) as cnt FROM sqlite_master WHERE type='table' AND name='datum'",
+  ).get() as { cnt: number };
+  if (hasV1.cnt > 0) {
+    database.exec(`
+      DROP VIEW IF EXISTS state;
+      DROP TABLE IF EXISTS memory;
+      DROP TABLE IF EXISTS fact;
+      DROP TABLE IF EXISTS datum;
+    `);
+  }
+};
+
+/**
  * Creates a connection to the existing replica. Errors if replica does not
  * exist.
  */
@@ -438,6 +489,7 @@ export const connect = async <Subject extends MemorySpace>({
         create: false,
       });
       database.exec(PRAGMAS);
+      migrateV1ToV2(database);
       database.exec(PREPARE);
       const session = new Space(subject as Subject, database);
       return { ok: session };
@@ -475,6 +527,7 @@ export const open = async <Subject extends MemorySpace>({
       });
       database.exec(NEW_DB_PRAGMAS);
       database.exec(PRAGMAS);
+      migrateV1ToV2(database);
       database.exec(PREPARE);
       const session = new Space(subject as Subject, database);
       return { ok: session };
@@ -747,8 +800,8 @@ const importDatum = <Space extends MemorySpace>(
       IMPORT_DATUM,
     );
     stmt.run({
-      this: is,
-      source: JSON.stringify(datum),
+      hash: is,
+      data: JSON.stringify(datum),
     });
 
     return is;
@@ -786,7 +839,11 @@ const iterateTransaction = function* (
 const swap = <Space extends MemorySpace>(
   session: Session<Space>,
   source: Retract | Assert | Claim,
-  { since, transaction }: { since: number; transaction: Transaction<Space> },
+  { since, transaction, commitRef }: {
+    since: number;
+    transaction: Transaction<Space>;
+    commitRef: string;
+  },
 ) => {
   const [{ the, of, is }, expect] = source.assert
     ? [source.assert, source.assert.cause]
@@ -828,12 +885,14 @@ const swap = <Space extends MemorySpace>(
       IMPORT_FACT,
     );
     imported = importFactStmt.run({
-      this: fact,
-      the,
-      of,
-      is: datumRef!,
-      cause,
-      since,
+      hash: fact,
+      type: the,
+      id: of,
+      value_ref: datumRef!,
+      parent: cause,
+      version: since,
+      commit_ref: commitRef,
+      fact_type: source.retract ? "delete" : "set",
     });
   }
 
@@ -854,7 +913,12 @@ const swap = <Space extends MemorySpace>(
       "importMemory",
       IMPORT_MEMORY,
     );
-    importMemoryStmt.run({ the, of, fact });
+    importMemoryStmt.run({
+      type: the,
+      id: of,
+      fact_hash: fact,
+      version: since,
+    });
   }
 
   // Finally we perform a memory swap, using conditional update so it only
@@ -862,7 +926,13 @@ const swap = <Space extends MemorySpace>(
   // value to figure out whether update took place, if it is `0` no records
   // were updated indicating potential conflict which we handle below.
   const swapStmt = getPreparedStatement(session.store, "swap", SWAP);
-  const updated = swapStmt.run({ fact, cause, the, of });
+  const updated = swapStmt.run({
+    fact_hash: fact,
+    parent: cause,
+    type: the,
+    id: of,
+    version: since,
+  });
 
   // If no records were updated it implies that there was no record with
   // matching `cause`. It may be because `cause` referenced implicit fact
@@ -905,6 +975,12 @@ const swap = <Space extends MemorySpace>(
   }
 };
 
+const INSERT_COMMIT =
+  `INSERT OR IGNORE INTO "commit" (hash, version, branch) VALUES (:hash, :version, '');`;
+
+const UPDATE_BRANCH_HEAD =
+  `UPDATE branch SET head_version = :version WHERE name = '';`;
+
 const commit = <Space extends MemorySpace>(
   session: Session<Space>,
   transaction: Transaction<Space>,
@@ -920,23 +996,48 @@ const commit = <Space extends MemorySpace>(
     ]
     : [0, unclaimedRef({ the, of })];
 
-  const commit = createCommit({
+  const commitData = createCommit({
     space: of,
     since,
     transaction,
     cause,
   });
 
+  // Compute commit hash and insert into commit table
+  const commitRef = refer(commitData).toString();
+  const insertCommitStmt = getPreparedStatement(
+    session.store,
+    "insertCommit",
+    INSERT_COMMIT,
+  );
+  insertCommitStmt.run({ hash: commitRef, version: since });
+
+  const swapContext = { ...commitData.is, commitRef };
+
   for (const fact of iterateTransaction(transaction)) {
-    swap(session, fact, commit.is);
+    swap(session, fact, swapContext);
   }
 
-  swap(session, { assert: commit }, commit.is);
+  swap(session, { assert: commitData }, swapContext);
+
+  // Update branch head version
+  const updateBranchStmt = getPreparedStatement(
+    session.store,
+    "updateBranchHead",
+    UPDATE_BRANCH_HEAD,
+  );
+  updateBranchStmt.run({ version: since });
 
   const changes: Commit<Space> = {} as Commit<Space>;
-  set(changes, commit.of, commit.the, commit.cause.toString() as CauseString, {
-    is: commit.is,
-  });
+  set(
+    changes,
+    commitData.of,
+    commitData.the,
+    commitData.cause.toString() as CauseString,
+    {
+      is: commitData.is,
+    },
+  );
   return changes;
 };
 
