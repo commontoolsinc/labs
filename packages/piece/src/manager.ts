@@ -190,43 +190,28 @@ export class PieceManager {
 
     // Send each piece and wait for transaction commit.
     // The onCommit callback fires both on success AND when retries are
-    // exhausted (scheduler.ts ~line 2089). We must check tx.status() to
+    // exhausted (scheduler.ts ~line 2089). We check tx.status() to
     // distinguish the two — otherwise pieces are silently dropped.
-    //
-    // When the addPiece handler's transaction conflicts (e.g. during
-    // default-app reactive graph stabilization), we retry after waiting
-    // for the scheduler to settle. The idle() wait is key: the conflict
-    // happens because computed values are still updating concurrently,
-    // and once idle the graph has stabilized.
-    const MAX_ADD_RETRIES = 3;
+    // Retries are handled by the scheduler internally.
     for (const piece of newPieces) {
-      let lastError: Error | undefined;
-      for (let attempt = 0; attempt < MAX_ADD_RETRIES; attempt++) {
-        try {
-          await new Promise<void>((resolve, reject) => {
-            addPieceHandler.send({ piece }, (tx) => {
-              if (tx.status().status === "error") {
-                reject(
-                  new Error(
-                    "Piece registration failed: addPiece transaction aborted after retries",
-                  ),
-                );
-              } else {
-                resolve();
-              }
-            });
-          });
-          lastError = undefined;
-          break;
-        } catch (e) {
-          lastError = e instanceof Error ? e : new Error(String(e));
-          // Wait for the reactive graph to settle before retrying
-          await this.runtime.idle();
-        }
-      }
-      if (lastError) {
-        throw lastError;
-      }
+      await new Promise<void>((resolve, reject) => {
+        addPieceHandler.send({ piece }, (tx) => {
+          const txStatus = tx.status();
+          if (txStatus.status === "error") {
+            console.error(
+              "Piece registration failed: addPiece transaction error:",
+              txStatus.error,
+            );
+            reject(
+              new Error(
+                "Piece registration failed: addPiece transaction aborted after retries",
+              ),
+            );
+          } else {
+            resolve();
+          }
+        });
+      });
     }
 
     await this.runtime.idle();
