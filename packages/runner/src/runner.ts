@@ -1415,6 +1415,8 @@ export class Runner {
       // different result, so don't do that.
       let previousResultCell: Cell<any> | undefined;
 
+      let previouslyInvalidArgument = false;
+
       const action: Action = (tx: IExtendedStorageTransaction) => {
         const frame = pushFrameFromCause(
           { inputs, outputs, fn: fn.toString() },
@@ -1442,11 +1444,13 @@ export class Runner {
           const isValidArgument = module.argumentSchema === false ||
             argument !== undefined;
 
-          if (!isValidArgument) {
+          if (!isValidArgument || previouslyInvalidArgument) {
             logger.info(
               "action",
               () => [
-                "action argument is undefined (potential schema mismatch) -- not running",
+                isValidArgument
+                  ? "action argument is valid now -- running"
+                  : "action argument is undefined (potential schema mismatch) -- not running",
                 module.argumentSchema,
                 inputsCell.getRaw(),
                 (() => {
@@ -1463,7 +1467,9 @@ export class Runner {
                 inputsCell,
               ],
             );
+            previouslyInvalidArgument = !isValidArgument;
           }
+
           // We only run the action if we have a valid argument, or the function's schema
           // is false (like an input of `never`).
           const result = isValidArgument ? fn(argument) : undefined;
