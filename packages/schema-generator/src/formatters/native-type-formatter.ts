@@ -6,6 +6,7 @@ import type {
 } from "../interface.ts";
 
 const NATIVE_TYPE_SCHEMAS: Record<string, SchemaDefinition | boolean> = {
+  // This schema is embedded in the code, so we can have simpler links.
   VNode: { $ref: "https://commontools.dev/schemas/vdom.json" },
   Date: { type: "string", format: "date-time" },
   URL: { type: "string", format: "uri" },
@@ -24,6 +25,7 @@ const NATIVE_TYPE_SCHEMAS: Record<string, SchemaDefinition | boolean> = {
   Float64Array: true,
   BigInt64Array: true,
   BigUint64Array: true,
+  // These types are complex, and aren't a meaningful filter
   JSONSchemaObj: true,
   JSONSchema: true,
 };
