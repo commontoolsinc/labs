@@ -1,13 +1,13 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
-  buildTransactCommand,
+  buildGraphQueryCommand,
   buildQueryCommand,
   buildSubscribeCommand,
+  buildTransactCommand,
   buildUnsubscribeCommand,
-  buildGraphQueryCommand,
-  parseTransactResult,
   parseQueryResult,
+  parseTransactResult,
 } from "../src/storage/v2-consumer.ts";
 import type { SpaceId } from "@commontools/memory/v2-types";
 
