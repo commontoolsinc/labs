@@ -142,7 +142,7 @@ jobs:
       - name: 🧪 Run CLI integration tests
         working-directory: packages/cli
         run: |
-          API_URL=http://localhost:8000 ./integration/integration.sh
+          LOG_TO_STDERR=1 API_URL=http://localhost:8000 ./integration/integration.sh
 
   pattern-integration-test:
     name: "Pattern Integration Tests"
