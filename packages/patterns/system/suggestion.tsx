@@ -8,6 +8,7 @@ import {
   patternTool,
   toSchema,
   UI,
+  type VNode,
   wish,
   type WishState,
   Writable,
@@ -20,7 +21,7 @@ export default pattern<
     context: { [id: string]: any };
     initialResults: Default<Writable<unknown>[], []>;
   },
-  WishState<Writable<any>>
+  WishState<Writable<any>> & { [UI]: VNode }
 >(({ situation, context, initialResults }) => {
   // --- Picker state (used when initialResults is non-empty) ---
   const selectedIndex = Writable.of(0);
@@ -66,7 +67,9 @@ Use the user context above to personalize your suggestions when relevant.`;
 
   const llmResult = computed(() => suggestion.result?.cell);
 
-  // --- Unified result for data consumers ---
+  // Reactively select between picker and LLM result. This must be a named
+  // computed variable — the CTS transformer leaves named Cells as-is in the
+  // return object, which lets wish.ts read the result via .get().
   const result = computed(() => {
     if (initialResults.length > 0) return pickerResult;
     return llmResult;
