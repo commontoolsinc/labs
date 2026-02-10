@@ -65,7 +65,7 @@ import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
 import "./builtins/index.ts";
 import { isCellResult } from "./query-result-proxy.ts";
 
-const logger = getLogger("runner");
+const logger = getLogger("runner", { enabled: true, level: "info" });
 
 export class Runner {
   readonly cancels = new Map<`${MemorySpace}/${URI}`, Cancel>();
@@ -1263,6 +1263,18 @@ export class Runner {
                 "action argument is undefined (potential schema mismatch) -- not running",
                 module.argumentSchema,
                 inputsCell.getRaw(),
+                (() => {
+                  let result;
+                  try {
+                    result = JSON.stringify(
+                      inputsCell.getAsQueryResult([], tx),
+                    );
+                  } catch (_e) {
+                    result = "(Can't serialize to JSON)";
+                  }
+                  return result;
+                })(),
+                inputsCell,
               ],
             );
           }
@@ -1431,12 +1443,24 @@ export class Runner {
             argument !== undefined;
 
           if (!isValidArgument) {
-            logger.debug(
+            logger.info(
               "action",
               () => [
                 "action argument is undefined (potential schema mismatch) -- not running",
                 module.argumentSchema,
                 inputsCell.getRaw(),
+                (() => {
+                  let result;
+                  try {
+                    result = JSON.stringify(
+                      inputsCell.getAsQueryResult([], tx),
+                    );
+                  } catch (_e) {
+                    result = "(Can't serialize to JSON)";
+                  }
+                  return result;
+                })(),
+                inputsCell,
               ],
             );
           }
