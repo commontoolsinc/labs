@@ -567,11 +567,19 @@ export function serialize(
     return context.encode('BigInt@1', value.toString());
   }
 
+  // --- `undefined` ---
+  // `undefined` is not a valid `SerializedForm` (`JsonValue`). Per Section 1.3,
+  // it becomes `null` in arrays, is omitted for object properties (handled by
+  // the caller's `val !== undefined` check), and signals deletion at top level.
+  // In all cases the serialized representation is `null`.
+  if (value === undefined) {
+    return null;
+  }
+
   // --- Primitives ---
-  if (value === null || value === undefined || typeof value === 'boolean'
+  if (value === null || typeof value === 'boolean'
       || typeof value === 'number' || typeof value === 'string') {
     // Primitives pass through to the wire format directly.
-    // (`undefined` becomes JSON `null` or is omitted per container rules.)
     return value as SerializedForm;
   }
 
@@ -587,6 +595,15 @@ export function serialize(
       result[key] = serialize(val, context);
     }
   }
+
+  // Apply `/object` escaping per Section 5.6: if the result has exactly one
+  // key and that key starts with `/`, wrap in `{ "/object": ... }` so the
+  // deserializer does not misinterpret it as a tagged type.
+  const keys = Object.keys(result);
+  if (keys.length === 1 && keys[0].startsWith('/')) {
+    return { '/object': result } as SerializedForm;
+  }
+
   return result;
 }
 
@@ -816,9 +833,11 @@ Use cases:
 The JSON serialization context's `encode()` and `decode()` methods generate and
 parse `/<Type>@<Version>` keys. The context is also responsible for:
 
-- Applying `/object` escaping when serializing plain objects that happen to have
-  a single slash-prefixed key (see Section 5.6).
 - Wrapping unknown types using the `typeTag` preserved in `UnknownStorable`.
+
+Note: `/object` escaping (Section 5.6) is applied directly by `serialize()`
+in its plain-objects path, not by the context, since it is structural escaping
+rather than type encoding.
 
 ### 5.8 Unknown Type Handling
 
