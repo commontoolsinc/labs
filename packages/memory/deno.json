@@ -46,7 +46,10 @@
     "./v2-types": "./v2-types.ts",
     "./v2-reference": "./v2-reference.ts",
     "./v2-fact": "./v2-fact.ts",
-    "./v2-codec": "./v2-codec.ts"
+    "./v2-codec": "./v2-codec.ts",
+    "./v2-branch": "./v2-branch.ts",
+    "./v2-merge": "./v2-merge.ts",
+    "./v2-subscription": "./v2-subscription.ts"
   },
   "imports": {
     "@db/sqlite": "jsr:@db/sqlite@^0.12.0",

@@ -192,6 +192,102 @@ export function buildGraphQueryCommand(
 }
 
 // ---------------------------------------------------------------------------
+// Branch command builders
+// ---------------------------------------------------------------------------
+
+export interface CreateBranchCommandArgs {
+  name: string;
+  fromBranch?: string;
+  atVersion?: number;
+}
+
+export interface MergeBranchCommandArgs {
+  source: string;
+  target: string;
+  resolutions?: Record<EntityId, JSONValue | null>;
+}
+
+export interface DeleteBranchCommandArgs {
+  name: string;
+}
+
+export interface ListBranchesCommandArgs {
+  includeDeleted?: boolean;
+}
+
+/**
+ * Build a create-branch command for the wire protocol.
+ */
+export function buildCreateBranchCommand(
+  spaceId: SpaceId,
+  args: CreateBranchCommandArgs,
+): {
+  cmd: "/memory/branch/create";
+  sub: SpaceId;
+  args: CreateBranchCommandArgs;
+} {
+  return {
+    cmd: "/memory/branch/create",
+    sub: spaceId,
+    args,
+  };
+}
+
+/**
+ * Build a merge-branch command for the wire protocol.
+ */
+export function buildMergeBranchCommand(
+  spaceId: SpaceId,
+  args: MergeBranchCommandArgs,
+): {
+  cmd: "/memory/branch/merge";
+  sub: SpaceId;
+  args: MergeBranchCommandArgs;
+} {
+  return {
+    cmd: "/memory/branch/merge",
+    sub: spaceId,
+    args,
+  };
+}
+
+/**
+ * Build a delete-branch command for the wire protocol.
+ */
+export function buildDeleteBranchCommand(
+  spaceId: SpaceId,
+  args: DeleteBranchCommandArgs,
+): {
+  cmd: "/memory/branch/delete";
+  sub: SpaceId;
+  args: DeleteBranchCommandArgs;
+} {
+  return {
+    cmd: "/memory/branch/delete",
+    sub: spaceId,
+    args,
+  };
+}
+
+/**
+ * Build a list-branches command for the wire protocol.
+ */
+export function buildListBranchesCommand(
+  spaceId: SpaceId,
+  args: ListBranchesCommandArgs = {},
+): {
+  cmd: "/memory/branch/list";
+  sub: SpaceId;
+  args: ListBranchesCommandArgs;
+} {
+  return {
+    cmd: "/memory/branch/list",
+    sub: spaceId,
+    args,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Response parsing
 // ---------------------------------------------------------------------------
 
@@ -225,6 +321,77 @@ export function parseQueryResult(response: unknown): QueryResult {
   const res = response as Record<string, unknown>;
   if ("ok" in res) {
     return { ok: res.ok as FactSet };
+  }
+  return { error: res.error ?? { name: "UnknownError" } };
+}
+
+// ---------------------------------------------------------------------------
+// Branch response types
+// ---------------------------------------------------------------------------
+
+export interface CreateBranchResult {
+  ok: {
+    name: string;
+    forkedFrom: string;
+    atVersion: number;
+  };
+}
+
+export interface MergeBranchResult {
+  ok: {
+    commit: Commit;
+    merged: number;
+  };
+}
+
+export interface BranchInfoResult {
+  name: string;
+  headVersion: number;
+  createdAt: string;
+  deletedAt?: string;
+}
+
+export interface ListBranchesResult {
+  ok: {
+    branches: BranchInfoResult[];
+  };
+}
+
+/**
+ * Parse a create-branch response from the server.
+ */
+export function parseCreateBranchResult(
+  response: unknown,
+): CreateBranchResult | { error: unknown } {
+  const res = response as Record<string, unknown>;
+  if ("ok" in res) {
+    return { ok: res.ok as CreateBranchResult["ok"] };
+  }
+  return { error: res.error ?? { name: "UnknownError" } };
+}
+
+/**
+ * Parse a merge-branch response from the server.
+ */
+export function parseMergeBranchResult(
+  response: unknown,
+): MergeBranchResult | { error: unknown } {
+  const res = response as Record<string, unknown>;
+  if ("ok" in res) {
+    return { ok: res.ok as MergeBranchResult["ok"] };
+  }
+  return { error: res.error ?? { name: "UnknownError" } };
+}
+
+/**
+ * Parse a list-branches response from the server.
+ */
+export function parseListBranchesResult(
+  response: unknown,
+): ListBranchesResult | { error: unknown } {
+  const res = response as Record<string, unknown>;
+  if ("ok" in res) {
+    return { ok: res.ok as ListBranchesResult["ok"] };
   }
   return { error: res.error ?? { name: "UnknownError" } };
 }

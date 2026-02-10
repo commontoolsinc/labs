@@ -82,6 +82,7 @@ CREATE TABLE IF NOT EXISTS branch (
   fork_version    INTEGER,
   head_version    INTEGER NOT NULL DEFAULT 0,
   created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+  deleted_at      TEXT,
   FOREIGN KEY (parent_branch) REFERENCES branch(name)
 );
 INSERT OR IGNORE INTO branch (name, head_version) VALUES ('', 0);
@@ -206,6 +207,10 @@ const GET_BRANCH_HEAD_VERSION = `
 SELECT head_version FROM branch WHERE name = ?;
 `;
 
+const GET_MAX_VERSION = `
+SELECT COALESCE(MAX(head_version), 0) AS max_version FROM branch;
+`;
+
 const UPDATE_BRANCH_HEAD_VERSION = `
 UPDATE branch SET head_version = ? WHERE name = ?;
 `;
@@ -213,6 +218,50 @@ UPDATE branch SET head_version = ? WHERE name = ?;
 const INSERT_SNAPSHOT = `
 INSERT OR REPLACE INTO snapshot (id, version, value_ref, branch)
 VALUES (?, ?, ?, ?);
+`;
+
+const GET_BRANCH = `
+SELECT name, parent_branch, fork_version, head_version, created_at, deleted_at
+FROM branch WHERE name = ?;
+`;
+
+const CREATE_BRANCH = `
+INSERT INTO branch (name, parent_branch, fork_version, head_version)
+VALUES (?, ?, ?, ?);
+`;
+
+const SOFT_DELETE_BRANCH = `
+UPDATE branch SET deleted_at = datetime('now') WHERE name = ? AND deleted_at IS NULL;
+`;
+
+const LIST_ACTIVE_BRANCHES = `
+SELECT name, parent_branch, fork_version, head_version, created_at, deleted_at
+FROM branch WHERE deleted_at IS NULL ORDER BY created_at;
+`;
+
+const LIST_ALL_BRANCHES = `
+SELECT name, parent_branch, fork_version, head_version, created_at, deleted_at
+FROM branch ORDER BY created_at;
+`;
+
+const READ_HEAD_AT_VERSION = `
+SELECT h.fact_hash, h.version, f.fact_type
+FROM head h
+JOIN fact f ON f.hash = h.fact_hash
+WHERE h.branch = ? AND h.id = ? AND h.version <= ?;
+`;
+
+const FIND_LATEST_FACT_ON_BRANCH = `
+SELECT f.hash AS fact_hash, f.version, f.fact_type
+FROM fact f
+WHERE f.id = ? AND f.branch = ? AND f.version <= ?
+ORDER BY f.version DESC
+LIMIT 1;
+`;
+
+const FIND_MODIFIED_ENTITIES = `
+SELECT DISTINCT id, fact_hash, version FROM head
+WHERE branch = ? AND version > ?;
 `;
 
 // ---------------------------------------------------------------------------
@@ -233,6 +282,15 @@ type PreparedStatements = {
   getBranchHeadVersion?: Statement;
   updateBranchHeadVersion?: Statement;
   insertSnapshot?: Statement;
+  getBranch?: Statement;
+  createBranch?: Statement;
+  softDeleteBranch?: Statement;
+  listActiveBranches?: Statement;
+  listAllBranches?: Statement;
+  readHeadAtVersion?: Statement;
+  findLatestFactOnBranch?: Statement;
+  findModifiedEntities?: Statement;
+  getMaxVersion?: Statement;
 };
 
 const preparedStatementsCache = new WeakMap<Database, PreparedStatements>();
@@ -481,17 +539,13 @@ export class V2Space implements V2Session {
   // -------------------------------------------------------------------------
 
   /**
-   * Get the next version number for a branch.
-   * Reads the current head_version from the branch table and returns +1.
+   * Get the next version number (space-global Lamport clock).
+   * Returns the max version across ALL branches + 1.
    */
-  nextVersion(branch: string): number {
-    const stmt = getStmt(
-      this.store,
-      "getBranchHeadVersion",
-      GET_BRANCH_HEAD_VERSION,
-    );
-    const row = stmt.get(branch) as { head_version: number } | undefined;
-    return (row?.head_version ?? 0) + 1;
+  nextVersion(_branch: string): number {
+    const stmt = getStmt(this.store, "getMaxVersion", GET_MAX_VERSION);
+    const row = stmt.get() as { max_version: number };
+    return row.max_version + 1;
   }
 
   /**
@@ -504,6 +558,166 @@ export class V2Space implements V2Session {
       UPDATE_BRANCH_HEAD_VERSION,
     );
     stmt.run(version, branch);
+  }
+
+  // -------------------------------------------------------------------------
+  // Branch operations
+  // -------------------------------------------------------------------------
+
+  /**
+   * Get branch metadata by name.
+   */
+  getBranch(name: string): {
+    name: string;
+    parentBranch: string | null;
+    forkVersion: number | null;
+    headVersion: number;
+    createdAt: string;
+    deletedAt: string | null;
+  } | null {
+    const stmt = getStmt(this.store, "getBranch", GET_BRANCH);
+    const row = stmt.get(name) as {
+      name: string;
+      parent_branch: string | null;
+      fork_version: number | null;
+      head_version: number;
+      created_at: string;
+      deleted_at: string | null;
+    } | undefined;
+
+    if (!row) return null;
+    return {
+      name: row.name,
+      parentBranch: row.parent_branch,
+      forkVersion: row.fork_version,
+      headVersion: row.head_version,
+      createdAt: row.created_at,
+      deletedAt: row.deleted_at,
+    };
+  }
+
+  /**
+   * Create a new branch record.
+   */
+  createBranchRecord(
+    name: string,
+    parentBranch: string,
+    forkVersion: number,
+    headVersion: number,
+  ): void {
+    const stmt = getStmt(this.store, "createBranch", CREATE_BRANCH);
+    stmt.run(name, parentBranch, forkVersion, headVersion);
+  }
+
+  /**
+   * Soft-delete a branch by setting deleted_at.
+   */
+  softDeleteBranch(name: string): boolean {
+    const stmt = getStmt(this.store, "softDeleteBranch", SOFT_DELETE_BRANCH);
+    stmt.run(name);
+    return this.store.changes > 0;
+  }
+
+  /**
+   * List branches.
+   */
+  listBranches(includeDeleted = false): Array<{
+    name: string;
+    parentBranch: string | null;
+    forkVersion: number | null;
+    headVersion: number;
+    createdAt: string;
+    deletedAt: string | null;
+  }> {
+    const sql = includeDeleted ? LIST_ALL_BRANCHES : LIST_ACTIVE_BRANCHES;
+    const key = includeDeleted ? "listAllBranches" : "listActiveBranches";
+    const stmt = getStmt(this.store, key, sql);
+    const rows = stmt.all() as Array<{
+      name: string;
+      parent_branch: string | null;
+      fork_version: number | null;
+      head_version: number;
+      created_at: string;
+      deleted_at: string | null;
+    }>;
+    return rows.map((r) => ({
+      name: r.name,
+      parentBranch: r.parent_branch,
+      forkVersion: r.fork_version,
+      headVersion: r.head_version,
+      createdAt: r.created_at,
+      deletedAt: r.deleted_at,
+    }));
+  }
+
+  /**
+   * Read a head entry with a version constraint (for parent chain resolution).
+   */
+  readHeadAtVersion(
+    branch: string,
+    entityId: EntityId,
+    maxVersion: number,
+  ): { factHash: string; version: number; factType: string } | null {
+    const stmt = getStmt(this.store, "readHeadAtVersion", READ_HEAD_AT_VERSION);
+    const row = stmt.get(branch, entityId, maxVersion) as
+      | { fact_hash: string; version: number; fact_type: string }
+      | undefined;
+    if (!row) return null;
+    return {
+      factHash: row.fact_hash,
+      version: row.version,
+      factType: row.fact_type,
+    };
+  }
+
+  /**
+   * Find the latest fact for an entity on a specific branch up to a version.
+   * Used for parent chain head resolution when the head table has been updated
+   * past the fork point.
+   */
+  findLatestFactOnBranch(
+    entityId: EntityId,
+    branch: string,
+    maxVersion: number,
+  ): { factHash: string; version: number; factType: string } | null {
+    const stmt = getStmt(
+      this.store,
+      "findLatestFactOnBranch",
+      FIND_LATEST_FACT_ON_BRANCH,
+    );
+    const row = stmt.get(entityId, branch, maxVersion) as
+      | { fact_hash: string; version: number; fact_type: string }
+      | undefined;
+    if (!row) return null;
+    return {
+      factHash: row.fact_hash,
+      version: row.version,
+      factType: row.fact_type,
+    };
+  }
+
+  /**
+   * Find all entities modified on a branch since a given version.
+   */
+  findModifiedEntities(
+    branch: string,
+    sinceVersion: number,
+  ): Array<{ id: EntityId; factHash: string; version: number }> {
+    const stmt = getStmt(
+      this.store,
+      "findModifiedEntities",
+      FIND_MODIFIED_ENTITIES,
+    );
+    const rows = stmt.all(branch, sinceVersion) as Array<{
+      id: string;
+      fact_hash: string;
+      version: number;
+    }>;
+    return rows.map((r) => ({
+      id: r.id as EntityId,
+      factHash: r.fact_hash,
+      version: r.version,
+    }));
   }
 
   // -------------------------------------------------------------------------

@@ -56,8 +56,28 @@ export class V2Replica {
   readonly spaceId: SpaceId;
   readonly state = new ClientState();
 
+  /** Current branch name (empty string = default branch). */
+  private _branch = "";
+
   constructor(spaceId: SpaceId) {
     this.spaceId = spaceId;
+  }
+
+  /** Get the current branch. */
+  get branch(): string {
+    return this._branch;
+  }
+
+  /**
+   * Switch the replica to a different branch.
+   * Clears all pending state (pending commits are branch-specific).
+   */
+  switchBranch(branch: string): void {
+    if (branch === this._branch) return;
+    this._branch = branch;
+    // Pending commits are branch-specific; clear them on switch.
+    // Confirmed state is also branch-specific, so clear everything.
+    this.state.clear();
   }
 
   /**
