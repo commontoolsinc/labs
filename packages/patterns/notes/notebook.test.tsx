@@ -9,8 +9,8 @@
  * - createNote stream for adding notes
  * - createNotes stream for bulk adding
  *
- * Note: Tests that depend on wish() (allCharms, etc.) may have limitations
- * in the isolated test environment.
+ * The test harness sets up defaultPattern so wish("#default") resolves,
+ * enabling tests for handlers that push to allPieces.
  *
  * Run: deno task ct test packages/patterns/notes/notebook.test.tsx --verbose
  */
@@ -60,22 +60,21 @@ export default pattern(() => {
     notebook.setTitle.send({ newTitle: "Final Name" });
   });
 
-  // FIXME(test): These actions fail because they depend on wish("#default")
-  // const _action_create_note_via_stream = action(() => {
-  //   notebook.createNote.send({
-  //     title: "Stream Created Note",
-  //     content: "Created via createNote stream",
-  //   });
-  // });
+  const action_create_note_via_stream = action(() => {
+    notebook.createNote.send({
+      title: "Stream Created Note",
+      content: "Created via createNote stream",
+    });
+  });
 
-  // const _action_create_multiple_notes = action(() => {
-  //   notebook.createNotes.send({
-  //     notesData: [
-  //       { title: "Bulk Note 1", content: "First bulk note" },
-  //       { title: "Bulk Note 2", content: "Second bulk note" },
-  //     ],
-  //   });
-  // });
+  const _action_create_multiple_notes = action(() => {
+    notebook.createNotes.send({
+      notesData: [
+        { title: "Bulk Note 1", content: "First bulk note" },
+        { title: "Bulk Note 2", content: "Second bulk note" },
+      ],
+    });
+  });
 
   // ==========================================================================
   // Assertions - Initial State
@@ -110,16 +109,15 @@ export default pattern(() => {
   // Assertions - After Creating Notes via Stream
   // ==========================================================================
 
-  // FIXME(test): These assertions fail because createNote/createNotes handlers
-  // depend on allCharms from wish("#default") which isn't available in tests.
-  // The handlers throw "Cannot read properties of undefined (reading 'push')"
-  // when trying to allCharms.push(newNote).
-
   // After createNote, should have 3 notes
-  // const assert_note_count_after_create = computed(() => notebook.noteCount === 3);
+  const assert_note_count_after_create = computed(() =>
+    notebook.noteCount === 3
+  );
 
   // After createNotes with 2 notes, should have 5 total
-  // const assert_note_count_after_bulk = computed(() => notebook.noteCount === 5);
+  const _assert_note_count_after_bulk = computed(() =>
+    notebook.noteCount === 5
+  );
 
   // ==========================================================================
   // Test Sequence
@@ -143,12 +141,13 @@ export default pattern(() => {
 
       { action: action_rename_again },
       { assertion: assert_title_final },
-      // FIXME(test): createNote/createNotes depend on wish("#default") for allCharms
       // === Create note via stream ===
-      // { action: action_create_note_via_stream },
-      // { assertion: assert_note_count_after_create },
-
+      { action: action_create_note_via_stream },
+      { assertion: assert_note_count_after_create },
       // === Bulk create notes ===
+      // KNOWN BUG: multi-push timeout - pushing 2+ sub-pattern instances into
+      // allPieces in a single action causes a reactive cascade timeout.
+      // See docs/development/debugging/multi-push-action-timeout.md
       // { action: action_create_multiple_notes },
       // { assertion: assert_note_count_after_bulk },
     ],
