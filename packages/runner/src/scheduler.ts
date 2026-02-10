@@ -161,6 +161,9 @@ export class Scheduler {
   private isEffectAction = new WeakMap<Action, boolean>();
   private dirty = new Set<Action>();
   private pullMode = false;
+  // Track outstanding commit promises so execute() can drain them before
+  // resolving idle, preventing commit callback backlog.
+  private outstandingCommits = new Set<Promise<any>>();
 
   // Compute time tracking for cycle-aware scheduling
   // Keyed by action ID (source location) to persist stats across action recreation
@@ -690,7 +693,7 @@ export class Scheduler {
 
     let result: any;
     this.runningPromise = new Promise((resolve) => {
-      const finalizeAction = async (error?: unknown) => {
+      const finalizeAction = (error?: unknown) => {
         // Record action execution time for cycle-aware scheduling
         const elapsed = performance.now() - actionStartTime;
         this.recordActionTime(action, elapsed);
@@ -704,38 +707,36 @@ export class Scheduler {
             this.handleError(error as Error, action);
           }
         } finally {
-          // Set up new reactive subscriptions after the action runs.
-          // The inner try/catch guarantees resolve() is always called even if
-          // commit rejects or resubscribe throws, preventing a scheduler
-          // deadlock (runningPromise would never resolve otherwise).
-          try {
-            // Commit the transaction and wait for it to complete before
-            // resolving. Previously this was fire-and-forget, which caused
-            // commit promise callbacks to accumulate and block the event loop
-            // for seconds after execute() finished (see multi-push-action-timeout.md).
-            logger.timeStart("scheduler", "run", "commit");
-            const commitResult = await tx.commit();
-            logger.timeEnd("scheduler", "run", "commit");
+          // Capture the reactivity log BEFORE committing, because commit
+          // closes the journal and the activity log becomes unavailable.
+          const log = txToReactivityLog(tx);
 
-            const log = txToReactivityLog(tx);
-
-            // Handle commit result synchronously now that we've awaited it.
-            if (commitResult.error) {
-              // On error, retry up to MAX_RETRIES_FOR_REACTIVE times. Note that
-              // on every attempt we still call the re-subscribe below, so that
-              // even after we run out of retries, this will be re-triggered when
-              // input data changes.
+          // Commit the transaction. We track the promise so execute() can
+          // drain all outstanding commits before resolving idle(), preventing
+          // commit callback backlog (see multi-push-action-timeout.md).
+          // The commit is NOT awaited here — run() resolves immediately so
+          // the settle loop can proceed to the next action without waiting
+          // for I/O.
+          logger.timeStart("scheduler", "run", "commit");
+          const commitPromise = tx.commit();
+          logger.timeEnd("scheduler", "run", "commit");
+          this.outstandingCommits.add(commitPromise);
+          commitPromise.then(({ error }) => {
+            this.outstandingCommits.delete(commitPromise);
+            if (error) {
+              // On error, retry up to MAX_RETRIES_FOR_REACTIVE times. Note
+              // that on every attempt we still call the re-subscribe below,
+              // so that even after we run out of retries, this will be
+              // re-triggered when input data changes.
               logger.info(
                 "schedule-run-error",
                 "Error committing transaction",
-                commitResult.error,
+                error,
               );
 
               this.retries.set(action, (this.retries.get(action) ?? 0) + 1);
               if (this.retries.get(action)! < MAX_RETRIES_FOR_REACTIVE) {
                 // Re-schedule the action to run again on conflict failure.
-                // Use resubscribe to set up dependencies/triggers from the log,
-                // then mark as dirty/pending to ensure it runs again.
                 this.resubscribe(action, log);
                 this.dirty.add(action);
                 this.pending.add(action);
@@ -745,21 +746,16 @@ export class Scheduler {
               // Clear retries after successful commit.
               this.retries.delete(action);
             }
+          });
 
-            logger.debug("schedule-run-complete", () => [
-              `[RUN] Action completed: ${actionId}`,
-              `Reads: ${log.reads.length}`,
-              `Writes: ${log.writes.length}`,
-              `Elapsed: ${elapsed.toFixed(2)}ms`,
-            ]);
+          logger.debug("schedule-run-complete", () => [
+            `[RUN] Action completed: ${actionId}`,
+            `Reads: ${log.reads.length}`,
+            `Writes: ${log.writes.length}`,
+            `Elapsed: ${elapsed.toFixed(2)}ms`,
+          ]);
 
-            this.resubscribe(action, log);
-          } catch (finalizeError) {
-            logger.error("schedule-finalize-error", () => [
-              `[RUN] Error finalizing action: ${actionId}`,
-              `${finalizeError}`,
-            ]);
-          }
+          this.resubscribe(action, log);
           resolve(result);
         }
       };
@@ -2459,9 +2455,22 @@ export class Scheduler {
     if (
       !hasPendingEffects && !hasDirtyEffects && this.eventQueue.length === 0
     ) {
-      const promises = this.idlePromises;
-      for (const resolve of promises) resolve();
-      this.idlePromises.length = 0;
+      // Drain all outstanding commit promises before resolving idle.
+      // Without this, commit .then() callbacks accumulate and block the
+      // event loop for seconds after execute() finishes, preventing
+      // idle() from resolving promptly (see multi-push-action-timeout.md).
+      if (this.outstandingCommits.size > 0) {
+        const commits = [...this.outstandingCommits];
+        Promise.all(commits).then(() => {
+          const promises = this.idlePromises;
+          for (const resolve of promises) resolve();
+          this.idlePromises.length = 0;
+        });
+      } else {
+        const promises = this.idlePromises;
+        for (const resolve of promises) resolve();
+        this.idlePromises.length = 0;
+      }
       this.loopCounter = new WeakMap();
       this.scheduled = false;
 
