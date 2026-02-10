@@ -422,6 +422,59 @@ export class UnknownStorable implements StorableInstance {
   `typeTag` to produce the original wire format.
 - This allows data to round-trip through systems that don't understand it.
 
+### 3.4 ProblematicStorable (Recommended)
+
+It is recommended that implementations provide a `ProblematicStorable` type,
+analogous to `UnknownStorable`, for cases where deconstruction or reconstruction
+fails partway through. This allows graceful degradation rather than hard
+failures -- for example, a type whose `[RECONSTRUCT]` throws can be preserved as
+a `ProblematicStorable` with the original tag, state, and error information.
+
+```typescript
+// file: packages/common/problematic-storable.ts
+
+import {
+  DECONSTRUCT,
+  RECONSTRUCT,
+  type StorableInstance,
+  type ReconstructionContext,
+} from './storable-protocol';
+
+/**
+ * Holds a value whose deconstruction or reconstruction failed. Preserves
+ * the original tag and raw state for round-tripping and debugging.
+ */
+export class ProblematicStorable implements StorableInstance {
+  constructor(
+    /** The original type tag, e.g. `"MyType@1"`. */
+    readonly typeTag: string,
+    /** The raw state that could not be processed. */
+    readonly state: StorableValue,
+    /** A description of what went wrong. */
+    readonly error: string,
+  ) {}
+
+  [DECONSTRUCT]() {
+    return { type: this.typeTag, state: this.state, error: this.error };
+  }
+
+  static [RECONSTRUCT](
+    state: { type: string; state: StorableValue; error: string },
+    _context: ReconstructionContext,
+  ): ProblematicStorable {
+    return new ProblematicStorable(state.type, state.state, state.error);
+  }
+}
+```
+
+Like `UnknownStorable`, a `ProblematicStorable` round-trips through
+serialization, preserving the original data so it is not silently lost. The
+`error` field aids debugging by recording what went wrong. Whether to wrap
+failures in `ProblematicStorable` or to throw is an implementation decision that
+may vary by context -- strict contexts (e.g., tests) may prefer to throw, while
+lenient contexts (e.g., production reconstruction) may prefer graceful
+degradation.
+
 ---
 
 ## 4. Serialization Contexts
@@ -884,8 +937,10 @@ tree construction.
  * Specific hashing contexts (e.g., recipe ID generation vs. request
  * deduplication) specify which algorithm is used in that context.
  *
- * Output format depends on context. Base64 with the standard alphabet
- * (`A-Za-z0-9+/` with `=` padding) is recommended as the default.
+ * Output format depends on context. When a string representation is needed,
+ * base64 with the standard alphabet (`A-Za-z0-9+/`) is recommended; padding
+ * (`=`) may be omitted unless required for unambiguity in a given context.
+ * When no stringification is needed, raw hash bytes are perfectly acceptable.
  */
 export function canonicalHash(
   value: StorableValue,
@@ -913,7 +968,7 @@ export function canonicalHash(
   // - `null`:              hash(TAG_NULL)
   // - `boolean`:           hash(TAG_BOOL, boolByte)
   // - `number`:            hash(TAG_NUMBER, ieee754Float64Bytes)
-  // - `string`:            hash(TAG_STRING, utf8Bytes)
+  // - `string`:            hash(TAG_STRING, utf16CodeUnits)
   // - `bigint`:            hash(TAG_BIGINT, signedTwosComplementBytes)
   // - `undefined`:         hash(TAG_UNDEFINED)
   // - `Uint8Array`:        hash(TAG_BYTES, rawBytes)
@@ -935,6 +990,13 @@ export function canonicalHash(
   // identical content representations.
 }
 ```
+
+> **String encoding for hashing.** Strings are hashed as a sequence of UTF-16
+> code units (two bytes per code unit, in platform byte order). This matches the
+> native string encoding in JavaScript contexts, which are often on one or both
+> sides of the serialization boundaries this spec defines. Future performance
+> characterization may lead to a switch to UTF-8 encoding if the overhead of
+> UTF-16 proves significant for non-BMP-heavy workloads.
 
 > **Map/Set ordering: serialization vs. hashing.** Serialized form (Section 1.4)
 > preserves insertion order for `Map` and `Set`, which matters for
@@ -1016,15 +1078,6 @@ spec from being implementable.
   behavior. Recommendation: start with identity semantics (the JS default) and
   revisit if structural equality is needed for specific use cases.
 
-- **`ProblematicStorable` for partial failures**: A `ProblematicStorable` type
-  (analogous to `UnknownStorable`) should be introduced for cases where
-  deconstruction or reconstruction fails partway through. This allows graceful
-  degradation rather than hard failures -- e.g., a type whose `[RECONSTRUCT]`
-  throws can be preserved as a `ProblematicStorable` with the original tag,
-  state, and error information, enabling round-tripping and debugging. The
-  exact API is an implementation decision, but the type should preserve the
-  original tag, the raw state, and a description of the failure.
-
 - **Type registry management**: How are serialization contexts configured? Static
   registration? Dynamic discovery? Who owns the registry? The isolation
   strategy (see `coordination/docs/isolation-strategy.md`) proposes
@@ -1035,21 +1088,10 @@ spec from being implementable.
   deconstructed state. How does this integrate with the schema language?
   Currently out of scope (schemas are listed as out-of-scope for this spec).
 
-- **Cycle detection in deconstructed state**: Cycle detection is the
-  responsibility of the serialization system, not individual `[DECONSTRUCT]`
-  implementations. The `serialize()` function tracks visited objects during
-  recursion and throws on cycles, analogous to how `toDeepStorableValue()` does
-  today. Many serializers won't even admit circularity as a possibility in the
-  first place. (Resolved -- retained here for context.)
-
 - **Exact canonical hash specification**: Precise byte-level specification of
   the hash algorithm (type tags, encoding of each type, handling of special
   cases like `-0` normalization). This should be specified as a separate
   document or appendix before the hashing implementation begins.
-
-- **Hash output format**: ~~Resolved.~~ Base64 with the standard alphabet is
-  recommended as the default output format. The specific format may vary by
-  context (see Section 6.3).
 
 - **Migration path**: Out of scope for this spec. The detailed migration plan
   (sequencing of flag introductions, criteria for graduating each flag to
