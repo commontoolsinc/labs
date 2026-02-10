@@ -2076,6 +2076,11 @@ export class Scheduler {
               // enough, especially for a series of event that act on the same
               // conflicting data.
               if (error && retriesLeft > 0) {
+                logger.warn(
+                  "scheduler",
+                  `Event handler transaction failed, retrying (${retriesLeft} retries left)`,
+                  { error, handlerId },
+                );
                 this.eventQueue.unshift({
                   action,
                   handler,
@@ -2086,18 +2091,27 @@ export class Scheduler {
                 // Ensure the re-queued event gets processed even if the scheduler
                 // finished this cycle before the commit completed.
                 this.queueExecution();
-              } else if (onCommit) {
-                // Call commit callback when:
-                // - Commit succeeds (!error), OR
-                // - Commit fails but we're out of retries (retriesLeft === 0)
-                try {
-                  onCommit(tx);
-                } catch (callbackError) {
+              } else {
+                if (error) {
                   logger.error(
                     "schedule-error",
-                    "Error in event commit callback:",
-                    callbackError,
+                    "Event handler transaction failed after exhausting all retries",
+                    { error, handlerId },
                   );
+                }
+                if (onCommit) {
+                  // Call commit callback when:
+                  // - Commit succeeds (!error), OR
+                  // - Commit fails but we're out of retries (retriesLeft === 0)
+                  try {
+                    onCommit(tx);
+                  } catch (callbackError) {
+                    logger.error(
+                      "schedule-error",
+                      "Error in event commit callback:",
+                      callbackError,
+                    );
+                  }
                 }
               }
             });
