@@ -1261,20 +1261,21 @@ export class Runner {
               "stream",
               () => [
                 "action argument is undefined (potential schema mismatch) -- not running",
-                module.argumentSchema,
-                inputsCell.getRaw(),
-                (() => {
-                  let result;
-                  try {
-                    result = JSON.stringify(
-                      inputsCell.getAsQueryResult([], tx),
-                    );
-                  } catch (_e) {
-                    result = "(Can't serialize to JSON)";
-                  }
-                  return result;
-                })(),
-                inputsCell,
+                {
+                  schema: module.argumentSchema,
+                  raw: inputsCell.getRaw(),
+                  asQueryResult: (() => {
+                    let result;
+                    try {
+                      result = JSON.stringify(
+                        inputsCell.getAsQueryResult([], tx),
+                      );
+                    } catch (_e) {
+                      result = "(Can't serialize to JSON)";
+                    }
+                    return result;
+                  })(),
+                },
               ],
             );
           }
@@ -1451,20 +1452,21 @@ export class Runner {
                 isValidArgument
                   ? "action argument is valid now -- running"
                   : "action argument is undefined (potential schema mismatch) -- not running",
-                module.argumentSchema,
-                inputsCell.getRaw(),
-                (() => {
-                  let result;
-                  try {
-                    result = JSON.stringify(
-                      inputsCell.getAsQueryResult([], tx),
-                    );
-                  } catch (_e) {
-                    result = "(Can't serialize to JSON)";
-                  }
-                  return result;
-                })(),
-                inputsCell,
+                {
+                  schema: module.argumentSchema,
+                  raw: inputsCell.getRaw(),
+                  asQueryResult: (() => {
+                    let result;
+                    try {
+                      result = JSON.stringify(
+                        inputsCell.getAsQueryResult([], tx),
+                      );
+                    } catch (_e) {
+                      result = "(Can't serialize to JSON)";
+                    }
+                    return result;
+                  })(),
+                },
               ],
             );
             previouslyInvalidArgument = !isValidArgument;
