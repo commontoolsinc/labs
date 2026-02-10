@@ -67,6 +67,9 @@ export default pattern(() => {
     });
   });
 
+  // KNOWN BUG: Multi-push times out due to stale commit promise backlog.
+  // See docs/development/debugging/multi-push-action-timeout.md
+  // Passes with --timeout 30000 but not the default 5s.
   const _action_create_multiple_notes = action(() => {
     notebook.createNotes.send({
       notesData: [
@@ -115,6 +118,7 @@ export default pattern(() => {
   );
 
   // After createNotes with 2 notes, should have 5 total
+  // KNOWN BUG: see multi-push-action-timeout.md
   const _assert_note_count_after_bulk = computed(() =>
     notebook.noteCount === 5
   );
@@ -145,9 +149,7 @@ export default pattern(() => {
       { action: action_create_note_via_stream },
       { assertion: assert_note_count_after_create },
       // === Bulk create notes ===
-      // KNOWN BUG: multi-push timeout - pushing 2+ sub-pattern instances into
-      // allPieces in a single action causes a reactive cascade timeout.
-      // See docs/development/debugging/multi-push-action-timeout.md
+      // KNOWN BUG: commented out, see multi-push-action-timeout.md
       // { action: action_create_multiple_notes },
       // { assertion: assert_note_count_after_bulk },
     ],
