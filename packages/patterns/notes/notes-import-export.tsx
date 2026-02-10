@@ -397,6 +397,7 @@ function performImport(
   allPieces: Writable<NotePiece[]>,
   notebooks: NotebookPiece[],
   skipTitles: Set<string>,
+  skipNotebookTitles: Set<string>,
   rawMarkdown?: string,
   onComplete?: () => void,
 ) {
@@ -437,7 +438,9 @@ function performImport(
     }
   }
   for (const nb of parsedNotebooks) {
-    notebooksNeeded.add(nb.title);
+    if (!skipNotebookTitles.has(nb.title)) {
+      notebooksNeeded.add(nb.title);
+    }
   }
 
   // Phase 1: Create all notes
@@ -546,6 +549,7 @@ function performImport(
     for (const idx of sortedIndices) {
       const nbData = parsedNotebooks[idx];
       if (!nbData) continue;
+      if (skipNotebookTitles.has(nbData.title)) continue;
 
       const actualName = getUniqueTitle(nbData.title);
       const notesForNotebook = notesByNotebook.get(nbData.title) ?? [];
@@ -579,6 +583,7 @@ function performImport(
     }
   } else {
     for (const nbName of notebooksNeeded) {
+      if (skipNotebookTitles.has(nbName)) continue;
       const actualName = getUniqueTitle(nbName);
       const notesForNotebook = notesByNotebook.get(nbName) ?? [];
       const newNb = Notebook({
@@ -775,6 +780,7 @@ function processImportResult(
       ctx.allPieces,
       ctx.notebooks,
       new Set(),
+      new Set(),
       markdown,
     );
 
@@ -847,12 +853,12 @@ function executePendingImport(
   ctx.showImportProgressModal.set(true);
 
   // Execute the import
-  // Note: performImport currently only supports skipping notes, not notebooks
   performImport(
     parsedNotes,
     ctx.allPieces,
     ctx.notebooks,
     skipNoteTitles,
+    skipNotebookTitles,
     markdown,
   );
 
