@@ -9,14 +9,52 @@
  *
  * Run: deno task ct test packages/patterns/notes/note.test.tsx --verbose
  */
-import { action, computed, pattern } from "commontools";
+import { action, computed, NAME, pattern } from "commontools";
 import Note from "./note.tsx";
+import Notebook from "./notebook.tsx";
 
 export default pattern(() => {
   const note = Note({
     title: "Test Note",
     content: "Line one\nLine two\nLine three",
     noteId: "test-note-123",
+    isHidden: false,
+  });
+
+  // Create notebooks for parentNotebook testing
+  const notebookA = Notebook({
+    title: "Notebook A",
+    notes: [],
+  });
+
+  const notebookB = Notebook({
+    title: "Notebook B",
+    notes: [],
+  });
+
+  // Note created with a parent notebook
+  const noteWithParent = Note({
+    title: "Child Note",
+    content: "I belong to a notebook",
+    noteId: "child-note-1",
+    isHidden: true,
+    parentNotebook: notebookA,
+  });
+
+  // Note created with a different parent notebook
+  const noteInNotebookB = Note({
+    title: "Note in B",
+    content: "I belong to notebook B",
+    noteId: "child-note-2",
+    isHidden: true,
+    parentNotebook: notebookB,
+  });
+
+  // Note explicitly created with no parent (same as `note` above but explicit)
+  const noteNoParent = Note({
+    title: "Orphan Note",
+    content: "I have no notebook",
+    noteId: "orphan-note-1",
     isHidden: false,
   });
 
@@ -38,17 +76,16 @@ export default pattern(() => {
     note.editContent.send({ detail: { value: "" } });
   });
 
+  // No mutation actions needed — parentNotebook is set at creation time
+  // and can only be changed by notebook.tsx actions (which require wish())
+
   // ==========================================================================
   // Assertions - Initial State
   // ==========================================================================
 
-  // FIXME(test): This assertion returns undefined instead of true/false - needs investigation
-  // The NAME computed should return "📝 Test Note" but something about accessing
-  // note[NAME] in a test context causes the computed to fail silently.
-  // const assert_name = computed(() => {
-  //   const name = note[NAME];
-  //   return typeof name === "string" && name.startsWith("📝 Test");
-  // });
+  const assert_name = computed(
+    () => note[NAME] === "📝 Test Note",
+  );
   const assert_initial_title = computed(() => note.title === "Test Note");
   const assert_initial_content = computed(
     () => note.content === "Line one\nLine two\nLine three",
@@ -57,17 +94,62 @@ export default pattern(() => {
     () => note.noteId === "test-note-123",
   );
   const assert_initial_not_hidden = computed(() => note.isHidden === false);
-  // FIXME(test): This assertion returns undefined instead of true/false - needs investigation
-  // The parentNotebook computed should return null when no parent is set,
-  // but something about accessing note.parentNotebook in a test context fails.
-  // const assert_initial_no_parent = computed(
-  //   () => !note.parentNotebook,
-  // );
+  const assert_initial_no_parent = computed(
+    () => !note.parentNotebook,
+  );
   const assert_initial_empty_backlinks = computed(
     () => note.backlinks.length === 0,
   );
   const assert_initial_empty_mentioned = computed(
     () => note.mentioned.length === 0,
+  );
+
+  // ==========================================================================
+  // Assertions - Parent Notebook
+  // ==========================================================================
+
+  // Note created with parent A should have it set
+  const assert_has_parent = computed(
+    () => !!noteWithParent.parentNotebook,
+  );
+
+  const assert_parent_is_notebook_a = computed(
+    () => noteWithParent.parentNotebook?.title === "Notebook A",
+  );
+
+  // Note created with parent B should point to B
+  const assert_note_b_has_parent = computed(
+    () => !!noteInNotebookB.parentNotebook,
+  );
+
+  const assert_parent_is_notebook_b = computed(
+    () => noteInNotebookB.parentNotebook?.title === "Notebook B",
+  );
+
+  // Different notes have different parents
+  const assert_different_parents = computed(
+    () =>
+      noteWithParent.parentNotebook?.title !== noteInNotebookB.parentNotebook
+        ?.title,
+  );
+
+  // Note created without parent should have no parent
+  const assert_orphan_no_parent = computed(
+    () => !noteNoParent.parentNotebook,
+  );
+
+  // Child notes should be hidden (set at creation)
+  const assert_child_a_hidden = computed(
+    () => noteWithParent.isHidden === true,
+  );
+
+  const assert_child_b_hidden = computed(
+    () => noteInNotebookB.isHidden === true,
+  );
+
+  // Orphan note should not be hidden
+  const assert_orphan_not_hidden = computed(
+    () => noteNoParent.isHidden === false,
   );
 
   // ==========================================================================
@@ -88,16 +170,31 @@ export default pattern(() => {
   return {
     tests: [
       // === Initial state ===
-      // FIXME(test): assert_name commented out - returns undefined, needs investigation
-      // { assertion: assert_name },
+      { assertion: assert_name },
       { assertion: assert_initial_title },
       { assertion: assert_initial_content },
       { assertion: assert_initial_note_id },
       { assertion: assert_initial_not_hidden },
-      // FIXME(test): assert_initial_no_parent commented out - returns undefined, needs investigation
-      // { assertion: assert_initial_no_parent },
+      { assertion: assert_initial_no_parent },
       { assertion: assert_initial_empty_backlinks },
       { assertion: assert_initial_empty_mentioned },
+
+      // === Parent notebook - note in notebook A ===
+      { assertion: assert_has_parent },
+      { assertion: assert_parent_is_notebook_a },
+      { assertion: assert_child_a_hidden },
+
+      // === Parent notebook - note in notebook B ===
+      { assertion: assert_note_b_has_parent },
+      { assertion: assert_parent_is_notebook_b },
+      { assertion: assert_child_b_hidden },
+
+      // === Different parents are distinct ===
+      { assertion: assert_different_parents },
+
+      // === Orphan note has no parent ===
+      { assertion: assert_orphan_no_parent },
+      { assertion: assert_orphan_not_hidden },
 
       // === Edit content ===
       { action: action_edit_content },
@@ -110,5 +207,8 @@ export default pattern(() => {
       { assertion: assert_content_cleared },
     ],
     note,
+    noteWithParent,
+    noteInNotebookB,
+    noteNoParent,
   };
 });
