@@ -27,12 +27,11 @@ boundary crossings (persistence, IPC, network).
 A `StorableValue` is defined as the following union:
 
 > **Package note:** The TypeScript stubs in this spec use `packages/common/` as
-> the proposed target location for shared storable-value types. This package does
-> not exist yet and would be created as part of implementation. In the current
-> codebase, the storable-value types live in `packages/memory/interface.ts` and
-> the conversion functions in `packages/memory/storable-value.ts`. The final
-> package location is an implementation decision; nothing in this spec depends on
-> it.
+> a placeholder package path. A more specific name (e.g., `packages/data-model`
+> or `packages/storable`) may be preferable. In the current codebase, the
+> storable-value types live in `packages/memory/interface.ts` and the conversion
+> functions in `packages/memory/storable-value.ts`. The final package name and
+> location is an implementation decision; nothing in this spec depends on it.
 
 ```typescript
 // file: packages/common/storable-value.ts
@@ -89,6 +88,13 @@ type StorableValue =
 > hash. In the current codebase, this normalization happens in
 > `packages/memory/storable-value.ts` at the `toStorableValue()` call site.
 
+> **Future: `-0` and non-finite numbers.** The current design normalizes `-0`
+> and rejects `NaN`/`Infinity`/`-Infinity`. Because the serialization system
+> uses typed tags (Section 5), a future version could represent these values
+> with full fidelity (e.g., `{ "/NegZero@1": null }`, `{ "/NaN@1": null }`,
+> `{ "/Infinity@1": "+" }`) without ambiguity. This option is preserved by the
+> architecture but not currently needed.
+
 ### 1.4 Built-in JS Types
 
 These types are recognized directly by the serialization system. They cannot be
@@ -117,6 +123,12 @@ explicitly.
 - Must not contain `undefined` elements (converted to `null` during storage)
 - Non-index keys (named properties on arrays) cause rejection
 - Sparse arrays are densified during conversion (`undefined` -> `null`)
+
+> **Future: explicit `undefined` in arrays.** A future version could preserve
+> explicitly-set `undefined` elements in arrays (as distinct from `null`), using
+> a tagged representation (e.g., `{ "/Undefined@1": null }`). Sparse arrays
+> (holes) are less likely to be worth preserving, but could be supported
+> similarly. Neither is currently needed.
 
 **Objects:**
 - Plain objects only (class instances must implement the storable protocol)
@@ -162,7 +174,7 @@ deserialize custom types without central registration at the type level.
 
 /**
  * Well-known symbol for deconstructing a storable instance into its
- * essential state. The returned value may contain nested `StorableValue`s
+ * essential state. The returned value may be or contain nested `StorableValue`s
  * (including other `StorableInstance`s); the serialization system handles
  * recursion.
  */
@@ -334,13 +346,23 @@ The system follows an **immutable-forward** design:
 
 - **Plain objects and arrays** are frozen (`Object.freeze()`) upon
   reconstruction.
-- **StorableInstances** should ideally be frozen as well -- this is the north
+- **`StorableInstance`s** should ideally be frozen as well -- this is the north
   star, though not yet a strict requirement.
 - **No distinction** is made between regular and null-prototype plain objects;
   reconstruction always produces regular plain objects.
 
 This immutability guarantee enables safe sharing of reconstructed values and
 aligns with the reactive system's assumption that values don't mutate in place.
+
+> **Frozen built-in types.** `Object.freeze()` does not enforce immutability on
+> `Map`, `Set`, `Date`, or `Uint8Array` -- their mutation methods remain
+> callable on a frozen instance. To uphold the immutable-forward guarantee for
+> these types, the implementation should provide frozen-wrapper types (e.g.,
+> `FrozenMap`, `FrozenSet`) that expose read-only interfaces and throw on
+> mutation attempts. The reconstructed value for a `Map` would be a `FrozenMap`
+> instance (which extends or wraps `Map`), and similarly for other mutable
+> built-in types. The exact API for these wrappers is an implementation
+> decision.
 
 ---
 
@@ -445,25 +467,31 @@ export interface SerializationContext {
   /** Get the class that can reconstruct instances for a given tag. */
   getClassFor(tag: string): StorableClass<StorableInstance> | undefined;
 
-  /** Wrap a tag and state into the format's wire representation. */
-  wrap(tag: string, state: SerializedForm): SerializedForm;
+  /** Encode a tag and state into the format's wire representation. */
+  encode(tag: string, state: SerializedForm): SerializedForm;
 
-  /** Unwrap a wire representation into tag and state, or `null` if not a tagged value. */
-  unwrap(data: SerializedForm): { tag: string; state: SerializedForm } | null;
+  /** Decode a wire representation into tag and state, or `null` if not a tagged value. */
+  decode(data: SerializedForm): { tag: string; state: SerializedForm } | null;
 }
 ```
 
 ### 4.4 Serialization Flow
 
 ```
-Serialize:   instance.[DECONSTRUCT]() -> state -> context.wrap(tag, state) -> wire
-Deserialize: wire -> context.unwrap() -> { tag, state } -> Class[RECONSTRUCT](state) -> instance
+Serialize:   instance.[DECONSTRUCT]() -> state -> context.encode(tag, state) -> wire
+Deserialize: wire -> context.decode() -> { tag, state } -> Class[RECONSTRUCT](state) -> instance
 ```
 
 The recursive descent is handled by top-level `serialize()` and `deserialize()`
 functions, not by the context or by individual types. See Section 4.5.
 
 ### 4.5 Top-Level Serialize/Deserialize
+
+> **Export style:** Following the JS standard convention of capitalized namespace
+> objects (cf. `Temporal`, `Atomics`), the `serialize()` and `deserialize()`
+> functions should be exported as methods on a namespace object -- e.g.,
+> `DataModel.serialize()` or `Serialization.serialize()`. The exact name is an
+> implementation decision.
 
 ```typescript
 // file: packages/common/serialization.ts
@@ -485,7 +513,7 @@ export function serialize(
     const state = value[DECONSTRUCT]();
     const tag = context.getTagFor(value);
     const serializedState = serialize(state, context); // recursive
-    return context.wrap(tag, serializedState);
+    return context.encode(tag, serializedState);
   }
 
   // --- Built-in JS types ---
@@ -511,32 +539,32 @@ export function serialize(
         state[key] = serialize((value as Record<string, unknown>)[key] as StorableValue, context);
       }
     }
-    return context.wrap('Error@1', state);
+    return context.encode('Error@1', state);
   }
 
   if (value instanceof Map) {
     const entries = [...value.entries()].map(
       ([k, v]) => [serialize(k, context), serialize(v, context)] as SerializedForm,
     );
-    return context.wrap('Map@1', entries);
+    return context.encode('Map@1', entries);
   }
 
   if (value instanceof Set) {
     const elements = [...value].map((v) => serialize(v, context));
-    return context.wrap('Set@1', elements);
+    return context.encode('Set@1', elements);
   }
 
   if (value instanceof Uint8Array) {
     // Base64 encoding produces a string; no recursion needed.
-    return context.wrap('Bytes@1', base64Encode(value));
+    return context.encode('Bytes@1', base64Encode(value));
   }
 
   if (value instanceof Date) {
-    return context.wrap('Date@1', value.toISOString());
+    return context.encode('Date@1', value.toISOString());
   }
 
   if (typeof value === 'bigint') {
-    return context.wrap('BigInt@1', value.toString());
+    return context.encode('BigInt@1', value.toString());
   }
 
   // --- Primitives ---
@@ -572,9 +600,9 @@ export function deserialize(
   context: SerializationContext,
   runtime: ReconstructionContext,
 ): StorableValue {
-  const unwrapped = context.unwrap(data);
-  if (unwrapped !== null) {
-    const { tag, state } = unwrapped;
+  const decoded = context.decode(data);
+  if (decoded !== null) {
+    const { tag, state } = decoded;
     const cls = context.getClassFor(tag);
     const deserializedState = deserialize(state, context, runtime); // recursive
     if (cls) {
@@ -658,6 +686,12 @@ key follows the pattern `/<Type>@<Version>`.
 - `<Type>` -- `UpperCamelCase` type name
 - `@<Version>` -- version number (natural number, starting at 1)
 
+This convention does **not** prohibit storing plain objects that happen to have
+`/`-prefixed keys. The escaping mechanism in Section 5.6 (`/object` and
+`/quote`) handles this case: during serialization, plain objects whose shape
+would be ambiguous with a tagged type are automatically wrapped so they
+round-trip correctly.
+
 ### 5.3 Standard Type Encodings
 
 ```typescript
@@ -667,7 +701,7 @@ key follows the pattern `/<Type>@<Version>`.
  * Standard JSON encodings for all built-in special types.
  *
  * In each case, the tag string (e.g. `"Link@1"`) is passed to the context's
- * `wrap()` method, which prepends `/` to produce the JSON key
+ * `encode()` method, which prepends `/` to produce the JSON key
  * (e.g. `"/Link@1"`).
  */
 
@@ -723,7 +757,10 @@ Types that require no reconstruction state use `null` as the value:
 { "/Stream@1": null }
 ```
 
-This clearly distinguishes "no state needed" from "empty state" (`{}`).
+Both `null` and `{}` are acceptable for "no state needed." `null` is the
+conventional choice, as it is slightly more idiomatic for signaling absence.
+The distinction between "`null` state" and "no state needed" is implied by the
+type being represented, not by the wire encoding.
 
 ### 5.6 Escaping
 
@@ -776,7 +813,7 @@ Use cases:
 
 ### 5.7 Serialization Context Responsibilities
 
-The JSON serialization context's `wrap()` and `unwrap()` methods generate and
+The JSON serialization context's `encode()` and `decode()` methods generate and
 parse `/<Type>@<Version>` keys. The context is also responsible for:
 
 - Applying `/object` escaping when serializing plain objects that happen to have
@@ -819,10 +856,40 @@ tree construction.
  * encoding-independent: the same identity whether later serialized
  * to JSON, CBOR, or any other format.
  *
- * Uses SHA-256 internally. Output format TBD (likely hex or base64).
+ * The digest algorithm is a parameter of the hashing context. The system
+ * must support at least:
+ * - **SHA-256** -- required; the default for most contexts.
+ * - **BLAKE2b** -- recommended as a second supported algorithm (faster in
+ *   software, same security margin).
+ *
+ * Specific hashing contexts (e.g., recipe ID generation vs. request
+ * deduplication) specify which algorithm is used in that context.
+ *
+ * Output format depends on context. Base64 with the standard alphabet
+ * (`A-Za-z0-9+/` with `=` padding) is recommended as the default.
  */
-export function canonicalHash(value: StorableValue): string {
-  // Implementation feeds type-tagged data into a SHA-256 hasher:
+export function canonicalHash(
+  value: StorableValue,
+  algorithm?: 'sha256' | 'blake2b',
+): string {
+  // Type tag bytes (single-byte prefixes to prevent cross-type collisions):
+  //
+  // TAG_NULL       = 0x00
+  // TAG_BOOL       = 0x01
+  // TAG_NUMBER     = 0x02
+  // TAG_STRING     = 0x03
+  // TAG_BIGINT     = 0x04
+  // TAG_UNDEFINED  = 0x05
+  // TAG_BYTES      = 0x06
+  // TAG_DATE       = 0x07
+  // TAG_ERROR      = 0x08
+  // TAG_MAP        = 0x09
+  // TAG_SET        = 0x0A
+  // TAG_ARRAY      = 0x0B
+  // TAG_OBJECT     = 0x0C
+  // TAG_STORABLE   = 0x0D
+  //
+  // Implementation feeds type-tagged data into the hasher:
   //
   // - `null`:              hash(TAG_NULL)
   // - `boolean`:           hash(TAG_BOOL, boolByte)
@@ -924,16 +991,20 @@ These questions may need resolution during implementation but do not block the
 spec from being implementable.
 
 - **Comparison semantics for rich types**: Should equality be by identity, by
-  deconstructed state, or configurable? This affects both runtime comparisons
-  (e.g., in reactive system change detection) and `Map`/`Set` key behavior.
-  Recommendation: start with identity semantics (the JS default) and revisit
-  if structural equality is needed for specific use cases.
+  deconstructed state (or as if by deconstructed state -- an implementation need
+  not actually run a deconstructor), or configurable? This affects both runtime
+  comparisons (e.g., in reactive system change detection) and `Map`/`Set` key
+  behavior. Recommendation: start with identity semantics (the JS default) and
+  revisit if structural equality is needed for specific use cases.
 
-- **Partial failure in DECONSTRUCT/RECONSTRUCT**: Should a `ProblematicStorable`
-  (analogous to `UnknownStorable`) be introduced for cases where
-  deconstruction or reconstruction fails partway through? This would allow
-  graceful degradation rather than hard failures. Recommendation: defer until
-  implementation reveals whether partial failures occur in practice.
+- **`ProblematicStorable` for partial failures**: A `ProblematicStorable` type
+  (analogous to `UnknownStorable`) should be introduced for cases where
+  deconstruction or reconstruction fails partway through. This allows graceful
+  degradation rather than hard failures -- e.g., a type whose `[RECONSTRUCT]`
+  throws can be preserved as a `ProblematicStorable` with the original tag,
+  state, and error information, enabling round-tripping and debugging. The
+  exact API is an implementation decision, but the type should preserve the
+  original tag, the raw state, and a description of the failure.
 
 - **Type registry management**: How are serialization contexts configured? Static
   registration? Dynamic discovery? Who owns the registry? The isolation
@@ -945,27 +1016,25 @@ spec from being implementable.
   deconstructed state. How does this integrate with the schema language?
   Currently out of scope (schemas are listed as out-of-scope for this spec).
 
-- **Cycle detection in deconstructed state**: Should cycles in deconstructed
-  state be detected and rejected, or is this left to the serialization system?
-  Per Section 1.6, within-document cycles are rejected. The `serialize()`
-  function should track visited objects during recursion and throw on cycles,
-  analogous to how `toDeepStorableValue()` does today.
+- **Cycle detection in deconstructed state**: Cycle detection is the
+  responsibility of the serialization system, not individual `[DECONSTRUCT]`
+  implementations. The `serialize()` function tracks visited objects during
+  recursion and throws on cycles, analogous to how `toDeepStorableValue()` does
+  today. Many serializers won't even admit circularity as a possibility in the
+  first place. (Resolved -- retained here for context.)
 
 - **Exact canonical hash specification**: Precise byte-level specification of
   the hash algorithm (type tags, encoding of each type, handling of special
   cases like `-0` normalization). This should be specified as a separate
   document or appendix before the hashing implementation begins.
 
-- **Hash output format**: Hex, base64, or other encoding for hash output.
-  The current `merkle-reference` system uses base32 multibase (`b` prefix,
-  as seen in `CauseString` type). The replacement should consider
-  compatibility with existing entity ID formats.
+- **Hash output format**: ~~Resolved.~~ Base64 with the standard alphabet is
+  recommended as the default output format. The specific format may vary by
+  context (see Section 6.3).
 
-- **Migration path**: Detailed plan for transitioning from current formats to
-  the new encoding while maintaining backward compatibility. The isolation
-  strategy provides the mechanism (`RuntimeOptions.experimental` flags with
-  per-runtime opt-in); the migration plan would specify the sequencing of
-  flag introductions and the criteria for graduating each flag to default-on.
+- **Migration path**: Out of scope for this spec. The detailed migration plan
+  (sequencing of flag introductions, criteria for graduating each flag to
+  default-on) will be addressed in a separate document.
 
 - **`ReconstructionContext` extensibility**: The minimal interface defined in
   Section 2.5 covers `Cell` reconstruction. Other future storable types may
