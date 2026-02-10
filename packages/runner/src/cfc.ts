@@ -395,7 +395,13 @@ export class ContextualFlowControl {
       if (Object.keys(rest).length > 0) {
         if (isRecord(resolved)) {
           // Merge our attributes with those in the ref
-          schemaObj = { ...resolved, ...rest } as JSONSchemaObj;
+          // If we replaced the fullSchema, pull in those $defs instead
+          schemaObj = {
+            ...resolved,
+            ...rest,
+            ...(fullSchema && isObject(fullSchema) && fullSchema.$defs &&
+              { $defs: fullSchema.$defs }),
+          } as JSONSchemaObj;
         } else {
           // Resolved to a boolean schema, so we can stop
           const schema = ContextualFlowControl.toSchemaObj(resolved);
@@ -635,6 +641,11 @@ export class ContextualFlowControl {
           cursor,
           { $defs: defs },
         );
+        // Resolve schema refs can resolve to a fullSchema, in which case we
+        // need to replace our defs.
+        if (isObject(cursor) && cursor.$defs) {
+          defs = cursor.$defs;
+        }
       }
       if (isObject(cursor) && ("anyOf" in cursor || "oneOf" in cursor)) {
         const subSchemas: JSONSchema[] = [];
