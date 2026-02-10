@@ -26,12 +26,12 @@ export default pattern<{ title: Default<string, "Suggestion Tester"> }>(
           <h1>Suggestion Tester</h1>
           <h2>Counter</h2>
           <ct-cell-context $cell={suggestion} label="Counter Suggestion">
-            {suggestion.result ? suggestion.result : "waiting..."}
+            {suggestion}
           </ct-cell-context>
 
           <h2>Note</h2>
           <ct-cell-context $cell={suggestion2} label="Note Suggestion">
-            {suggestion2.result ? suggestion2.result : "waiting..."}
+            {suggestion2}
           </ct-cell-context>
         </div>
       ),
