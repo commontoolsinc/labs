@@ -629,7 +629,15 @@ export class Logger {
     this.maybeLogCountSummary();
     if (shouldLog("debug", this.level)) {
       const { prefix, color } = this.getLogFormat("debug");
-      console.debug(prefix, color, key, ...resolveMessages(messages));
+      if (shouldLogToStderr()) {
+        logToStderr(
+          prefix.replace("%c", ""),
+          key,
+          ...resolveMessages(messages),
+        );
+      } else {
+        console.debug(prefix, color, key, ...resolveMessages(messages));
+      }
     }
   }
 
@@ -650,7 +658,15 @@ export class Logger {
     this.maybeLogCountSummary();
     if (shouldLog("info", this.level)) {
       const { prefix, color } = this.getLogFormat("info");
-      console.log(prefix, color, key, ...resolveMessages(messages));
+      if (shouldLogToStderr()) {
+        logToStderr(
+          prefix.replace("%c", ""),
+          key,
+          ...resolveMessages(messages),
+        );
+      } else {
+        console.log(prefix, color, key, ...resolveMessages(messages));
+      }
     }
   }
 
@@ -664,7 +680,15 @@ export class Logger {
     this.maybeLogCountSummary();
     if (shouldLog("warn", this.level)) {
       const { prefix, color } = this.getLogFormat("warn");
-      console.warn(prefix, color, key, ...resolveMessages(messages));
+      if (shouldLogToStderr()) {
+        logToStderr(
+          prefix.replace("%c", ""),
+          key,
+          ...resolveMessages(messages),
+        );
+      } else {
+        console.warn(prefix, color, key, ...resolveMessages(messages));
+      }
     }
   }
 
@@ -678,7 +702,15 @@ export class Logger {
     this.maybeLogCountSummary();
     if (shouldLog("error", this.level)) {
       const { prefix, color } = this.getLogFormat("error");
-      console.error(prefix, color, key, ...resolveMessages(messages));
+      if (shouldLogToStderr()) {
+        logToStderr(
+          prefix.replace("%c", ""),
+          key,
+          ...resolveMessages(messages),
+        );
+      } else {
+        console.error(prefix, color, key, ...resolveMessages(messages));
+      }
     }
   }
 
@@ -882,6 +914,43 @@ function getEnvLevel() {
     }
   }
   return undefined;
+}
+
+/**
+ * Check if LOG_TO_STDERR environment variable is set.
+ * When set, all log output goes to stderr to avoid polluting stdout
+ * (useful for CLI tools where stdout is used for machine-readable output).
+ */
+function shouldLogToStderr(): boolean {
+  if (isDeno()) {
+    try {
+      return Deno.env.get("LOG_TO_STDERR") === "1";
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+/**
+ * Log to stderr using Deno.stderr.writeSync.
+ * Falls back to console.error if not in Deno or if write fails.
+ */
+function logToStderr(...args: unknown[]): void {
+  if (isDeno()) {
+    try {
+      const message = args
+        .map((arg) =>
+          typeof arg === "string" ? arg : Deno.inspect(arg, { colors: false })
+        )
+        .join(" ");
+      Deno.stderr.writeSync(new TextEncoder().encode(message + "\n"));
+      return;
+    } catch {
+      // Fall back to console.error
+    }
+  }
+  console.error(...args);
 }
 
 /**
