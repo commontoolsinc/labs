@@ -690,7 +690,7 @@ export class Scheduler {
 
     let result: any;
     this.runningPromise = new Promise((resolve) => {
-      const finalizeAction = (error?: unknown) => {
+      const finalizeAction = async (error?: unknown) => {
         // Record action execution time for cycle-aware scheduling
         const elapsed = performance.now() - actionStartTime;
         this.recordActionTime(action, elapsed);
@@ -706,43 +706,42 @@ export class Scheduler {
         } finally {
           // Set up new reactive subscriptions after the action runs
 
-          // Commit the transaction. The code continues synchronously after
-          // kicking off the commit, i.e. it assumes the commit will be
-          // successful. If it isn't, the data will be rolled back and all other
-          // reactive functions based on it will be retriggered. But also, the
-          // retry logic below will have re-scheduled this action, so
-          // topological sorting should move it before the dependencies.
+          // Commit the transaction and wait for it to complete before
+          // resolving. Previously this was fire-and-forget, which caused
+          // commit promise callbacks to accumulate and block the event loop
+          // for seconds after execute() finished (see multi-push-action-timeout.md).
           logger.timeStart("scheduler", "run", "commit");
-          const commitPromise = tx.commit();
+          const commitResult = await tx.commit();
           logger.timeEnd("scheduler", "run", "commit");
-          commitPromise.then(({ error }) => {
+
+          const log = txToReactivityLog(tx);
+
+          // Handle commit result synchronously now that we've awaited it.
+          if (commitResult.error) {
             // On error, retry up to MAX_RETRIES_FOR_REACTIVE times. Note that
             // on every attempt we still call the re-subscribe below, so that
             // even after we run out of retries, this will be re-triggered when
             // input data changes.
-            if (error) {
-              logger.info(
-                "schedule-run-error",
-                "Error committing transaction",
-                error,
-              );
+            logger.info(
+              "schedule-run-error",
+              "Error committing transaction",
+              commitResult.error,
+            );
 
-              this.retries.set(action, (this.retries.get(action) ?? 0) + 1);
-              if (this.retries.get(action)! < MAX_RETRIES_FOR_REACTIVE) {
-                // Re-schedule the action to run again on conflict failure.
-                // Use resubscribe to set up dependencies/triggers from the log,
-                // then mark as dirty/pending to ensure it runs again.
-                this.resubscribe(action, log);
-                this.dirty.add(action);
-                this.pending.add(action);
-                this.queueExecution();
-              }
-            } else {
-              // Clear retries after successful commit.
-              this.retries.delete(action);
+            this.retries.set(action, (this.retries.get(action) ?? 0) + 1);
+            if (this.retries.get(action)! < MAX_RETRIES_FOR_REACTIVE) {
+              // Re-schedule the action to run again on conflict failure.
+              // Use resubscribe to set up dependencies/triggers from the log,
+              // then mark as dirty/pending to ensure it runs again.
+              this.resubscribe(action, log);
+              this.dirty.add(action);
+              this.pending.add(action);
+              this.queueExecution();
             }
-          });
-          const log = txToReactivityLog(tx);
+          } else {
+            // Clear retries after successful commit.
+            this.retries.delete(action);
+          }
 
           logger.debug("schedule-run-complete", () => [
             `[RUN] Action completed: ${actionId}`,
