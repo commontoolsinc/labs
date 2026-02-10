@@ -7,7 +7,7 @@ import type {
 
 const NATIVE_TYPE_SCHEMAS: Record<string, SchemaDefinition | boolean> = {
   // This schema is embedded in the code, so we can have simpler links.
-  VNode: { $ref: "https://commontools.dev/schemas/vdom.json" },
+  VNode: { $ref: "https://commonfabric.org/schemas/vnode.json" },
   Date: { type: "string", format: "date-time" },
   URL: { type: "string", format: "uri" },
   ArrayBuffer: true,

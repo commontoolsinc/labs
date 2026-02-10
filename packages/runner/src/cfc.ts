@@ -4,9 +4,16 @@ import { getLogger } from "@commontools/utils/logger";
 import type { JSONSchema } from "./builder/types.ts";
 import { CycleTracker } from "./traverse.ts";
 import { isArrayIndexPropertyName } from "@commontools/memory/storable-value";
-import { rendererVDOMSchema } from "@commontools/runner/schemas";
+import { rendererVDOMSchema, vnodeSchema } from "@commontools/runner/schemas";
 
 const logger = getLogger("cfc");
+
+// Mapping from ref url to schema object
+// Any $ref links in these must be self contained or absolute
+const embeddedSchemas: Record<string, JSONSchema> = {
+  "https://commonfabric.org/schemas/vdom.json": rendererVDOMSchema,
+  "https://commonfabric.org/schemas/vnode.json": vnodeSchema,
+};
 
 // I use these strings in other code, so make them available as
 // constants. These are just strings, and real meaning would be
@@ -421,8 +428,8 @@ export class ContextualFlowControl {
     schemaRef: string,
   ): JSONSchema | undefined {
     // Allow for some absolute schema refs
-    if (schemaRef == "https://commontools.dev/schemas/vdom.json") {
-      return rendererVDOMSchema;
+    if (schemaRef in embeddedSchemas) {
+      return embeddedSchemas[schemaRef];
     }
     // We only support schemaRefs that are URI fragments
     if (!schemaRef.startsWith("#")) {
