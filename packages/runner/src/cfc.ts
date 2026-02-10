@@ -382,6 +382,9 @@ export class ContextualFlowControl {
       );
       if (resolved === undefined) { // Non-existent ref
         return undefined;
+      } else if ($ref in embeddedSchemas) {
+        // Absolute $ref means we should reset our fullSchema
+        fullSchema = resolved;
       }
       // If we have other properties, we need to keep them as we resolve refs.
       // They will override any properties in those refs.
