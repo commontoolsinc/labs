@@ -52,6 +52,7 @@ interface Input {
   allPieces?: Writable<NotePiece[]>;
 }
 
+/** Manages all notes and notebooks in the space. #allNotes */
 interface Output {
   [NAME]?: string;
   [UI]?: VNode;
@@ -980,7 +981,9 @@ const getExportFilename = (prefix: string) => {
 const NotesImportExport = pattern<Input, Output>(
   ({ title, importMarkdown, allPieces }) => {
     // allPieces is passed directly from default-app for proper cell sharing
-    // This is the only reliable way to share the cell - wish({ query: "#default" }) doesn't work in this context
+    // Used for both reads (filtering) and writes (push new notes/notebooks during import)
+    // Note: wish({ scope: ["."] }) is not used here because allPieces is a direct prop,
+    // not from the mentionable list. The emoji filtering is reliable for this context.
 
     // Filter to only notes using 📝 marker in NAME (same pattern as notebooks)
     // Note: Using NAME prefix is more reliable than checking title/content through proxy

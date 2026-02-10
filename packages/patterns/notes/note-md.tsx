@@ -64,10 +64,8 @@ export default pattern<NoteMdInput, NoteMdOutput>(
       );
     });
 
-    // Get allPieces for noteId lookup fallback
-    // Contains mixed piece types, so we use NotePiece for note-specific lookups
-    const { allPieces } =
-      wish<{ allPieces: NotePiece[] }>({ query: "#default" }).result;
+    // Type-based discovery for notes via mentionable list
+    const noteWish = wish<NotePiece>({ query: "#note", scope: ["."] });
 
     // Use sourceNoteRef directly if provided, otherwise fall back to noteId lookup
     const sourceNote = computed(() => {
@@ -76,7 +74,7 @@ export default pattern<NoteMdInput, NoteMdOutput>(
       }
       const myNoteId = note?.noteId;
       if (!myNoteId) return null;
-      return allPieces.find((piece) => piece?.noteId === myNoteId);
+      return noteWish.candidates.find((piece) => piece?.noteId === myNoteId);
     });
 
     // Action: navigate back to source note for editing

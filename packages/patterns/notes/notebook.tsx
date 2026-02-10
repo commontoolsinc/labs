@@ -89,6 +89,7 @@ const removeFromAllNotebooks = (
 
 // ===== Output Type =====
 
+/** A #notebook that organizes notes into collections. */
 interface NotebookOutput {
   [NAME]: string;
   [UI]: VNode;
@@ -720,6 +721,23 @@ const handleCreateNotebook = handler<
 
 const Notebook = pattern<NotebookInput, NotebookOutput>(
   ({ title, notes, isNotebook, isHidden, parentNotebook, [SELF]: self }) => {
+    // Type-based discovery for notebooks and "All Notes" piece
+    const notebookWish = wish<NotebookPiece>({
+      query: "#notebook",
+      scope: ["."],
+    });
+    const allNotesWish = wish<MinimalPiece>({
+      query: "#allNotes",
+      scope: ["."],
+    });
+
+    // Notebooks discovered via wish scope (replaces allPieces emoji filtering)
+    const notebooks = notebookWish.candidates;
+
+    // "All Notes" piece discovered via wish scope
+    const allNotesPiece = allNotesWish.result;
+
+    // Still need allPieces for write operations (push new notes/notebooks)
     const { allPieces } = wish<{ allPieces: Writable<NotePiece[]> }>(
       { query: "#default" },
     ).result;
@@ -788,13 +806,8 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
     });
 
     const goToAllNotesAction = action(() => {
-      const pieces = allPieces.get();
-      const existing = pieces.find((piece: any) => {
-        const name = piece?.[NAME];
-        return typeof name === "string" && name.startsWith("All Notes");
-      });
-      if (existing) {
-        return navigateTo(existing);
+      if (allNotesPiece) {
+        return navigateTo(allNotesPiece);
       }
       // No "All Notes" piece exists - can't create one here due to circular import
       // User should create it from default-app or deploy notes-import-export directly
@@ -840,19 +853,6 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
       }
       selectedNoteIndices.set([]);
     });
-
-    // Filter to find all notebooks by checking if [NAME] contains "Notebook" or starts with notebook emoji
-    // Pieces from wish({ query: "#default" }) only expose [NAME] at top level, not other properties
-    const notebooks = computed(() =>
-      allPieces.get().filter((piece: any) => {
-        const name = piece?.[NAME];
-        if (typeof name !== "string") return false;
-        // Check for notebook emoji (first char code > 127 and contains "Notebook" pattern)
-        // The emoji check via startsWith can have unicode issues, so check both
-        return name.includes("Notebook") || name.includes("Child") ||
-          name.charCodeAt(0) > 127;
-      })
-    );
 
     // COMBINED computed for ALL notebook relationships to avoid nested computed access issues
     // Returns parents, children, siblings, and their boolean flags all in one place
@@ -927,14 +927,6 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
         hasSiblings: false, // Set to: siblings.length > 0 when re-enabling
       };
     });
-
-    // Check if "All Notes" piece exists in the space
-    const allNotesPiece = computed(() =>
-      allPieces.get().find((piece: any) => {
-        const name = piece?.[NAME];
-        return typeof name === "string" && name.startsWith("All Notes");
-      })
-    );
 
     // Computed items for ct-select dropdowns (notebooks + "New Notebook...")
     // ct-select has proper bidirectional DOM sync, unlike native <select>
