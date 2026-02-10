@@ -6,7 +6,7 @@ values are identified by content.
 
 ## Status
 
-Draft formal spec -- extracted from the data model proposal.
+Draft formal spec — extracted from the data model proposal.
 
 ---
 
@@ -14,7 +14,7 @@ Draft formal spec -- extracted from the data model proposal.
 
 ### 1.1 Overview
 
-The system stores **storable values** -- data that can flow through the runtime
+The system stores **storable values** — data that can flow through the runtime
 as rich types and be serialized to wire/storage formats at boundary crossings.
 All persistent data and in-flight messages use this representation.
 
@@ -49,17 +49,19 @@ type StorableValue =
   | undefined // deletion at top level; absent in objects; `null` in arrays
   | bigint    // large integers
 
-  // (b) Built-in JS types (require explicit serialization handling)
+  // (b) Built-in JS types with derived StorableInstance form (Section 1.4)
   | Error
   | Map<StorableValue, StorableValue>
   | Set<StorableValue>
+
+  // (c) Built-in JS types (require explicit serialization handling)
   | Uint8Array
   | Date
 
-  // (c) Branded storables (custom types implementing the storable protocol)
+  // (d) Branded storables (custom types implementing the storable protocol)
   | StorableInstance
 
-  // (d) Recursive containers
+  // (e) Recursive containers
   | StorableValue[]
   | { [key: string]: StorableValue };
 ```
@@ -97,24 +99,55 @@ type StorableValue =
 
 ### 1.4 Built-in JS Types
 
-These types are recognized directly by the serialization system. They cannot be
-patched with symbol-keyed methods, so the serialization context must handle them
-explicitly.
+Certain built-in JS types cannot have `Symbol`-keyed methods added via
+prototype patching in a reliable, cross-realm way. The serialization system
+therefore handles them with hardcoded logic. However, for the purposes of
+serialization and hashing, `Error`, `Map`, and `Set` are treated _as if_ they
+implement the storable protocol — the spec defines a derived `StorableInstance`
+form for each, and the system processes them through the same conceptual path as
+user-defined `StorableInstance` types.
+
+#### 1.4.1 Types with Derived `StorableInstance` Form
+
+`Error`, `Map`, and `Set` have derived `StorableInstance` forms. The serializer
+decomposes them into essential state as defined below, then processes the result
+exactly as it would for any `StorableInstance` (tagging, recursive descent,
+hashing via `TAG_STORABLE`). The implementation uses hardcoded branches (since
+these types cannot carry `[DECONSTRUCT]` methods), but the behavior is
+equivalent to what the storable protocol would produce.
+
+| Type | Type Tag | Deconstructed State | Notes |
+|------|----------|---------------------|-------|
+| `Error` | `Error@1` | `{ name, message, stack?, cause?, ...custom }` | Captures `name`, `message`, `stack` (if present), `cause` (if present), and custom enumerable properties. Nested values (including `cause`) are recursively processed — see Section 4.4. |
+| `Map` | `Map@1` | `[[key, value], ...]` | Entry pairs as an array of two-element arrays. Insertion order is preserved in serialized form. Keys and values are recursively processed. (For canonical hashing, entries are sorted by key hash — see Section 6.3.) |
+| `Set` | `Set@1` | `[value, ...]` | Elements as an array. Iteration order is preserved in serialized form. Values are recursively processed. (For canonical hashing, elements are sorted by hash — see Section 6.3.) |
+
+Reconstruction for these types is also defined:
+
+- **`Error`**: Construct a new `Error` (or subclass based on `name`), setting
+  `message`, `stack`, `cause`, and any custom enumerable properties from the
+  deconstructed state.
+- **`Map`**: Construct a new `Map` from the entry pairs.
+- **`Set`**: Construct a new `Set` from the element array.
+
+> **Why derived `StorableInstance` form?** Treating `Error`, `Map`, and `Set` as
+> having a `StorableInstance` form — rather than as base types of the storage
+> system — means the serialization and hashing systems have fewer special cases.
+> The type tag + deconstructed state model is the same one used for user-defined
+> types, `UnknownStorable`, and `ProblematicStorable`. The only difference is
+> that the decomposition is implemented by the serializer rather than by a
+> `[DECONSTRUCT]` method on the instance.
+
+#### 1.4.2 Other Built-in Types
+
+`Uint8Array` and `Date` remain as true built-in types whose serialized
+representations do not follow the deconstructed-state model (their payloads are
+opaque encodings rather than recursively-processable `StorableValue`s).
 
 | Type | JSON Encoding | Notes |
 |------|---------------|-------|
-| `Error` | `{ "/Error@1": { name, message, stack, cause, ... } }` | Captures `name`, `message`, `stack`, `cause`, and custom enumerable properties. Nested values (including `cause`) are recursively serialized by the serialization system -- see Section 4.4 for the recursion model. |
-| `Map` | `{ "/Map@1": [[key, value], ...] }` | Entry order is preserved in serialized form. Keys and values are recursively serialized. (For canonical hashing, entries are sorted by key hash -- see Section 6.3.) |
-| `Set` | `{ "/Set@1": [value, ...] }` | Iteration order is preserved in serialized form. Values are recursively serialized. (For canonical hashing, elements are sorted by hash -- see Section 6.3.) |
 | `Uint8Array` | `{ "/Bytes@1": "base64..." }` | Base64-encoded binary data. |
 | `Date` | `{ "/Date@1": "ISO-8601-string" }` | ISO 8601 UTC format. |
-
-> **Built-in types vs. the storable protocol:** Built-in JS types like `Error`
-> cannot have `Symbol`-keyed methods added via prototype patching in a reliable,
-> cross-realm way. The serialization system therefore has hardcoded knowledge of
-> how to decompose these types. This is distinct from user-defined
-> `StorableInstance` types, which participate via the `[DECONSTRUCT]` /
-> `[RECONSTRUCT]` protocol (Section 2).
 
 ### 1.5 Recursive Containers
 
@@ -328,13 +361,13 @@ class Cell<T> implements StorableInstance {
 ### 2.8 Deconstructed State and Recursion
 
 The value returned by `[DECONSTRUCT]()` can contain any value that is itself
-storable -- including other `StorableInstance`s, built-in types like `Error` or
+storable — including other `StorableInstance`s, built-in types like `Error` or
 `Map`, primitives, and plain objects/arrays.
 
 **The serialization system handles recursion, not the individual deconstructor
 methods.** A `[DECONSTRUCT]` implementation returns its essential state without
 recursively deconstructing nested values. The deconstructor does not have access
-to the serialization machinery -- by design, as it would be a layering
+to the serialization machinery — by design, as it would be a layering
 violation.
 
 Similarly, `[RECONSTRUCT]` receives state where nested values have already been
@@ -346,7 +379,7 @@ The system follows an **immutable-forward** design:
 
 - **Plain objects and arrays** are frozen (`Object.freeze()`) upon
   reconstruction.
-- **`StorableInstance`s** should ideally be frozen as well -- this is the north
+- **`StorableInstance`s** should ideally be frozen as well — this is the north
   star, though not yet a strict requirement.
 - **No distinction** is made between regular and null-prototype plain objects;
   reconstruction always produces regular plain objects.
@@ -355,7 +388,7 @@ This immutability guarantee enables safe sharing of reconstructed values and
 aligns with the reactive system's assumption that values don't mutate in place.
 
 > **Frozen built-in types.** `Object.freeze()` does not enforce immutability on
-> `Map`, `Set`, `Date`, or `Uint8Array` -- their mutation methods remain
+> `Map`, `Set`, `Date`, or `Uint8Array` — their mutation methods remain
 > callable on a frozen instance. To uphold the immutable-forward guarantee for
 > these types, the implementation should provide frozen-wrapper types (e.g.,
 > `FrozenMap`, `FrozenSet`) that expose read-only interfaces and throw on
@@ -370,11 +403,11 @@ aligns with the reactive system's assumption that values don't mutate in place.
 
 ### 3.1 Overview
 
-When deserializing, a context may encounter a type tag it doesn't recognize --
+When deserializing, a context may encounter a type tag it doesn't recognize —
 for example, data written by a newer version of the system. Unknown types are
 **passed through** rather than rejected, preserving forward compatibility.
 
-### 3.2 UnknownStorable
+### 3.2 `UnknownStorable`
 
 ```typescript
 // file: packages/common/unknown-storable.ts
@@ -422,12 +455,12 @@ export class UnknownStorable implements StorableInstance {
   `typeTag` to produce the original wire format.
 - This allows data to round-trip through systems that don't understand it.
 
-### 3.4 ProblematicStorable (Recommended)
+### 3.4 `ProblematicStorable` (Recommended)
 
 It is recommended that implementations provide a `ProblematicStorable` type,
 analogous to `UnknownStorable`, for cases where deconstruction or reconstruction
 fails partway through. This allows graceful degradation rather than hard
-failures -- for example, a type whose `[RECONSTRUCT]` throws can be preserved as
+failures — for example, a type whose `[RECONSTRUCT]` throws can be preserved as
 a `ProblematicStorable` with the original tag, state, and error information.
 
 ```typescript
@@ -471,7 +504,7 @@ Like `UnknownStorable`, a `ProblematicStorable` round-trips through
 serialization, preserving the original data so it is not silently lost. The
 `error` field aids debugging by recording what went wrong. Whether to wrap
 failures in `ProblematicStorable` or to throw is an implementation decision that
-may vary by context -- strict contexts (e.g., tests) may prefer to throw, while
+may vary by context — strict contexts (e.g., tests) may prefer to throw, while
 lenient contexts (e.g., production reconstruction) may prefer graceful
 degradation.
 
@@ -488,7 +521,7 @@ encoding/decoding.
 
 ### 4.2 SerializedForm
 
-Each serialization context defines a `SerializedForm` -- the type of values in
+Each serialization context defines a `SerializedForm` — the type of values in
 its wire format. For the JSON context, this is:
 
 ```typescript
@@ -542,7 +575,7 @@ functions, not by the context or by individual types. See Section 4.5.
 
 > **Export style:** Following the JS standard convention of capitalized namespace
 > objects (cf. `Temporal`, `Atomics`), the `serialize()` and `deserialize()`
-> functions should be exported as methods on a namespace object -- e.g.,
+> functions should be exported as methods on a namespace object — e.g.,
 > `DataModel.serialize()` or `Serialization.serialize()`. The exact name is an
 > implementation decision.
 
@@ -569,11 +602,10 @@ export function serialize(
     return context.encode(tag, serializedState);
   }
 
-  // --- Built-in JS types ---
-  // These types cannot implement [DECONSTRUCT] via symbol, so the serializer
-  // handles them explicitly. Each is decomposed into essential state, nested
-  // values are recursively serialized, and the result is wrapped with the
-  // appropriate tag.
+  // --- Built-in JS types with derived StorableInstance form (Section 1.4.1) ---
+  // `Error`, `Map`, and `Set` cannot carry `[DECONSTRUCT]` methods, so the
+  // serializer derives their deconstructed state inline. The result is tagged
+  // and recursively processed exactly as for any `StorableInstance`.
 
   if (value instanceof Error) {
     const state: Record<string, SerializedForm> = {
@@ -606,6 +638,8 @@ export function serialize(
     const elements = [...value].map((v) => serialize(v, context));
     return context.encode('Set@1', elements);
   }
+
+  // --- Other built-in types (Section 1.4.2) ---
 
   if (value instanceof Uint8Array) {
     // Base64 encoding produces a string; no recursion needed.
@@ -705,6 +739,13 @@ export function deserialize(
 }
 ```
 
+> **Implementation guidance: caching `instanceof` checks.** The `serialize()`
+> function uses a cascade of `instanceof` checks to identify built-in types.
+> If this cascade proves too slow in practice, a `WeakMap<object, string>` can
+> cache the result of the type detection for each object, so the cascade runs
+> at most once per object. This assumes (and the system may eventually enforce)
+> that the prototype chain of storable objects is not altered after creation.
+
 ### 4.6 Separation of Concerns
 
 This architecture enables:
@@ -722,7 +763,7 @@ The boundaries where serialization occurs:
 | Boundary | Packages | Direction |
 |----------|----------|-----------|
 | **Persistence** | `memory` <-> database | read/write |
-| **Iframe sandbox** | `runner` <-> `iframe-sandbox` | postMessage |
+| **Iframe sandbox** | `runner` <-> `iframe-sandbox` | `postMessage` |
 | **Background service** | `shell` <-> `background-charm-service` | worker messages |
 | **HTML reconciler** | `html` reconciler (runs in a web worker) | worker messages |
 | **Network sync** | `toolshed` <-> remote peers | WebSocket/HTTP |
@@ -752,9 +793,9 @@ types more directly without layering on JSON.
 All special types in JSON use a single convention: single-key objects where the
 key follows the pattern `/<Type>@<Version>`.
 
-- `/` -- sigil prefix (nodding to IPLD heritage)
-- `<Type>` -- `UpperCamelCase` type name
-- `@<Version>` -- version number (natural number, starting at 1)
+- `/` — sigil prefix (nodding to IPLD heritage)
+- `<Type>` — `UpperCamelCase` type name
+- `@<Version>` — version number (natural number, starting at 1)
 
 This convention does **not** prohibit storing plain objects that happen to have
 `/`-prefixed keys. The escaping mechanism in Section 5.6 (`/object` and
@@ -837,7 +878,7 @@ type being represented, not by the wire encoding.
 Two escape mechanisms handle cases where user data might be mistaken for
 special types.
 
-#### `/object` -- Single-Layer Escape
+#### `/object` — Single-Layer Escape
 
 Wraps a plain object whose key(s) might look like special types. The values
 are still processed normally during deserialization:
@@ -856,7 +897,7 @@ has exactly one string key that starts with `/`, the serializer wraps it in
 If the object has multiple keys, no wrapping is needed (since tagged types
 always have exactly one key).
 
-#### `/quote` -- Fully Literal
+#### `/quote` — Fully Literal
 
 Wraps a value that should be returned exactly as-is, with no deserialization
 of any nested special forms:
@@ -865,7 +906,7 @@ of any nested special forms:
 { "/quote": { "/Link@1": { "id": "..." } } }
 ```
 
-Deserializes to: `{ "/Link@1": { "id": "..." } }` -- the inner structure is
+Deserializes to: `{ "/Link@1": { "id": "..." } }` — the inner structure is
 *not* reconstructed. It remains a plain object.
 
 Use cases:
@@ -956,12 +997,9 @@ export function canonicalHash(
   // TAG_UNDEFINED  = 0x05
   // TAG_BYTES      = 0x06
   // TAG_DATE       = 0x07
-  // TAG_ERROR      = 0x08
-  // TAG_MAP        = 0x09
-  // TAG_SET        = 0x0A
-  // TAG_ARRAY      = 0x0B
-  // TAG_OBJECT     = 0x0C
-  // TAG_STORABLE   = 0x0D
+  // TAG_ARRAY      = 0x08
+  // TAG_OBJECT     = 0x09
+  // TAG_STORABLE   = 0x0A
   //
   // Implementation feeds type-tagged data into the hasher:
   //
@@ -973,18 +1011,21 @@ export function canonicalHash(
   // - `undefined`:         hash(TAG_UNDEFINED)
   // - `Uint8Array`:        hash(TAG_BYTES, rawBytes)
   // - `Date`:              hash(TAG_DATE, int64MillisSinceEpoch)
-  // - `Error`:             hash(TAG_ERROR, canonicalHash(errorState))
-  // - `Map`:               hash(TAG_MAP, sortedEntries)
-  //                        where entries are sorted by canonicalHash(key)
-  //                        (NOT by insertion order -- hashing is order-independent)
-  // - `Set`:               hash(TAG_SET, sortedElements)
-  //                        where elements are sorted by canonicalHash(element)
-  //                        (NOT by insertion order -- hashing is order-independent)
   // - array:               hash(TAG_ARRAY, length, ...canonicalHash(element))
   //                        (order-preserving)
   // - object:              hash(TAG_OBJECT, sortedKeys, ...canonicalHash(value))
   //                        (keys sorted lexicographically by UTF-8)
   // - `StorableInstance`:  hash(TAG_STORABLE, typeTag, canonicalHash(deconstructedState))
+  //
+  // `Error`, `Map`, and `Set` are hashed via TAG_STORABLE using their derived
+  // `StorableInstance` form (Section 1.4.1). For example:
+  // - `Error`:  hash(TAG_STORABLE, "Error@1", canonicalHash(errorState))
+  // - `Map`:    hash(TAG_STORABLE, "Map@1", canonicalHash(sortedEntries))
+  //             where entries are sorted by canonicalHash(key)
+  //             (NOT by insertion order — hashing is order-independent)
+  // - `Set`:    hash(TAG_STORABLE, "Set@1", canonicalHash(sortedElements))
+  //             where elements are sorted by canonicalHash(element)
+  //             (NOT by insertion order — hashing is order-independent)
   //
   // Each type is tagged to prevent collisions between types with
   // identical content representations.
@@ -998,19 +1039,20 @@ export function canonicalHash(
 > characterization may lead to a switch to UTF-8 encoding if the overhead of
 > UTF-16 proves significant for non-BMP-heavy workloads.
 
-> **Map/Set ordering: serialization vs. hashing.** Serialized form (Section 1.4)
-> preserves insertion order for `Map` and `Set`, which matters for
-> round-tripping. Canonical hashing (this section) sorts entries/elements by
-> hash, which makes the hash order-independent. These are not contradictory:
-> serialization preserves what the user put in; hashing normalizes for identity
-> comparison.
+> **Map/Set ordering: serialization vs. hashing.** The derived `StorableInstance`
+> form (Section 1.4.1) preserves insertion order for `Map` and `Set`, which
+> matters for round-tripping. Canonical hashing (this section) sorts
+> entries/elements by hash, which makes the hash order-independent. These are
+> not contradictory: serialization preserves what the user put in; hashing
+> normalizes for identity comparison.
 
 ### 6.4 Relationship to Late Serialization
 
 Canonical hashing operates on rich types directly, using deconstructed state
-for `StorableInstance`s and type-specific handling for built-in JS types. This
-makes identity hashing independent of any particular wire encoding -- the same
-hash whether later serialized to JSON, CBOR, or Automerge.
+for `StorableInstance`s (including the derived forms for `Error`, `Map`, and
+`Set`) and type-specific handling for other built-in types. This makes identity
+hashing independent of any particular wire encoding — the same hash whether
+later serialized to JSON, CBOR, or Automerge.
 
 ### 6.5 Use Cases
 
@@ -1072,7 +1114,7 @@ These questions may need resolution during implementation but do not block the
 spec from being implementable.
 
 - **Comparison semantics for rich types**: Should equality be by identity, by
-  deconstructed state (or as if by deconstructed state -- an implementation need
+  deconstructed state (or as if by deconstructed state — an implementation need
   not actually run a deconstructor), or configurable? This affects both runtime
   comparisons (e.g., in reactive system change detection) and `Map`/`Set` key
   behavior. Recommendation: start with identity semantics (the JS default) and
