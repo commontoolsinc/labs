@@ -3830,7 +3830,7 @@ describe("Schema Support", () => {
       expect(cellALink.path).toEqual(["baz", "bar"]);
     });
 
-    it("with data cell: validates system prompt", () => {
+    it("with data cell: validates contents", () => {
       const cellASchema = {
         type: "object",
         properties: { system: { type: "string" } },
