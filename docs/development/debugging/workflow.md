@@ -52,9 +52,24 @@ deno task ct piece inspect --identity key.json --api-url URL --space SPACE --pie
 | LLM in handler | Move `generateText` to pattern body |
 | UI blocking | Use `fetchData` instead of `await` in handlers |
 
-## 6. Check Logger Stats
+## 6. Check Runtime Logs and Stats
 
-Use `globalThis.commontools` in the browser console to inspect runtime metrics:
+The runtime has structured loggers across all modules (`runner`, `runtime-client`,
+etc.). Most are disabled by default to keep the console clean. Enabling them
+produces tagged output in the browser console, which is useful for tracing what
+the runtime is doing under the hood.
+
+```javascript
+// Enable a logger and set it to debug level — this produces console output
+commontools.logger["runner"].disabled = false
+commontools.logger["runner"].level = "debug"
+
+// Turn it back off when done to reduce noise
+commontools.logger["runner"].disabled = true
+```
+
+Even when loggers are disabled, call counts and timing stats are still tracked.
+You can inspect these without turning on console output:
 
 ```javascript
 // See which loggers exist and their call counts
@@ -65,10 +80,6 @@ commontools.getTimingStatsBreakdown()
 
 // Check for actions with invalid inputs (schema mismatches)
 commontools.getLoggerFlagsBreakdown()
-
-// Enable a disabled logger for more detail
-commontools.logger["runner"].disabled = false
-commontools.logger["runner"].level = "debug"
 ```
 
 See [console-commands](./console-commands.md) for the full reference.
