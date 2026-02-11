@@ -176,7 +176,9 @@ function starPageUrl(
   if (!owner || !repo || totalStars === 0) return "";
   const pages = computeSamplePages(totalStars);
   if (index >= pages.length) return "";
-  return `https://api.github.com/repos/${owner}/${repo}/stargazers?page=${pages[index]}&per_page=100`;
+  return `https://api.github.com/repos/${owner}/${repo}/stargazers?page=${
+    pages[index]
+  }&per_page=100`;
 }
 
 const FLAG_COLORS: Record<string, string> = {
@@ -232,21 +234,11 @@ export const RepoCard = pattern<RepoCardInput>(
 
     // Compute each page URL directly from stars to avoid reactive array
     // indexing issues (pages[N] on a computed array may return a proxy).
-    const pageUrl0 = computed(() =>
-      starPageUrl(owner, repo, 0, stars)
-    );
-    const pageUrl1 = computed(() =>
-      starPageUrl(owner, repo, 1, stars)
-    );
-    const pageUrl2 = computed(() =>
-      starPageUrl(owner, repo, 2, stars)
-    );
-    const pageUrl3 = computed(() =>
-      starPageUrl(owner, repo, 3, stars)
-    );
-    const pageUrl4 = computed(() =>
-      starPageUrl(owner, repo, 4, stars)
-    );
+    const pageUrl0 = computed(() => starPageUrl(owner, repo, 0, stars));
+    const pageUrl1 = computed(() => starPageUrl(owner, repo, 1, stars));
+    const pageUrl2 = computed(() => starPageUrl(owner, repo, 2, stars));
+    const pageUrl3 = computed(() => starPageUrl(owner, repo, 3, stars));
+    const pageUrl4 = computed(() => starPageUrl(owner, repo, 4, stars));
 
     const starOpts = computed(() => ({ headers: starHeaders }));
 
@@ -296,23 +288,30 @@ export const RepoCard = pattern<RepoCardInput>(
     const growthFlag = computed((): GrowthFlag => growth.flag);
     const growthRate = computed(() => growth.rate);
 
-    const sparklineBars = computed(() => {
+    const sparkMarks = computed(() => {
       const pts = curvePoints;
       if (pts.length === 0) return [];
-      const max = Math.max(...pts.map((p) => p.stars));
-      return pts.map((p, i) => {
-        const pct = max > 0 ? (p.stars / max) * 100 : 0;
-        let color = FLAG_COLORS.linear;
-        if (i > 0 && i < pts.length - 1) {
-          const prev = pts[i - 1].stars;
-          const next = pts[i + 1].stars;
-          const d1 = p.stars - prev;
-          const d2 = next - p.stars;
-          if (d2 > d1 * 1.1) color = FLAG_COLORS.accelerating;
-          else if (d2 < d1 * 0.9) color = FLAG_COLORS.decelerating;
-        }
-        return { pct, color };
-      });
+      const color = FLAG_COLORS[growthFlag] || "#6b7280";
+      return [
+        {
+          type: "area" as const,
+          data: pts,
+          x: "date",
+          y: "stars",
+          color,
+          opacity: 0.35,
+          curve: "monotone" as const,
+        },
+        {
+          type: "line" as const,
+          data: pts,
+          x: "date",
+          y: "stars",
+          color,
+          strokeWidth: 1.5,
+          curve: "monotone" as const,
+        },
+      ];
     });
 
     return {
@@ -368,30 +367,13 @@ export const RepoCard = pattern<RepoCardInput>(
             {computed(() => stars === 0 ? "..." : `★ ${formatStars(stars)}`)}
           </span>
 
-          <div
-            style={{
-              display: "flex",
-              alignItems: "flex-end",
-              gap: "1px",
-              height: "24px",
-              width: "100px",
-              flexShrink: "0",
-            }}
-          >
-            {computed(() =>
-              sparklineBars.map((bar: { pct: number; color: string }) => (
-                <div
-                  style={{
-                    flex: "1",
-                    height: `${bar.pct}%`,
-                    backgroundColor: bar.color,
-                    borderRadius: "1px 1px 0 0",
-                    minHeight: "1px",
-                  }}
-                />
-              ))
-            )}
-          </div>
+          <ct-chart
+            height={24}
+            crosshair={false}
+            padding={[2, 0, 2, 0]}
+            $marks={sparkMarks}
+            style={{ width: "100px", flexShrink: "0" }}
+          />
 
           <span
             style={computed(() => ({
