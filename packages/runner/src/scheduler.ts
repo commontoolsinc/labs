@@ -164,6 +164,9 @@ export class Scheduler {
   // Track outstanding commit promises so execute() can drain them before
   // resolving idle, preventing commit callback backlog.
   private outstandingCommits = new Set<Promise<any>>();
+  // True while waiting for outstanding commits to drain after execute()
+  // finishes. idle() checks this to avoid resolving prematurely.
+  private drainingCommits = false;
 
   // Compute time tracking for cycle-aware scheduling
   // Keyed by action ID (source location) to persist stats across action recreation
@@ -707,55 +710,65 @@ export class Scheduler {
             this.handleError(error as Error, action);
           }
         } finally {
-          // Capture the reactivity log BEFORE committing, because commit
-          // closes the journal and the activity log becomes unavailable.
-          const log = txToReactivityLog(tx);
+          try {
+            // Capture the reactivity log BEFORE committing, because commit
+            // closes the journal and the activity log becomes unavailable.
+            const log = txToReactivityLog(tx);
 
-          // Commit the transaction. We track the promise so execute() can
-          // drain all outstanding commits before resolving idle(), preventing
-          // commit callback backlog (see multi-push-action-timeout.md).
-          // The commit is NOT awaited here — run() resolves immediately so
-          // the settle loop can proceed to the next action without waiting
-          // for I/O.
-          logger.timeStart("scheduler", "run", "commit");
-          const commitPromise = tx.commit();
-          logger.timeEnd("scheduler", "run", "commit");
-          this.outstandingCommits.add(commitPromise);
-          commitPromise.then(({ error }) => {
-            this.outstandingCommits.delete(commitPromise);
-            if (error) {
-              // On error, retry up to MAX_RETRIES_FOR_REACTIVE times. Note
-              // that on every attempt we still call the re-subscribe below,
-              // so that even after we run out of retries, this will be
-              // re-triggered when input data changes.
-              logger.info(
-                "schedule-run-error",
-                "Error committing transaction",
-                error,
-              );
+            // Commit the transaction. We track the promise so execute() can
+            // drain all outstanding commits before resolving idle(), preventing
+            // commit callback backlog (see multi-push-action-timeout.md).
+            // The commit is NOT awaited here — run() resolves immediately so
+            // the settle loop can proceed to the next action without waiting
+            // for I/O.
+            logger.timeStart("scheduler", "run", "commit");
+            const commitPromise = tx.commit();
+            logger.timeEnd("scheduler", "run", "commit");
+            this.outstandingCommits.add(commitPromise);
+            commitPromise.then(({ error }) => {
+              this.outstandingCommits.delete(commitPromise);
+              if (error) {
+                // On error, retry up to MAX_RETRIES_FOR_REACTIVE times. Note
+                // that on every attempt we still call the re-subscribe below,
+                // so that even after we run out of retries, this will be
+                // re-triggered when input data changes.
+                logger.info(
+                  "schedule-run-error",
+                  "Error committing transaction",
+                  error,
+                );
 
-              this.retries.set(action, (this.retries.get(action) ?? 0) + 1);
-              if (this.retries.get(action)! < MAX_RETRIES_FOR_REACTIVE) {
-                // Re-schedule the action to run again on conflict failure.
-                this.resubscribe(action, log);
-                this.dirty.add(action);
-                this.pending.add(action);
-                this.queueExecution();
+                this.retries.set(action, (this.retries.get(action) ?? 0) + 1);
+                if (this.retries.get(action)! < MAX_RETRIES_FOR_REACTIVE) {
+                  // Re-schedule the action to run again on conflict failure.
+                  this.resubscribe(action, log);
+                  this.dirty.add(action);
+                  this.pending.add(action);
+                  this.queueExecution();
+                }
+              } else {
+                // Clear retries after successful commit.
+                this.retries.delete(action);
               }
-            } else {
-              // Clear retries after successful commit.
-              this.retries.delete(action);
-            }
-          });
+            });
 
-          logger.debug("schedule-run-complete", () => [
-            `[RUN] Action completed: ${actionId}`,
-            `Reads: ${log.reads.length}`,
-            `Writes: ${log.writes.length}`,
-            `Elapsed: ${elapsed.toFixed(2)}ms`,
-          ]);
+            logger.debug("schedule-run-complete", () => [
+              `[RUN] Action completed: ${actionId}`,
+              `Reads: ${log.reads.length}`,
+              `Writes: ${log.writes.length}`,
+              `Elapsed: ${elapsed.toFixed(2)}ms`,
+            ]);
 
-          this.resubscribe(action, log);
+            this.resubscribe(action, log);
+          } catch (finalizeError) {
+            logger.error(
+              "schedule-error",
+              "Error in finalize (commit/resubscribe), resolving anyway to prevent deadlock:",
+              finalizeError,
+            );
+          }
+          // resolve() is outside the try/catch so it ALWAYS runs,
+          // preventing runningPromise from hanging permanently.
           resolve(result);
         }
       };
@@ -801,8 +814,8 @@ export class Scheduler {
       if (this.runningPromise) {
         // Something is currently running - wait for it then check again
         this.runningPromise.then(() => this.idle().then(resolve));
-      } else if (!this.scheduled) {
-        // Nothing is scheduled to run - we're idle.
+      } else if (!this.scheduled && !this.drainingCommits) {
+        // Nothing is scheduled to run and no commits draining - we're idle.
         // In pull mode, pending computations won't run without an effect to pull them,
         // so we don't wait for them.
         resolve();
@@ -2460,11 +2473,21 @@ export class Scheduler {
       // event loop for seconds after execute() finishes, preventing
       // idle() from resolving promptly (see multi-push-action-timeout.md).
       if (this.outstandingCommits.size > 0) {
+        // Set drainingCommits so idle() callers queue into idlePromises
+        // rather than resolving immediately. We keep scheduled=false so
+        // queueExecution() still works if a commit callback triggers a
+        // retry during the drain.
+        this.drainingCommits = true;
         const commits = [...this.outstandingCommits];
         Promise.all(commits).then(() => {
-          const promises = this.idlePromises;
-          for (const resolve of promises) resolve();
-          this.idlePromises.length = 0;
+          this.drainingCommits = false;
+          // If new work was scheduled during the drain, don't resolve
+          // idle — the next execute() cycle will handle it.
+          if (!this.scheduled) {
+            const promises = this.idlePromises;
+            for (const resolve of promises) resolve();
+            this.idlePromises.length = 0;
+          }
         });
       } else {
         const promises = this.idlePromises;
