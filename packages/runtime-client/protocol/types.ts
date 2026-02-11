@@ -253,6 +253,11 @@ export type LoggerTimingData = Record<
   Record<string, TimingStats>
 >;
 
+export type LoggerFlagsData = Record<
+  string,
+  Record<string, Record<string, Record<string, unknown> | null>>
+>;
+
 export interface PageCreateRequest extends BaseRequest {
   type: RequestType.PageCreate;
   source: {
@@ -440,6 +445,7 @@ export interface LoggerCountsResponse {
   counts: LoggerCountsData;
   metadata: LoggerMetadata;
   timing: LoggerTimingData;
+  flags: LoggerFlagsData;
 }
 
 export interface CellUpdateNotification {

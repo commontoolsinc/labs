@@ -1256,6 +1256,36 @@ export class Runner {
           const isValidArgument = module.argumentSchema === false ||
             argument !== undefined;
 
+          // Set/clear the invalid input flag for stream handlers
+          if (name) {
+            if (!isValidArgument) {
+              let queryResult: string;
+              try {
+                queryResult = JSON.stringify(
+                  inputsCell.getAsQueryResult([], tx),
+                );
+              } catch (_e) {
+                queryResult = "(Can't serialize to JSON)";
+              }
+              logger.flag(
+                "action invalid input",
+                `action:${name}`,
+                true,
+                {
+                  schema: module.argumentSchema,
+                  raw: inputsCell.getRaw(),
+                  queryResult,
+                },
+              );
+            } else {
+              logger.flag(
+                "action invalid input",
+                `action:${name}`,
+                false,
+              );
+            }
+          }
+
           if (!isValidArgument) {
             logger.error(
               "stream",
@@ -1444,6 +1474,36 @@ export class Runner {
           // If we have a schema of false, we don't use our argument, so undefined is ok
           const isValidArgument = module.argumentSchema === false ||
             argument !== undefined;
+
+          // Set/clear the invalid input flag (always, not just on transitions)
+          if (name) {
+            if (!isValidArgument) {
+              let queryResult: string;
+              try {
+                queryResult = JSON.stringify(
+                  inputsCell.getAsQueryResult([], tx),
+                );
+              } catch (_e) {
+                queryResult = "(Can't serialize to JSON)";
+              }
+              logger.flag(
+                "action invalid input",
+                `action:${name}`,
+                true,
+                {
+                  schema: module.argumentSchema,
+                  raw: inputsCell.getRaw(),
+                  queryResult,
+                },
+              );
+            } else {
+              logger.flag(
+                "action invalid input",
+                `action:${name}`,
+                false,
+              );
+            }
+          }
 
           if (!isValidArgument || previouslyInvalidArgument) {
             logger.info(

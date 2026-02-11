@@ -3,6 +3,7 @@ import { PieceManager } from "@commontools/piece";
 import { PiecesController } from "@commontools/piece/ops";
 import {
   getLoggerCountsBreakdown,
+  getLoggerFlagsBreakdown,
   getTimingStatsBreakdown,
   Logger,
   resetAllCountBaselines,
@@ -632,7 +633,8 @@ export class RuntimeProcessor {
     const counts = getLoggerCountsBreakdown();
     const metadata = this.#getLoggerMetadata();
     const timing = getTimingStatsBreakdown();
-    return { counts, metadata, timing };
+    const flags = getLoggerFlagsBreakdown();
+    return { counts, metadata, timing, flags };
   }
 
   #getLoggerMetadata(): LoggerMetadata {

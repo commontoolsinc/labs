@@ -3,6 +3,7 @@ import type { RuntimeInternals } from "./runtime.ts";
 import type {
   CellHandle,
   CellRef,
+  LoggerFlagsData,
   RuntimeTelemetryMarkerResult,
   SchedulerGraphEdge,
   SchedulerGraphSnapshot,
@@ -66,6 +67,10 @@ export class DebuggerController implements ReactiveController {
   private historicalEdges = new Set<string>(); // "from->to" format
   private graphUpdateVersion = 0;
   private isProcessingTelemetry = false; // Guard against re-entrant updates
+
+  // Logger flags from worker (e.g. "action invalid input" flags)
+  private activeFlags: LoggerFlagsData = {};
+  private flagsVersion = 0;
 
   // Baseline stats for scheduler graph delta calculations
   // Persists across tab switches (stored here instead of in SchedulerGraphView component)
@@ -396,6 +401,9 @@ export class DebuggerController implements ReactiveController {
     const snapshot = await rt.getGraphSnapshot();
     this.processGraphSnapshot(snapshot);
     this.host.requestUpdate();
+
+    // Also refresh flags alongside the graph
+    this.requestFlags().catch(() => {});
   }
 
   /**
@@ -449,6 +457,57 @@ export class DebuggerController implements ReactiveController {
    */
   getSchedulerBaselineVersion(): number {
     return this.schedulerBaselineVersion;
+  }
+
+  /**
+   * Get active logger flags from the worker
+   */
+  getActiveFlags(): LoggerFlagsData {
+    return this.activeFlags;
+  }
+
+  /**
+   * Get the flags version for change detection
+   */
+  getFlagsVersion(): number {
+    return this.flagsVersion;
+  }
+
+  /**
+   * Update active flags directly (e.g. from an existing IPC response)
+   */
+  updateFlags(flags: LoggerFlagsData): void {
+    this.activeFlags = flags;
+    this.flagsVersion++;
+  }
+
+  /**
+   * Request fresh flags from the worker via getLoggerCounts
+   */
+  async requestFlags(): Promise<void> {
+    if (!this.runtime) return;
+
+    const rt = this.runtime.runtime();
+    if (!rt) return;
+    try {
+      const result = await rt.getLoggerCounts();
+      this.activeFlags = result.flags;
+      this.flagsVersion++;
+      this.host.requestUpdate();
+    } catch (e) {
+      console.error("[DebuggerController] Failed to request flags:", e);
+    }
+  }
+
+  /**
+   * Get metadata for a specific flag ID.
+   * Returns the metadata object if present, or null.
+   */
+  getFlagMetadata(
+    flagName: string,
+    id: string,
+  ): Record<string, unknown> | null {
+    return this.activeFlags?.["runner"]?.[flagName]?.[id] ?? null;
   }
 
   /**
