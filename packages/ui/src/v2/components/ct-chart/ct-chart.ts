@@ -35,7 +35,6 @@ import { MarkElement } from "./marks/base-mark.ts";
 import {
   collectAllMarkData,
   createScales,
-  extractDataPoints,
   type CollectedMarkData,
   type XScale,
   type YScale,
@@ -183,36 +182,70 @@ export class CTChart extends BaseElement {
       xType = scales.xType;
     }
 
+    const svgContent = xScale && yScale
+      ? this._renderChartContent(
+        allMarks,
+        xScale,
+        yScale,
+        xType,
+        plotWidth,
+        plotHeight,
+        chartPadding,
+        configMarks,
+      )
+      : svg``;
+
+    const tooltip = this._tooltipInfo
+      ? this._renderTooltip(chartPadding)
+      : html``;
+
+    const w = this._width || "100%";
+    const vw = this._width || 1;
+
     return html`
       <div class="chart-container" style="height: ${this.height}px;">
-        <svg
-          width=${this._width || "100%"}
-          height=${this.height}
-          viewBox="0 0 ${this._width || 1} ${this.height}"
-        >
-          ${xScale && yScale ? svg`
-            <g transform="translate(${chartPadding.left}, ${chartPadding.top})">
-              ${this._renderAllMarks(allMarks, xScale, yScale, plotWidth, plotHeight, configMarks)}
-              ${this.xAxis ? renderXAxis(xScale, xType, plotWidth, plotHeight) : svg``}
-              ${this.yAxis ? renderYAxis(yScale, plotHeight) : svg``}
-              ${this.crosshair && this._crosshairX !== null
-                ? renderCrosshair(this._crosshairX, plotHeight)
-                : svg``}
-              <rect
-                class="interaction-overlay"
-                width=${plotWidth}
-                height=${plotHeight}
-                @mousemove=${(e: MouseEvent) => this._handleMouseMove(e, allMarks, xScale!, yScale!, xType, chartPadding)}
-                @click=${(e: MouseEvent) => this._handleClick(e, allMarks, xScale!, yScale!, xType, chartPadding)}
-                @mouseleave=${this._handleMouseLeave}
-              />
-            </g>
-          ` : svg``}
+        <svg width="${w}" height="${this.height}" viewBox="0 0 ${vw} ${this.height}">
+          ${svgContent}
         </svg>
-        ${this._tooltipInfo ? this._renderTooltip(chartPadding) : html``}
+        ${tooltip}
         <slot @slotchange=${this._onSlotChange}></slot>
       </div>
     `;
+  }
+
+  // === Chart content rendering ===
+
+  private _renderChartContent(
+    allMarks: CollectedMarkData[],
+    xScale: XScale,
+    yScale: YScale,
+    xType: XScaleType,
+    plotWidth: number,
+    plotHeight: number,
+    chartPadding: ChartPadding,
+    configMarks: readonly MarkConfig[],
+  ) {
+    const marks = this._renderAllMarks(
+      allMarks, xScale, yScale, plotWidth, plotHeight, configMarks,
+    );
+    const xAxisSvg = this.xAxis
+      ? renderXAxis(xScale, xType, plotWidth, plotHeight)
+      : svg``;
+    const yAxisSvg = this.yAxis
+      ? renderYAxis(yScale, plotHeight)
+      : svg``;
+    const crosshairSvg = this.crosshair && this._crosshairX !== null
+      ? renderCrosshair(this._crosshairX, plotHeight)
+      : svg``;
+
+    const onMove = (e: MouseEvent) =>
+      this._handleMouseMove(e, allMarks, xScale, yScale, xType, chartPadding);
+    const onClick = (e: MouseEvent) =>
+      this._handleClick(e, allMarks, xScale, yScale, xType, chartPadding);
+    const tx = chartPadding.left;
+    const ty = chartPadding.top;
+
+    return svg`<g transform="translate(${tx}, ${ty})">${marks}${xAxisSvg}${yAxisSvg}${crosshairSvg}<rect class="interaction-overlay" width="${plotWidth}" height="${plotHeight}" @mousemove=${onMove} @click=${onClick} @mouseleave=${this._handleMouseLeave} /></g>`;
   }
 
   // === Mark rendering ===
@@ -221,34 +254,30 @@ export class CTChart extends BaseElement {
     allMarks: CollectedMarkData[],
     xScale: XScale,
     yScale: YScale,
-    plotWidth: number,
+    _plotWidth: number,
     plotHeight: number,
     configMarks: readonly MarkConfig[],
   ) {
-    // Combine config marks and child marks for rendering
     const configCount = configMarks.length;
 
-    return svg`
-      ${allMarks.map((markData, i) => {
-        // Get the config source for this mark
-        const config = i < configCount
-          ? configMarks[i]
-          : this._childMarks[i - configCount];
+    const groups = allMarks.map((markData, i) => {
+      const config = i < configCount
+        ? configMarks[i]
+        : this._childMarks[i - configCount];
 
-        return svg`
-          <g class="mark-group" data-mark-index=${i}>
-            ${renderMark(
-              markData.type,
-              markData.points,
-              xScale,
-              yScale,
-              plotHeight,
-              config as MarkConfig | MarkElement,
-            )}
-          </g>
-        `;
-      })}
-    `;
+      const rendered = renderMark(
+        markData.type,
+        markData.points,
+        xScale,
+        yScale,
+        plotHeight,
+        config as MarkConfig | MarkElement,
+      );
+
+      return svg`<g class="mark-group" data-mark-index="${i}">${rendered}</g>`;
+    });
+
+    return svg`${groups}`;
   }
 
   // === Tooltip rendering ===

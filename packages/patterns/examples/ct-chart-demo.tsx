@@ -3,7 +3,7 @@ import { computed, NAME, pattern, UI } from "commontools";
 
 export default pattern(() => {
   // Line chart data - simple number array (auto-indexed x)
-  const sparklineData = [1, 3, 2, 5, 4, 7, 6, 8, 5, 9, 7, 10];
+  const sparklineData = computed(() => [1, 3, 2, 5, 4, 7, 6, 8, 5, 9, 7, 10]);
 
   // Time series data
   const priceData = computed(() => {

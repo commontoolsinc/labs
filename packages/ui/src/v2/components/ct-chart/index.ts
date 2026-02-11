@@ -10,14 +10,14 @@ import { CTBarMark } from "./marks/ct-bar-mark.ts";
 import { CTDotMark } from "./marks/ct-dot-mark.ts";
 
 import type {
+  ChartClickDetail,
+  ChartHoverDetail,
+  ChartPadding,
+  CurveType,
   MarkConfig,
   MarkType,
-  CurveType,
   XScaleType,
   YScaleType,
-  ChartHoverDetail,
-  ChartClickDetail,
-  ChartPadding,
 } from "./types.ts";
 
 if (!customElements.get("ct-chart")) {
@@ -36,22 +36,15 @@ if (!customElements.get("ct-dot-mark")) {
   customElements.define("ct-dot-mark", CTDotMark);
 }
 
-export {
-  CTChart,
-  MarkElement,
-  CTLineMark,
-  CTAreaMark,
-  CTBarMark,
-  CTDotMark,
-};
+export { CTAreaMark, CTBarMark, CTChart, CTDotMark, CTLineMark, MarkElement };
 
 export type {
+  ChartClickDetail,
+  ChartHoverDetail,
+  ChartPadding,
+  CurveType,
   MarkConfig,
   MarkType,
-  CurveType,
   XScaleType,
   YScaleType,
-  ChartHoverDetail,
-  ChartClickDetail,
-  ChartPadding,
 };

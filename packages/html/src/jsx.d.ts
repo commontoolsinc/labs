@@ -2920,6 +2920,13 @@ interface CTVoiceInputElement extends CTHTMLElement {}
 interface CTAudioVisualizerElement extends CTHTMLElement {}
 interface CTLocationElement extends CTHTMLElement {}
 
+// Chart components
+interface CTChartElement extends CTHTMLElement {}
+interface CTLineMarkElement extends CTHTMLElement {}
+interface CTAreaMarkElement extends CTHTMLElement {}
+interface CTBarMarkElement extends CTHTMLElement {}
+interface CTDotMarkElement extends CTHTMLElement {}
+
 // Tab components
 interface CTTabsElement extends CTHTMLElement {}
 interface CTTabElement extends CTHTMLElement {}
@@ -3027,6 +3034,69 @@ interface CTAudioVisualizerAttributes<T> extends CTHTMLAttributes<T> {
   "maxHeight"?: number;
   "color"?: string;
   "smoothing"?: number;
+}
+
+// Chart component attributes
+interface CTChartAttributes<T> extends CTHTMLAttributes<T> {
+  "height"?: number;
+  "marks"?: any[] | CellLike<any[]>;
+  "$marks"?: any[] | CellLike<any[]>;
+  "xAxis"?: boolean;
+  "yAxis"?: boolean;
+  "xType"?: "linear" | "time" | "band";
+  "yType"?: "linear" | "log";
+  "xDomain"?: [unknown, unknown];
+  "yDomain"?: [number, number];
+  "padding"?: number | [number, number, number, number];
+  "crosshair"?: boolean;
+  "onct-hover"?: EventHandler<any>;
+  "onct-click"?: EventHandler<any>;
+  "onct-leave"?: EventHandler<any>;
+}
+
+interface CTLineMarkAttributes<T> extends CTHTMLAttributes<T> {
+  "data"?: any[] | CellLike<any[]>;
+  "$data"?: any[] | CellLike<any[]>;
+  "x"?: string;
+  "y"?: string;
+  "color"?: string;
+  "strokeWidth"?: number;
+  "curve"?: "linear" | "step" | "monotone" | "natural";
+  "label"?: string;
+}
+
+interface CTAreaMarkAttributes<T> extends CTHTMLAttributes<T> {
+  "data"?: any[] | CellLike<any[]>;
+  "$data"?: any[] | CellLike<any[]>;
+  "x"?: string;
+  "y"?: string;
+  "color"?: string;
+  "strokeWidth"?: number;
+  "curve"?: "linear" | "step" | "monotone" | "natural";
+  "opacity"?: number;
+  "y2"?: string | number;
+  "label"?: string;
+}
+
+interface CTBarMarkAttributes<T> extends CTHTMLAttributes<T> {
+  "data"?: any[] | CellLike<any[]>;
+  "$data"?: any[] | CellLike<any[]>;
+  "x"?: string;
+  "y"?: string;
+  "color"?: string;
+  "opacity"?: number;
+  "barPadding"?: number;
+  "label"?: string;
+}
+
+interface CTDotMarkAttributes<T> extends CTHTMLAttributes<T> {
+  "data"?: any[] | CellLike<any[]>;
+  "$data"?: any[] | CellLike<any[]>;
+  "x"?: string;
+  "y"?: string;
+  "color"?: string;
+  "radius"?: number;
+  "label"?: string;
 }
 
 interface CTLocationAttributes<T> extends CTHTMLAttributes<T> {
@@ -4789,6 +4859,28 @@ declare global {
       "ct-map": CTDOM.DetailedHTMLProps<
         CTMapAttributes<CTMapElement>,
         CTMapElement
+      >;
+
+      // Chart components
+      "ct-chart": CTDOM.DetailedHTMLProps<
+        CTChartAttributes<CTChartElement>,
+        CTChartElement
+      >;
+      "ct-line-mark": CTDOM.DetailedHTMLProps<
+        CTLineMarkAttributes<CTLineMarkElement>,
+        CTLineMarkElement
+      >;
+      "ct-area-mark": CTDOM.DetailedHTMLProps<
+        CTAreaMarkAttributes<CTAreaMarkElement>,
+        CTAreaMarkElement
+      >;
+      "ct-bar-mark": CTDOM.DetailedHTMLProps<
+        CTBarMarkAttributes<CTBarMarkElement>,
+        CTBarMarkElement
+      >;
+      "ct-dot-mark": CTDOM.DetailedHTMLProps<
+        CTDotMarkAttributes<CTDotMarkElement>,
+        CTDotMarkElement
       >;
     }
   }

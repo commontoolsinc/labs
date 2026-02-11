@@ -6,7 +6,7 @@
  *
  * @element ct-area-mark
  */
-import type { MarkType, CurveType } from "../types.ts";
+import type { CurveType, MarkType } from "../types.ts";
 import { MarkElement } from "./base-mark.ts";
 
 export class CTAreaMark extends MarkElement {

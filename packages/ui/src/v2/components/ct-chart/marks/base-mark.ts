@@ -6,9 +6,9 @@
  * The parent ct-chart reads their properties and renders all SVG.
  */
 import { css, LitElement, PropertyValues } from "lit";
-import { type CellHandle, isCellHandle } from "@commontools/runtime-client";
+import { type CellHandle } from "@commontools/runtime-client";
 import { CellController } from "../../../core/cell-controller.ts";
-import type { CurveType, MarkType } from "../types.ts";
+import type { MarkType } from "../types.ts";
 
 export abstract class MarkElement extends LitElement {
   static override styles = css`
