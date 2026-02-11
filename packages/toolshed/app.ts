@@ -11,6 +11,7 @@ import discord from "@/routes/integrations/discord/discord.index.ts";
 import googleOAuth from "@/routes/integrations/google-oauth/google-oauth.index.ts";
 import plaidOAuth from "@/routes/integrations/plaid-oauth/plaid-oauth.index.ts";
 import memory from "@/routes/storage/memory/memory.index.ts";
+import v2Memory from "@/routes/storage/memory/v2-memory.index.ts";
 import whoami from "@/routes/whoami/whoami.index.ts";
 import meta from "@/routes/meta/meta.index.ts";
 import shell from "@/routes/shell/shell.index.ts";
@@ -33,6 +34,7 @@ const routes = [
   googleOAuth,
   plaidOAuth,
   memory,
+  v2Memory,
   whoami,
   meta,
   staticRoute,

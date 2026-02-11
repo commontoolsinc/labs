@@ -41,6 +41,7 @@ CREATE INDEX IF NOT EXISTS idx_commit_branch ON "commit" (branch);
 CREATE TABLE IF NOT EXISTS fact (
   hash        TEXT    NOT NULL PRIMARY KEY,
   id          TEXT    NOT NULL,
+  type        TEXT    NOT NULL DEFAULT 'application/json',
   value_ref   TEXT    NOT NULL,
   parent      TEXT,
   branch      TEXT    NOT NULL DEFAULT '',
@@ -58,13 +59,15 @@ CREATE INDEX IF NOT EXISTS idx_fact_branch     ON fact (branch);
 
 CREATE TABLE IF NOT EXISTS head (
   branch    TEXT    NOT NULL,
+  type      TEXT    NOT NULL DEFAULT 'application/json',
   id        TEXT    NOT NULL,
   fact_hash TEXT    NOT NULL,
   version   INTEGER NOT NULL,
-  PRIMARY KEY (branch, id),
+  PRIMARY KEY (branch, type, id),
   FOREIGN KEY (fact_hash) REFERENCES fact(hash)
 );
 CREATE INDEX IF NOT EXISTS idx_head_branch ON head (branch);
+CREATE INDEX IF NOT EXISTS idx_head_type   ON head (type);
 
 CREATE TABLE IF NOT EXISTS snapshot (
   id         TEXT    NOT NULL,
@@ -99,7 +102,7 @@ COMMIT;
 
 const STATE_VIEW = `
 CREATE VIEW IF NOT EXISTS state AS
-SELECT h.branch, h.id, f.fact_type, f.version, v.data AS value
+SELECT h.branch, h.type, h.id, f.fact_type, f.version, v.data AS value
 FROM head h
 JOIN fact f ON f.hash = h.fact_hash
 JOIN value v ON v.hash = f.value_ref;
@@ -129,7 +132,7 @@ const READ_HEAD = `
 SELECT h.fact_hash, h.version, f.fact_type
 FROM head h
 JOIN fact f ON f.hash = h.fact_hash
-WHERE h.branch = ? AND h.id = ?;
+WHERE h.branch = ? AND h.type = ? AND h.id = ?;
 `;
 
 const READ_HEAD_VALUE = `
@@ -137,7 +140,7 @@ SELECT f.fact_type, f.version, v.data
 FROM head h
 JOIN fact f ON f.hash = h.fact_hash
 JOIN value v ON v.hash = f.value_ref
-WHERE h.branch = ? AND h.id = ?;
+WHERE h.branch = ? AND h.type = ? AND h.id = ?;
 `;
 
 const FIND_NEAREST_SNAPSHOT = `
@@ -188,14 +191,14 @@ INSERT OR IGNORE INTO value (hash, data) VALUES (?, ?);
 `;
 
 const INSERT_FACT = `
-INSERT INTO fact (hash, id, value_ref, parent, branch, version, commit_ref, fact_type)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+INSERT INTO fact (hash, id, type, value_ref, parent, branch, version, commit_ref, fact_type)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
 `;
 
 const UPSERT_HEAD = `
-INSERT INTO head (branch, id, fact_hash, version)
-VALUES (?, ?, ?, ?)
-ON CONFLICT (branch, id) DO UPDATE SET fact_hash = excluded.fact_hash, version = excluded.version;
+INSERT INTO head (branch, type, id, fact_hash, version)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT (branch, type, id) DO UPDATE SET fact_hash = excluded.fact_hash, version = excluded.version;
 `;
 
 const INSERT_COMMIT = `
@@ -244,7 +247,7 @@ const READ_HEAD_AT_VERSION = `
 SELECT h.fact_hash, h.version, f.fact_type
 FROM head h
 JOIN fact f ON f.hash = h.fact_hash
-WHERE h.branch = ? AND h.id = ? AND h.version <= ?;
+WHERE h.branch = ? AND h.type = ? AND h.id = ? AND h.version <= ?;
 `;
 
 const FIND_LATEST_FACT_ON_BRANCH = `
@@ -257,7 +260,7 @@ LIMIT 1;
 
 const FIND_MODIFIED_ENTITIES = `
 SELECT DISTINCT id, fact_hash, version FROM head
-WHERE branch = ? AND version > ?;
+WHERE branch = ? AND type = ? AND version > ?;
 `;
 
 // ---------------------------------------------------------------------------
@@ -398,9 +401,13 @@ export class V2Space implements V2Session {
    *
    * @see spec 02-storage.md §5.1
    */
-  readEntity(branch: string, entityId: EntityId): JSONValue | null {
+  readEntity(
+    branch: string,
+    entityId: EntityId,
+    type = "application/json",
+  ): JSONValue | null {
     const stmt = getStmt(this.store, "readHeadValue", READ_HEAD_VALUE);
-    const row = stmt.get(branch, entityId) as
+    const row = stmt.get(branch, type, entityId) as
       | { fact_type: string; version: number; data: string | null }
       | undefined;
 
@@ -422,9 +429,10 @@ export class V2Space implements V2Session {
   readHead(
     branch: string,
     entityId: EntityId,
+    type = "application/json",
   ): { factHash: string; version: number; factType: string } | null {
     const stmt = getStmt(this.store, "readHead", READ_HEAD);
-    const row = stmt.get(branch, entityId) as
+    const row = stmt.get(branch, type, entityId) as
       | { fact_hash: string; version: number; fact_type: string }
       | undefined;
 
@@ -480,6 +488,7 @@ export class V2Space implements V2Session {
   insertFact(params: {
     hash: string;
     id: EntityId;
+    type?: string;
     valueRef: string;
     parent: string | null;
     branch: string;
@@ -491,6 +500,7 @@ export class V2Space implements V2Session {
     stmt.run(
       params.hash,
       params.id,
+      params.type ?? "application/json",
       params.valueRef,
       params.parent,
       params.branch,
@@ -505,9 +515,10 @@ export class V2Space implements V2Session {
     entityId: EntityId,
     factHash: string,
     version: number,
+    type = "application/json",
   ): void {
     const stmt = getStmt(this.store, "upsertHead", UPSERT_HEAD);
-    stmt.run(branch, entityId, factHash, version);
+    stmt.run(branch, type, entityId, factHash, version);
   }
 
   insertCommit(
@@ -653,9 +664,10 @@ export class V2Space implements V2Session {
     branch: string,
     entityId: EntityId,
     maxVersion: number,
+    type = "application/json",
   ): { factHash: string; version: number; factType: string } | null {
     const stmt = getStmt(this.store, "readHeadAtVersion", READ_HEAD_AT_VERSION);
-    const row = stmt.get(branch, entityId, maxVersion) as
+    const row = stmt.get(branch, type, entityId, maxVersion) as
       | { fact_hash: string; version: number; fact_type: string }
       | undefined;
     if (!row) return null;
@@ -698,13 +710,14 @@ export class V2Space implements V2Session {
   findModifiedEntities(
     branch: string,
     sinceVersion: number,
+    type = "application/json",
   ): Array<{ id: EntityId; factHash: string; version: number }> {
     const stmt = getStmt(
       this.store,
       "findModifiedEntities",
       FIND_MODIFIED_ENTITIES,
     );
-    const rows = stmt.all(branch, sinceVersion) as Array<{
+    const rows = stmt.all(branch, type, sinceVersion) as Array<{
       id: string;
       fact_hash: string;
       version: number;

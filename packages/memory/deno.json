@@ -50,7 +50,13 @@
     "./v2-branch": "./v2-branch.ts",
     "./v2-merge": "./v2-merge.ts",
     "./v2-subscription": "./v2-subscription.ts",
-    "./v2-gc": "./v2-gc.ts"
+    "./v2-gc": "./v2-gc.ts",
+    "./v2-space": "./v2-space.ts",
+    "./v2-commit": "./v2-commit.ts",
+    "./v2-query": "./v2-query.ts",
+    "./v2-protocol": "./v2-protocol.ts",
+    "./v2-patch": "./v2-patch.ts",
+    "./v2-snapshot": "./v2-snapshot.ts"
   },
   "imports": {
     "@db/sqlite": "jsr:@db/sqlite@^0.12.0",

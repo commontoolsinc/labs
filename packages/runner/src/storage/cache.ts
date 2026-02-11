@@ -66,6 +66,7 @@ import * as SubscriptionManager from "./subscription.ts";
 import * as Differential from "./differential.ts";
 import * as Address from "./transaction/address.ts";
 import { ACL_TYPE, ANYONE_USER } from "@commontools/memory/acl";
+import { V2Provider } from "./v2-provider.ts";
 
 export type { Result, Unit };
 export interface Selector<Key> extends Iterable<Key> {
@@ -2099,7 +2100,21 @@ export class StorageManager implements IStorageManager {
   }
 
   protected connect(space: MemorySpace): IStorageProviderWithReplica {
-    const { id, address, as, settings } = this;
+    const { id, address, settings } = this;
+
+    // Memory V2 path: use V2Provider with simplified WebSocket transport.
+    if (this.memoryV2) {
+      return V2Provider.connect({
+        id,
+        space,
+        address: new URL(address.href + "/v2"),
+        settings,
+        subscription: this.#subscription,
+      });
+    }
+
+    // V1 path: full UCAN-based provider with IDB caching.
+    const { as } = this;
 
     // Determine the correct spaceIdentity for this space
     // For the workspace space (where spaceIdentity.did() === space), use spaceIdentity

@@ -54,7 +54,7 @@ SELECT h.id, h.version, h.fact_hash, f.fact_type, v.data
 FROM head h
 JOIN fact f ON f.hash = h.fact_hash
 JOIN value v ON v.hash = f.value_ref
-WHERE h.branch = ?;
+WHERE h.branch = ? AND h.type = ?;
 `;
 
 const LIST_HEADS_SINCE = `
@@ -62,7 +62,7 @@ SELECT h.id, h.version, h.fact_hash, f.fact_type, v.data
 FROM head h
 JOIN fact f ON f.hash = h.fact_hash
 JOIN value v ON v.hash = f.value_ref
-WHERE h.branch = ? AND h.version > ?;
+WHERE h.branch = ? AND h.type = ? AND h.version > ?;
 `;
 
 const LIST_HEADS_PAGINATED = `
@@ -70,7 +70,7 @@ SELECT h.id, h.version, h.fact_hash, f.fact_type, v.data
 FROM head h
 JOIN fact f ON f.hash = h.fact_hash
 JOIN value v ON v.hash = f.value_ref
-WHERE h.branch = ? AND h.id > ?
+WHERE h.branch = ? AND h.type = ? AND h.id > ?
 ORDER BY h.id ASC
 LIMIT ?;
 `;
@@ -80,7 +80,7 @@ SELECT h.id, h.version, h.fact_hash, f.fact_type, v.data
 FROM head h
 JOIN fact f ON f.hash = h.fact_hash
 JOIN value v ON v.hash = f.value_ref
-WHERE h.branch = ? AND h.version > ? AND h.id > ?
+WHERE h.branch = ? AND h.type = ? AND h.version > ? AND h.id > ?
 ORDER BY h.id ASC
 LIMIT ?;
 `;
@@ -100,6 +100,7 @@ LIMIT ?;
 export function executeSimpleQuery(
   space: V2Space,
   query: SimpleQuery,
+  type = "application/json",
 ): FactSet {
   const branch = query.branch ?? "";
   const result: FactSet = {};
@@ -110,7 +111,9 @@ export function executeSimpleQuery(
   if (isWildcard) {
     // Match all entities on the branch
     const sql = query.since !== undefined ? LIST_HEADS_SINCE : LIST_ALL_HEADS;
-    const params = query.since !== undefined ? [branch, query.since] : [branch];
+    const params = query.since !== undefined
+      ? [branch, type, query.since]
+      : [branch, type];
     const rows = space.store.prepare(sql).all(...params) as Array<{
       id: string;
       version: number;
@@ -198,6 +201,7 @@ export function executeSimpleQuery(
 export function executePaginatedQuery(
   space: V2Space,
   query: PaginatedQuery,
+  type = "application/json",
 ): PaginatedResult {
   const branch = query.branch ?? "";
   const cursor = query.cursor ?? "";
@@ -208,8 +212,8 @@ export function executePaginatedQuery(
     ? LIST_HEADS_SINCE_PAGINATED
     : LIST_HEADS_PAGINATED;
   const params = query.since !== undefined
-    ? [branch, query.since, cursor, limit]
-    : [branch, cursor, limit];
+    ? [branch, type, query.since, cursor, limit]
+    : [branch, type, cursor, limit];
 
   const rows = space.store.prepare(sql).all(...params) as Array<{
     id: string;
