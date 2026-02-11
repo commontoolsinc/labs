@@ -3041,8 +3041,18 @@ interface CTChartAttributes<T> extends CTHTMLAttributes<T> {
   "height"?: number;
   "marks"?: any[] | CellLike<any[]>;
   "$marks"?: any[] | CellLike<any[]>;
-  "xAxis"?: boolean | { label?: string; tickFormat?: string | ((value: unknown) => string); grid?: boolean; tickCount?: number };
-  "yAxis"?: boolean | { label?: string; tickFormat?: string | ((value: unknown) => string); grid?: boolean; tickCount?: number };
+  "xAxis"?: boolean | {
+    label?: string;
+    tickFormat?: string | ((value: unknown) => string);
+    grid?: boolean;
+    tickCount?: number;
+  };
+  "yAxis"?: boolean | {
+    label?: string;
+    tickFormat?: string | ((value: unknown) => string);
+    grid?: boolean;
+    tickCount?: number;
+  };
   "xType"?: "linear" | "time" | "band";
   "yType"?: "linear" | "log";
   "xDomain"?: [unknown, unknown];
