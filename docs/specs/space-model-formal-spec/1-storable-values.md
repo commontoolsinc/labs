@@ -953,8 +953,8 @@ tree construction.
 
 - Traverse the natural data structure directly (no intermediate tree
   construction).
-- Sort plain-object keys lexicographically; preserve array, `Map`, and `Set`
-  insertion order.
+- Sort plain-object keys lexicographically; preserve array element order and
+  `Map`/`Set` insertion order.
 - Hash type tags + content in a single pass.
 - No intermediate allocations beyond the hash state.
 - The hash reflects the logical content, not any particular encoding or
@@ -1091,14 +1091,25 @@ boundary-only serialization:
 
 ### 7.2 Unifying JSON Encoding
 
-Three legacy conventions in the current codebase must be migrated to the unified
+Four legacy conventions in the current codebase must be migrated to the unified
 `/<Type>@<Version>` format:
 
 | Legacy Convention | Where Used | Example | New Form |
 |-------------------|------------|---------|----------|
 | IPLD sigil | Links (`sigil-types.ts`) | `{ "/": { "link@1": { id, path, space } } }` | `{ "/Link@1": { id, path, space } }` |
 | `@` prefix | Errors (`storable-value.ts`) | `{ "@Error": { name, message, ... } }` | `{ "/Error@1": { name, message, ... } }` |
-| `$` prefix | Streams (`builder/types.ts`) | `{ "$stream": true }` | `{ "/Stream@1": null }` |
+| `$` prefix (stream) | Streams (`builder/types.ts`) | `{ "$stream": true }` | `{ "/Stream@1": null }` |
+| `$` prefix (alias) | Internal refs (`json-utils.ts`, `cell-handle.ts`) | `{ "$alias": { path, cell?, schema? } }` | `{ "/Link@1": { id, path, space, overwrite? } }` |
+
+> **Note on `$stream`:** In the current codebase, `$stream` is a stateless
+> marker — it signals that a cell path is a stream endpoint rather than carrying
+> reconstructible state. Under the new encoding it becomes `{ "/Stream@1": null }`
+> (a stateless tagged type per Section 5.5), preserving its marker semantics.
+>
+> **Note on `$alias`:** An alias is an internal cross-cell reference with an
+> optional schema filter. During migration it maps to `/Link@1` with the
+> appropriate `overwrite` property (e.g., `overwrite: "redirect"` for aliases
+> that redirect writes to the target cell).
 
 ### 7.3 Replacing CID-Based Hashing
 
