@@ -2887,6 +2887,7 @@ interface CTModalElement extends CTHTMLElement {}
 interface CTModalProviderElement extends CTHTMLElement {}
 interface CTChevronButtonElement extends CTHTMLElement {}
 interface CTCardElement extends CTHTMLElement {}
+interface CTQuestionElement extends CTHTMLElement {}
 interface CTAlertElement extends CTHTMLElement {}
 interface CTVStackElement extends CTHTMLElement {}
 interface CTMessageInputElement extends CTHTMLElement {}
@@ -3276,6 +3277,12 @@ interface CTAlertAttributes<T> extends CTHTMLAttributes<T> {
 
 interface CTCardAttributes<T> extends CTHTMLAttributes<T> {
   "clickable"?: boolean;
+}
+
+interface CTQuestionAttributes<T> extends CTHTMLAttributes<T> {
+  "question"?: CellLike<string>;
+  "options"?: CellLike<string[]>;
+  "onct-answer"?: EventHandler<{ answer: string }>;
 }
 
 interface CTButtonAttributes<T> extends CTHTMLAttributes<T> {
@@ -4609,6 +4616,10 @@ declare global {
       "ct-card": CTDOM.DetailedHTMLProps<
         CTCardAttributes<CTCardElement>,
         CTCardElement
+      >;
+      "ct-question": CTDOM.DetailedHTMLProps<
+        CTQuestionAttributes<CTQuestionElement>,
+        CTQuestionElement
       >;
       "ct-toolbar": CTDOM.DetailedHTMLProps<
         CTToolbarAttributes<CTToolbarElement>,
