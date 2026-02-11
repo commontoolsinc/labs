@@ -2,12 +2,16 @@ import ts from "typescript";
 import type { TransformationContext } from "../core/mod.ts";
 import type { CaptureTreeNode } from "../utils/capture-tree.ts";
 import { createPropertyName } from "../utils/identifiers.ts";
-import { inferWidenedTypeFromExpression } from "./type-inference.ts";
+import {
+  inferWidenedTypeFromExpression,
+  unwrapOpaqueLikeType,
+} from "./type-inference.ts";
 import {
   isOptionalProperty,
   isOptionalPropertyAccess,
   setParentPointers,
 } from "./utils.ts";
+import { isUnionWithUndefined } from "@commontools/schema-generator/property-optionality";
 
 /**
  * Common flags for type-to-typenode conversion.
@@ -112,8 +116,19 @@ export function buildTypeElementsFromCaptureTree(
         // check if the type itself is T | undefined.
         // This handles cases like: const x = wishResult.result; action(() => { if (x) ... })
         // where x has type MinimalPiece | undefined from an optional wish result.
+        //
+        // The | undefined may be buried inside OpaqueCell<T | undefined>,
+        // so we also unwrap the OpaqueCell to check its inner type argument.
         if (isOptionalProperty(undefined, currentType)) {
           questionToken = factory.createToken(ts.SyntaxKind.QuestionToken);
+        } else {
+          const innerType = unwrapOpaqueLikeType(currentType, checker);
+          if (
+            innerType && innerType !== currentType &&
+            isUnionWithUndefined(innerType)
+          ) {
+            questionToken = factory.createToken(ts.SyntaxKind.QuestionToken);
+          }
         }
       }
     } else if (childNode.properties.size > 0) {
