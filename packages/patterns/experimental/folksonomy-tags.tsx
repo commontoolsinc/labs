@@ -192,8 +192,18 @@ const onTagsChanged = handler<
   const current = tags.get() || [];
   const previous = previousTags.get() || [];
 
-  // Find added tags (in current but not in previous)
-  const added = current.filter((t) => !previous.includes(t));
+  let added: string[];
+
+  if (previous.length === 0 && current.length > 1) {
+    // First change with pre-existing tags loaded from storage.
+    // previousTags starts empty, so a naive diff would emit telemetry for ALL tags.
+    // Since autocomplete adds one tag at a time, the newest tag is the last one.
+    // Only emit telemetry for that one to avoid inflating counts.
+    added = [current[current.length - 1]];
+  } else {
+    // Normal case: diff to find newly added tags
+    added = current.filter((t) => !previous.includes(t));
+  }
 
   // Post add events for each new tag
   if (added.length > 0 && aggregatorStream && scope) {
