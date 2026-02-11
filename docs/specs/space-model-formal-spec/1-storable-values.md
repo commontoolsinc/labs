@@ -119,8 +119,8 @@ equivalent to what the storable protocol would produce.
 | Type | Type Tag | Deconstructed State | Notes |
 |------|----------|---------------------|-------|
 | `Error` | `Error@1` | `{ name, message, stack?, cause?, ...custom }` | Captures `name`, `message`, `stack` (if present), `cause` (if present), and custom enumerable properties. Nested values (including `cause`) are recursively processed — see Section 4.4. |
-| `Map` | `Map@1` | `[[key, value], ...]` | Entry pairs as an array of two-element arrays. Insertion order is preserved in serialized form. Keys and values are recursively processed. (For canonical hashing, entries are sorted by key hash — see Section 6.3.) |
-| `Set` | `Set@1` | `[value, ...]` | Elements as an array. Iteration order is preserved in serialized form. Values are recursively processed. (For canonical hashing, elements are sorted by hash — see Section 6.3.) |
+| `Map` | `Map@1` | `[[key, value], ...]` | Entry pairs as an array of two-element arrays. Insertion order is preserved in both serialized form and canonical hashing. Keys and values are recursively processed. |
+| `Set` | `Set@1` | `[value, ...]` | Elements as an array. Iteration order is preserved in both serialized form and canonical hashing. Values are recursively processed. |
 
 Reconstruction for these types is also defined:
 
@@ -953,7 +953,8 @@ tree construction.
 
 - Traverse the natural data structure directly (no intermediate tree
   construction).
-- Sort object keys lexicographically; preserve array order.
+- Sort plain-object keys lexicographically; preserve array, `Map`, and `Set`
+  insertion order.
 - Hash type tags + content in a single pass.
 - No intermediate allocations beyond the hash state.
 - The hash reflects the logical content, not any particular encoding or
@@ -1020,12 +1021,10 @@ export function canonicalHash(
   // `Error`, `Map`, and `Set` are hashed via TAG_STORABLE using their derived
   // `StorableInstance` form (Section 1.4.1). For example:
   // - `Error`:  hash(TAG_STORABLE, "Error@1", canonicalHash(errorState))
-  // - `Map`:    hash(TAG_STORABLE, "Map@1", canonicalHash(sortedEntries))
-  //             where entries are sorted by canonicalHash(key)
-  //             (NOT by insertion order — hashing is order-independent)
-  // - `Set`:    hash(TAG_STORABLE, "Set@1", canonicalHash(sortedElements))
-  //             where elements are sorted by canonicalHash(element)
-  //             (NOT by insertion order — hashing is order-independent)
+  // - `Map`:    hash(TAG_STORABLE, "Map@1", canonicalHash(entries))
+  //             where entries are hashed in insertion order
+  // - `Set`:    hash(TAG_STORABLE, "Set@1", canonicalHash(elements))
+  //             where elements are hashed in insertion order
   //
   // Each type is tagged to prevent collisions between types with
   // identical content representations.
@@ -1039,12 +1038,14 @@ export function canonicalHash(
 > characterization may lead to a switch to UTF-8 encoding if the overhead of
 > UTF-16 proves significant for non-BMP-heavy workloads.
 
-> **Map/Set ordering: serialization vs. hashing.** The derived `StorableInstance`
-> form (Section 1.4.1) preserves insertion order for `Map` and `Set`, which
-> matters for round-tripping. Canonical hashing (this section) sorts
-> entries/elements by hash, which makes the hash order-independent. These are
-> not contradictory: serialization preserves what the user put in; hashing
-> normalizes for identity comparison.
+> **Map/Set ordering in hashing.** Canonical hashing preserves insertion order
+> for `Map` entries and `Set` elements, matching the serialized form. This means
+> two `Map`s or `Set`s with the same elements in different insertion order will
+> hash differently. This is intentional: insertion order is part of the
+> observable semantics of these types in JavaScript, so values that behave
+> differently should not hash the same. (By contrast, plain objects are hashed
+> with sorted keys, matching the existing convention that plain-object key order
+> is not semantically significant.)
 
 ### 6.4 Relationship to Late Serialization
 
