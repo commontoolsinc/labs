@@ -8,7 +8,7 @@ import { SigilLink } from "../src/sigil-types.ts";
 import { ID, type JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { toURI } from "../src/uri-utils.ts";
-import { parseLink } from "../src/link-utils.ts";
+import { createDataCellURI, parseLink } from "../src/link-utils.ts";
 import { txToReactivityLog } from "../src/scheduler.ts";
 import { sortAndCompactPaths } from "../src/reactive-dependencies.ts";
 import { toCell } from "../src/back-to-cell.ts";
@@ -3828,6 +3828,99 @@ describe("Schema Support", () => {
         .getAsNormalizedFullLink();
       expect(cellALink.id).toBe(cellDLink.id);
       expect(cellALink.path).toEqual(["baz", "bar"]);
+    });
+
+    it("with data cell: validates contents", async () => {
+      const cellASchema = {
+        type: "object",
+        properties: { system: { type: "string" } },
+      } as const satisfies JSONSchema;
+      const cellCSchema = {
+        type: "object",
+        properties: {
+          internal: {
+            type: "object",
+            properties: { "__#1": { type: "string" } },
+          },
+        },
+      } as const satisfies JSONSchema;
+      const cellBSchema = {
+        type: "object",
+        properties: {
+          argument: {
+            type: "object",
+            properties: { system: { type: "string" } },
+          },
+        },
+      } as const satisfies JSONSchema;
+
+      // of:baedreian4qt2iajev5hzb33p3obcoz4v237b53mwro4hd2wtfpp54xrn64
+      const cellC = runtime.getCell<{ internal: { "__#1": string } }>(
+        space,
+        "redirect-test-ascell-c",
+        cellCSchema,
+        tx,
+      );
+      const cellCLink = cellC.getAsNormalizedFullLink();
+      cellC.set({ internal: { "__#1": "You are a polite..." } });
+
+      // of:baedreifyl2zipph2s75lxkbi6tttr4euo5bsmt53xwznkoc43tk5jqayse
+      const cellB = runtime.getCell<{ argument: { system: string } }>(
+        space,
+        "redirect-test-ascell-b",
+        cellBSchema,
+        tx,
+      );
+      const cellBLink = cellB.getAsNormalizedFullLink();
+      // cellB's argument.system points to cellC's internal.__#1
+      cellB.setRaw({
+        "argument": {
+          "system": {
+            "$alias": {
+              "path": ["internal", "__#1"],
+              "cell": { "/": cellCLink.id.split(":")[1] },
+            },
+          },
+        },
+      });
+
+      // data cell's system points to cellB's argument.system
+      const dataCellURI = createDataCellURI({
+        "system": {
+          "$alias": {
+            "path": [
+              "argument",
+              "system",
+            ],
+            "schema": {
+              "type": "string",
+              "$defs": {}, // the real case has a bunch here, but it doesn't matter
+            },
+            "cell": {
+              "/": cellBLink.id.split(":")[1],
+            },
+          },
+        },
+      });
+      const cellA = runtime.getCellFromLink(
+        {
+          id: dataCellURI,
+          path: [],
+          space,
+          type: "application/json",
+        },
+        cellASchema,
+      );
+
+      await tx.commit();
+      tx = runtime.edit();
+
+      const cellAContents = cellA.asSchema({
+        "type": "object",
+        "properties": { "system": { "type": "string", "asOpaque": true } },
+        "required": ["system"],
+      }).get();
+      expect(cellAContents).toEqual({ system: "You are a polite..." });
     });
   });
 });
