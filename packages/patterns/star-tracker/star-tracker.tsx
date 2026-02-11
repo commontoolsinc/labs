@@ -268,7 +268,7 @@ export const RepoCard = pattern<RepoCardInput>(
       options: starOpts,
     });
 
-    const curvePoints = computed((): CurvePoint[] => {
+    const rawCurve = computed((): CurvePoint[] => {
       const allPages = [
         page0.result,
         page1.result,
@@ -279,9 +279,25 @@ export const RepoCard = pattern<RepoCardInput>(
       const s = stars;
       const pages = computeSamplePages(s);
       if (pages.length === 0) return [];
-      const raw = buildCurve(allPages as StarEvent[][], pages, s);
+      return buildCurve(allPages as StarEvent[][], pages, s);
+    });
+
+    const curvePoints = computed((): CurvePoint[] => {
+      const raw = rawCurve;
       if (raw.length < 2) return raw;
       return bucketCurve(raw, 20);
+    });
+
+    const detailPoints = computed((): CurvePoint[] => {
+      const raw = rawCurve;
+      if (raw.length < 2) return raw;
+      return bucketCurve(raw, 50);
+    });
+
+    const expanded = Writable.of(false);
+
+    const toggleExpanded = action(() => {
+      expanded.set(!expanded.get());
     });
 
     const growth = computed(() => analyzeGrowth(curvePoints));
@@ -309,6 +325,32 @@ export const RepoCard = pattern<RepoCardInput>(
           y: "stars",
           color,
           strokeWidth: 1.5,
+          curve: "monotone" as const,
+        },
+      ];
+    });
+
+    const detailMarks = computed(() => {
+      const pts = detailPoints;
+      if (pts.length === 0) return [];
+      const color = FLAG_COLORS[growthFlag] || "#6b7280";
+      return [
+        {
+          type: "area" as const,
+          data: pts,
+          x: "date",
+          y: "stars",
+          color,
+          opacity: 0.2,
+          curve: "monotone" as const,
+        },
+        {
+          type: "line" as const,
+          data: pts,
+          x: "date",
+          y: "stars",
+          color,
+          strokeWidth: 2,
           curve: "monotone" as const,
         },
       ];
@@ -372,8 +414,50 @@ export const RepoCard = pattern<RepoCardInput>(
             crosshair={false}
             padding={[2, 0, 2, 0]}
             $marks={sparkMarks}
-            style={{ width: "100px", flexShrink: "0" }}
+            onct-click={toggleExpanded}
+            style={{ width: "100px", flexShrink: "0", cursor: "pointer" }}
           />
+
+          <ct-modal $open={expanded} dismissable size="md">
+            <span slot="header">
+              {computed(() => `${owner}/${repo} — ★ ${formatStars(stars)}`)}
+            </span>
+            <ct-chart
+              height={300}
+              xAxis={{ grid: true }}
+              yAxis={{ label: "Stars", grid: true }}
+              $marks={detailMarks}
+            />
+            <div
+              slot="footer"
+              style={{
+                display: "flex",
+                gap: "16px",
+                fontSize: "13px",
+                color: "var(--ct-color-gray-500, #6b7280)",
+              }}
+            >
+              <span>
+                {computed(() => {
+                  const r = growthRate;
+                  if (r === 0 && stars === 0) return "";
+                  if (Math.abs(r) < 0.1) return "Growth: <0.1 stars/day";
+                  return `Growth: +${r.toFixed(1)} stars/day`;
+                })}
+              </span>
+              <span
+                style={computed(() => ({
+                  color: FLAG_COLORS[growthFlag] || "#6b7280",
+                }))}
+              >
+                {computed(() => {
+                  const f = growthFlag;
+                  if (f === "unknown") return "";
+                  return `${FLAG_DOTS[f] || ""} ${f}`;
+                })}
+              </span>
+            </div>
+          </ct-modal>
 
           <span
             style={computed(() => ({
