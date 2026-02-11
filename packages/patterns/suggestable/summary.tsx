@@ -14,7 +14,7 @@ import {
 
 type SummaryInput = {
   topic?: Default<string, "">;
-  context?: Default<Record<string, any>, {}>;
+  context?: Default<Record<string, any>, Record<string, never>>;
 };
 
 type SummaryOutput = {

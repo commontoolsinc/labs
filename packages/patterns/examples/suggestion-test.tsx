@@ -4,6 +4,10 @@ import Suggestion from "../system/suggestion.tsx";
 import Summary from "../suggestable/summary.tsx";
 import Checklist from "../suggestable/checklist.tsx";
 import Question from "../suggestable/question.tsx";
+import Diagram from "../suggestable/diagram.tsx";
+import BudgetPlanner from "../suggestable/budget-planner.tsx";
+import PeopleList from "../suggestable/people-list.tsx";
+import EventList from "../suggestable/event-list.tsx";
 
 export default pattern<{ title: Default<string, "Suggestion Tester"> }>(
   ({ title }) => {
@@ -56,6 +60,25 @@ export default pattern<{ title: Default<string, "Suggestion Tester"> }>(
             topic="I'm looking to improve my fitness level"
             context={{ list: ["calisthenics", "yoga"] }}
           />
+
+          <hr />
+
+          <Diagram
+            topic="Diagram of the animal kingdom"
+            context={{ list: ["baboon", "fish", "donkey", "horse"] }}
+          />
+
+          <hr />
+
+          <PeopleList />
+
+          <hr />
+
+          <EventList />
+
+          <hr />
+
+          <BudgetPlanner maxAmount={1000} topic="Weekend trip" />
         </div>
       ),
     };
