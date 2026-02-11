@@ -23,6 +23,12 @@
     "@codemirror/theme-one-dark": "npm:@codemirror/theme-one-dark@^6.1.2",
     "@codemirror/autocomplete": "npm:@codemirror/autocomplete@^6.15.0",
     "leaflet": "npm:leaflet@^1.9.4",
-    "@types/leaflet": "npm:@types/leaflet@^1.9.21"
+    "@types/leaflet": "npm:@types/leaflet@^1.9.21",
+    "d3-scale": "npm:d3-scale@^4.0.2",
+    "d3-shape": "npm:d3-shape@^3.2.0",
+    "d3-array": "npm:d3-array@^3.2.4",
+    "@types/d3-scale": "npm:@types/d3-scale@^4.0.8",
+    "@types/d3-shape": "npm:@types/d3-shape@^3.1.6",
+    "@types/d3-array": "npm:@types/d3-array@^3.2.1"
   }
 }
