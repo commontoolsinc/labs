@@ -3,13 +3,24 @@
 # uses jq to select the property at value.argument:
 # $> db_view Ntos s4ia | jq .value.argument
 # This should be run from the labs folder (so we can find the sqlite db).
-# This returns all the results in the database, not just the last.
+# Use -a to get all the results, instead of just the last.
 db_view() {
-  local space=$1
-  local cell=$2
+  local mode="last"
+  local space
+  local cell
+
+  # Parse arguments
+  if [[ "$1" == "--all" || "$1" == "-a" ]]; then
+    mode="all"
+    space=$2
+    cell=$3
+  else
+    space=$1
+    cell=$2
+  fi  
   
   if [[ -z "$space" || -z "$cell" ]]; then
-    echo "Usage: db_view <space> <cell>" >&2
+    echo "Usage: db_view [--all|-a] <space> <cell>" >&2
     return 1
   fi
   
@@ -19,13 +30,23 @@ db_view() {
     echo "Error: Database file not found for space '$space'" >&2
     return 1
   fi
-  
-  sqlite3 "file:$db_file?mode=rw" \
-    "SELECT datum.source 
-     FROM datum, fact 
-     WHERE fact.of LIKE '%$cell' 
-       AND fact.\`is\` = datum.this"
-}
+
+  local query
+  if [[ "$mode" == "last" ]]; then
+    query="SELECT datum.source
+             FROM datum, memory, fact 
+            WHERE memory.of LIKE '%$cell' 
+              AND memory.fact = fact.this
+              AND fact.\`is\` = datum.this"
+  else
+    query="SELECT datum.source FROM datum, fact 
+            WHERE fact.of LIKE '%$cell' 
+              AND fact.\`is\` = datum.this"
+  fi
+
+  # use mode=rw so we don't create new db files if there's no match
+  sqlite3 "file:$db_file?mode=rw" "$query"
+}      
 
 # If script is executed (not sourced), call the function with arguments
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
