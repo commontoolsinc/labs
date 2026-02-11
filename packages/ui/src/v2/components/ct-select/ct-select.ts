@@ -11,6 +11,7 @@ import {
 } from "../theme-context.ts";
 import { type CellHandle } from "@commontools/runtime-client";
 import { createCellController } from "../../core/cell-controller.ts";
+import { createFormFieldController } from "../../core/form-field-controller.ts";
 
 /**
  * CTSelect – Dropdown/select component that accepts an array of generic JS objects
@@ -145,6 +146,15 @@ export class CTSelect extends BaseElement {
       },
     });
 
+    /* ---------- Form field controller for buffering ---------- */
+    private _formField = createFormFieldController<unknown | unknown[]>(this, {
+      cellController: this._cellController,
+      validate: () => ({
+        valid: this.checkValidity(),
+        message: this._select?.validationMessage,
+      }),
+    });
+
     /* ---------- Reactive properties ---------- */
     static override properties = {
       disabled: { type: Boolean, reflect: true },
@@ -195,6 +205,14 @@ export class CTSelect extends BaseElement {
       this.applyValueToDom();
       // Apply theme on first render
       applyThemeToElement(this, this.theme ?? defaultTheme);
+
+      // Register with form after binding is complete
+      this._formField.register(this.name);
+    }
+
+    override disconnectedCallback() {
+      super.disconnectedCallback();
+      // Controllers handle cleanup automatically via ReactiveController
     }
 
     override willUpdate(changedProperties: Map<string, any>) {
@@ -202,8 +220,10 @@ export class CTSelect extends BaseElement {
 
       // If the value property itself changed (e.g., switched to a different cell)
       if (changedProperties.has("value")) {
-        // Bind the new value (Cell or plain) to the controller
+        // Bind the new cell first so getValue() returns the new value
         this._cellController.bind(this.value);
+        // Then clear buffer - this captures the new cell's value as baseline for reset/dirty
+        this._formField.clearBuffer();
       }
     }
 
@@ -331,8 +351,8 @@ export class CTSelect extends BaseElement {
         newValue = this._keyMap.get(optKey)?.value;
       }
 
-      // Always update through cell controller
-      this._cellController.setValue(newValue);
+      // Use form field controller (handles buffering vs direct write)
+      this._formField.setValue(newValue);
     }
 
     /* ---------- Public API ---------- */
@@ -367,10 +387,10 @@ export class CTSelect extends BaseElement {
     }
 
     /**
-     * Get the current value from the cell controller
+     * Get the current value from the form field controller
      */
     private getCurrentValue(): unknown | unknown[] {
-      return this._cellController.getValue();
+      return this._formField.getValue();
     }
 
     /**

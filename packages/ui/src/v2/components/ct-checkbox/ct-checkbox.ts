@@ -4,6 +4,7 @@ import { BaseElement } from "../../core/base-element.ts";
 import { type CellHandle } from "@commontools/runtime-client";
 import { booleanSchema } from "@commontools/runner/schemas";
 import { createBooleanCellController } from "../../core/cell-controller.ts";
+import { createFormFieldController } from "../../core/form-field-controller.ts";
 
 /**
  * CTCheckbox - Binary selection input with support for indeterminate state
@@ -162,6 +163,7 @@ export class CTCheckbox extends BaseElement {
       checked: { type: Boolean, reflect: true },
       disabled: { type: Boolean, reflect: true },
       indeterminate: { type: Boolean, reflect: true },
+      required: { type: Boolean, reflect: true },
       name: { type: String },
       value: { type: String },
     };
@@ -169,6 +171,7 @@ export class CTCheckbox extends BaseElement {
     declare checked: CellHandle<boolean> | boolean;
     declare disabled: boolean;
     declare indeterminate: boolean;
+    declare required: boolean;
     declare name: string;
     declare value: string;
 
@@ -185,21 +188,41 @@ export class CTCheckbox extends BaseElement {
       },
     });
 
+    // Form field controller handles buffering when in ct-form context
+    private _formField = createFormFieldController<boolean>(this, {
+      cellController: this._checkedCellController,
+      validate: () => {
+        // Disabled fields should not cause form invalidation
+        if (this.disabled) {
+          return { valid: true };
+        }
+        // Required checkbox must be checked
+        if (this.required && !this.getChecked()) {
+          return { valid: false, message: "This checkbox is required" };
+        }
+        return { valid: true };
+      },
+    });
+
     constructor() {
       super();
       this.checked = false;
       this.disabled = false;
       this.indeterminate = false;
+      this.required = false;
       this.name = "";
       this.value = "on";
     }
 
     private getChecked(): boolean {
-      return this._checkedCellController.getValue();
+      return this._formField.getValue();
     }
 
     private setChecked(newValue: boolean): void {
-      this._checkedCellController.setValue(newValue);
+      this._formField.setValue(newValue);
+      // Update aria attributes immediately since checked property doesn't change
+      // when buffering (the buffer is internal, not reflected to the property)
+      this._updateAriaAttributes();
     }
 
     override connectedCallback() {
@@ -215,11 +238,17 @@ export class CTCheckbox extends BaseElement {
       this.addEventListener("keydown", this._handleKeydown);
     }
 
+    override firstUpdated() {
+      // Register with form after first render when context is available
+      this._formField.register(this.name);
+    }
+
     override disconnectedCallback() {
       super.disconnectedCallback();
       // Clean up event listeners
       this.removeEventListener("click", this._handleClick);
       this.removeEventListener("keydown", this._handleKeydown);
+      // Controllers handle form cleanup automatically via ReactiveController
     }
 
     override willUpdate(
@@ -229,8 +258,10 @@ export class CTCheckbox extends BaseElement {
 
       // If the checked property itself changed (e.g., switched to a different cell)
       if (changedProperties.has("checked")) {
-        // Bind the new checked (Cell or plain) to the controller
+        // Bind the new cell first so getValue() returns the new value
         this._checkedCellController.bind(this.checked, booleanSchema);
+        // Then clear buffer - this captures the new cell's value as baseline for reset/dirty
+        this._formField.clearBuffer();
       }
     }
 

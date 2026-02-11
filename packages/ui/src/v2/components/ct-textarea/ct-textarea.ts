@@ -12,6 +12,7 @@ import {
 import { type CellHandle } from "@commontools/runtime-client";
 import { stringSchema } from "@commontools/runner/schemas";
 import { createStringCellController } from "../../core/cell-controller.ts";
+import { createFormFieldController } from "../../core/form-field-controller.ts";
 
 export type TimingStrategy = "immediate" | "debounce" | "throttle" | "blur";
 
@@ -288,6 +289,15 @@ export class CTTextarea extends BaseElement {
         },
       });
 
+      // Form field controller handles buffering when in ct-form context
+      private _formField = createFormFieldController<string>(this, {
+        cellController: this._cellController,
+        validate: () => ({
+          valid: this.checkValidity(),
+          message: this.validationMessage,
+        }),
+      });
+
       constructor() {
         super();
         this.placeholder = "";
@@ -312,11 +322,11 @@ export class CTTextarea extends BaseElement {
       }
 
       private getValue(): string {
-        return this._cellController.getValue();
+        return this._formField.getValue();
       }
 
       private setValue(newValue: string): void {
-        this._cellController.setValue(newValue);
+        this._formField.setValue(newValue);
       }
 
       get textarea(): HTMLTextAreaElement | null {
@@ -348,6 +358,9 @@ export class CTTextarea extends BaseElement {
         // Apply theme on mount
         applyThemeToElement(this, this.theme ?? defaultTheme);
 
+        // Register with form after binding is complete
+        this._formField.register(this.name);
+
         if (this.autofocus) {
           this.textarea?.focus();
         }
@@ -359,15 +372,29 @@ export class CTTextarea extends BaseElement {
         }
       }
 
+      override disconnectedCallback() {
+        super.disconnectedCallback();
+        // Controllers handle cleanup automatically via ReactiveController
+      }
+
+      override willUpdate(
+        changedProperties: Map<string | number | symbol, unknown>,
+      ) {
+        super.willUpdate(changedProperties);
+
+        // Bind value in willUpdate (before render) to avoid extra render cycle
+        if (changedProperties.has("value")) {
+          // Bind the new cell first so getValue() returns the new value
+          this._cellController.bind(this.value, stringSchema);
+          // Then clear buffer - this captures the new cell's value as baseline for reset/dirty
+          this._formField.clearBuffer();
+        }
+      }
+
       override updated(
         changedProperties: Map<string | number | symbol, unknown>,
       ) {
         super.updated(changedProperties);
-
-        if (changedProperties.has("value")) {
-          // Bind the new value (Cell or plain) to the controller
-          this._cellController.bind(this.value, stringSchema);
-        }
 
         // Update timing options if they changed
         if (

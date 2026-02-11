@@ -13,6 +13,7 @@ import { type CellHandle } from "@commontools/runtime-client";
 import { stringSchema } from "@commontools/runner/schemas";
 import { type InputTimingOptions } from "../../core/input-timing-controller.ts";
 import { createStringCellController } from "../../core/cell-controller.ts";
+import { createFormFieldController } from "../../core/form-field-controller.ts";
 
 /**
  * CTInput - Enhanced input field with support for various types, validation patterns, and reactive data binding
@@ -97,9 +98,11 @@ export type InputMode =
   | "url";
 
 // Common validation patterns for different input types
+// Note: Patterns must be compatible with both legacy and Unicode Sets (/v flag) regex modes
+// In /v mode, hyphens in character classes must be at start/end or escaped
 export const INPUT_PATTERNS = {
-  // Email pattern (basic validation)
-  email: "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}",
+  // Email pattern (basic validation) - hyphen at end of character class for /v compatibility
+  email: "[a-zA-Z0-9._%+\\-]+@[a-zA-Z0-9.\\-]+\\.[a-zA-Z]{2,}",
   // URL pattern (http/https)
   url: "https?://.+",
   // US Phone pattern (various formats)
@@ -358,6 +361,7 @@ export class CTInput extends BaseElement {
           delay: 300,
         },
         onChange: (newValue: string, oldValue: string) => {
+          // ct-change is emitted via timing controller to honor timingStrategy
           this.emit("ct-change", {
             value: newValue,
             oldValue,
@@ -365,6 +369,15 @@ export class CTInput extends BaseElement {
             files: this.type === "file" ? this._input?.files : undefined,
           });
         },
+      });
+
+      // Form field controller handles buffering when in ct-form context
+      private _formField = createFormFieldController<string>(this, {
+        cellController: this._cellController,
+        validate: () => ({
+          valid: this.checkValidity(),
+          message: this.validationMessage,
+        }),
       });
 
       constructor() {
@@ -411,12 +424,11 @@ export class CTInput extends BaseElement {
       }
 
       private getValue(): string {
-        return this._cellController.getValue();
+        return this._formField.getValue();
       }
 
-      private setValue(newValue: string, _files?: FileList | null): void {
-        // Store files reference for the onChange handler
-        this._cellController.setValue(newValue);
+      private setValue(newValue: string): void {
+        this._formField.setValue(newValue);
       }
 
       private getPattern(): string {
@@ -476,14 +488,9 @@ export class CTInput extends BaseElement {
         return isValid ? "" : "error";
       }
 
-      override connectedCallback() {
-        super.connectedCallback();
-        // CellController handles subscription automatically via ReactiveController
-      }
-
       override disconnectedCallback() {
         super.disconnectedCallback();
-        // CellController handles cleanup automatically via ReactiveController
+        // Controllers handle cleanup automatically via ReactiveController
       }
 
       override willUpdate(changedProperties: Map<string, any>) {
@@ -491,9 +498,10 @@ export class CTInput extends BaseElement {
 
         // If the value property itself changed (e.g., switched to a different cell)
         if (changedProperties.has("value")) {
-          // Bind the new value (Cell or plain) to the controller
-          // This updates the internal reference so getValue() returns the correct value
+          // Bind the new cell first so getValue() returns the new value
           this._cellController.bind(this.value, stringSchema);
+          // Then clear buffer - this captures the new cell's value as baseline for reset/dirty
+          this._formField.clearBuffer();
         }
       }
 
@@ -536,6 +544,9 @@ export class CTInput extends BaseElement {
           strategy: this.timingStrategy,
           delay: this.timingDelay,
         });
+
+        // Register with form after binding is complete
+        this._formField.register(this.name);
 
         if (this.autofocus) {
           this._input?.focus();
@@ -596,10 +607,10 @@ export class CTInput extends BaseElement {
 
         // For file inputs, we can't set the value programmatically
         if (this.type !== "file") {
-          this.setValue(input.value, input.files);
+          this.setValue(input.value);
         } else {
           // For file inputs, still emit the event with files
-          this.setValue("", input.files);
+          this.setValue("");
         }
 
         // Emit ct-input event directly for non-cell interop
@@ -613,24 +624,15 @@ export class CTInput extends BaseElement {
 
       private _handleChange(event: Event) {
         const input = event.target as HTMLInputElement;
-        const oldValue = this.getValue();
 
-        // Change events use the same setValue logic as input events
-        // The timing controller will determine when to actually emit
+        // Update value through form field controller
+        // ct-change is emitted by the cell controller's onChange callback
+        // which honors the configured timingStrategy (debounce/throttle/blur)
         if (this.type !== "file") {
-          this.setValue(input.value, input.files);
+          this.setValue(input.value);
         } else {
-          this.setValue("", input.files);
+          this.setValue("");
         }
-
-        // Emit ct-change event directly for non-cell interop
-        // This ensures the event is emitted regardless of timing strategy
-        this.emit("ct-change", {
-          value: this.type === "file" ? "" : input.value,
-          oldValue,
-          name: this.name,
-          files: this.type === "file" ? input.files : undefined,
-        });
       }
 
       private _handleFocus(_event: Event) {

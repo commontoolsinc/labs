@@ -6,3 +6,11 @@ if (!customElements.get("ct-form")) {
 
 export { CTForm };
 export type { CTForm as CTFormElement };
+
+// Re-export form context types and utilities
+export {
+  type FieldRegistration,
+  type FormContext,
+  formContext,
+  type ValidationResult,
+} from "./form-context.ts";
