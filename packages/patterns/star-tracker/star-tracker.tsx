@@ -415,7 +415,11 @@ export const RepoCard = pattern<RepoCardInput>(
             padding={[2, 0, 2, 0]}
             $marks={sparkMarks}
             onct-click={toggleExpanded}
-            style={{ width: "100px", flexShrink: "0", cursor: "pointer" }}
+            style={{
+              width: "100px",
+              flexShrink: "0",
+              "--ct-chart-cursor": "zoom-in",
+            }}
           />
 
           <ct-modal $open={expanded} dismissable size="md">

@@ -85,6 +85,6 @@ export const chartStyles = css`
 
   .interaction-overlay {
     fill: transparent;
-    cursor: crosshair;
+    cursor: var(--ct-chart-cursor, crosshair);
   }
 `;
