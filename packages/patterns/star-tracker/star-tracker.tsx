@@ -6,6 +6,7 @@ import {
   fetchData,
   NAME,
   pattern,
+  Stream,
   UI,
   type VNode,
   Writable,
@@ -13,7 +14,7 @@ import {
 
 // === Types ===
 
-interface RepoEntry {
+export interface RepoEntry {
   owner: string;
   repo: string;
 }
@@ -28,6 +29,8 @@ interface StarTrackerOutput {
   [UI]: VNode;
   repos: RepoEntry[];
   githubToken: string;
+  addRepos: Stream<string>;
+  removeRepo: Stream<RepoEntry>;
 }
 
 type RepoInfo = {
@@ -429,8 +432,8 @@ export default pattern<StarTrackerInput, StarTrackerOutput>(
     const addText = Writable.of("");
     const sortMode = Writable.of<SortMode>("stars");
 
-    const addRepos = action(() => {
-      const text = addText.get();
+    const addRepos = action((inputText: string) => {
+      const text = inputText || addText.get();
       const lines = text
         .split("\n")
         .map((l) => l.trim())
@@ -463,6 +466,10 @@ export default pattern<StarTrackerInput, StarTrackerOutput>(
       repos.set(
         current.filter((r) => r && !(r.owner === owner && r.repo === repo)),
       );
+    });
+
+    const addFromInput = action(() => {
+      addRepos.send(addText.get());
     });
 
     const totalCount = computed(() => repos.get().length);
@@ -532,11 +539,11 @@ export default pattern<StarTrackerInput, StarTrackerOutput>(
             <ct-hstack gap="2" align="end">
               <ct-textarea
                 $value={addText}
-                placeholder={"Add repos (one per line):\nowner/repo"}
+                placeholder="Add repos (one per line):&#10;owner/repo"
                 rows={2}
                 style={{ flex: "1" }}
               />
-              <ct-button variant="primary" onClick={() => addRepos.send()}>
+              <ct-button variant="primary" onClick={addFromInput}>
                 Add
               </ct-button>
             </ct-hstack>
@@ -545,6 +552,8 @@ export default pattern<StarTrackerInput, StarTrackerOutput>(
       ),
       repos,
       githubToken,
+      addRepos,
+      removeRepo,
     };
   },
 );
