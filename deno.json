@@ -107,6 +107,9 @@
       "packages/static/assets/",
       "packages/ts-transformers/test/fixtures",
       "packages/schema-generator/test/fixtures",
+      "packages/ui/src/v2/components/ct-chart/ct-chart.ts",
+      "packages/ui/src/v2/components/ct-chart/lib/axes.ts",
+      "packages/ui/src/v2/components/ct-chart/lib/render.ts",
       "packages/vendor-astral",
       "tutorials/"
     ]

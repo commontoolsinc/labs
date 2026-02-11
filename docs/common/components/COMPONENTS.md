@@ -436,6 +436,102 @@ const mapData = {
 
 ---
 
+## ct-chart
+
+SVG charting components. Compose mark elements inside a `ct-chart` container.
+
+### Elements
+
+- **`ct-chart`** - Container that discovers child marks, computes scales, renders SVG
+- **`ct-line-mark`** - Line series
+- **`ct-area-mark`** - Filled area
+- **`ct-bar-mark`** - Bar/column chart
+- **`ct-dot-mark`** - Scatter/dot plot
+
+### ct-chart Properties
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `height` | `number` | `200` | Chart height in px. Width fills container. |
+| `marks` / `$marks` | `MarkConfig[]` | `[]` | Programmatic marks (rendered below children) |
+| `xAxis` | `boolean` | `false` | Show x-axis |
+| `yAxis` | `boolean` | `false` | Show y-axis |
+| `xType` | `"linear"\|"time"\|"band"` | auto | Scale type (auto-detected from data) |
+| `yType` | `"linear"\|"log"` | auto | Y scale type |
+| `xDomain` | `[min, max]` | auto | Override x domain |
+| `yDomain` | `[min, max]` | auto | Override y domain |
+| `crosshair` | `boolean` | `true` | Show crosshair on hover |
+
+### Mark Properties (shared)
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `data` / `$data` | `number[]\|object[]` | required | Data array |
+| `x` | `string` | index | Key for x accessor |
+| `y` | `string` | value | Key for y accessor |
+| `color` | `string` | `"#6366f1"` | Stroke/fill color |
+| `label` | `string` | - | Label for tooltip |
+
+**ct-line-mark** adds: `strokeWidth` (default 2), `curve` (`"linear"`, `"step"`, `"monotone"`, `"natural"`)
+
+**ct-area-mark** adds: `opacity` (default 0.2), `curve`, `y2` (baseline)
+
+**ct-bar-mark** adds: `opacity` (default 1), `barPadding` (0-1, default 0.2)
+
+**ct-dot-mark** adds: `radius` (default 3)
+
+### Events
+
+| Event | Detail | Description |
+|-------|--------|-------------|
+| `ct-hover` | `{ x, y, dataX, dataY, nearest }` | Mouse over chart |
+| `ct-click` | `{ x, y, dataX, dataY, nearest }` | Chart clicked |
+| `ct-leave` | `{}` | Mouse left chart |
+
+### Usage
+
+```tsx
+// Sparkline (inline, no axes)
+<ct-chart height={24} style="width: 80px;">
+  <ct-line-mark $data={trend} color="green" />
+</ct-chart>
+
+// Line chart with axes
+<ct-chart height={200} xAxis yAxis>
+  <ct-line-mark $data={prices} x="date" y="price" color="blue" label="AAPL" />
+</ct-chart>
+
+// Layered area + line
+<ct-chart height={200} xAxis yAxis>
+  <ct-area-mark $data={prices} x="date" y="price" color="blue" opacity={0.15} />
+  <ct-line-mark $data={prices} x="date" y="price" color="blue" />
+</ct-chart>
+
+// Bar chart
+<ct-chart height={200} xAxis yAxis>
+  <ct-bar-mark $data={monthly} x="month" y="revenue" color="green" label="Revenue" />
+</ct-chart>
+
+// Multi-series
+<ct-chart height={300} xAxis yAxis>
+  <ct-line-mark $data={appl} x="date" y="price" color="blue" label="AAPL" />
+  <ct-line-mark $data={goog} x="date" y="price" color="red" label="GOOG" />
+</ct-chart>
+
+// Simple number array (auto-indexed x)
+<ct-chart height={100}>
+  <ct-line-mark $data={[1, 3, 2, 5, 4, 7, 6]} color="#22c55e" />
+</ct-chart>
+```
+
+### Notes
+
+- **Data auto-detection:** Number arrays auto-index. String x-values use band scale. Date/ISO strings use time scale.
+- **Responsive width:** Chart fills its container width. Use CSS to control.
+- **Crosshair:** Enabled by default. Shows nearest data point on hover.
+
+---
+
 ## Limitations
 
 ### SVG Not Supported
@@ -449,4 +545,4 @@ SVG elements (`<svg>`, `<path>`, `<circle>`, etc.) are not in the JSX type defin
 </svg>
 ```
 
-**Workarounds:** Use styled `<div>` elements for bar charts, text sparklines (`▁▂▃▄▅▆▇█`), or request a `ct-chart` component.
+**Workarounds:** Use `ct-chart` for data visualization, styled `<div>` elements for simple graphics, or text sparklines (`▁▂▃▄▅▆▇█`).
