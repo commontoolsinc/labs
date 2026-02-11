@@ -162,8 +162,9 @@ version of the data. Hashes are primarily used for:
   existence, not the data content itself)
 
 The `"/"` sigil convention is reused as a general escape mechanism for special
-object shapes, not specifically tied to IPLD/IPFS semantics. Only some legacy
-links use the `{ "/": string }` form to avoid conflicting with IPFS-style CIDs.
+object shapes, not specifically tied to IPLD/IPFS semantics. The legacy
+`{ "/": string }` bare-string link form has been removed from recognition;
+current link formats use structured objects under the `"/"` key.
 
 ### Concerns: IPFS Conventions Without IPFS Benefits
 
