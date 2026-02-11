@@ -3041,8 +3041,8 @@ interface CTChartAttributes<T> extends CTHTMLAttributes<T> {
   "height"?: number;
   "marks"?: any[] | CellLike<any[]>;
   "$marks"?: any[] | CellLike<any[]>;
-  "xAxis"?: boolean;
-  "yAxis"?: boolean;
+  "xAxis"?: boolean | { label?: string; tickFormat?: string | ((value: unknown) => string); grid?: boolean; tickCount?: number };
+  "yAxis"?: boolean | { label?: string; tickFormat?: string | ((value: unknown) => string); grid?: boolean; tickCount?: number };
   "xType"?: "linear" | "time" | "band";
   "yType"?: "linear" | "log";
   "xDomain"?: [unknown, unknown];
@@ -3074,7 +3074,7 @@ interface CTAreaMarkAttributes<T> extends CTHTMLAttributes<T> {
   "strokeWidth"?: number;
   "curve"?: "linear" | "step" | "monotone" | "natural";
   "opacity"?: number;
-  "y2"?: string | number;
+  "y2"?: number;
   "label"?: string;
 }
 

@@ -26,6 +26,8 @@ import { BaseElement } from "../../core/base-element.ts";
 import { createCellController } from "../../core/cell-controller.ts";
 import { chartStyles } from "./styles.ts";
 import type {
+  AxisConfig,
+  AxisOption,
   MarkConfig,
   XScaleType,
   YScaleType,
@@ -56,14 +58,21 @@ import "./marks/ct-dot-mark.ts";
 const RESIZE_DEBOUNCE_MS = 100;
 const DEFAULT_HEIGHT = 200;
 
+/** Normalize boolean | AxisConfig → AxisConfig | null */
+function resolveAxisConfig(opt: AxisOption | undefined): AxisConfig | null {
+  if (!opt) return null;
+  if (opt === true) return {};
+  return opt;
+}
+
 export class CTChart extends BaseElement {
   static override styles = [BaseElement.baseStyles, chartStyles];
 
   static override properties = {
     height: { type: Number },
     marks: { attribute: false },
-    xAxis: { type: Boolean },
-    yAxis: { type: Boolean },
+    xAxis: { attribute: false },
+    yAxis: { attribute: false },
     xType: { type: String },
     yType: { type: String },
     xDomain: { attribute: false },
@@ -74,8 +83,8 @@ export class CTChart extends BaseElement {
 
   declare height: number;
   declare marks: CellHandle<MarkConfig[]> | MarkConfig[];
-  declare xAxis: boolean;
-  declare yAxis: boolean;
+  declare xAxis: AxisOption;
+  declare yAxis: AxisOption;
   declare xType: XScaleType | undefined;
   declare yType: YScaleType | undefined;
   declare xDomain: [unknown, unknown] | undefined;
@@ -222,28 +231,30 @@ export class CTChart extends BaseElement {
     xType: XScaleType,
     plotWidth: number,
     plotHeight: number,
-    chartPadding: ChartPadding,
+    padding: ChartPadding,
     configMarks: readonly MarkConfig[],
   ) {
     const marks = this._renderAllMarks(
       allMarks, xScale, yScale, plotWidth, plotHeight, configMarks,
     );
-    const xAxisSvg = this.xAxis
-      ? renderXAxis(xScale, xType, plotWidth, plotHeight)
+    const xAxisConfig = resolveAxisConfig(this.xAxis);
+    const yAxisConfig = resolveAxisConfig(this.yAxis);
+    const xAxisSvg = xAxisConfig
+      ? renderXAxis(xScale, xType, plotWidth, plotHeight, xAxisConfig)
       : svg``;
-    const yAxisSvg = this.yAxis
-      ? renderYAxis(yScale, plotHeight)
+    const yAxisSvg = yAxisConfig
+      ? renderYAxis(yScale, plotWidth, plotHeight, yAxisConfig)
       : svg``;
     const crosshairSvg = this.crosshair && this._crosshairX !== null
       ? renderCrosshair(this._crosshairX, plotHeight)
       : svg``;
 
     const onMove = (e: MouseEvent) =>
-      this._handleMouseMove(e, allMarks, xScale, yScale, xType, chartPadding);
+      this._handleMouseMove(e, allMarks, xScale, yScale, xType);
     const onClick = (e: MouseEvent) =>
-      this._handleClick(e, allMarks, xScale, yScale, xType, chartPadding);
-    const tx = chartPadding.left;
-    const ty = chartPadding.top;
+      this._handleClick(e, allMarks, xScale, yScale, xType);
+    const tx = padding.left;
+    const ty = padding.top;
 
     return svg`<g transform="translate(${tx}, ${ty})">${marks}${xAxisSvg}${yAxisSvg}${crosshairSvg}<rect class="interaction-overlay" width="${plotWidth}" height="${plotHeight}" @mousemove=${onMove} @click=${onClick} @mouseleave=${this._handleMouseLeave} /></g>`;
   }
@@ -309,14 +320,14 @@ export class CTChart extends BaseElement {
     xScale: XScale,
     yScale: YScale,
     xType: XScaleType,
-    padding: ChartPadding,
   ): void {
     const rect = (e.currentTarget as SVGRectElement).getBoundingClientRect();
-    const offsetX = e.clientX - rect.left + padding.left;
-    const offsetY = e.clientY - rect.top + padding.top;
+    // rect already includes the SVG <g> translate, so coordinates are in plot space
+    const plotX = e.clientX - rect.left;
+    const plotY = e.clientY - rect.top;
 
     const { detail, nearest } = computeEventDetail(
-      offsetX, offsetY, allMarks, xScale, yScale, xType, padding,
+      plotX, plotY, allMarks, xScale, yScale, xType,
     );
 
     if (this.crosshair && nearest) {
@@ -334,14 +345,13 @@ export class CTChart extends BaseElement {
     xScale: XScale,
     yScale: YScale,
     xType: XScaleType,
-    padding: ChartPadding,
   ): void {
     const rect = (e.currentTarget as SVGRectElement).getBoundingClientRect();
-    const offsetX = e.clientX - rect.left + padding.left;
-    const offsetY = e.clientY - rect.top + padding.top;
+    const plotX = e.clientX - rect.left;
+    const plotY = e.clientY - rect.top;
 
     const { detail } = computeEventDetail(
-      offsetX, offsetY, allMarks, xScale, yScale, xType, padding,
+      plotX, plotY, allMarks, xScale, yScale, xType,
     );
 
     this.emit("ct-click", detail);
@@ -401,11 +411,13 @@ export class CTChart extends BaseElement {
     }
 
     // Auto-calculate based on axes
+    const xConfig = resolveAxisConfig(this.xAxis);
+    const yConfig = resolveAxisConfig(this.yAxis);
     return {
       top: 8,
       right: 8,
-      bottom: this.xAxis ? 28 : 8,
-      left: this.yAxis ? 48 : 8,
+      bottom: xConfig ? (xConfig.label ? 40 : 28) : 8,
+      left: yConfig ? (yConfig.label ? 56 : 48) : 8,
     };
   }
 

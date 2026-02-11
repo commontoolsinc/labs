@@ -43,6 +43,18 @@ export const chartStyles = css`
     fill: none;
   }
 
+  .axis .grid-line {
+    stroke: var(--ct-border-color, #ddd);
+    stroke-opacity: 0.4;
+    stroke-dasharray: 2 2;
+  }
+
+  .axis .axis-label {
+    font-size: 11px;
+    fill: var(--ct-text-secondary, #888);
+    font-weight: 500;
+  }
+
   .crosshair line {
     stroke: var(--ct-text-secondary, #888);
     stroke-width: 1;

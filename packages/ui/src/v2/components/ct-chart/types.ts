@@ -8,6 +8,27 @@ export type XScaleType = "linear" | "time" | "band";
 /** Supported scale types for y-axis */
 export type YScaleType = "linear" | "log";
 
+/**
+ * Axis configuration. Pass `true` for defaults, or an object to customize.
+ *
+ * All fields are optional — omitted fields use sensible defaults.
+ * This type is designed for forward-compatible extensibility:
+ * new fields can be added without breaking existing usage.
+ */
+export interface AxisConfig {
+  /** Axis label text */
+  label?: string;
+  /** Tick format: d3-format string (e.g. "$,.0f") or function */
+  tickFormat?: string | ((value: unknown) => string);
+  /** Show grid lines across the plot area */
+  grid?: boolean;
+  /** Number of ticks to display (approximate) */
+  tickCount?: number;
+}
+
+/** Resolved axis config: normalizes boolean | AxisConfig to a concrete object */
+export type AxisOption = boolean | AxisConfig;
+
 /** Curve interpolation types */
 export type CurveType = "linear" | "step" | "monotone" | "natural";
 
@@ -27,7 +48,7 @@ export interface MarkConfig {
   curve?: CurveType;
   // Area specific
   opacity?: number;
-  y2?: string | number;
+  y2?: number;
   // Bar specific
   barPadding?: number;
   // Dot specific

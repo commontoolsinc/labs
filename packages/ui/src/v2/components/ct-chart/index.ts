@@ -10,6 +10,8 @@ import { CTBarMark } from "./marks/ct-bar-mark.ts";
 import { CTDotMark } from "./marks/ct-dot-mark.ts";
 
 import type {
+  AxisConfig,
+  AxisOption,
   ChartClickDetail,
   ChartHoverDetail,
   ChartPadding,
@@ -39,6 +41,8 @@ if (!customElements.get("ct-dot-mark")) {
 export { CTAreaMark, CTBarMark, CTChart, CTDotMark, CTLineMark, MarkElement };
 
 export type {
+  AxisConfig,
+  AxisOption,
   ChartClickDetail,
   ChartHoverDetail,
   ChartPadding,

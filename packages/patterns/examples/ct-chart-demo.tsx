@@ -46,10 +46,14 @@ export default pattern(() => {
           </div>
         </div>
 
-        {/* Line chart with axes */}
+        {/* Line chart with axes + grid + labels */}
         <div>
-          <h3>Line Chart</h3>
-          <ct-chart height={200} xAxis yAxis>
+          <h3>Line Chart (with labels and grid)</h3>
+          <ct-chart
+            height={200}
+            xAxis={{ label: "Date" }}
+            yAxis={{ label: "Price ($)", grid: true }}
+          >
             <ct-line-mark
               $data={priceData}
               x="date"
