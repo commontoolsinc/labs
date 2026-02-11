@@ -65,7 +65,7 @@ import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
 import "./builtins/index.ts";
 import { isCellResult } from "./query-result-proxy.ts";
 
-const logger = getLogger("runner");
+const logger = getLogger("runner", { enabled: true, level: "info" });
 
 export class Runner {
   readonly cancels = new Map<`${MemorySpace}/${URI}`, Cancel>();
@@ -1261,8 +1261,21 @@ export class Runner {
               "stream",
               () => [
                 "action argument is undefined (potential schema mismatch) -- not running",
-                module.argumentSchema,
-                inputsCell.getRaw(),
+                {
+                  schema: module.argumentSchema,
+                  raw: inputsCell.getRaw(),
+                  asQueryResult: (() => {
+                    let result;
+                    try {
+                      result = JSON.stringify(
+                        inputsCell.getAsQueryResult([], tx),
+                      );
+                    } catch (_e) {
+                      result = "(Can't serialize to JSON)";
+                    }
+                    return result;
+                  })(),
+                },
               ],
             );
           }
@@ -1403,6 +1416,8 @@ export class Runner {
       // different result, so don't do that.
       let previousResultCell: Cell<any> | undefined;
 
+      let previouslyInvalidArgument = false;
+
       const action: Action = (tx: IExtendedStorageTransaction) => {
         const frame = pushFrameFromCause(
           { inputs, outputs, fn: fn.toString() },
@@ -1430,16 +1445,33 @@ export class Runner {
           const isValidArgument = module.argumentSchema === false ||
             argument !== undefined;
 
-          if (!isValidArgument) {
-            logger.debug(
+          if (!isValidArgument || previouslyInvalidArgument) {
+            logger.info(
               "action",
               () => [
-                "action argument is undefined (potential schema mismatch) -- not running",
-                module.argumentSchema,
-                inputsCell.getRaw(),
+                isValidArgument
+                  ? "action argument is valid now -- running"
+                  : "action argument is undefined (potential schema mismatch) -- not running",
+                {
+                  schema: module.argumentSchema,
+                  raw: inputsCell.getRaw(),
+                  asQueryResult: (() => {
+                    let result;
+                    try {
+                      result = JSON.stringify(
+                        inputsCell.getAsQueryResult([], tx),
+                      );
+                    } catch (_e) {
+                      result = "(Can't serialize to JSON)";
+                    }
+                    return result;
+                  })(),
+                },
               ],
             );
+            previouslyInvalidArgument = !isValidArgument;
           }
+
           // We only run the action if we have a valid argument, or the function's schema
           // is false (like an input of `never`).
           const result = isValidArgument ? fn(argument) : undefined;
