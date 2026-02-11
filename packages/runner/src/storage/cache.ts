@@ -2107,7 +2107,7 @@ export class StorageManager implements IStorageManager {
       return V2Provider.connect({
         id,
         space,
-        address: new URL(address.href + "/v2"),
+        address,
         settings,
         subscription: this.#subscription,
       });

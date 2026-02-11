@@ -2,7 +2,7 @@
  * Memory v2 OpenAPI Route Definitions
  *
  * Zod schemas and OpenAPI route definitions for the v2 memory protocol.
- * Routes are mounted at /api/storage/memory/v2.
+ * Routes are mounted at /api/storage/memory.
  *
  * @module v2-memory.routes
  */
@@ -88,7 +88,7 @@ const QueryBody = z.object({
 
 export const transact = createRoute({
   method: "patch",
-  path: "/api/storage/memory/v2",
+  path: "/api/storage/memory",
   tags,
   request: {
     body: {
@@ -129,7 +129,7 @@ export const transact = createRoute({
 
 export const query = createRoute({
   method: "post",
-  path: "/api/storage/memory/v2",
+  path: "/api/storage/memory",
   tags,
   request: {
     body: {
@@ -160,7 +160,7 @@ export const query = createRoute({
 
 export const subscribe = createRoute({
   method: "get",
-  path: "/api/storage/memory/v2",
+  path: "/api/storage/memory",
   tags,
   request: {
     headers: z.object({
