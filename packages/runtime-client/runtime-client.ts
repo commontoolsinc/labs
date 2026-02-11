@@ -20,6 +20,7 @@ import {
   InitializationData,
   JSONValue,
   type LoggerCountsData,
+  type LoggerFlagsData,
   type LoggerMetadata,
   type LoggerTimingData,
   type LogLevel,
@@ -243,11 +244,17 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     counts: LoggerCountsData;
     metadata: LoggerMetadata;
     timing: LoggerTimingData;
+    flags: LoggerFlagsData;
   }> {
     const res = await this.#conn.request<RequestType.GetLoggerCounts>({
       type: RequestType.GetLoggerCounts,
     });
-    return { counts: res.counts, metadata: res.metadata, timing: res.timing };
+    return {
+      counts: res.counts,
+      metadata: res.metadata,
+      timing: res.timing,
+      flags: res.flags,
+    };
   }
 
   /**

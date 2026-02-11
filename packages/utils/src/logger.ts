@@ -472,6 +472,8 @@ export class Logger {
     warn: number;
     error: number;
   } | null = null;
+  private _flags: Map<string, Map<string, Record<string, unknown> | true>> =
+    new Map();
 
   constructor(private moduleName?: string, options?: GetLoggerOptions) {
     // Set initial disabled state from options
@@ -885,6 +887,64 @@ export class Logger {
     };
   }
 
+  // ============================================================
+  // Flag Methods
+  // ============================================================
+
+  /**
+   * Set or clear a named boolean flag for a specific ID, with optional metadata.
+   * Flags track named boolean state per ID (e.g. "action invalid input" for "action:myModule").
+   * When value=true and metadata is provided, the metadata is stored with the flag.
+   * When value=true without metadata, stores `true`.
+   * When value=false, the entry is deleted so active flags = present entries.
+   */
+  flag(
+    name: string,
+    id: string,
+    value: boolean,
+    metadata?: Record<string, unknown>,
+  ): void {
+    let group = this._flags.get(name);
+    if (!group) {
+      group = new Map();
+      this._flags.set(name, group);
+    }
+    if (value) {
+      group.set(id, metadata ?? true);
+    } else {
+      group.delete(id);
+    }
+  }
+
+  /**
+   * Get all active flags as a record of flag name -> { id -> metadata | null }.
+   * Metadata is the object passed to flag() or null if no metadata was provided.
+   * Only includes groups with at least one active flag.
+   */
+  get flags(): Record<string, Record<string, Record<string, unknown> | null>> {
+    const result: Record<
+      string,
+      Record<string, Record<string, unknown> | null>
+    > = {};
+    for (const [name, group] of this._flags) {
+      if (group.size > 0) {
+        const entries: Record<string, Record<string, unknown> | null> = {};
+        for (const [id, value] of group) {
+          entries[id] = value === true ? null : value;
+        }
+        result[name] = entries;
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Reset all flags for this logger.
+   */
+  resetFlags(): void {
+    this._flags.clear();
+  }
+
   /**
    * Get the total count of all log calls (debug + info + warn + error).
    */
@@ -1098,6 +1158,38 @@ export function getTimingStatsBreakdown(): TimingStatsBreakdown {
 }
 
 /**
+ * Breakdown of flags by logger name.
+ * Structure: { loggerName: { flagName: { id: metadata | null } } }
+ */
+export type LoggerFlagsBreakdown = Record<
+  string,
+  Record<string, Record<string, Record<string, unknown> | null>>
+>;
+
+/**
+ * Get a breakdown of active flags by logger name and flag name.
+ * @returns Object with nested flag data per logger: { "runner": { "action invalid input": { "action:myModule": { schema: ..., raw: ... } } } }
+ */
+export function getLoggerFlagsBreakdown(): LoggerFlagsBreakdown {
+  const global = globalThis as unknown as {
+    commontools?: { logger?: Record<string, Logger> };
+  };
+
+  const breakdown: LoggerFlagsBreakdown = {};
+
+  if (global.commontools?.logger) {
+    for (const [name, logger] of Object.entries(global.commontools.logger)) {
+      const flags = logger.flags;
+      if (Object.keys(flags).length > 0) {
+        breakdown[name] = flags;
+      }
+    }
+  }
+
+  return breakdown;
+}
+
+/**
  * Reset timing statistics for all registered loggers.
  * Iterates through all loggers in globalThis.commontools.logger and resets their timing stats.
  */
@@ -1151,6 +1243,7 @@ if (typeof globalThis !== "undefined") {
       getLoggerCountsBreakdown?: typeof getLoggerCountsBreakdown;
       resetAllLoggerCounts?: typeof resetAllLoggerCounts;
       getTimingStatsBreakdown?: typeof getTimingStatsBreakdown;
+      getLoggerFlagsBreakdown?: typeof getLoggerFlagsBreakdown;
       resetAllTimingStats?: typeof resetAllTimingStats;
       resetAllCountBaselines?: typeof resetAllCountBaselines;
       resetAllTimingBaselines?: typeof resetAllTimingBaselines;
@@ -1163,6 +1256,7 @@ if (typeof globalThis !== "undefined") {
   global.commontools.getLoggerCountsBreakdown = getLoggerCountsBreakdown;
   global.commontools.resetAllLoggerCounts = resetAllLoggerCounts;
   global.commontools.getTimingStatsBreakdown = getTimingStatsBreakdown;
+  global.commontools.getLoggerFlagsBreakdown = getLoggerFlagsBreakdown;
   global.commontools.resetAllTimingStats = resetAllTimingStats;
   global.commontools.resetAllCountBaselines = resetAllCountBaselines;
   global.commontools.resetAllTimingBaselines = resetAllTimingBaselines;

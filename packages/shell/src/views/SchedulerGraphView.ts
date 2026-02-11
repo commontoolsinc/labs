@@ -82,9 +82,12 @@ export class XSchedulerGraph extends LitElement {
       border-radius: 0.375rem 0 0 0.375rem;
     }
 
+    .toggle-button:not(:first-child) {
+      border-left: none;
+    }
+
     .toggle-button:last-child {
       border-radius: 0 0.375rem 0.375rem 0;
-      border-left: none;
     }
 
     .toggle-button:hover {
@@ -916,6 +919,123 @@ export class XSchedulerGraph extends LitElement {
       border-color: #3b82f6;
       color: white;
     }
+
+    /* Flags view styles */
+    .flags-container {
+      flex: 1;
+      display: flex;
+      overflow: hidden;
+    }
+
+    .flags-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0.5rem;
+    }
+
+    .flags-empty {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: #64748b;
+      font-family: monospace;
+      font-size: 0.8125rem;
+    }
+
+    .flags-section-title {
+      color: #94a3b8;
+      font-size: 0.6875rem;
+      font-family: monospace;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 0.5rem 0.5rem 0.25rem;
+      border-bottom: 1px solid #1e293b;
+    }
+
+    .flag-item {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem;
+      border-radius: 0.25rem;
+      cursor: pointer;
+      font-family: monospace;
+      font-size: 0.75rem;
+      color: #cbd5e1;
+      transition: background 0.15s;
+    }
+
+    .flag-item:hover {
+      background: #1e293b;
+    }
+
+    .flag-item.selected {
+      background: #1e3a5f;
+      border-left: 2px solid #3b82f6;
+    }
+
+    .flag-warning {
+      color: #f59e0b;
+      font-size: 0.875rem;
+    }
+
+    .flag-label {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .flag-tag {
+      padding: 0.125rem 0.375rem;
+      background: #7f1d1d;
+      color: #fca5a5;
+      border-radius: 0.25rem;
+      font-size: 0.625rem;
+      white-space: nowrap;
+    }
+
+    .flag-unmatched {
+      color: #64748b;
+      font-size: 0.625rem;
+      font-style: italic;
+    }
+
+    /* Flag metadata styles in detail pane */
+    .flag-meta-title {
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+      color: #f59e0b;
+    }
+
+    .flag-meta-field {
+      margin-bottom: 0.5rem;
+    }
+
+    .flag-meta-label {
+      color: #94a3b8;
+      font-size: 0.625rem;
+      font-family: monospace;
+      text-transform: uppercase;
+      margin-bottom: 0.125rem;
+    }
+
+    .flag-meta-value {
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 0.25rem;
+      padding: 0.375rem;
+      color: #e2e8f0;
+      font-family: monospace;
+      font-size: 0.625rem;
+      white-space: pre-wrap;
+      word-break: break-all;
+      max-height: 12rem;
+      overflow-y: auto;
+      margin: 0;
+    }
   `;
 
   @property({ attribute: false })
@@ -955,7 +1075,7 @@ export class XSchedulerGraph extends LitElement {
   private collapsedParents = new Set<string>();
 
   @state()
-  private viewMode: "graph" | "table" = "table";
+  private viewMode: "graph" | "table" | "flags" = "table";
 
   @state()
   private tableSortColumn: "totalTime" | "runCount" | "avgTime" | "lastTime" =
@@ -1658,6 +1778,17 @@ export class XSchedulerGraph extends LitElement {
           >
             Table
           </button>
+          <button
+            type="button"
+            class="toggle-button ${this.viewMode === "flags" ? "active" : ""}"
+            @click="${() => {
+              this.viewMode = "flags";
+              this.debuggerController?.requestFlags();
+            }}"
+            title="Actions with invalid/pending inputs"
+          >
+            Data pending
+          </button>
         </div>
 
         <div class="toggle-group">
@@ -2320,6 +2451,61 @@ export class XSchedulerGraph extends LitElement {
                 `
                 : "";
             })()}
+          ${(() => {
+            const flagMeta = this.debuggerController?.getFlagMetadata(
+              "action invalid input",
+              node.id,
+            );
+            return flagMeta
+              ? html`
+                <div class="detail-section">
+                  <div class="detail-section-title flag-meta-title">
+                    <span class="flag-warning">&#x26a0;</span> Invalid Input Diagnostics
+                  </div>
+                  ${flagMeta.schema !== undefined
+                    ? html`
+                      <div class="flag-meta-field">
+                        <div class="flag-meta-label">Schema</div>
+                        <pre class="flag-meta-value">${JSON.stringify(
+                          flagMeta.schema,
+                          null,
+                          2,
+                        )}</pre>
+                      </div>
+                    `
+                    : ""} ${flagMeta.raw !== undefined
+                    ? html`
+                      <div class="flag-meta-field">
+                        <div class="flag-meta-label">Raw Value</div>
+                        <pre class="flag-meta-value">${JSON.stringify(
+                          flagMeta.raw,
+                          null,
+                          2,
+                        )}</pre>
+                      </div>
+                    `
+                    : ""} ${flagMeta.queryResult !== undefined
+                    ? html`
+                      <div class="flag-meta-field">
+                        <div class="flag-meta-label">Query Result</div>
+                        <pre class="flag-meta-value">${(() => {
+                          try {
+                            return JSON.stringify(
+                              JSON.parse(flagMeta.queryResult as string),
+                              null,
+                              2,
+                            );
+                          } catch {
+                            return String(flagMeta.queryResult);
+                          }
+                        })()}</pre>
+                      </div>
+                    `
+                    : ""}
+                </div>
+              `
+              : "";
+          })()}
         </div>
       `;
     }
@@ -2432,7 +2618,96 @@ export class XSchedulerGraph extends LitElement {
             ${this.renderDetailPane()}
           </div>
         `
+        : this.viewMode === "flags"
+        ? this.renderFlagsView()
         : this.renderTable()}
+    `;
+  }
+
+  private renderFlagsView(): TemplateResult {
+    const flags = this.debuggerController?.getActiveFlags() ?? {};
+    const invalidInputMap = flags["runner"]?.["action invalid input"] ?? {};
+    const invalidInputIds = Object.keys(invalidInputMap);
+
+    if (invalidInputIds.length === 0) {
+      return html`
+        <div class="flags-container">
+          <div class="flags-list">
+            <div class="flags-empty">
+              No actions with invalid inputs detected.
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // Split into matched (in graph) and unmatched IDs
+    const matched: {
+      id: string;
+      node: LayoutNode;
+      metadata: Record<string, unknown> | null;
+    }[] = [];
+    const unmatched: {
+      id: string;
+      metadata: Record<string, unknown> | null;
+    }[] = [];
+
+    for (const id of invalidInputIds) {
+      const node = this.layoutNodes.get(id);
+      const metadata = invalidInputMap[id] ?? null;
+      if (node) {
+        matched.push({ id, node, metadata });
+      } else {
+        unmatched.push({ id, metadata });
+      }
+    }
+
+    return html`
+      <div class="flags-container">
+        <div class="flags-list">
+          <div class="flags-section-title">
+            Actions with invalid inputs (${invalidInputIds.length})
+          </div>
+          ${matched.map(({ id, node }) => {
+            const isSelected = this.selectedNode?.id === id;
+            return html`
+              <div
+                class="flag-item ${isSelected ? "selected" : ""}"
+                @click="${() => {
+                  this.selectedNode = node;
+                  this.selectedEdge = null;
+                }}"
+                title="${node.fullId}"
+              >
+                <span class="flag-warning">&#x26a0;</span>
+                <span class="type-badge ${node.type}">${node.type}</span>
+                <span class="flag-label">${node.label}</span>
+                <span class="flag-tag">invalid input</span>
+              </div>
+            `;
+          })} ${unmatched.length > 0
+            ? html`
+              <div class="flags-section-title">
+                Not in graph (${unmatched.length})
+              </div>
+              ${unmatched.map(({ id }) =>
+                html`
+                  <div
+                    class="flag-item"
+                    title="${id}"
+                  >
+                    <span class="flag-warning">&#x26a0;</span>
+                    <span class="flag-label">${id}</span>
+                    <span class="flag-unmatched">not in graph</span>
+                    <span class="flag-tag">invalid input</span>
+                  </div>
+                `
+              )}
+            `
+            : ""}
+        </div>
+        ${this.renderDetailPane()}
+      </div>
     `;
   }
 

@@ -1464,6 +1464,10 @@ export class XDebuggerView extends LitElement {
     try {
       const result = await rt.getLoggerCounts();
       this.workerLoggerMetadata = result.metadata;
+      // Also push flags to the debugger controller (piggyback on existing IPC call)
+      if (result.flags && this.debuggerController) {
+        this.debuggerController.updateFlags(result.flags);
+      }
       return { counts: result.counts, timing: result.timing };
     } catch {
       return { counts: null, timing: null };
