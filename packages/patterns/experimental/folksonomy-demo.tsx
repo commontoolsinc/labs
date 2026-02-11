@@ -51,14 +51,18 @@ interface Output {
 
 export default pattern<Input, Output>(
   ({ itemATags, itemBTags, itemCTags, customScope }) => {
-    // Check if aggregator is available
-    // Using object form { query: "#..." } to get WishState with .result property
-    const aggregatorWish = wish<{ events: unknown[] }>({
+    // Discover aggregator via wish - searches favorites and current space
+    const aggregatorWish = wish<{
+      events: unknown[];
+      suggestions: Record<string, unknown[]>;
+      postEvent: unknown;
+    }>({
       query: "#folksonomy-aggregator",
+      scope: ["~", "."],
     });
     const hasAggregator = derive(
       aggregatorWish.result,
-      (agg: any) => agg != null,
+      (agg: unknown) => agg != null,
     );
 
     // Shared scope for A and B
@@ -73,7 +77,7 @@ export default pattern<Input, Output>(
       "https://github.com/commontools/folksonomy-demo/demo-isolated",
     );
 
-    // Create tag instances - pass Cells directly without casting
+    // Create tag instances - aggregator discovered via wish() internally
     const tagsA = FolksonomyTags({
       scope: sharedScope,
       tags: itemATags,
