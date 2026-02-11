@@ -55,6 +55,11 @@ These issues compile without errors but fail at runtime.
 - [Reactivity Issues](reactivity-issues.md) - Data not updating, scoping problems
 - [Runtime Errors](runtime-errors.md) - DOM access, async blocking
 
+### Runtime Inspection
+
+- [Logger System](logger-system.md) - Structured logging, levels, counts, timing, flags
+- [Console Commands](console-commands.md) - `globalThis.commontools.*` browser console reference
+
 ### Workflows
 
 - [Debugging Workflow](workflow.md) - Step-by-step process + quick fixes

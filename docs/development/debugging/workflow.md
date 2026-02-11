@@ -52,8 +52,31 @@ deno task ct piece inspect --identity key.json --api-url URL --space SPACE --pie
 | LLM in handler | Move `generateText` to pattern body |
 | UI blocking | Use `fetchData` instead of `await` in handlers |
 
+## 6. Check Logger Stats
+
+Use `globalThis.commontools` in the browser console to inspect runtime metrics:
+
+```javascript
+// See which loggers exist and their call counts
+commontools.getLoggerCountsBreakdown()
+
+// Check timing stats (IPC latency, cell operations, etc.)
+commontools.getTimingStatsBreakdown()
+
+// Check for actions with invalid inputs (schema mismatches)
+commontools.getLoggerFlagsBreakdown()
+
+// Enable a disabled logger for more detail
+commontools.logger["runner"].disabled = false
+commontools.logger["runner"].level = "debug"
+```
+
+See [console-commands](./console-commands.md) for the full reference.
+
 ## See Also
 
 - [@CELL_CONTEXT](../../common/components/CELL_CONTEXT.md) - Cell debugging tool details
+- [Logger System](./logger-system.md) - Logger architecture and API
+- [Console Commands](./console-commands.md) - Browser console reference
 - [cli-debugging](./cli-debugging.md) - CLI-based debugging workflows
 - [testing](./testing.md) - Testing patterns locally and deployed
