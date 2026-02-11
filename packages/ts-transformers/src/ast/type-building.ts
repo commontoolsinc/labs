@@ -107,6 +107,14 @@ export function buildTypeElementsFromCaptureTree(
         if (isOptionalPropertyAccess(childNode.expression, checker)) {
           questionToken = factory.createToken(ts.SyntaxKind.QuestionToken);
         }
+      } else if (currentType) {
+        // For non-property-access expressions (e.g., local variables),
+        // check if the type itself is T | undefined.
+        // This handles cases like: const x = wishResult.result; action(() => { if (x) ... })
+        // where x has type MinimalPiece | undefined from an optional wish result.
+        if (isOptionalProperty(undefined, currentType)) {
+          questionToken = factory.createToken(ts.SyntaxKind.QuestionToken);
+        }
       }
     } else if (childNode.properties.size > 0) {
       // Intermediate node - need to get type to check optionality
