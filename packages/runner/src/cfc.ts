@@ -4,8 +4,16 @@ import { getLogger } from "@commontools/utils/logger";
 import type { JSONSchema } from "./builder/types.ts";
 import { CycleTracker } from "./traverse.ts";
 import { isArrayIndexPropertyName } from "@commontools/memory/storable-value";
+import { rendererVDOMSchema, vnodeSchema } from "@commontools/runner/schemas";
 
 const logger = getLogger("cfc");
+
+// Mapping from ref url to schema object
+// Any $ref links in these must be self contained or absolute
+const embeddedSchemas: Record<string, JSONSchema> = {
+  "https://commonfabric.org/schemas/vdom.json": rendererVDOMSchema,
+  "https://commonfabric.org/schemas/vnode.json": vnodeSchema,
+};
 
 // I use these strings in other code, so make them available as
 // constants. These are just strings, and real meaning would be
@@ -230,6 +238,10 @@ export class ContextualFlowControl {
         schema,
         fullSchema,
       );
+      if (schema.$ref in embeddedSchemas) {
+        // Absolute $ref means we should reset our fullSchema
+        fullSchema = resolvedSchema;
+      }
       ContextualFlowControl.joinSchema(
         joined,
         resolvedSchema,
@@ -374,13 +386,22 @@ export class ContextualFlowControl {
       );
       if (resolved === undefined) { // Non-existent ref
         return undefined;
+      } else if ($ref in embeddedSchemas) {
+        // Absolute $ref means we should reset our fullSchema
+        fullSchema = resolved;
       }
       // If we have other properties, we need to keep them as we resolve refs.
       // They will override any properties in those refs.
       if (Object.keys(rest).length > 0) {
         if (isRecord(resolved)) {
           // Merge our attributes with those in the ref
-          schemaObj = { ...resolved, ...rest } as JSONSchemaObj;
+          // If we replaced the fullSchema, pull in those $defs instead
+          schemaObj = {
+            ...resolved,
+            ...rest,
+            ...(fullSchema && isObject(fullSchema) && fullSchema.$defs &&
+              { $defs: fullSchema.$defs }),
+          } as JSONSchemaObj;
         } else {
           // Resolved to a boolean schema, so we can stop
           const schema = ContextualFlowControl.toSchemaObj(resolved);
@@ -419,6 +440,10 @@ export class ContextualFlowControl {
     fullSchema: JSONSchema,
     schemaRef: string,
   ): JSONSchema | undefined {
+    // Allow for some absolute schema refs
+    if (schemaRef in embeddedSchemas) {
+      return embeddedSchemas[schemaRef];
+    }
     // We only support schemaRefs that are URI fragments
     if (!schemaRef.startsWith("#")) {
       logger.warn("cfc", () => ["Unsupported $ref in schema: ", schemaRef]);
@@ -616,6 +641,11 @@ export class ContextualFlowControl {
           cursor,
           { $defs: defs },
         );
+        // Resolve schema refs can resolve to a fullSchema, in which case we
+        // need to replace our defs.
+        if (isObject(cursor) && cursor.$defs) {
+          defs = cursor.$defs;
+        }
       }
       if (isObject(cursor) && ("anyOf" in cursor || "oneOf" in cursor)) {
         const subSchemas: JSONSchema[] = [];

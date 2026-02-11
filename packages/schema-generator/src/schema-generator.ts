@@ -11,6 +11,7 @@ import { PrimitiveFormatter } from "./formatters/primitive-formatter.ts";
 import { ObjectFormatter } from "./formatters/object-formatter.ts";
 import { ArrayFormatter } from "./formatters/array-formatter.ts";
 import { CommonToolsFormatter } from "./formatters/common-tools-formatter.ts";
+import { NativeTypeFormatter } from "./formatters/native-type-formatter.ts";
 import { UnionFormatter } from "./formatters/union-formatter.ts";
 import { IntersectionFormatter } from "./formatters/intersection-formatter.ts";
 import {
@@ -28,6 +29,7 @@ import { extractDocFromType } from "./doc-utils.ts";
 export class SchemaGenerator implements ISchemaGenerator {
   private formatters: TypeFormatter[] = [
     new CommonToolsFormatter(this),
+    new NativeTypeFormatter(),
     new UnionFormatter(this),
     new IntersectionFormatter(this),
     // Prefer array detection before primitives to avoid Any-flag misrouting
@@ -301,9 +303,9 @@ export class SchemaGenerator implements ISchemaGenerator {
     }
 
     // All-named strategy:
-    // Hoist every named type (excluding wrappers filtered by getNamedTypeKey)
-    // into definitions and return $ref for non-root uses. Cycle detection
-    // still applies via definitionStack.
+    // Hoist every named type (excluding wrappers and native types filtered
+    // by getNamedTypeKey) into definitions and return $ref for non-root uses.
+    // Cycle detection still applies via definitionStack.
 
     // Check if we're in a wrapper context (Default/Cell/Stream/OpaqueRef).
     // Wrapper types erase to their inner type, so we must check typeNode to

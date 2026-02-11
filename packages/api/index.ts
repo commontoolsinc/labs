@@ -1091,6 +1091,7 @@ export type JSONSchemaTypes =
 export type JSONSchema = JSONSchemaObj | boolean;
 
 export type JSONSchemaObj = {
+  readonly $id?: string;
   readonly $ref?: string;
   readonly $defs?: Readonly<Record<string, JSONSchema>>;
   /** @deprecated Use `$defs` for 2019-09/Draft 8 or later */
