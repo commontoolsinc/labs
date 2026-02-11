@@ -3830,7 +3830,7 @@ describe("Schema Support", () => {
       expect(cellALink.path).toEqual(["baz", "bar"]);
     });
 
-    it("with data cell: validates contents", () => {
+    it("with data cell: validates contents", async () => {
       const cellASchema = {
         type: "object",
         properties: { system: { type: "string" } },
@@ -3912,7 +3912,7 @@ describe("Schema Support", () => {
         cellASchema,
       );
 
-      tx.commit();
+      await tx.commit();
       tx = runtime.edit();
 
       const cellAContents = cellA.asSchema({
