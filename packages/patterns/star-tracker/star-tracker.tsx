@@ -57,7 +57,9 @@ function formatStars(n: number): string {
 }
 
 function computeSamplePages(totalStars: number): number[] {
-  const totalPages = Math.ceil(totalStars / 100);
+  // GitHub API caps stargazer pagination at page 400 (40k stars)
+  const MAX_PAGE = 400;
+  const totalPages = Math.min(Math.ceil(totalStars / 100), MAX_PAGE);
   if (totalPages <= 0) return [];
   if (totalPages <= 5) {
     return Array.from({ length: totalPages }, (_, i) => i + 1);
@@ -165,6 +167,18 @@ function analyzeGrowth(points: CurvePoint[]): {
   return { flag, rate };
 }
 
+function starPageUrl(
+  owner: string,
+  repo: string,
+  index: number,
+  totalStars: number,
+): string {
+  if (!owner || !repo || totalStars === 0) return "";
+  const pages = computeSamplePages(totalStars);
+  if (index >= pages.length) return "";
+  return `https://api.github.com/repos/${owner}/${repo}/stargazers?page=${pages[index]}&per_page=100`;
+}
+
 const FLAG_COLORS: Record<string, string> = {
   accelerating: "#22c55e",
   linear: "#eab308",
@@ -215,43 +229,24 @@ export const RepoCard = pattern<RepoCardInput>(
     });
 
     const stars = computed(() => repoInfo.result?.stargazers_count ?? 0);
-    const samplePages = computed(() => computeSamplePages(stars));
 
-    const pageUrl0 = computed(() => {
-      const pages = samplePages;
-      if (!owner || !repo || 0 >= pages.length) return "";
-      return `https://api.github.com/repos/${owner}/${repo}/stargazers?page=${
-        pages[0]
-      }&per_page=100`;
-    });
-    const pageUrl1 = computed(() => {
-      const pages = samplePages;
-      if (!owner || !repo || 1 >= pages.length) return "";
-      return `https://api.github.com/repos/${owner}/${repo}/stargazers?page=${
-        pages[1]
-      }&per_page=100`;
-    });
-    const pageUrl2 = computed(() => {
-      const pages = samplePages;
-      if (!owner || !repo || 2 >= pages.length) return "";
-      return `https://api.github.com/repos/${owner}/${repo}/stargazers?page=${
-        pages[2]
-      }&per_page=100`;
-    });
-    const pageUrl3 = computed(() => {
-      const pages = samplePages;
-      if (!owner || !repo || 3 >= pages.length) return "";
-      return `https://api.github.com/repos/${owner}/${repo}/stargazers?page=${
-        pages[3]
-      }&per_page=100`;
-    });
-    const pageUrl4 = computed(() => {
-      const pages = samplePages;
-      if (!owner || !repo || 4 >= pages.length) return "";
-      return `https://api.github.com/repos/${owner}/${repo}/stargazers?page=${
-        pages[4]
-      }&per_page=100`;
-    });
+    // Compute each page URL directly from stars to avoid reactive array
+    // indexing issues (pages[N] on a computed array may return a proxy).
+    const pageUrl0 = computed(() =>
+      starPageUrl(owner, repo, 0, stars)
+    );
+    const pageUrl1 = computed(() =>
+      starPageUrl(owner, repo, 1, stars)
+    );
+    const pageUrl2 = computed(() =>
+      starPageUrl(owner, repo, 2, stars)
+    );
+    const pageUrl3 = computed(() =>
+      starPageUrl(owner, repo, 3, stars)
+    );
+    const pageUrl4 = computed(() =>
+      starPageUrl(owner, repo, 4, stars)
+    );
 
     const starOpts = computed(() => ({ headers: starHeaders }));
 
@@ -289,9 +284,10 @@ export const RepoCard = pattern<RepoCardInput>(
         page3.result,
         page4.result,
       ].map((r) => (Array.isArray(r) ? r : []));
-      const pages = samplePages;
+      const s = stars;
+      const pages = computeSamplePages(s);
       if (pages.length === 0) return [];
-      const raw = buildCurve(allPages as StarEvent[][], pages, stars);
+      const raw = buildCurve(allPages as StarEvent[][], pages, s);
       if (raw.length < 2) return raw;
       return bucketCurve(raw, 20);
     });
