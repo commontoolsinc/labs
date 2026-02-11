@@ -74,6 +74,7 @@ export const LLMParamsSchema = {
     model: { type: "string" },
     maxTokens: { type: "number" },
     system: { type: "string" },
+    initialMessage: { type: "string" },
     stop: { type: "string" },
     tools: { type: "object", additionalProperties: LLMToolSchema, default: {} },
     context: {

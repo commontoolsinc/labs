@@ -2,11 +2,11 @@
 import {
   computed,
   type Default,
-  generateObject,
+  handler,
   ifElse,
+  llmDialog,
   pattern,
   patternTool,
-  toSchema,
   UI,
   type VNode,
   wish,
@@ -14,6 +14,13 @@ import {
   Writable,
 } from "commontools";
 import { fetchAndRunPattern, listPatternIndex } from "./common-tools.tsx";
+
+// Handler that captures the result cell - (event, state) signature
+const presentResultHandler = handler(
+  (event: { cell: Writable<any> }, state: { resultCell: Writable<any> }) => {
+    state.resultCell.set(event.cell);
+  },
+);
 
 export default pattern<
   {
@@ -47,25 +54,32 @@ export default pattern<
   });
 
   const systemPrompt = computed(() => {
-    const profileCtx = profileContext;
-    return `Find a useful pattern, run it, pass link to final result.${profileCtx}
+    return `Find a useful pattern, run it, then call presentResult with the result cell.${profileContext}
 
 Use the user context above to personalize your suggestions when relevant.`;
   });
 
-  const suggestion = generateObject({
+  // Cell to capture the final result
+  const llmResult = Writable.of<Writable<any>>(undefined);
+
+  // Bind the handler to our result cell
+  const presentResult = presentResultHandler({ resultCell: llmResult });
+
+  const { pending: _pending } = llmDialog({
     system: systemPrompt,
-    prompt: situation,
     context,
+    initialMessage: situation,
     tools: {
       fetchAndRunPattern: patternTool(fetchAndRunPattern),
       listPatternIndex: patternTool(listPatternIndex),
+      // Handler tool - directly writes to bound state
+      presentResult: {
+        handler: presentResult,
+        description: "Present the final result cell",
+      },
     },
     model: "anthropic:claude-haiku-4-5",
-    schema: toSchema<{ cell: Writable<any> }>(),
   });
-
-  const llmResult = computed(() => suggestion.result?.cell);
 
   // Reactively select between picker and LLM result. This must be a named
   // computed variable — the CTS transformer leaves named Cells as-is in the
