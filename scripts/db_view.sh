@@ -2,7 +2,7 @@
 # Sample call that views cell of:...s4ia in space did:key:...Ntos and 
 # uses jq to select the property at value.argument:
 # $> db_view Ntos s4ia | jq .value.argument
-# This should be run from the labs folder (so we can find the sqlite db).
+# This can be run from anywhere within the labs git repo.
 # Use -a to get all the results, instead of just the last.
 db_view() {
   local mode="last"
@@ -17,14 +17,16 @@ db_view() {
   else
     space=$1
     cell=$2
-  fi  
-  
+  fi
+
   if [[ -z "$space" || -z "$cell" ]]; then
     echo "Usage: db_view [--all|-a] <space> <cell>" >&2
     return 1
   fi
   
-  local db_file=$(find ./packages/toolshed/cache/memory/ -name "did:key:*$space.sqlite" -print -quit)
+  local repo_root
+  repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "Error: not in a git repo" >&2; return 1; }
+  local db_file=$(find "$repo_root/packages/toolshed/cache/memory/" -maxdepth 1 -name "did:key:*$space.sqlite" -print -quit)
   
   if [[ -z "$db_file" ]]; then
     echo "Error: Database file not found for space '$space'" >&2
@@ -44,9 +46,8 @@ db_view() {
               AND fact.\`is\` = datum.this"
   fi
 
-  # use mode=rw so we don't create new db files if there's no match
-  sqlite3 "file:$db_file?mode=rw" "$query"
-}      
+  sqlite3 "file:$db_file?mode=ro" "$query"
+}
 
 # If script is executed (not sourced), call the function with arguments
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
