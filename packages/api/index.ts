@@ -834,10 +834,15 @@ export declare const WriteonlyCell: CellTypeConstructor<AsWriteonlyCell>;
  *
  * OpaqueRef<Cell<T>> unwraps to Cell<T>.
  */
-export type OpaqueRef<T> = [T] extends [AnyBrandedCell<any>] ? T
-  :
-    & OpaqueCell<T>
-    & OpaqueRefInner<T>;
+export type OpaqueRef<T> =
+  // Already a branded cell? Return as-is
+  [T] extends [AnyBrandedCell<any>] ? T
+    // Branded cell | undefined? Extract the cell, drop undefined
+    : [T] extends [AnyBrandedCell<any> | undefined] ? Exclude<T, undefined>
+    // Everything else: wrap in OpaqueCell + map inner properties
+    :
+      & OpaqueCell<T>
+      & OpaqueRefInner<T>;
 
 // Helper type for OpaqueRef's inner property/array mapping
 // Handles nullable types by extracting the non-null part for mapping
@@ -1653,15 +1658,15 @@ export type WishParams = {
 };
 
 export type WishState<T> = {
-  result?: T;
-  candidates?: T[];
-  error?: any;
-  [UI]?: VNode;
+  result: T | undefined;
+  candidates: T[] | undefined;
+  error: any;
+  [UI]: VNode | undefined;
 };
 
 export type NavigateToFunction = (cell: OpaqueRef<any>) => OpaqueRef<boolean>;
 export interface WishFunction {
-  <T = unknown>(target: Opaque<WishParams>): OpaqueRef<Required<WishState<T>>>;
+  <T = unknown>(target: Opaque<WishParams>): OpaqueRef<WishState<T>>;
 }
 
 export type CreateNodeFactoryFunction = <T = any, R = any>(

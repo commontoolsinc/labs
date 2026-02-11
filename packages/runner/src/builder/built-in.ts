@@ -280,15 +280,15 @@ export const navigateTo = createNodeFactory({
 
 export function wish<T = unknown>(
   target: Opaque<WishParams>,
-): OpaqueRef<Required<WishState<T>>>;
+): OpaqueRef<WishState<T>>;
 export function wish<T = unknown>(
   target: Opaque<WishParams>,
   schema: JSONSchema,
-): OpaqueRef<Required<WishState<T>>>;
+): OpaqueRef<WishState<T>>;
 export function wish<T = unknown>(
   target: Opaque<WishParams>,
   schema?: JSONSchema,
-): OpaqueRef<Required<WishState<T>>> {
+): OpaqueRef<WishState<T>> {
   let param;
   let resultSchema;
 

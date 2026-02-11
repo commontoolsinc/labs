@@ -408,7 +408,7 @@ declare module "commontools" {
     <S extends JSONSchema = JSONSchema>(
       target: Opaque<import("commontools").WishParams>,
       schema: S,
-    ): OpaqueRef<Required<import("commontools").WishState<Schema<S>>>>;
+    ): OpaqueRef<import("commontools").WishState<Schema<S>>>;
   }
 
   // Augment IResolvable with schema-based getArgumentCell overload

@@ -38,7 +38,7 @@ export default pattern<Record<string, never>>((_) => {
         <hr />
         <ct-textarea $value={wishText} />
         <hr />
-        {wishResult}
+        {wishResult[UI]}
       </div>
     ),
   };

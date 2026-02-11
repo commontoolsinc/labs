@@ -669,7 +669,12 @@ export function wish(
         }" has no query.`;
         sendResult(
           tx,
-          { error: errorMsg, [UI]: errorUI(errorMsg) } satisfies WishState<any>,
+          {
+            result: undefined,
+            candidates: undefined,
+            error: errorMsg,
+            [UI]: errorUI(errorMsg),
+          } satisfies WishState<any>,
         );
         return;
       }
@@ -748,9 +753,12 @@ export function wish(
           const errorMsg = e instanceof WishError ? e.message : String(e);
           sendResult(
             tx,
-            { error: errorMsg, [UI]: errorUI(errorMsg) } satisfies WishState<
-              any
-            >,
+            {
+              result: undefined,
+              candidates: undefined,
+              error: errorMsg,
+              [UI]: errorUI(errorMsg),
+            } satisfies WishState<any>,
           );
         }
       } else {
@@ -768,7 +776,12 @@ export function wish(
       const errorMsg = `Wish target is not recognized: ${targetValue}`;
       sendResult(
         tx,
-        { error: errorMsg, [UI]: errorUI(errorMsg) } satisfies WishState<any>,
+        {
+          result: undefined,
+          candidates: undefined,
+          error: errorMsg,
+          [UI]: errorUI(errorMsg),
+        } satisfies WishState<any>,
       );
       return;
     }
