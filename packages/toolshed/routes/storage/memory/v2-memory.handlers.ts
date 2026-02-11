@@ -186,6 +186,8 @@ function handleWebSocketCommand(
 
   const ability = cmd.cmd as string;
   const spaceId = cmd.sub as string;
+  // Preserve the envelope id for response correlation
+  const requestId = msg.id as string | undefined;
 
   if (!ability || !spaceId) {
     ws.send(
@@ -203,16 +205,26 @@ function handleWebSocketCommand(
 
   switch (ability) {
     case "/memory/transact":
-      handleWsTransact(ws, spaceId, cmd as unknown as TransactCommand);
+      handleWsTransact(
+        ws,
+        spaceId,
+        cmd as unknown as TransactCommand,
+        requestId,
+      );
       break;
     case "/memory/query":
-      handleWsQuery(ws, spaceId, cmd as unknown as QueryCommand);
+      handleWsQuery(ws, spaceId, cmd as unknown as QueryCommand, requestId);
       break;
     case "/memory/query/subscribe":
       handleWsSubscribe(ws, spaceId, cmd as unknown as SubscribeCommand);
       break;
     case "/memory/query/unsubscribe":
-      handleWsUnsubscribe(ws, spaceId, cmd as unknown as UnsubscribeCommand);
+      handleWsUnsubscribe(
+        ws,
+        spaceId,
+        cmd as unknown as UnsubscribeCommand,
+        requestId,
+      );
       break;
     default:
       ws.send(
@@ -234,6 +246,7 @@ function handleWsTransact(
   ws: WebSocket,
   spaceId: string,
   cmd: TransactCommand,
+  requestId?: string,
 ): void {
   try {
     const result = v2MemoryService.transact(spaceId, {
@@ -244,10 +257,11 @@ function handleWsTransact(
     });
 
     if ("ok" in result) {
-      ws.send(JSON.stringify({ ok: result.ok }));
+      ws.send(JSON.stringify({ id: requestId, ok: result.ok }));
     } else {
       ws.send(
         JSON.stringify({
+          id: requestId,
           error: {
             name: "ConflictError",
             conflicts: result.error.conflicts,
@@ -259,6 +273,7 @@ function handleWsTransact(
   } catch (err) {
     ws.send(
       JSON.stringify({
+        id: requestId,
         error: {
           name: err instanceof Error ? err.name : "UnknownError",
           message: err instanceof Error ? err.message : String(err),
@@ -272,6 +287,7 @@ function handleWsQuery(
   ws: WebSocket,
   spaceId: string,
   cmd: QueryCommand,
+  requestId?: string,
 ): void {
   try {
     const result = v2MemoryService.query(spaceId, {
@@ -279,10 +295,11 @@ function handleWsQuery(
       since: cmd.args.since,
       branch: cmd.args.branch,
     });
-    ws.send(JSON.stringify({ ok: result }));
+    ws.send(JSON.stringify({ id: requestId, ok: result }));
   } catch (err) {
     ws.send(
       JSON.stringify({
+        id: requestId,
         error: {
           name: "QueryError",
           message: err instanceof Error ? err.message : String(err),
@@ -338,18 +355,21 @@ function handleWsUnsubscribe(
   ws: WebSocket,
   spaceId: string,
   cmd: UnsubscribeCommand,
+  requestId?: string,
 ): void {
   try {
     const sourceId = cmd.args.source;
     const removed = v2MemoryService.unsubscribe(spaceId, sourceId);
     ws.send(
       JSON.stringify({
+        id: requestId,
         ok: { removed },
       }),
     );
   } catch (err) {
     ws.send(
       JSON.stringify({
+        id: requestId,
         error: {
           name: "UnsubscribeError",
           message: err instanceof Error ? err.message : String(err),

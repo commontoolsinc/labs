@@ -2113,25 +2113,10 @@ export class StorageManager implements IStorageManager {
       });
     }
 
-    // V1 path: full UCAN-based provider with IDB caching.
-    const { as } = this;
-
-    // Determine the correct spaceIdentity for this space
-    // For the workspace space (where spaceIdentity.did() === space), use spaceIdentity
-    // For other spaces (like home space), pass undefined
-    const spaceIdentityForSpace = this.spaceIdentity?.did() === space
-      ? this.spaceIdentity
-      : undefined;
-
-    return Provider.connect({
-      id,
-      space,
-      address,
-      settings,
-      subscription: this.#subscription,
-      session: Consumer.create({ as }),
-      spaceIdentity: spaceIdentityForSpace,
-    });
+    // V1 path is permanently disabled (memoryV2=true).
+    throw new Error(
+      "v1 storage provider is disabled (memoryV2=true). This code path should be unreachable.",
+    );
   }
 
   async close() {

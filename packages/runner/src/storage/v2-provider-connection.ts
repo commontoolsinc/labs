@@ -13,6 +13,7 @@
 
 import { getLogger } from "@commontools/utils/logger";
 import type { SpaceId } from "@commontools/memory/v2-types";
+import type { V2Transport } from "./v2-provider.ts";
 
 const logger = getLogger("storage.v2-connection", {
   enabled: true,
@@ -58,7 +59,7 @@ export interface V2ProviderConnectionOptions {
 // V2ProviderConnection
 // ---------------------------------------------------------------------------
 
-export class V2ProviderConnection {
+export class V2ProviderConnection implements V2Transport {
   readonly address: URL;
   readonly spaceId: SpaceId;
 

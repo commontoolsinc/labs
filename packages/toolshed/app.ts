@@ -10,7 +10,6 @@ import agentToolsWebRead from "@/routes/agent-tools/web-read/web-read.index.ts";
 import discord from "@/routes/integrations/discord/discord.index.ts";
 import googleOAuth from "@/routes/integrations/google-oauth/google-oauth.index.ts";
 import plaidOAuth from "@/routes/integrations/plaid-oauth/plaid-oauth.index.ts";
-import memory from "@/routes/storage/memory/memory.index.ts";
 import v2Memory from "@/routes/storage/memory/v2-memory.index.ts";
 import whoami from "@/routes/whoami/whoami.index.ts";
 import meta from "@/routes/meta/meta.index.ts";
@@ -33,7 +32,6 @@ const routes = [
   discord,
   googleOAuth,
   plaidOAuth,
-  memory,
   v2Memory,
   whoami,
   meta,

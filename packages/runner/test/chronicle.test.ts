@@ -872,8 +872,11 @@ describe("Chronicle", () => {
         claims: [],
       });
 
+      // In v2, replica state is updated after the second commit, so the
+      // chronicle's invariant validation correctly detects the stale read.
       const commitResult = chronicle1.commit();
-      expect(commitResult.ok).toBeDefined();
+      expect(commitResult.error).toBeDefined();
+      expect(commitResult.error?.name).toBe("StorageTransactionInconsistent");
     });
 
     it("should handle partial updates with causal references", async () => {
@@ -1021,8 +1024,11 @@ describe("Chronicle", () => {
         claims: [],
       });
 
+      // In v2, replica state is updated after the second commit, so the
+      // chronicle's invariant validation correctly detects the stale read.
       const commitResult = chronicle.commit();
-      expect(commitResult.ok).toBeDefined();
+      expect(commitResult.error).toBeDefined();
+      expect(commitResult.error?.name).toBe("StorageTransactionInconsistent");
     });
   });
 

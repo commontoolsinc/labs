@@ -311,7 +311,7 @@ describe("Storage Subscription", () => {
       const subscription = new Subscription();
       runtime.storageManager.subscribe(subscription);
 
-      // Use Cell interface to write something and commit
+      // First commit some data via the normal path (produces "commit" not "integrate")
       const cell1 = runtime.getCell<{ version: number }>(
         space,
         "test:integrate-1",
@@ -321,29 +321,23 @@ describe("Storage Subscription", () => {
       cell1.set({ version: 1 });
 
       await tx.commit();
+      await runtime.idle();
 
-      // Try another commit with different entity using a new transaction
-      const tx2 = runtime.edit();
-      const cell2 = runtime.getCell<{ version: number }>(
-        space,
-        "test:integrate-2",
-        undefined,
-        tx2,
-      );
-      cell2.set({ version: 2 });
+      // Inject external data (simulating another client writing).
+      // This bypasses V2Provider, writes directly to the space, and
+      // triggers subscription updates → "integrate" notifications.
+      (storageManager as any).injectExternal(space, [
+        { id: "test:integrate-ext", value: { version: 99 } },
+      ]);
 
-      await tx2.commit();
+      // Let microtasks process the subscription update
+      await runtime.idle();
 
-      // When second commit is returned we should have integrate notification
       expect(subscription.integrates.length).toBeGreaterThan(0);
 
       const integrate = subscription.integrates[0];
       expect(integrate.type).toBe("integrate");
       expect(integrate.space).toBe(space);
-
-      // Integrating upstream changes seem to have got broken due
-      // to commits being reducted, so disabling this for now.
-      // expect([...integrate.changes]).toBeGreaterThan(0);
     });
   });
 

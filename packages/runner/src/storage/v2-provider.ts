@@ -13,6 +13,8 @@
 
 import { getLogger } from "@commontools/utils/logger";
 import { unclaimed } from "@commontools/memory/fact";
+import { refer } from "@commontools/memory/reference";
+import { EMPTY } from "@commontools/memory/v2-reference";
 import type {
   StorableDatum,
   StorableValue,
@@ -45,6 +47,7 @@ import type {
 } from "./interface.ts";
 import type { BaseMemoryAddress } from "../traverse.ts";
 import {
+  buildQueryCommand,
   buildSubscribeCommand,
   buildTransactCommand,
   parseQueryResult,
@@ -65,6 +68,28 @@ const logger = getLogger("storage.v2-provider", {
 
 /** Default media type for v2 entities. */
 const JSON_MIME = "application/json" as const;
+
+// ---------------------------------------------------------------------------
+// Transport interface
+// ---------------------------------------------------------------------------
+
+/**
+ * Abstract transport that V2Provider uses to send/receive v2 commands.
+ * Implementations: V2ProviderConnection (WebSocket), V2DirectTransport (in-process).
+ */
+export interface V2Transport {
+  send(command: unknown): void;
+  close(): Promise<void>;
+}
+
+export interface V2TransportCallbacks {
+  onMessage: (msg: unknown) => void;
+  onOpen: () => void;
+}
+
+export type V2TransportFactory = (
+  callbacks: V2TransportCallbacks,
+) => V2Transport;
 
 // ---------------------------------------------------------------------------
 // Options
@@ -88,6 +113,61 @@ export interface V2ProviderOptions {
 }
 
 // ---------------------------------------------------------------------------
+// V2HeapShim (v1 compat: entity change subscriptions)
+// ---------------------------------------------------------------------------
+
+/**
+ * Minimal v1 Heap compatibility shim. Provides subscribe/unsubscribe for
+ * entity-level change notifications. Only fires for "integrate" type
+ * changes (server pushes from other clients), matching v1 heap behavior.
+ */
+class V2HeapShim {
+  readonly #subscribers = new Map<string, Set<(value?: unknown) => void>>();
+
+  subscribe(
+    entry: { id: string; type: string },
+    subscriber: (value?: unknown) => void,
+  ): void {
+    const key = `${entry.id}/${entry.type}`;
+    let subs = this.#subscribers.get(key);
+    if (!subs) {
+      subs = new Set();
+      this.#subscribers.set(key, subs);
+    }
+    subs.add(subscriber);
+  }
+
+  unsubscribe(
+    entry: { id: string; type: string },
+    subscriber: (value?: unknown) => void,
+  ): void {
+    const key = `${entry.id}/${entry.type}`;
+    const subs = this.#subscribers.get(key);
+    if (subs) {
+      subs.delete(subscriber);
+      if (subs.size === 0) this.#subscribers.delete(key);
+    }
+  }
+
+  /** Notify subscribers for the given entity changes. */
+  notify(changes: EntityChange[]): void {
+    for (const change of changes) {
+      const key = `${change.id}/${JSON_MIME}`;
+      const subs = this.#subscribers.get(key);
+      if (subs) {
+        for (const cb of subs) {
+          try {
+            cb(change.after);
+          } catch {
+            // swallow errors in subscriber callbacks
+          }
+        }
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // V2SpaceReplica (adapter: V2Replica -> ISpaceReplica)
 // ---------------------------------------------------------------------------
 
@@ -99,6 +179,15 @@ export interface V2ProviderOptions {
 class V2SpaceReplica implements ISpaceReplica {
   readonly #replica: V2Replica;
   readonly #provider: V2Provider;
+
+  /**
+   * v1 compat: Heap shim that provides subscribe/unsubscribe for entity
+   * changes. Subscribers only fire for "integrate" type notifications
+   * (server pushes from other clients), NOT for this client's own
+   * optimistic commits. This matches v1 heap behavior where pending
+   * nursery changes don't trigger heap subscribers.
+   */
+  readonly heap = new V2HeapShim();
 
   constructor(replica: V2Replica, provider: V2Provider) {
     this.#replica = replica;
@@ -131,21 +220,28 @@ class V2SpaceReplica implements ISpaceReplica {
     // The `cause` and `is` fields let the v1 transaction layer work.
     const confirmed = this.#replica.state.confirmed.get(entityId);
     if (confirmed?.value !== undefined) {
-      // Build a mock v1 fact from confirmed state.
-      return {
+      // Build a v1-compatible fact from confirmed state.
+      // Use refer() to create a proper Reference for the cause field.
+      const fact = {
         the: entry.type ?? JSON_MIME,
         of: entry.id,
         is: confirmed.value as StorableDatum,
-        cause: { toString: () => confirmed.hash } as any,
+      };
+      return {
+        ...fact,
+        cause: refer(fact),
       } as unknown as State;
     }
 
     // Pending or unknown tier -- return with the value we have.
-    return {
+    const pendingFact = {
       the: entry.type ?? JSON_MIME,
       of: entry.id,
       is: result.value as StorableDatum,
-      cause: { toString: () => "pending" } as any,
+    };
+    return {
+      ...pendingFact,
+      cause: refer(pendingFact),
     } as unknown as State;
   }
 
@@ -157,6 +253,39 @@ class V2SpaceReplica implements ISpaceReplica {
     source?: IStorageTransaction,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     return this.#provider.commitTransaction(transaction, source);
+  }
+
+  /**
+   * Reset the replica state (clear confirmed + pending).
+   * Used in tests to simulate a stale/disconnected client.
+   */
+  reset(): void {
+    this.#replica.clear();
+    this.#provider.notifyReset();
+  }
+
+  /**
+   * Load facts into the replica (v1 compat for cache-based loading).
+   * In v2 this is a no-op — data comes through subscriptions.
+   */
+  load(
+    _entries: Iterable<[{ the: string; of: string }, unknown]>,
+  ): Promise<void> {
+    // v2 doesn't have local cache loading. Emit a load notification
+    // with empty changes for test compat.
+    this.#provider.notifyLoad();
+    return Promise.resolve();
+  }
+
+  /**
+   * Pull entities from the server and update the replica.
+   * Queries the transport for the requested entities and emits a "pull"
+   * notification with the changes.
+   */
+  async pull(
+    entries: Iterable<[{ id: string; type: string }, unknown]>,
+  ): Promise<void> {
+    await this.#provider.pullEntities(entries);
   }
 }
 
@@ -192,9 +321,8 @@ export class V2Provider implements IStorageProviderWithReplica {
   readonly #v2Replica: V2Replica;
   readonly #spaceReplica: V2SpaceReplica;
   readonly #subscription: IStorageSubscription;
-  readonly #connection: V2ProviderConnection;
+  readonly #connection: V2Transport;
   readonly #space: MemorySpace;
-  readonly #settings: IRemoteStorageProviderSettings;
 
   /** Per-entity subscriber callbacks. */
   readonly #subscribers = new Map<
@@ -211,33 +339,63 @@ export class V2Provider implements IStorageProviderWithReplica {
   /** Whether the initial subscription has been sent. */
   #subscribed = false;
 
+  /**
+   * Expose the underlying transport for test compat
+   * (e.g. accessing V2DirectTransport.space in emulated mode).
+   */
+  get transport(): V2Transport {
+    return this.#connection;
+  }
+
   // -------------------------------------------------------------------------
   // Construction
   // -------------------------------------------------------------------------
 
-  private constructor(options: V2ProviderOptions) {
-    this.#space = options.space;
-    this.#settings = options.settings;
-    this.#subscription = options.subscription;
-    this.#v2Replica = new V2Replica(options.space as SpaceId);
+  private constructor(
+    space: MemorySpace,
+    subscription: IStorageSubscription,
+    transportFactory: V2TransportFactory,
+  ) {
+    this.#space = space;
+    this.#subscription = subscription;
+    this.#v2Replica = new V2Replica(space as SpaceId);
     this.#spaceReplica = new V2SpaceReplica(this.#v2Replica, this);
 
-    this.#connection = new V2ProviderConnection({
-      address: options.address,
-      spaceId: options.space as SpaceId,
-      connectionTimeout: options.settings.connectionTimeout,
+    this.#connection = transportFactory({
       onMessage: (msg) => this.onMessage(msg),
       onOpen: () => this.onConnectionOpen(),
     });
   }
 
   /**
-   * Create and connect a V2Provider.
+   * Create and connect a V2Provider over WebSocket.
    */
   static connect(
     options: V2ProviderOptions,
   ): V2Provider & IStorageProviderWithReplica {
-    return new V2Provider(options);
+    return new V2Provider(
+      options.space,
+      options.subscription,
+      (callbacks) =>
+        new V2ProviderConnection({
+          address: options.address,
+          spaceId: options.space as SpaceId,
+          connectionTimeout: options.settings.connectionTimeout,
+          onMessage: callbacks.onMessage,
+          onOpen: callbacks.onOpen,
+        }),
+    );
+  }
+
+  /**
+   * Create a V2Provider with a custom transport (e.g. in-process direct).
+   */
+  static create(
+    space: MemorySpace,
+    subscription: IStorageSubscription,
+    transportFactory: V2TransportFactory,
+  ): V2Provider & IStorageProviderWithReplica {
+    return new V2Provider(space, subscription, transportFactory);
   }
 
   // -------------------------------------------------------------------------
@@ -395,7 +553,11 @@ export class V2Provider implements IStorageProviderWithReplica {
     const envelope = { id: requestId, ...cmd };
     (this as any).__pendingTransacts = (this as any).__pendingTransacts ||
       new Map();
-    (this as any).__pendingTransacts.set(requestId, resolve);
+    // send() doesn't use optimistic commits, so no client hash to confirm.
+    (this as any).__pendingTransacts.set(requestId, {
+      resolve,
+      clientCommitHash: "",
+    });
 
     this.#connection.send(envelope);
 
@@ -447,8 +609,10 @@ export class V2Provider implements IStorageProviderWithReplica {
     }
 
     // Convert v1 claims to v2 read dependencies.
+    const readEntityIds = new Set<string>();
     for (const claim of claims) {
       const entityId = claim.of as EntityId;
+      readEntityIds.add(entityId);
       const confirmed = this.#v2Replica.state.confirmed.get(entityId);
       if (confirmed) {
         reads.confirmed.push({
@@ -459,6 +623,28 @@ export class V2Provider implements IStorageProviderWithReplica {
       }
     }
 
+    // Also add read dependencies for entities being written.
+    // This enables conflict detection: if the client has no confirmed state
+    // for an entity (e.g. after reset()), it declares version=0 (EMPTY),
+    // and the server will conflict if the entity already exists.
+    for (const op of operations) {
+      if (readEntityIds.has(op.id)) continue; // Already tracked via claims
+      const confirmed = this.#v2Replica.state.confirmed.get(op.id);
+      if (confirmed) {
+        reads.confirmed.push({
+          id: op.id,
+          hash: confirmed.hash,
+          version: confirmed.version,
+        });
+      } else {
+        // No confirmed state: declare we believe the entity doesn't exist.
+        reads.confirmed.push({
+          id: op.id,
+          hash: EMPTY(op.id as EntityId).toString(),
+          version: 0,
+        });
+      }
+    }
     if (operations.length === 0) {
       return Promise.resolve({ ok: {} });
     }
@@ -472,13 +658,14 @@ export class V2Provider implements IStorageProviderWithReplica {
       }
     });
 
-    const { changes: localChanges } = this.#v2Replica.commit(
-      v2Ops.map((op) => ({
-        ...op,
-        parent: { toString: () => "pending" } as any,
-      })),
-      reads.confirmed,
-    );
+    const { commitHash: clientCommitHash, changes: localChanges } = this
+      .#v2Replica.commit(
+        v2Ops.map((op) => ({
+          ...op,
+          parent: EMPTY(op.id as EntityId),
+        })),
+        reads.confirmed,
+      );
 
     // Notify scheduler about the optimistic commit.
     if (localChanges.changes.length > 0) {
@@ -505,7 +692,15 @@ export class V2Provider implements IStorageProviderWithReplica {
     const envelope = { id: requestId, ...cmd };
     (this as any).__pendingTransacts = (this as any).__pendingTransacts ||
       new Map();
-    (this as any).__pendingTransacts.set(requestId, resolve);
+    // Store the resolver, client-side commit hash, and source transaction so
+    // onCommandResponse can confirm with the right hash (server hash
+    // may differ because the server resolves parent references) and emit
+    // revert notifications with the correct source.
+    (this as any).__pendingTransacts.set(requestId, {
+      resolve,
+      clientCommitHash,
+      source,
+    });
 
     this.#connection.send(envelope);
 
@@ -519,6 +714,16 @@ export class V2Provider implements IStorageProviderWithReplica {
   private onMessage(msg: unknown): void {
     const message = msg as Record<string, unknown>;
 
+    // Unwrap task/effect subscription updates.
+    // The transport sends: { the: "task/effect", of: subscriptionId, is: { commit, revisions } }
+    if (message.the === "task/effect" && message.is != null) {
+      const inner = message.is as Record<string, unknown>;
+      if ("commit" in inner && "revisions" in inner) {
+        this.onSubscriptionUpdate(inner);
+        return;
+      }
+    }
+
     // Route by presence of known fields.
     if ("id" in message && "ok" in message) {
       // Response to a command (transact or query).
@@ -526,7 +731,7 @@ export class V2Provider implements IStorageProviderWithReplica {
     } else if ("id" in message && "error" in message) {
       this.onCommandResponse(message);
     } else if ("commit" in message && "revisions" in message) {
-      // Subscription update.
+      // Subscription update (flat format).
       this.onSubscriptionUpdate(message);
     } else if ("ok" in message) {
       // Initial query/subscribe response (may carry a FactSet).
@@ -541,42 +746,122 @@ export class V2Provider implements IStorageProviderWithReplica {
   private onCommandResponse(msg: Record<string, unknown>): void {
     const id = msg.id as string;
     const pendingTransacts = (this as any).__pendingTransacts as
-      | Map<string, (result: Result<Unit, any>) => void>
+      | Map<
+        string,
+        {
+          resolve: (result: Result<Unit, any>) => void;
+          clientCommitHash: string;
+          source?: IStorageTransaction;
+        }
+      >
       | undefined;
 
     if (pendingTransacts?.has(id)) {
-      const resolve = pendingTransacts.get(id)!;
+      const { resolve, clientCommitHash, source } = pendingTransacts.get(id)!;
       pendingTransacts.delete(id);
 
       const result = parseTransactResult(msg);
       if ("ok" in result) {
-        // Confirm the commit in the replica.
+        // Confirm the commit in the replica using the CLIENT hash
+        // (server hash may differ due to different parent resolution).
         const commit = result.ok;
         this.#v2Replica.confirm(
-          commit.hash?.toString() ?? "",
+          clientCommitHash,
           commit.version,
         );
         resolve({ ok: {} });
       } else {
-        // Reject in the replica.
+        // Reject in the replica -- revert optimistic writes.
+        const rejected = this.#v2Replica.reject(clientCommitHash);
         const errorObj = result.error as Record<string, unknown>;
-        if (errorObj?.name === "ConflictError") {
-          resolve({
+
+        // If the conflict response includes actual entity values,
+        // update the confirmed state so the replica reflects server truth.
+        // Read actuals from the raw message (not the parsed result, which
+        // strips extra fields like actuals).
+        const rawError = msg.error as Record<string, unknown> | undefined;
+        const actualValues = (rawError as any)?.actuals as
+          | Array<
+            { id: string; value?: JSONValue; version: number; hash: string }
+          >
+          | undefined;
+        if (actualValues) {
+          for (const actual of actualValues) {
+            const eid = actual.id as EntityId;
+            this.#v2Replica.state.confirmed.set(eid, {
+              version: actual.version,
+              hash: actual.hash,
+              value: actual.value,
+            });
+            // Update the rejected changes to reflect the actual server value
+            for (const change of rejected.changes) {
+              if (change.id === eid) {
+                change.after = actual.value;
+              }
+            }
+          }
+        }
+
+        const errorResult = errorObj?.name === "ConflictError"
+          ? {
             error: {
-              name: "ConflictError",
+              name: "StorageTransactionInconsistent",
               message: "Transaction conflict",
               conflict: errorObj,
             } as any,
-          });
-        } else {
-          resolve({
+          }
+          : {
             error: {
               name: "ConnectionError",
               message: String(errorObj),
             } as any,
+          };
+
+        // Emit a revert notification so the scheduler knows the
+        // optimistic commit was rolled back.
+        if (rejected.changes.length > 0) {
+          this.#subscription.next({
+            type: "revert",
+            space: this.#space,
+            changes: new V2MergedChanges(rejected.changes),
+            reason: errorResult.error,
+            source,
+          } as any);
+        }
+
+        resolve(errorResult);
+      }
+      return;
+    }
+
+    // Check for pending pull (query) responses.
+    const pendingPulls = (this as any).__pendingPulls as
+      | Map<string, (value: void) => void>
+      | undefined;
+    if (pendingPulls?.has(id)) {
+      const resolve = pendingPulls.get(id)!;
+      pendingPulls.delete(id);
+
+      const queryResult = parseQueryResult(msg);
+      if ("ok" in queryResult) {
+        const factSet = queryResult.ok;
+        const entityChanges: EntityChange[] = [];
+        for (const [entityId, entry] of Object.entries(factSet)) {
+          const eid = entityId as EntityId;
+          const before = this.#v2Replica.state.confirmed.get(eid)?.value;
+          this.#v2Replica.state.confirmed.set(eid, {
+            version: entry.version,
+            hash: entry.hash?.toString() ?? "",
+            value: entry.value,
           });
+          entityChanges.push({ id: eid, before, after: entry.value });
+        }
+        if (entityChanges.length > 0) {
+          this.notifyEntityChanges(entityChanges, "pull");
         }
       }
+
+      resolve();
       return;
     }
   }
@@ -589,13 +874,20 @@ export class V2Provider implements IStorageProviderWithReplica {
       const entityChanges: EntityChange[] = [];
       for (const [entityId, entry] of Object.entries(factSet)) {
         const eid = entityId as EntityId;
+        // Skip entities in pending state — they were already notified
+        // optimistically via commitTransaction and the pending value takes
+        // precedence. We still update confirmed state so that when the
+        // pending commit is confirmed the version/hash are correct.
+        const inPending = this.#v2Replica.state.pending.get(eid);
         const before = this.#v2Replica.state.confirmed.get(eid)?.value;
         this.#v2Replica.state.confirmed.set(eid, {
           version: entry.version,
           hash: entry.hash?.toString() ?? "",
           value: entry.value,
         });
-        entityChanges.push({ id: eid, before, after: entry.value });
+        if (!inPending) {
+          entityChanges.push({ id: eid, before, after: entry.value });
+        }
       }
 
       // Notify subscribers.
@@ -628,6 +920,18 @@ export class V2Provider implements IStorageProviderWithReplica {
       }
     }
 
+    // Filter out entities that are in our pending commit queue.
+    // Subscription updates for our OWN commits must not trigger integrate
+    // (we already notified via the optimistic commit notification).
+    // We also track pending entities for heap subscriber filtering.
+    const pendingEntityIds = new Set<EntityId>();
+    for (const eid of entityValues.keys()) {
+      if (this.#v2Replica.state.pending.get(eid)) {
+        pendingEntityIds.add(eid);
+        entityValues.delete(eid);
+      }
+    }
+
     const commit = msg.commit as {
       hash: unknown;
       version: number;
@@ -648,7 +952,11 @@ export class V2Provider implements IStorageProviderWithReplica {
       );
 
       if (changes.changes.length > 0) {
-        this.notifyEntityChanges(changes.changes, "integrate");
+        this.notifyEntityChanges(
+          changes.changes,
+          "integrate",
+          pendingEntityIds,
+        );
       }
     }
   }
@@ -681,6 +989,7 @@ export class V2Provider implements IStorageProviderWithReplica {
   private notifyEntityChanges(
     changes: EntityChange[],
     type: "commit" | "pull" | "integrate",
+    pendingEntityIds?: Set<EntityId>,
   ): void {
     // Notify scheduler via storage subscription.
     this.#subscription.next({
@@ -705,6 +1014,20 @@ export class V2Provider implements IStorageProviderWithReplica {
         }
       }
     }
+
+    // Notify heap subscribers only for "integrate" type changes
+    // (server pushes from other clients). Entities that are in our
+    // pending commit queue are excluded to prevent double-notification
+    // to the scheduler. This matches v1 behavior where pending nursery
+    // changes don't trigger heap subscribers.
+    if (type === "integrate") {
+      const heapChanges = pendingEntityIds?.size
+        ? changes.filter((c) => !pendingEntityIds.has(c.id))
+        : changes;
+      if (heapChanges.length > 0) {
+        this.#spaceReplica.heap.notify(heapChanges);
+      }
+    }
   }
 
   private resolveAllSyncPromises(): void {
@@ -717,6 +1040,58 @@ export class V2Provider implements IStorageProviderWithReplica {
       }
       (this as any).__syncResolvers = [];
     }
+  }
+
+  /**
+   * Pull specific entities from the server by issuing a query command.
+   * Updates confirmed state and emits a "pull" notification.
+   * Called by V2SpaceReplica.pull().
+   */
+  pullEntities(
+    entries: Iterable<[{ id: string; type: string }, unknown]>,
+  ): Promise<void> {
+    const select: Record<string, Record<string, unknown>> = {};
+    for (const [entry] of entries) {
+      select[entry.id] = {};
+    }
+
+    const spaceId = this.#space as SpaceId;
+    const cmd = buildQueryCommand(spaceId, { select });
+
+    const { promise, resolve } = Promise.withResolvers<void>();
+    const requestId = `job:${crypto.randomUUID()}`;
+    const envelope = { id: requestId, ...cmd };
+
+    // Store a pull resolver keyed by request id.
+    (this as any).__pendingPulls = (this as any).__pendingPulls || new Map();
+    (this as any).__pendingPulls.set(requestId, resolve);
+
+    this.#connection.send(envelope);
+    return promise;
+  }
+
+  /**
+   * Emit a "reset" notification to the scheduler.
+   * Called by V2SpaceReplica.reset().
+   */
+  notifyReset(): void {
+    this.#subscription.next({
+      type: "reset",
+      space: this.#space,
+      changes: new V2MergedChanges([]),
+    } as any);
+  }
+
+  /**
+   * Emit a "load" notification to the scheduler.
+   * Called by V2SpaceReplica.load().
+   */
+  notifyLoad(): void {
+    this.#subscription.next({
+      type: "load",
+      space: this.#space,
+      changes: new V2MergedChanges([]),
+    } as any);
   }
 
   // -------------------------------------------------------------------------
