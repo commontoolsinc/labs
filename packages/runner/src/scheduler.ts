@@ -715,9 +715,17 @@ export class Scheduler {
           // retry logic below will have re-scheduled this action, so
           // topological sorting should move it before the dependencies.
           logger.timeStart("scheduler", "run", "commit");
+          const _commitFireTime = performance.now();
           const commitPromise = tx.commit();
           logger.timeEnd("scheduler", "run", "commit");
+          // [INSTRUMENTATION] Track how long commit promise callbacks wait
           commitPromise.then(({ error }) => {
+            const _cbDelay = performance.now() - _commitFireTime;
+            console.warn(
+              `[SCHEDULER-COMMIT-CB] action=${actionId} | callbackDelay=${
+                _cbDelay.toFixed(1)
+              }ms`,
+            );
             // On error, retry up to MAX_RETRIES_FOR_REACTIVE times. Note that
             // on every attempt we still call the re-subscribe below, so that
             // even after we run out of retries, this will be re-triggered when
@@ -2459,6 +2467,14 @@ export class Scheduler {
       !hasPendingEffects && !hasDirtyEffects && this.eventQueue.length === 0
     ) {
       const promises = this.idlePromises;
+      // [INSTRUMENTATION] Log when scheduler declares idle
+      if (promises.length > 0) {
+        console.warn(
+          `[SCHEDULER-IDLE] Resolving ${promises.length} idle promises at t=${
+            performance.now().toFixed(0)
+          }`,
+        );
+      }
       for (const resolve of promises) resolve();
       this.idlePromises.length = 0;
       this.loopCounter = new WeakMap();

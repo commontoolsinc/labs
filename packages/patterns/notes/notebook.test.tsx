@@ -67,10 +67,9 @@ export default pattern(() => {
     });
   });
 
-  // KNOWN BUG: Multi-push times out due to stale commit promise backlog.
-  // See docs/development/debugging/multi-push-action-timeout.md
-  // Passes with --timeout 30000 but not the default 5s.
-  const _action_create_multiple_notes = action(() => {
+  // KNOWN BUG: Multi-push times out at default 5s.
+  // Run with --timeout 30000 to see it pass + timing data.
+  const action_create_multiple_notes = action(() => {
     notebook.createNotes.send({
       notesData: [
         { title: "Bulk Note 1", content: "First bulk note" },
@@ -118,10 +117,7 @@ export default pattern(() => {
   );
 
   // After createNotes with 2 notes, should have 5 total
-  // KNOWN BUG: see multi-push-action-timeout.md
-  const _assert_note_count_after_bulk = computed(() =>
-    notebook.noteCount === 5
-  );
+  const assert_note_count_after_bulk = computed(() => notebook.noteCount === 5);
 
   // ==========================================================================
   // Test Sequence
@@ -148,10 +144,9 @@ export default pattern(() => {
       // === Create note via stream ===
       { action: action_create_note_via_stream },
       { assertion: assert_note_count_after_create },
-      // === Bulk create notes ===
-      // KNOWN BUG: commented out, see multi-push-action-timeout.md
-      // { action: action_create_multiple_notes },
-      // { assertion: assert_note_count_after_bulk },
+      // === Bulk create notes (times out at 5s, needs --timeout 30000) ===
+      { action: action_create_multiple_notes },
+      { assertion: assert_note_count_after_bulk },
     ],
     notebook,
     emptyNotebook,

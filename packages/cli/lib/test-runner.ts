@@ -221,12 +221,27 @@ export async function runTestPattern(
         ) as unknown as Stream<unknown>;
 
         // Send undefined for void streams
+        // [INSTRUMENTATION] Track action send -> idle timing
+        const _actionSendTime = performance.now();
+        console.warn(
+          `[TEST-RUNNER] Sending ${actionName} at t=${
+            _actionSendTime.toFixed(0)
+          }`,
+        );
         actionStream.send(undefined);
 
         // Wait for idle with timeout
         try {
           await Promise.race([
-            runtime.idle(),
+            runtime.idle().then(() => {
+              console.warn(
+                `[TEST-RUNNER] idle() resolved for ${actionName} at t=${
+                  performance.now().toFixed(0)
+                } (${
+                  (performance.now() - _actionSendTime).toFixed(1)
+                }ms after send)`,
+              );
+            }),
             timeout(
               TIMEOUT,
               `Action at index ${i} timed out after ${TIMEOUT}ms`,

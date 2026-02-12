@@ -249,6 +249,9 @@ class MemoryConsumerSession<
     return invocation;
   }
 
+  // [INSTRUMENTATION] Batch flush counter for timing analysis
+  private static _flushSeq = 0;
+
   async execute<Ability extends string>(
     invocation: ConsumerInvocation<Ability, MemoryProtocol>,
     options?: { immediate?: boolean },
@@ -312,6 +315,9 @@ class MemoryConsumerSession<
     this.pendingBatch = [];
     if (batch.length === 0) return;
 
+    // [INSTRUMENTATION] Track batch auth timing
+    const _t0 = performance.now();
+    const _flushId = ++MemoryConsumerSession._flushSeq;
     const refs = batch.map(({ invocation }) => invocation.refer());
     // If authorize throws, convert to a Result error so executeAuthorized
     // can propagate it to each invocation through the normal path.
@@ -319,6 +325,7 @@ class MemoryConsumerSession<
       .catch((error: unknown) => ({
         error: error instanceof Error ? error : new Error(String(error)),
       } as Awaited<ReturnType<typeof Access.authorize>>));
+    const _tAuth = performance.now();
 
     for (let i = 0; i < batch.length; i++) {
       const { invocation, queueEntry } = batch[i];
@@ -357,6 +364,15 @@ class MemoryConsumerSession<
         }
       }
     }
+    // [INSTRUMENTATION] Batch auth + dispatch timing
+    const _tDone = performance.now();
+    console.warn(
+      `[CONSUMER-BATCH] #${_flushId} size=${batch.length} | auth=${
+        (_tAuth - _t0).toFixed(1)
+      }ms dispatch=${(_tDone - _tAuth).toFixed(1)}ms | total=${
+        (_tDone - _t0).toFixed(1)
+      }ms`,
+    );
   }
 
   private executeAuthorized<

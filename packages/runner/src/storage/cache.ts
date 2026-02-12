@@ -1057,7 +1057,12 @@ export class Replica {
     this.syncTimer = setTimeout(this.pull, this.syncTimeout);
   }
 
+  // [INSTRUMENTATION] Commit sequence counter for timing analysis
+  private static _commitSeq = 0;
+
   async commit(transaction: ITransaction, source?: IStorageTransaction) {
+    const _t0 = performance.now();
+    const _commitId = ++Replica._commitSeq;
     const { facts, claims } = transaction;
 
     // Log push operation start
@@ -1105,12 +1110,22 @@ export class Replica {
 
     // These push transaction that will commit desired state to a remote.
     const immediate = source?.immediate === true;
+    const _tPreTransact = performance.now();
     const commitPromise = this.remote.transact({
       changes: getChanges([...claims, ...changedFacts] as Statement[]),
     }, immediate ? { immediate } : undefined);
     this.commitPromises.add(commitPromise);
     const result = await commitPromise;
     this.commitPromises.delete(commitPromise);
+    // [INSTRUMENTATION] Per-commit phase timing
+    const _tDone = performance.now();
+    console.warn(
+      `[COMMIT-TIMING] #${_commitId} facts=${facts.length} | sync=${
+        (_tPreTransact - _t0).toFixed(1)
+      }ms transact=${(_tDone - _tPreTransact).toFixed(1)}ms | total=${
+        (_tDone - _t0).toFixed(1)
+      }ms`,
+    );
 
     // If transaction fails we delete facts from the nursery so that new
     // changes will not build upon rejected state. If there are other inflight
