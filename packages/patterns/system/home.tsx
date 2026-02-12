@@ -118,7 +118,7 @@ const addFavorite = handler<
   { favorites: Writable<Favorite[]>; journal: Writable<JournalEntry[]> }
 >(({ piece, tag, spaceName }, { favorites, journal }) => {
   const current = favorites.get();
-  if (!current.some((f) => equals(f.cell, piece))) {
+  if (!current.some((f) => f && equals(f.cell, piece))) {
     // HACK(seefeld): Access internal API to get schema.
     // Once we sandbox, we need proper reflection
     //
@@ -161,7 +161,7 @@ const removeFavorite = handler<
   { piece: Writable<unknown> },
   { favorites: Writable<Favorite[]>; journal: Writable<JournalEntry[]> }
 >(({ piece }, { favorites, journal }) => {
-  const favorite = favorites.get().find((f) => equals(f.cell, piece));
+  const favorite = favorites.get().find((f) => f && equals(f.cell, piece));
   if (favorite) {
     // Capture snapshot before removing
     const snapshot = captureSnapshot(
@@ -256,6 +256,8 @@ export default pattern((_) => {
       { spaceDid: string; spaceName?: string }
     >();
     for (const fav of favorites.get()) {
+      // Cross-space cell references may be null before sync completes
+      if (!fav) continue;
       const did = fav.spaceDid;
       if (did && !spaceMap.has(did)) {
         spaceMap.set(did, { spaceDid: did, spaceName: fav.spaceName });
