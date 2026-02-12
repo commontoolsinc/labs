@@ -73,10 +73,6 @@ Statement caching is an implementation optimization and is not specified here.
 
 ## 3. Tables
 
-**Naming convention**: The SQL schema uses `version` as the column name for the
-space-global Lamport clock. In the TypeScript interfaces (§01-§06), this field
-is named `seq` for consistency. The mapping is: `SQL version` = `TypeScript seq`.
-
 ### 3.1 `value` — Content-Addressed Value Storage
 
 Stores the serialized JSON content of entity values (both full values and patch
@@ -116,7 +112,7 @@ CREATE TABLE fact (
   value_ref   TEXT    NOT NULL,              -- FK → value.hash (value or patch ops)
   parent      TEXT,                          -- Hash of previous fact (NULL for first write)
   branch      TEXT    NOT NULL DEFAULT '',   -- Branch this fact was committed on (denormalized)
-  version     INTEGER NOT NULL,             -- Lamport clock at commit time
+  seq     INTEGER NOT NULL,             -- Lamport clock at commit time
   commit_ref  TEXT    NOT NULL,             -- FK → commit.hash
   fact_type   TEXT    NOT NULL,             -- 'set' | 'patch' | 'delete'
 
@@ -124,14 +120,14 @@ CREATE TABLE fact (
   FOREIGN KEY (commit_ref) REFERENCES commit(hash)
 );
 
--- Query facts by version range (for subscriptions and point-in-time reads)
-CREATE INDEX idx_fact_version ON fact (version);
+-- Query facts by seq range (for subscriptions and point-in-time reads)
+CREATE INDEX idx_fact_seq ON fact (seq);
 
 -- Query all facts for a specific entity (for causal chain traversal)
 CREATE INDEX idx_fact_id ON fact (id);
 
--- Query facts by entity and version (for point-in-time entity reads)
-CREATE INDEX idx_fact_id_version ON fact (id, version);
+-- Query facts by entity and seq (for point-in-time entity reads)
+CREATE INDEX idx_fact_id_seq ON fact (id, seq);
 
 -- Query facts by commit (for commit inspection)
 CREATE INDEX idx_fact_commit ON fact (commit_ref);
@@ -149,7 +145,7 @@ CREATE INDEX idx_fact_branch ON fact (branch);
 | `value_ref` | Points to the value table. For `set`: the full JSON value. For `patch`: the JSON-serialized patch operation list. For `delete`: the `__empty__` sentinel. |
 | `parent` | Hash of the previous fact for this entity. `NULL` when this is the entity's first fact (parent is the Empty reference, which is implicit). |
 | `branch` | Branch this fact was committed on. Denormalized from the commit for efficient branch-scoped queries. Default `''` (main branch). |
-| `version` | Space-global Lamport clock (= `seq` in TypeScript), assigned at commit time. All facts in the same commit share the same version. |
+| `seq` | Space-global Lamport clock, assigned at commit time. All facts in the same commit share the same seq. |
 | `commit_ref` | Hash of the commit that included this fact. |
 | `fact_type` | Discriminant: `'set'`, `'patch'`, or `'delete'`. |
 
@@ -163,7 +159,7 @@ CREATE TABLE head (
   branch    TEXT    NOT NULL,    -- Branch name ('' for the default branch)
   id        TEXT    NOT NULL,    -- Entity identifier
   fact_hash TEXT    NOT NULL,    -- FK → fact.hash (the current head fact)
-  version   INTEGER NOT NULL,   -- Version of the head fact (for fast version lookups)
+  seq   INTEGER NOT NULL,   -- Seq of the head fact (for fast lookups)
 
   PRIMARY KEY (branch, id),
   FOREIGN KEY (fact_hash) REFERENCES fact(hash)
@@ -189,14 +185,14 @@ were applied atomically.
 ```sql
 CREATE TABLE commit (
   hash        TEXT    NOT NULL PRIMARY KEY,  -- Content hash of the commit
-  version     INTEGER NOT NULL,             -- Lamport clock (same as facts in this commit)
+  seq     INTEGER NOT NULL,             -- Lamport clock (same as facts in this commit)
   branch      TEXT    NOT NULL DEFAULT '',   -- Branch this commit was applied to
-  reads       JSON,                         -- Read set: {entityId: version} for validation
+  reads       JSON,                         -- Read set: {entityId: seq} for validation
   created_at  TEXT    NOT NULL DEFAULT (datetime('now'))  -- Wall-clock timestamp
 );
 
--- Query commits by version (for log traversal)
-CREATE INDEX idx_commit_version ON commit (version);
+-- Query commits by seq (for log traversal)
+CREATE INDEX idx_commit_seq ON commit (seq);
 
 -- Query commits by branch (for branch history)
 CREATE INDEX idx_commit_branch ON commit (branch);
@@ -207,29 +203,29 @@ CREATE INDEX idx_commit_branch ON commit (branch);
 | Column | Description |
 |--------|-------------|
 | `hash` | Content hash of the commit's logical content. |
-| `version` | The Lamport clock value (= `seq` in TypeScript) assigned to this commit. Matches the `version` on all facts in this commit. |
+| `seq` | The Lamport clock value assigned to this commit. Matches the `seq` on all facts in this commit. |
 | `branch` | Which branch this commit targets. |
 | `reads` | JSON object recording the seq of each entity that was read as a precondition for this commit. Used for optimistic concurrency validation (see §03 Commit Model). |
 | `created_at` | Wall-clock time for diagnostics. Not used for ordering. |
 
 ### 3.5 `snapshot` — Periodic Full-Value Materializations
 
-Stores pre-computed full values for entities at specific versions, enabling
+Stores pre-computed full values for entities at specific seqs, enabling
 fast reads without full patch replay.
 
 ```sql
 CREATE TABLE snapshot (
   id         TEXT    NOT NULL,    -- Entity identifier
-  version    INTEGER NOT NULL,    -- Version at which this snapshot was taken
+  seq    INTEGER NOT NULL,    -- Version at which this snapshot was taken
   value_ref  TEXT    NOT NULL,    -- FK → value.hash (the full materialized value)
   branch     TEXT    NOT NULL DEFAULT '',  -- Branch this snapshot belongs to
 
-  PRIMARY KEY (branch, id, version),
+  PRIMARY KEY (branch, id, seq),
   FOREIGN KEY (value_ref) REFERENCES value(hash)
 );
 
--- Find the nearest snapshot before a target version
-CREATE INDEX idx_snapshot_lookup ON snapshot (branch, id, version);
+-- Find the nearest snapshot before a target seq
+CREATE INDEX idx_snapshot_lookup ON snapshot (branch, id, seq);
 ```
 
 ### 3.6 `branch` — Branch Metadata
@@ -240,15 +236,15 @@ Tracks branch lifecycle and fork points.
 CREATE TABLE branch (
   name            TEXT    NOT NULL PRIMARY KEY,  -- Branch name ('' = default/main)
   parent_branch   TEXT,                          -- Branch this was forked from (NULL for default)
-  fork_version    INTEGER,                       -- Version at the time of fork
-  head_version    INTEGER NOT NULL DEFAULT 0,    -- Latest version on this branch
+  fork_seq    INTEGER,                       -- Seq at the time of fork
+  head_seq    INTEGER NOT NULL DEFAULT 0,    -- Latest seq on this branch
   created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
 
   FOREIGN KEY (parent_branch) REFERENCES branch(name)
 );
 
 -- Seed the default branch
-INSERT OR IGNORE INTO branch (name, head_version) VALUES ('', 0);
+INSERT OR IGNORE INTO branch (name, head_seq) VALUES ('', 0);
 ```
 
 ### 3.7 `blob_store` — Immutable Content-Addressed Binary Data
@@ -290,12 +286,12 @@ INSERT OR IGNORE INTO value (hash, data) VALUES ('__empty__', NULL);
 
 CREATE TABLE IF NOT EXISTS commit (
   hash        TEXT    NOT NULL PRIMARY KEY,
-  version     INTEGER NOT NULL,
+  seq     INTEGER NOT NULL,
   branch      TEXT    NOT NULL DEFAULT '',
   reads       JSON,
   created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
 );
-CREATE INDEX IF NOT EXISTS idx_commit_version ON commit (version);
+CREATE INDEX IF NOT EXISTS idx_commit_seq ON commit (seq);
 CREATE INDEX IF NOT EXISTS idx_commit_branch ON commit (branch);
 
 CREATE TABLE IF NOT EXISTS fact (
@@ -304,15 +300,15 @@ CREATE TABLE IF NOT EXISTS fact (
   value_ref   TEXT    NOT NULL,
   parent      TEXT,
   branch      TEXT    NOT NULL DEFAULT '',
-  version     INTEGER NOT NULL,
+  seq     INTEGER NOT NULL,
   commit_ref  TEXT    NOT NULL,
   fact_type   TEXT    NOT NULL,
   FOREIGN KEY (value_ref)  REFERENCES value(hash),
   FOREIGN KEY (commit_ref) REFERENCES commit(hash)
 );
-CREATE INDEX IF NOT EXISTS idx_fact_version    ON fact (version);
+CREATE INDEX IF NOT EXISTS idx_fact_seq    ON fact (seq);
 CREATE INDEX IF NOT EXISTS idx_fact_id         ON fact (id);
-CREATE INDEX IF NOT EXISTS idx_fact_id_version ON fact (id, version);
+CREATE INDEX IF NOT EXISTS idx_fact_id_seq ON fact (id, seq);
 CREATE INDEX IF NOT EXISTS idx_fact_commit     ON fact (commit_ref);
 CREATE INDEX IF NOT EXISTS idx_fact_branch     ON fact (branch);
 
@@ -320,7 +316,7 @@ CREATE TABLE IF NOT EXISTS head (
   branch    TEXT    NOT NULL,
   id        TEXT    NOT NULL,
   fact_hash TEXT    NOT NULL,
-  version   INTEGER NOT NULL,
+  seq   INTEGER NOT NULL,
   PRIMARY KEY (branch, id),
   FOREIGN KEY (fact_hash) REFERENCES fact(hash)
 );
@@ -328,23 +324,23 @@ CREATE INDEX IF NOT EXISTS idx_head_branch ON head (branch);
 
 CREATE TABLE IF NOT EXISTS snapshot (
   id         TEXT    NOT NULL,
-  version    INTEGER NOT NULL,
+  seq    INTEGER NOT NULL,
   value_ref  TEXT    NOT NULL,
   branch     TEXT    NOT NULL DEFAULT '',
-  PRIMARY KEY (branch, id, version),
+  PRIMARY KEY (branch, id, seq),
   FOREIGN KEY (value_ref) REFERENCES value(hash)
 );
-CREATE INDEX IF NOT EXISTS idx_snapshot_lookup ON snapshot (branch, id, version);
+CREATE INDEX IF NOT EXISTS idx_snapshot_lookup ON snapshot (branch, id, seq);
 
 CREATE TABLE IF NOT EXISTS branch (
   name            TEXT    NOT NULL PRIMARY KEY,
   parent_branch   TEXT,
-  fork_version    INTEGER,
-  head_version    INTEGER NOT NULL DEFAULT 0,
+  fork_seq    INTEGER,
+  head_seq    INTEGER NOT NULL DEFAULT 0,
   created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
   FOREIGN KEY (parent_branch) REFERENCES branch(name)
 );
-INSERT OR IGNORE INTO branch (name, head_version) VALUES ('', 0);
+INSERT OR IGNORE INTO branch (name, head_seq) VALUES ('', 0);
 
 CREATE TABLE IF NOT EXISTS blob_store (
   hash          TEXT    NOT NULL PRIMARY KEY,
@@ -363,7 +359,7 @@ querying of current state:
 
 ```sql
 CREATE VIEW state AS
-SELECT h.branch, h.id, f.fact_type, f.version, v.data AS value
+SELECT h.branch, h.id, f.fact_type, f.seq, v.data AS value
 FROM head h
 JOIN fact f ON f.hash = h.fact_hash
 JOIN value v ON v.hash = f.value_ref;
@@ -408,13 +404,13 @@ INSERT OR IGNORE INTO value (hash, data)
 VALUES (:ops_hash, :ops_json);
 
 -- Step 2: Insert the fact
-INSERT INTO fact (hash, id, value_ref, parent, branch, version, commit_ref, fact_type)
-VALUES (:fact_hash, :entity_id, :ops_hash, :parent_hash, :branch, :version, :commit_hash, 'patch');
+INSERT INTO fact (hash, id, value_ref, parent, branch, seq, commit_ref, fact_type)
+VALUES (:fact_hash, :entity_id, :ops_hash, :parent_hash, :branch, :seq, :commit_hash, 'patch');
 
 -- Step 3: Update (or insert) the head pointer
-INSERT INTO head (branch, id, fact_hash, version)
-VALUES (:branch, :entity_id, :fact_hash, :version)
-ON CONFLICT (branch, id) DO UPDATE SET fact_hash = :fact_hash, version = :version;
+INSERT INTO head (branch, id, fact_hash, seq)
+VALUES (:branch, :entity_id, :fact_hash, :seq)
+ON CONFLICT (branch, id) DO UPDATE SET fact_hash = :fact_hash, seq = :seq;
 ```
 
 ### 4.3 Write Path — Insert a Set Fact
@@ -425,26 +421,26 @@ INSERT OR IGNORE INTO value (hash, data)
 VALUES (:value_hash, :value_json);
 
 -- Step 2: Insert the fact
-INSERT INTO fact (hash, id, value_ref, parent, branch, version, commit_ref, fact_type)
-VALUES (:fact_hash, :entity_id, :value_hash, :parent_hash, :branch, :version, :commit_hash, 'set');
+INSERT INTO fact (hash, id, value_ref, parent, branch, seq, commit_ref, fact_type)
+VALUES (:fact_hash, :entity_id, :value_hash, :parent_hash, :branch, :seq, :commit_hash, 'set');
 
 -- Step 3: Update the head pointer
-INSERT INTO head (branch, id, fact_hash, version)
-VALUES (:branch, :entity_id, :fact_hash, :version)
-ON CONFLICT (branch, id) DO UPDATE SET fact_hash = :fact_hash, version = :version;
+INSERT INTO head (branch, id, fact_hash, seq)
+VALUES (:branch, :entity_id, :fact_hash, :seq)
+ON CONFLICT (branch, id) DO UPDATE SET fact_hash = :fact_hash, seq = :seq;
 ```
 
 ### 4.4 Write Path — Insert a Delete Fact
 
 ```sql
 -- Step 1: Insert the fact (value_ref = __empty__ sentinel)
-INSERT INTO fact (hash, id, value_ref, parent, branch, version, commit_ref, fact_type)
-VALUES (:fact_hash, :entity_id, '__empty__', :parent_hash, :branch, :version, :commit_hash, 'delete');
+INSERT INTO fact (hash, id, value_ref, parent, branch, seq, commit_ref, fact_type)
+VALUES (:fact_hash, :entity_id, '__empty__', :parent_hash, :branch, :seq, :commit_hash, 'delete');
 
 -- Step 2: Update the head pointer to the delete fact
-INSERT INTO head (branch, id, fact_hash, version)
-VALUES (:branch, :entity_id, :fact_hash, :version)
-ON CONFLICT (branch, id) DO UPDATE SET fact_hash = :fact_hash, version = :version;
+INSERT INTO head (branch, id, fact_hash, seq)
+VALUES (:branch, :entity_id, :fact_hash, :seq)
+ON CONFLICT (branch, id) DO UPDATE SET fact_hash = :fact_hash, seq = :seq;
 ```
 
 ---
@@ -457,7 +453,7 @@ To read an entity's current value on a branch:
 
 ```sql
 -- Step 1: Find the current head fact
-SELECT f.fact_type, f.version, v.data
+SELECT f.fact_type, f.seq, v.data
 FROM head h
 JOIN fact f ON f.hash = h.fact_hash
 JOIN value v ON v.hash = f.value_ref
@@ -472,38 +468,38 @@ If `fact_type = 'patch'`, we need to find a base value and replay:
 
 ```sql
 -- Step 2: Find the nearest snapshot
-SELECT s.version, v.data AS snapshot_value
+SELECT s.seq, v.data AS snapshot_value
 FROM snapshot s
 JOIN value v ON v.hash = s.value_ref
 WHERE s.branch = :branch
   AND s.id = :entity_id
-  AND s.version <= :head_version
-ORDER BY s.version DESC
+  AND s.seq <= :head_seq
+ORDER BY s.seq DESC
 LIMIT 1;
 ```
 
 ```sql
 -- Step 3: If no snapshot, find the most recent 'set' fact
-SELECT f.version, v.data AS set_value
+SELECT f.seq, v.data AS set_value
 FROM fact f
 JOIN value v ON v.hash = f.value_ref
 WHERE f.id = :entity_id
   AND f.fact_type = 'set'
-  AND f.version <= :head_version
-ORDER BY f.version DESC
+  AND f.seq <= :head_seq
+ORDER BY f.seq DESC
 LIMIT 1;
 ```
 
 ```sql
 -- Step 4: Collect all patches between base and head
-SELECT v.data AS patch_ops, f.version
+SELECT v.data AS patch_ops, f.seq
 FROM fact f
 JOIN value v ON v.hash = f.value_ref
 WHERE f.id = :entity_id
   AND f.fact_type = 'patch'
-  AND f.version > :base_version
-  AND f.version <= :head_version
-ORDER BY f.version ASC;
+  AND f.seq > :base_seq
+  AND f.seq <= :head_seq
+ORDER BY f.seq ASC;
 ```
 
 Then in application code:
@@ -522,11 +518,11 @@ function readEntity(
   }
 
   // head.factType === "patch" — need to reconstruct
-  const snapshot = findNearestSnapshot(branch, entityId, head.version);
-  const baseVersion = snapshot?.version ?? findLatestSet(entityId, head.version)?.version ?? 0;
-  const baseValue = snapshot?.value ?? findLatestSet(entityId, head.version)?.value ?? {};
+  const snapshot = findNearestSnapshot(branch, entityId, head.seq);
+  const baseSeq = snapshot?.seq ?? findLatestSet(entityId, head.seq)?.seq ?? 0;
+  const baseValue = snapshot?.value ?? findLatestSet(entityId, head.seq)?.value ?? {};
 
-  const patches = collectPatches(entityId, baseVersion, head.version);
+  const patches = collectPatches(entityId, baseSeq, head.seq);
   let value = baseValue;
   for (const patch of patches) {
     value = applyPatch(value, JSON.parse(patch.ops));
@@ -537,45 +533,45 @@ function readEntity(
 
 ### 5.2 Point-in-Time Read
 
-Read an entity's value at a specific seq (SQL `version` column) on a branch:
+Read an entity's value at a specific seq on a branch:
 
 ```sql
--- Find the fact that was the head at the target version
--- (the latest fact for this entity with version <= target)
-SELECT f.hash, f.fact_type, f.version, v.data
+-- Find the fact that was the head at the target seq
+-- (the latest fact for this entity with seq <= target)
+SELECT f.hash, f.fact_type, f.seq, v.data
 FROM fact f
 JOIN value v ON v.hash = f.value_ref
 WHERE f.id = :entity_id
-  AND f.version <= :target_version
-ORDER BY f.version DESC
+  AND f.seq <= :target_seq
+ORDER BY f.seq DESC
 LIMIT 1;
 ```
 
 If the result is a `set`, return the value directly. If it's a `delete`, return
 `null`. If it's a `patch`, find the nearest snapshot or `set` before
-`:target_version` and replay patches up to `:target_version` using the same
-algorithm as §5.1 but with `target_version` as the upper bound.
+`:target_seq` and replay patches up to `:target_seq` using the same
+algorithm as §5.1 but with `target_seq` as the upper bound.
 
 ```sql
 -- Snapshot lookup for PIT read
-SELECT s.version, v.data AS snapshot_value
+SELECT s.seq, v.data AS snapshot_value
 FROM snapshot s
 JOIN value v ON v.hash = s.value_ref
 WHERE s.branch = :branch
   AND s.id = :entity_id
-  AND s.version <= :target_version
-ORDER BY s.version DESC
+  AND s.seq <= :target_seq
+ORDER BY s.seq DESC
 LIMIT 1;
 
 -- Patches between snapshot and target
-SELECT v.data AS patch_ops, f.version
+SELECT v.data AS patch_ops, f.seq
 FROM fact f
 JOIN value v ON v.hash = f.value_ref
 WHERE f.id = :entity_id
   AND f.fact_type = 'patch'
-  AND f.version > :snapshot_version
-  AND f.version <= :target_version
-ORDER BY f.version ASC;
+  AND f.seq > :snapshot_seq
+  AND f.seq <= :target_seq
+ORDER BY f.seq ASC;
 ```
 
 ### 5.3 Read Multiple Entities
@@ -598,8 +594,8 @@ SELECT COUNT(*) AS patch_count
 FROM fact f
 WHERE f.id = :entity_id
   AND f.fact_type = 'patch'
-  AND f.version > COALESCE(
-    (SELECT MAX(s.version) FROM snapshot s
+  AND f.seq > COALESCE(
+    (SELECT MAX(s.seq) FROM snapshot s
      WHERE s.branch = :branch AND s.id = :entity_id),
     0
   );
@@ -618,8 +614,8 @@ INSERT OR IGNORE INTO value (hash, data)
 VALUES (:value_hash, :value_json);
 
 -- Step 2: Insert the snapshot record
-INSERT OR REPLACE INTO snapshot (id, version, value_ref, branch)
-VALUES (:entity_id, :version, :value_hash, :branch);
+INSERT OR REPLACE INTO snapshot (id, seq, value_ref, branch)
+VALUES (:entity_id, :seq, :value_hash, :branch);
 ```
 
 ### 6.3 Snapshot Compaction
@@ -632,15 +628,15 @@ entity per branch is needed for efficient reads. A compaction query:
 DELETE FROM snapshot
 WHERE rowid NOT IN (
   SELECT rowid FROM snapshot s1
-  WHERE s1.version = (
-    SELECT MAX(s2.version) FROM snapshot s2
+  WHERE s1.seq = (
+    SELECT MAX(s2.seq) FROM snapshot s2
     WHERE s2.branch = s1.branch AND s2.id = s1.id
   )
 );
 ```
 
 In practice, keeping a few historical snapshots can speed up point-in-time reads
-for popular versions.
+for popular seqs.
 
 ---
 
@@ -660,7 +656,7 @@ snapshot captures the materialized state. However, facts that are referenced as
 -- Find facts that are safe to compact:
 -- facts older than a snapshot, not referenced as parent by any other fact
 DELETE FROM fact
-WHERE version < :retention_version
+WHERE seq < :retention_seq
   AND hash NOT IN (SELECT parent FROM fact WHERE parent IS NOT NULL);
 ```
 
@@ -703,14 +699,14 @@ When a branch is created:
 
 ```sql
 -- Record the fork point
-INSERT INTO branch (name, parent_branch, fork_version, head_version)
-VALUES (:branch_name, :parent_branch, :fork_version, :fork_version);
+INSERT INTO branch (name, parent_branch, fork_seq, head_seq)
+VALUES (:branch_name, :parent_branch, :fork_seq, :fork_seq);
 ```
 
 Head pointers are **not** eagerly copied from the parent branch. Instead, reads
 on a child branch resolve heads lazily: if no head exists for an entity on the
 child branch, the system falls back to the parent branch's head at or before
-the fork version. This avoids an O(N) copy of all head pointers at fork time
+the fork seq. This avoids an O(N) copy of all head pointers at fork time
 and makes branch creation O(1). See §06 Branching for the full resolution
 algorithm.
 
@@ -720,33 +716,33 @@ Writing to a branch is identical to writing to the default branch — the same
 fact and value insertion, but the head update targets the branch name:
 
 ```sql
-INSERT INTO head (branch, id, fact_hash, version)
-VALUES (:branch_name, :entity_id, :fact_hash, :version)
-ON CONFLICT (branch, id) DO UPDATE SET fact_hash = :fact_hash, version = :version;
+INSERT INTO head (branch, id, fact_hash, seq)
+VALUES (:branch_name, :entity_id, :fact_hash, :seq)
+ON CONFLICT (branch, id) DO UPDATE SET fact_hash = :fact_hash, seq = :seq;
 ```
 
 The `commit` row records which branch was written to:
 
 ```sql
-INSERT INTO commit (hash, version, branch, reads)
-VALUES (:commit_hash, :version, :branch_name, :reads_json);
+INSERT INTO commit (hash, seq, branch, reads)
+VALUES (:commit_hash, :seq, :branch_name, :reads_json);
 ```
 
 ### 8.3 Branch Seq Numbering
 
-Each branch maintains its own `head_version` (= `headSeq` in TypeScript) in
-the `branch` table. When a commit is applied to a branch, `head_version` is
+Each branch maintains its own `head_seq` (= `headSeq` in TypeScript) in
+the `branch` table. When a commit is applied to a branch, `head_seq` is
 set to the commit's global seq number:
 
 ```sql
 UPDATE branch
-SET head_version = :version
+SET head_seq = :seq
 WHERE name = :branch_name;
 ```
 
-The Lamport clock (`version` column on facts and commits, = `seq` in
-TypeScript) is space-global — it increases across all branches. The branch's
-`head_version` tracks the latest global seq applied to that branch, ensuring
+The Lamport clock (`seq` column on facts and commits) is space-global —
+it increases across all branches. The branch's
+`head_seq` tracks the latest global seq applied to that branch, ensuring
 that seq numbers are globally unique and orderable, even across branches.
 
 ### 8.4 Branch Deletion
@@ -776,7 +772,7 @@ Point-in-time reads combine fact lookup and snapshot-based reconstruction.
 function readAtSeq(
   branch: string,
   entityId: EntityId,
-  targetSeq: number,       // maps to SQL `version` column
+  targetSeq: number,
 ): JSONValue | null {
   // 1. Find the latest fact for this entity at or before targetSeq
   const latestFact = findFactAtSeq(entityId, targetSeq);
@@ -814,24 +810,24 @@ function readAtSeq(
 ### 9.2 Branch-Aware PIT Reads
 
 For point-in-time reads on a branch, the query must consider that the branch
-was forked at a specific version. Facts before the fork version are inherited
+was forked at a specific seq. Facts before the fork seq are inherited
 from the parent branch.
 
 ```sql
 -- Facts for an entity on a branch (including inherited pre-fork facts)
-SELECT f.hash, f.fact_type, f.version, v.data
+SELECT f.hash, f.fact_type, f.seq, v.data
 FROM fact f
 JOIN value v ON v.hash = f.value_ref
 WHERE f.id = :entity_id
-  AND f.version <= :target_version
+  AND f.seq <= :target_seq
   AND (
     -- Facts committed on this branch
     f.branch = :branch_name
     OR
     -- Facts from before the fork point (inherited)
-    f.version <= (SELECT fork_version FROM branch WHERE name = :branch_name)
+    f.seq <= (SELECT fork_seq FROM branch WHERE name = :branch_name)
   )
-ORDER BY f.version DESC
+ORDER BY f.seq DESC
 LIMIT 1;
 ```
 
