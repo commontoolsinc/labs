@@ -142,6 +142,14 @@ class MemoryConsumerSession<
   // Promises that are resolved when the message is at the front of the queue
   private sendQueue: PromiseWithResolvers<void>[] = [];
 
+  // Batch signing state: accumulate invocations and sign them together
+  private pendingBatch: {
+    invocation: ConsumerInvocation<string, MemoryProtocol>;
+    queueEntry: PromiseWithResolvers<void>;
+  }[] = [];
+  private debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private batchStartTime: number | null = null;
+
   constructor(
     public as: Signer,
     public clock: Clock = Settings.clock,
@@ -246,25 +254,62 @@ class MemoryConsumerSession<
     // they are executed, regardless of authorization timing
     this.sendQueue.push(queueEntry);
 
-    const authorizationResult = await Access.authorize([
-      invocation.refer(),
-    ], this.as);
+    this.pendingBatch.push({
+      invocation: invocation as ConsumerInvocation<string, MemoryProtocol>,
+      queueEntry,
+    });
 
-    // If we're not at the front of the queue, wait until we are
-    if (queueEntry !== this.sendQueue[0]) {
-      await queueEntry.promise;
-      // We can be resolved, then rejected (noop) via cancel.
-      if (this.sendQueue.length === 0 || queueEntry !== this.sendQueue[0]) {
-        throw new Error("session cancel");
-      }
+    if (this.batchStartTime === null) {
+      this.batchStartTime = Date.now();
     }
-    try {
-      this.executeAuthorized(authorizationResult, invocation);
-    } finally {
-      // if that throws, we still want to unblock the queue
-      this.sendQueue.shift();
-      if (this.sendQueue.length > 0) {
-        this.sendQueue[0].resolve();
+
+    const elapsed = Date.now() - this.batchStartTime;
+    if (
+      this.pendingBatch.length >= Settings.batchMaxSize ||
+      elapsed >= Settings.batchMaxAccumulateMs
+    ) {
+      await this.flushBatch();
+    } else {
+      if (this.debounceTimer !== null) {
+        clearTimeout(this.debounceTimer);
+      }
+      this.debounceTimer = setTimeout(
+        () => this.flushBatch(),
+        Settings.batchDebounceMs,
+      );
+    }
+  }
+
+  private async flushBatch() {
+    if (this.debounceTimer !== null) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
+    }
+    this.batchStartTime = null;
+
+    const batch = this.pendingBatch;
+    this.pendingBatch = [];
+    if (batch.length === 0) return;
+
+    const refs = batch.map(({ invocation }) => invocation.refer());
+    const authorizationResult = await Access.authorize(refs, this.as);
+
+    for (const { invocation, queueEntry } of batch) {
+      if (queueEntry !== this.sendQueue[0]) {
+        await queueEntry.promise;
+        if (
+          this.sendQueue.length === 0 || queueEntry !== this.sendQueue[0]
+        ) {
+          throw new Error("session cancel");
+        }
+      }
+      try {
+        this.executeAuthorized(authorizationResult, invocation);
+      } finally {
+        this.sendQueue.shift();
+        if (this.sendQueue.length > 0) {
+          this.sendQueue[0].resolve();
+        }
       }
     }
   }
@@ -308,7 +353,16 @@ class MemoryConsumerSession<
     this.controller?.terminate();
   }
   cancel() {
+    if (this.debounceTimer !== null) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
+    }
+    this.batchStartTime = null;
+    this.pendingBatch = [];
     for (const queueEntry of [...this.sendQueue]) {
+      // Suppress unhandled rejection for entries that may not yet be awaited
+      // (e.g. batched entries whose flushBatch timer hasn't fired)
+      queueEntry.promise.catch(() => {});
       queueEntry.reject(new Error("session cancel"));
     }
     this.sendQueue = [];
