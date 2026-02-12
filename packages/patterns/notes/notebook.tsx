@@ -109,60 +109,8 @@ interface NotebookOutput {
   }>;
 }
 
-// NOTE: showNewNoteModal and showNewNotebookModal converted to actions inside pattern
-
-// Handler to create note - createAnother binding determines behavior
-const createNote = handler<
-  void,
-  {
-    createAnother: boolean;
-    newNoteTitle: Writable<string>;
-    showNewNotePrompt: Writable<boolean>;
-    notes: Writable<NotePiece[]>;
-    allPieces: Writable<NotePiece[]>;
-    usedCreateAnotherNote: Writable<boolean>;
-    self: any;
-  }
->((
-  _,
-  {
-    createAnother,
-    newNoteTitle,
-    showNewNotePrompt,
-    notes,
-    allPieces,
-    usedCreateAnotherNote,
-    self,
-  },
-) => {
-  const title = newNoteTitle.get() || "New Note";
-  const newNote = Note({
-    title,
-    content: "",
-    isHidden: true,
-    noteId: generateId(),
-    parentNotebook: self,
-  });
-  allPieces.push(newNote as any); // Required for persistence
-  notes.push(newNote);
-
-  if (createAnother) {
-    // Mark that "Create Another" was used, keep modal open
-    usedCreateAnotherNote.set(true);
-    newNoteTitle.set("");
-  } else {
-    // Close modal and navigate (unless "Create Another" was previously used)
-    const shouldNavigate = !usedCreateAnotherNote.get();
-    showNewNotePrompt.set(false);
-    newNoteTitle.set("");
-    usedCreateAnotherNote.set(false);
-    if (shouldNavigate) {
-      return navigateTo(newNote);
-    }
-  }
-});
-
-// NOTE: cancelNewNotePrompt converted to action inside pattern
+// NOTE: showNewNoteModal, cancelNewNotePrompt, createNote, createNestedNotebook
+// all converted to actions inside pattern (closing over self now works with Default<> inputs)
 
 // Handler to remove a note from this notebook (but keep it in the space)
 const removeFromNotebook = handler<
@@ -307,59 +255,7 @@ const handleDropOntoNotebook = handler<
   }
 });
 
-// Create nested notebook - createAnother binding determines behavior
-// Note: Notebooks are created empty; a default note is created lazily when opened
-const createNestedNotebook = handler<
-  void,
-  {
-    createAnother: boolean;
-    newNestedNotebookTitle: Writable<string>;
-    showNewNestedNotebookPrompt: Writable<boolean>;
-    notes: Writable<NotePiece[]>;
-    allPieces: Writable<NotePiece[]>;
-    usedCreateAnotherNotebook: Writable<boolean>;
-    self: any;
-  }
->((
-  _,
-  {
-    createAnother,
-    newNestedNotebookTitle,
-    showNewNestedNotebookPrompt,
-    notes,
-    allPieces,
-    usedCreateAnotherNotebook,
-    self,
-  },
-) => {
-  const title = newNestedNotebookTitle.get() || "New Notebook";
-
-  const nb = Notebook({
-    title,
-    notes: [],
-    isHidden: true,
-    parentNotebook: createAnother ? undefined : self,
-  });
-  allPieces.push(nb);
-  notes.push(nb);
-
-  if (createAnother) {
-    usedCreateAnotherNotebook.set(true);
-    newNestedNotebookTitle.set("");
-  } else {
-    const shouldNavigate = !usedCreateAnotherNotebook.get();
-    showNewNestedNotebookPrompt.set(false);
-    newNestedNotebookTitle.set("");
-    usedCreateAnotherNotebook.set(false);
-    if (shouldNavigate) {
-      return navigateTo(nb);
-    }
-  }
-});
-
-// NOTE: cancelNewNestedNotebookPrompt converted to action inside pattern
-
-// NOTE: goToAllNotes converted to action inside pattern
+// NOTE: cancelNewNestedNotebookPrompt, goToAllNotes converted to actions inside pattern
 
 // Handler for clicking on a backlink
 const handleBacklinkClick = handler<
@@ -381,12 +277,12 @@ const goToParent = handler<
 );
 
 // Handler to navigate to a child (note or notebook) - sets parent for back navigation
+// Must be module-scope handler because it's used in .map() with per-iteration child bindings
 const navigateToChild = handler<
   void,
   { child: Writable<any>; self: any }
 >(
   (_, { child, self }) => {
-    // Set the child's parentNotebook to current notebook for back navigation
     child.key("parentNotebook").set(self);
     navigateTo(child);
   },
@@ -832,6 +728,84 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
     });
 
     // ===== Actions (close over notes, allPieces, self) =====
+    // These work because all inputs use Default<> (not optional ?), so self
+    // always satisfies the output schema's required properties at runtime.
+
+    // Create note - shared logic for "Create" and "Create Another" buttons
+    const createNoteAction = action(() => {
+      const noteTitle = newNoteTitle.get() || "New Note";
+      const newNote = Note({
+        title: noteTitle,
+        content: "",
+        isHidden: true,
+        noteId: generateId(),
+        parentNotebook: self,
+      });
+      allPieces.push(newNote as any);
+      notes.push(newNote);
+
+      // Close modal and navigate (unless "Create Another" was previously used)
+      const shouldNavigate = !usedCreateAnotherNote.get();
+      showNewNotePrompt.set(false);
+      newNoteTitle.set("");
+      usedCreateAnotherNote.set(false);
+      if (shouldNavigate) {
+        return navigateTo(newNote);
+      }
+    });
+
+    const createAnotherNoteAction = action(() => {
+      const noteTitle = newNoteTitle.get() || "New Note";
+      const newNote = Note({
+        title: noteTitle,
+        content: "",
+        isHidden: true,
+        noteId: generateId(),
+        parentNotebook: self,
+      });
+      allPieces.push(newNote as any);
+      notes.push(newNote);
+
+      // Keep modal open for "Create Another"
+      usedCreateAnotherNote.set(true);
+      newNoteTitle.set("");
+    });
+
+    // Create nested notebook - shared logic for "Create" and "Create Another" buttons
+    const createNestedNotebookAction = action(() => {
+      const nbTitle = newNestedNotebookTitle.get() || "New Notebook";
+      const nb = Notebook({
+        title: nbTitle,
+        notes: [],
+        isHidden: true,
+        parentNotebook: self,
+      });
+      allPieces.push(nb);
+      notes.push(nb);
+
+      const shouldNavigate = !usedCreateAnotherNotebook.get();
+      showNewNestedNotebookPrompt.set(false);
+      newNestedNotebookTitle.set("");
+      usedCreateAnotherNotebook.set(false);
+      if (shouldNavigate) {
+        return navigateTo(nb);
+      }
+    });
+
+    const createAnotherNestedNotebookAction = action(() => {
+      const nbTitle = newNestedNotebookTitle.get() || "New Notebook";
+      const nb = Notebook({
+        title: nbTitle,
+        notes: [],
+        isHidden: true,
+        parentNotebook: undefined,
+      });
+      allPieces.push(nb);
+      notes.push(nb);
+
+      usedCreateAnotherNotebook.set(true);
+      newNestedNotebookTitle.set("");
+    });
 
     // Action to duplicate selected notes
     const doDuplicateSelectedNotes = action(() => {
@@ -1438,29 +1412,13 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
               </ct-button>
               <ct-button
                 variant="ghost"
-                onClick={createNote({
-                  createAnother: true,
-                  newNoteTitle,
-                  showNewNotePrompt,
-                  notes,
-                  allPieces,
-                  usedCreateAnotherNote,
-                  self,
-                })}
+                onClick={createAnotherNoteAction}
               >
                 Create Another
               </ct-button>
               <ct-button
                 variant="primary"
-                onClick={createNote({
-                  createAnother: false,
-                  newNoteTitle,
-                  showNewNotePrompt,
-                  notes,
-                  allPieces,
-                  usedCreateAnotherNote,
-                  self,
-                })}
+                onClick={createNoteAction}
               >
                 Create
               </ct-button>
@@ -1492,29 +1450,13 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
               </ct-button>
               <ct-button
                 variant="ghost"
-                onClick={createNestedNotebook({
-                  createAnother: true,
-                  newNestedNotebookTitle,
-                  showNewNestedNotebookPrompt,
-                  notes,
-                  allPieces,
-                  usedCreateAnotherNotebook,
-                  self,
-                })}
+                onClick={createAnotherNestedNotebookAction}
               >
                 Create Another
               </ct-button>
               <ct-button
                 variant="primary"
-                onClick={createNestedNotebook({
-                  createAnother: false,
-                  newNestedNotebookTitle,
-                  showNewNestedNotebookPrompt,
-                  notes,
-                  allPieces,
-                  usedCreateAnotherNotebook,
-                  self,
-                })}
+                onClick={createNestedNotebookAction}
               >
                 Create
               </ct-button>
