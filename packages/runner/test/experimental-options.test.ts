@@ -3,14 +3,21 @@ import { expect } from "@std/expect";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
-import { dispatchToStorableValue, dispatchToDeepStorableValue } from "../src/storable-dispatch.ts";
-import { convertCellsToLinks } from "../src/cell.ts";
-import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import {
+  getExperimentalStorableConfig,
+  resetExperimentalStorableConfig,
+  setExperimentalStorableConfig,
+  toDeepStorableValue,
+  toStorableValue,
+} from "@commontools/memory/storable-value";
 
 const signer = await Identity.fromPassphrase("test experimental");
-const space = signer.did();
 
 describe("ExperimentalOptions", () => {
+  afterEach(() => {
+    resetExperimentalStorableConfig();
+  });
+
   describe("Runtime construction", () => {
     it("defaults all flags to false when no experimental options given", async () => {
       const sm = StorageManager.emulate({ as: signer });
@@ -44,143 +51,93 @@ describe("ExperimentalOptions", () => {
     });
   });
 
-  describe("dispatchToStorableValue", () => {
-    it("delegates to toStorableValue when richStorableValues is false", () => {
-      const result = dispatchToStorableValue("hello", { richStorableValues: false });
-      expect(result).toBe("hello");
-    });
-
-    it("delegates to toStorableValue when no experimental options given", () => {
-      const result = dispatchToStorableValue(42);
-      expect(result).toBe(42);
-    });
-
-    it("throws when richStorableValues is true", () => {
-      expect(() => {
-        dispatchToStorableValue("hello", { richStorableValues: true });
-      }).toThrow("richStorableValues not yet implemented");
-    });
-  });
-
-  describe("dispatchToDeepStorableValue", () => {
-    it("delegates to toDeepStorableValue when richStorableValues is false", () => {
-      const result = dispatchToDeepStorableValue({ a: 1 }, { richStorableValues: false });
-      expect(result).toEqual({ a: 1 });
+  describe("toStorableValue with global config", () => {
+    it("works normally when richStorableValues is false (default)", () => {
+      expect(toStorableValue("hello")).toBe("hello");
+      expect(toStorableValue(42)).toBe(42);
+      expect(toStorableValue(null)).toBe(null);
+      expect(toStorableValue(true)).toBe(true);
+      expect(toStorableValue({ a: 1 })).toEqual({ a: 1 });
     });
 
     it("throws when richStorableValues is true", () => {
+      setExperimentalStorableConfig({ richStorableValues: true });
       expect(() => {
-        dispatchToDeepStorableValue({ a: 1 }, { richStorableValues: true });
+        toStorableValue("hello");
       }).toThrow("richStorableValues not yet implemented");
+    });
+
+    it("works again after reset", () => {
+      setExperimentalStorableConfig({ richStorableValues: true });
+      resetExperimentalStorableConfig();
+      expect(toStorableValue("hello")).toBe("hello");
     });
   });
 
-  describe("dispatch wired into cell.ts setRaw", () => {
-    let runtime: Runtime;
-    let storageManager: ReturnType<typeof StorageManager.emulate>;
-    let tx: IExtendedStorageTransaction;
-
-    afterEach(async () => {
-      await tx?.commit();
-      await runtime?.dispose();
-      await storageManager?.close();
+  describe("toDeepStorableValue with global config", () => {
+    it("works normally when richStorableValues is false (default)", () => {
+      expect(toDeepStorableValue({ a: { b: 1 } })).toEqual({ a: { b: 1 } });
+      expect(toDeepStorableValue([1, 2, 3])).toEqual([1, 2, 3]);
     });
 
-    it("setRaw works normally without experimental flags", () => {
-      storageManager = StorageManager.emulate({ as: signer });
-      runtime = new Runtime({
-        apiUrl: new URL(import.meta.url),
-        storageManager,
-      });
-      tx = runtime.edit();
-      const cell = runtime.getCell(space, "setRaw normal", undefined, tx);
-      cell.setRaw({ value: 42 });
-      expect(cell.getRaw()).toEqual({ value: 42 });
-    });
-
-    it("setRaw throws when richStorableValues is enabled", () => {
-      storageManager = StorageManager.emulate({ as: signer });
-      runtime = new Runtime({
-        apiUrl: new URL(import.meta.url),
-        storageManager,
-        experimental: { richStorableValues: true },
-      });
-      tx = runtime.edit();
-      const cell = runtime.getCell(space, "setRaw experimental", undefined, tx);
+    it("throws when richStorableValues is true", () => {
+      setExperimentalStorableConfig({ richStorableValues: true });
       expect(() => {
-        cell.setRaw({ value: 42 });
+        toDeepStorableValue({ a: 1 });
       }).toThrow("richStorableValues not yet implemented");
+    });
+
+    it("works again after reset", () => {
+      setExperimentalStorableConfig({ richStorableValues: true });
+      resetExperimentalStorableConfig();
+      expect(toDeepStorableValue({ a: 1 })).toEqual({ a: 1 });
     });
   });
 
-  describe("dispatch wired into data-updating.ts normalizeAndDiff", () => {
-    let runtime: Runtime;
-    let storageManager: ReturnType<typeof StorageManager.emulate>;
-    let tx: IExtendedStorageTransaction;
-
-    afterEach(async () => {
-      await tx?.commit();
-      await runtime?.dispose();
-      await storageManager?.close();
-    });
-
-    it("cell.set works normally without experimental flags", () => {
-      storageManager = StorageManager.emulate({ as: signer });
-      runtime = new Runtime({
-        apiUrl: new URL(import.meta.url),
-        storageManager,
-      });
-      tx = runtime.edit();
-      const cell = runtime.getCell<number>(space, "set normal", undefined, tx);
-      cell.set(42);
-      expect(cell.get()).toBe(42);
-    });
-
-    it("cell.set throws when richStorableValues is enabled", () => {
-      storageManager = StorageManager.emulate({ as: signer });
-      runtime = new Runtime({
-        apiUrl: new URL(import.meta.url),
-        storageManager,
-        experimental: { richStorableValues: true },
-      });
-      tx = runtime.edit();
-      const cell = runtime.getCell<number>(space, "set experimental", undefined, tx);
-      expect(() => {
-        cell.set(42);
-      }).toThrow("richStorableValues not yet implemented");
-    });
-  });
-
-  describe("dispatch wired into convertCellsToLinks", () => {
-    it("works normally without experimental options", () => {
-      const result = convertCellsToLinks({ a: 1 });
-      expect(result).toEqual({ a: 1 });
-    });
-
-    it("throws when richStorableValues is enabled via options", () => {
-      expect(() => {
-        convertCellsToLinks({ a: 1 }, { experimental: { richStorableValues: true } });
-      }).toThrow("richStorableValues not yet implemented");
-    });
-  });
-
-  describe("experimental options threaded to transaction", () => {
-    it("edit() sets experimental on the underlying transaction", async () => {
+  describe("Runtime sets and resets global config", () => {
+    it("constructing Runtime with richStorableValues sets global config", async () => {
       const sm = StorageManager.emulate({ as: signer });
       const runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager: sm,
         experimental: { richStorableValues: true },
       });
-      const tx = runtime.edit();
-      expect(tx.tx.experimental).toEqual({
-        richStorableValues: true,
-        storableProtocol: false,
-        unifiedJsonEncoding: false,
-      });
-      await tx.commit();
+
+      const config = getExperimentalStorableConfig();
+      expect(config.richStorableValues).toBe(true);
+
       await runtime.dispose();
       await sm.close();
+    });
+
+    it("constructing Runtime without experimental leaves config at defaults", async () => {
+      const sm = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: sm,
+      });
+
+      const config = getExperimentalStorableConfig();
+      expect(config.richStorableValues).toBe(false);
+
+      await runtime.dispose();
+      await sm.close();
+    });
+
+    it("disposing Runtime resets global config", async () => {
+      const sm = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: sm,
+        experimental: { richStorableValues: true },
+      });
+
+      expect(getExperimentalStorableConfig().richStorableValues).toBe(true);
+
+      await runtime.dispose();
+      await sm.close();
+
+      expect(getExperimentalStorableConfig().richStorableValues).toBe(false);
     });
   });
 });

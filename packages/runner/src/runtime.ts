@@ -13,6 +13,10 @@ import type {
   Schema,
 } from "./builder/types.ts";
 import { ContextualFlowControl } from "./cfc.ts";
+import {
+  resetExperimentalStorableConfig,
+  setExperimentalStorableConfig,
+} from "@commontools/memory/storable-value";
 import { RecipeEnvironment, setRecipeEnvironment } from "./builder/env.ts";
 import type {
   ChangeGroup,
@@ -151,6 +155,7 @@ export class Runtime {
       unifiedJsonEncoding: false,
       ...options.experimental,
     };
+    setExperimentalStorableConfig(this.experimental);
     this.id = options.storageManager.id;
     this.apiUrl = new URL(options.apiUrl);
     this.staticCache = isDeno()
@@ -242,6 +247,9 @@ export class Runtime {
     // Dispose the Engine (clears TypeScriptCompiler, UnsafeEvalRuntime source maps, console hook)
     this.harness.dispose();
 
+    // Reset experimental storable config to defaults
+    resetExperimentalStorableConfig();
+
     // Clear the current runtime reference
     // Removed setCurrentRuntime call - no longer using singleton pattern
   }
@@ -262,7 +270,6 @@ export class Runtime {
     if (options.changeGroup !== undefined) {
       tx.changeGroup = options.changeGroup;
     }
-    tx.experimental = this.experimental;
     return new ExtendedStorageTransaction(tx);
   }
 

@@ -18,7 +18,6 @@ import type {
   Result,
   WriteError,
 } from "../interface.ts";
-import type { ExperimentalOptions } from "../../runtime.ts";
 import * as Chronicle from "./chronicle.ts";
 
 export interface UnknownState {
@@ -92,8 +91,8 @@ class Journal implements IJournal, ITransactionJournal {
   writer(space: MemorySpace) {
     return writer(this, space);
   }
-  close(experimental?: ExperimentalOptions) {
-    return close(this, experimental);
+  close() {
+    return close(this);
   }
   abort(reason: unknown) {
     return abort(this, reason);
@@ -249,14 +248,14 @@ export const abort = (journal: IJournal, reason: unknown) => {
   }
 };
 
-export const close = (journal: IJournal, experimental?: ExperimentalOptions) => {
+export const close = (journal: IJournal) => {
   const { ok: open, error } = edit(journal);
   if (error) {
     return { error };
   } else {
     const archive: JournalArchive = new Map();
     for (const [space, chronicle] of open.branches) {
-      const { error, ok } = chronicle.commit(experimental);
+      const { error, ok } = chronicle.commit();
       if (error) {
         journal.state = {
           branches: open.branches,

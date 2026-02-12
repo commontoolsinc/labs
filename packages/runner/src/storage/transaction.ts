@@ -1,6 +1,5 @@
 import { getLogger } from "@commontools/utils/logger";
 import type { StorableDatum } from "@commontools/memory/interface";
-import type { ExperimentalOptions } from "../runtime.ts";
 import type {
   ChangeGroup,
   CommitError,
@@ -70,7 +69,6 @@ export type State =
  */
 class StorageTransaction implements IStorageTransaction {
   changeGroup?: ChangeGroup;
-  experimental?: ExperimentalOptions;
 
   static mutate(transaction: StorageTransaction, state: State) {
     transaction.#state = state;
@@ -315,7 +313,7 @@ export const commit = async (
   if (error) {
     return { error };
   } else {
-    const { error, ok: archive } = ready.journal.close(transaction.experimental);
+    const { error, ok: archive } = ready.journal.close();
     if (error) {
       mutate(transaction, {
         status: "done",

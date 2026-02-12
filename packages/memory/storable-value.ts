@@ -1,6 +1,30 @@
 import { isInstance, isRecord } from "@commontools/utils/types";
 import type { StorableValue, StorableValueLayer } from "./interface.ts";
 
+export interface ExperimentalStorableConfig {
+  richStorableValues: boolean;
+}
+
+const defaultConfig: ExperimentalStorableConfig = {
+  richStorableValues: false,
+};
+
+let currentConfig: ExperimentalStorableConfig = { ...defaultConfig };
+
+export function setExperimentalStorableConfig(
+  config: Partial<ExperimentalStorableConfig>,
+): void {
+  currentConfig = { ...defaultConfig, ...config };
+}
+
+export function getExperimentalStorableConfig(): ExperimentalStorableConfig {
+  return currentConfig;
+}
+
+export function resetExperimentalStorableConfig(): void {
+  currentConfig = { ...defaultConfig };
+}
+
 /**
  * Character code for digit `0`.
  */
@@ -178,6 +202,9 @@ export function isStorableValue(value: unknown): value is StorableValueLayer {
  * @throws Error if the value can't be converted to a JSON-encodable form.
  */
 export function toStorableValue(value: unknown): StorableValueLayer {
+  if (currentConfig.richStorableValues) {
+    throw new Error("richStorableValues not yet implemented");
+  }
   switch (typeof value) {
     case "boolean":
     case "string":
@@ -271,6 +298,9 @@ const PROCESSING = Symbol("PROCESSING");
  * @throws Error if the value (or any nested value) can't be converted.
  */
 export function toDeepStorableValue(value: unknown): StorableValue {
+  if (currentConfig.richStorableValues) {
+    throw new Error("richStorableValues not yet implemented");
+  }
   // The internal helper can return OMIT for nested values that should be
   // omitted, but at the top level this never happens (OMIT is only returned
   // when converted.size > 0, i.e., in nested calls).
