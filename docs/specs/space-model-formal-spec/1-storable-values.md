@@ -46,7 +46,7 @@ type StorableValue =
   | boolean
   | number    // finite only; `NaN` and `Infinity` rejected
   | string
-  | undefined // serialized as `{ "/Undefined@1": null }` in all contexts
+  | undefined // first-class storable; requires tagged representation in formats lacking native `undefined`
   | bigint    // large integers
 
   // (b) Built-in JS types with derived StorableInstance form (Section 1.4)
@@ -70,20 +70,23 @@ type StorableValue =
 
 | Type | Constraints | Notes |
 |------|-------------|-------|
-| `null` | None | JSON null |
+| `null` | None | The null value |
 | `boolean` | None | `true` or `false` |
 | `number` | Must be finite | `-0` normalized to `0`; `NaN`/`Infinity` rejected |
 | `string` | None | Unicode text |
-| `undefined` | None | Serialized as `{ "/Undefined@1": null }` (see note below) |
-| `bigint` | None | Serialized as string in JSON encoding |
+| `undefined` | None | First-class storable; see note below |
+| `bigint` | None | Large integers; see Section 5.3 for JSON encoding |
 
-> **`undefined` serialization:** `undefined` is a first-class storable value
-> with a dedicated tagged representation: `{ "/Undefined@1": null }`. This
-> representation is used uniformly regardless of context — as an array element,
-> an object property value, or a top-level value. Deletion semantics (e.g.,
-> removing a cell's value when `undefined` is written at top level) are an
-> application-level concern, not a serialization concern: the serializer
-> faithfully records `undefined` and the application layer interprets the result.
+> **`undefined` as a first-class storable.** `undefined` is a first-class
+> storable value that round-trips faithfully through serialization. Because most
+> wire formats (including JSON) have no native `undefined` representation, the
+> serialization system uses a dedicated tagged form for `undefined` — the same
+> tagged form regardless of context (array element, object property value, or
+> top-level value). See Section 5.3 for the specific JSON encoding. Deletion
+> semantics (e.g., removing a cell's value when `undefined` is written at top
+> level) are an application-level concern, not a serialization concern: the
+> serializer faithfully records `undefined` and the application layer interprets
+> the result.
 
 > **`-0` normalization:** Negative zero (`-0`) is normalized to positive zero
 > (`0`) during storable-value conversion (i.e., `toStorableValue()`), before the
@@ -95,9 +98,8 @@ type StorableValue =
 > **Future: `-0` and non-finite numbers.** The current design normalizes `-0`
 > and rejects `NaN`/`Infinity`/`-Infinity`. Because the serialization system
 > uses typed tags (Section 5), a future version could represent these values
-> with full fidelity (e.g., `{ "/NegZero@1": null }`, `{ "/NaN@1": null }`,
-> `{ "/Infinity@1": "+" }`) without ambiguity. This option is preserved by the
-> architecture but not currently needed.
+> with full fidelity via dedicated type tags, without ambiguity. This option is
+> preserved by the architecture but not currently needed.
 
 ### 1.4 Built-in JS Types
 
@@ -146,19 +148,19 @@ Reconstruction for these types is also defined:
 representations do not follow the deconstructed-state model (their payloads are
 opaque encodings rather than recursively-processable `StorableValue`s).
 
-| Type | JSON Encoding | Notes |
-|------|---------------|-------|
-| `Uint8Array` | `{ "/Bytes@1": "base64..." }` | Base64-encoded binary data. |
-| `Date` | `{ "/Date@1": "ISO-8601-string" }` | ISO 8601 UTC format. |
+| Type | Serialization Strategy | Notes |
+|------|------------------------|-------|
+| `Uint8Array` | Base64-encoded binary data | See Section 5.3 for JSON encoding. |
+| `Date` | ISO 8601 UTC string | See Section 5.3 for JSON encoding. |
 
 ### 1.5 Recursive Containers
 
 **Arrays:**
 - May be dense or sparse
-- Elements may be `undefined` (serialized as `{ "/Undefined@1": null }` per
-  Section 1.3)
-- Sparse arrays (arrays with holes) are supported; holes are serialized
-  using run-length encoding as `{ "/Hole@1": <count> }` (see below)
+- Elements may be `undefined` (a first-class storable; see Section 1.3)
+- Sparse arrays (arrays with holes) are supported; holes are distinct from
+  `undefined` and are represented using run-length encoding in serialized forms
+  (see below and Section 5.3 for the specific JSON encoding)
 - Non-index keys (named properties on arrays) cause rejection
 
 > **Holes vs. `undefined`.** A hole (sparse slot) is distinct from an
@@ -167,32 +169,26 @@ opaque encodings rather than recursively-processable `StorableValue`s).
 > is an explicit `undefined` — `1 in b` is `true`. Both must round-trip
 > faithfully:
 >
-> - Explicit `undefined` serializes as `{ "/Undefined@1": null }`.
-> - A hole serializes as `{ "/Hole@1": <count> }`, where `<count>` is a
->   positive integer indicating the number of consecutive holes.
+> - Explicit `undefined` elements have a dedicated tagged representation in
+>   serialized forms (distinct from `null`).
+> - Holes have their own tagged representation, using run-length encoding:
+>   each hole entry carries a positive integer count of consecutive holes.
 >
-> On deserialization, `Hole@1` elements are reconstructed as true holes (absent
+> On deserialization, hole entries are reconstructed as true holes (absent
 > indices in the resulting array, not `undefined` assignments), preserving the
-> `in`-operator distinction.
+> `in`-operator distinction. See Section 5.3 for the specific JSON encodings.
 
-> **Array serialization format.** Even when an array contains holes, it is
-> serialized as a JSON array with `{ "/Hole@1": <count> }` entries representing
-> runs of consecutive holes. Each `Hole@1` entry replaces `<count>` consecutive
-> absent indices in the serialized array. This preserves the array-as-array
-> structure in JSON while efficiently encoding sparse arrays.
->
-> Examples:
-> - `[1, , undefined, 3]` serializes as
->   `[1, { "/Hole@1": 1 }, { "/Undefined@1": null }, 3]`.
-> - `[1, , , , 5]` serializes as `[1, { "/Hole@1": 3 }, 5]`.
-> - A very sparse array like `a = []; a[1000000] = 'x'` serializes as
->   `[{ "/Hole@1": 1000000 }, "x"]`.
+> **Array serialization strategy.** Even when an array contains holes, it is
+> serialized as an array (not an object or other structure). Runs of consecutive
+> holes are replaced by a single hole marker carrying the run length, preserving
+> the array structure while efficiently encoding sparse arrays. See Section 5.3
+> for the specific JSON encoding and examples.
 
 **Objects:**
 - Plain objects only (class instances must implement the storable protocol)
 - Keys must be strings; symbol keys cause rejection
-- Values must be storable; properties whose value is `undefined` are serialized
-  with the `Undefined@1` tag (not omitted)
+- Values must be storable; properties whose value is `undefined` are preserved
+  (not omitted) — `undefined` is a first-class value, not a signal for deletion
 - No distinction between regular and null-prototype objects; reconstruction
   produces regular plain objects
 
@@ -940,6 +936,18 @@ round-trip correctly.
 // { "/BigInt@1": string }
 ```
 
+> **Sparse array encoding in JSON.** Even when an array contains holes, it is
+> serialized as a JSON array. Runs of consecutive holes are represented by
+> `Hole@1` entries, each carrying the run length as a positive integer. This
+> preserves the array-as-array structure while efficiently encoding sparse
+> arrays:
+>
+> - `[1, , undefined, 3]` serializes as
+>   `[1, { "/Hole@1": 1 }, { "/Undefined@1": null }, 3]`.
+> - `[1, , , , 5]` serializes as `[1, { "/Hole@1": 3 }, 5]`.
+> - A very sparse array like `a = []; a[1000000] = 'x'` serializes as
+>   `[{ "/Hole@1": 1000000 }, "x"]`.
+
 ### 5.4 Detection
 
 A value is a special type if:
@@ -1109,21 +1117,16 @@ export function canonicalHash(
   //                        (uint32 big-endian) and elements are hashed
   //                        in order:
   //                          if `i in array`: canonicalHash(array[i])
-  //                          else (hole run): hash(TAG_HOLE, count(N))
+  //                          else (hole run): hash(TAG_HOLE, uint32(N))
   //                        (order-preserving)
   //
   //                        Holes use run-length encoding in the hash
   //                        stream, matching the wire format: a maximal
   //                        run of N consecutive holes is hashed as a
   //                        single `TAG_HOLE` followed by the run length.
-  //                        The run length encoding is either:
-  //                          (a) uint32 big-endian (4 bytes, simple), or
-  //                          (b) unsigned LEB128 (variable-length,
-  //                              1 byte for counts 1-127, more compact
-  //                              for typical cases).
-  //                        This is an implementation decision; whichever
-  //                        is chosen must be used consistently. A single
-  //                        hole is `hash(TAG_HOLE, count(1))`.
+  //                        The run length is encoded as uint32
+  //                        big-endian (4 bytes). A single hole is
+  //                        `hash(TAG_HOLE, uint32(1))`.
   //
   //                        Runs MUST be maximal — consecutive holes are
   //                        always coalesced into a single TAG_HOLE entry
@@ -1134,7 +1137,7 @@ export function canonicalHash(
   //
   //                        When hashing from the wire format, each
   //                        `Hole@1` entry maps directly to one
-  //                        `TAG_HOLE + count(N)` in the hash (since
+  //                        `TAG_HOLE + uint32(N)` in the hash (since
   //                        the wire format also uses maximal runs).
   //                        When hashing from an in-memory array, the
   //                        implementation must count consecutive absent
@@ -1279,11 +1282,10 @@ spec from being implementable.
 - **Exact canonical hash specification**: Precise byte-level specification of
   the hash algorithm (type tags, encoding of each type, handling of special
   cases like `-0` normalization). This should be specified as a separate
-  document or appendix before the hashing implementation begins. One open
-  sub-decision: `TAG_HOLE`'s run-length count encoding — uint32 big-endian
-  (fixed 4 bytes, simple) vs. unsigned LEB128 (variable-length, 1 byte for
-  counts 1-127, more compact for typical cases). The choice does not affect
-  semantics but must be consistent across all implementations.
+  document or appendix before the hashing implementation begins. (Note:
+  `TAG_HOLE`'s run-length count encoding is now specified as uint32 big-endian;
+  see Section 6.3. Consider unsigned LEB128 as a future optimization once
+  measurement data is available to assess its impact.)
 
 - **Migration path**: Out of scope for this spec. The detailed migration plan
   (sequencing of flag introductions, criteria for graduating each flag to
