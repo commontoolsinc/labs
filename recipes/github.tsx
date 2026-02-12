@@ -97,6 +97,7 @@ const recipeSchema = {
   },
   title: "GitHub Commits",
   description: "Fetch commits from the specified GitHub repository.",
+  required: ["owner", "repo"],
 } as const satisfies JSONSchema;
 
 const CommitSchema = {

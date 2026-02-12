@@ -328,7 +328,7 @@ declare module "commontools" {
   interface PatternFunction {
     <IS extends JSONSchema = JSONSchema, OS extends JSONSchema = JSONSchema>(
       fn: (
-        input: OpaqueRef<Required<Schema<IS>>> & {
+        input: OpaqueRef<Schema<IS>> & {
           [SELF]: OpaqueRef<Schema<OS>>;
         },
       ) => Opaque<Schema<OS>>,
@@ -343,7 +343,7 @@ declare module "commontools" {
     <S extends JSONSchema>(
       argumentSchema: S,
       fn: (
-        input: OpaqueRef<Required<SchemaWithoutCell<S>>> & {
+        input: OpaqueRef<SchemaWithoutCell<S>> & {
           [SELF]: OpaqueRef<any>;
         },
       ) => any,
@@ -352,7 +352,7 @@ declare module "commontools" {
     <S extends JSONSchema, R>(
       argumentSchema: S,
       fn: (
-        input: OpaqueRef<Required<SchemaWithoutCell<S>>> & {
+        input: OpaqueRef<SchemaWithoutCell<S>> & {
           [SELF]: OpaqueRef<R>;
         },
       ) => Opaque<R>,
@@ -362,7 +362,7 @@ declare module "commontools" {
       argumentSchema: S,
       resultSchema: RS,
       fn: (
-        input: OpaqueRef<Required<SchemaWithoutCell<S>>> & {
+        input: OpaqueRef<SchemaWithoutCell<S>> & {
           [SELF]: OpaqueRef<SchemaWithoutCell<RS>>;
         },
       ) => Opaque<SchemaWithoutCell<RS>>,
