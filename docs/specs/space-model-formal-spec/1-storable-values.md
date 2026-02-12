@@ -46,7 +46,7 @@ type StorableValue =
   | boolean
   | number    // finite only; `NaN` and `Infinity` rejected
   | string
-  | undefined // deletion at top level; absent in objects; `null` in arrays
+  | undefined // first-class storable; requires tagged representation in formats lacking native `undefined`
   | bigint    // large integers
 
   // (b) Built-in JS types with derived StorableInstance form (Section 1.4)
@@ -70,18 +70,23 @@ type StorableValue =
 
 | Type | Constraints | Notes |
 |------|-------------|-------|
-| `null` | None | JSON null |
+| `null` | None | The null value |
 | `boolean` | None | `true` or `false` |
 | `number` | Must be finite | `-0` normalized to `0`; `NaN`/`Infinity` rejected |
 | `string` | None | Unicode text |
-| `undefined` | Context-dependent | Top-level: deletion. Object property: absent. Array element: `null` (see note below) |
-| `bigint` | None | Serialized as string in JSON encoding |
+| `undefined` | None | First-class storable; see note below |
+| `bigint` | None | Large integers; see Section 5.3 for JSON encoding |
 
-> **`undefined` semantics:** The context-dependent behavior of `undefined` is
-> preserved from the current implementation: at top level it signals deletion
-> (removing a cell's value), as an object property value it means that property
-> is absent (omitted during serialization), and as an array element it is
-> converted to `null` (since JSON arrays cannot represent `undefined`).
+> **`undefined` as a first-class storable.** `undefined` is a first-class
+> storable value that round-trips faithfully through serialization. Because most
+> wire formats (including JSON) have no native `undefined` representation, the
+> serialization system uses a dedicated tagged form for `undefined` — the same
+> tagged form regardless of context (array element, object property value, or
+> top-level value). See Section 5.3 for the specific JSON encoding. Deletion
+> semantics (e.g., removing a cell's value when `undefined` is written at top
+> level) are an application-level concern, not a serialization concern: the
+> serializer faithfully records `undefined` and the application layer interprets
+> the result.
 
 > **`-0` normalization:** Negative zero (`-0`) is normalized to positive zero
 > (`0`) during storable-value conversion (i.e., `toStorableValue()`), before the
@@ -93,9 +98,8 @@ type StorableValue =
 > **Future: `-0` and non-finite numbers.** The current design normalizes `-0`
 > and rejects `NaN`/`Infinity`/`-Infinity`. Because the serialization system
 > uses typed tags (Section 5), a future version could represent these values
-> with full fidelity (e.g., `{ "/NegZero@1": null }`, `{ "/NaN@1": null }`,
-> `{ "/Infinity@1": "+" }`) without ambiguity. This option is preserved by the
-> architecture but not currently needed.
+> with full fidelity via dedicated type tags, without ambiguity. This option is
+> preserved by the architecture but not currently needed.
 
 ### 1.4 Built-in JS Types
 
@@ -144,29 +148,47 @@ Reconstruction for these types is also defined:
 representations do not follow the deconstructed-state model (their payloads are
 opaque encodings rather than recursively-processable `StorableValue`s).
 
-| Type | JSON Encoding | Notes |
-|------|---------------|-------|
-| `Uint8Array` | `{ "/Bytes@1": "base64..." }` | Base64-encoded binary data. |
-| `Date` | `{ "/Date@1": "ISO-8601-string" }` | ISO 8601 UTC format. |
+| Type | Serialization Strategy | Notes |
+|------|------------------------|-------|
+| `Uint8Array` | Base64-encoded binary data | See Section 5.3 for JSON encoding. |
+| `Date` | ISO 8601 UTC string | See Section 5.3 for JSON encoding. |
 
 ### 1.5 Recursive Containers
 
 **Arrays:**
-- Must be dense (no holes)
-- Must not contain `undefined` elements (converted to `null` during storage)
+- May be dense or sparse
+- Elements may be `undefined` (a first-class storable; see Section 1.3)
+- Sparse arrays (arrays with holes) are supported; holes are distinct from
+  `undefined` and are represented using run-length encoding in serialized forms
+  (see below and Section 5.3 for the specific JSON encoding)
 - Non-index keys (named properties on arrays) cause rejection
-- Sparse arrays are densified during conversion (`undefined` -> `null`)
 
-> **Future: explicit `undefined` in arrays.** A future version could preserve
-> explicitly-set `undefined` elements in arrays (as distinct from `null`), using
-> a tagged representation (e.g., `{ "/Undefined@1": null }`). Sparse arrays
-> (holes) are less likely to be worth preserving, but could be supported
-> similarly. Neither is currently needed.
+> **Holes vs. `undefined`.** A hole (sparse slot) is distinct from an
+> explicitly-set `undefined` element. Given `const a = [1, , 3]`, index `1` is
+> a hole — `1 in a` is `false`. Given `const b = [1, undefined, 3]`, index `1`
+> is an explicit `undefined` — `1 in b` is `true`. Both must round-trip
+> faithfully:
+>
+> - Explicit `undefined` elements have a dedicated tagged representation in
+>   serialized forms (distinct from `null`).
+> - Holes have their own tagged representation, using run-length encoding:
+>   each hole entry carries a positive integer count of consecutive holes.
+>
+> On deserialization, hole entries are reconstructed as true holes (absent
+> indices in the resulting array, not `undefined` assignments), preserving the
+> `in`-operator distinction. See Section 5.3 for the specific JSON encodings.
+
+> **Array serialization strategy.** Even when an array contains holes, it is
+> serialized as an array (not an object or other structure). Runs of consecutive
+> holes are replaced by a single hole marker carrying the run length, preserving
+> the array structure while efficiently encoding sparse arrays. See Section 5.3
+> for the specific JSON encoding and examples.
 
 **Objects:**
 - Plain objects only (class instances must implement the storable protocol)
 - Keys must be strings; symbol keys cause rejection
-- Values must be storable
+- Values must be storable; properties whose value is `undefined` are preserved
+  (not omitted) — `undefined` is a first-class value, not a signal for deletion
 - No distinction between regular and null-prototype objects; reconstruction
   produces regular plain objects
 
@@ -655,12 +677,10 @@ export function serialize(
   }
 
   // --- `undefined` ---
-  // `undefined` is not a valid `SerializedForm` (`JsonValue`). Per Section 1.3,
-  // it becomes `null` in arrays, is omitted for object properties (handled by
-  // the caller's `val !== undefined` check), and signals deletion at top level.
-  // In all cases the serialized representation is `null`.
+  // Serialized as a tagged type. Per Section 1.3, `undefined` always uses its
+  // dedicated tagged representation regardless of context.
   if (value === undefined) {
-    return null;
+    return context.encode('Undefined@1', null);
   }
 
   // --- Primitives ---
@@ -671,16 +691,36 @@ export function serialize(
   }
 
   // --- Arrays ---
+  // Sparse arrays are supported: runs of consecutive holes (absent indices)
+  // are serialized as a single `Hole@1` entry whose state is the run length
+  // (a positive integer). This is distinct from explicit `undefined`
+  // (serialized as `Undefined@1`). See Section 1.5.
   if (Array.isArray(value)) {
-    return value.map((element) => serialize(element, context)) as SerializedForm;
+    const result: SerializedForm[] = [];
+    let i = 0;
+    while (i < value.length) {
+      if (!(i in value)) {
+        // Count consecutive holes starting at index `i`.
+        let count = 0;
+        while (i < value.length && !(i in value)) {
+          count++;
+          i++;
+        }
+        result.push(context.encode('Hole@1', count));
+      } else {
+        result.push(serialize(value[i], context));
+        i++;
+      }
+    }
+    return result as SerializedForm;
   }
 
   // --- Plain objects ---
+  // All enumerable own properties are serialized, including those whose value
+  // is `undefined` (which serializes as `Undefined@1` per Section 1.3).
   const result: Record<string, SerializedForm> = {};
   for (const [key, val] of Object.entries(value as Record<string, StorableValue>)) {
-    if (val !== undefined) {
-      result[key] = serialize(val, context);
-    }
+    result[key] = serialize(val, context);
   }
 
   // Apply `/object` escaping per Section 5.6: if the result has exactly one
@@ -707,6 +747,17 @@ export function deserialize(
   const decoded = context.decode(data);
   if (decoded !== null) {
     const { tag, state } = decoded;
+
+    // `Undefined@1`: stateless type whose reconstruction produces the JS
+    // value `undefined`.
+    if (tag === 'Undefined@1') {
+      return undefined;
+    }
+
+    // `Hole@1` is not valid outside of array deserialization; if encountered
+    // at top level or in an object, treat as an unknown type for safety.
+    // (Array deserialization handles `Hole@1` inline — see below.)
+
     const cls = context.getClassFor(tag);
     const deserializedState = deserialize(state, context, runtime); // recursive
     if (cls) {
@@ -725,9 +776,36 @@ export function deserialize(
     return data;
   }
 
-  // Arrays: recursively deserialize elements.
+  // Arrays: recursively deserialize elements. `Hole@1` entries use
+  // run-length encoding — the state is a positive integer indicating how
+  // many consecutive holes to skip. Those indices are left absent in the
+  // result array, creating true holes.
   if (Array.isArray(data)) {
-    return Object.freeze(data.map((element) => deserialize(element, context, runtime)));
+    // First pass: compute the logical length (sum of run lengths for
+    // `Hole@1` entries plus one for each non-hole entry).
+    let logicalLength = 0;
+    for (const entry of data) {
+      const entryDecoded = context.decode(entry);
+      if (entryDecoded !== null && entryDecoded.tag === 'Hole@1') {
+        logicalLength += entryDecoded.state as number;
+      } else {
+        logicalLength++;
+      }
+    }
+
+    const result = new Array(logicalLength);
+    let targetIndex = 0;
+    for (const entry of data) {
+      const entryDecoded = context.decode(entry);
+      if (entryDecoded !== null && entryDecoded.tag === 'Hole@1') {
+        // Skip `state` indices — leave them absent, creating true holes.
+        targetIndex += entryDecoded.state as number;
+      } else {
+        result[targetIndex] = deserialize(entry, context, runtime);
+        targetIndex++;
+      }
+    }
+    return Object.freeze(result);
   }
 
   // Plain objects: recursively deserialize values, then freeze.
@@ -824,6 +902,15 @@ round-trip correctly.
 // Tag: "Error@1"
 // { "/Error@1": { name: string, message: string, stack?: string, cause?: ..., ... } }
 
+// Undefined (stateless -- value is null)
+// Tag: "Undefined@1"
+// { "/Undefined@1": null }
+
+// Array holes (run-length encoded; value is a positive integer; only valid
+// inside arrays)
+// Tag: "Hole@1"
+// { "/Hole@1": <count> }   e.g. { "/Hole@1": 1 }, { "/Hole@1": 5 }
+
 // Stream markers (stateless -- value is null)
 // Tag: "Stream@1"
 // { "/Stream@1": null }
@@ -848,6 +935,18 @@ round-trip correctly.
 // Tag: "BigInt@1"
 // { "/BigInt@1": string }
 ```
+
+> **Sparse array encoding in JSON.** Even when an array contains holes, it is
+> serialized as a JSON array. Runs of consecutive holes are represented by
+> `Hole@1` entries, each carrying the run length as a positive integer. This
+> preserves the array-as-array structure while efficiently encoding sparse
+> arrays:
+>
+> - `[1, , undefined, 3]` serializes as
+>   `[1, { "/Hole@1": 1 }, { "/Undefined@1": null }, 3]`.
+> - `[1, , , , 5]` serializes as `[1, { "/Hole@1": 3 }, 5]`.
+> - A very sparse array like `a = []; a[1000000] = 'x'` serializes as
+>   `[{ "/Hole@1": 1000000 }, "x"]`.
 
 ### 5.4 Detection
 
@@ -1001,6 +1100,7 @@ export function canonicalHash(
   // TAG_ARRAY      = 0x08
   // TAG_OBJECT     = 0x09
   // TAG_STORABLE   = 0x0A
+  // TAG_HOLE       = 0x0B
   //
   // Implementation feeds type-tagged data into the hasher:
   //
@@ -1012,8 +1112,36 @@ export function canonicalHash(
   // - `undefined`:         hash(TAG_UNDEFINED)
   // - `Uint8Array`:        hash(TAG_BYTES, rawBytes)
   // - `Date`:              hash(TAG_DATE, int64MillisSinceEpoch)
-  // - array:               hash(TAG_ARRAY, length, ...canonicalHash(element))
+  // - array:               hash(TAG_ARRAY, length, ...elementHash)
+  //                        where `length` is the logical array length
+  //                        (uint32 big-endian) and elements are hashed
+  //                        in order:
+  //                          if `i in array`: canonicalHash(array[i])
+  //                          else (hole run): hash(TAG_HOLE, uint32(N))
   //                        (order-preserving)
+  //
+  //                        Holes use run-length encoding in the hash
+  //                        stream, matching the wire format: a maximal
+  //                        run of N consecutive holes is hashed as a
+  //                        single `TAG_HOLE` followed by the run length.
+  //                        The run length is encoded as uint32
+  //                        big-endian (4 bytes). A single hole is
+  //                        `hash(TAG_HOLE, uint32(1))`.
+  //
+  //                        Runs MUST be maximal — consecutive holes are
+  //                        always coalesced into a single TAG_HOLE entry
+  //                        so the hash is canonical. (An implementation
+  //                        must not split a run of 10 holes into two
+  //                        runs of 5; this would produce a different
+  //                        hash.)
+  //
+  //                        When hashing from the wire format, each
+  //                        `Hole@1` entry maps directly to one
+  //                        `TAG_HOLE + uint32(N)` in the hash (since
+  //                        the wire format also uses maximal runs).
+  //                        When hashing from an in-memory array, the
+  //                        implementation must count consecutive absent
+  //                        indices to form maximal runs.
   // - object:              hash(TAG_OBJECT, sortedKeys, ...canonicalHash(value))
   //                        (keys sorted lexicographically by UTF-8)
   // - `StorableInstance`:  hash(TAG_STORABLE, typeTag, canonicalHash(deconstructedState))
@@ -1027,7 +1155,16 @@ export function canonicalHash(
   //             where elements are hashed in insertion order
   //
   // Each type is tagged to prevent collisions between types with
-  // identical content representations.
+  // identical content representations. In particular, holes (TAG_HOLE),
+  // `undefined` (TAG_UNDEFINED), and `null` (TAG_NULL) all produce
+  // distinct hashes, ensuring `[1, , 3]`, `[1, undefined, 3]`, and
+  // `[1, null, 3]` are distinguishable by hash.
+  //
+  // Note: The canonical hash is a function of the logical value, not
+  // any particular wire format. Implementations that hash from an
+  // in-memory array and implementations that hash from the wire
+  // format must produce identical hashes. Both use maximal-run RLE
+  // for holes in the hash stream.
 }
 ```
 
@@ -1145,7 +1282,10 @@ spec from being implementable.
 - **Exact canonical hash specification**: Precise byte-level specification of
   the hash algorithm (type tags, encoding of each type, handling of special
   cases like `-0` normalization). This should be specified as a separate
-  document or appendix before the hashing implementation begins.
+  document or appendix before the hashing implementation begins. (Note:
+  `TAG_HOLE`'s run-length count encoding is now specified as uint32 big-endian;
+  see Section 6.3. Consider unsigned LEB128 as a future optimization once
+  measurement data is available to assess its impact.)
 
 - **Migration path**: Out of scope for this spec. The detailed migration plan
   (sequencing of flag introductions, criteria for graduating each flag to
