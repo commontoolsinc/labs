@@ -9,6 +9,7 @@ import {
   Stream,
   UI,
   type VNode,
+  wish,
   Writable,
 } from "commontools";
 
@@ -495,6 +496,14 @@ type SortMode = "stars" | "growth" | "name";
 
 export default pattern<StarTrackerInput, StarTrackerOutput>(
   ({ repos, githubToken }) => {
+    const tokenWish = wish<{ token: string }>({ query: "#githubToken" });
+
+    const effectiveToken = computed(() => {
+      const wished = tokenWish.result?.token;
+      if (wished) return wished;
+      return githubToken;
+    });
+
     const addText = Writable.of("");
     const sortMode = Writable.of<SortMode>("stars");
 
@@ -565,6 +574,7 @@ export default pattern<StarTrackerInput, StarTrackerOutput>(
                 </ct-tab-list>
               </ct-tabs>
             </ct-hstack>
+            {tokenWish}
           </ct-vstack>
 
           <ct-vscroll flex showScrollbar fadeEdges>
@@ -577,7 +587,7 @@ export default pattern<StarTrackerInput, StarTrackerOutput>(
                     <RepoCard
                       owner={entry.owner}
                       repo={entry.repo}
-                      githubToken={githubToken}
+                      githubToken={effectiveToken}
                     />
                   ))
               )}
