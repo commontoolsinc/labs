@@ -40,7 +40,11 @@ self.addEventListener("message", async (event: MessageEvent) => {
       throw new Error("WorkerRuntime not initialized.");
     }
     if (worker.isDisposed()) {
-      throw new Error("WorkerRuntime is disposed.");
+      // After disposal, silently ack any late-arriving requests.
+      // Components may still be unsubscribing or finishing in-flight
+      // operations during teardown — no point erroring on these.
+      self.postMessage({ msgId });
+      return;
     }
 
     const response = await worker.handleRequest(request);
