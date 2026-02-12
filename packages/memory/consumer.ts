@@ -454,6 +454,7 @@ export interface MemoryConsumer<Space extends MemorySpace>
       UCAN<ConsumerCommandInvocation<Protocol>>
     > {
   as: Signer;
+  cancel(): void;
 }
 
 export interface MemorySpaceSession<Space extends MemorySpace = MemorySpace> {

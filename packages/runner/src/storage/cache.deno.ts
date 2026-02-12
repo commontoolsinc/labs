@@ -47,8 +47,7 @@ export class StorageManagerEmulator extends BaseStorageManager {
 
   override async close() {
     await super.close();
-    // deno-lint-ignore no-explicit-any
-    (this.#session as any)?.cancel?.();
+    this.#session?.cancel();
   }
 }
 
