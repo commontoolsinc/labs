@@ -134,68 +134,9 @@ export function setParentPointers(node: ts.Node, parent?: ts.Node): void {
   ts.forEachChild(node, (child) => setParentPointers(child, node));
 }
 
-/**
- * Check if a type is a union that includes undefined.
- * When a property type is `T | undefined`, it's considered optional for JSON/runtime semantics.
- *
- * This aligns with schema-generator's treatment: JSON doesn't distinguish between absent and undefined.
- */
-function isUnionWithUndefined(type: ts.Type): boolean {
-  if (!(type.flags & ts.TypeFlags.Union)) {
-    return false;
-  }
-  const unionType = type as ts.UnionType;
-  return unionType.types.some((t) => (t.flags & ts.TypeFlags.Undefined) !== 0);
-}
-
-/**
- * Centralized optionality check for properties and symbols.
- * Returns true if the property is optional by ANY of these criteria:
- * 1. Declaration has `?` token (most reliable - e.g., `foo?: T`)
- * 2. Symbol has Optional flag (fallback for case 1)
- * 3. Type is a union with undefined (e.g., `foo: T | undefined`)
- *
- * This aligns with schema-generator's JSON/runtime semantics where absent and undefined are equivalent.
- *
- * Note: We check the declaration's questionToken first because SymbolFlags.Optional
- * is not always set correctly by the TypeScript compiler.
- *
- * @param symbol - The property symbol (may be undefined)
- * @param type - The property type (may be undefined)
- * @returns true if the property is optional by any criterion
- */
-export function isOptionalProperty(
-  symbol: ts.Symbol | undefined,
-  type: ts.Type | undefined,
-): boolean {
-  // Check declaration's questionToken (most reliable)
-  if (symbol) {
-    const declarations = symbol.getDeclarations();
-    if (declarations && declarations.length > 0) {
-      for (const decl of declarations) {
-        if (
-          ts.isPropertySignature(decl) || ts.isPropertyDeclaration(decl)
-        ) {
-          if (decl.questionToken) {
-            return true;
-          }
-        }
-      }
-    }
-
-    // Also check the SymbolFlags.Optional as a fallback
-    if ((symbol.flags & ts.SymbolFlags.Optional) !== 0) {
-      return true;
-    }
-  }
-
-  // Check if type is T | undefined
-  if (type && isUnionWithUndefined(type)) {
-    return true;
-  }
-
-  return false;
-}
+// Import and re-export the shared optionality check from schema-generator
+import { isOptionalProperty } from "@commontools/schema-generator/property-optionality";
+export { isOptionalProperty };
 
 /**
  * Check if a property access expression refers to an optional property.

@@ -645,7 +645,25 @@ export function hasArrayTypeArgument(
         const innerType = typeRef.typeArguments[0];
         if (!innerType) return false;
         // Check if inner type is an array or tuple
-        return checker.isArrayType(innerType) || checker.isTupleType(innerType);
+        if (checker.isArrayType(innerType) || checker.isTupleType(innerType)) {
+          return true;
+        }
+        // Handle T[] | undefined (from optional WishState properties):
+        // strip undefined from the union and check if the remainder is an array
+        if (innerType.isUnion()) {
+          const nonUndefined = innerType.types.filter(
+            (t) => !(t.flags & ts.TypeFlags.Undefined),
+          );
+          const sole = nonUndefined[0];
+          if (
+            nonUndefined.length === 1 && sole &&
+            (checker.isArrayType(sole) ||
+              checker.isTupleType(sole))
+          ) {
+            return true;
+          }
+        }
+        return false;
       }
     }
   }

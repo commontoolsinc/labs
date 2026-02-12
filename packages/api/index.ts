@@ -848,8 +848,11 @@ type OpaqueRefInner<T> = [T] extends
   : [T] extends [object] ? { [K in keyof T]: OpaqueRef<T[K]> }
   // For nullable types (T | null | undefined), extract and map the non-null part
   : [NonNullable<T>] extends [never] ? T
-  // Handle nullable branded cells (e.g., (OpaqueCell<X> & X) | undefined) - don't wrap
-  : [NonNullable<T>] extends [AnyBrandedCell<any>] ? T
+  // Handle nullable branded cells (e.g., (OpaqueRef<X> | undefined) from .find() on proxy arrays)
+  // Use NonNullable<T> instead of T to avoid leaking null/undefined into the
+  // OpaqueCell<T> & OpaqueRefInner<T> intersection, where TypeScript's
+  // intersection simplification would erase them (object & undefined = never).
+  : [NonNullable<T>] extends [AnyBrandedCell<any>] ? NonNullable<T>
   : [NonNullable<T>] extends [Array<infer U>] ? Array<OpaqueRef<U>>
   : [NonNullable<T>] extends [object]
     ? { [K in keyof NonNullable<T>]: OpaqueRef<NonNullable<T>[K]> }

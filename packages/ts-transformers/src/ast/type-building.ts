@@ -107,6 +107,19 @@ export function buildTypeElementsFromCaptureTree(
         if (isOptionalPropertyAccess(childNode.expression, checker)) {
           questionToken = factory.createToken(ts.SyntaxKind.QuestionToken);
         }
+      } else if (currentType) {
+        // For non-property-access expressions (e.g., local variables),
+        // check if the type itself is T | undefined at the top level.
+        // This handles cases like destructured optional properties where
+        // the variable's own type is a union with undefined.
+        //
+        // Note: We intentionally do NOT unwrap OpaqueCell/Cell to check
+        // inner types. Cell<T | undefined> means the cell exists but holds
+        // a nullable value — the cell itself is always present and should
+        // be required in the schema.
+        if (isOptionalProperty(undefined, currentType)) {
+          questionToken = factory.createToken(ts.SyntaxKind.QuestionToken);
+        }
       }
     } else if (childNode.properties.size > 0) {
       // Intermediate node - need to get type to check optionality
