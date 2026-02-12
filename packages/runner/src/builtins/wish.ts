@@ -671,7 +671,7 @@ export function wish(
           tx,
           {
             result: undefined,
-            candidates: undefined,
+            candidates: [],
             error: errorMsg,
             [UI]: errorUI(errorMsg),
           } satisfies WishState<any>,
@@ -755,7 +755,7 @@ export function wish(
             tx,
             {
               result: undefined,
-              candidates: undefined,
+              candidates: [],
               error: errorMsg,
               [UI]: errorUI(errorMsg),
             } satisfies WishState<any>,
@@ -778,7 +778,7 @@ export function wish(
         tx,
         {
           result: undefined,
-          candidates: undefined,
+          candidates: [],
           error: errorMsg,
           [UI]: errorUI(errorMsg),
         } satisfies WishState<any>,

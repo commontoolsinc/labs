@@ -1662,10 +1662,11 @@ export type WishParams = {
 };
 
 export type WishState<T> = {
+  // A failed wish should have result of undefined and candidates of []
   result: T | undefined;
-  candidates: T[] | undefined;
-  error: any;
-  [UI]: VNode | undefined;
+  candidates: T[];
+  error?: any;
+  [UI]?: VNode;
 };
 
 export type NavigateToFunction = (cell: OpaqueRef<any>) => OpaqueRef<boolean>;
