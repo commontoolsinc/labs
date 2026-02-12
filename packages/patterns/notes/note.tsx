@@ -100,32 +100,6 @@ const handleBacklinkClick = handler<
 
 // NOTE: goToParent converted to action inside pattern
 
-// Handler to navigate to markdown viewer
-// NOTE: Must be module-scope handler because actions can't close over SELF (runtime bug)
-const goToViewerHandler = handler<
-  void,
-  {
-    title: Writable<string>;
-    content: Writable<string>;
-    backlinks: Writable<MentionablePiece[]>;
-    noteId: string;
-    self: NotePiece;
-  }
->((_, { title, content, backlinks, noteId, self }) => {
-  return navigateTo(
-    NoteMd({
-      note: {
-        title,
-        content,
-        backlinks,
-        noteId,
-      },
-      sourceNoteRef: self as NotePiece,
-      content,
-    }),
-  );
-});
-
 // ===== Utility functions =====
 
 // Grep function for patternTool - filters content lines by query
@@ -210,13 +184,19 @@ const Note = pattern<NoteInput, NoteOutput>(
       if (p) navigateTo(p);
     });
 
-    // Bind the module-scope handler with current note data
-    const goToViewer = goToViewerHandler({
-      title,
-      content,
-      backlinks,
-      noteId,
-      self,
+    const goToViewer = action(() => {
+      return navigateTo(
+        NoteMd({
+          note: {
+            title,
+            content,
+            backlinks,
+            noteId,
+          },
+          sourceNoteRef: self as NotePiece,
+          content,
+        }),
+      );
     });
 
     // Create new note action - closes over allPieces and parentNotebook
