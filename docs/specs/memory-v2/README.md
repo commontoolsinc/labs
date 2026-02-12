@@ -8,19 +8,19 @@ transactional, content-addressed store that underlies the Common Tools runtime.
 1. **Clean break** — No backward compatibility with the v1 database, protocol,
    or client code. Fresh start.
 2. **Boring nomenclature** — Replace the cute v1 terms (`the`, `of`, `since`,
-   `cause`) with standard ones (`id`, `version`, `parent`). Drop the `the`
+   `cause`) with standard ones (`id`, `seq`, `parent`). Drop the `the`
    dimension entirely (it was always `application/json`).
 3. **Incremental changes** — Transactions support patches (JSON Patch + splice
    extension), not just whole-document replacement. Patches are stored as-is and
    replayed on read, with periodic snapshots for efficiency.
 4. **Content-addressed blobs** — Immutable, write-once binary data with mutable
    metadata (IFC labels). Stored separately from entities.
-5. **Point-in-time retrieval** — Read any entity's state at any version number
+5. **Point-in-time retrieval** — Read any entity's state at any seq number
    on any branch.
 6. **Branching** — Lightweight branches with isolation, merging, and conflict
    detection. Branches share the fact history (O(1) creation).
 7. **Optimistic commit model** — Local commits are synchronous and optimistic.
-   The server confirms asynchronously, with version-based validation (replacing
+   The server confirms asynchronously, with seq-based validation (replacing
    strict CAS). See §03 for the confirmed/pending model.
 8. **Schema-based traversal** — Graph queries follow JSON Schema-defined
    references, reusing `traverse.ts` patterns (cycle detection, schema
@@ -32,7 +32,7 @@ transactional, content-addressed store that underlies the Common Tools runtime.
 |---------|---------|-------------|
 | `the` | *(dropped)* | Was always `application/json`. No type dimension in v2. |
 | `of` | `id` | Entity identifier (URI) |
-| `since` | `version` | Monotonic sequence number (Lamport clock) |
+| `since` | `seq` | Monotonic sequence number (Lamport clock) |
 | `cause` | `parent` | Reference to previous fact in causal chain |
 | `is` | `value` | The JSON data |
 | `Unclaimed` | `Empty` | Genesis state before any writes |
@@ -56,7 +56,7 @@ transactional, content-addressed store that underlies the Common Tools runtime.
 │                                                              │
 │  ┌──────────────┐  ┌──────────────┐  ┌───────────────────┐  │
 │  │  Confirmed   │  │   Pending    │  │   Client Library   │  │
-│  │  (version,   │  │  (stacked    │  │  connect()         │  │
+│  │  (seq,       │  │  (stacked    │  │  connect()         │  │
 │  │   hash,      │  │   commits,   │  │  session.transact()│  │
 │  │   value)     │  │   provisional│  │  session.query()   │  │
 │  │              │  │   hashes)    │  │  session.subscribe()│ │
@@ -74,7 +74,7 @@ transactional, content-addressed store that underlies the Common Tools runtime.
 │                           │                                  │
 │  ┌────────────────────────▼────────────────────────────────┐ │
 │  │                   Commit Engine                         │ │
-│  │  Version-based validation, atomic application,          │ │
+│  │  Seq-based validation, atomic application,               │ │
 │  │  conflict detection, branch-aware commits               │ │
 │  └────────────────────────┬────────────────────────────────┘ │
 │                           │                                  │
@@ -159,7 +159,7 @@ interface EntityDocument {
 }
 
 // Validation rule (replaces strict CAS):
-//   For each entity read: read.version >= server.head[entity].version
+//   For each entity read: read.seq >= server.head[entity].seq
 ```
 
 **Two kinds of "subscription"**: The v2 protocol defines *data subscriptions*

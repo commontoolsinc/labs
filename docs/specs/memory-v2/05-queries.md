@@ -8,7 +8,7 @@ reads, subscriptions, and classification-based access control.
 
 There are two query types, each with increasing expressiveness:
 
-1. **Simple queries** -- match entities by id and filter by version range.
+1. **Simple queries** -- match entities by id and filter by seq range.
 2. **Schema queries** -- follow references between entities guided by a JSON
    Schema, reusing the traversal patterns from `traverse.ts`.
 
@@ -19,7 +19,7 @@ subscriptions.
 // Base query options shared by all query types
 interface QueryOptions {
   branch?: BranchName;     // Target branch (default branch if omitted)
-  atVersion?: number;      // Point-in-time read (latest if omitted)
+  atSeq?: number;          // Point-in-time read (latest if omitted)
 }
 ```
 
@@ -27,7 +27,7 @@ interface QueryOptions {
 
 ## 5.2 Simple Queries
 
-A simple query matches entities by id and optionally filters by version range.
+A simple query matches entities by id and optionally filters by seq range.
 This is the lightweight path for clients that know exactly which entities they
 need.
 
@@ -59,19 +59,19 @@ When using the wildcard `"*"` selector, the server MAY impose a fan-out limit
 exceeded, the server returns a paginated result (see section 5.8) rather than an
 error.
 
-### 5.2.2 Version Filtering
+### 5.2.2 Seq Filtering
 
 The `since` parameter enables incremental synchronization. When provided, the
-server returns only facts with `version > since`.
+server returns only facts with `seq > since`.
 
 ```typescript
 interface IncrementalQuery extends Query {
-  since?: number;  // Only return facts newer than this version
+  since?: number;  // Only return facts newer than this seq
 }
 ```
 
 This is the primary mechanism for keeping a client in sync: after an initial
-full query, subsequent queries use the highest version seen as the `since`
+full query, subsequent queries use the highest seq seen as the `since`
 value.
 
 ### 5.2.3 Simple Query Execution
@@ -83,8 +83,8 @@ Given a `Query`, the server:
    - If the key is `"*"`, iterate all entities on the branch.
    - If the key is a specific id, look up that entity's head on the branch.
 3. For each matched entity, read its current head fact.
-4. If `since` is provided, skip entities whose head version is <= `since`.
-5. If `atVersion` is provided, reconstruct the entity state at that version
+4. If `since` is provided, skip entities whose head seq is <= `since`.
+5. If `atSeq` is provided, reconstruct the entity state at that seq
    (see section 5.5).
 6. Apply classification checks (see section 5.6).
 7. Assemble and return a `FactSet`.
@@ -363,7 +363,7 @@ Given a `SchemaQuery`, the server:
    d. Records all visited entities in the schema tracker.
 4. Collects all visited entities and their values into the result `FactSet`.
 5. If `since` is provided, filters the result to only include entities whose
-   version exceeds `since`.
+   seq exceeds `since`.
 6. Returns the `FactSet` along with the schema tracker (for subscription
    setup).
 
@@ -398,11 +398,11 @@ Client                                Server
 For simple queries, the server:
 
 1. Executes the initial query and returns the result.
-2. Records the query's entity match patterns and the highest version sent.
+2. Records the query's entity match patterns and the highest seq sent.
 3. On each commit:
    a. Check if any committed facts match the subscription's patterns.
    b. If so, send only the changed facts as an incremental `FactSet`.
-   c. Update the highest version sent.
+   c. Update the highest seq sent.
 
 Matching uses the same rules as `subscription.ts`: an entity matches if its id
 (or the wildcard `*`) intersects with the subscription pattern.
@@ -437,8 +437,8 @@ re-evaluates a single entity's outgoing references under a given schema.
 The server tracks what has been sent to each subscription to avoid sending
 duplicate data:
 
-- **Version watermark**: for simple subscriptions, the highest version sent acts
-  as a watermark. Only facts with version > watermark are sent.
+- **Seq watermark**: for simple subscriptions, the highest seq sent acts
+  as a watermark. Only facts with seq > watermark are sent.
 - **Sent entity set**: for schema subscriptions, the server additionally tracks
   which entities have been sent in this subscription session. When
   `excludeSent: true` is set in the query, entities already sent are omitted
@@ -459,7 +459,7 @@ interface SubscriptionState {
   id: string;                                // Unique subscription identifier
   query: Query | SchemaQuery;                // The subscribed query
   branch: BranchName;                        // Target branch
-  lastVersionSent: number;                   // Version watermark
+  lastSeqSent: number;                       // Seq watermark
   schemaTracker?: SchemaTracker;             // For schema subscriptions
   sentEntities?: Set<string>;                // For excludeSent optimization
 }
@@ -469,31 +469,31 @@ interface SubscriptionState {
 
 ## 5.5 Point-in-Time Queries
 
-A point-in-time query reconstructs the state of entities at a specific version
-on a specific branch. This is specified via the `atVersion` field in
+A point-in-time query reconstructs the state of entities at a specific seq
+on a specific branch. This is specified via the `atSeq` field in
 `QueryOptions`.
 
 ### 5.5.1 Reconstruction Algorithm
 
-For each matched entity at `atVersion`:
+For each matched entity at `atSeq`:
 
-1. **Find the nearest snapshot** at or before the target version. A snapshot is
-   a stored full-value checkpoint of the entity at a specific version.
-2. **Collect patches** between the snapshot version and the target version.
-   These are the incremental operations (JSON Patch operations) stored as facts
-   with version in the range `(snapshotVersion, targetVersion]`.
-3. **Replay patches** on the snapshot value in version order to reconstruct the
-   entity's state at the target version.
-4. If the entity was deleted (a `Delete` fact) at or before the target version,
+1. **Find the nearest snapshot** at or before the target seq. A snapshot is
+   a stored full-value checkpoint of the entity at a specific seq.
+2. **Collect patches** between the snapshot seq and the target seq.
+   These are the incremental operations (patch operations) stored as facts
+   with seq in the range `(snapshotSeq, targetSeq]`.
+3. **Replay patches** on the snapshot value in seq order to reconstruct the
+   entity's state at the target seq.
+4. If the entity was deleted (a `Delete` fact) at or before the target seq,
    return the tombstone state.
 
 ```
-state(entity, targetVersion):
-  snapshot = findLatestSnapshot(entity, branch, targetVersion)
-  patches = findPatches(entity, branch, snapshot.version, targetVersion)
+state(entity, targetSeq):
+  snapshot = findLatestSnapshot(entity, branch, targetSeq)
+  patches = findPatches(entity, branch, snapshot.seq, targetSeq)
 
   value = snapshot.value
-  for each patch in patches (ordered by version ascending):
+  for each patch in patches (ordered by seq ascending):
     if patch is Delete:
       return DeletedState
     value = applyPatch(value, patch.operations)
@@ -504,18 +504,18 @@ state(entity, targetVersion):
 
 - **Snapshot frequency**: the server periodically creates snapshots to bound the
   number of patches that must be replayed. A reasonable default is one snapshot
-  every N versions per entity (e.g. N=100).
+  every N seqs per entity (e.g. N=100).
 - **No snapshot available**: if no snapshot exists for an entity, reconstruction
   starts from the entity's first `Write` fact (which is always a full value,
   acting as an implicit snapshot).
-- **Version 0**: querying at version 0 returns the initial state (typically
+- **Seq 0**: querying at seq 0 returns the initial state (typically
   empty for all entities).
 
 ### 5.5.3 Point-in-Time with Schema Queries
 
 Point-in-time reads compose with schema queries. The schema traversal operates
 on the reconstructed values, following references to other entities that are
-themselves reconstructed at the same target version. This provides a consistent
+themselves reconstructed at the same target seq. This provides a consistent
 snapshot of the entire reachable graph at a single point in time.
 
 ---
@@ -607,7 +607,7 @@ interface FactSet {
 // A single fact entry in the result
 interface FactEntry {
   value?: JSONValue;   // The entity value (absent for deletes/tombstones)
-  version: number;     // The version when this fact was committed
+  seq: number;         // The seq when this fact was committed
   hash: Reference;     // Hash of the current head fact
 }
 ```
@@ -649,8 +649,8 @@ interface PaginatedResult {
 ### 5.8.3 Pagination Semantics
 
 - The cursor is opaque to the client. The server may encode the last entity id
-  and version, or any other state needed to resume iteration.
-- Pagination is **version-consistent**: the server pins the query to the version
+  and seq, or any other state needed to resume iteration.
+- Pagination is **seq-consistent**: the server pins the query to the seq
   at which the first page was served, so subsequent pages reflect the same
   snapshot.
 - Schema queries paginate over root entities. Linked entities reachable from a
@@ -668,6 +668,7 @@ default branch is used.
 ```typescript
 interface QueryOptions {
   branch?: BranchName;  // Omit for default branch
+  atSeq?: number;       // Point-in-time read (latest if omitted)
 }
 ```
 
@@ -683,8 +684,8 @@ queries targeting each branch.
 
 ### 5.9.3 Branch + Point-in-Time
 
-Branch and version interact naturally: `{ branch: "feature-x", atVersion: 42 }`
-reads the state of the `feature-x` branch as it was at version 42. The
+Branch and seq interact naturally: `{ branch: "feature-x", atSeq: 42 }`
+reads the state of the `feature-x` branch as it was at seq 42. The
 reconstruction algorithm (5.5) scopes its fact lookup to the specified branch.
 
 ---

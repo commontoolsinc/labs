@@ -32,8 +32,8 @@ mapping from entity id to the current head fact for that entity.
 interface Branch {
   name: BranchName;              // Unique name within the space
   parentBranch: BranchName;      // Branch this was forked from
-  forkVersion: number;           // Version at which the fork occurred
-  headVersion: number;           // Latest version committed on this branch
+  forkSeq: number;               // Seq at which the fork occurred
+  headSeq: number;               // Latest seq committed on this branch
   createdAt: number;             // Timestamp of branch creation
   status: "active" | "deleted";  // Soft-delete flag
 }
@@ -52,14 +52,14 @@ interface BranchHead {
   branch: BranchName;
   entityId: EntityId;
   factHash: Reference;      // Hash of the current head fact
-  version: number;          // Version at which this head was set
+  seq: number;              // Seq at which this head was set
 }
 ```
 
 At branch creation time, the new branch's head table is a logical copy of the
-parent branch's head table at the fork version. No physical copy occurs -- the
+parent branch's head table at the fork seq. No physical copy occurs -- the
 server resolves heads by checking the branch's own head table first, then
-falling back to the parent branch's heads at the fork version.
+falling back to the parent branch's heads at the fork seq.
 
 ### 6.2.2 Storage Implications
 
@@ -78,7 +78,7 @@ See `02-storage.md` for the physical table layouts that support this model.
 
 ## 6.3 Branch Creation
 
-A new branch is created from an existing branch at a specific version.
+A new branch is created from an existing branch at a specific seq.
 
 ### 6.3.1 API
 
@@ -86,7 +86,7 @@ A new branch is created from an existing branch at a specific version.
 interface CreateBranchRequest {
   name: BranchName;              // Must be unique within the space
   fromBranch?: BranchName;       // Default: default branch
-  atVersion?: number;            // Default: head version of fromBranch
+  atSeq?: number;                // Default: headSeq of fromBranch
 }
 
 interface CreateBranchResult {
@@ -96,28 +96,28 @@ interface CreateBranchResult {
 
 ### 6.3.2 Semantics
 
-When `branch.create({ name, fromBranch, atVersion })` is called:
+When `branch.create({ name, fromBranch, atSeq })` is called:
 
 1. **Validate** that `name` does not already exist (including soft-deleted
    branches -- names are permanently consumed).
 2. **Resolve the parent branch.** If `fromBranch` is omitted, use the default
    branch.
-3. **Resolve the fork version.** If `atVersion` is omitted, use the parent
-   branch's current `headVersion`. If `atVersion` is specified, it must be
-   <= the parent branch's `headVersion`.
+3. **Resolve the fork seq.** If `atSeq` is omitted, use the parent
+   branch's current `headSeq`. If `atSeq` is specified, it must be
+   <= the parent branch's `headSeq`.
 4. **Create the `Branch` record:**
    ```
    Branch {
      name: name,
      parentBranch: fromBranch,
-     forkVersion: atVersion,
-     headVersion: atVersion,
+     forkSeq: atSeq,
+     headSeq: atSeq,
      createdAt: now(),
      status: "active"
    }
    ```
 5. The new branch starts with the same entity heads as the parent branch at the
-   fork version. No head records are physically copied -- head resolution falls
+   fork seq. No head records are physically copied -- head resolution falls
    back to the parent (see 6.2.1).
 
 ### 6.3.3 Fork from a Fork
@@ -153,26 +153,26 @@ branch-scoped heads:
 
 ```
 For each entity touched by a commit:
-  commit.reads[entity].version >= branch.head[entity].version
+  commit.reads[entity].seq >= branch.head[entity].seq
 ```
 
 This means a commit is validated against the entity state **on the target
 branch**, not against any other branch. Two branches can independently modify
 the same entity without conflict until a merge is attempted.
 
-### 6.4.3 Version Assignment
+### 6.4.3 Seq Assignment
 
-All branches share the Space's global version counter (Lamport clock). A commit
-on branch A advances the global version just as a commit on the default branch
-would. This ensures versions are globally ordered across all branches, which is
+All branches share the Space's global seq counter (Lamport clock). A commit
+on branch A advances the global seq just as a commit on the default branch
+would. This ensures seqs are globally ordered across all branches, which is
 essential for point-in-time queries.
 
 ```
 commit on branch "feature-x":
-  globalVersion++
+  globalSeq++
   for each fact in commit:
-    fact.version = globalVersion
-  branch["feature-x"].headVersion = globalVersion
+    fact.seq = globalSeq
+  branch["feature-x"].headSeq = globalSeq
 ```
 
 ---
@@ -188,19 +188,19 @@ subscriptions -- respect the branch scope.
 When reading an entity on a branch:
 
 1. Check the branch's own head table for an explicit head entry.
-2. If not found, check the parent branch's head table at the fork version.
+2. If not found, check the parent branch's head table at the fork seq.
 3. Recurse up the parent chain until a head is found or the default branch is
    reached.
 
 ```
 resolveHead(branch, entityId):
   head = branch.heads[entityId]
-  if head exists and head.version <= branch.headVersion:
+  if head exists and head.seq <= branch.headSeq:
     return head
   if branch.parentBranch exists:
     // Only consider parent's state at or before the fork point
     return resolveHead(branch.parentBranch, entityId,
-                       atVersion = branch.forkVersion)
+                       atSeq = branch.forkSeq)
   return null  // Entity does not exist
 ```
 
@@ -234,7 +234,7 @@ This isolation guarantee is fundamental and absolute:
 ### 6.6.1 Shared History
 
 While branches are isolated going forward from the fork point, they share all
-history prior to the fork. Facts committed before `forkVersion` are visible on
+history prior to the fork. Facts committed before `forkSeq` are visible on
 both the parent and child branch.
 
 ```
@@ -278,15 +278,15 @@ relative to their common ancestor (the fork point).
 
 ```
 merge(source, target):
-  forkVersion = source.forkVersion  // The version at which source diverged
+  forkSeq = source.forkSeq  // The seq at which source diverged
   conflicts = []
   fastForwards = []
 
   // Find all entities modified on the source branch since fork
-  for each entity modified on source since forkVersion:
+  for each entity modified on source since forkSeq:
     sourceHead = source.heads[entity]
     targetHead = resolveHead(target, entity)
-    ancestorHead = resolveHeadAtVersion(target, entity, forkVersion)
+    ancestorHead = resolveHeadAtSeq(target, entity, forkSeq)
 
     if targetHead == ancestorHead:
       // Target hasn't changed this entity -- fast-forward
@@ -335,15 +335,15 @@ is noted as a natural evolution of the merge system.
 
 A successful merge creates a **merge commit** on the target branch. This commit:
 
-- Records the source branch name and its head version at merge time.
+- Records the source branch name and its head seq at merge time.
 - Updates the target branch's head table for all fast-forwarded entities.
-- Advances the target branch's `headVersion` to the new global version.
+- Advances the target branch's `headSeq` to the new global seq.
 
 ```typescript
 interface MergeCommitData {
   type: "merge";
   sourceBranch: BranchName;
-  sourceVersion: number;       // Source branch's headVersion at merge time
+  sourceSeq: number;           // Source branch's headSeq at merge time
   entities: EntityId[];        // Entities that were fast-forwarded
 }
 ```
@@ -363,8 +363,8 @@ interface BranchConflict {
   sourceValue: JSONValue | null;    // Value on source branch (null = deleted)
   targetValue: JSONValue | null;    // Value on target branch (null = deleted)
   ancestorValue: JSONValue | null;  // Value at fork point (null = didn't exist)
-  sourceVersion: number;            // Version of source's head fact
-  targetVersion: number;            // Version of target's head fact
+  sourceSeq: number;                // Seq of source's head fact
+  targetSeq: number;                // Seq of target's head fact
 }
 ```
 
@@ -431,7 +431,7 @@ interface DeleteBranchRequest {
 - The branch name is permanently consumed -- a new branch with the same name
   cannot be created.
 - Facts committed on the branch remain in the shared fact history. They may be
-  referenced by other branches or by point-in-time queries that target a version
+  referenced by other branches or by point-in-time queries that target a seq
   before the deletion.
 - Child branches (branches forked from the deleted branch) remain functional.
   Their `parentBranch` reference still points to the deleted branch, and head
@@ -447,31 +447,31 @@ branches:
 ```typescript
 interface BranchPointInTimeQuery extends QueryOptions {
   branch: BranchName;
-  atVersion: number;
+  atSeq: number;
 }
 ```
 
 ### 6.10.1 Semantics
 
-`query({ branch: "feature-x", atVersion: 42 })` reads the state of the
-`feature-x` branch as it was at version 42:
+`query({ branch: "feature-x", atSeq: 42 })` reads the state of the
+`feature-x` branch as it was at seq 42:
 
-1. **Version bounds**: `atVersion` must be within the branch's version range.
-   - For the default branch, any version from 0 to `headVersion` is valid.
-   - For a non-default branch, valid versions are those in the range
-     `[forkVersion, headVersion]` (the branch's own commits) plus any version
-     in `[0, forkVersion]` (inherited from parent).
+1. **Seq bounds**: `atSeq` must be within the branch's seq range.
+   - For the default branch, any seq from 0 to `headSeq` is valid.
+   - For a non-default branch, valid seqs are those in the range
+     `[forkSeq, headSeq]` (the branch's own commits) plus any seq
+     in `[0, forkSeq]` (inherited from parent).
 2. **Reconstruction**: the reconstruction algorithm from `05-queries.md` section
    5.5 applies, scoped to the branch. Only facts committed on the branch (or
-   inherited from ancestors before fork) with version <= `atVersion` are
+   inherited from ancestors before fork) with seq <= `atSeq` are
    considered.
 
 ### 6.10.2 Interaction with Merge Commits
 
 After a merge, the target branch contains facts from the source branch. A
-point-in-time query at a version before the merge will not see the merged facts
-(they were committed at the merge version). A query at or after the merge
-version will see them.
+point-in-time query at a seq before the merge will not see the merged facts
+(they were committed at the merge seq). A query at or after the merge
+seq will see them.
 
 ---
 
@@ -494,8 +494,8 @@ interface ListBranchesResult {
 interface BranchInfo {
   name: BranchName;
   parentBranch: BranchName;
-  forkVersion: number;
-  headVersion: number;
+  forkSeq: number;
+  headSeq: number;
   createdAt: number;
   status: "active" | "deleted";
   entityCount?: number;        // Number of entities with explicit heads

@@ -21,6 +21,11 @@ deliver real-time updates.
 server upgrades the HTTP request and establishes a session. The session persists
 until either side closes the connection.
 
+**Protocol Version Negotiation**: The client MUST declare its protocol version
+in the **first WebSocket message** after connection. The server MUST reject
+connections with an unsupported version. The server MUST NOT silently fall back
+to an older protocol version.
+
 ```
 Client                              Server
   |                                    |
@@ -29,8 +34,20 @@ Client                              Server
   |  101 Switching Protocols           |
   |  ←-------------------------------- |
   |                                    |
+  |  { "protocol": "memory/v2" }       |
+  |  --------------------------------→ |
+  |  { "ok": true }                    |
+  |  ←-------------------------------- |
+  |                                    |
   |  ← bidirectional message stream →  |
   |                                    |
+```
+
+If the server does not support the requested protocol version, it responds with
+an error and closes the connection:
+
+```json
+{ "error": { "name": "UnsupportedProtocol", "supported": ["memory/v2"] } }
 ```
 
 **Message flow**: Messages are JSON-encoded strings. The client sends
@@ -126,6 +143,55 @@ type Receipt<Result, Effect> = TaskReturn<Result> | TaskEffect<Effect>;
 type InvocationId = `job:${string}`;
 ```
 
+### 4.2.3 Batch Invocations
+
+Multiple invocations can be batched into a single signed message. This
+optimizes signature overhead — one UCANTO authorization covers all invocations
+in the batch.
+
+```typescript
+// Client sends a batch of invocations with a single authorization
+interface BatchMessage {
+  invocations: Command[];        // Array of commands to execute
+  authorization: Authorization;  // Single signature covering all invocations
+}
+```
+
+The `authorization.access` proof contains references to ALL invocations in the
+batch:
+
+```typescript
+// Access.authorize() already accepts arrays of invocation references
+const refs = invocations.map(inv => refer(inv));
+const { ok: auth } = await Access.authorize(refs, signer);
+// auth.access = { "<ref1>": {}, "<ref2>": {}, ... }
+// auth.signature = single signature over all refs
+```
+
+**Semantics:**
+
+- Each invocation in the batch **succeeds or fails independently**. Invocation
+  1 succeeding does not depend on invocation 2.
+- The server responds with per-invocation receipts:
+
+```typescript
+// Server response for a batch
+interface BatchReceipt {
+  receipts: Array<{
+    invocation: InvocationId;  // Correlates to a specific invocation
+    result: TaskReturn<any>;   // Per-invocation result (ok or error)
+  }>;
+}
+```
+
+- **Batching optimizes signatures, not atomicity.** If you need atomicity
+  across multiple operations, put them in a single transaction (single
+  invocation), not a batch of transactions.
+- Any command type can be included in a batch (transact, query, subscribe,
+  etc.), though the primary use case is batching transactions.
+- The server MUST verify the batch signature before processing any invocation.
+  If the signature is invalid, all invocations in the batch are rejected.
+
 ---
 
 ## 4.3 Commands
@@ -165,13 +231,13 @@ interface TransactCommand {
 
 // Success response
 interface TransactSuccess {
-  ok: Commit;  // The recorded commit, including version assignment
+  ok: Commit;  // The recorded commit, including seq assignment
 }
 
 // Commit — the server's response after a successful transaction
 interface Commit {
   hash: Reference;       // Content hash of the commit
-  version: number;       // Server-assigned version number
+  seq: number;           // Server-assigned seq number
   branch: BranchId;      // Branch the commit was applied to
   facts: StoredFact[];   // Facts produced by this commit
   createdAt: string;     // ISO-8601 timestamp
@@ -184,7 +250,7 @@ type TransactError =
   | { error: AuthorizationError };
 ```
 
-The `Commit` in the success response includes the version number, the facts
+The `Commit` in the success response includes the seq number, the facts
 produced, the commit hash, and the target branch. This gives the client
 everything it needs to move the affected entities from pending to confirmed.
 
@@ -200,14 +266,14 @@ interface QueryCommand {
   sub: SpaceId;
   args: {
     select: Selector;     // Pattern to match entities
-    since?: number;        // Only return facts newer than this version
+    since?: number;        // Only return facts newer than this seq
     branch?: BranchId;     // Target branch (default if omitted)
   };
 }
 
 // Success response
 interface QuerySuccess {
-  ok: FactSet;  // Set of matching facts with their current values and versions
+  ok: FactSet;  // Set of matching facts with their current values and seqs
 }
 
 // Error responses
@@ -217,8 +283,8 @@ type QueryError =
 ```
 
 The `since` parameter enables efficient incremental reads: "give me everything
-that changed since version N." The server returns only facts with
-`version > since`.
+that changed since seq N." The server returns only facts with
+`seq > since`.
 
 ### 4.3.3 `query.subscribe` — Subscribe to Changes
 
@@ -233,7 +299,7 @@ interface SubscribeCommand {
   sub: SpaceId;
   args: {
     select: Selector;     // Pattern to match
-    since?: number;        // Initial cursor
+    since?: number;        // Initial seq cursor
     branch?: BranchId;
   };
 }
@@ -296,7 +362,7 @@ interface GraphQueryCommand {
   sub: SpaceId;
   args: {
     selectSchema: SchemaSelector;  // Starting points + schema for traversal
-    since?: number;                // Version cursor
+    since?: number;                // Seq cursor
     subscribe?: boolean;           // If true, also subscribe to changes
     excludeSent?: boolean;         // If true, omit already-sent entities
     branch?: BranchId;
@@ -335,7 +401,7 @@ interface CreateBranchCommand {
   args: {
     name: BranchName;            // Name for the new branch
     fromBranch?: BranchName;     // Branch to fork from (default branch if omitted)
-    atVersion?: number;          // Version to fork at (head if omitted)
+    atSeq?: number;              // Seq to fork at (head if omitted)
   };
 }
 
@@ -343,7 +409,7 @@ interface CreateBranchResult {
   ok: {
     name: BranchName;
     forkedFrom: BranchName;
-    atVersion: number;
+    atSeq: number;
   };
 }
 
@@ -393,7 +459,7 @@ interface ListBranchesResult {
 
 interface BranchInfo {
   name: BranchName;
-  headVersion: number;
+  headSeq: number;
   createdAt: string;
   deletedAt?: string;
 }
@@ -477,20 +543,28 @@ The **subject** (`sub`) of every command is a space DID. The server checks
 whether the issuer (`iss`) is authorized to perform the requested operation
 on that space.
 
-Authorization sources, checked in order:
+**Authorization check algorithm:**
 
-1. **Identity**: The issuer IS the space (the space's DID matches the issuer's
-   DID). This grants full owner access.
-2. **Delegation**: The issuer presents a UCAN delegation chain from the space
-   owner granting specific capabilities. *(Future — not yet implemented.)*
-3. **ACL**: The space has an Access Control List entity that maps DIDs to
-   capability levels.
+1. **Identity check**: If `iss === sub` (the issuer IS the space), grant full
+   owner access. This is always allowed regardless of ACL state.
+2. **Delegation check**: If the issuer presents a UCAN delegation chain from
+   the space owner granting specific capabilities. *(Future — not yet
+   implemented.)*
+3. **ACL check**: Look up the ACL entity for the space and check the issuer's
+   capability level.
+
+#### ACL Entity Structure
+
+The ACL is stored as a **regular entity** within the space:
+
+- **Entity ID**: The space DID itself (e.g., `did:key:z6Mk...`)
+- **Value**: An `EntityDocument` with a `value` property containing the ACL map
 
 ```typescript
 type Capability = "READ" | "WRITE" | "OWNER";
 
 type ACL = {
-  [did: DID | "*"]?: Capability;
+  [principal: DID | "*"]?: Capability;
 };
 ```
 
@@ -504,10 +578,54 @@ are hierarchical: `OWNER` implies `WRITE`, which implies `READ`.
 | `branch/create`, `branch/merge`, `branch/delete` | `WRITE` |
 | ACL modifications | `OWNER` |
 
-The ACL is stored as a regular entity at the well-known ID
-`urn:acl:<space-did>`. It is a JSON object mapping DIDs to capability levels.
-ACL modifications require `OWNER` capability and follow the normal commit path
-(transact with a set operation on the ACL entity).
+ACL modifications follow the normal commit path (transact with a set operation
+on the ACL entity) and require `OWNER` capability.
+
+#### Space Bootstrap (ACL Initialization)
+
+A new space requires a **bootstrap transaction** to set the initial ACL. This
+transaction is signed with the **space keypair** (not the user keypair):
+
+```typescript
+// Bootstrap transaction — signed by the space itself
+{
+  invocation: {
+    cmd: "/memory/transact",
+    iss: spaceDID,              // Space signs its own bootstrap
+    sub: spaceDID,
+    args: {
+      reads: {
+        confirmed: [{ id: spaceDID, seq: 0 }],
+        pending: []
+      },
+      operations: [{
+        op: "set",
+        id: spaceDID,            // Entity ID = space DID
+        value: {
+          value: {               // EntityDocument envelope
+            [userDID]: "OWNER",
+            "*": "READ"
+          }
+        }
+      }]
+    }
+  },
+  authorization: spaceKeypairSignature
+}
+```
+
+The server grants access because `iss === sub` (identity check passes). This
+sets the ACL entity to grant `OWNER` to the user who created the space, and
+`READ` to everyone else.
+
+**Bootstrap constraints:**
+
+- The bootstrap transaction MUST be the first transaction on a new space.
+- It CANNOT be batched with other transactions, because the bootstrap uses
+  the space keypair as signer while subsequent transactions use the user
+  keypair. Batch signing produces a single signature from a single signer.
+- After bootstrap, all subsequent transactions are signed by the user keypair
+  and authorized via the ACL.
 
 ---
 
@@ -520,7 +638,7 @@ pushes an update to the subscriber.
 
 The subscription update includes:
 
-1. The **commit** that produced the changes (for provenance and version tracking)
+1. The **commit** that produced the changes (for provenance and seq tracking)
 2. The **revisions** — the new facts matching the subscription's selector
 
 ```typescript
@@ -548,15 +666,15 @@ updates entirely.
 
 ### 4.6.3 Deduplication
 
-The server tracks the last version sent to each subscription. If a fact was
-already sent in a previous update (same entity, same or older version), it is
+The server tracks the last seq sent to each subscription. If a fact was
+already sent in a previous update (same entity, same or older seq), it is
 not sent again. This prevents duplicate deliveries when multiple subscriptions
 overlap.
 
 ```typescript
 // Server-side per-session tracking
 interface SessionState {
-  // Last version sent for each entity (keyed by entityId)
+  // Last seq sent for each entity (keyed by entityId)
   lastRevision: Map<EntityId, number>;
 }
 ```
@@ -596,7 +714,7 @@ within the same call stack).
 Facts with classification labels may be redacted before delivery. If a
 subscriber lacks the appropriate claims for a classification level, the
 server omits the `value` field from the fact (delivering the metadata —
-entity ID, version, parent — without the content).
+entity ID, seq, parent — without the content).
 
 ---
 
@@ -703,14 +821,14 @@ interface SpaceSession {
   // Query entities
   query(args: {
     select: Selector;
-    since?: number;
+    since?: number;    // Seq cursor
     branch?: BranchId;
   }): Promise<Result<QueryView, QueryError>>;
 
   // Schema-driven query with optional subscription
   queryGraph(args: {
     selectSchema: SchemaSelector;
-    since?: number;
+    since?: number;    // Seq cursor
     subscribe?: boolean;
     excludeSent?: boolean;
     branch?: BranchId;

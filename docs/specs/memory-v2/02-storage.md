@@ -73,6 +73,10 @@ Statement caching is an implementation optimization and is not specified here.
 
 ## 3. Tables
 
+**Naming convention**: The SQL schema uses `version` as the column name for the
+space-global Lamport clock. In the TypeScript interfaces (§01-§06), this field
+is named `seq` for consistency. The mapping is: `SQL version` = `TypeScript seq`.
+
 ### 3.1 `value` — Content-Addressed Value Storage
 
 Stores the serialized JSON content of entity values (both full values and patch
@@ -145,7 +149,7 @@ CREATE INDEX idx_fact_branch ON fact (branch);
 | `value_ref` | Points to the value table. For `set`: the full JSON value. For `patch`: the JSON-serialized patch operation list. For `delete`: the `__empty__` sentinel. |
 | `parent` | Hash of the previous fact for this entity. `NULL` when this is the entity's first fact (parent is the Empty reference, which is implicit). |
 | `branch` | Branch this fact was committed on. Denormalized from the commit for efficient branch-scoped queries. Default `''` (main branch). |
-| `version` | Space-global Lamport clock, assigned at commit time. All facts in the same commit share the same version. |
+| `version` | Space-global Lamport clock (= `seq` in TypeScript), assigned at commit time. All facts in the same commit share the same version. |
 | `commit_ref` | Hash of the commit that included this fact. |
 | `fact_type` | Discriminant: `'set'`, `'patch'`, or `'delete'`. |
 
@@ -203,9 +207,9 @@ CREATE INDEX idx_commit_branch ON commit (branch);
 | Column | Description |
 |--------|-------------|
 | `hash` | Content hash of the commit's logical content. |
-| `version` | The Lamport clock value assigned to this commit. Matches the `version` on all facts in this commit. |
+| `version` | The Lamport clock value (= `seq` in TypeScript) assigned to this commit. Matches the `version` on all facts in this commit. |
 | `branch` | Which branch this commit targets. |
-| `reads` | JSON object recording the version of each entity that was read as a precondition for this commit. Used for optimistic concurrency validation (see §03 Commit Model). |
+| `reads` | JSON object recording the seq of each entity that was read as a precondition for this commit. Used for optimistic concurrency validation (see §03 Commit Model). |
 | `created_at` | Wall-clock time for diagnostics. Not used for ordering. |
 
 ### 3.5 `snapshot` — Periodic Full-Value Materializations
@@ -533,7 +537,7 @@ function readEntity(
 
 ### 5.2 Point-in-Time Read
 
-Read an entity's value at a specific version on a branch:
+Read an entity's value at a specific seq (SQL `version` column) on a branch:
 
 ```sql
 -- Find the fact that was the head at the target version
@@ -728,11 +732,11 @@ INSERT INTO commit (hash, version, branch, reads)
 VALUES (:commit_hash, :version, :branch_name, :reads_json);
 ```
 
-### 8.3 Branch Version Numbering
+### 8.3 Branch Seq Numbering
 
-Each branch maintains its own `head_version` in the `branch` table. When a
-commit is applied to a branch, `head_version` is set to the commit's global
-version number:
+Each branch maintains its own `head_version` (= `headSeq` in TypeScript) in
+the `branch` table. When a commit is applied to a branch, `head_version` is
+set to the commit's global seq number:
 
 ```sql
 UPDATE branch
@@ -740,10 +744,10 @@ SET head_version = :version
 WHERE name = :branch_name;
 ```
 
-The Lamport clock (`version` on facts and commits) is space-global — it
-increases across all branches. The branch's `head_version` tracks the latest
-global version applied to that branch, ensuring that version numbers are
-globally unique and orderable, even across branches.
+The Lamport clock (`version` column on facts and commits, = `seq` in
+TypeScript) is space-global — it increases across all branches. The branch's
+`head_version` tracks the latest global seq applied to that branch, ensuring
+that seq numbers are globally unique and orderable, even across branches.
 
 ### 8.4 Branch Deletion
 
@@ -769,16 +773,16 @@ Point-in-time reads combine fact lookup and snapshot-based reconstruction.
 ### 9.1 Algorithm
 
 ```typescript
-function readAtVersion(
+function readAtSeq(
   branch: string,
   entityId: EntityId,
-  targetVersion: number,
+  targetSeq: number,       // maps to SQL `version` column
 ): JSONValue | null {
-  // 1. Find the latest fact for this entity at or before targetVersion
-  const latestFact = findFactAtVersion(entityId, targetVersion);
-  if (!latestFact) return null;  // Entity didn't exist at this version
+  // 1. Find the latest fact for this entity at or before targetSeq
+  const latestFact = findFactAtSeq(entityId, targetSeq);
+  if (!latestFact) return null;  // Entity didn't exist at this seq
 
-  // 2. If it's a delete, entity was deleted at this version
+  // 2. If it's a delete, entity was deleted at this seq
   if (latestFact.factType === "delete") return null;
 
   // 3. If it's a set, return the value directly
@@ -786,19 +790,19 @@ function readAtVersion(
     return JSON.parse(latestFact.data);
   }
 
-  // 4. It's a patch — find nearest snapshot ≤ targetVersion
-  const snapshot = findNearestSnapshot(branch, entityId, targetVersion);
+  // 4. It's a patch — find nearest snapshot ≤ targetSeq
+  const snapshot = findNearestSnapshot(branch, entityId, targetSeq);
 
-  // 5. If no snapshot, find the latest set ≤ targetVersion
+  // 5. If no snapshot, find the latest set ≤ targetSeq
   const baseSet = snapshot
     ? null
-    : findLatestSetBefore(entityId, targetVersion);
+    : findLatestSetBefore(entityId, targetSeq);
 
-  const baseVersion = snapshot?.version ?? baseSet?.version ?? 0;
+  const baseSeq = snapshot?.seq ?? baseSet?.seq ?? 0;
   const baseValue = snapshot?.value ?? baseSet?.value ?? {};
 
-  // 6. Collect and apply patches from baseVersion to targetVersion
-  const patches = collectPatches(entityId, baseVersion, targetVersion);
+  // 6. Collect and apply patches from baseSeq to targetSeq
+  const patches = collectPatches(entityId, baseSeq, targetSeq);
   let value = baseValue;
   for (const patch of patches) {
     value = applyPatch(value, JSON.parse(patch.ops));

@@ -138,16 +138,16 @@ interface StoredFact {
   /** The fact itself. */
   fact: Fact;
 
-  /** Monotonic version number (Lamport clock), assigned at commit time. Per-space. */
-  version: number;
+  /** Monotonic seq number (Lamport clock), assigned at commit time. Per-space. */
+  seq: number;
 
   /** Hash of the commit that included this fact. */
   commitHash: Reference;
 }
 ```
 
-- `version` is a space-global Lamport clock that increases monotonically with
-  every commit. All facts in the same commit share the same version number.
+- `seq` is a space-global Lamport clock that increases monotonically with
+  every commit. All facts in the same commit share the same seq number.
 - `commitHash` links the fact to its containing transaction record.
 
 ### 2.5 Causal Chain
@@ -330,8 +330,17 @@ complete state. This is semantically identical to v1 assertions.
 ### 6.2 Patch (Incremental Change)
 
 A `patch` operation applies a list of fine-grained operations to the entity's
-current value. Patches use a subset of [JSON Patch (RFC 6902)](https://datatracker.ietf.org/doc/html/rfc6902)
-plus a custom `splice` extension for efficient array manipulation.
+current value. Patch operations are inspired by
+[JSON Patch (RFC 6902)](https://datatracker.ietf.org/doc/html/rfc6902) but are
+**not bound by it**. Key differences from RFC 6902:
+
+- **`add` creates intermediate parents automatically.** Writing to
+  `/person/name` creates the `person` object if it doesn't exist. Numeric path
+  segments create arrays; string segments create objects. When a schema is
+  available, it guides the choice between array and object.
+- **Custom `splice` operation** for efficient array manipulation.
+- **Future CRDT/OT operations** for collaborative text editing (e.g.,
+  `text-insert`, `text-delete`) are planned as extensions to this set.
 
 ```typescript
 /**
@@ -340,7 +349,7 @@ plus a custom `splice` extension for efficient array manipulation.
 type JSONPointer = string;
 
 /**
- * Standard JSON Patch operations (RFC 6902 subset).
+ * Patch operations (inspired by RFC 6902, not bound by it).
  */
 interface ReplaceOp {
   op: "replace";
@@ -352,6 +361,9 @@ interface AddOp {
   op: "add";
   path: JSONPointer;
   value: JSONValue;
+  // Creates intermediate parents automatically:
+  // numeric path segments → array, string segments → object,
+  // schema-guided when available.
 }
 
 interface RemoveOp {
@@ -366,8 +378,7 @@ interface MoveOp {
 }
 
 /**
- * Extension operation: array splice.
- * More efficient than expressing insert/delete as individual add/remove ops.
+ * Array splice: more efficient than individual add/remove ops.
  */
 interface SpliceOp {
   op: "splice";
@@ -423,7 +434,7 @@ value via a `value_ref` column. See §02 Storage for details.
 
 ## 7. Snapshots
 
-A **snapshot** is a materialized full value of an entity at a specific version.
+A **snapshot** is a materialized full value of an entity at a specific seq.
 Snapshots accelerate reads by avoiding full replay of the entity's entire patch
 history.
 
@@ -432,8 +443,8 @@ interface Snapshot {
   /** The entity this snapshot is for. */
   id: EntityId;
 
-  /** The version (Lamport clock) at which this snapshot was taken. */
-  version: number;
+  /** The seq (Lamport clock) at which this snapshot was taken. */
+  seq: number;
 
   /** Reference to the full value in the value table. */
   valueRef: Reference;
@@ -464,16 +475,16 @@ before archiving).
 To read an entity's current value:
 
 1. Find the most recent snapshot for the entity on the target branch.
-2. Collect all `PatchWrite` facts with `version > snapshot.version` up to the
+2. Collect all `PatchWrite` facts with `seq > snapshot.seq` up to the
    head.
-3. Start from the snapshot value and apply each patch in version order.
+3. Start from the snapshot value and apply each patch in seq order.
 4. If no snapshot exists, start from the first `SetWrite` fact and replay all
    subsequent patches.
 
-For point-in-time reads at a specific version:
+For point-in-time reads at a specific seq:
 
-1. Find the most recent snapshot with `version <= targetVersion`.
-2. Collect patches in `(snapshot.version, targetVersion]`.
+1. Find the most recent snapshot with `seq <= targetSeq`.
+2. Collect patches in `(snapshot.seq, targetSeq]`.
 3. Replay from snapshot through patches.
 
 See §02 Storage for the SQL queries that implement this.
@@ -481,11 +492,11 @@ See §02 Storage for the SQL queries that implement this.
 ### 7.3 Snapshot Invariants
 
 - A snapshot's value MUST equal the result of replaying all facts from genesis
-  up to `snapshot.version`.
+  up to `snapshot.seq`.
 - Snapshots are **redundant** — they can always be recomputed from the fact
   history. Deleting a snapshot never loses data; it only makes reads slower.
 - Snapshots are per-branch. A snapshot on branch A does not apply to branch B
-  unless the versions coincide exactly.
+  unless the seqs coincide exactly.
 
 ---
 
