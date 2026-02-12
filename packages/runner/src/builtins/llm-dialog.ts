@@ -97,30 +97,6 @@ function normalizeInputSchema(schemaLike: unknown): JSONSchema {
 }
 
 /**
- * Create a copy of a recipe with argumentSchema set to `true` on all node
- * modules. This means we will always pass the argument validatio in
- * instantiateJavaScriptNode that was introduced by the unified traversal
- * (5d352fc09).
- *
- * This is needed for tool call patterns because iInternal builtin nodes
- * have schema mismatches.
- *
- * Setting argumentSchema to true is safe here because this only affects the
- * ephemeral recipe copy created for this tool call invocation.
- */
-function prepareRecipeForToolCall(recipe: Readonly<Recipe>): Recipe {
-  return {
-    ...recipe,
-    nodes: recipe.nodes.map((node) => ({
-      ...node,
-      module: {
-        ...node.module,
-        argumentSchema: true as unknown as JSONSchema,
-      },
-    })),
-  };
-}
-/**
  * Resolve a piece's result schema similarly to PieceManager.#getResultSchema:
  * - Prefer a non-empty recipe.resultSchema if recipe is loaded
  * - Otherwise derive a simple object schema from the current value
@@ -1631,8 +1607,7 @@ async function handleInvoke(
     );
 
     if (pattern) {
-      const toolPattern = prepareRecipeForToolCall(pattern);
-      runtime.run(tx, toolPattern, { ...input, ...extraParams }, result);
+      runtime.run(tx, pattern, { ...input, ...extraParams }, result);
     } else if (handler) {
       handler.withTx(tx).send({
         ...input,
