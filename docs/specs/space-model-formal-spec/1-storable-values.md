@@ -157,8 +157,8 @@ opaque encodings rather than recursively-processable `StorableValue`s).
 - May be dense or sparse
 - Elements may be `undefined` (serialized as `{ "/Undefined@1": null }` per
   Section 1.3)
-- Sparse arrays (arrays with holes) are supported; holes are serialized as
-  `{ "/Hole@1": null }` (see below)
+- Sparse arrays (arrays with holes) are supported; holes are serialized
+  using run-length encoding as `{ "/Hole@1": <count> }` (see below)
 - Non-index keys (named properties on arrays) cause rejection
 
 > **Holes vs. `undefined`.** A hole (sparse slot) is distinct from an
@@ -168,18 +168,25 @@ opaque encodings rather than recursively-processable `StorableValue`s).
 > faithfully:
 >
 > - Explicit `undefined` serializes as `{ "/Undefined@1": null }`.
-> - A hole serializes as `{ "/Hole@1": null }`.
+> - A hole serializes as `{ "/Hole@1": <count> }`, where `<count>` is a
+>   positive integer indicating the number of consecutive holes.
 >
 > On deserialization, `Hole@1` elements are reconstructed as true holes (absent
 > indices in the resulting array, not `undefined` assignments), preserving the
 > `in`-operator distinction.
 
 > **Array serialization format.** Even when an array contains holes, it is
-> serialized as a JSON array of `length` elements, with `{ "/Hole@1": null }` at
-> each hole position. This preserves the array-as-array structure in JSON and
-> keeps the representation consistent with how other per-element tagged values
-> (like `Undefined@1`) work. Example: `[1, , undefined, 3]` serializes as
-> `[1, { "/Hole@1": null }, { "/Undefined@1": null }, 3]`.
+> serialized as a JSON array with `{ "/Hole@1": <count> }` entries representing
+> runs of consecutive holes. Each `Hole@1` entry replaces `<count>` consecutive
+> absent indices in the serialized array. This preserves the array-as-array
+> structure in JSON while efficiently encoding sparse arrays.
+>
+> Examples:
+> - `[1, , undefined, 3]` serializes as
+>   `[1, { "/Hole@1": 1 }, { "/Undefined@1": null }, 3]`.
+> - `[1, , , , 5]` serializes as `[1, { "/Hole@1": 3 }, 5]`.
+> - A very sparse array like `a = []; a[1000000] = 'x'` serializes as
+>   `[{ "/Hole@1": 1000000 }, "x"]`.
 
 **Objects:**
 - Plain objects only (class instances must implement the storable protocol)
@@ -688,17 +695,25 @@ export function serialize(
   }
 
   // --- Arrays ---
-  // Sparse arrays are supported: holes (absent indices) are serialized as
-  // `Hole@1` and are distinct from explicit `undefined` (serialized as
-  // `Undefined@1`). See Section 1.5.
+  // Sparse arrays are supported: runs of consecutive holes (absent indices)
+  // are serialized as a single `Hole@1` entry whose state is the run length
+  // (a positive integer). This is distinct from explicit `undefined`
+  // (serialized as `Undefined@1`). See Section 1.5.
   if (Array.isArray(value)) {
     const result: SerializedForm[] = [];
-    for (let i = 0; i < value.length; i++) {
+    let i = 0;
+    while (i < value.length) {
       if (!(i in value)) {
-        // Hole: index is absent from the array.
-        result.push(context.encode('Hole@1', null));
+        // Count consecutive holes starting at index `i`.
+        let count = 0;
+        while (i < value.length && !(i in value)) {
+          count++;
+          i++;
+        }
+        result.push(context.encode('Hole@1', count));
       } else {
         result.push(serialize(value[i], context));
+        i++;
       }
     }
     return result as SerializedForm;
@@ -765,17 +780,34 @@ export function deserialize(
     return data;
   }
 
-  // Arrays: recursively deserialize elements. `Hole@1` elements are
-  // reconstructed as true holes (absent indices) in the result array.
+  // Arrays: recursively deserialize elements. `Hole@1` entries use
+  // run-length encoding — the state is a positive integer indicating how
+  // many consecutive holes to skip. Those indices are left absent in the
+  // result array, creating true holes.
   if (Array.isArray(data)) {
-    const result = new Array(data.length);
-    for (let i = 0; i < data.length; i++) {
-      const elementDecoded = context.decode(data[i]);
-      if (elementDecoded !== null && elementDecoded.tag === 'Hole@1') {
-        // Leave index absent — do not assign, creating a true hole.
-        continue;
+    // First pass: compute the logical length (sum of run lengths for
+    // `Hole@1` entries plus one for each non-hole entry).
+    let logicalLength = 0;
+    for (const entry of data) {
+      const entryDecoded = context.decode(entry);
+      if (entryDecoded !== null && entryDecoded.tag === 'Hole@1') {
+        logicalLength += entryDecoded.state as number;
+      } else {
+        logicalLength++;
       }
-      result[i] = deserialize(data[i], context, runtime);
+    }
+
+    const result = new Array(logicalLength);
+    let targetIndex = 0;
+    for (const entry of data) {
+      const entryDecoded = context.decode(entry);
+      if (entryDecoded !== null && entryDecoded.tag === 'Hole@1') {
+        // Skip `state` indices — leave them absent, creating true holes.
+        targetIndex += entryDecoded.state as number;
+      } else {
+        result[targetIndex] = deserialize(entry, context, runtime);
+        targetIndex++;
+      }
     }
     return Object.freeze(result);
   }
@@ -878,9 +910,10 @@ round-trip correctly.
 // Tag: "Undefined@1"
 // { "/Undefined@1": null }
 
-// Array holes (stateless -- value is null; only valid inside arrays)
+// Array holes (run-length encoded; value is a positive integer; only valid
+// inside arrays)
 // Tag: "Hole@1"
-// { "/Hole@1": null }
+// { "/Hole@1": <count> }   e.g. { "/Hole@1": 1 }, { "/Hole@1": 5 }
 
 // Stream markers (stateless -- value is null)
 // Tag: "Stream@1"
@@ -1072,10 +1105,18 @@ export function canonicalHash(
   // - `Uint8Array`:        hash(TAG_BYTES, rawBytes)
   // - `Date`:              hash(TAG_DATE, int64MillisSinceEpoch)
   // - array:               hash(TAG_ARRAY, length, ...elementHash)
-  //                        where for each index `i` in `0..length`:
+  //                        where `length` is the logical array length
+  //                        and for each index `i` in `0..length`:
   //                          if `i in array`: canonicalHash(array[i])
   //                          else (hole):     hash(TAG_HOLE)
   //                        (order-preserving)
+  //
+  //                        Hashing always operates on the logical array,
+  //                        not the wire encoding. Each hole contributes
+  //                        one `TAG_HOLE` to the hash regardless of how
+  //                        holes are encoded on the wire (e.g., run-length
+  //                        encoding). N consecutive holes produce N
+  //                        `TAG_HOLE` entries in the hash stream.
   // - object:              hash(TAG_OBJECT, sortedKeys, ...canonicalHash(value))
   //                        (keys sorted lexicographically by UTF-8)
   // - `StorableInstance`:  hash(TAG_STORABLE, typeTag, canonicalHash(deconstructedState))
@@ -1093,6 +1134,12 @@ export function canonicalHash(
   // `undefined` (TAG_UNDEFINED), and `null` (TAG_NULL) all produce
   // distinct hashes, ensuring `[1, , 3]`, `[1, undefined, 3]`, and
   // `[1, null, 3]` are distinguishable by hash.
+  //
+  // Note: Hashing is independent of wire encoding. Even though `Hole@1`
+  // uses run-length encoding on the wire (Section 4.5), canonical hashing
+  // always hashes each hole individually — a run of N holes produces N
+  // `TAG_HOLE` entries. This ensures that the hash is a function of the
+  // logical array content, not any particular serialization format.
 }
 ```
 
