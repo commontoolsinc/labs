@@ -149,6 +149,7 @@ class MemoryConsumerSession<
   }[] = [];
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private batchStartTime: number | null = null;
+  private lastFlushTime: number | null = null;
 
   constructor(
     public as: Signer,
@@ -223,6 +224,7 @@ class MemoryConsumerSession<
 
   invoke<Ability extends string>(
     command: ConsumerCommandFor<Ability, MemoryProtocol>,
+    options?: { immediate?: boolean },
   ) {
     const invocation = ConsumerInvocation.create(
       this.as.did(),
@@ -230,7 +232,7 @@ class MemoryConsumerSession<
       this.clock.now(),
       this.ttl,
     );
-    this.execute(invocation);
+    this.execute(invocation, options);
     return invocation;
   }
 
@@ -248,6 +250,7 @@ class MemoryConsumerSession<
 
   async execute<Ability extends string>(
     invocation: ConsumerInvocation<Ability, MemoryProtocol>,
+    options?: { immediate?: boolean },
   ) {
     const queueEntry = Promise.withResolvers<void>();
     // put it in the queue immediately -- messages are sent in the order
@@ -261,6 +264,17 @@ class MemoryConsumerSession<
 
     if (this.batchStartTime === null) {
       this.batchStartTime = Date.now();
+    }
+
+    // Immediate flag or first invocation in a quiet period: flush now
+    const inCoalesceWindow = this.lastFlushTime !== null &&
+      (Date.now() - this.lastFlushTime) < Settings.batchCoalesceMs;
+    if (
+      options?.immediate ||
+      (this.pendingBatch.length === 1 && !inCoalesceWindow)
+    ) {
+      await this.flushBatch();
+      return;
     }
 
     const elapsed = Date.now() - this.batchStartTime;
@@ -286,6 +300,7 @@ class MemoryConsumerSession<
       this.debounceTimer = null;
     }
     this.batchStartTime = null;
+    this.lastFlushTime = Date.now();
 
     const batch = this.pendingBatch;
     this.pendingBatch = [];
@@ -358,6 +373,7 @@ class MemoryConsumerSession<
       this.debounceTimer = null;
     }
     this.batchStartTime = null;
+    this.lastFlushTime = null;
     this.pendingBatch = [];
     for (const queueEntry of [...this.sendQueue]) {
       // Suppress unhandled rejection for entries that may not yet be awaited
@@ -397,7 +413,10 @@ export interface MemoryConsumer<Space extends MemorySpace>
 
 export interface MemorySpaceSession<Space extends MemorySpace = MemorySpace> {
   as: Signer;
-  transact(source: Transaction<Space>["args"]): TransactionResult<Space>;
+  transact(
+    source: Transaction<Space>["args"],
+    options?: { immediate?: boolean },
+  ): TransactionResult<Space>;
   query(
     source: Query["args"] | SchemaQuery["args"],
   ): QueryView<Space, Protocol<Space>>;
@@ -414,12 +433,12 @@ class MemorySpaceConsumerSession<Space extends MemorySpace>
   ) {
     this.as = session.as;
   }
-  transact(source: Transaction["args"]) {
+  transact(source: Transaction["args"], options?: { immediate?: boolean }) {
     return this.session.invoke({
       cmd: "/memory/transact",
       sub: this.space,
       args: source,
-    });
+    }, options);
   }
   query(
     source: Query["args"] | SchemaQuery["args"],

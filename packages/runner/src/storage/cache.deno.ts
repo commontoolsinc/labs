@@ -44,6 +44,12 @@ export class StorageManagerEmulator extends BaseStorageManager {
   override subscribe(subscription: IStorageSubscription): void {
     this.#subscription.subscribe(subscription);
   }
+
+  override async close() {
+    await super.close();
+    // deno-lint-ignore no-explicit-any
+    (this.#session as any)?.cancel?.();
+  }
 }
 
 export class StorageManager extends BaseStorageManager {

@@ -266,6 +266,7 @@ export class Runtime {
     { ok: T; error?: undefined } | { ok?: undefined; error: CommitError }
   > {
     const tx = this.edit();
+    tx.tx.immediate = true;
     const result = fn(tx);
     return tx.commit().then(({ error }) => {
       if (error) {

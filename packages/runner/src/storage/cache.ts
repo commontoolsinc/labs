@@ -1104,9 +1104,10 @@ export class Replica {
     );
 
     // These push transaction that will commit desired state to a remote.
+    const immediate = source?.immediate === true;
     const commitPromise = this.remote.transact({
       changes: getChanges([...claims, ...changedFacts] as Statement[]),
-    });
+    }, immediate ? { immediate } : undefined);
     this.commitPromises.add(commitPromise);
     const result = await commitPromise;
     this.commitPromises.delete(commitPromise);

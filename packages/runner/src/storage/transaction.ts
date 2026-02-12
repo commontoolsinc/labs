@@ -69,6 +69,7 @@ export type State =
  */
 class StorageTransaction implements IStorageTransaction {
   changeGroup?: ChangeGroup;
+  immediate?: boolean;
 
   static mutate(transaction: StorageTransaction, state: State) {
     transaction.#state = state;

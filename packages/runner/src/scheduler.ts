@@ -2118,6 +2118,7 @@ export class Scheduler {
           }
         };
         const tx = this.runtime.edit();
+        tx.tx.immediate = true;
         const actionId = this.getActionId(action);
 
         try {
