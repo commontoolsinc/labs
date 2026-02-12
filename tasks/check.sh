@@ -2,7 +2,7 @@
 set -e
 shopt -s extglob nullglob
 
-DENO_VERSIONS_ALLOWED=("2.5.2" "2.6.4")
+DENO_VERSIONS_ALLOWED=("2.5.2" "2.6.4" "2.6.9")
 # This is more portable than parsing `deno --version`
 DENO_VERSION=$(echo "console.log(Deno.version.deno)" | deno run -)
 if [[ ! " ${DENO_VERSIONS_ALLOWED[@]} " =~ " ${DENO_VERSION} " ]]; then
@@ -100,6 +100,6 @@ if [[ "${GITHUB_ACTION}" != '' ]]; then
     reloadArg=(--reload)
 fi
 
-deno check "${reloadArg[@]}" "${FILES_TO_CHECK[@]}"
+DENO_V8_FLAGS="--max-old-space-size=8192" deno check "${reloadArg[@]}" "${FILES_TO_CHECK[@]}"
 
 echo "Type check complete."
