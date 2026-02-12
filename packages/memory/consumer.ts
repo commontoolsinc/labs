@@ -393,6 +393,11 @@ class MemoryConsumerSession<
     }
   }
 
+  /** Immediately flush any debounced batch without waiting for the timer. */
+  flush() {
+    return this.flushBatch();
+  }
+
   close() {
     this.cancel();
     this.controller?.terminate();
@@ -453,6 +458,7 @@ export interface MemoryConsumer<Space extends MemorySpace>
 
 export interface MemorySpaceSession<Space extends MemorySpace = MemorySpace> {
   as: Signer;
+  flush(): Promise<void>;
   transact(
     source: Transaction<Space>["args"],
     options?: { immediate?: boolean },
@@ -473,6 +479,9 @@ class MemorySpaceConsumerSession<Space extends MemorySpace>
   ) {
     this.as = session.as;
   }
+  flush() {
+    return this.session.flush();
+  }
   transact(source: Transaction["args"], options?: { immediate?: boolean }) {
     return this.session.invoke({
       cmd: "/memory/transact",
@@ -486,11 +495,13 @@ class MemorySpaceConsumerSession<Space extends MemorySpace>
     const selectSchema = ("select" in source)
       ? MemorySpaceConsumerSession.asSelectSchema(source)
       : source;
+    // Queries are always awaited by the caller, so flush immediately
+    // rather than debouncing (batching queries adds latency with no benefit).
     const query = this.session.invoke({
       cmd: "/memory/graph/query" as const,
       sub: this.space,
       args: selectSchema,
-    });
+    }, { immediate: true });
     return QueryView.create(this.session, query);
   }
 

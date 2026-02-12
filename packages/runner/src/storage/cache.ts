@@ -1882,11 +1882,13 @@ export class Provider implements IStorageProvider {
     }
   }
 
-  synced() {
-    return Promise.all([
+  async synced() {
+    // Flush any debounced batch so pending transacts start immediately.
+    await this.workspace.remote.flush();
+    await Promise.all([
       Promise.all(this.serverSubscriptions.getAllPromises()),
       Promise.all(this.workspace.commitPromises),
-    ]) as unknown as Promise<void>;
+    ]);
   }
 
   get<T extends StorableValue = StorableValue>(
