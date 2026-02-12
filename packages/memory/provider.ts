@@ -671,42 +671,75 @@ class MemoryProviderSession<
     // [INSTRUMENTATION] One-time dump of schema channels when count > 200
     if (this.schemaChannels.size > 200 && !this._schemaDumped) {
       this._schemaDumped = true;
-      const entityCounts = new Map<string, number>();
-      const typeCounts = new Map<string, number>();
       let wildcardCount = 0;
+
+      // Group subscriptions by entity, tracking unique vs duplicate schemas
+      const entitySubs = new Map<
+        string,
+        { total: number; uniqueSchemas: Set<string>; sampleSchemas: string[] }
+      >();
       for (const [_jobId, sub] of this.schemaChannels) {
         if (sub.isWildcardQuery) wildcardCount++;
         const sel = sub.invocation.args.selectSchema;
+        // Serialize the full selectSchema to check for duplicates
+        const schemaKey = JSON.stringify(sel);
         for (const of of Object.keys(sel)) {
-          entityCounts.set(of, (entityCounts.get(of) ?? 0) + 1);
-          const types = sel[of];
-          if (types && typeof types === "object") {
-            for (const the of Object.keys(types)) {
-              typeCounts.set(the, (typeCounts.get(the) ?? 0) + 1);
-            }
+          let entry = entitySubs.get(of);
+          if (!entry) {
+            entry = { total: 0, uniqueSchemas: new Set(), sampleSchemas: [] };
+            entitySubs.set(of, entry);
+          }
+          entry.total++;
+          const wasNew = !entry.uniqueSchemas.has(schemaKey);
+          entry.uniqueSchemas.add(schemaKey);
+          if (wasNew && entry.sampleSchemas.length < 3) {
+            entry.sampleSchemas.push(schemaKey);
           }
         }
       }
-      const topEntities = [...entityCounts.entries()]
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 20)
-        .map(([k, v]) => `${k.substring(0, 40)}(${v})`);
-      const topTypes = [...typeCounts.entries()]
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 10)
-        .map(([k, v]) => `${k}(${v})`);
+
+      // Sort by total count descending
+      const sorted = [...entitySubs.entries()].sort((a, b) =>
+        b[1].total - a[1].total
+      );
+
       let trackerDocCount = 0;
       let trackerTotalSelectors = 0;
       for (const [_key, selectors] of this.sharedSchemaTracker) {
         trackerDocCount++;
         trackerTotalSelectors += selectors.size;
       }
-      console.warn(
-        `[SCHEMA-DUMP] ${this.schemaChannels.size} schema channels | wildcards=${wildcardCount}\n` +
-          `  top entities: ${topEntities.join(", ")}\n` +
-          `  top types: ${topTypes.join(", ")}\n` +
-          `  sharedSchemaTracker: ${trackerDocCount} docs, ${trackerTotalSelectors} total selectors`,
-      );
+
+      const lines = [
+        `[SCHEMA-DUMP] ${this.schemaChannels.size} schema channels | wildcards=${wildcardCount}`,
+        `  sharedSchemaTracker: ${trackerDocCount} docs, ${trackerTotalSelectors} total selectors`,
+      ];
+      for (const [entity, info] of sorted.slice(0, 6)) {
+        // Collect all unique paths across all schemas for this entity
+        const allPaths = new Set<string>();
+        for (const schemaStr of info.uniqueSchemas) {
+          try {
+            const schema = JSON.parse(schemaStr);
+            for (const entityKey of Object.keys(schema)) {
+              for (const type of Object.keys(schema[entityKey])) {
+                for (const cause of Object.keys(schema[entityKey][type])) {
+                  const selector = schema[entityKey][type][cause];
+                  if (selector?.path) {
+                    allPaths.add(JSON.stringify(selector.path));
+                  }
+                }
+              }
+            }
+          } catch { /* ignore parse errors */ }
+        }
+        lines.push(
+          `  ${
+            entity.substring(0, 50)
+          }: ${info.total} subs, ${info.uniqueSchemas.size} unique schemas`,
+        );
+        lines.push(`    paths: ${[...allPaths].sort().join(", ")}`);
+      }
+      console.warn(lines.join("\n"));
     }
 
     // Extract changed document keys from transaction
