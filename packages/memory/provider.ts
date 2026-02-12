@@ -651,8 +651,9 @@ class MemoryProviderSession<
    *
    * Returns all facts that match any subscription's criteria.
    */
-  // [INSTRUMENTATION] Schema match counter
+  // [INSTRUMENTATION] Schema match counter + one-time dump flag
   private static _schemaMatchSeq = 0;
+  private _schemaDumped = false;
 
   private async getSchemaSubscriptionMatches<Space extends MemorySpace>(
     transaction: Transaction<Space>,
@@ -666,6 +667,47 @@ class MemoryProviderSession<
 
     const _t0 = performance.now();
     const _smId = ++MemoryProviderSession._schemaMatchSeq;
+
+    // [INSTRUMENTATION] One-time dump of schema channels when count > 200
+    if (this.schemaChannels.size > 200 && !this._schemaDumped) {
+      this._schemaDumped = true;
+      const entityCounts = new Map<string, number>();
+      const typeCounts = new Map<string, number>();
+      let wildcardCount = 0;
+      for (const [_jobId, sub] of this.schemaChannels) {
+        if (sub.isWildcardQuery) wildcardCount++;
+        const sel = sub.invocation.args.selectSchema;
+        for (const of of Object.keys(sel)) {
+          entityCounts.set(of, (entityCounts.get(of) ?? 0) + 1);
+          const types = sel[of];
+          if (types && typeof types === "object") {
+            for (const the of Object.keys(types)) {
+              typeCounts.set(the, (typeCounts.get(the) ?? 0) + 1);
+            }
+          }
+        }
+      }
+      const topEntities = [...entityCounts.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 20)
+        .map(([k, v]) => `${k.substring(0, 40)}(${v})`);
+      const topTypes = [...typeCounts.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10)
+        .map(([k, v]) => `${k}(${v})`);
+      let trackerDocCount = 0;
+      let trackerTotalSelectors = 0;
+      for (const [_key, selectors] of this.sharedSchemaTracker) {
+        trackerDocCount++;
+        trackerTotalSelectors += selectors.size;
+      }
+      console.warn(
+        `[SCHEMA-DUMP] ${this.schemaChannels.size} schema channels | wildcards=${wildcardCount}\n` +
+          `  top entities: ${topEntities.join(", ")}\n` +
+          `  top types: ${topTypes.join(", ")}\n` +
+          `  sharedSchemaTracker: ${trackerDocCount} docs, ${trackerTotalSelectors} total selectors`,
+      );
+    }
 
     // Extract changed document keys from transaction
     const changedDocs = this.extractChangedDocKeys(space, transaction);
