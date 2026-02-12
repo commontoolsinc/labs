@@ -420,7 +420,7 @@ export const RepoCard = pattern<RepoCardInput>(
               width: "100px",
               flexShrink: "0",
               "--ct-chart-cursor": "zoom-in",
-            }}
+            } as Record<string, string>}
           />
 
           <ct-modal $open={expanded} dismissable size="md">
