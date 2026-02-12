@@ -1111,12 +1111,20 @@ export function canonicalHash(
   //                          else (hole):     hash(TAG_HOLE)
   //                        (order-preserving)
   //
-  //                        Hashing always operates on the logical array,
-  //                        not the wire encoding. Each hole contributes
-  //                        one `TAG_HOLE` to the hash regardless of how
-  //                        holes are encoded on the wire (e.g., run-length
-  //                        encoding). N consecutive holes produce N
-  //                        `TAG_HOLE` entries in the hash stream.
+  //                        When hashing from wire format (where holes use
+  //                        run-length encoding), a `Hole@1` entry with
+  //                        run length N expands to N `TAG_HOLE` entries
+  //                        in the hash stream:
+  //
+  //                          for each wire element:
+  //                            if element is Hole@1 with state N:
+  //                              repeat N times: hash(TAG_HOLE)
+  //                            else:
+  //                              canonicalHash(deserialize(element))
+  //
+  //                        The logical length for TAG_ARRAY is the sum
+  //                        of all run lengths plus the count of non-hole
+  //                        wire elements.
   // - object:              hash(TAG_OBJECT, sortedKeys, ...canonicalHash(value))
   //                        (keys sorted lexicographically by UTF-8)
   // - `StorableInstance`:  hash(TAG_STORABLE, typeTag, canonicalHash(deconstructedState))
@@ -1135,11 +1143,11 @@ export function canonicalHash(
   // distinct hashes, ensuring `[1, , 3]`, `[1, undefined, 3]`, and
   // `[1, null, 3]` are distinguishable by hash.
   //
-  // Note: Hashing is independent of wire encoding. Even though `Hole@1`
-  // uses run-length encoding on the wire (Section 4.5), canonical hashing
-  // always hashes each hole individually — a run of N holes produces N
-  // `TAG_HOLE` entries. This ensures that the hash is a function of the
-  // logical array content, not any particular serialization format.
+  // Note: The canonical hash is a function of the logical value, not
+  // any particular wire format. Implementations that hash from a
+  // deserialized in-memory array and implementations that hash from
+  // the wire format (expanding `Hole@1` run lengths) must produce
+  // identical hashes.
 }
 ```
 
