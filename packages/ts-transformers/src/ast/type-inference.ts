@@ -654,10 +654,11 @@ export function hasArrayTypeArgument(
           const nonUndefined = innerType.types.filter(
             (t) => !(t.flags & ts.TypeFlags.Undefined),
           );
+          const sole = nonUndefined[0];
           if (
-            nonUndefined.length === 1 &&
-            (checker.isArrayType(nonUndefined[0]) ||
-              checker.isTupleType(nonUndefined[0]))
+            nonUndefined.length === 1 && sole &&
+            (checker.isArrayType(sole) ||
+              checker.isTupleType(sole))
           ) {
             return true;
           }
