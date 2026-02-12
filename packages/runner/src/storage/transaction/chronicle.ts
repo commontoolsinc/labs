@@ -1,6 +1,7 @@
 import { deepEqual } from "@commontools/utils/deep-equal";
 import { normalizeFact, unclaimed } from "@commontools/memory/fact";
 import { dispatchToDeepStorableValue } from "../../storable-dispatch.ts";
+import type { ExperimentalOptions } from "../../runtime.ts";
 import type {
   Assertion,
   IAttestation,
@@ -235,7 +236,7 @@ export class Chronicle {
    *
    * CT-1123: Simplified to use working copy directly instead of rebasing.
    */
-  commit(experimental?: import("../../runtime.ts").ExperimentalOptions): Result<
+  commit(experimental?: ExperimentalOptions): Result<
     ITransaction,
     IStorageTransactionInconsistent
   > {

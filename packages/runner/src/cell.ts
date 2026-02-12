@@ -5,9 +5,6 @@ import {
   isRecord,
 } from "@commontools/utils/types";
 import {
-  toStorableValue,
-} from "@commontools/memory/storable-value";
-import {
   dispatchToDeepStorableValue,
   dispatchToStorableValue,
 } from "./storable-dispatch.ts";
@@ -71,7 +68,7 @@ import {
   type SigilWriteRedirectLink,
   type URI,
 } from "./sigil-types.ts";
-import type { Runtime } from "./runtime.ts";
+import type { ExperimentalOptions, Runtime } from "./runtime.ts";
 import {
   areLinksSame,
   createSigilLinkFromParsedLink,
@@ -1769,7 +1766,7 @@ export function convertCellsToLinks(
     keepStreams?: boolean;
     keepAsCell?: boolean;
     doNotConvertCellResults?: boolean;
-    experimental?: import("./runtime.ts").ExperimentalOptions;
+    experimental?: ExperimentalOptions;
   } = {},
   path: string[] = [],
   seen: Map<any, string[]> = new Map(),

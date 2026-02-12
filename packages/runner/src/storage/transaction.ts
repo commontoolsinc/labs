@@ -1,5 +1,6 @@
 import { getLogger } from "@commontools/utils/logger";
 import type { StorableDatum } from "@commontools/memory/interface";
+import type { ExperimentalOptions } from "../runtime.ts";
 import type {
   ChangeGroup,
   CommitError,
@@ -69,7 +70,7 @@ export type State =
  */
 class StorageTransaction implements IStorageTransaction {
   changeGroup?: ChangeGroup;
-  experimental?: import("../runtime.ts").ExperimentalOptions;
+  experimental?: ExperimentalOptions;
 
   static mutate(transaction: StorageTransaction, state: State) {
     transaction.#state = state;

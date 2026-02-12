@@ -1,5 +1,6 @@
 import type { Immutable } from "@commontools/utils/types";
 import type { EntityId } from "../create-ref.ts";
+import type { ExperimentalOptions } from "../runtime.ts";
 import type { Cancel } from "../cancel.ts";
 import type {
   Assertion,
@@ -445,7 +446,7 @@ export interface IStorageTransaction {
    * Optional experimental options for space model implementation features.
    * Threaded to Chronicle.commit() for dispatch to new storable value converters.
    */
-  experimental?: import("../runtime.ts").ExperimentalOptions;
+  experimental?: ExperimentalOptions;
   /**
    * The transaction journal containing all read and write activities.
    * Provides access to transaction operations and dependency tracking.
