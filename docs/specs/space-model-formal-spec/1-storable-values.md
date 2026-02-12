@@ -1109,15 +1109,21 @@ export function canonicalHash(
   //                        (uint32 big-endian) and elements are hashed
   //                        in order:
   //                          if `i in array`: canonicalHash(array[i])
-  //                          else (hole run): hash(TAG_HOLE, uint32(N))
+  //                          else (hole run): hash(TAG_HOLE, count(N))
   //                        (order-preserving)
   //
   //                        Holes use run-length encoding in the hash
   //                        stream, matching the wire format: a maximal
   //                        run of N consecutive holes is hashed as a
-  //                        single `TAG_HOLE` followed by a uint32
-  //                        big-endian count (4 bytes). A single hole
-  //                        is `hash(TAG_HOLE, uint32(1))`.
+  //                        single `TAG_HOLE` followed by the run length.
+  //                        The run length encoding is either:
+  //                          (a) uint32 big-endian (4 bytes, simple), or
+  //                          (b) unsigned LEB128 (variable-length,
+  //                              1 byte for counts 1-127, more compact
+  //                              for typical cases).
+  //                        This is an implementation decision; whichever
+  //                        is chosen must be used consistently. A single
+  //                        hole is `hash(TAG_HOLE, count(1))`.
   //
   //                        Runs MUST be maximal — consecutive holes are
   //                        always coalesced into a single TAG_HOLE entry
@@ -1128,7 +1134,7 @@ export function canonicalHash(
   //
   //                        When hashing from the wire format, each
   //                        `Hole@1` entry maps directly to one
-  //                        `TAG_HOLE + uint32(N)` in the hash (since
+  //                        `TAG_HOLE + count(N)` in the hash (since
   //                        the wire format also uses maximal runs).
   //                        When hashing from an in-memory array, the
   //                        implementation must count consecutive absent
@@ -1273,7 +1279,11 @@ spec from being implementable.
 - **Exact canonical hash specification**: Precise byte-level specification of
   the hash algorithm (type tags, encoding of each type, handling of special
   cases like `-0` normalization). This should be specified as a separate
-  document or appendix before the hashing implementation begins.
+  document or appendix before the hashing implementation begins. One open
+  sub-decision: `TAG_HOLE`'s run-length count encoding — uint32 big-endian
+  (fixed 4 bytes, simple) vs. unsigned LEB128 (variable-length, 1 byte for
+  counts 1-127, more compact for typical cases). The choice does not affect
+  semantics but must be consistent across all implementations.
 
 - **Migration path**: Out of scope for this spec. The detailed migration plan
   (sequencing of flag introductions, criteria for graduating each flag to
