@@ -953,6 +953,88 @@ describe("setup/start", () => {
     expect(cellValue).toEqual({ output: 5 });
   });
 
+  it("handler recovers when stream marker is missing from storage", async () => {
+    // Regression test: when a pattern with handlers is restarted and the
+    // stored value at the $event path is not { $stream: true } (e.g., due to
+    // incomplete sync after page reload, or stale persisted state),
+    // instantiateJavaScriptNode should restore the stream marker rather
+    // than throwing "Handler used as lift".
+    const recipe: Recipe = {
+      argumentSchema: {
+        type: "object",
+        properties: { value: { type: "number" } },
+      },
+      resultSchema: {
+        type: "object",
+        properties: {
+          eventCount: { type: "number" },
+        },
+      },
+      initial: {
+        internal: {
+          myHandler: { $stream: true },
+          eventCount: 0,
+        },
+      },
+      result: {
+        eventCount: { $alias: { path: ["internal", "eventCount"] } },
+        myHandler: { $alias: { path: ["internal", "myHandler"] } },
+      },
+      nodes: [
+        {
+          module: {
+            type: "javascript",
+            wrapper: "handler",
+            implementation: (_event: any, ctx: { eventCount: number }) => {
+              ctx.eventCount = (ctx.eventCount || 0) + 1;
+            },
+          },
+          inputs: {
+            $event: { $alias: { path: ["internal", "myHandler"] } },
+            $ctx: {
+              eventCount: { $alias: { path: ["internal", "eventCount"] } },
+            },
+          },
+          outputs: {
+            eventCount: { $alias: { path: ["internal", "eventCount"] } },
+          },
+        },
+      ],
+    };
+
+    const resultCell = runtime.getCell(
+      space,
+      "handler-missing-stream-marker",
+    );
+
+    // First run to establish the pattern in storage
+    runtime.setup(undefined, recipe, { value: 1 }, resultCell);
+    runtime.start(resultCell);
+    await resultCell.pull();
+    runtime.runner.stop(resultCell);
+
+    // Corrupt the stream marker — simulate what happens when the process
+    // cell's internal state is synced without the stream marker (e.g.,
+    // after page reload with incomplete sync, or stale previousInternal).
+    const processCell = resultCell.getSourceCell()!;
+    const tx = runtime.edit();
+    const raw = processCell.withTx(tx).getRaw() as Record<string, any>;
+    processCell.withTx(tx).setRaw({
+      ...raw,
+      internal: { ...raw.internal, myHandler: null },
+    });
+    tx.commit();
+
+    // Restart via start() only (no setup) — this is the exact code path
+    // used by handleEnsureHomePatternRunning's fast path: doStart →
+    // startCore → instantiateJavaScriptNode. Previously threw "Handler
+    // used as lift, because $stream: true was overwritten". Now should
+    // recover by restoring the stream marker.
+    await runtime.start(resultCell);
+    const cellValue = await resultCell.pull();
+    expect(cellValue).toBeDefined();
+  });
+
   it("setup with Module wraps to recipe and runs on start", async () => {
     const mod = {
       type: "javascript" as const,

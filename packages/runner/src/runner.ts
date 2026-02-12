@@ -1191,16 +1191,31 @@ export class Runner {
     let streamLink: NormalizedFullLink | undefined = undefined;
     if (isRecord(inputs) && "$event" in inputs) {
       let value: JSONValue | undefined = inputs.$event as JSONValue | undefined;
+      let resolvedStreamLink: NormalizedFullLink | undefined = undefined;
       while (isWriteRedirectLink(value)) {
-        const maybeStreamLink = resolveLink(
+        resolvedStreamLink = resolveLink(
           this.runtime,
           tx,
           parseLink(value, processCell),
           "writeRedirect",
         );
-        value = tx.readValueOrThrow(maybeStreamLink);
+        value = tx.readValueOrThrow(resolvedStreamLink);
       }
       if (isStreamValue(value)) {
+        streamLink = parseLink(inputs.$event, processCell);
+      } else if (resolvedStreamLink) {
+        // The stored value is not a stream marker — this can happen when the
+        // process cell's internal state hasn't been fully synced yet (e.g.,
+        // pattern restart after page reload) or when previousInternal
+        // overwrote the marker. Since $event in inputs means the recipe
+        // compiled this node as a handler, restore the stream marker at the
+        // resolved storage location and treat this as a stream.
+        logger.warn(
+          "stream-marker-restored",
+          `Restored missing $stream marker for handler "${name}"`,
+          { resolvedStreamLink, storedValue: value },
+        );
+        tx.writeValueOrThrow(resolvedStreamLink, { $stream: true });
         streamLink = parseLink(inputs.$event, processCell);
       }
     }
@@ -1429,7 +1444,7 @@ export class Runner {
     } else {
       if (isRecord(inputs) && "$event" in inputs) {
         throw new Error(
-          "Handler used as lift, because $stream: true was overwritten",
+          "Handler used as lift: $event alias could not be resolved to a stream link",
         );
       }
 
