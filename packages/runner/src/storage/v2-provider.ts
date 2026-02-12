@@ -123,6 +123,20 @@ export interface V2ProviderOptions {
  */
 class V2HeapShim {
   readonly #subscribers = new Map<string, Set<(value?: unknown) => void>>();
+  readonly #getEntity: (
+    entry: { id: string; type: string },
+  ) => State | undefined;
+
+  constructor(
+    getEntity: (entry: { id: string; type: string }) => State | undefined,
+  ) {
+    this.#getEntity = getEntity;
+  }
+
+  /** Read a value from the heap (delegates to the replica). */
+  get(entry: { id: string; type: string }): State | undefined {
+    return this.#getEntity(entry);
+  }
 
   subscribe(
     entry: { id: string; type: string },
@@ -149,15 +163,29 @@ class V2HeapShim {
     }
   }
 
-  /** Notify subscribers for the given entity changes. */
+  /** Notify subscribers for the given entity changes, wrapping values in State-like objects. */
   notify(changes: EntityChange[]): void {
     for (const change of changes) {
       const key = `${change.id}/${JSON_MIME}`;
       const subs = this.#subscribers.get(key);
       if (subs) {
+        // Wrap the value in a v1-compatible State (Assertion) shape so that
+        // integration tests accessing v.is.value work correctly.
+        const state = change.after !== undefined
+          ? {
+            the: JSON_MIME,
+            of: change.id,
+            is: change.after as StorableDatum,
+            cause: refer({
+              the: JSON_MIME,
+              of: change.id,
+              is: change.after,
+            }),
+          }
+          : undefined;
         for (const cb of subs) {
           try {
-            cb(change.after);
+            cb(state);
           } catch {
             // swallow errors in subscriber callbacks
           }
@@ -187,11 +215,12 @@ class V2SpaceReplica implements ISpaceReplica {
    * optimistic commits. This matches v1 heap behavior where pending
    * nursery changes don't trigger heap subscribers.
    */
-  readonly heap = new V2HeapShim();
+  readonly heap: V2HeapShim;
 
   constructor(replica: V2Replica, provider: V2Provider) {
     this.#replica = replica;
     this.#provider = provider;
+    this.heap = new V2HeapShim((entry) => this.get(entry as any));
   }
 
   did(): MemorySpace {
@@ -201,6 +230,13 @@ class V2SpaceReplica implements ISpaceReplica {
   /**
    * Read a value from the replica for a given base memory address.
    * Returns a v1 State compatible object, or undefined if not found.
+   *
+   * Uses V2Replica.get() which checks pending first, then confirmed.
+   * Returning the pending value is critical for pipelined commits:
+   * when the scheduler re-evaluates after an optimistic commit, the
+   * claim hash will be based on the pending value (not confirmed),
+   * causing commitTransaction to route it to reads.pending instead
+   * of reads.confirmed -- avoiding false conflicts on the server.
    */
   get(entry: BaseMemoryAddress): State | undefined {
     // In v2 the entity is keyed by its id; the type is always JSON_MIME.
@@ -216,32 +252,16 @@ class V2SpaceReplica implements ISpaceReplica {
       return unclaimed({ the: entry.type ?? JSON_MIME, of: entry.id });
     }
 
-    // Build a v1 State (Assertion) from the v2 value.
-    // The `cause` and `is` fields let the v1 transaction layer work.
-    const confirmed = this.#replica.state.confirmed.get(entityId);
-    if (confirmed?.value !== undefined) {
-      // Build a v1-compatible fact from confirmed state.
-      // Use refer() to create a proper Reference for the cause field.
-      const fact = {
-        the: entry.type ?? JSON_MIME,
-        of: entry.id,
-        is: confirmed.value as StorableDatum,
-      };
-      return {
-        ...fact,
-        cause: refer(fact),
-      } as unknown as State;
-    }
-
-    // Pending or unknown tier -- return with the value we have.
-    const pendingFact = {
+    // Build a v1 State (Assertion) from whatever tier the replica
+    // returned (pending takes precedence over confirmed).
+    const fact = {
       the: entry.type ?? JSON_MIME,
       of: entry.id,
       is: result.value as StorableDatum,
     };
     return {
-      ...pendingFact,
-      cause: refer(pendingFact),
+      ...fact,
+      cause: refer(fact),
     } as unknown as State;
   }
 
@@ -404,6 +424,15 @@ export class V2Provider implements IStorageProviderWithReplica {
 
   get replica(): ISpaceReplica {
     return this.#spaceReplica;
+  }
+
+  /**
+   * v1 compat: ProviderConnection had a `.provider` property. Tests access
+   * `(storageManager.open(space) as any).provider.replica.heap`. In v2,
+   * V2Provider itself is the provider so we return `this`.
+   */
+  get provider(): this {
+    return this;
   }
 
   // -------------------------------------------------------------------------
@@ -609,35 +638,115 @@ export class V2Provider implements IStorageProviderWithReplica {
     }
 
     // Convert v1 claims to v2 read dependencies.
+    //
+    // When an entity is in pending state we need to determine whether the
+    // claim was recorded against the *confirmed* value or the *pending* value:
+    //
+    //   - Parallel conflicts: both transactions read confirmed state before
+    //     either committed. The claim's fact hash matches the confirmed value.
+    //     → use reads.confirmed so the server detects the conflict.
+    //
+    //   - Pipelining: the scheduler re-evaluated after an optimistic commit,
+    //     so the claim's fact hash matches the pending value.
+    //     → use reads.pending to avoid false conflict with the stale confirmed
+    //       version.
+    //
+    // We distinguish these by computing the expected claim hash for the
+    // confirmed value and comparing it against the actual claim hash.
     const readEntityIds = new Set<string>();
     for (const claim of claims) {
       const entityId = claim.of as EntityId;
       readEntityIds.add(entityId);
+
+      const pendingEntry = this.#v2Replica.state.pending.get(entityId);
       const confirmed = this.#v2Replica.state.confirmed.get(entityId);
-      if (confirmed) {
-        reads.confirmed.push({
+
+      if (!pendingEntry) {
+        // Not in pending state → straightforward confirmed read.
+        if (confirmed) {
+          reads.confirmed.push({
+            id: entityId,
+            hash: confirmed.hash,
+            version: confirmed.version,
+          });
+        }
+        continue;
+      }
+
+      // Entity has pending state. Determine if the claim was based on
+      // confirmed or pending by comparing claim fact hashes.
+      let claimMatchesConfirmed = false;
+      try {
+        if (confirmed) {
+          let expectedFact;
+          if (confirmed.value !== undefined) {
+            // Reconstruct the State that V2SpaceReplica.get() would return
+            // for the confirmed value, then compute its claim hash.
+            const fact = {
+              the: claim.the,
+              of: entityId,
+              is: confirmed.value,
+            };
+            expectedFact = refer({ ...fact, cause: refer(fact) });
+          } else {
+            // Confirmed but deleted → unclaimed state
+            expectedFact = refer({ the: claim.the, of: entityId });
+          }
+          claimMatchesConfirmed =
+            claim.fact.toString() === expectedFact.toString();
+        } else {
+          // No confirmed state → check if claim matches unclaimed.
+          const expectedFact = refer({ the: claim.the, of: entityId });
+          claimMatchesConfirmed =
+            claim.fact.toString() === expectedFact.toString();
+        }
+      } catch {
+        // Hash computation failed → fall back to confirmed reads (safer)
+        claimMatchesConfirmed = true;
+      }
+
+      if (claimMatchesConfirmed) {
+        // Claim was based on confirmed state → declare confirmed read.
+        if (confirmed) {
+          reads.confirmed.push({
+            id: entityId,
+            hash: confirmed.hash,
+            version: confirmed.version,
+          });
+        } else {
+          // Entity doesn't exist in confirmed state → declare version 0.
+          reads.confirmed.push({
+            id: entityId,
+            hash: EMPTY(entityId).toString(),
+            version: 0,
+          });
+        }
+      } else {
+        // Claim was based on pending state → declare pending read.
+        reads.pending.push({
           id: entityId,
-          hash: confirmed.hash,
-          version: confirmed.version,
+          hash: pendingEntry.hash,
+          fromCommit: pendingEntry.fromCommit,
         });
       }
     }
 
-    // Also add read dependencies for entities being written.
-    // This enables conflict detection: if the client has no confirmed state
-    // for an entity (e.g. after reset()), it declares version=0 (EMPTY),
-    // and the server will conflict if the entity already exists.
+    // For entities that appear only in operations (no claims), add reads
+    // only for entities the client has ZERO local knowledge about (no
+    // confirmed, no pending state).  This catches the stale-client case
+    // where the replica was reset but the server still has data.
+    //
+    // For entities with any local state, blind writes (no prior read) are
+    // "last writer wins" — matching v1 behaviour and allowing pipelined
+    // commits to succeed without false conflicts.
     for (const op of operations) {
-      if (readEntityIds.has(op.id)) continue; // Already tracked via claims
-      const confirmed = this.#v2Replica.state.confirmed.get(op.id);
-      if (confirmed) {
-        reads.confirmed.push({
-          id: op.id,
-          hash: confirmed.hash,
-          version: confirmed.version,
-        });
-      } else {
-        // No confirmed state: declare we believe the entity doesn't exist.
+      if (readEntityIds.has(op.id)) continue;
+      const confirmed = this.#v2Replica.state.confirmed.get(
+        op.id as EntityId,
+      );
+      const pending = this.#v2Replica.state.pending.get(op.id as EntityId);
+      if (!confirmed && !pending) {
+        // Entity completely unknown locally → declare "doesn't exist" read.
         reads.confirmed.push({
           id: op.id,
           hash: EMPTY(op.id as EntityId).toString(),
@@ -665,6 +774,7 @@ export class V2Provider implements IStorageProviderWithReplica {
           parent: EMPTY(op.id as EntityId),
         })),
         reads.confirmed,
+        reads.pending,
       );
 
     // Notify scheduler about the optimistic commit.
@@ -722,6 +832,13 @@ export class V2Provider implements IStorageProviderWithReplica {
         this.onSubscriptionUpdate(inner);
         return;
       }
+    }
+
+    // Unwrap task/return subscribe responses (initial state).
+    // The server sends: { the: "task/return", of: subId, is: { ok: FactSet } }
+    if (message.the === "task/return" && message.is != null) {
+      this.onQueryResponse(message.is as Record<string, unknown>);
+      return;
     }
 
     // Route by presence of known fields.

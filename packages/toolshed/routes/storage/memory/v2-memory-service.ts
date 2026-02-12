@@ -149,10 +149,10 @@ export class V2MemoryService {
     const clientCommit: ClientCommit = {
       reads: { confirmed: confirmedReads, pending: pendingReads },
       operations,
-      branch: args.branch,
-      codeCID: args.codeCID
-        ? (args.codeCID as unknown as Reference)
-        : undefined,
+      ...(args.branch != null ? { branch: args.branch } : {}),
+      ...(args.codeCID != null
+        ? { codeCID: args.codeCID as unknown as Reference }
+        : {}),
     };
 
     const result = applyCommit(entry.space.store, clientCommit);

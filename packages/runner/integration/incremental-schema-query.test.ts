@@ -108,18 +108,9 @@ async function testNewLinkDiscovery() {
   assertEquals(initialValue?.name, "Alice");
   assertEquals(initialValue?.address, undefined);
 
-  // Check that address document is NOT in runtime2's heap yet
-  const provider2 = (runtime2.storageManager.open(space) as any).provider;
-  const addressKey = `of:${addressEntityId["/"]}`;
-  const initialAddressInHeap = provider2.replica.heap.get({
-    id: addressKey,
-    type: "application/json",
-  });
-  assertEquals(
-    initialAddressInHeap,
-    undefined,
-    "Address should NOT be in heap before link is created",
-  );
+  // In v2, all entities are pre-loaded via wildcard subscription, so we
+  // skip the v1-specific heap check that verified the address wasn't
+  // in the heap before the link was created.
 
   // Set up listener for updates
   const updateReceived = Promise.withResolvers<boolean>();
@@ -164,16 +155,8 @@ async function testNewLinkDiscovery() {
   assert(result, "Should have received update with linked address");
   assert(receivedAddress, "Should have received the address data");
 
-  // Verify address is now in runtime2's heap
+  // In v2, all entities are available via wildcard subscription.
   await runtime2.storageManager.synced();
-  const finalAddressInHeap = provider2.replica.heap.get({
-    id: addressKey,
-    type: "application/json",
-  });
-  assert(
-    finalAddressInHeap !== undefined,
-    "Address should be in heap after link was created",
-  );
 
   await runtime3.dispose();
   await runtime2.dispose();

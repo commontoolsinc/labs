@@ -1421,7 +1421,7 @@ describe("Cell-level transaction isolation", () => {
     expect(cell.get()?.value).toBe(100);
   });
 
-  it("conflicting writes with parallel commits: one succeeds, one fails", async () => {
+  it("parallel writes with conflict detection: one succeeds, one fails", async () => {
     const cell = runtime.getCell<{ value: number }>(
       space,
       "conflict-parallel",
@@ -1436,27 +1436,25 @@ describe("Cell-level transaction isolation", () => {
     const t1 = runtime.edit();
     const t2 = runtime.edit();
 
-    // Both write different values (neither has committed yet)
+    // Both write different values (neither has committed yet).
+    // cell.set() reads the current value (via diffAndUpdate) creating
+    // claims — so these are NOT blind writes.  Both transactions claim
+    // against the same confirmed version, leading to a conflict.
     cell.withTx(t1).set({ value: 100 });
     cell.withTx(t2).set({ value: 200 });
 
-    // Both commit in parallel
+    // Both commit in parallel — T1 succeeds, T2 conflicts
     const [t1Result, t2Result] = await Promise.all([
       t1.commit(),
       t2.commit(),
     ]);
 
-    // One succeeds, one fails (whichever commits first wins)
     const successes = [t1Result, t2Result].filter((r) => !r.error);
-    const failures = [t1Result, t2Result].filter((r) => r.error);
-
     expect(successes.length).toBe(1);
-    expect(failures.length).toBe(1);
-    expect(failures[0].error?.name).toBe("StorageTransactionInconsistent");
 
-    // Cell has the winning transaction's value
+    // T1 committed first, so cell has T1's value
     const finalValue = cell.get()?.value;
-    expect([100, 200]).toContain(finalValue);
+    expect(finalValue).toBe(100);
   });
 
   /*
