@@ -69,6 +69,7 @@ export type State =
  */
 class StorageTransaction implements IStorageTransaction {
   changeGroup?: ChangeGroup;
+  experimental?: import("../runtime.ts").ExperimentalOptions;
 
   static mutate(transaction: StorageTransaction, state: State) {
     transaction.#state = state;
@@ -313,7 +314,7 @@ export const commit = async (
   if (error) {
     return { error };
   } else {
-    const { error, ok: archive } = ready.journal.close();
+    const { error, ok: archive } = ready.journal.close(transaction.experimental);
     if (error) {
       mutate(transaction, {
         status: "done",

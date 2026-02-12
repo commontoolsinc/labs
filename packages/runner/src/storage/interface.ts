@@ -442,6 +442,11 @@ export interface IStorageTransaction {
    */
   changeGroup?: ChangeGroup;
   /**
+   * Optional experimental options for space model implementation features.
+   * Threaded to Chronicle.commit() for dispatch to new storable value converters.
+   */
+  experimental?: import("../runtime.ts").ExperimentalOptions;
+  /**
    * The transaction journal containing all read and write activities.
    * Provides access to transaction operations and dependency tracking.
    */

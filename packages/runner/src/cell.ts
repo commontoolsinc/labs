@@ -5,9 +5,12 @@ import {
   isRecord,
 } from "@commontools/utils/types";
 import {
-  toDeepStorableValue,
   toStorableValue,
 } from "@commontools/memory/storable-value";
+import {
+  dispatchToDeepStorableValue,
+  dispatchToStorableValue,
+} from "./storable-dispatch.ts";
 import type { MemorySpace, StorableValue } from "@commontools/memory/interface";
 import { getTopFrame, recipe } from "./builder/recipe.ts";
 import { createNodeFactory } from "./builder/module.ts";
@@ -667,7 +670,7 @@ export class CellImpl<T extends StorableValue>
     // Check if we're dealing with a stream
     if (this.isStream(resolvedToValueLink)) {
       // Stream behavior
-      const event = convertCellsToLinks(newValue) as AnyCellWrapping<T>;
+      const event = convertCellsToLinks(newValue, { experimental: this.runtime.experimental }) as AnyCellWrapping<T>;
 
       // Trigger on fully resolved link
       this.runtime.scheduler.queueEvent(
@@ -1169,7 +1172,7 @@ export class CellImpl<T extends StorableValue>
     // retry on conflict.
     if (!this.synced) this.sync();
 
-    value = toDeepStorableValue(value);
+    value = dispatchToDeepStorableValue(value, this.runtime.experimental);
     this.tx.writeValueOrThrow(this.link, findAndInlineDataURILinks(value));
   }
 
@@ -1692,7 +1695,7 @@ export function recursivelyAddIDIfNeeded<T>(
   // - Instances (e.g., Error → @Error wrapper)
   // - Objects/arrays with toJSON() methods
   // - Sparse arrays (densified with null in holes)
-  const converted = toStorableValue(value);
+  const converted = dispatchToStorableValue(value, frame?.runtime?.experimental);
   const convertedIsRecord = isRecord(converted);
 
   // If conversion changed the value, cache the result so shared references
@@ -1766,6 +1769,7 @@ export function convertCellsToLinks(
     keepStreams?: boolean;
     keepAsCell?: boolean;
     doNotConvertCellResults?: boolean;
+    experimental?: import("./runtime.ts").ExperimentalOptions;
   } = {},
   path: string[] = [],
   seen: Map<any, string[]> = new Map(),
@@ -1794,7 +1798,7 @@ export function convertCellsToLinks(
   // Convert the (top level of) the value to something JSON-encodable if not
   // already JSON-encodable, or throw if it's neither already valid nor
   // convertible.
-  value = toStorableValue(value);
+  value = dispatchToStorableValue(value, options.experimental);
 
   // Recursively process arrays and objects, if we ended up with one of those.
   if (!isRecord(value)) {

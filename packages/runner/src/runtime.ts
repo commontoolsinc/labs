@@ -68,6 +68,15 @@ export type ErrorWithContext = Error & {
 export type ErrorHandler = (error: ErrorWithContext) => void;
 export type NavigateCallback = (target: Cell<any>) => void;
 
+export interface ExperimentalOptions {
+  /** Enable the new storable value type system (bigint, Map, Set, Uint8Array, Date, StorableInstance). */
+  richStorableValues?: boolean;
+  /** Enable the storable protocol ([DECONSTRUCT]/[RECONSTRUCT]) and SerializationContext-based boundary serialization. */
+  storableProtocol?: boolean;
+  /** Enable /<Type>@<Version> JSON encoding, replacing legacy sigil/@-prefix/$-prefix conventions. */
+  unifiedJsonEncoding?: boolean;
+}
+
 export interface RuntimeOptions {
   apiUrl: URL;
   storageManager: IStorageManager;
@@ -77,6 +86,7 @@ export interface RuntimeOptions {
   navigateCallback?: NavigateCallback;
   debug?: boolean;
   telemetry?: RuntimeTelemetry;
+  experimental?: ExperimentalOptions;
 }
 
 /**
@@ -129,11 +139,18 @@ export class Runtime {
   readonly staticCache: StaticCache;
   readonly storageManager: IStorageManager;
   readonly telemetry: RuntimeTelemetry;
+  readonly experimental: Required<ExperimentalOptions>;
   readonly apiUrl: URL;
   readonly userIdentityDID: DID;
   private defaultFrame?: Frame;
 
   constructor(options: RuntimeOptions) {
+    this.experimental = {
+      richStorableValues: false,
+      storableProtocol: false,
+      unifiedJsonEncoding: false,
+      ...options.experimental,
+    };
     this.id = options.storageManager.id;
     this.apiUrl = new URL(options.apiUrl);
     this.staticCache = isDeno()
@@ -245,6 +262,7 @@ export class Runtime {
     if (options.changeGroup !== undefined) {
       tx.changeGroup = options.changeGroup;
     }
+    tx.experimental = this.experimental;
     return new ExtendedStorageTransaction(tx);
   }
 

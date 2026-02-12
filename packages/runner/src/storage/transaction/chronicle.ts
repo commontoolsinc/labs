@@ -1,6 +1,6 @@
 import { deepEqual } from "@commontools/utils/deep-equal";
 import { normalizeFact, unclaimed } from "@commontools/memory/fact";
-import { toDeepStorableValue } from "@commontools/memory/storable-value";
+import { dispatchToDeepStorableValue } from "../../storable-dispatch.ts";
 import type {
   Assertion,
   IAttestation,
@@ -235,7 +235,7 @@ export class Chronicle {
    *
    * CT-1123: Simplified to use working copy directly instead of rebasing.
    */
-  commit(): Result<
+  commit(experimental?: import("../../runtime.ts").ExperimentalOptions): Result<
     ITransaction,
     IStorageTransactionInconsistent
   > {
@@ -268,8 +268,8 @@ export class Chronicle {
         edit.claim(loaded);
       } else {
         // Normalize both values for comparison and potential storage.
-        const normalizedMerged = toDeepStorableValue(merged.value);
-        const normalizedLoaded = toDeepStorableValue(loaded.is);
+        const normalizedMerged = dispatchToDeepStorableValue(merged.value, experimental);
+        const normalizedLoaded = dispatchToDeepStorableValue(loaded.is, experimental);
 
         if (deepEqual(normalizedMerged, normalizedLoaded)) {
           // Values are deeply equal after normalization - no change needed.

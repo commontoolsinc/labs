@@ -3,6 +3,7 @@ export type {
   ConsoleHandler,
   ErrorHandler,
   ErrorWithContext as RuntimeErrorWithContext,
+  ExperimentalOptions,
   RuntimeOptions,
   SpaceCellContents,
 } from "./runtime.ts";

@@ -388,6 +388,7 @@ export class RuntimeProcessor {
       includeSchema: true,
       keepAsCell: true,
       doNotConvertCellResults: true,
+      experimental: this.runtime.experimental,
     });
     return { value: converted };
   }
@@ -421,6 +422,7 @@ export class RuntimeProcessor {
         includeSchema: true,
         keepAsCell: true,
         doNotConvertCellResults: true,
+        experimental: this.runtime.experimental,
       });
 
       // `.sink` fires synchronously on invocation. Trigger the notification
