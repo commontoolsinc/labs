@@ -837,8 +837,12 @@ export declare const WriteonlyCell: CellTypeConstructor<AsWriteonlyCell>;
 export type OpaqueRef<T> =
   // Already a branded cell? Return as-is
   [T] extends [AnyBrandedCell<any>] ? T
-    // Branded cell | undefined? Extract the cell, drop undefined
-    : [T] extends [AnyBrandedCell<any> | undefined] ? Exclude<T, undefined>
+    // Branded cell | undefined? Strip undefined to avoid brand collision
+    // in the OpaqueCell<T> & OpaqueRefInner<T> intersection below.
+    // The proxy never returns undefined at runtime, so this is safe.
+    : [NonNullable<T>] extends [AnyBrandedCell<any>]
+      ? [NonNullable<T>] extends [never] ? OpaqueCell<T> & OpaqueRefInner<T>
+      : NonNullable<T>
     // Everything else: wrap in OpaqueCell + map inner properties
     :
       & OpaqueCell<T>
