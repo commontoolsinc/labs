@@ -1,7 +1,16 @@
 import { isInstance, isRecord } from "@commontools/utils/types";
 import type { StorableValue, StorableValueLayer } from "./interface.ts";
 
+/**
+ * Configuration for experimental storable-value features gated behind
+ * `RuntimeOptions.experimental`. Uses ambient (module-level) state so that
+ * deep call sites can check flags without parameter threading.
+ *
+ * See Section 1 of the formal spec (`docs/specs/space-model-formal-spec/`).
+ */
 export interface ExperimentalStorableConfig {
+  /** When `true`, `toStorableValue` and `toDeepStorableValue` use the
+   *  extended type system (bigint, Map, Set, Uint8Array, Date, etc.). */
   richStorableValues: boolean;
 }
 
@@ -11,16 +20,27 @@ const defaultConfig: ExperimentalStorableConfig = {
 
 let currentConfig: ExperimentalStorableConfig = { ...defaultConfig };
 
+/**
+ * Activates experimental storable-value features. Called by the `Runtime`
+ * constructor to propagate `ExperimentalOptions` into the memory layer.
+ * Merges the provided partial config with defaults.
+ */
 export function setExperimentalStorableConfig(
   config: Partial<ExperimentalStorableConfig>,
 ): void {
   currentConfig = { ...defaultConfig, ...config };
 }
 
+/** Returns the current experimental storable-value configuration. */
 export function getExperimentalStorableConfig(): ExperimentalStorableConfig {
   return currentConfig;
 }
 
+/**
+ * Restores experimental storable-value configuration to defaults. Called by
+ * `Runtime.dispose()` to avoid leaking flags between runtime instances or
+ * test runs.
+ */
 export function resetExperimentalStorableConfig(): void {
   currentConfig = { ...defaultConfig };
 }

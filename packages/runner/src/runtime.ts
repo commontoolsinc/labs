@@ -72,6 +72,14 @@ export type ErrorWithContext = Error & {
 export type ErrorHandler = (error: ErrorWithContext) => void;
 export type NavigateCallback = (target: Cell<any>) => void;
 
+/**
+ * Feature flags for the space-model data-layer changes. Each flag gates an
+ * independent piece of the new storable-value pipeline so that the features
+ * can be enabled incrementally. Passed via `RuntimeOptions.experimental` and
+ * propagated to the memory layer as ambient config.
+ *
+ * See the formal spec at `docs/specs/space-model-formal-spec/`.
+ */
 export interface ExperimentalOptions {
   /** Enable the new storable value type system (bigint, Map, Set, Uint8Array, Date, StorableInstance). */
   richStorableValues?: boolean;
@@ -90,6 +98,7 @@ export interface RuntimeOptions {
   navigateCallback?: NavigateCallback;
   debug?: boolean;
   telemetry?: RuntimeTelemetry;
+  /** Optional feature flags for experimental space-model data-layer changes. */
   experimental?: ExperimentalOptions;
 }
 
@@ -143,6 +152,7 @@ export class Runtime {
   readonly staticCache: StaticCache;
   readonly storageManager: IStorageManager;
   readonly telemetry: RuntimeTelemetry;
+  /** Resolved experimental flags (all properties present, defaulting to `false`). */
   readonly experimental: Required<ExperimentalOptions>;
   readonly apiUrl: URL;
   readonly userIdentityDID: DID;
@@ -155,6 +165,7 @@ export class Runtime {
       unifiedJsonEncoding: false,
       ...options.experimental,
     };
+    // Propagate experimental flags to the memory layer's ambient config.
     setExperimentalStorableConfig(this.experimental);
     this.id = options.storageManager.id;
     this.apiUrl = new URL(options.apiUrl);

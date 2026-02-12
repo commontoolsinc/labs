@@ -3,7 +3,7 @@ export type {
   ConsoleHandler,
   ErrorHandler,
   ErrorWithContext as RuntimeErrorWithContext,
-  ExperimentalOptions,
+  ExperimentalOptions, // Space-model feature flags; see ExperimentalOptions in runtime.ts
   RuntimeOptions,
   SpaceCellContents,
 } from "./runtime.ts";
