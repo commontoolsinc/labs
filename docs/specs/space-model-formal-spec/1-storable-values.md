@@ -1106,25 +1106,33 @@ export function canonicalHash(
   // - `Date`:              hash(TAG_DATE, int64MillisSinceEpoch)
   // - array:               hash(TAG_ARRAY, length, ...elementHash)
   //                        where `length` is the logical array length
-  //                        and for each index `i` in `0..length`:
+  //                        (uint32 big-endian) and elements are hashed
+  //                        in order:
   //                          if `i in array`: canonicalHash(array[i])
-  //                          else (hole):     hash(TAG_HOLE)
+  //                          else (hole run): hash(TAG_HOLE, uint32(N))
   //                        (order-preserving)
   //
-  //                        When hashing from wire format (where holes use
-  //                        run-length encoding), a `Hole@1` entry with
-  //                        run length N expands to N `TAG_HOLE` entries
-  //                        in the hash stream:
+  //                        Holes use run-length encoding in the hash
+  //                        stream, matching the wire format: a maximal
+  //                        run of N consecutive holes is hashed as a
+  //                        single `TAG_HOLE` followed by a uint32
+  //                        big-endian count (4 bytes). A single hole
+  //                        is `hash(TAG_HOLE, uint32(1))`.
   //
-  //                          for each wire element:
-  //                            if element is Hole@1 with state N:
-  //                              repeat N times: hash(TAG_HOLE)
-  //                            else:
-  //                              canonicalHash(deserialize(element))
+  //                        Runs MUST be maximal — consecutive holes are
+  //                        always coalesced into a single TAG_HOLE entry
+  //                        so the hash is canonical. (An implementation
+  //                        must not split a run of 10 holes into two
+  //                        runs of 5; this would produce a different
+  //                        hash.)
   //
-  //                        The logical length for TAG_ARRAY is the sum
-  //                        of all run lengths plus the count of non-hole
-  //                        wire elements.
+  //                        When hashing from the wire format, each
+  //                        `Hole@1` entry maps directly to one
+  //                        `TAG_HOLE + uint32(N)` in the hash (since
+  //                        the wire format also uses maximal runs).
+  //                        When hashing from an in-memory array, the
+  //                        implementation must count consecutive absent
+  //                        indices to form maximal runs.
   // - object:              hash(TAG_OBJECT, sortedKeys, ...canonicalHash(value))
   //                        (keys sorted lexicographically by UTF-8)
   // - `StorableInstance`:  hash(TAG_STORABLE, typeTag, canonicalHash(deconstructedState))
@@ -1144,10 +1152,10 @@ export function canonicalHash(
   // `[1, null, 3]` are distinguishable by hash.
   //
   // Note: The canonical hash is a function of the logical value, not
-  // any particular wire format. Implementations that hash from a
-  // deserialized in-memory array and implementations that hash from
-  // the wire format (expanding `Hole@1` run lengths) must produce
-  // identical hashes.
+  // any particular wire format. Implementations that hash from an
+  // in-memory array and implementations that hash from the wire
+  // format must produce identical hashes. Both use maximal-run RLE
+  // for holes in the hash stream.
 }
 ```
 
