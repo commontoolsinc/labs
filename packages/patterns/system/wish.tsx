@@ -43,6 +43,7 @@ export default pattern<
     return {
       result,
       candidates,
+      error: undefined,
       [UI]: computed(() => {
         if (candidates.length === 0) return <div>No candidates</div>;
         // Auto-confirmed single match or user-confirmed: show the result

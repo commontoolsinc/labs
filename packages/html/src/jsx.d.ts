@@ -3696,8 +3696,8 @@ interface CTCodeEditorAttributes<T> extends CTHTMLAttributes<T> {
   "placeholder"?: string;
   "timingStrategy"?: string;
   "timingDelay"?: number;
-  "$mentionable"?: CellLike<Charm[]>;
-  "$mentioned"?: CellLike<Charm[]>;
+  "$mentionable"?: CellLike<Charm[]> | CellLike<Charm[] | undefined>;
+  "$mentioned"?: CellLike<Charm[]> | CellLike<Charm[] | undefined>;
   "$pattern"?: CellLike<any>;
   "pattern"?: any;
   "wordWrap"?: boolean;

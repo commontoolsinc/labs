@@ -49,6 +49,8 @@ Use the user context above to personalize your suggestions when relevant.`;
 
   return {
     result,
+    candidates: undefined,
+    error: undefined,
     [UI]: (
       <ct-cell-context $cell={result}>
         {computed(() => result ?? "Searching...")}
