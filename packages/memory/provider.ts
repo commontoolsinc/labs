@@ -460,22 +460,29 @@ class MemoryProviderSession<
     }
   }
 
+  // [INSTRUMENTATION] Commit counter for timing analysis
+  private static _commitSeqProvider = 0;
+
   async commit(commit: Commit<Space>, labels?: Memory.FactSelection) {
     // We should really only have one item, but it's technically legal to have
     // multiple transactions in the same commit, so iterate
     for (
       const item of SelectionBuilder.iterate<{ is: Memory.CommitData }>(commit)
     ) {
+      const _t0 = performance.now();
+      const _cId = ++MemoryProviderSession._commitSeqProvider;
       // Remove any classified results from our commit before broadcasting.
       const redactedData = redactCommitData(item.value.is, labels);
       if (Subscription.isTransactionReadOnly(redactedData.transaction)) {
         continue;
       }
+      const _tRedact = performance.now();
       // First, check to see if any of our schema queries need to be notified
       // Any queries that lack access are skipped (with a console log)
       const schemaFacts = await this.getSchemaSubscriptionMatches(
         redactedData.transaction,
       );
+      const _tSchema = performance.now();
 
       // Send commits with revisions to commit log subscriptions
       // The client's startSynchronization() reads revisions to update its heap
@@ -504,6 +511,14 @@ class MemoryProviderSession<
           });
         }
       }
+      const _tDone = performance.now();
+      console.warn(
+        `[PROVIDER-COMMIT] #${_cId} schemaChannels=${this.schemaChannels.size} channels=${this.channels.size} matched=${commitJobIds.length} schemaFacts=${schemaFacts.length} | redact=${
+          (_tRedact - _t0).toFixed(1)
+        }ms schema=${(_tSchema - _tRedact).toFixed(1)}ms dispatch=${
+          (_tDone - _tSchema).toFixed(1)
+        }ms | total=${(_tDone - _t0).toFixed(1)}ms`,
+      );
     }
     return { ok: {} };
   }
@@ -636,6 +651,9 @@ class MemoryProviderSession<
    *
    * Returns all facts that match any subscription's criteria.
    */
+  // [INSTRUMENTATION] Schema match counter
+  private static _schemaMatchSeq = 0;
+
   private async getSchemaSubscriptionMatches<Space extends MemorySpace>(
     transaction: Transaction<Space>,
   ): Promise<Revision<Fact>[]> {
@@ -646,11 +664,15 @@ class MemoryProviderSession<
       return [];
     }
 
+    const _t0 = performance.now();
+    const _smId = ++MemoryProviderSession._schemaMatchSeq;
+
     // Extract changed document keys from transaction
     const changedDocs = this.extractChangedDocKeys(space, transaction);
     if (changedDocs.size === 0) {
       return [];
     }
+    const _tExtract = performance.now();
 
     // Get access to the space session for evaluating documents
     const mountResult = await Memory.mount(
@@ -661,6 +683,7 @@ class MemoryProviderSession<
       throw new Error(`Failed to mount space ${space}: ${mountResult.error}`);
     }
     const spaceSession = mountResult.ok as unknown as SpaceSession<Space>;
+    const _tMount = performance.now();
 
     // Find affected docs using the shared schemaTracker (for non-wildcard)
     const sharedAffectedDocs = new Map<string, Set<SchemaPathSelector>>();
@@ -676,10 +699,13 @@ class MemoryProviderSession<
       spaceSession,
       sharedAffectedDocs,
     );
+    const _tShared = performance.now();
 
     // Add facts from wildcard subscriptions
+    let _wildcardCount = 0;
     for (const [_jobId, subscription] of this.schemaChannels) {
       if (subscription.isWildcardQuery) {
+        _wildcardCount++;
         const wildcardDocs = this.findAffectedDocsForWildcard(
           changedDocs,
           subscription.invocation,
@@ -695,6 +721,17 @@ class MemoryProviderSession<
         }
       }
     }
+    const _tWildcard = performance.now();
+
+    console.warn(
+      `[SCHEMA-MATCH] #${_smId} changedDocs=${changedDocs.size} sharedAffected=${sharedAffectedDocs.size} wildcardSubs=${_wildcardCount} results=${newFacts.size} | extract=${
+        (_tExtract - _t0).toFixed(1)
+      }ms mount=${(_tMount - _tExtract).toFixed(1)}ms shared=${
+        (_tShared - _tMount).toFixed(1)
+      }ms wildcard=${(_tWildcard - _tShared).toFixed(1)}ms | total=${
+        (_tWildcard - _t0).toFixed(1)
+      }ms`,
+    );
 
     return [...newFacts.values()];
   }

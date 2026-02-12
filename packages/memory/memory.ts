@@ -66,13 +66,27 @@ export class Memory implements Session, MemorySession {
     return this;
   }
 
+  // [INSTRUMENTATION] Perform counter for queue timing analysis
+  private static _performSeq = 0;
+
   /**
    * Runs task one at a time, this works around some bug in deno sqlite bindings
    * which seems to cause problems if query and transaction happen concurrently.
    */
   async perform<Out>(task: () => Promise<Out>): Promise<Out> {
     return await traceAsync("memory.perform", async (_span) => {
-      const result = this.ready.finally().then(task);
+      const _pId = ++Memory._performSeq;
+      const _tEnqueue = performance.now();
+      const result = this.ready.finally().then(() => {
+        const _tStart = performance.now();
+        const _queueWait = _tStart - _tEnqueue;
+        if (_queueWait > 1) {
+          console.warn(
+            `[MEMORY-PERFORM] #${_pId} queueWait=${_queueWait.toFixed(1)}ms`,
+          );
+        }
+        return task();
+      });
       this.ready = result.finally();
       await this.ready;
       return await result;
@@ -205,8 +219,13 @@ export const querySchemaWithTracker = async (
   });
 };
 
+// [INSTRUMENTATION] Transaction counter for timing analysis
+let _txSeq = 0;
+
 export const transact = async (session: Session, transaction: Transaction) => {
   return await traceAsync("memory.transact", async (span) => {
+    const _t0 = performance.now();
+    const _txId = ++_txSeq;
     addMemoryAttributes(span, {
       operation: "transact",
       space: transaction.sub,
@@ -217,6 +236,7 @@ export const transact = async (session: Session, transaction: Transaction) => {
     }
 
     const { ok: space, error } = await mount(session, transaction.sub);
+    const _tMount = performance.now();
     if (error) {
       span.setAttribute("mount.status", "error");
       return { error };
@@ -224,6 +244,7 @@ export const transact = async (session: Session, transaction: Transaction) => {
 
     span.setAttribute("mount.status", "success");
     const result = space.transact(transaction);
+    const _tSpaceTx = performance.now();
 
     if (result.error) {
       return result;
@@ -240,12 +261,22 @@ export const transact = async (session: Session, transaction: Transaction) => {
           session.subscribers.size,
         );
 
+        const _tNotifyStart = performance.now();
         const promises = [];
         // Copy here, in case a subscriber modifies the set of subscribers
         for (const subscriber of [...session.subscribers]) {
           promises.push(subscriber.commit(result.ok, labels));
         }
         await Promise.all(promises);
+        const _tNotifyDone = performance.now();
+
+        console.warn(
+          `[MEMORY-TX] #${_txId} subs=${session.subscribers.size} | mount=${
+            (_tMount - _t0).toFixed(1)
+          }ms spaceTx=${(_tSpaceTx - _tMount).toFixed(1)}ms notify=${
+            (_tNotifyDone - _tNotifyStart).toFixed(1)
+          }ms | total=${(_tNotifyDone - _t0).toFixed(1)}ms`,
+        );
 
         return result;
       },
