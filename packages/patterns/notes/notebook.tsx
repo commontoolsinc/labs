@@ -255,7 +255,21 @@ const handleDropOntoNotebook = handler<
   }
 });
 
-// NOTE: cancelNewNestedNotebookPrompt, goToAllNotes converted to actions inside pattern
+// Navigate to All Notes piece if it exists (found by name in allPieces)
+// Module-scope handler avoids closure-over-wish issue (see traverse.ts required-property bug)
+const goToAllNotes = handler<
+  void,
+  { allPieces: Writable<NotePiece[]> }
+>((_, { allPieces }) => {
+  const pieces = allPieces.get();
+  const existing = pieces.find((piece: any) => {
+    const name = piece?.[NAME];
+    return typeof name === "string" && name.startsWith("All Notes");
+  });
+  if (existing) {
+    return navigateTo(existing);
+  }
+});
 
 // Handler for clicking on a backlink
 const handleBacklinkClick = handler<
@@ -622,16 +636,8 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
       query: "#notebook",
       scope: ["."],
     });
-    const allNotesWish = wish<MinimalPiece>({
-      query: "#allNotes",
-      scope: ["."],
-    });
-
     // Notebooks discovered via wish scope (replaces allPieces emoji filtering)
     const notebooks = notebookWish.candidates;
-
-    // "All Notes" piece discovered via wish scope
-    const allNotesPiece = allNotesWish.result;
 
     // Still need allPieces for write operations (push new notes/notebooks)
     const { allPieces } = wish<{ allPieces: Writable<NotePiece[]> }>(
@@ -701,13 +707,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
       selectedMoveNotebook.set("");
     });
 
-    const goToAllNotesAction = action(() => {
-      if (allNotesPiece) {
-        return navigateTo(allNotesPiece);
-      }
-      // No "All Notes" piece exists - can't create one here due to circular import
-      // User should create it from default-app or deploy notes-import-export directly
-    });
+    const goToAllNotesAction = goToAllNotes({ allPieces });
 
     const selectAllNotesAction = action(() => {
       const notesList = notes.get();
@@ -945,10 +945,15 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
       backlinks.get().length > 0 ? "flex" : "none"
     );
 
-    // All Notes button display
-    const allNotesButtonDisplay = computed(() =>
-      allNotesPiece ? "flex" : "none"
-    );
+    // All Notes button display - search allPieces by name (matches default-app approach)
+    const allNotesButtonDisplay = computed(() => {
+      const pieces = allPieces.get();
+      const exists = pieces.some((piece: any) => {
+        const name = piece?.[NAME];
+        return typeof name === "string" && name.startsWith("All Notes");
+      });
+      return exists ? "flex" : "none";
+    });
 
     // ===== Shared UI Styles =====
 
