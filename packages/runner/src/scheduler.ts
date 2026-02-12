@@ -181,6 +181,7 @@ export class Scheduler {
   >();
   // Track all active debounce timers for cleanup during dispose
   private activeDebounceTimers = new Set<ReturnType<typeof setTimeout>>();
+  private pendingQueueTaskTimer: ReturnType<typeof setTimeout> | null = null;
   private actionDebounce = new WeakMap<Action, number>();
   // Actions that opt out of auto-debounce (inverted: true means NO auto-debounce)
   private noDebounce = new WeakMap<Action, boolean>();
@@ -240,6 +241,7 @@ export class Scheduler {
   private consoleHandler: ConsoleHandler;
   private _running: Promise<unknown> | undefined = undefined;
   private scheduled = false;
+  private disposed = false;
 
   get runningPromise(): Promise<unknown> | undefined {
     return this._running;
@@ -994,8 +996,11 @@ export class Scheduler {
   }
 
   queueExecution(): void {
-    if (this.scheduled) return;
-    queueTask(() => this.execute());
+    if (this.scheduled || this.disposed) return;
+    this.pendingQueueTaskTimer = queueTask(() => {
+      this.pendingQueueTaskTimer = null;
+      this.execute();
+    });
     this.scheduled = true;
   }
 
@@ -1937,6 +1942,7 @@ export class Scheduler {
   }
 
   private async execute(): Promise<void> {
+    if (this.disposed) return;
     logger.timeStart("scheduler", "execute");
 
     // In case a directly invoked `run` is still running, wait for it to finish.
@@ -2461,7 +2467,10 @@ export class Scheduler {
       this.scheduledFirstTime.clear();
     } else {
       // Keep scheduled = true since we're queuing another execution
-      queueTask(() => this.execute());
+      this.pendingQueueTaskTimer = queueTask(() => {
+        this.pendingQueueTaskTimer = null;
+        this.execute();
+      });
     }
     logger.timeEnd("scheduler", "execute");
   }
@@ -2471,11 +2480,16 @@ export class Scheduler {
    * Should be called when the scheduler is being torn down.
    */
   dispose(): void {
+    this.disposed = true;
     // Clear all active debounce timers
     for (const timer of this.activeDebounceTimers) {
       clearTimeout(timer);
     }
     this.activeDebounceTimers.clear();
+    if (this.pendingQueueTaskTimer !== null) {
+      clearTimeout(this.pendingQueueTaskTimer);
+      this.pendingQueueTaskTimer = null;
+    }
   }
 }
 
@@ -2663,6 +2677,6 @@ function getPieceMetadataFromFrame(frame?: Frame): {
   return result;
 }
 
-function queueTask(fn: () => void): void {
-  setTimeout(fn, 0);
+function queueTask(fn: () => void): ReturnType<typeof setTimeout> {
+  return setTimeout(fn, 0);
 }

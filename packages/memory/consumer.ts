@@ -150,6 +150,7 @@ class MemoryConsumerSession<
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private batchStartTime: number | null = null;
   private lastFlushTime: number | null = null;
+  private cancelled = false;
 
   constructor(
     public as: Signer,
@@ -252,6 +253,11 @@ class MemoryConsumerSession<
     invocation: ConsumerInvocation<Ability, MemoryProtocol>,
     options?: { immediate?: boolean },
   ) {
+    if (this.cancelled) {
+      // deno-lint-ignore no-explicit-any
+      invocation.return({ error: new Error("session cancel") } as any);
+      return;
+    }
     const queueEntry = Promise.withResolvers<void>();
     // put it in the queue immediately -- messages are sent in the order
     // they are executed, regardless of authorization timing
@@ -307,15 +313,39 @@ class MemoryConsumerSession<
     if (batch.length === 0) return;
 
     const refs = batch.map(({ invocation }) => invocation.refer());
-    const authorizationResult = await Access.authorize(refs, this.as);
+    // If authorize throws, convert to a Result error so executeAuthorized
+    // can propagate it to each invocation through the normal path.
+    const authorizationResult = await Access.authorize(refs, this.as)
+      .catch((error: unknown) => ({
+        error: error instanceof Error ? error : new Error(String(error)),
+      } as Awaited<ReturnType<typeof Access.authorize>>));
 
-    for (const { invocation, queueEntry } of batch) {
+    for (let i = 0; i < batch.length; i++) {
+      const { invocation, queueEntry } = batch[i];
       if (queueEntry !== this.sendQueue[0]) {
-        await queueEntry.promise;
+        try {
+          await queueEntry.promise;
+        } catch {
+          // Session was cancelled — fail remaining invocations whose
+          // promises would otherwise hang forever.
+          for (let j = i; j < batch.length; j++) {
+            batch[j].invocation.return(
+              // deno-lint-ignore no-explicit-any
+              { error: new Error("session cancel") } as any,
+            );
+          }
+          return;
+        }
         if (
           this.sendQueue.length === 0 || queueEntry !== this.sendQueue[0]
         ) {
-          throw new Error("session cancel");
+          for (let j = i; j < batch.length; j++) {
+            batch[j].invocation.return(
+              // deno-lint-ignore no-explicit-any
+              { error: new Error("session cancel") } as any,
+            );
+          }
+          return;
         }
       }
       try {
@@ -368,12 +398,16 @@ class MemoryConsumerSession<
     this.controller?.terminate();
   }
   cancel() {
+    this.cancelled = true;
     if (this.debounceTimer !== null) {
       clearTimeout(this.debounceTimer);
       this.debounceTimer = null;
     }
     this.batchStartTime = null;
     this.lastFlushTime = null;
+    // Fail pending batch invocations so their promises resolve (with error)
+    // rather than hanging forever.
+    const pendingBatch = this.pendingBatch;
     this.pendingBatch = [];
     for (const queueEntry of [...this.sendQueue]) {
       // Suppress unhandled rejection for entries that may not yet be awaited
@@ -382,6 +416,12 @@ class MemoryConsumerSession<
       queueEntry.reject(new Error("session cancel"));
     }
     this.sendQueue = [];
+    // Return pending invocations last — their .then() handlers may trigger
+    // new execute() calls, which will bail out via the cancelled flag.
+    for (const { invocation } of pendingBatch) {
+      // deno-lint-ignore no-explicit-any
+      invocation.return({ error: new Error("session cancel") } as any);
+    }
   }
   abort(invocation: InvocationHandle) {
     this.invocations.delete(invocation.toURL());
