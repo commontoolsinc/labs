@@ -67,8 +67,7 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                     },
                     asCell: true
                 }
-            },
-            required: ["list"]
+            }
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, { list: list }, ({ list }) => !list.get()?.[0]), <span>No first entry</span>)}
