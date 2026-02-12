@@ -10,3 +10,16 @@ export const ttl = 60 * 60;
  * in CI environments.
  */
 export const clock = Clock.default.with(10);
+
+/**
+ * Batch signing settings: accumulate invocations over a debounce window
+ * and sign them all with one Ed25519 signature.
+ *
+ * First invocation in a quiet period flushes immediately (zero added latency).
+ * If another invocation arrives within `batchCoalesceMs` of the last flush,
+ * debounce mode activates and accumulates for up to `batchDebounceMs`.
+ */
+export const batchCoalesceMs = 5;
+export const batchDebounceMs = 20;
+export const batchMaxAccumulateMs = 1000;
+export const batchMaxSize = 50;

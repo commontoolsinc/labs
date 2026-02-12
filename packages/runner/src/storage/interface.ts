@@ -442,6 +442,11 @@ export interface IStorageTransaction {
    */
   changeGroup?: ChangeGroup;
   /**
+   * When true, the transaction bypasses batch-signing debounce and flushes
+   * immediately. Set for user-interactive paths (editWithRetry, events).
+   */
+  immediate?: boolean;
+  /**
    * The transaction journal containing all read and write activities.
    * Provides access to transaction operations and dependency tracking.
    */

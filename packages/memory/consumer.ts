@@ -142,6 +142,16 @@ class MemoryConsumerSession<
   // Promises that are resolved when the message is at the front of the queue
   private sendQueue: PromiseWithResolvers<void>[] = [];
 
+  // Batch signing state: accumulate invocations and sign them together
+  private pendingBatch: {
+    invocation: ConsumerInvocation<string, MemoryProtocol>;
+    queueEntry: PromiseWithResolvers<void>;
+  }[] = [];
+  private debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private batchStartTime: number | null = null;
+  private lastFlushTime: number | null = null;
+  private cancelled = false;
+
   constructor(
     public as: Signer,
     public clock: Clock = Settings.clock,
@@ -215,6 +225,7 @@ class MemoryConsumerSession<
 
   invoke<Ability extends string>(
     command: ConsumerCommandFor<Ability, MemoryProtocol>,
+    options?: { immediate?: boolean },
   ) {
     const invocation = ConsumerInvocation.create(
       this.as.did(),
@@ -222,7 +233,7 @@ class MemoryConsumerSession<
       this.clock.now(),
       this.ttl,
     );
-    this.execute(invocation);
+    this.execute(invocation, options);
     return invocation;
   }
 
@@ -240,31 +251,110 @@ class MemoryConsumerSession<
 
   async execute<Ability extends string>(
     invocation: ConsumerInvocation<Ability, MemoryProtocol>,
+    options?: { immediate?: boolean },
   ) {
+    if (this.cancelled) {
+      // deno-lint-ignore no-explicit-any
+      invocation.return({ error: new Error("session cancel") } as any);
+      return;
+    }
     const queueEntry = Promise.withResolvers<void>();
     // put it in the queue immediately -- messages are sent in the order
     // they are executed, regardless of authorization timing
     this.sendQueue.push(queueEntry);
 
-    const authorizationResult = await Access.authorize([
-      invocation.refer(),
-    ], this.as);
+    this.pendingBatch.push({
+      invocation: invocation as ConsumerInvocation<string, MemoryProtocol>,
+      queueEntry,
+    });
 
-    // If we're not at the front of the queue, wait until we are
-    if (queueEntry !== this.sendQueue[0]) {
-      await queueEntry.promise;
-      // We can be resolved, then rejected (noop) via cancel.
-      if (this.sendQueue.length === 0 || queueEntry !== this.sendQueue[0]) {
-        throw new Error("session cancel");
-      }
+    if (this.batchStartTime === null) {
+      this.batchStartTime = Date.now();
     }
-    try {
-      this.executeAuthorized(authorizationResult, invocation);
-    } finally {
-      // if that throws, we still want to unblock the queue
-      this.sendQueue.shift();
-      if (this.sendQueue.length > 0) {
-        this.sendQueue[0].resolve();
+
+    // Immediate flag or first invocation in a quiet period: flush now
+    const inCoalesceWindow = this.lastFlushTime !== null &&
+      (Date.now() - this.lastFlushTime) < Settings.batchCoalesceMs;
+    if (
+      options?.immediate ||
+      (this.pendingBatch.length === 1 && !inCoalesceWindow)
+    ) {
+      await this.flushBatch();
+      return;
+    }
+
+    const elapsed = Date.now() - this.batchStartTime;
+    if (
+      this.pendingBatch.length >= Settings.batchMaxSize ||
+      elapsed >= Settings.batchMaxAccumulateMs
+    ) {
+      await this.flushBatch();
+    } else {
+      if (this.debounceTimer !== null) {
+        clearTimeout(this.debounceTimer);
+      }
+      this.debounceTimer = setTimeout(
+        () => this.flushBatch(),
+        Settings.batchDebounceMs,
+      );
+    }
+  }
+
+  private async flushBatch() {
+    if (this.debounceTimer !== null) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
+    }
+    this.batchStartTime = null;
+    this.lastFlushTime = Date.now();
+
+    const batch = this.pendingBatch;
+    this.pendingBatch = [];
+    if (batch.length === 0) return;
+
+    const refs = batch.map(({ invocation }) => invocation.refer());
+    // If authorize throws, convert to a Result error so executeAuthorized
+    // can propagate it to each invocation through the normal path.
+    const authorizationResult = await Access.authorize(refs, this.as)
+      .catch((error: unknown) => ({
+        error: error instanceof Error ? error : new Error(String(error)),
+      } as Awaited<ReturnType<typeof Access.authorize>>));
+
+    for (let i = 0; i < batch.length; i++) {
+      const { invocation, queueEntry } = batch[i];
+      if (queueEntry !== this.sendQueue[0]) {
+        try {
+          await queueEntry.promise;
+        } catch {
+          // Session was cancelled — fail remaining invocations whose
+          // promises would otherwise hang forever.
+          for (let j = i; j < batch.length; j++) {
+            batch[j].invocation.return(
+              // deno-lint-ignore no-explicit-any
+              { error: new Error("session cancel") } as any,
+            );
+          }
+          return;
+        }
+        if (
+          this.sendQueue.length === 0 || queueEntry !== this.sendQueue[0]
+        ) {
+          for (let j = i; j < batch.length; j++) {
+            batch[j].invocation.return(
+              // deno-lint-ignore no-explicit-any
+              { error: new Error("session cancel") } as any,
+            );
+          }
+          return;
+        }
+      }
+      try {
+        this.executeAuthorized(authorizationResult, invocation);
+      } finally {
+        this.sendQueue.shift();
+        if (this.sendQueue.length > 0) {
+          this.sendQueue[0].resolve();
+        }
       }
     }
   }
@@ -303,15 +393,40 @@ class MemoryConsumerSession<
     }
   }
 
+  /** Immediately flush any debounced batch without waiting for the timer. */
+  flush() {
+    return this.flushBatch();
+  }
+
   close() {
     this.cancel();
     this.controller?.terminate();
   }
   cancel() {
+    this.cancelled = true;
+    if (this.debounceTimer !== null) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
+    }
+    this.batchStartTime = null;
+    this.lastFlushTime = null;
+    // Fail pending batch invocations so their promises resolve (with error)
+    // rather than hanging forever.
+    const pendingBatch = this.pendingBatch;
+    this.pendingBatch = [];
     for (const queueEntry of [...this.sendQueue]) {
+      // Suppress unhandled rejection for entries that may not yet be awaited
+      // (e.g. batched entries whose flushBatch timer hasn't fired)
+      queueEntry.promise.catch(() => {});
       queueEntry.reject(new Error("session cancel"));
     }
     this.sendQueue = [];
+    // Return pending invocations last — their .then() handlers may trigger
+    // new execute() calls, which will bail out via the cancelled flag.
+    for (const { invocation } of pendingBatch) {
+      // deno-lint-ignore no-explicit-any
+      invocation.return({ error: new Error("session cancel") } as any);
+    }
   }
   abort(invocation: InvocationHandle) {
     this.invocations.delete(invocation.toURL());
@@ -339,11 +454,16 @@ export interface MemoryConsumer<Space extends MemorySpace>
       UCAN<ConsumerCommandInvocation<Protocol>>
     > {
   as: Signer;
+  cancel(): void;
 }
 
 export interface MemorySpaceSession<Space extends MemorySpace = MemorySpace> {
   as: Signer;
-  transact(source: Transaction<Space>["args"]): TransactionResult<Space>;
+  flush(): Promise<void>;
+  transact(
+    source: Transaction<Space>["args"],
+    options?: { immediate?: boolean },
+  ): TransactionResult<Space>;
   query(
     source: Query["args"] | SchemaQuery["args"],
   ): QueryView<Space, Protocol<Space>>;
@@ -360,12 +480,15 @@ class MemorySpaceConsumerSession<Space extends MemorySpace>
   ) {
     this.as = session.as;
   }
-  transact(source: Transaction["args"]) {
+  flush() {
+    return this.session.flush();
+  }
+  transact(source: Transaction["args"], options?: { immediate?: boolean }) {
     return this.session.invoke({
       cmd: "/memory/transact",
       sub: this.space,
       args: source,
-    });
+    }, options);
   }
   query(
     source: Query["args"] | SchemaQuery["args"],
@@ -373,11 +496,13 @@ class MemorySpaceConsumerSession<Space extends MemorySpace>
     const selectSchema = ("select" in source)
       ? MemorySpaceConsumerSession.asSelectSchema(source)
       : source;
+    // Queries are always awaited by the caller, so flush immediately
+    // rather than debouncing (batching queries adds latency with no benefit).
     const query = this.session.invoke({
       cmd: "/memory/graph/query" as const,
       sub: this.space,
       args: selectSchema,
-    });
+    }, { immediate: true });
     return QueryView.create(this.session, query);
   }
 

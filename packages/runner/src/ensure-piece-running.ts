@@ -37,6 +37,7 @@ export async function ensurePieceRunning(
 ): Promise<boolean> {
   try {
     const tx = runtime.edit();
+    tx.tx.immediate = true;
 
     try {
       // Get the cell at the event link location

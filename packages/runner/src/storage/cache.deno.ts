@@ -44,6 +44,11 @@ export class StorageManagerEmulator extends BaseStorageManager {
   override subscribe(subscription: IStorageSubscription): void {
     this.#subscription.subscribe(subscription);
   }
+
+  override async close() {
+    await super.close();
+    this.#session?.cancel();
+  }
 }
 
 export class StorageManager extends BaseStorageManager {

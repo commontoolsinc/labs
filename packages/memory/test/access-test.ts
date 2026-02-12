@@ -101,6 +101,53 @@ test("Fail authorization if issuer is not a subject", async () => {
   );
 });
 
+test("Access.authorize with multiple refs -> each can be claimed", async () => {
+  const invocation1: Invocation = {
+    iss: alice.did(),
+    cmd: "/test/alpha",
+    sub: alice.did(),
+    args: { n: 1 },
+    prf: [],
+  };
+  const invocation2: Invocation = {
+    iss: alice.did(),
+    cmd: "/test/beta",
+    sub: alice.did(),
+    args: { n: 2 },
+    prf: [],
+  };
+
+  const result = await Access.authorize(
+    [refer(invocation1), refer(invocation2)],
+    alice,
+  );
+  assert(result.ok, "batch authorization was issued");
+  const authorization = result.ok;
+
+  const claim1 = await Access.claim(invocation1, authorization, serviceDid);
+  assert(claim1.ok, "first invocation is valid");
+
+  const claim2 = await Access.claim(invocation2, authorization, serviceDid);
+  assert(claim2.ok, "second invocation is valid");
+
+  const unrelated: Invocation = {
+    iss: alice.did(),
+    cmd: "/test/gamma",
+    sub: alice.did(),
+    args: {},
+    prf: [],
+  };
+  const claimUnrelated = await Access.claim(
+    unrelated,
+    authorization,
+    serviceDid,
+  );
+  assertMatch(
+    claimUnrelated?.error?.message ?? "",
+    /Authorization does not/,
+  );
+});
+
 test("Fail authorization if subject isn't a did", async () => {
   const invocation: Invocation = {
     iss: bob.did(),

@@ -1246,11 +1246,53 @@ test(
 );
 
 test(
+  "batch signing: multiple concurrent transacts succeed",
+  store,
+  async (session) => {
+    const clock = new Clock();
+    const memory = Consumer.open({ as: subject, session, clock })
+      .mount(subject.did());
+
+    const doc1 = `of:${refer({ batch: 1 })}` as const;
+    const doc2 = `of:${refer({ batch: 2 })}` as const;
+    const doc3 = `of:${refer({ batch: 3 })}` as const;
+
+    const v1 = Fact.assert({ the, of: doc1, is: { n: 1 } });
+    const v2 = Fact.assert({ the, of: doc2, is: { n: 2 } });
+    const v3 = Fact.assert({ the, of: doc3, is: { n: 3 } });
+
+    // Fire all three without awaiting — they should batch together
+    const p1 = memory.transact({ changes: Changes.from([v1]) });
+    const p2 = memory.transact({ changes: Changes.from([v2]) });
+    const p3 = memory.transact({ changes: Changes.from([v3]) });
+
+    const [r1, r2, r3] = await Promise.all([p1, p2, p3]);
+    assert(r1.ok, "first transaction succeeded");
+    assert(r2.ok, "second transaction succeeded");
+    assert(r3.ok, "third transaction succeeded");
+
+    // Verify all three docs are queryable
+    const { ok: query } = await memory.query({
+      select: { _: { [the]: {} } },
+    });
+    assert(query);
+
+    const facts = query.facts;
+    const ofs = facts.map((f) => f.of);
+    assert(ofs.includes(doc1), "doc1 present");
+    assert(ofs.includes(doc2), "doc2 present");
+    assert(ofs.includes(doc3), "doc3 present");
+  },
+);
+
+test(
   "messages sent in order when signed out of order",
   store,
   async (session) => {
     const clock = new Clock();
-    // Create a sign method that will sign the second payload before the first
+    // Create a sign method that will sign the second batch before the first.
+    // With batch signing, each batch calls sign once. We force separate
+    // batches by issuing the second transact after the first batch flushes.
     const slowSigner = await Identity.fromString(
       "MU+bzp2GaFQHso587iSFWPSeCzbSfn/CbNHEz7ilKRZ0=",
     );
@@ -1288,6 +1330,9 @@ test(
 
     const c1 = Changes.from([v1]);
     const p1 = memory.transact({ changes: c1 });
+
+    // Wait for the debounce timer to fire so batch 1 starts authorization
+    await new Promise((resolve) => setTimeout(resolve, 50));
 
     const v2 = Fact.assert({
       the: "application/json",
