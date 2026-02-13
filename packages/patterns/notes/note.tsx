@@ -107,8 +107,6 @@ const handleBacklinkClick = handler<
   (_, { piece }) => navigateTo(piece),
 );
 
-// NOTE: goToParent converted to action inside pattern
-
 // ===== Utility functions =====
 
 // Grep function for patternTool - filters content lines by query

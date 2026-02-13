@@ -74,7 +74,7 @@ export default pattern(() => {
     content: checkboxContent,
   });
 
-  // === NEW: Edge case - regular markdown links ===
+  // === Edge case - regular markdown links ===
   const regularLinksContent = Writable.of(
     "Use [regular markdown](http://example.com) links",
   );
@@ -89,7 +89,7 @@ export default pattern(() => {
     content: regularLinksContent,
   });
 
-  // === NEW: Edge case - wiki-link with special characters ===
+  // === Edge case - wiki-link with special characters ===
   const specialCharsContent = Writable.of("See [[Alice & Bob (special-123)]]");
 
   const mdSpecialChars = NoteMd({
@@ -102,7 +102,7 @@ export default pattern(() => {
     content: specialCharsContent,
   });
 
-  // === NEW: Edge case - no checkboxes ===
+  // === Edge case - no checkboxes ===
   const noCheckboxContent = Writable.of("Just regular text\nNo checkboxes");
 
   const mdNoCheckbox = NoteMd({
@@ -115,7 +115,7 @@ export default pattern(() => {
     content: noCheckboxContent,
   });
 
-  // === NEW: Edge case - mixed markdown with checkboxes ===
+  // === Edge case - mixed markdown with checkboxes ===
   const mixedContent = Writable.of(
     "# Title\n\n- [ ] First task\n\nSome text\n\n- [x] Second task",
   );
@@ -130,7 +130,7 @@ export default pattern(() => {
     content: mixedContent,
   });
 
-  // === NEW: Edge case - empty content ===
+  // === Edge case - empty content ===
   const emptyContent = Writable.of("");
 
   const mdEmpty = NoteMd({
@@ -143,7 +143,7 @@ export default pattern(() => {
     content: emptyContent,
   });
 
-  // === NEW: Edge case - whitespace only content ===
+  // === Edge case - whitespace only content ===
   const whitespaceContent = Writable.of("   \n\n   ");
 
   const mdWhitespace = NoteMd({
@@ -156,7 +156,7 @@ export default pattern(() => {
     content: whitespaceContent,
   });
 
-  // === NEW: Instance with sourceNoteRef for Edit navigation ===
+  // === Instance with sourceNoteRef for Edit navigation ===
   const sourceNote = Note({
     title: "Source Note",
     content: "Original editable content",
@@ -214,27 +214,27 @@ export default pattern(() => {
     );
   });
 
-  // === NEW: Toggle on content with no checkboxes ===
+  // === Toggle on content with no checkboxes ===
   const action_toggle_no_checkbox = action(() => {
     mdNoCheckbox.checkboxToggle.send({ detail: { index: 0, checked: true } });
   });
 
-  // === NEW: Toggle first checkbox in mixed content ===
+  // === Toggle first checkbox in mixed content ===
   const action_check_mixed_first = action(() => {
     mdMixed.checkboxToggle.send({ detail: { index: 0, checked: true } });
   });
 
-  // === NEW: Toggle second checkbox in mixed content ===
+  // === Toggle second checkbox in mixed content ===
   const action_uncheck_mixed_second = action(() => {
     mdMixed.checkboxToggle.send({ detail: { index: 1, checked: false } });
   });
 
-  // === NEW: Test goToEdit with sourceNoteRef ===
+  // === Test goToEdit with sourceNoteRef ===
   const action_go_to_edit_with_source = action(() => {
     mdWithSource.goToEdit.send();
   });
 
-  // === NEW: Test goToEdit without sourceNoteRef (wish fallback) ===
+  // === Test goToEdit without sourceNoteRef (wish fallback) ===
   const action_go_to_edit_without_source = action(() => {
     mdWithoutSource.goToEdit.send();
   });
@@ -320,7 +320,7 @@ export default pattern(() => {
   );
 
   // ==========================================================================
-  // NEW Assertions - hasBacklinks computed
+  // Assertions - hasBacklinks computed
   // ==========================================================================
 
   const assert_no_backlinks_initially = computed(
@@ -328,7 +328,7 @@ export default pattern(() => {
   );
 
   // ==========================================================================
-  // NEW Assertions - Edge cases - wiki-links
+  // Assertions - Edge cases - wiki-links
   // ==========================================================================
 
   const assert_regular_links_passthrough = computed(
@@ -343,7 +343,7 @@ export default pattern(() => {
   );
 
   // ==========================================================================
-  // NEW Assertions - Edge cases - checkboxes
+  // Assertions - Edge cases - checkboxes
   // ==========================================================================
 
   const assert_no_checkbox_content = computed(
@@ -373,7 +373,7 @@ export default pattern(() => {
   );
 
   // ==========================================================================
-  // NEW Assertions - Edge cases - empty/missing content
+  // Assertions - Edge cases - empty/missing content
   // ==========================================================================
 
   const assert_empty_content = computed(
@@ -385,7 +385,7 @@ export default pattern(() => {
   );
 
   // ==========================================================================
-  // NEW Assertions - sourceNoteRef path
+  // Assertions - sourceNoteRef path
   // ==========================================================================
 
   const assert_source_name = computed(
@@ -446,14 +446,14 @@ export default pattern(() => {
       { action: action_check_third },
       { assertion: assert_third_checked },
 
-      // === NEW: hasBacklinks computed ===
+      // === hasBacklinks computed ===
       { assertion: assert_no_backlinks_initially },
 
-      // === NEW: Edge cases - wiki-links ===
+      // === Edge cases - wiki-links ===
       { assertion: assert_regular_links_passthrough },
       { assertion: assert_special_chars_converted },
 
-      // === NEW: Edge cases - checkboxes ===
+      // === Edge cases - checkboxes ===
       { assertion: assert_no_checkbox_content },
       { action: action_toggle_no_checkbox },
       { assertion: assert_no_checkbox_unchanged },
@@ -464,11 +464,11 @@ export default pattern(() => {
       { action: action_uncheck_mixed_second },
       { assertion: assert_mixed_second_unchecked },
 
-      // === NEW: Edge cases - empty/missing content ===
+      // === Edge cases - empty/missing content ===
       { assertion: assert_empty_content },
       { assertion: assert_whitespace_preserved },
 
-      // === NEW: sourceNoteRef tests ===
+      // === sourceNoteRef tests ===
       { assertion: assert_source_name },
       { assertion: assert_source_content },
       { assertion: assert_source_is_hidden },
