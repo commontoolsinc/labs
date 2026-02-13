@@ -405,25 +405,13 @@ function detectSchemaArguments(
 }
 
 /**
- * Argument ordering for builder schema injection.
- * - "schemas-first": [inputSchema, resultSchema, function] (used by pattern)
- * - "function-first": [function, inputSchema, resultSchema] (used by pattern)
- */
-type BuilderArgumentOrder = "schemas-first" | "function-first";
-
-interface BuilderSchemaInjectionConfig {
-  readonly argumentOrder: BuilderArgumentOrder;
-}
-
-/**
- * Shared handler for pattern schema injection.
- * Both builders have nearly identical logic - the only difference is argument ordering.
+ * Handler for pattern schema injection.
+ * Argument order is schemas-first: [inputSchema, resultSchema, function]
  *
  * @returns The transformed node, or undefined if no transformation was performed
  */
 function handleBuilderSchemaInjection(
   node: ts.CallExpression,
-  config: BuilderSchemaInjectionConfig,
   context: TransformationContext,
   typeRegistry: TypeRegistry | undefined,
   visit: (node: ts.Node) => ts.Node,
@@ -438,16 +426,16 @@ function handleBuilderSchemaInjection(
     return undefined; // No function found - skip transformation
   }
 
-  // Helper to build final call with correct argument order
+  // Helper to build final call with schemas-first argument order
   const buildCallExpression = (
     inputSchema: ts.Expression,
     resultSchema: ts.Expression,
   ): ts.CallExpression => {
-    const args = config.argumentOrder === "schemas-first"
-      ? [inputSchema, resultSchema, builderFunction]
-      : [builderFunction, inputSchema, resultSchema];
-
-    return factory.createCallExpression(node.expression, undefined, args);
+    return factory.createCallExpression(node.expression, undefined, [
+      inputSchema,
+      resultSchema,
+      builderFunction,
+    ]);
   };
 
   // Determine input and result schema TypeNodes based on type arguments
@@ -589,19 +577,6 @@ export class SchemaInjectionTransformer extends Transformer {
       if (callKind?.kind === "builder" && callKind.builderName === "pattern") {
         const result = handleBuilderSchemaInjection(
           node,
-          { argumentOrder: "schemas-first" },
-          context,
-          typeRegistry,
-          visit,
-        );
-        if (result) return result;
-        return ts.visitEachChild(node, visit, transformation);
-      }
-
-      if (callKind?.kind === "builder" && callKind.builderName === "pattern") {
-        const result = handleBuilderSchemaInjection(
-          node,
-          { argumentOrder: "function-first" },
           context,
           typeRegistry,
           visit,

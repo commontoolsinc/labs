@@ -46,7 +46,6 @@ import { isCommonToolsSymbol } from "../core/mod.ts";
 
 const BUILDER_SYMBOL_NAMES = new Set([
   "pattern",
-  "pattern",
   "handler",
   "action",
   "lift",
