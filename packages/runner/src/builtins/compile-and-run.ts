@@ -76,7 +76,7 @@ export function compileAndRun(
         tx,
       );
 
-      error = runtime.getCell<string | undefined>(
+      error = runtime.getCell<string | null>(
         parentCell.space,
         { compile: { error: cause } },
         undefined,
