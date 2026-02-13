@@ -39,6 +39,7 @@ export interface NotePiece {
   isHidden?: boolean;
   noteId?: string;
   backlinks?: MentionablePiece[];
+  parentNotebook?: NotebookPiece | null;
 }
 
 /**

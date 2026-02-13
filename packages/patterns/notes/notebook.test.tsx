@@ -20,10 +20,6 @@
  * The test harness sets up defaultPattern so wish("#default") resolves,
  * enabling tests for handlers that push to allPieces.
  *
- * KNOWN ISSUE: Tests for SELF-dependent parentNotebook currently FAIL.
- * These failures demonstrate the bug where handlers using SELF don't properly
- * set the parentNotebook reference on created notes. See investigation notes.
- *
  * Run: deno task ct test packages/patterns/notes/notebook.test.tsx --verbose
  */
 import { action, computed, NAME, pattern } from "commontools";
@@ -376,17 +372,11 @@ export default pattern(() => {
   // Assertions - Create Nested Notebook
   // ==========================================================================
 
-  const assert_notebook_created = computed(() => notebook.noteCount === 4 // 3 notes + 1 nested notebook
+  // createNotebook pushes to allPieces, not to this notebook's notes array.
+  // So the notebook's own noteCount should remain unchanged at 3.
+  const assert_notebook_count_unchanged = computed(() =>
+    notebook.noteCount === 3
   );
-
-  // The nested notebook should have the note inside it
-  const assert_nested_notebook_has_note = computed(() => {
-    const notesList = notebook.notes;
-    // Find the last item, which should be the nested notebook
-    const last = notesList[notesList.length - 1];
-    // The nested notebook was created with notesData, so it should have 1 note
-    return !!last && (last as any)?.notes?.length === 1;
-  });
 
   // ==========================================================================
   // Test Sequence
@@ -458,10 +448,9 @@ export default pattern(() => {
       { action: action_delete_selected },
       { assertion: assert_notes_deleted },
 
-      // === Create nested notebook ===
+      // === Create nested notebook (pushes to allPieces, not notes) ===
       { action: action_create_notebook_via_stream },
-      { assertion: assert_notebook_created },
-      { assertion: assert_nested_notebook_has_note },
+      { assertion: assert_notebook_count_unchanged },
       // === Bulk create notes ===
       // KNOWN BUG: commented out, see multi-push-action-timeout.md
       // { action: action_create_multiple_notes },
