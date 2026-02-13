@@ -192,7 +192,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
     })
   );
 
-  const index = BacklinksIndex({ allPieces });
+  const index = BacklinksIndex({});
 
   const fab = OmniboxFAB({
     mentionable: index.mentionable,

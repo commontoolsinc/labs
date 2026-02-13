@@ -352,6 +352,9 @@ export class CTCodeEditor extends BaseElement {
   private _previousBacklinkNames = new Map<string, string>();
   // Track subscriptions to piece NAME cells for bidirectional sync
   private _pieceNameSubscriptions = new Map<string, () => void>();
+  // Cache of resolved piece cell IDs: index in mentionable array → stable piece cell ID.
+  // Populated asynchronously when mentionable changes via resolveAsCell().
+  private _resolvedPieceIds = new Map<number, string>();
 
   // Transaction annotation to mark Cell-originated updates.
   // This is the idiomatic CodeMirror 6 way to distinguish programmatic
@@ -428,8 +431,8 @@ export class CTCodeEditor extends BaseElement {
       const hasAutoCloseBrackets = afterCursor.startsWith("]]");
 
       // Build options from existing mentionable items
-      const options: Completion[] = mentionable.map((piece) => {
-        const pieceId = piece.id();
+      const options: Completion[] = mentionable.map(([piece, index]) => {
+        const pieceId = this._getPieceId(index);
         const pieceName = piece.key(NAME).get() || "";
         const insertText = `${pieceName} (${pieceId})`;
         return {
@@ -458,9 +461,13 @@ export class CTCodeEditor extends BaseElement {
   }
 
   /**
-   * Get filtered mentionable items based on query
+   * Get filtered mentionable items based on query.
+   * Returns tuples of [CellHandle, originalIndex] so callers can look up
+   * the stable resolved piece ID via _getPieceId(index).
    */
-  private getFilteredMentionable(query: string): CellHandle<Mentionable>[] {
+  private getFilteredMentionable(
+    query: string,
+  ): Array<[CellHandle<Mentionable>, number]> {
     if (!this.mentionable) {
       return [];
     }
@@ -477,7 +484,7 @@ export class CTCodeEditor extends BaseElement {
     }
 
     const queryLower = query.toLowerCase();
-    const matches: CellHandle<Mentionable>[] = [];
+    const matches: Array<[CellHandle<Mentionable>, number]> = [];
 
     for (let i = 0; i < mentionableData.length; i++) {
       const mention = mentionableData[i];
@@ -487,7 +494,7 @@ export class CTCodeEditor extends BaseElement {
           ?.toLowerCase()
           ?.includes(queryLower)
       ) {
-        matches.push(this.mentionable.key(i) as CellHandle<Mentionable>);
+        matches.push([this.mentionable.key(i) as CellHandle<Mentionable>, i]);
       }
     }
 
@@ -495,9 +502,12 @@ export class CTCodeEditor extends BaseElement {
   }
 
   /**
-   * Find exact case-insensitive match in mentionable items
+   * Find exact case-insensitive match in mentionable items.
+   * Returns [CellHandle, originalIndex] or null.
    */
-  private _findExactMentionable(query: string): CellHandle<Mentionable> | null {
+  private _findExactMentionable(
+    query: string,
+  ): [CellHandle<Mentionable>, number] | null {
     if (!this.mentionable) return null;
 
     const rawMentionable = this.mentionable.get();
@@ -513,7 +523,7 @@ export class CTCodeEditor extends BaseElement {
       const mention = mentionableData[i];
       const name = mention?.[NAME] ?? "";
       if (name.toLowerCase() === queryLower) {
-        return this.mentionable.key(i);
+        return [this.mentionable.key(i), i];
       }
     }
 
@@ -790,7 +800,8 @@ export class CTCodeEditor extends BaseElement {
   }
 
   /**
-   * Find a piece by ID in the mentionable list
+   * Find a piece by ID in the mentionable list.
+   * Uses pre-resolved stable piece IDs from _resolvedPieceIds cache.
    */
   private findPieceById(id: string): CellHandle<Mentionable> | null {
     if (!this.mentionable) return null;
@@ -808,14 +819,69 @@ export class CTCodeEditor extends BaseElement {
     for (let i = 0; i < mentionableData.length; i++) {
       const pieceValue = mentionableData[i];
       if (!pieceValue) continue;
-      const pieceCell = this.mentionable.key(i) as CellHandle<Mentionable>;
-      const pieceId = pieceCell.id();
+      const pieceId = this._getPieceId(i);
       if (pieceId === id) {
-        return pieceCell;
+        return this.mentionable.key(i) as CellHandle<Mentionable>;
       }
     }
 
     return null;
+  }
+
+  /**
+   * Get the stable piece cell ID for a mentionable item at the given index.
+   * Returns the pre-resolved ID if available, otherwise falls back to
+   * the sub-cell ID (which may be unstable across recomputations).
+   */
+  private _getPieceId(index: number): string {
+    return this._resolvedPieceIds.get(index) ??
+      (this.mentionable?.key(index)?.id() ?? "");
+  }
+
+  /**
+   * Resolve stable piece cell IDs for all items in the mentionable list.
+   * Each mentionable sub-cell (mentionable.key(i)) may be an indirect
+   * reference whose ID changes when the list recomputes. resolveAsCell()
+   * follows the indirection to get the piece's own stable cell ID.
+   */
+  private async _resolvePieceIds(): Promise<void> {
+    if (!this.mentionable) return;
+
+    const rawMentionable = this.mentionable.get();
+    if (!rawMentionable) return;
+    const mentionableData = Array.isArray(rawMentionable)
+      ? rawMentionable as MentionableArray
+      : isCellHandle(rawMentionable)
+      ? ((rawMentionable.get() ?? []) as MentionableArray)
+      : [];
+
+    // Keep a reference to the current mentionable to detect staleness
+    const currentMentionable = this.mentionable;
+    const newResolved = new Map<number, string>();
+
+    // Resolve all piece IDs in parallel
+    const promises = mentionableData.map(async (item, i) => {
+      if (!item) return;
+      try {
+        const subCell = currentMentionable.key(i);
+        const resolved = await subCell.resolveAsCell();
+        const resolvedId = resolved.id();
+        if (resolvedId) {
+          newResolved.set(i, resolvedId);
+        }
+      } catch {
+        // If resolution fails, we'll fall back to the sub-cell ID
+      }
+    });
+
+    await Promise.all(promises);
+
+    // Only apply if mentionable hasn't changed while we were resolving
+    if (this.mentionable === currentMentionable) {
+      this._resolvedPieceIds = newResolved;
+      // Re-resolve mentioned from content now that we have stable IDs
+      this._updateMentionedFromContent();
+    }
   }
 
   /**
@@ -1024,6 +1090,9 @@ export class CTCodeEditor extends BaseElement {
     if (!this.mentionable) return;
     const unsubscribe = this.mentionable
       .subscribe((_value) => {
+        // Clear stale resolved IDs and re-resolve asynchronously
+        this._resolvedPieceIds.clear();
+        this._resolvePieceIds();
         this._updateMentionedFromContent();
       });
     this._mentionableUnsub = unsubscribe;
@@ -1051,6 +1120,7 @@ export class CTCodeEditor extends BaseElement {
   private _cleanup(): void {
     this._cleanupCellSyncHandler();
     this._cleanupPieceNameSubscriptions();
+    this._resolvedPieceIds.clear();
     if (this._mentionableUnsub) {
       this._mentionableUnsub();
       this._mentionableUnsub = null;
@@ -1072,6 +1142,8 @@ export class CTCodeEditor extends BaseElement {
       if (this.mentionable) {
         this.mentionable = this.mentionable.asSchema(MentionableArraySchema);
       }
+      this._resolvedPieceIds.clear();
+      this._resolvePieceIds();
       this._setupMentionableSyncHandler();
       this._updateMentionedFromContent();
     }
@@ -1361,9 +1433,10 @@ export class CTCodeEditor extends BaseElement {
               const exactMatch = this._findExactMentionable(text);
 
               if (exactMatch) {
-                // Found exact match - insert complete backlink with ID
-                const pieceId = exactMatch.id();
-                const pieceName = exactMatch.key(NAME).get() || text;
+                // Found exact match - insert complete backlink with stable piece ID
+                const [matchCell, matchIndex] = exactMatch;
+                const pieceId = this._getPieceId(matchIndex);
+                const pieceName = matchCell.key(NAME).get() || text;
                 this._completeBacklinkWithId(view, text, pieceName, pieceId);
               } else if (this.pattern) {
                 // No exact match - create new piece without navigating
@@ -1457,7 +1530,9 @@ export class CTCodeEditor extends BaseElement {
           break;
         }
       }
-      if (same) return; // No change
+      if (same) {
+        return; // No change
+      }
     }
 
     // Resolve IDs to Mentionable values and update the cell
@@ -1510,8 +1585,7 @@ export class CTCodeEditor extends BaseElement {
       if (!mentionedValue) continue;
       for (let i = 0; i < mentionableData.length; i++) {
         if (mentionableData[i] === mentionedValue) {
-          const pieceCell = this.mentionable.key(i) as CellHandle<Mentionable>;
-          const pieceId = pieceCell.id();
+          const pieceId = this._getPieceId(i);
           if (pieceId) curIds.add(pieceId);
           break;
         }
@@ -1635,15 +1709,19 @@ export class CTCodeEditor extends BaseElement {
       if (id) ids.push(id);
     }
 
-    // Resolve unique ids to pieces using mentionable list
+    // Resolve unique ids to pieces using mentionable list.
+    // Push CellHandles (not plain values) so the pattern system receives
+    // live cell references that backlinks-index can traverse.
     const seen = new Set<string>();
     const result: Mentionable[] = [];
     for (const id of ids) {
       if (seen.has(id)) continue;
       const piece = this.findPieceById(id);
-      const value = piece?.get();
-      if (value) {
-        result.push(value);
+      if (piece) {
+        // Push the CellHandle itself — it serializes as a link (via toJSON)
+        // so the runtime resolves it to the actual piece cell, preserving
+        // reactive connections for backlinks computation.
+        result.push(piece as unknown as Mentionable);
         seen.add(id);
       }
     }
