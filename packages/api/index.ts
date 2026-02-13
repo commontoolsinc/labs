@@ -1398,11 +1398,9 @@ export interface PatternFunction {
   ): PatternFactory<StripCell<T>, StripCell<R>>;
 
   // Function-only overload: T explicit, R inferred
-  // SELF is typed as `never` - using it will produce a type error
-  // Use pattern<T, R>() with both type params for typed SELF access
   <T>(
-    fn: (input: OpaqueRef<Required<T>> & { [SELF]: never }) => any,
-  ): PatternFactory<StripCell<T>, any>;
+    fn: (input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<any> }) => any,
+  ): PatternFactory<StripCell<T>, StripCell<ReturnType<typeof fn>>>;
 
   // Schema + function overload: T explicit, R inferred
   <T>(
