@@ -35,6 +35,33 @@ interface TodoListOutput {
 
 // ===== Pattern =====
 
+export const TodoItemPiece = pattern<
+  {
+    item: TodoItem;
+    removeItem: Stream<{ item: TodoItem }>;
+  },
+  { [UI]: VNode; [NAME]: string }
+>(({ item, removeItem }) => {
+  return {
+    [NAME]: "Todo Item",
+    [UI]: (
+      <ct-card>
+        <ct-hstack gap="2" align="center">
+          <ct-checkbox $checked={item.done} />
+          <ct-input
+            $value={item.title}
+            style="flex: 1;"
+            placeholder="Todo item..."
+          />
+          <ct-button variant="ghost" onClick={() => removeItem.send({ item })}>
+            x
+          </ct-button>
+        </ct-hstack>
+      </ct-card>
+    ),
+  };
+});
+
 export default pattern<TodoListInput, TodoListOutput>(({ items }) => {
   // Pattern-body actions - preferred for single-use handlers that close over
   // this pattern's state.
@@ -69,22 +96,7 @@ export default pattern<TodoListInput, TodoListOutput>(({ items }) => {
         <ct-vscroll flex showScrollbar fadeEdges>
           <ct-vstack gap="2" style="padding: 1rem;">
             {items.map((item) => (
-              <ct-card>
-                <ct-hstack gap="2" align="center">
-                  <ct-checkbox $checked={item.done} />
-                  <ct-input
-                    $value={item.title}
-                    style="flex: 1;"
-                    placeholder="Todo item..."
-                  />
-                  <ct-button
-                    variant="ghost"
-                    onClick={() => removeItem.send({ item })}
-                  >
-                    x
-                  </ct-button>
-                </ct-hstack>
-              </ct-card>
+              <TodoItemPiece item={item} removeItem={removeItem} />
             ))}
 
             {hasNoItems
