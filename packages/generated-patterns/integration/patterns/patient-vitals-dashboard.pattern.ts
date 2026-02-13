@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -407,7 +407,7 @@ const liftAlertSummaryText = lift((count: number) =>
 );
 
 /** Pattern tracking patient vitals with derived alert summaries. */
-export const patientVitalsDashboardPattern = recipe<PatientVitalsArgs>(
+export const patientVitalsDashboardPattern = pattern<PatientVitalsArgs>(
   "Patient Vitals Dashboard",
   ({ patientName, initialReadings, thresholds }) => {
     const readableName = liftReadableName(patientName);

@@ -6,7 +6,7 @@ import {
   Default,
   derive,
   handler,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -39,7 +39,7 @@ const setOverrideLabel = handler(
   },
 );
 
-export const counterWithComputedDefaultStrings = recipe<
+export const counterWithComputedDefaultStrings = pattern<
   ComputedDefaultStringsArgs
 >(
   "Counter With Computed Default Strings",

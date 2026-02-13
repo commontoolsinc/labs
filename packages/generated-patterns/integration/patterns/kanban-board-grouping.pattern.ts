@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -338,7 +338,7 @@ const liftHistoryView = lift((entries: MoveRecord[] | undefined) =>
   Array.isArray(entries) ? entries : []
 );
 
-export const kanbanBoardGrouping = recipe<KanbanBoardArgs>(
+export const kanbanBoardGrouping = pattern<KanbanBoardArgs>(
   "Kanban Board Grouping",
   ({ tasks, wipLimits }) => {
     const moveHistory = cell<MoveRecord[]>([]);

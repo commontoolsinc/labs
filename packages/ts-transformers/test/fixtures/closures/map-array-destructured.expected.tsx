@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 type PizzaEntry = [
     date: string,
     pizza: string
@@ -8,7 +8,7 @@ interface State {
     pizzas: PizzaEntry[];
     scale: number;
 }
-export default recipe({
+export default pattern({
     type: "object",
     properties: {
         pizzas: {
@@ -64,7 +64,7 @@ export default recipe({
     return {
         [UI]: (<div>
         {/* Map with array destructured parameter */}
-        {state.pizzas.mapWithPattern(__ctHelpers.recipe({
+        {state.pizzas.mapWithPattern(__ctHelpers.pattern({
                 type: "object",
                 properties: {
                     element: {
@@ -110,7 +110,7 @@ export default recipe({
           </div>)), {})}
 
         {/* Map with array destructured parameter and capture */}
-        {state.pizzas.mapWithPattern(__ctHelpers.recipe({
+        {state.pizzas.mapWithPattern(__ctHelpers.pattern({
                 type: "object",
                 properties: {
                     element: {

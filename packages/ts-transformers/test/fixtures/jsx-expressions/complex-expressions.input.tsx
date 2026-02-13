@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 
 interface Problem {
   price: number;
@@ -7,7 +7,7 @@ interface Problem {
   tax: number;
 }
 
-export default recipe<Problem>(
+export default pattern<Problem>(
   "ComplexExpressions",
   ({ price, discount, tax }) => {
     return {

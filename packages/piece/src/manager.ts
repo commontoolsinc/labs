@@ -10,7 +10,7 @@ import {
   type MemorySpace,
   Module,
   parseLink,
-  Recipe,
+  Pattern,
   Runtime,
   type Schema,
   type SpaceCellContents,
@@ -251,7 +251,7 @@ export class PieceManager {
       : this.runtime.getCellFromEntityId(this.space, { "/": id });
 
     if (runIt) {
-      // start() handles sync, recipe loading, and running
+      // start() handles sync, pattern loading, and running
       // It's idempotent - no effect if already running
       await this.runtime.start(piece);
     } else {
@@ -692,18 +692,18 @@ export class PieceManager {
     return cell;
   }
 
-  // Return Cell with argument content, loading the recipe if needed.
+  // Return Cell with argument content, loading the pattern if needed.
   async getArgument<T = unknown>(
     piece: Cell<unknown | T>,
   ): Promise<Cell<T>> {
     const source = piece.getSourceCell(processSchema);
-    const recipeId = source?.get()?.[TYPE]!;
-    if (!recipeId) throw new Error("piece missing recipe ID");
-    const recipe = await this.runtime.recipeManager.loadRecipe(
-      recipeId,
+    const patternId = source?.get()?.[TYPE]!;
+    if (!patternId) throw new Error("piece missing pattern ID");
+    const pattern = await this.runtime.patternManager.loadPattern(
+      patternId,
       this.space,
     );
-    return source.key("argument").asSchema<T>(recipe.argumentSchema);
+    return source.key("argument").asSchema<T>(pattern.argumentSchema);
   }
 
   getResult<T = unknown>(
@@ -752,7 +752,7 @@ export class PieceManager {
   }
 
   async runPersistent<T = unknown>(
-    recipe: Recipe | Module,
+    pattern: Pattern | Module,
     inputs?: unknown,
     cause?: unknown,
     llmRequestId?: string,
@@ -760,7 +760,7 @@ export class PieceManager {
   ): Promise<Cell<T>> {
     const start = options?.start ?? true;
     const piece = await this.setupPersistent<T>(
-      recipe,
+      pattern,
       inputs,
       cause,
       llmRequestId,
@@ -772,11 +772,11 @@ export class PieceManager {
   }
 
   // Consistently return the `Cell<Piece>` of piece with
-  // id `pieceId`, applies the provided `recipe` (which may be
-  // its current recipe -- useful when we are only updating inputs),
+  // id `pieceId`, applies the provided `pattern` (which may be
+  // its current pattern -- useful when we are only updating inputs),
   // and optionally applies `inputs` if provided.
-  async runWithRecipe(
-    recipe: Recipe | Module,
+  async runWithPattern(
+    pattern: Pattern | Module,
     pieceId: string,
     inputs?: object,
     options?: { start?: boolean },
@@ -787,21 +787,21 @@ export class PieceManager {
     await piece.sync();
     const start = options?.start ?? true;
     if (start) {
-      await this.runtime.runSynced(piece, recipe, inputs);
+      await this.runtime.runSynced(piece, pattern, inputs);
     } else {
-      this.runtime.setup(undefined, recipe, inputs ?? {}, piece);
+      this.runtime.setup(undefined, pattern, inputs ?? {}, piece);
     }
-    await this.syncRecipe(piece);
+    await this.syncPattern(piece);
 
     return piece;
   }
 
   /**
-   * Prepare a new piece by setting up its process/result cells and recipe
-   * metadata without scheduling the recipe's nodes.
+   * Prepare a new piece by setting up its process/result cells and pattern
+   * metadata without scheduling the pattern's nodes.
    */
   async setupPersistent<T = unknown>(
-    recipe: Recipe | Module,
+    pattern: Pattern | Module,
     inputs?: unknown,
     cause?: unknown,
     llmRequestId?: string,
@@ -810,10 +810,10 @@ export class PieceManager {
     const piece = this.runtime.getCell<T>(
       this.space,
       cause,
-      recipe.resultSchema,
+      pattern.resultSchema,
     );
-    this.runtime.setup(undefined, recipe, inputs ?? {}, piece);
-    await this.syncRecipe(piece);
+    this.runtime.setup(undefined, pattern, inputs ?? {}, piece);
+    await this.syncPattern(piece);
 
     if (llmRequestId) {
       this.runtime.editWithRetry((tx) => {
@@ -848,7 +848,7 @@ export class PieceManager {
   }
 
   // FIXME(JA): this really really really needs to be revisited
-  async syncRecipe(piece: Cell<unknown>) {
+  async syncPattern(piece: Cell<unknown>) {
     await piece.sync();
 
     // When we subscribe to a doc, our subscription includes the doc's source,
@@ -857,19 +857,19 @@ export class PieceManager {
     if (!sourceCell) throw new Error("piece missing source cell");
     await sourceCell.sync();
 
-    const recipeId = sourceCell.get()?.[TYPE];
-    if (!recipeId) throw new Error("piece missing recipe ID");
+    const patternId = sourceCell.get()?.[TYPE];
+    if (!patternId) throw new Error("piece missing pattern ID");
 
-    return await this.syncRecipeById(recipeId);
+    return await this.syncPatternById(patternId);
   }
 
-  async syncRecipeById(recipeId: string) {
-    if (!recipeId) throw new Error("recipeId is required");
-    const recipe = await this.runtime.recipeManager.loadRecipe(
-      recipeId,
+  async syncPatternById(patternId: string) {
+    if (!patternId) throw new Error("patternId is required");
+    const pattern = await this.runtime.patternManager.loadPattern(
+      patternId,
       this.space,
     );
-    return recipe;
+    return pattern;
   }
 
   async sync(entity: Cell<unknown>, _waitForStorage: boolean = false) {
@@ -934,11 +934,14 @@ export class PieceManager {
   }
 }
 
-export const getRecipeIdFromPiece = (piece: Cell<unknown>): string => {
+export const getPatternIdFromPiece = (piece: Cell<unknown>): string => {
   const sourceCell = piece.getSourceCell(processSchema);
   if (!sourceCell) throw new Error("piece missing source cell");
   return sourceCell.get()?.[TYPE]!;
 };
+
+/** @deprecated Use getPatternIdFromPiece instead */
+export const getRecipeIdFromPiece = getPatternIdFromPiece;
 
 async function getCellByIdOrPiece(
   manager: PieceManager,
@@ -955,7 +958,7 @@ async function getCellByIdOrPiece(
     }
     return { cell: piece, isPiece: true };
   } catch (_) {
-    // If manager.get() fails (e.g., "recipeId is required"), try as arbitrary cell ID
+    // If manager.get() fails (e.g., "patternId is required"), try as arbitrary cell ID
     try {
       const cell = await manager.getCellById({ "/": cellId });
 

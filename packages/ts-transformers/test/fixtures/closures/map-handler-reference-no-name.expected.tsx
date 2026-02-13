@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { recipe, UI, handler, Cell } from "commontools";
+import { pattern, UI, handler, Cell } from "commontools";
 declare global {
     namespace JSX {
         interface IntrinsicElements {
@@ -28,7 +28,7 @@ interface State {
     items: Item[];
     count: Cell<number>;
 }
-export default recipe({
+export default pattern({
     type: "object",
     properties: {
         items: {

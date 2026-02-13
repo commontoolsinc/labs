@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { Cell, derive, recipe, toSchema, UI } from "commontools";
+import { Cell, derive, pattern, toSchema, UI } from "commontools";
 interface State {
     value: Cell<number>;
 }
@@ -16,7 +16,7 @@ const model = {
         value: 0
     }
 } as const satisfies __ctHelpers.JSONSchema;
-export default recipe(model, model, (cell) => {
+export default pattern(model, model, (cell) => {
     const doubled = derive(true as const satisfies __ctHelpers.JSONSchema, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema, cell.value, (v) => v * 2);

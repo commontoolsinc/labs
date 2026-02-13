@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -397,7 +397,7 @@ const liftSyncOptions = lift((raw: QuoteOptionInput[] | undefined) => {
   return sanitizeOptionList(raw);
 });
 
-export const quoteConfiguration = recipe<QuoteConfigurationArgs>(
+export const quoteConfiguration = pattern<QuoteConfigurationArgs>(
   "Quote Configuration Pattern",
   ({ basePrice, discountRate, options }) => {
     const initialOptions = sanitizeOptionList(undefined);

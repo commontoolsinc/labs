@@ -15,7 +15,7 @@ offline-friendly recipes that the harness can assert confidently.
   payload ordering or missing fields.
 - The framework can turn cells into non-cells and vice-versa, and so call sites
   have to only match the underlying schema, but not cell boundaries. E.g.
-  handlers request data as Cell<> to be able to write into them, but the recipe
+  handlers request data as Cell<> to be able to write into them, but the pattern
   creating the handler can pass in regular references, they don't have to be
   cells.
 
@@ -35,7 +35,7 @@ offline-friendly recipes that the harness can assert confidently.
 - When only reading from a cell, as is the case most of the times with `lift`,
   it isn't necessary to request Cell<> and then have to call .get, just specifiy
   the shape of the data needed.
-- Use `cell()` for state owned by the recipe. when the new cell remains part of
+- Use `cell()` for state owned by the pattern. when the new cell remains part of
   the returned graph.
 - Lift automatically memoized derived objects, they only get recomputed when the
   data changes.
@@ -60,7 +60,7 @@ offline-friendly recipes that the harness can assert confidently.
   can assert.
 - When argument cells double as mutable state, write the canonicalized entries
   back into that argument cell and keep consumers on a sanitized `lift` view so
-  initialization never needs to read values during recipe creation.
+  initialization never needs to read values during pattern creation.
 - Allow handlers to accept optional target priorities so escalations can jump
   directly to stricter SLAs while countdowns stay clamped to shared defaults.
 - When promoting new keys (like reaction types), extend the canonical catalog
@@ -175,7 +175,7 @@ offline-friendly recipes that the harness can assert confidently.
   beyond the CTS APIs.
 - When arguments supply initial collections that must later mutate, mirror them
   into your own `cell` via a seeding `lift` so handlers avoid reading during
-  recipe creation while still honoring caller-provided defaults.
+  pattern creation while still honoring caller-provided defaults.
 - When a pattern needs hyphenated identifiers (e.g. `in-progress`), expose an
   ordered array summary so harness assertions can use numeric indices instead of
   awkward bracket notation.

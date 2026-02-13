@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
   type Stream,
 } from "commontools";
@@ -56,7 +56,7 @@ const liftSafeHistory = lift((records: BubbleRecord[] | undefined) =>
   Array.isArray(records) ? records : []
 );
 
-const childCounter = recipe<{ value: Default<number, 0> }>(
+const childCounter = pattern<{ value: Default<number, 0> }>(
   "Bubbled Child Counter",
   ({ value }) => {
     const safeValue = liftSafeCount(value);
@@ -110,7 +110,7 @@ const parentIncrement = handler(
 );
 
 /** Pattern simulating parent handler bubbling events into a child stream. */
-export const counterWithParentChildBubbling = recipe<ParentChildBubbleArgs>(
+export const counterWithParentChildBubbling = pattern<ParentChildBubbleArgs>(
   "Counter With Parent-Child Event Bubbling",
   ({ parent, child }) => {
     const parentView = liftSafeCount(parent);

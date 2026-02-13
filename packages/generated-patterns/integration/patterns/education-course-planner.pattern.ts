@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -185,7 +185,7 @@ const reorderModules = handler(
   },
 );
 
-export const educationCoursePlanner = recipe<EducationCoursePlannerArgs>(
+export const educationCoursePlanner = pattern<EducationCoursePlannerArgs>(
   "Education Course Planner",
   ({ modules, startWeek }) => {
     const reorderCount = cell(0);

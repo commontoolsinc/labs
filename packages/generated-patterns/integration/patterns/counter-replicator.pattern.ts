@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
   toSchema,
 } from "commontools";
@@ -76,7 +76,7 @@ const liftTotal = lift((items: unknown) => {
   }, 0);
 });
 
-export const counterReplicator = recipe<ReplicatorArgs>(
+export const counterReplicator = pattern<ReplicatorArgs>(
   "Counter Replicator",
   ({ seeds }) => {
     const replicas = buildReplicas({ seeds });

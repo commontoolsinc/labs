@@ -23,7 +23,7 @@ interface Output {
 
 export default pattern<Input, Output>(({ value }) => {
   return {
-    [NAME]: "recipe output issue",
+    [NAME]: "pattern output issue",
     [UI]: (
       <ct-button onClick={increment({ value: value })}>
         {value}

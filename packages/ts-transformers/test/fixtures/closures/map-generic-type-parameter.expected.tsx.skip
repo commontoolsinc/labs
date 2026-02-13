@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { recipe, OpaqueRef } from "commontools";
+import { pattern, OpaqueRef } from "commontools";
 interface Email {
     id: string;
     content: string;
@@ -18,7 +18,7 @@ interface State {
  */
 function processWithType<T>(emails: OpaqueRef<Email[]>, _prompt: string) {
     // T is used here but should NOT be captured - it's a type, not a value
-    return emails.mapWithPattern(__ctHelpers.recipe({
+    return emails.mapWithPattern(__ctHelpers.pattern({
         type: "object",
         properties: {
             element: {
@@ -59,7 +59,7 @@ function processWithType<T>(emails: OpaqueRef<Email[]>, _prompt: string) {
         return result;
     }), {});
 }
-export default recipe({
+export default pattern({
     type: "object",
     properties: {
         emails: {

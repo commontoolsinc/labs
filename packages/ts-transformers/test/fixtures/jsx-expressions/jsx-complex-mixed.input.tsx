@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 
 interface Item {
   id: number;
@@ -15,7 +15,7 @@ interface State {
   taxRate: number;
 }
 
-export default recipe<State>("ComplexMixed", (state) => {
+export default pattern<State>("ComplexMixed", (state) => {
   return {
     [UI]: (
       <div>

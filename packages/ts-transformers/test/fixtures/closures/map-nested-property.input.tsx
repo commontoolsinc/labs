@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 
 interface Item {
   id: number;
@@ -16,7 +16,7 @@ interface State {
   currentUser: User;
 }
 
-export default recipe<State>("NestedProperty", (state) => {
+export default pattern<State>("NestedProperty", (state) => {
   return {
     [UI]: (
       <div>

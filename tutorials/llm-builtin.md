@@ -1,25 +1,25 @@
 ---
-title: Using the LLM built-in within a Recipe
+title: Using the LLM built-in within a Pattern
 short_title: LLM built-in
 description: A tutorial on llm built-in
 subject: Tutorial
-subtitle: A gentle tutorial into using the llm() function in a recipe
+subtitle: A gentle tutorial into using the llm() function in a pattern
 authors:
   - name: Ellyse Cedeno
     email: ellyse@common.tools
-keywords: commontools, recipes, llm, builtins
+keywords: commontools, patterns, llm, builtins
 abstract: |
-  In this section, we will create recipes to make LLM calls. We'll iterate on them to make new features, making sure you understand the changes each step of the way.
+  In this section, we will create patterns to make LLM calls. We'll iterate on them to make new features, making sure you understand the changes each step of the way.
 ---
-(skeleton_recipe)=
-## Skeleton Recipe
-Let's first create a skeleton recipe. We'll need the basic imports. These are so common that you should generally just copy and paste them.
+(skeleton_pattern)=
+## Skeleton Pattern
+Let's first create a skeleton pattern. We'll need the basic imports. These are so common that you should generally just copy and paste them.
 
 ```{code-block} typescript
 :label: imports
 :linenos: true
 :emphasize-lines: 1
-:caption: Imports for Recipe
+:caption: Imports for Pattern
 /// <cts-enable />
 import {
   BuiltInLLMContent,
@@ -32,22 +32,22 @@ import {
   ifElse,
   llm,
   NAME,
-  recipe,
+  pattern,
   UI,
 } from "commontools";
 ```
-Notice line 1 begins with `/// <cts-enable`, which is important because it enables the Common Tools AST Transformer. This allows you to use TypeScript types for many of the function parameters instead of passing in JSONSchema which can be quite verbose and difficult to read; it also enables automatic transformation of recipes you write to forms that use the reactive wrappers `derive` and `ifElse` without you having to write them yourself. We generally have this at the start of all recipes.
+Notice line 1 begins with `/// <cts-enable`, which is important because it enables the Common Tools AST Transformer. This allows you to use TypeScript types for many of the function parameters instead of passing in JSONSchema which can be quite verbose and difficult to read; it also enables automatic transformation of patterns you write to forms that use the reactive wrappers `derive` and `ifElse` without you having to write them yourself. We generally have this at the start of all patterns.
 
-The next step is to append our recipe function to the code, right after the imports. You can see `recipe` imported on line 32 in the code snippet above ([](#imports)). This is the main entry point for your recipe, you can think of it like *main()* in many languages.
-Normally, the recipe function takes in extra arguments, but for now, we'll leave it empty.
+The next step is to append our pattern function to the code, right after the imports. You can see `pattern` imported on line 32 in the code snippet above ([](#imports)). This is the main entry point for your pattern, you can think of it like *main()* in many languages.
+Normally, the pattern function takes in extra arguments, but for now, we'll leave it empty.
 
 ```{code-block} typescript
 :label: llm_code_02
 :linenos: true
 :emphasize-lines: 1
-:caption: Skeleton Recipe function
+:caption: Skeleton Pattern function
 
-export default recipe("LLM Test", () => {
+export default pattern("LLM Test", () => {
   return {
     [NAME]: "MyLLM Test",
     [UI]: (
@@ -59,7 +59,7 @@ export default recipe("LLM Test", () => {
 });
 ```
 
-Note that we are using `export` on line 1, this is because a single recipe source file may have multiple recipes in it. When the system is building a piece from the source file, it needs the main entry point, which will be the recipe that you export.
+Note that we are using `export` on line 1, this is because a single pattern source file may have multiple patterns in it. When the system is building a piece from the source file, it needs the main entry point, which will be the pattern that you export.
 
 The [NAME] symbol is used as a property in the created piece. It is used for displaying the piece and also often for debugging.
 
@@ -68,22 +68,22 @@ The [UI] property has all the information to render the piece in the browser. It
 When you deploy and browse to your piece, you should see something that looks like this:
 
 ![](./images/llmv1.png)
-**Figure**: Placeholder Recipe
+**Figure**: Placeholder Pattern
 
 ## Add User Input
 Now that we have a working deployed piece, let's continue to iterate and add a user input form.
 This will eventually serve as the user's input to the LLM call.
 
-We'll update our `recipe` function to create a `Cell` to hold the value of the user input, add the JSX component that gets user text input, and also display the user input.
-A `Cell` is like a variable in programming languages. Cells can store values and can be displayed in a recipe's [UI]. They are also persistent and automatically saved to the datastore.
+We'll update our `pattern` function to create a `Cell` to hold the value of the user input, add the JSX component that gets user text input, and also display the user input.
+A `Cell` is like a variable in programming languages. Cells can store values and can be displayed in a pattern's [UI]. They are also persistent and automatically saved to the datastore.
 
-Here's our updated Recipe:
+Here's our updated Pattern:
 ```{code-block} typescript
 :label: llm_code_03
 :linenos: true
 :emphasize-lines: 2, 11, 15
 :caption: Adding the Input JSX Component
-export default recipe("LLM Test", () => {
+export default pattern("LLM Test", () => {
   const userMessage = cell<string>(undefined);
 
   return {
@@ -109,11 +109,11 @@ export default recipe("LLM Test", () => {
 On line 2, we have a call to cell(). This will create a Cell with the default value passed in.
 We'll use this cell to store the text the user types in our user input component.
 
-On line 11, we've added the `<ct-message-input>` component. Note that regular HTML forms are not allowed in the recipe UI. These restrictions are there for data privacy and security reasons.
+On line 11, we've added the `<ct-message-input>` component. Note that regular HTML forms are not allowed in the pattern UI. These restrictions are there for data privacy and security reasons.
 The `placeholder` property (line 13) shows faded text in the input form as its default value. The `onct-send` property (line 15) is called when the user submits their message (presses enter or clicks on the submit button). The value for `onct-send` is the function that gets executed to handle the event. We'll define that next. The parameters you send must be wrapped in an object. Example: `{ userMessage }`. Additional parameters would be comma separated.
 
 
-Before this code will actually work, we'll need to define the textInputHandler function. This should be at the same level as the `recipe` function. 
+Before this code will actually work, we'll need to define the textInputHandler function. This should be at the same level as the `pattern` function. 
 
 ```{code-block} typescript
 :label: llm_code_04
@@ -138,18 +138,18 @@ Our function body is just a single line (line 5). It simply sets the value of th
 After deploying your piece, you should see something like this:
 
 ![](./images/llm_handler.png)
-**Figure**: Recipe with Handler
+**Figure**: Pattern with Handler
 
 (calling_llm)=
 ## Calling the LLM!
 
-The next step is the real pay-off. We'll finally call the LLM. We'll add the built-in call right after the userMessage definition in the recipe. The actual location doesn't matter as long as it's in the `recipe`'s body.
+The next step is the real pay-off. We'll finally call the LLM. We'll add the built-in call right after the userMessage definition in the pattern. The actual location doesn't matter as long as it's in the `pattern`'s body.
 ```{code-block} typescript
 :label: llm_builtin
 :linenos: true
 :emphasize-lines:
 :caption: Adding the LLM built-in call
-export default recipe("LLM Test", () => {
+export default pattern("LLM Test", () => {
   const userMessage = cell<string>(undefined);
 
   const llmResponse = llm({
@@ -190,7 +190,7 @@ Looking at the function body on line 8, we see it first checks if `msg` is defin
 Notice that we do not have to explicitly call the llm() function each time we get an input.
 This is handled for us by the reactive system we just talked about. Specifically, the `llm()` built-in will re-execute every time `userMessages` is updated. We can then use the variable `llmResponse` to view the response, which we'll do right now.
 
-We'll add a new section to the recipe [UI] to display the current value of the `llmResponse`. Luckily, this is very straightforward:
+We'll add a new section to the pattern [UI] to display the current value of the `llmResponse`. Luckily, this is very straightforward:
 ```{code-block} html
 :label: llm_response
 :linenos: true
@@ -216,13 +216,13 @@ The AST Transformer (enabled via `/// <cts-enable />`) rewrites that ternary exp
 If you deploy and run it, you should be able to enter a message into the input form, then wait a few seconds and see a response from our friendly LLM. Here is what it looks like for me:
 
 ![](./images/llm_final.png)
-**Figure**: Final Recipe
+**Figure**: Final Pattern
 
 ## The Final Flow
 Et voilà ! Hopefully that worked for you. The full source code is listed at the end of this section.
 
 Here is the flow control at a high level.
-When the system first loads, it executes the body of the recipe() function, which creates the `userMessage` cell, and `llmResponse` which holds the result of calling `llm()`.
+When the system first loads, it executes the body of the pattern() function, which creates the `userMessage` cell, and `llmResponse` which holds the result of calling `llm()`.
 
 Technically, the `llm()` built-in is called once with the undefined userMessage upon its initialization.
 
@@ -258,7 +258,7 @@ import {
   ifElse,
   llm,
   NAME,
-  recipe,
+  pattern,
   UI,
 } from "commontools";
 
@@ -269,7 +269,7 @@ const textInputHandler = handler<
   userMessage.set(message);
 });
 
-export default recipe("LLM Test", () => {
+export default pattern("LLM Test", () => {
   const userMessage = cell<string>(undefined);
 
   const llmResponse = llm({

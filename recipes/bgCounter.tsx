@@ -5,7 +5,7 @@ import {
   derive,
   handler,
   NAME,
-  recipe,
+  pattern,
   str,
   UI,
 } from "commontools";
@@ -32,7 +32,7 @@ const updateError = handler<
   },
 );
 
-export default recipe<
+export default pattern<
   { error: Cell<Default<string, "">>; counter: Cell<Default<number, 0>> }
 >(
   "bgCounter",

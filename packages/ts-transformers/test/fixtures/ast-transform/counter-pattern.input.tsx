@@ -17,7 +17,7 @@ const decrement = handler((_, state: { value: Cell<number> }) => {
   state.value.set(state.value.get() - 1);
 });
 
-export default pattern<PatternState>((state) => {
+export default pattern<PatternState>("Counter", (state) => {
   return {
     [NAME]: str`Simple counter: ${state.value}`,
     [UI]: (

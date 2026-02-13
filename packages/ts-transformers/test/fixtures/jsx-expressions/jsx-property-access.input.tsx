@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 
 interface User {
   name: string;
@@ -35,7 +35,7 @@ interface State {
   numbers: number[];
 }
 
-export default recipe<State>("PropertyAccess", (state) => {
+export default pattern<State>("PropertyAccess", (state) => {
   return {
     [UI]: (
       <div>

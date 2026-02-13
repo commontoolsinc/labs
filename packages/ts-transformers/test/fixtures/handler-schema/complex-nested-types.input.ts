@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, handler, recipe } from "commontools";
+import { Cell, handler, pattern } from "commontools";
 
 // Updated 2025-09-03: String literal unions now generate correct JSON Schema
 // (enum instead of array) due to schema-generator UnionFormatter improvements
@@ -47,6 +47,6 @@ const _updateTags = handler<
 
 export { userHandler };
 
-export default recipe("complex-nested-types test", () => {
+export default pattern("complex-nested-types test", () => {
   return { userHandler };
 });

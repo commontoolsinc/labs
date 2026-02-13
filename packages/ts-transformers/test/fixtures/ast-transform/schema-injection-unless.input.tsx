@@ -1,12 +1,12 @@
 /// <cts-enable />
-import { unless, recipe, UI, NAME } from "commontools";
+import { unless, pattern, UI, NAME } from "commontools";
 
 interface State {
   value: string | null;
   defaultValue: string;
 }
 
-export default recipe<State>("Unless Schema Injection", ({ value, defaultValue }) => {
+export default pattern<State>("Unless Schema Injection", ({ value, defaultValue }) => {
   // unless(condition, fallback) - returns condition if truthy, else fallback
   const result = unless(value, defaultValue);
 

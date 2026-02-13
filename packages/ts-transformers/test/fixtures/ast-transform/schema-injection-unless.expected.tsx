@@ -1,10 +1,10 @@
 import * as __ctHelpers from "commontools";
-import { unless, recipe, UI, NAME } from "commontools";
+import { unless, pattern, UI, NAME } from "commontools";
 interface State {
     value: string | null;
     defaultValue: string;
 }
-export default recipe({
+export default pattern({
     type: "object",
     properties: {
         value: {

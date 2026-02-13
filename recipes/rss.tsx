@@ -7,7 +7,7 @@ import {
   fetchData,
   handler,
   NAME,
-  recipe,
+  pattern,
   str,
   UI,
 } from "commontools";
@@ -42,7 +42,7 @@ const feedUpdater = handler<never, {
   );
 });
 
-export default recipe<
+export default pattern<
   { settings: Settings }
 >(
   "rss importer",

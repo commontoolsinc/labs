@@ -1,7 +1,7 @@
 /// <cts-enable />
-import { cell, NAME, recipe, UI } from "commontools";
+import { cell, NAME, pattern, UI } from "commontools";
 
-export default recipe("Conditional Empty Check", () => {
+export default pattern("Conditional Empty Check", () => {
   const items = cell<string[]>([]);
   return {
     [NAME]: "Conditional empty check",

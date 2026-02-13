@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { type Cell, Default, handler, lift, recipe, str } from "commontools";
+import { type Cell, Default, handler, lift, pattern, str } from "commontools";
 
 interface ContributionItemSeed {
   label?: string;
@@ -270,7 +270,7 @@ const liftHighlightedGroup = lift(
   },
 );
 
-export const counterWithNestedComputedPercentages = recipe<
+export const counterWithNestedComputedPercentages = pattern<
   NestedComputedPercentagesArgs
 >(
   "Counter With Nested Computed Percentages",

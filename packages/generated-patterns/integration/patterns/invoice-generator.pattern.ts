@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { type Cell, Default, handler, lift, recipe, str } from "commontools";
+import { type Cell, Default, handler, lift, pattern, str } from "commontools";
 
 interface InvoiceItemInput {
   id?: string;
@@ -400,7 +400,7 @@ const liftLineLabels = lift((entries: InvoiceLineSummary[] | undefined) => {
   );
 });
 
-export const invoiceGeneratorPattern = recipe<InvoiceGeneratorArgs>(
+export const invoiceGeneratorPattern = pattern<InvoiceGeneratorArgs>(
   "Invoice Generator Pattern",
   ({ items, taxRate, invoiceDiscountRate }) => {
     const normalizedItems = liftNormalizedItems(items);

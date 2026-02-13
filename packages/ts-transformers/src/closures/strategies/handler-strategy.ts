@@ -5,7 +5,7 @@ import { isEventHandlerJsxAttribute } from "../../ast/mod.ts";
 import { CaptureCollector } from "../capture-collector.ts";
 import { unwrapArrowFunction } from "../utils/ast-helpers.ts";
 import { buildCapturePropertyAssignments } from "./map-strategy.ts";
-import { RecipeBuilder } from "../utils/recipe-builder.ts";
+import { PatternBuilder } from "../utils/pattern-builder.ts";
 import { SchemaFactory } from "../utils/schema-factory.ts";
 
 export class HandlerStrategy implements ClosureTransformationStrategy {
@@ -59,12 +59,12 @@ export function transformHandlerJsxAttribute(
   const collector = new CaptureCollector(context.checker);
   const { captureTree } = collector.analyze(callback);
 
-  // Initialize RecipeBuilder
-  const builder = new RecipeBuilder(context);
+  // Initialize PatternBuilder
+  const builder = new PatternBuilder(context);
   builder.setCaptureTree(captureTree);
 
   // Register capture names as used to avoid collision with event parameter
-  // MOVED: This logic is now handled inside RecipeBuilder.buildHandlerCallback
+  // MOVED: This logic is now handled inside PatternBuilder.buildHandlerCallback
   // to prevent captures from colliding with themselves.
 
   // Build the new callback using buildHandlerCallback

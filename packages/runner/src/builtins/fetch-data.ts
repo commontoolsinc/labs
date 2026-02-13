@@ -1,7 +1,7 @@
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { Runtime } from "../runtime.ts";
-import { getRecipeEnvironment } from "../builder/env.ts";
+import { getPatternEnvironment } from "../builder/env.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { Schema } from "../builder/types.ts";
 import {
@@ -42,10 +42,10 @@ export function fetchData(
   let myRequestId: string | undefined = undefined;
   let abortController: AbortController | undefined = undefined;
 
-  // This is called when the recipe containing this node is being stopped.
+  // This is called when the pattern containing this node is being stopped.
   addCancel(() => {
     // Abort the request if it's still pending.
-    abortController?.abort("Recipe stopped");
+    abortController?.abort("Pattern stopped");
 
     // Only try to update state if cells were initialized
     if (!cellsInitialized) return;
@@ -285,7 +285,7 @@ async function startFetch(
 
   try {
     const response = await fetch(
-      new URL(url, getRecipeEnvironment().apiUrl),
+      new URL(url, getPatternEnvironment().apiUrl),
       {
         signal: abortSignal,
         ...fetchOptions,

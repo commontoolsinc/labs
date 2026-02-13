@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 
 interface Point {
   x: number;
@@ -11,7 +11,7 @@ interface State {
   scale: number;
 }
 
-export default recipe<State>("DestructuredParam", (state) => {
+export default pattern<State>("DestructuredParam", (state) => {
   return {
     [UI]: (
       <div>

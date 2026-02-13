@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 interface State {
     text: string;
     searchTerm: string;
@@ -22,7 +22,7 @@ interface State {
     words: string[];
     separator: string;
 }
-export default recipe({
+export default pattern({
     type: "object",
     properties: {
         text: {
@@ -280,7 +280,7 @@ export default recipe({
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.items,
                 threshold: state.threshold
-            } }, ({ state }) => state.items.filter((x) => x > state.threshold)).mapWithPattern(__ctHelpers.recipe({
+            } }, ({ state }) => state.items.filter((x) => x > state.threshold)).mapWithPattern(__ctHelpers.pattern({
             type: "object",
             properties: {
                 element: {
@@ -504,7 +504,7 @@ export default recipe({
         <h3>Complex Method Combinations</h3>
         {/* Map with chained operations inside */}
         <ul>
-          {state.names.mapWithPattern(__ctHelpers.recipe({
+          {state.names.mapWithPattern(__ctHelpers.pattern({
                 type: "object",
                 properties: {
                     element: {
@@ -759,7 +759,7 @@ export default recipe({
 
         {/* Map with conditional logic */}
         <ul>
-          {state.users.mapWithPattern(__ctHelpers.recipe({
+          {state.users.mapWithPattern(__ctHelpers.pattern({
                 type: "object",
                 properties: {
                     element: {

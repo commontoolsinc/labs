@@ -119,7 +119,7 @@ export default pattern(({ items }) => {
                     required: ["$UI"]
                 }
             }
-        } as const satisfies __ctHelpers.JSONSchema, hasItems, items.mapWithPattern(__ctHelpers.recipe({
+        } as const satisfies __ctHelpers.JSONSchema, hasItems, items.mapWithPattern(__ctHelpers.pattern({
             type: "object",
             properties: {
                 element: {
@@ -184,7 +184,7 @@ export default pattern(({ items }) => {
         } as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: {} }) => (<div>
               <strong>{item.label}</strong>
               <ul>
-                {item.tags.mapWithPattern(__ctHelpers.recipe({
+                {item.tags.mapWithPattern(__ctHelpers.pattern({
                 type: "object",
                 properties: {
                     element: {

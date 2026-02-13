@@ -6,7 +6,7 @@ import {
   derive,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -245,7 +245,7 @@ const liftSanitizeString = lift((value: string | undefined) =>
 );
 
 /** Pattern computing canonical view of nested counters for stable assertions. */
-export const counterWithDerivedCanonicalForm = recipe<CanonicalFormArgs>(
+export const counterWithDerivedCanonicalForm = pattern<CanonicalFormArgs>(
   "Counter With Derived Canonical Form",
   ({ groups }) => {
     const history = cell<string[]>([]);

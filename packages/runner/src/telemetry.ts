@@ -50,7 +50,7 @@ export interface SchedulerGraphSnapshot {
 }
 
 export interface SchedulerActionInfo {
-  recipeName?: string;
+  patternName?: string;
   moduleName?: string;
   reads?: string[];
   writes?: string[];

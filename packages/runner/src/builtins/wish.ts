@@ -11,10 +11,12 @@ import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import { type Runtime, spaceCellSchema } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import { type JSONSchema, NAME, type Recipe, UI } from "../builder/types.ts";
-import { getRecipeEnvironment } from "../env.ts";
+import { type JSONSchema, NAME, type Pattern, UI } from "../builder/types.ts";
+import { getPatternEnvironment } from "../env.ts";
 
-const SUGGESTION_TSX_PATH = getRecipeEnvironment().apiUrl +
+const WISH_TSX_PATH = getPatternEnvironment().apiUrl +
+  "api/patterns/system/wish.tsx";
+const SUGGESTION_TSX_PATH = getPatternEnvironment().apiUrl +
   "api/patterns/system/suggestion.tsx";
 
 // Schema for mentionable array - items are cell references (asCell: true)
@@ -467,13 +469,39 @@ async function resolveBase(
   throw new WishError(`Wish target "${parsed.key}" is not recognized.`);
 }
 
+// fetchWishPattern runs at runtime scope, shared across all wish invocations
+let wishPatternFetchPromise: Promise<Pattern | undefined> | undefined;
+let wishPattern: Pattern | undefined;
+
+async function fetchWishPattern(
+  runtime: Runtime,
+): Promise<Pattern | undefined> {
+  try {
+    const program = await runtime.harness.resolve(
+      new HttpProgramResolver(WISH_TSX_PATH),
+    );
+
+    if (!program) {
+      throw new WishError("Can't load wish.tsx");
+    }
+    const pattern = await runtime.patternManager.compilePattern(program);
+
+    if (!pattern) throw new WishError("Can't compile wish.tsx");
+
+    return pattern;
+  } catch (e) {
+    console.error("[wish] fetchWishPattern: Failed to load wish.tsx", e);
+    return undefined;
+  }
+}
+
 // fetchSuggestionPattern runs at runtime scope, shared across all wish invocations
-let suggestionPatternFetchPromise: Promise<Recipe | undefined> | undefined;
-let suggestionPattern: Recipe | undefined;
+let suggestionPatternFetchPromise: Promise<Pattern | undefined> | undefined;
+let suggestionPattern: Pattern | undefined;
 
 async function fetchSuggestionPattern(
   runtime: Runtime,
-): Promise<Recipe | undefined> {
+): Promise<Pattern | undefined> {
   try {
     const program = await runtime.harness.resolve(
       new HttpProgramResolver(SUGGESTION_TSX_PATH),
@@ -482,7 +510,7 @@ async function fetchSuggestionPattern(
     if (!program) {
       throw new WishError("Can't load suggestion.tsx");
     }
-    const pattern = await runtime.recipeManager.compileRecipe(program);
+    const pattern = await runtime.patternManager.compilePattern(program);
 
     if (!pattern) throw new WishError("Can't compile suggestion.tsx");
 

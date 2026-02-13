@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -343,7 +343,7 @@ const liftSelectionTrail = lift((entries: string[] | undefined) => {
   return entries.join(" → ");
 });
 
-export const templateGallery = recipe<TemplateGalleryArgs>(
+export const templateGallery = pattern<TemplateGalleryArgs>(
   "Template Gallery",
   ({ templates, category }) => {
     const selectionSequence = cell(0);

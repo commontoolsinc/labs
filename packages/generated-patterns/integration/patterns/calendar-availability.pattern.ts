@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -297,7 +297,7 @@ const modifySharedAvailability = handler(
  * Pattern computing shared availability windows across participants while
  * reacting to block edits in real time for offline scheduling flows.
  */
-export const calendarAvailabilityPattern = recipe<CalendarAvailabilityArgs>(
+export const calendarAvailabilityPattern = pattern<CalendarAvailabilityArgs>(
   "Calendar Availability Pattern",
   ({ participants, blocked }) => {
     const history = cell<string[]>([]);

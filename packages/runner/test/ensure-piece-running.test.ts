@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { type Recipe, TYPE } from "../src/builder/types.ts";
+import { type Pattern, TYPE } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { ensurePieceRunning } from "../src/ensure-piece-running.ts";
@@ -31,7 +31,7 @@ describe("ensurePieceRunning", () => {
   });
 
   it("should return false for cells without process cell structure", async () => {
-    // Create a cell that has no piece structure (no process cell, no recipe)
+    // Create a cell that has no piece structure (no process cell, no pattern)
     const orphanCell = runtime.getCell<{ $stream: true }>(
       space,
       "orphan-cell-test",
@@ -81,7 +81,7 @@ describe("ensurePieceRunning", () => {
     await tx.commit();
     tx = runtime.edit();
 
-    // ensurePieceRunning should return false - no TYPE means no recipe
+    // ensurePieceRunning should return false - no TYPE means no pattern
     const result = await ensurePieceRunning(
       runtime,
       resultCell.getAsNormalizedFullLink(),
@@ -91,15 +91,15 @@ describe("ensurePieceRunning", () => {
   });
 
   it("should return false for cells without resultRef in process cell", async () => {
-    // Create a simple recipe
-    const recipe: Recipe = {
+    // Create a simple pattern
+    const pattern: Pattern = {
       argumentSchema: { type: "object" },
       resultSchema: { type: "object" },
       result: {},
       nodes: [],
     };
 
-    const recipeId = runtime.recipeManager.registerRecipe(recipe);
+    const patternId = runtime.patternManager.registerPattern(pattern);
 
     // Create a result cell that points to a process cell without resultRef
     const resultCell = runtime.getCell(
@@ -121,7 +121,7 @@ describe("ensurePieceRunning", () => {
 
     // Process cell has TYPE but no resultRef
     processCell.set({
-      [TYPE]: recipeId,
+      [TYPE]: patternId,
       argument: { value: 1 },
       // Missing resultRef!
     });
@@ -139,9 +139,9 @@ describe("ensurePieceRunning", () => {
   });
 
   it("should start a piece with valid process cell structure", async () => {
-    // Create a simple recipe
-    let recipeRan = false;
-    const recipe: Recipe = {
+    // Create a simple pattern
+    let patternRan = false;
+    const pattern: Pattern = {
       argumentSchema: {
         type: "object",
         properties: { value: { type: "number" } },
@@ -158,7 +158,7 @@ describe("ensurePieceRunning", () => {
           module: {
             type: "javascript",
             implementation: (value: number) => {
-              recipeRan = true;
+              patternRan = true;
               return value * 2;
             },
           },
@@ -168,7 +168,7 @@ describe("ensurePieceRunning", () => {
       ],
     };
 
-    const recipeId = runtime.recipeManager.registerRecipe(recipe);
+    const patternId = runtime.patternManager.registerPattern(pattern);
 
     // Create result cell
     const resultCell = runtime.getCell(
@@ -195,7 +195,7 @@ describe("ensurePieceRunning", () => {
     resultCell.setSourceCell(processCell);
 
     processCell.set({
-      [TYPE]: recipeId,
+      [TYPE]: patternId,
       argument: { value: 5 },
       resultRef: resultCell.getAsLink({ base: processCell }),
       internal: {},
@@ -215,13 +215,13 @@ describe("ensurePieceRunning", () => {
     // Wait for the piece to run
     await resultCell.pull();
 
-    expect(recipeRan).toBe(true);
+    expect(patternRan).toBe(true);
   });
 
   it("should be idempotent - calling multiple times is safe", async () => {
-    // Create a simple recipe
+    // Create a simple pattern
     let startCount = 0;
-    const recipe: Recipe = {
+    const pattern: Pattern = {
       argumentSchema: { type: "object" },
       resultSchema: { type: "object" },
       result: {},
@@ -239,7 +239,7 @@ describe("ensurePieceRunning", () => {
       ],
     };
 
-    const recipeId = runtime.recipeManager.registerRecipe(recipe);
+    const patternId = runtime.patternManager.registerPattern(pattern);
 
     const resultCell = runtime.getCell(
       space,
@@ -259,7 +259,7 @@ describe("ensurePieceRunning", () => {
     resultCell.setSourceCell(processCell);
 
     processCell.set({
-      [TYPE]: recipeId,
+      [TYPE]: patternId,
       argument: {},
       resultRef: resultCell.getAsLink({ base: processCell }),
       internal: {},
@@ -290,9 +290,9 @@ describe("ensurePieceRunning", () => {
   });
 
   it("should restart a stopped piece when called again", async () => {
-    // Create a simple recipe that tracks how many times it starts
+    // Create a simple pattern that tracks how many times it starts
     let startCount = 0;
-    const recipe: Recipe = {
+    const pattern: Pattern = {
       argumentSchema: { type: "object" },
       resultSchema: { type: "object" },
       result: {},
@@ -310,7 +310,7 @@ describe("ensurePieceRunning", () => {
       ],
     };
 
-    const recipeId = runtime.recipeManager.registerRecipe(recipe);
+    const patternId = runtime.patternManager.registerPattern(pattern);
 
     const resultCell = runtime.getCell(
       space,
@@ -330,7 +330,7 @@ describe("ensurePieceRunning", () => {
     resultCell.setSourceCell(processCell);
 
     processCell.set({
-      [TYPE]: recipeId,
+      [TYPE]: patternId,
       argument: {},
       resultRef: resultCell.getAsLink({ base: processCell }),
       internal: {},
@@ -415,10 +415,10 @@ describe("queueEvent with auto-start", () => {
   });
 
   it("should start piece when event sent to result cell path, but not retry if no handler", async () => {
-    // Create a recipe with a reactive lift (to prove it starts) but NO event handler
+    // Create a pattern with a reactive lift (to prove it starts) but NO event handler
     let liftRunCount = 0;
 
-    const recipe: Recipe = {
+    const pattern: Pattern = {
       argumentSchema: {
         type: "object",
         properties: {
@@ -458,7 +458,7 @@ describe("queueEvent with auto-start", () => {
       ],
     };
 
-    const recipeId = runtime.recipeManager.registerRecipe(recipe);
+    const patternId = runtime.patternManager.registerPattern(pattern);
 
     // Create result cell
     const resultCell = runtime.getCell(
@@ -488,9 +488,9 @@ describe("queueEvent with auto-start", () => {
     resultCell.setSourceCell(processCell);
 
     // Set up process cell - internal.events must be set to $stream: true
-    // (both in recipe.initial and directly on the cell)
+    // (both in pattern.initial and directly on the cell)
     processCell.set({
-      [TYPE]: recipeId,
+      [TYPE]: patternId,
       argument: { value: 5 },
       resultRef: resultCell.getAsLink({ base: processCell }),
       internal: {
@@ -535,12 +535,12 @@ describe("queueEvent with auto-start", () => {
   });
 
   it("should start piece and process event when handler is defined", async () => {
-    // Create a recipe with a handler that reads from the stream
+    // Create a pattern with a handler that reads from the stream
     let liftRunCount = 0;
     let handlerRunCount = 0;
     const receivedEvents: any[] = [];
 
-    const recipe: Recipe = {
+    const pattern: Pattern = {
       argumentSchema: {
         type: "object",
         properties: {
@@ -603,7 +603,7 @@ describe("queueEvent with auto-start", () => {
       ],
     };
 
-    const recipeId = runtime.recipeManager.registerRecipe(recipe);
+    const patternId = runtime.patternManager.registerPattern(pattern);
 
     // Create result cell
     const resultCell = runtime.getCell(
@@ -639,9 +639,9 @@ describe("queueEvent with auto-start", () => {
     resultCell.setSourceCell(processCell);
 
     // Set up process cell - internal.events must be set to $stream: true
-    // (both in recipe.initial and directly on the cell)
+    // (both in pattern.initial and directly on the cell)
     processCell.set({
-      [TYPE]: recipeId,
+      [TYPE]: patternId,
       argument: { value: 5 },
       resultRef: resultCell.getAsLink({ base: processCell }),
       internal: {

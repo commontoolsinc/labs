@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { Cell, handler, recipe, UI } from "commontools";
+import { Cell, handler, pattern, UI } from "commontools";
 type TodoState = {
     items: Cell<string[]>;
 };
@@ -29,7 +29,7 @@ const addTodo = handler({
 } as const satisfies __ctHelpers.JSONSchema, (event, state) => {
     state.items.push(event.add);
 });
-export default recipe({
+export default pattern({
     type: "object",
     properties: {
         items: {
@@ -78,7 +78,7 @@ export default recipe({
           Add
         </button>
         <ul>
-          {state.items.mapWithPattern(__ctHelpers.recipe({
+          {state.items.mapWithPattern(__ctHelpers.pattern({
             type: "object",
             properties: {
                 element: {

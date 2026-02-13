@@ -6,7 +6,7 @@ import {
   derive,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -110,7 +110,7 @@ const liftAudit = lift((record: DedupAudit | undefined) =>
 );
 
 /** Pattern maintaining counter with deduplicated history and sorted view. */
-export const counterWithDeduplicatedList = recipe<DeduplicatedListArgs>(
+export const counterWithDeduplicatedList = pattern<DeduplicatedListArgs>(
   "Counter With Deduplicated List",
   ({ value, uniqueValues }) => {
     const additions = cell(0);

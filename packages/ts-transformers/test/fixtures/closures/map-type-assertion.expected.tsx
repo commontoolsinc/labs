@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { recipe, UI, OpaqueRef } from "commontools";
+import { pattern, UI, OpaqueRef } from "commontools";
 interface Item {
     id: number;
     name: string;
@@ -8,7 +8,7 @@ interface State {
     items: any; // Type will be asserted
     prefix: string;
 }
-export default recipe({
+export default pattern({
     type: "object",
     properties: {
         items: true,
@@ -53,7 +53,7 @@ export default recipe({
     return {
         [UI]: (<div>
         {/* Map on type-asserted reactive array */}
-        {typedItems.mapWithPattern(__ctHelpers.recipe({
+        {typedItems.mapWithPattern(__ctHelpers.pattern({
                 type: "object",
                 properties: {
                     element: {

@@ -13,7 +13,7 @@ import {
   ifElse,
   lift,
   NAME,
-  recipe,
+  pattern,
   UI,
   Writable,
 } from "commontools";
@@ -275,7 +275,7 @@ const handleDeleteOccurrence = handler<
 });
 
 // ===== The Pattern =====
-export const OccurrenceTrackerModule = recipe<
+export const OccurrenceTrackerModule = pattern<
   OccurrenceTrackerInput,
   OccurrenceTrackerInput
 >("OccurrenceTrackerModule", ({ label, occurrences }) => {

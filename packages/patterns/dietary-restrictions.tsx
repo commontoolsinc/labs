@@ -19,7 +19,7 @@ import {
   ifElse,
   lift,
   NAME,
-  recipe,
+  pattern,
   UI,
   Writable,
 } from "commontools";
@@ -1366,7 +1366,7 @@ const onSelectRestriction = handler<
   restrictions.set([...current, { name: value, level }]);
 });
 
-// ===== Module Recipe =====
+// ===== Module Pattern =====
 
 // Level priority lookup for fast comparison (avoids indexOf on every comparison)
 const LEVEL_PRIORITY: Record<RestrictionLevel, number> = {
@@ -1396,7 +1396,7 @@ const hasImpliedItems = lift<ImpliedItemsArray, boolean>(
   (implied) => implied && implied.length > 0,
 );
 
-export const DietaryRestrictionsModule = recipe<
+export const DietaryRestrictionsModule = pattern<
   DietaryRestrictionsInput,
   DietaryRestrictionsInput
 >("DietaryRestrictionsModule", ({ restrictions }) => {

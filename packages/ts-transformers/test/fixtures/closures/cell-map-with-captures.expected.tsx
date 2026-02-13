@@ -1,10 +1,10 @@
 import * as __ctHelpers from "commontools";
-import { Cell, cell, recipe, UI } from "commontools";
+import { Cell, cell, pattern, UI } from "commontools";
 interface State {
     values: number[];
     multiplier: number;
 }
-export default recipe({
+export default pattern({
     type: "object",
     properties: {
         values: {
@@ -59,7 +59,7 @@ export default recipe({
     } as const satisfies __ctHelpers.JSONSchema);
     return {
         [UI]: (<div>
-        {typedValues.mapWithPattern(__ctHelpers.recipe({
+        {typedValues.mapWithPattern(__ctHelpers.pattern({
                 type: "object",
                 properties: {
                     element: {

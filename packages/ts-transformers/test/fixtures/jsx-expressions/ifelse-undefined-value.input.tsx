@@ -1,11 +1,11 @@
 /// <cts-enable />
-import { computed, fetchData, ifElse, recipe, UI } from "commontools";
+import { computed, fetchData, ifElse, pattern, UI } from "commontools";
 
 // Tests ifElse where ifTrue is explicitly undefined
 // This pattern is common: ifElse(pending, undefined, { result })
 // The transformer must handle this correctly - the undefined is a VALUE, not a missing argument
 
-export default recipe<Record<string, never>>(() => {
+export default pattern<Record<string, never>>(() => {
   const { pending, result } = fetchData({
     url: "/api/data",
     mode: "text",

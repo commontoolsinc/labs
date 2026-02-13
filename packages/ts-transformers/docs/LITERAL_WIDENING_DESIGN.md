@@ -81,7 +81,7 @@ Apply widening when inferring captured variable types for handler state schemas.
 
 Apply widening when inferring input types from function parameters.
 
-#### pattern/recipe - Inferred input types
+#### pattern - Inferred input types
 
 Apply widening when no explicit type argument is provided.
 

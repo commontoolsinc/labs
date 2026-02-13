@@ -1,9 +1,9 @@
 import * as __ctHelpers from "commontools";
-import { Default, NAME, recipe, UI } from "commontools";
-interface RecipeState {
+import { Default, NAME, pattern, UI } from "commontools";
+interface PatternState {
     value: Default<number, 0>;
 }
-export default recipe({
+export default pattern({
     type: "object",
     properties: {
         value: {

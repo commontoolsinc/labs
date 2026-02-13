@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, derive, handler, recipe } from "commontools";
+import { Cell, Default, derive, handler, pattern } from "commontools";
 
 interface ToggleArgs {
   active: Default<boolean, false>;
@@ -12,7 +12,7 @@ const toggleState = handler(
   },
 );
 
-export const toggleWithLabel = recipe<ToggleArgs>(
+export const toggleWithLabel = pattern<ToggleArgs>(
   "Toggle With Derive Label",
   ({ active }) => {
     const status = derive(

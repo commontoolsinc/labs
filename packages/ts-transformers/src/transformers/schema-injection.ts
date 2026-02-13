@@ -23,7 +23,7 @@ import {
  * Schema Injection Transformer - TypeRegistry Integration
  *
  * This transformer injects JSON schemas for CommonTools core functions (pattern, derive,
- * recipe, handler, lift) by analyzing TypeScript types and converting them to runtime schemas.
+ * pattern, handler, lift) by analyzing TypeScript types and converting them to runtime schemas.
  *
  * ## TypeRegistry Integration (Unified Approach)
  *
@@ -49,7 +49,7 @@ import {
  * - **Handler**: Checks TypeRegistry for type arguments, uses `unknown` fallback
  * - **Derive**: Checks TypeRegistry for type arguments, preserves shorthand property types
  * - **Pattern**: Checks TypeRegistry before inferring, registers inferred types
- * - **Recipe**: Checks TypeRegistry for type arguments
+ * - **Pattern**: Checks TypeRegistry for type arguments
  * - **Lift**: Checks TypeRegistry for type arguments and inferred types
  *
  * ## Why This Matters
@@ -364,7 +364,7 @@ function prependSchemaArguments(
 }
 
 /**
- * Helper to find the function argument in a builder call (recipe/pattern).
+ * Helper to find the function argument in a builder call (pattern).
  * Searches from the end of the arguments array for the first function-like expression.
  */
 function findFunctionArgument(
@@ -406,7 +406,7 @@ function detectSchemaArguments(
 
 /**
  * Argument ordering for builder schema injection.
- * - "schemas-first": [inputSchema, resultSchema, function] (used by recipe)
+ * - "schemas-first": [inputSchema, resultSchema, function] (used by pattern)
  * - "function-first": [function, inputSchema, resultSchema] (used by pattern)
  */
 type BuilderArgumentOrder = "schemas-first" | "function-first";
@@ -416,7 +416,7 @@ interface BuilderSchemaInjectionConfig {
 }
 
 /**
- * Shared handler for recipe and pattern schema injection.
+ * Shared handler for pattern schema injection.
  * Both builders have nearly identical logic - the only difference is argument ordering.
  *
  * @returns The transformed node, or undefined if no transformation was performed
@@ -586,7 +586,7 @@ export class SchemaInjectionTransformer extends Transformer {
 
       const callKind = detectCallKind(node, checker);
 
-      if (callKind?.kind === "builder" && callKind.builderName === "recipe") {
+      if (callKind?.kind === "builder" && callKind.builderName === "pattern") {
         const result = handleBuilderSchemaInjection(
           node,
           { argumentOrder: "schemas-first" },
@@ -714,7 +714,7 @@ export class SchemaInjectionTransformer extends Transformer {
             typeRegistry,
             checker,
           );
-          // Visit children to catch any recipe calls created by ClosureTransformer
+          // Visit children to catch any pattern calls created by ClosureTransformer
           // inside the derive callback (e.g., from map transformations)
           return ts.visitEachChild(updated, visit, transformation);
         };
@@ -832,7 +832,7 @@ export class SchemaInjectionTransformer extends Transformer {
             typeRegistry,
             checker,
           );
-          // Visit children to catch any recipe calls created by ClosureTransformer
+          // Visit children to catch any pattern calls created by ClosureTransformer
           // inside the derive callback (e.g., from map transformations)
           return ts.visitEachChild(updated, visit, transformation);
         };

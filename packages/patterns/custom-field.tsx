@@ -16,7 +16,7 @@ import {
   handler,
   ifElse,
   NAME,
-  recipe,
+  pattern,
   UI,
   Writable,
 } from "commontools";
@@ -115,7 +115,7 @@ const toggleBoolean = handler<
 
 // ===== The Pattern =====
 
-export const CustomFieldModule = recipe<
+export const CustomFieldModule = pattern<
   CustomFieldModuleInput,
   CustomFieldModuleOutput
 >("CustomFieldModule", ({ name, value, valueType }) => {

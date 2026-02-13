@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { cell, recipe, handler } from "commontools";
+import { cell, pattern, handler } from "commontools";
 
 // 1. Top-level
 const _topLevel = cell(10);
@@ -24,10 +24,10 @@ class TestClass {
   }
 }
 
-// 5. Inside recipe
-const testRecipe = recipe(() => {
-  const _inRecipe = cell(50);
-  return _inRecipe;
+// 5. Inside pattern
+const testPattern = pattern(() => {
+  const _inPattern = cell(50);
+  return _inPattern;
 });
 
 // 6. Inside handler
@@ -42,7 +42,7 @@ export default function TestContextVariations() {
     regularFunction,
     arrowFunction,
     TestClass,
-    testRecipe,
+    testPattern,
     testHandler,
   };
 }

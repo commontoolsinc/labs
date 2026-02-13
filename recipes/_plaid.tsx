@@ -2,14 +2,14 @@ import {
   Cell,
   cell,
   derive,
-  getRecipeEnvironment,
+  getPatternEnvironment,
   handler,
   ID,
   ifElse,
   JSONSchema,
   Mutable,
   NAME,
-  recipe,
+  pattern,
   Schema,
   str,
   UI,
@@ -87,7 +87,7 @@ export const PlaidAuthSchema = {
   required: ["items"],
 } as const satisfies JSONSchema;
 
-const env = getRecipeEnvironment();
+const env = getPatternEnvironment();
 
 const AccountProperties = {
   accountId: {
@@ -615,8 +615,8 @@ const formatAmount = (amount: number, currency: string) => {
   }).format(Math.abs(amount));
 };
 
-// Main recipe
-export default recipe(
+// Main pattern
+export default pattern(
   PlaidImporterInputs,
   ResultSchema,
   ({ settings, auth }) => {

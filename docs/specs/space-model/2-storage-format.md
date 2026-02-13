@@ -35,7 +35,7 @@ A special category of fact stores execution metadata:
 
 ```
 {
-  $TYPE: string,           // recipe/function content ID (serialized key is "$TYPE")
+  $TYPE: string,           // pattern/function content ID (serialized key is "$TYPE")
   resultRef: SigilLink,    // link to the result cell
   argument?: any,          // input data (optional)
   spell?: SigilLink,       // link to spell cell (optional)
@@ -44,7 +44,7 @@ A special category of fact stores execution metadata:
 ```
 
 Process cells enable:
-- Identifying which recipe governs a piece
+- Identifying which pattern governs a piece
 - Lazy loading of pieces when events arrive
 - Traversing the ownership graph via `sourceCell` chains
 

@@ -1,13 +1,13 @@
 import { BuiltInLLMDialogState } from "@commontools/api";
 import { createNodeFactory, lift } from "./module.ts";
-import { recipe } from "./recipe.ts";
-import { isRecipe } from "./types.ts";
+import { pattern } from "./pattern.ts";
+import { isPattern } from "./types.ts";
 import type {
   JSONSchema,
   NodeFactory,
   Opaque,
   OpaqueRef,
-  RecipeFactory,
+  PatternFactory,
   Schema,
 } from "./types.ts";
 import type { Cell as CellType } from "./types.ts";
@@ -367,11 +367,11 @@ declare function createCell<S extends JSONSchema = JSONSchema>(
 export type { createCell };
 
 /**
- * Helper function for creating LLM tool definitions from recipes with optional pre-filled parameters.
- * Creates a recipe with the given function and returns an object suitable for use as an LLM tool,
+ * Helper function for creating LLM tool definitions from patterns with optional pre-filled parameters.
+ * Creates a pattern with the given function and returns an object suitable for use as an LLM tool,
  * with proper TypeScript typing that reflects only the non-pre-filled parameters.
  *
- * @param fnOrRecipe - Either a recipe function or an already-created RecipeFactory
+ * @param fnOrPattern - Either a pattern function or an already-created PatternFactory
  * @param extraParams - Optional object containing parameter values to pre-fill
  * @returns An object with `pattern` and `extraParams` properties, typed to show only remaining params
  *
@@ -381,7 +381,7 @@ export type { createCell };
  *
  * const content = cell("Hello world");
  *
- * // With a function - recipe will be created automatically
+ * // With a function - pattern will be created automatically
  * const grepTool = patternTool(
  *   ({ query, content }: { query: string; content: string }) => {
  *     return derive({ query, content }, ({ query, content }) => {
@@ -391,28 +391,28 @@ export type { createCell };
  *   { content }
  * );
  *
- * // With an existing recipe
- * const myRecipe = recipe<{ query: string; content: string }>(
+ * // With an existing pattern
+ * const myPattern = pattern<{ query: string; content: string }>(
  *   "Grep",
  *   ({ query, content }) => { ... }
  * );
- * const grepTool2 = patternTool(myRecipe, { content });
+ * const grepTool2 = patternTool(myPattern, { content });
  *
  * // Both result in type: PatternToolResult<{ content: string }>
- * // which has { pattern: Recipe, extraParams: { content: string } }
+ * // which has { pattern: Pattern, extraParams: { content: string } }
  * ```
  */
 export const patternTool = (<
   T,
   E extends Partial<T> = Record<PropertyKey, never>,
 >(
-  fnOrRecipe: ((input: OpaqueRef<Required<T>>) => any) | RecipeFactory<T, any>,
+  fnOrPattern: ((input: OpaqueRef<Required<T>>) => any) | PatternFactory<T, any>,
   extraParams?: Opaque<E>,
 ): PatternToolResult<E> => {
-  const pattern = isRecipe(fnOrRecipe) ? fnOrRecipe : recipe(fnOrRecipe);
+  const resolvedPattern = isPattern(fnOrPattern) ? fnOrPattern : pattern(fnOrPattern);
 
   return {
-    pattern,
+    pattern: resolvedPattern,
     extraParams: (extraParams ?? {}) as E,
   };
 }) as PatternToolFunction;

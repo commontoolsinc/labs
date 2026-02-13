@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, handler, recipe } from "commontools";
+import { Cell, handler, pattern } from "commontools";
 import "commontools/schema";
 
 interface State {
@@ -11,7 +11,7 @@ const myHandler = handler((_, state: State) => {
   state.value.set(state.value.get() + 1);
 });
 
-export default recipe({
+export default pattern({
   type: "object",
   properties: {
     value: { type: "number", asCell: true },

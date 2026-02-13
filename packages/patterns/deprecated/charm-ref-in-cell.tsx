@@ -7,32 +7,32 @@ import {
   lift,
   NAME,
   navigateTo,
-  recipe,
+  pattern,
   toSchema,
   UI,
   Writable,
 } from "commontools";
 
-// full recipe state
-interface RecipeState {
+// full pattern state
+interface PatternState {
   piece: any;
   cellRef: Writable<{ piece: any }>;
   isInitialized: Writable<boolean>;
 }
-const RecipeStateSchema = toSchema<RecipeState>();
+const PatternStateSchema = toSchema<PatternState>();
 
-// what we pass into the recipe as input
+// what we pass into the pattern as input
 // wraps the piece reference in an object { piece: any }
 // instead of storing the piece directly. This avoids a "pointer of pointers"
 // error that occurs when a Cell directly contains another Cell/piece reference.
-type RecipeInOutput = {
+type PatternInOutput = {
   cellRef: Default<{ piece: any }, { piece: null }>;
 };
 
 // the simple piece (to which we'll store a reference within a cell)
-const SimpleRecipe = recipe(({ id }: { id: string }) => ({
-  [NAME]: computed(() => `SimpleRecipe: ${id}`),
-  [UI]: <div>Simple Recipe id {id}</div>,
+const SimplePiece = pattern(({ id }: { id: string }) => ({
+  [NAME]: computed(() => `SimplePiece: ${id}`),
+  [UI]: <div>Simple Piece id {id}</div>,
 }));
 
 // Lift that stores a piece reference in a cell and navigates to it.
@@ -48,7 +48,7 @@ const SimpleRecipe = recipe(({ id }: { id: string }) => ({
 // We use a lift() here instead of executing inside of a handler because
 // we want to know the passed in piece is initialized
 const storePieceAndNavigate = lift(
-  RecipeStateSchema,
+  PatternStateSchema,
   undefined,
   ({ piece, cellRef, isInitialized }) => {
     if (!isInitialized.get()) {
@@ -72,9 +72,9 @@ const storePieceAndNavigate = lift(
 
 // Handler that creates a new piece instance and stores its reference.
 // 1. Creates a local isInitialized cell to track one-time execution
-// 2. Instantiates SimpleRecipe piece
+// 2. Instantiates SimplePiece piece
 // 3. Uses storePieceAndNavigate lift to save reference and navigate
-const createSimpleRecipe = handler<
+const createSimplePiece = handler<
   unknown,
   { cellRef: Writable<{ piece: any }> }
 >(
@@ -85,7 +85,7 @@ const createSimpleRecipe = handler<
     const randomId = Math.floor(10000 + Math.random() * 90000).toString();
 
     // create the piece
-    const piece = SimpleRecipe({ id: randomId });
+    const piece = SimplePiece({ id: randomId });
 
     // store the piece ref in a cell (pass isInitialized to prevent recursive calls)
     return storePieceAndNavigate({ piece, cellRef, isInitialized });
@@ -105,7 +105,7 @@ const goToStoredPiece = handler<unknown, { cellRef: Writable<{ piece: any }> }>(
   },
 );
 
-export default recipe<RecipeInOutput, RecipeInOutput>(
+export default pattern<PatternInOutput, PatternInOutput>(
   "Launcher",
   ({ cellRef }) => {
     return {
@@ -120,7 +120,7 @@ export default recipe<RecipeInOutput, RecipeInOutput>(
             })}
           </div>
           <ct-button
-            onClick={createSimpleRecipe({ cellRef })}
+            onClick={createSimplePiece({ cellRef })}
           >
             Create Sub Piece
           </ct-button>

@@ -4,7 +4,7 @@ import {
   handler,
   type JSONSchema,
   NAME,
-  recipe,
+  pattern,
   UI,
 } from "commontools";
 import type { Schema } from "commontools/schema";
@@ -13,7 +13,7 @@ import type { Schema } from "commontools/schema";
 // README:
 // sudo tailscale serve --https=443 localhost:8080
 // you need OPERATOR_PASS set so that it doesn't default to "implicit trust"
-// OPERATOR_PASS="common user" API_URL=https://toolshed.saga-castor.ts.net deno task start --spaceName discordstuff --cause 420 --recipeFile ../recipes/discord.tsx
+// OPERATOR_PASS="common user" API_URL=https://toolshed.saga-castor.ts.net deno task start --spaceName discordstuff --cause 420 --patternFile ../recipes/discord.tsx
 // then you go to
 // TOOLSHED_URL/discordstuff
 
@@ -105,7 +105,7 @@ const discordUpdater = handler(
       messages_data.length,
     );
 
-    // this was set in the recipe export, see end of return object of recipe
+    // this was set in the pattern export, see end of return object of pattern
     state.messages.push(...messages_data);
   },
 );
@@ -119,7 +119,7 @@ export async function fetchMessages(requestor_id: string) {
   return await messages_fetch.json();
 }
 
-export default recipe(
+export default pattern(
   InputSchema,
   ResultSchema,
   ({ requestor_id }) => {

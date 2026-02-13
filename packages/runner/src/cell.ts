@@ -9,7 +9,7 @@ import {
   toStorableValue,
 } from "@commontools/memory/storable-value";
 import type { MemorySpace, StorableValue } from "@commontools/memory/interface";
-import { getTopFrame, recipe } from "./builder/recipe.ts";
+import { getTopFrame, pattern } from "./builder/pattern.ts";
 import { createNodeFactory } from "./builder/module.ts";
 import {
   type AnyCell,
@@ -33,7 +33,7 @@ import {
   type Opaque,
   type OpaqueCell,
   type OpaqueRef,
-  type RecipeFactory,
+  type PatternFactory,
   type Schema,
   SELF,
   type Stream,
@@ -1276,11 +1276,11 @@ export class CellImpl<T extends StorableValue>
 
   /**
    * Connect this cell to a node reference.
-   * This stores the node in a set of connected nodes, which is used during recipe construction.
+   * This stores the node in a set of connected nodes, which is used during pattern construction.
    * @param node - The node to connect to
    */
   connect(node: NodeRef): void {
-    // For cells created during recipe construction, we need to track which nodes
+    // For cells created during pattern construction, we need to track which nodes
     // they're connected to. Since Cell doesn't have a nodes set like OpaqueRef's store,
     // we'll store this in a WeakMap keyed by the cell instance.
     const top = this._causeContainer.cell;
@@ -1424,19 +1424,19 @@ export class CellImpl<T extends StorableValue>
     // Use the cell directly as an OpaqueRef (since cells are now also OpaqueRefs)
     return mapFactory({
       list: this as unknown as OpaqueRef<T>,
-      op: recipe(
+      op: pattern(
         ({ element, index, array }: Opaque<any>) => fn(element, index, array),
       ),
     });
   }
 
   /**
-   * Map over an array cell using a pattern/recipe.
-   * Similar to map but accepts a pre-defined recipe instead of a function.
+   * Map over an array cell using a pattern/pattern.
+   * Similar to map but accepts a pre-defined pattern instead of a function.
    */
   mapWithPattern<S>(
     this: IsThisObject,
-    op: RecipeFactory<T extends Array<infer U> ? U : T, S>,
+    op: PatternFactory<T extends Array<infer U> ? U : T, S>,
     params: Record<string, any>,
   ): OpaqueRef<S[]> {
     // Create the factory if it doesn't exist
@@ -1867,7 +1867,7 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
       const frame = getTopFrame();
       if (!frame || !frame.runtime) {
         throw new Error(
-          "Can't invoke Cell.of() outside of a recipe/handler/lift context",
+          "Can't invoke Cell.of() outside of a pattern/handler/lift context",
         );
       }
 
@@ -1948,7 +1948,7 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
       const frame = getTopFrame();
       if (!frame || !frame.runtime) {
         throw new Error(
-          "Can't invoke Cell.for() outside of a recipe/handler/lift context",
+          "Can't invoke Cell.for() outside of a pattern/handler/lift context",
         );
       }
 

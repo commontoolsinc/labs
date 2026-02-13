@@ -10,7 +10,7 @@ interface State {
 export default pattern((state) => {
     return {
         [UI]: (<div>
-        {state.items.mapWithPattern(__ctHelpers.recipe({
+        {state.items.mapWithPattern(__ctHelpers.pattern({
                 type: "object",
                 properties: {
                     element: {

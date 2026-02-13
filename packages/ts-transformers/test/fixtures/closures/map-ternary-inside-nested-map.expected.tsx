@@ -119,7 +119,7 @@ export default pattern(({ items, showInactive }) => {
                     required: ["$UI"]
                 }
             }
-        } as const satisfies __ctHelpers.JSONSchema, hasItems, items.mapWithPattern(__ctHelpers.recipe({
+        } as const satisfies __ctHelpers.JSONSchema, hasItems, items.mapWithPattern(__ctHelpers.pattern({
             type: "object",
             properties: {
                 element: {
@@ -252,7 +252,7 @@ export default pattern(({ items, showInactive }) => {
                 }
             } }, ({ item }) => item.tags.length > 0)), item.label, "No tags")}</strong>
               <ul>
-                {item.tags.mapWithPattern(__ctHelpers.recipe({
+                {item.tags.mapWithPattern(__ctHelpers.pattern({
                 type: "object",
                 properties: {
                     element: {

@@ -5,7 +5,7 @@ import {
   derive,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
   toSchema,
 } from "commontools";
@@ -408,7 +408,7 @@ const liftSnapshot = lift(
   },
 );
 
-export const researchCitationManager = recipe<CitationArgs>(
+export const researchCitationManager = pattern<CitationArgs>(
   "Research Citation Manager",
   ({ citations, style }) => {
     const activeStyle = liftActiveStyle(style);

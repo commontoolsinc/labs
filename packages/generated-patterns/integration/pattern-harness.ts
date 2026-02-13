@@ -77,7 +77,7 @@ export async function runPatternScenario(scenario: PatternIntegrationScenario) {
   if (scenario.exportName) {
     program.mainExport = scenario.exportName;
   }
-  const patternFactory = await runtime.recipeManager.compileRecipe(program);
+  const patternFactory = await runtime.patternManager.compilePattern(program);
 
   const tx = runtime.edit();
   const resultCell = runtime.getCell<any>(

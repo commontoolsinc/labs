@@ -8,14 +8,14 @@ import {
   NAME,
   navigateTo,
   OpaqueRef,
-  recipe,
+  pattern,
   UI,
 } from "commontools";
 
 // the simple charm (to which we'll store references within a cell)
-const SimpleRecipe = recipe("Simple Recipe", () => ({
-  [NAME]: "Some Simple Recipe",
-  [UI]: <div>Some Simple Recipe</div>,
+const SimplePattern = pattern("Simple Pattern", () => ({
+  [NAME]: "Some Simple Pattern",
+  [UI]: <div>Some Simple Pattern</div>,
 }));
 
 // Create a cell to store an array of charms
@@ -77,14 +77,14 @@ const addCharmAndNavigate = lift(
   },
 );
 
-// Create a new SimpleRecipe and add it to the array
-const createSimpleRecipe = handler<unknown, { cellRef: Cell<any[]> }>(
+// Create a new SimplePattern and add it to the array
+const createSimplePattern = handler<unknown, { cellRef: Cell<any[]> }>(
   (_, { cellRef }) => {
     // Create isInitialized cell for this charm addition
     const isInitialized = cell(false);
 
     // Create the charm
-    const charm = SimpleRecipe({});
+    const charm = SimplePattern({});
 
     // Store the charm in the array and navigate
     return addCharmAndNavigate({ charm, cellRef, isInitialized });
@@ -99,8 +99,8 @@ const goToCharm = handler<unknown, { charm: any }>(
   },
 );
 
-// create the named cell inside the recipe body, so we do it just once
-export default recipe("Charms Launcher", () => {
+// create the named cell inside the pattern body, so we do it just once
+export default pattern("Charms Launcher", () => {
   // cell to store array of charms we created
   const { cellRef } = createCellRef({
     isInitialized: cell(false),
@@ -134,7 +134,7 @@ export default recipe("Charms Launcher", () => {
         )}
 
         <ct-button
-          onClick={createSimpleRecipe({ cellRef })}
+          onClick={createSimplePattern({ cellRef })}
         >
           Create New Charm
         </ct-button>

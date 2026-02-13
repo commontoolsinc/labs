@@ -1,10 +1,10 @@
 import * as __ctHelpers from "commontools";
-import { derive, recipe } from "commontools";
+import { derive, pattern } from "commontools";
 interface Preference {
     ingredient: string;
     preference: "liked" | "disliked";
 }
-export default recipe({
+export default pattern({
     type: "object",
     properties: {
         preferences: {
@@ -86,7 +86,7 @@ export default recipe({
             .filter((p) => p.preference === "liked")
             .map((p) => p.ingredient)
             .join(", ");
-        return `Recipe for ${food} with: ${liked}`;
+        return `Pattern for ${food} with: ${liked}`;
     });
     return { wishQuery };
 });

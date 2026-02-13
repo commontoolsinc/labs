@@ -1,9 +1,9 @@
 /// <cts-enable />
-import { cell, recipe, UI } from "commontools";
+import { cell, pattern, UI } from "commontools";
 
 // Tests triple && chain: a && b && c
 // Should produce nested when calls or derive the entire chain
-export default recipe("LogicalTripleAndChain", (_state) => {
+export default pattern("LogicalTripleAndChain", (_state) => {
   const user = cell<{ active: boolean; verified: boolean; name: string }>({ active: false, verified: false, name: "" });
 
   return {

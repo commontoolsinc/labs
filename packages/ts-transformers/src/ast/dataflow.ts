@@ -179,7 +179,7 @@ export function createDataFlowAnalyzer(
     callee: InternalAnalysis,
     rewriteHint: RewriteHint,
   ): InternalAnalysis => {
-    // Builder calls (like recipe) don't need derive wrapping
+    // Builder calls (like pattern) don't need derive wrapping
     if (callKind?.kind === "builder") {
       return {
         ...merged,
@@ -391,7 +391,7 @@ export function createDataFlowAnalyzer(
           dataFlows: [expression],
         };
       }
-      // Check if this identifier is a parameter to a builder or array-map call (like recipe)
+      // Check if this identifier is a parameter to a builder or array-map call (like pattern)
       // These parameters become implicitly opaque even though their type isn't OpaqueRef
       if (isRootOpaqueParameter(symbol)) {
         recordDataFlow(expression, scope, null, true); // Explicit: opaque parameter

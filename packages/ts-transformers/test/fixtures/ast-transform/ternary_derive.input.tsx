@@ -1,11 +1,11 @@
 /// <cts-enable />
-import { Default, NAME, recipe, UI } from "commontools";
+import { Default, NAME, pattern, UI } from "commontools";
 
-interface RecipeState {
+interface PatternState {
   value: Default<number, 0>;
 }
 
-export default recipe<RecipeState>("Counter", (state) => {
+export default pattern<PatternState>("Counter", (state) => {
   return {
     [NAME]: "test ternary with derive",
     [UI]: (

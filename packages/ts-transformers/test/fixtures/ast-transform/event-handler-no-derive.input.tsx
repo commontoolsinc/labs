@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, handler, recipe, UI } from "commontools";
+import { Cell, Default, handler, pattern, UI } from "commontools";
 
 declare global {
   namespace JSX {
@@ -15,7 +15,7 @@ const handleClick = handler<unknown, { count: Cell<number> }>(
   },
 );
 
-export default recipe<{ count: Default<number, 0> }>(
+export default pattern<{ count: Default<number, 0> }>(
   "Event Handler Test",
   ({ count }) => {
     return {

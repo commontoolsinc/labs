@@ -5,7 +5,7 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { setRecipeEnvironment } from "../src/env.ts";
+import { setPatternEnvironment } from "../src/env.ts";
 
 const signer = await Identity.fromPassphrase("test fetch-data mutex");
 const space = signer.did();
@@ -14,7 +14,7 @@ describe("fetch-data mutex mechanism", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
-  let recipe: ReturnType<typeof createBuilder>["commontools"]["recipe"];
+  let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
   let byRef: ReturnType<typeof createBuilder>["commontools"]["byRef"];
   let originalFetch: typeof globalThis.fetch;
   let fetchCalls: Array<{ url: string; init?: RequestInit }>;
@@ -28,11 +28,11 @@ describe("fetch-data mutex mechanism", () => {
     tx = runtime.edit();
 
     const { commontools } = createBuilder();
-    recipe = commontools.recipe;
+    pattern = commontools.pattern;
     byRef = commontools.byRef;
 
-    // Set up recipe environment with a mock base URL
-    setRecipeEnvironment({
+    // Set up pattern environment with a mock base URL
+    setPatternEnvironment({
       apiUrl: new URL("http://mock-test-server.local"),
     });
 
@@ -73,13 +73,13 @@ describe("fetch-data mutex mechanism", () => {
 
   it("should successfully fetch data", async () => {
     const fetchData = byRef("fetchData");
-    const testRecipe = recipe<{ url: string }>(
+    const testPattern = pattern<{ url: string }>(
       "Fetch Test",
       ({ url }) => fetchData({ url, mode: "json" }),
     );
 
     const resultCell = runtime.getCell(space, "fetch-test", undefined, tx);
-    const result = runtime.run(tx, testRecipe, {
+    const result = runtime.run(tx, testPattern, {
       url: "http://mock-test-server.local/api/test",
     }, resultCell);
     tx.commit();
@@ -113,7 +113,7 @@ describe("fetch-data mutex mechanism", () => {
 
   it("should handle concurrent requests with same inputs (mutex test)", async () => {
     const fetchData = byRef("fetchData");
-    const testRecipe = recipe<{ url: string }>(
+    const testPattern = pattern<{ url: string }>(
       "Concurrent Fetch",
       ({ url }) => fetchData({ url, mode: "json" }),
     );
@@ -123,8 +123,8 @@ describe("fetch-data mutex mechanism", () => {
     const resultCell2 = runtime.getCell(space, "concurrent-2", undefined, tx);
 
     // Start both at the same time
-    runtime.run(tx, testRecipe, { url: "/api/concurrent" }, resultCell1);
-    runtime.run(tx, testRecipe, { url: "/api/concurrent" }, resultCell2);
+    runtime.run(tx, testPattern, { url: "/api/concurrent" }, resultCell1);
+    runtime.run(tx, testPattern, { url: "/api/concurrent" }, resultCell2);
     tx.commit();
 
     // Pull first to trigger computation (starts the fetch)
@@ -157,13 +157,13 @@ describe("fetch-data mutex mechanism", () => {
     tx = runtime.edit();
 
     const fetchData = byRef("fetchData");
-    const testRecipe = recipe<{ url: string }>(
+    const testPattern = pattern<{ url: string }>(
       "URL Change Test",
       ({ url }) => fetchData({ url, mode: "json" }),
     );
 
     const resultCell = runtime.getCell(space, "url-change-test", undefined, tx);
-    runtime.run(tx, testRecipe, { url: urlCell }, resultCell);
+    runtime.run(tx, testPattern, { url: urlCell }, resultCell);
     tx.commit();
     tx = runtime.edit();
 
@@ -200,13 +200,13 @@ describe("fetch-data mutex mechanism", () => {
     const fetchData = byRef("fetchData");
 
     // First fetch as JSON
-    const jsonRecipe = recipe<{ url: string }>(
+    const jsonPattern = pattern<{ url: string }>(
       "JSON Fetch",
       ({ url }) => fetchData({ url, mode: "json" }),
     );
 
     const resultCell1 = runtime.getCell(space, "mode-test-json", undefined, tx);
-    runtime.run(tx, jsonRecipe, { url: "/api/mode" }, resultCell1);
+    runtime.run(tx, jsonPattern, { url: "/api/mode" }, resultCell1);
     tx.commit();
 
     // Pull first to trigger computation
@@ -221,13 +221,13 @@ describe("fetch-data mutex mechanism", () => {
 
     // Now fetch same URL as text - should trigger new fetch due to different mode
     tx = runtime.edit();
-    const textRecipe = recipe<{ url: string }>(
+    const textPattern = pattern<{ url: string }>(
       "Text Fetch",
       ({ url }) => fetchData({ url, mode: "text" }),
     );
 
     const resultCell2 = runtime.getCell(space, "mode-test-text", undefined, tx);
-    runtime.run(tx, textRecipe, { url: "/api/mode" }, resultCell2);
+    runtime.run(tx, textPattern, { url: "/api/mode" }, resultCell2);
     tx.commit();
 
     // Pull first to trigger computation
@@ -265,7 +265,7 @@ describe("fetch-data mutex mechanism", () => {
     };
 
     const fetchData = byRef("fetchData");
-    const testRecipe = recipe<{ url: string }>(
+    const testPattern = pattern<{ url: string }>(
       "Pending Test",
       ({ url }) => fetchData({ url, mode: "json" }),
     );
@@ -273,7 +273,7 @@ describe("fetch-data mutex mechanism", () => {
     const resultCell = runtime.getCell(space, "pending-test", undefined, tx);
     const result = runtime.run(
       tx,
-      testRecipe,
+      testPattern,
       { url: "/api/pending" },
       resultCell,
     );
@@ -309,7 +309,7 @@ describe("fetch-data mutex mechanism", () => {
     };
 
     const fetchData = byRef("fetchData");
-    const testRecipe = recipe<{ url: string }>(
+    const testPattern = pattern<{ url: string }>(
       "Error Test",
       ({ url }) => fetchData({ url, mode: "json" }),
     );
@@ -317,7 +317,7 @@ describe("fetch-data mutex mechanism", () => {
     const resultCell = runtime.getCell(space, "error-test", undefined, tx);
     const result = runtime.run(
       tx,
-      testRecipe,
+      testPattern,
       { url: "/api/error" },
       resultCell,
     );
@@ -347,7 +347,7 @@ describe("fetch-data mutex mechanism", () => {
 
   it("should abort and clear state if URL becomes empty while waiting for mutex", async () => {
     const fetchData = byRef("fetchData");
-    const testRecipe = recipe<{ url: string }>(
+    const testPattern = pattern<{ url: string }>(
       "Empty URL Test",
       ({ url }) => fetchData({ url, mode: "json" }),
     );
@@ -361,7 +361,7 @@ describe("fetch-data mutex mechanism", () => {
     urlCell.set("/api/test");
 
     const resultCell = runtime.getCell(space, "empty-url-test", undefined, tx);
-    runtime.run(tx, testRecipe, { url: urlCell }, resultCell);
+    runtime.run(tx, testPattern, { url: urlCell }, resultCell);
     tx.commit();
     tx = runtime.edit();
 

@@ -5,7 +5,7 @@ import {
   computed,
   Default,
   handler,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -522,7 +522,7 @@ const advanceStage = handler(
   },
 );
 
-export const contentPublishingWorkflow = recipe<ContentPublishingWorkflowArgs>(
+export const contentPublishingWorkflow = pattern<ContentPublishingWorkflowArgs>(
   "Content Publishing Workflow",
   ({ drafts }) => {
     const sequence = cell(0);

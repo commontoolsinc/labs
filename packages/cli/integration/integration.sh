@@ -28,9 +28,9 @@ fi
 SPACE=$(mktemp -u XXXXXXXXXX) # generates a random space
 IDENTITY=$(mktemp)
 SPACE_ARGS="--api-url=$API_URL --identity=$IDENTITY --space=$SPACE"
-RECIPE_SRC="$SCRIPT_DIR/recipe/main.tsx"
+PATTERN_SRC="$SCRIPT_DIR/pattern/main.tsx"
 WORK_DIR=$(mktemp -d)
-CUSTOM_EXPORT="customRecipeExport" # for testing this feature
+CUSTOM_EXPORT="customPatternExport" # for testing this feature
 
 echo "API_URL=$API_URL"
 echo "SPACE=$SPACE"
@@ -46,7 +46,7 @@ if [ "$(ct piece ls $SPACE_ARGS)" != "" ]; then
 fi
 
 # Create a new piece using custom default export as input
-PIECE_ID=$(ct piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS $RECIPE_SRC)
+PIECE_ID=$(ct piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS $PATTERN_SRC)
 echo "Created piece: $PIECE_ID"
 
 echo "Fetching piece source to $WORK_DIR"

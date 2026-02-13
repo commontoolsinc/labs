@@ -10,7 +10,7 @@ import {
   type OpaqueRef,
   Schema,
 } from "../src/builder/types.ts";
-import { recipe } from "../src/builder/recipe.ts";
+import { pattern } from "../src/builder/pattern.ts";
 import { Cell, Runtime } from "@commontools/runner";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
@@ -716,7 +716,7 @@ describe("Schema-to-TS Type Conversion", () => {
     // but the types should be correctly inferred
   });
 
-  it("should correctly infer types when using recipe with JSON schema", () => {
+  it("should correctly infer types when using pattern with JSON schema", () => {
     // Define input and output schemas
     const inputSchema = {
       type: "object",
@@ -773,8 +773,8 @@ describe("Schema-to-TS Type Conversion", () => {
       };
     };
 
-    // Create a recipe using JSON schemas
-    const processRecipe = recipe(
+    // Create a pattern using JSON schemas
+    const processPattern = pattern(
       inputSchema,
       outputSchema,
       (input) => {
@@ -795,13 +795,13 @@ describe("Schema-to-TS Type Conversion", () => {
     );
 
     // Verify types statically
-    type InferredInput = Parameters<typeof processRecipe>[0];
-    type InferredOutput = ReturnType<typeof processRecipe>;
+    type InferredInput = Parameters<typeof processPattern>[0];
+    type InferredOutput = ReturnType<typeof processPattern>;
 
     expectType<AnyCellWrapping<ExpectedInput>, Schema<typeof inputSchema>>();
     expectType<ExpectedOutput, Schema<typeof outputSchema>>();
 
-    // Verify that the recipe function parameter matches our expected input type
+    // Verify that the pattern function parameter matches our expected input type
     expectType<InferredInput, ExpectedInput>();
 
     // The expected output is the output schema wrapped in a single OpaqueRef.
@@ -810,7 +810,7 @@ describe("Schema-to-TS Type Conversion", () => {
 
     // Uncomment for debugging - shows what the actual structure is
     // This should help us see what the real type looks like
-    // type Debug = ReturnType<typeof processRecipe>;
+    // type Debug = ReturnType<typeof processPattern>;
   });
 
   // Runtime tests to verify the Schema type works with actual data

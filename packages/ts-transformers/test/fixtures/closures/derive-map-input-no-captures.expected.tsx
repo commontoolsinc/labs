@@ -28,7 +28,7 @@ export default pattern(({ items }) => {
         }
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema, items.mapWithPattern(__ctHelpers.recipe({
+    } as const satisfies __ctHelpers.JSONSchema, items.mapWithPattern(__ctHelpers.pattern({
         type: "object",
         properties: {
             element: {

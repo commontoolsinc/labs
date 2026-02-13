@@ -1,6 +1,6 @@
 import * as __ctHelpers from "commontools";
-import { cell, NAME, recipe, UI } from "commontools";
-export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
+import { cell, NAME, pattern, UI } from "commontools";
+export default pattern(false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         $NAME: {

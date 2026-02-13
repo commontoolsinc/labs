@@ -1,5 +1,5 @@
 import { parseArgs } from "@std/cli/parse-args";
-import { compileRecipe, PieceManager } from "@commontools/piece";
+import { compilePattern, PieceManager } from "@commontools/piece";
 import { Runtime } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { type DID } from "@commontools/identity";
@@ -11,21 +11,21 @@ import {
 } from "./src/schema.ts";
 import { getIdentity } from "./src/utils.ts";
 
-const { recipePath, quit } = parseArgs(
+const { patternPath, quit } = parseArgs(
   Deno.args,
   {
-    string: ["recipePath"],
+    string: ["patternPath"],
     boolean: ["quit"],
     default: {
-      name: "recipe-caster",
+      name: "pattern-caster",
       quit: false,
     },
   },
 );
 
-if (!recipePath) {
+if (!patternPath) {
   console.error(
-    "Usage: deno task castRecipe --recipePath <path to recipe>",
+    "Usage: deno task castPattern --patternPath <path to pattern>",
   );
   Deno.exit(1);
 }
@@ -40,14 +40,14 @@ const identity = await getIdentity(
 
 // Storage and blobby server URL are now configured in Runtime constructor
 
-async function castRecipe() {
+async function castPattern() {
   const spaceId = BG_SYSTEM_SPACE_ID;
   const cause = BG_CELL_CAUSE;
-  console.log(`Casting recipe from ${recipePath} in space ${spaceId}`);
+  console.log(`Casting pattern from ${patternPath} in space ${spaceId}`);
 
   console.log("params:", {
     spaceId,
-    recipePath,
+    patternPath,
     cause,
     toolshedUrl,
     quit,
@@ -63,9 +63,9 @@ async function castRecipe() {
   });
 
   try {
-    // Load and compile the recipe first
-    console.log("Loading recipe...");
-    const recipeSrc = await Deno.readTextFile(recipePath!);
+    // Load and compile the pattern first
+    console.log("Loading pattern...");
+    const patternSrc = await Deno.readTextFile(patternPath!);
 
     if (!cause) {
       throw new Error("Cell ID is required");
@@ -83,8 +83,8 @@ async function castRecipe() {
 
     console.log("Getting cell...");
 
-    // Cast the recipe on the cell or with undefined if no cell
-    console.log("Casting recipe...");
+    // Cast the pattern on the cell or with undefined if no cell
+    console.log("Casting pattern...");
 
     // Create session and charm manager (matching main.ts pattern)
     const session = await createSession({
@@ -95,26 +95,26 @@ async function castRecipe() {
     // Create charm manager for the specified space
     const charmManager = new PieceManager(session, runtime);
     await charmManager.ready;
-    const recipe = await compileRecipe(
-      recipeSrc,
-      "recipe",
+    const pattern = await compilePattern(
+      patternSrc,
+      "pattern",
       runtime,
       spaceId,
     );
-    console.log("Recipe compiled successfully");
+    console.log("Pattern compiled successfully");
 
-    const charm = await charmManager.runPersistent(recipe, {
+    const charm = await charmManager.runPersistent(pattern, {
       charms: targetCell,
     });
 
-    console.log("Recipe cast successfully!");
+    console.log("Pattern cast successfully!");
     console.log("Result charm ID:", charm.entityId);
 
     await runtime.storageManager.synced();
     console.log("Storage synced, exiting");
     Deno.exit(0);
   } catch (error) {
-    console.error("Error casting recipe:", error);
+    console.error("Error casting pattern:", error);
     if (quit) {
       await runtime.storageManager.synced();
       Deno.exit(1);
@@ -122,4 +122,4 @@ async function castRecipe() {
   }
 }
 
-castRecipe();
+castPattern();

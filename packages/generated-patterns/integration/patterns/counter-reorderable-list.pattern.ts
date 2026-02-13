@@ -5,7 +5,7 @@ import {
   derive,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -82,7 +82,7 @@ const liftSize = lift((values: number[] | undefined) =>
   normalizeItems(values).length
 );
 
-export const counterWithReorderableList = recipe<ReorderableListArgs>(
+export const counterWithReorderableList = pattern<ReorderableListArgs>(
   "Counter With Reorderable List",
   ({ items }) => {
     const positions = derive(

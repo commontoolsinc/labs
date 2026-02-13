@@ -169,7 +169,7 @@ current limitations?
 
 ✅ **Phase 3 Complete:** Never/unknown refinement fully implemented and tested
 
-- All transformers (handler, pattern, recipe, derive, lift) use refined fallback
+- All transformers (handler, pattern, derive, lift) use refined fallback
 - 30+ test fixtures updated
 - All tests passing (16 suites, 180 steps)
 

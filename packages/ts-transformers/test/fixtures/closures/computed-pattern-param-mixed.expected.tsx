@@ -1,6 +1,20 @@
 import * as __ctHelpers from "commontools";
 import { cell, computed, pattern } from "commontools";
-export default pattern((config: {
+export default pattern({
+    type: "object",
+    properties: {
+        base: {
+            type: "number"
+        },
+        multiplier: {
+            type: "number"
+        }
+    },
+    required: ["base", "multiplier"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "number",
+    asOpaque: true
+} as const satisfies __ctHelpers.JSONSchema, (config: {
     base: number;
     multiplier: number;
 }) => {
@@ -51,21 +65,7 @@ export default pattern((config: {
         threshold: threshold
     }, ({ value, config, offset, threshold }) => (value.get() + config.base + offset) * config.multiplier + threshold.get());
     return result;
-}, {
-    type: "object",
-    properties: {
-        base: {
-            type: "number"
-        },
-        multiplier: {
-            type: "number"
-        }
-    },
-    required: ["base", "multiplier"]
-} as const satisfies __ctHelpers.JSONSchema, {
-    type: "number",
-    asOpaque: true
-} as const satisfies __ctHelpers.JSONSchema);
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

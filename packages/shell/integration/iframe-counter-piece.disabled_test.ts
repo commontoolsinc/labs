@@ -1,10 +1,10 @@
 // @ts-nocheck - This test file is disabled and uses the old PieceController API
 // that has been replaced by PieceHandle with the RuntimeClient implementation.
 /**
- * Integration test for iframe counter recipe.
+ * Integration test for iframe counter pattern.
  *
  * This test uses coordinate-based clicking due to iframe sandbox restrictions
- * that prevent direct DOM access. The counter recipe has a full-screen layout
+ * that prevent direct DOM access. The counter pattern has a full-screen layout
  * divided into three sections:
  * - Left third: Decrement area (red)
  * - Center third: Count display
@@ -109,7 +109,7 @@ describe("shell iframe counter tests", () => {
       await Deno.readTextFile(
         join(
           import.meta.dirname!,
-          "iframe-counter-recipe.tsx",
+          "iframe-counter-pattern.tsx",
         ),
       ),
       { start: false },

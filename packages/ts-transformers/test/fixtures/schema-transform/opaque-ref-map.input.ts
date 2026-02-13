@@ -1,12 +1,12 @@
 /// <cts-enable />
-import { recipe } from "commontools";
+import { pattern } from "commontools";
 
 interface TodoItem {
   title: string;
   done: boolean;
 }
 
-export default recipe<{ items: TodoItem[] }>("Test Map", ({ items }) => {
+export default pattern<{ items: TodoItem[] }>("Test Map", ({ items }) => {
   // Map on opaque ref arrays should be transformed to mapWithPattern
   const mapped = items.map((item) => item.title);
 

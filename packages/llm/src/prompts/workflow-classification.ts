@@ -37,7 +37,7 @@ Please analyze this request and respond in the following format:
 export const AUTOCOMPLETE_INTENT_PROMPT = llmPrompt(
   "autocomplete-intent",
   `
-  This is Common Tools. Our system uses the concept of a \`Piece\`, a bundle of data + UI + functionality that can be composed, remixed and reused. Pieces are smaller than apps, closer to a screen or panel of a web app, but can be networked together into complex systems. Pieces communicate using a reactive graph database, any changes to referenced data automatically propagate. The 'behavior' of a Piece is defined by a Recipe, a data flow graph where the nodes are functions.
+  This is Common Tools. Our system uses the concept of a \`Piece\`, a bundle of data + UI + functionality that can be composed, remixed and reused. Pieces are smaller than apps, closer to a screen or panel of a web app, but can be networked together into complex systems. Pieces communicate using a reactive graph database, any changes to referenced data automatically propagate. The 'behavior' of a Piece is defined by a Pattern, a data flow graph where the nodes are functions.
 
   Users will come to you with intentions, requests and vague ideas of their needs. Your task is to 'autocomplete' their thought, using your knowledge of the Common Tools system.
 

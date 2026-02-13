@@ -3,7 +3,7 @@ import type { TransformationContext } from "../../core/mod.ts";
 import type { ClosureTransformationStrategy } from "./strategy.ts";
 import { detectCallKind, registerSyntheticCallType } from "../../ast/mod.ts";
 import { CaptureCollector } from "../capture-collector.ts";
-import { RecipeBuilder } from "../utils/recipe-builder.ts";
+import { PatternBuilder } from "../utils/pattern-builder.ts";
 import { SchemaFactory } from "../utils/schema-factory.ts";
 import { buildCapturePropertyAssignments } from "./map-strategy.ts";
 import { unwrapArrowFunction } from "../utils/ast-helpers.ts";
@@ -32,7 +32,7 @@ import { unwrapArrowFunction } from "../utils/ast-helpers.ts";
  * NOT supported: action(function() { count.set(count.get() + 1) })
  *
  * To support function expressions in the future:
- * 1. Update RecipeBuilder.buildHandlerCallback to accept FunctionExpression
+ * 1. Update PatternBuilder.buildHandlerCallback to accept FunctionExpression
  *    (currently typed as ArrowFunction only)
  * 2. Update this strategy to use isFunctionLikeExpression instead of unwrapArrowFunction
  * 3. Potentially update HandlerStrategy for consistency
@@ -116,8 +116,8 @@ function transformActionCall(
   const collector = new CaptureCollector(checker);
   const { captureTree } = collector.analyze(callback);
 
-  // Initialize RecipeBuilder
-  const builder = new RecipeBuilder(context);
+  // Initialize PatternBuilder
+  const builder = new PatternBuilder(context);
   builder.setCaptureTree(captureTree);
 
   // Determine event parameter name:

@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -262,7 +262,7 @@ const liftLatestView = lift((entries: readonly SleepSessionEntry[]) =>
   entries.length === 0 ? null : entries[entries.length - 1]
 );
 
-export const sleepJournalPattern = recipe<SleepJournalArgs>(
+export const sleepJournalPattern = pattern<SleepJournalArgs>(
   "Sleep Journal Pattern",
   ({ sessions }) => {
     const idSeed = cell(0);

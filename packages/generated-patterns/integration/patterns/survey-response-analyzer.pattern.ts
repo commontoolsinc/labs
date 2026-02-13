@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -432,7 +432,7 @@ const liftResponsesView = lift((entries: SurveyResponse[]) =>
   entries.map(cloneResponse)
 );
 
-export const surveyResponseAnalyzer = recipe<SurveyResponseArgs>(
+export const surveyResponseAnalyzer = pattern<SurveyResponseArgs>(
   "Survey Response Analyzer",
   ({ responses, questions }) => {
     const sanitizedArgumentResponses = liftSanitizeResponses(responses);

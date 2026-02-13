@@ -95,7 +95,7 @@ Control plane metadata for piece execution:
 
 ```
 {
-  $TYPE: string,        // recipe ID
+  $TYPE: string,        // pattern ID
   resultRef: SigilLink, // link to result cell
   argument?: any,       // input data
   spell?: SigilLink,    // link to spell
@@ -104,7 +104,7 @@ Control plane metadata for piece execution:
 ```
 
 Process cells are implemented as value cells but serve a distinct purpose:
-tracking which recipe governs a piece and linking to its result. See
+tracking which pattern governs a piece and linking to its result. See
 [Storage Format](./2-storage-format.md) for details.
 
 #### Precious Data Cells
@@ -132,12 +132,12 @@ precious data.
 
 #### Computed Result Cells
 
-Derived data produced by recipes from inputs:
+Derived data produced by patterns from inputs:
 - Pattern outputs
 - Aggregations and transformations
 - Cached computations
 
-These **can be reconstructed** by re-running the recipe with the same inputs.
+These **can be reconstructed** by re-running the pattern with the same inputs.
 Persisting them is an optimization (avoid recomputation), not a requirement.
 The system could potentially discard and recompute these during compaction.
 

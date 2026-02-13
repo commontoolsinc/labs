@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -333,7 +333,7 @@ const loadStageSnapshot = handler(
   },
 );
 
-export const funnelAnalytics = recipe<FunnelAnalyticsArgs>(
+export const funnelAnalytics = pattern<FunnelAnalyticsArgs>(
   "Funnel Analytics",
   ({ stages }) => {
     const updateHistory = cell<StageUpdateEntry[]>([]);

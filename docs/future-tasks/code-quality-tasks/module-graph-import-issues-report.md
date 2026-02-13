@@ -10,7 +10,7 @@ guideline:
 
 ### Component Files
 
-- `packages/piece/src/iframe/recipe.ts`
+- `packages/piece/src/iframe/pattern.ts`
 - `packages/piece/src/commands.ts`
 - `packages/html/src/render.ts`
 - `packages/html/src/path.ts`

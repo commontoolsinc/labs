@@ -54,7 +54,7 @@ Example:
 
 #### Legacy Formats
 
-**`$alias` format** — still actively produced by recipe serialization:
+**`$alias` format** — still actively produced by pattern serialization:
 ```json
 { "$alias": { "cell": { "/": "abc123" }, "path": ["value"] } }
 ```
@@ -74,7 +74,7 @@ function. See [Data Model](./1-data-model.md#hashing-and-content-addressing) for
 details on the hashing mechanism.
 
 The `refer()` function is used for:
-- Recipe ID generation: `refer({ causal: { recipeId, type: "recipe" } })`
+- Pattern ID generation: `refer({ causal: { patternId, type: "pattern" } })`
 - Request deduplication: `refer(llmParams).toString()`
 - Cache keys: `refer(JSON.stringify(selector)).toString()`
 - Causal chain references
@@ -113,7 +113,7 @@ proposal to simplify content addressing.
 `LegacyJSONCellLink` and bare string links (`{ "/": string }`) have been removed
 from write and recognition code paths. `LegacyJSONCellLink` retains
 backwards-compatible reading for previously persisted data, but is otherwise
-inactive. The `$alias` format remains in active use by recipe serialization and
+inactive. The `$alias` format remains in active use by pattern serialization and
 should be removed once that path produces `link@1` format.
 
 ---

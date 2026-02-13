@@ -110,10 +110,10 @@ export function fetchProgram(
   let myRequestId: string | undefined = undefined;
   let abortController: AbortController | undefined = undefined;
 
-  // This is called when the recipe containing this node is being stopped.
+  // This is called when the pattern containing this node is being stopped.
   addCancel(() => {
     // Abort the request if it's still pending.
-    abortController?.abort("Recipe stopped");
+    abortController?.abort("Pattern stopped");
 
     // Only try to update state if cells were initialized
     if (!cellsInitialized || !myRequestId) return;

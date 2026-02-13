@@ -13,7 +13,7 @@ import { Identity, Session } from "@commontools/identity";
 import { env } from "@commontools/integration";
 import { StorageManager } from "../src/storage/cache.ts";
 import { Runtime } from "../src/index.ts";
-import { compileRecipe, PieceManager } from "@commontools/piece";
+import { compilePattern, PieceManager } from "@commontools/piece";
 
 (Error as any).stackTraceLimit = 100;
 
@@ -107,20 +107,20 @@ async function runTest() {
   const pieceManager = new PieceManager(session, runtime);
   await pieceManager.ready;
 
-  // Read the recipe file content
-  const recipeContent = await Deno.readTextFile(
+  // Read the pattern file content
+  const patternContent = await Deno.readTextFile(
     "./integration/derive_array_leak.test.tsx",
   );
 
-  const recipe = await compileRecipe(
-    recipeContent,
-    "recipe",
+  const pattern = await compilePattern(
+    patternContent,
+    "pattern",
     runtime,
     space_thingy_space,
   );
-  console.log("Recipe compiled successfully");
+  console.log("Pattern compiled successfully");
 
-  const piece = (await pieceManager.runPersistent(recipe, {})).asSchema({
+  const piece = (await pieceManager.runPersistent(pattern, {})).asSchema({
     type: "object",
     properties: {
       value: { type: "number" },

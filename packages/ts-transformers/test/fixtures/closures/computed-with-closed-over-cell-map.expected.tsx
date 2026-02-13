@@ -39,7 +39,7 @@ export default function TestComputedWithClosedOverCellMap() {
     } as const satisfies __ctHelpers.JSONSchema, {
         numbers: numbers,
         multiplier: multiplier
-    }, ({ numbers, multiplier }) => numbers.mapWithPattern(__ctHelpers.recipe({
+    }, ({ numbers, multiplier }) => numbers.mapWithPattern(__ctHelpers.pattern({
         type: "object",
         properties: {
             element: {

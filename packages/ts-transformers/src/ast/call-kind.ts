@@ -2,7 +2,7 @@
  * Call Kind Detection
  *
  * This module identifies CommonTools-specific call expressions (derive, ifElse,
- * recipe, etc.) to enable appropriate transformation behavior.
+ * pattern, etc.) to enable appropriate transformation behavior.
  *
  * ## Detection Strategy
  *
@@ -45,7 +45,7 @@ import ts from "typescript";
 import { isCommonToolsSymbol } from "../core/mod.ts";
 
 const BUILDER_SYMBOL_NAMES = new Set([
-  "recipe",
+  "pattern",
   "pattern",
   "handler",
   "action",

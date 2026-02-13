@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, derive, handler, lift, recipe, str } from "commontools";
+import { Cell, Default, derive, handler, lift, pattern, str } from "commontools";
 
 interface Item {
   label: string;
@@ -38,7 +38,7 @@ const incrementItem = handler(
   },
 );
 
-export const listManager = recipe<ListManagerArgs>(
+export const listManager = pattern<ListManagerArgs>(
   "List Manager",
   ({ items }) => {
     const size = liftSize(items);

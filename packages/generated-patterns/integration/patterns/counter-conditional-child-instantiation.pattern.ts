@@ -5,7 +5,7 @@ import {
   computed,
   Default,
   handler,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -70,7 +70,7 @@ interface ChildCounterState {
   increment: { amount?: number };
 }
 
-const _conditionalChild = recipe<
+const _conditionalChild = pattern<
   { value: Default<number, 0> },
   ChildCounterState
 >(
@@ -92,7 +92,7 @@ interface ConditionalChildArgs {
   enabled: Default<boolean, false>;
 }
 
-export const counterWithConditionalChildInstantiation = recipe<
+export const counterWithConditionalChildInstantiation = pattern<
   ConditionalChildArgs
 >(
   "Counter With Conditional Child Instantiation",

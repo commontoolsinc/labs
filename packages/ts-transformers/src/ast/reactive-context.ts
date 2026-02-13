@@ -8,7 +8,7 @@
  * ## Context Types
  *
  * **Restricted Reactive Contexts** (opaque reading NOT allowed):
- * - recipe body
+ * - pattern body
  * - pattern body
  * - render body
  * - map/mapWithPattern callbacks on opaques/cells
@@ -33,7 +33,7 @@ import { detectCallKind } from "./call-kind.ts";
  * Builder names that establish a "reactive context" where reading opaques is NOT allowed.
  */
 export const RESTRICTED_CONTEXT_BUILDERS = new Set([
-  "recipe",
+  "pattern",
   "pattern",
   "render",
 ]);
@@ -264,7 +264,7 @@ export function isInsideSafeWrapper(
 /**
  * Checks if a node is inside a restricted reactive context where opaque reading is NOT allowed.
  *
- * Restricted contexts are: recipe, pattern, render bodies, and map callbacks on opaques.
+ * Restricted contexts are: pattern, render bodies, and map callbacks on opaques.
  */
 export function isInsideRestrictedContext(
   node: ts.Node,
@@ -282,7 +282,7 @@ export function isInsideRestrictedContext(
       ) {
         const callKind = detectCallKind(functionParent, checker);
         if (callKind) {
-          // recipe, pattern, render are restricted
+          // pattern, render are restricted
           if (
             callKind.kind === "builder" &&
             RESTRICTED_CONTEXT_BUILDERS.has(callKind.builderName)
@@ -306,17 +306,17 @@ export function isInsideRestrictedContext(
  * Checks if a node is in a "restricted reactive context" where reading opaques is NOT allowed.
  *
  * This returns true if:
- * - We're inside a recipe/pattern body OR a .map callback on opaques
+ * - We're inside a pattern body OR a .map callback on opaques
  * - AND we're NOT inside a safe wrapper (computed, action, derive, lift, handler)
  *
  * @example
  * // Returns true (restricted - opaque reading not allowed):
- * recipe("test", ({ item }) => {
+ * pattern("test", ({ item }) => {
  *   const x = item.price > 100; // <-- here
  * });
  *
  * // Returns false (safe wrapper - opaque reading allowed):
- * recipe("test", ({ item }) => {
+ * pattern("test", ({ item }) => {
  *   const x = computed(() => item.price > 100); // <-- here (inside computed)
  * });
  */

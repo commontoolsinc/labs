@@ -9,7 +9,7 @@ import {
   Writable,
 } from "commontools";
 
-interface RecipeState {
+interface PatternState {
   value: Default<number, 0>;
 }
 
@@ -41,7 +41,7 @@ function nth(value: number) {
   return `${value}th`;
 }
 
-export const Counter = pattern<RecipeState>((state) => {
+export const Counter = pattern<PatternState>((state) => {
   return {
     // computed() is used to create reactive derived values
     [NAME]: computed(() => `Simple counter: ${state.value}`),
@@ -67,7 +67,7 @@ export const Counter = pattern<RecipeState>((state) => {
   };
 });
 
-export default pattern<RecipeState>((state) => {
+export default pattern<PatternState>((state) => {
   const counter = Counter({ value: state.value });
 
   return {
@@ -79,7 +79,7 @@ export default pattern<RecipeState>((state) => {
         <div>
           Component: <Counter value={state.value} />
         </div>
-        {/* ct-render will NOT usually appear in a recipe, rather, it's used within other ct- component internals */}
+        {/* ct-render will NOT usually appear in a pattern, rather, it's used within other ct- component internals */}
         <div>
           ct-render: <ct-render $cell={counter} />
         </div>

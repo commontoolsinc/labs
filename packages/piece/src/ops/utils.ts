@@ -1,6 +1,6 @@
 import { Cell, RuntimeProgram } from "@commontools/runner";
 import { PieceManager } from "../manager.ts";
-import { compileRecipe } from "../iterate.ts";
+import { compilePattern } from "../iterate.ts";
 
 export type CellPath = (string | number)[];
 
@@ -23,14 +23,14 @@ export async function compileProgram(
   manager: PieceManager,
   program: RuntimeProgram | string,
 ) {
-  const recipe = await compileRecipe(
+  const pattern = await compilePattern(
     program,
-    "recipe",
+    "pattern",
     manager.runtime,
     manager.getSpace(),
     undefined, // parents
   );
-  return recipe;
+  return pattern;
 }
 
 export function resolveCellPath<T>(

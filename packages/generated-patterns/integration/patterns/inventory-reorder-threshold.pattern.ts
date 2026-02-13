@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { type Cell, Default, handler, lift, recipe, str } from "commontools";
+import { type Cell, Default, handler, lift, pattern, str } from "commontools";
 
 interface InventoryEntry {
   sku: string;
@@ -179,7 +179,7 @@ const liftAlertMessage = lift((skus: string[]) => {
   return `Reorder needed for ${skus.join(", ")}`;
 });
 
-export const inventoryReorderThreshold = recipe<InventoryReorderArgs>(
+export const inventoryReorderThreshold = pattern<InventoryReorderArgs>(
   "Inventory Reorder Threshold",
   ({ inventory }) => {
     const inventoryView = liftInventoryView(inventory);

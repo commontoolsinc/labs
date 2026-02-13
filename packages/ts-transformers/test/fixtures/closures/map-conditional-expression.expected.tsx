@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 interface Item {
     id: number;
     price: number;
@@ -9,7 +9,7 @@ interface State {
     discount: number;
     threshold: number;
 }
-export default recipe({
+export default pattern({
     type: "object",
     properties: {
         items: {
@@ -74,7 +74,7 @@ export default recipe({
     return {
         [UI]: (<div>
         {/* Ternary with captures in map callback */}
-        {state.items.mapWithPattern(__ctHelpers.recipe({
+        {state.items.mapWithPattern(__ctHelpers.pattern({
                 type: "object",
                 properties: {
                     element: {

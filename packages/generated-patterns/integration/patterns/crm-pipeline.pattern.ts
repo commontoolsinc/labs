@@ -6,7 +6,7 @@ import {
   derive,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -473,7 +473,7 @@ const liftSanitizeDefaultAmount = lift((value: number | undefined) => {
 const liftFormatCurrency = lift(formatCurrency);
 const liftFormatStageCount = lift(formatStageCount);
 
-export const crmPipeline = recipe<PipelineArgs>(
+export const crmPipeline = pattern<PipelineArgs>(
   "CRM Pipeline",
   ({ deals, stages, defaultAmount }) => {
     const lastAction = cell("none");

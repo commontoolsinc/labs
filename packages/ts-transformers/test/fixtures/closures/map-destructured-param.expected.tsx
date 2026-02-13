@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 interface Point {
     x: number;
     y: number;
@@ -8,7 +8,7 @@ interface State {
     points: Point[];
     scale: number;
 }
-export default recipe({
+export default pattern({
     type: "object",
     properties: {
         points: {
@@ -70,7 +70,7 @@ export default recipe({
     return {
         [UI]: (<div>
         {/* Map with destructured parameter and capture */}
-        {state.points.mapWithPattern(__ctHelpers.recipe({
+        {state.points.mapWithPattern(__ctHelpers.pattern({
                 type: "object",
                 properties: {
                     element: {

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { NAME, recipe, schema, str, UI } from "commontools";
+import { NAME, pattern, schema, str, UI } from "commontools";
 
 const model = schema({
   type: "object",
@@ -7,7 +7,7 @@ const model = schema({
   default: {},
 });
 
-export default recipe(model, model, () => {
+export default pattern(model, model, () => {
   return {
     [NAME]: str`Common UI v2 Components Showcase`,
     [UI]: (

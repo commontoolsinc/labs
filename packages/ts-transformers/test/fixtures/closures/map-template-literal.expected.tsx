@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 interface Item {
     id: number;
     name: string;
@@ -9,7 +9,7 @@ interface State {
     prefix: string;
     suffix: string;
 }
-export default recipe({
+export default pattern({
     type: "object",
     properties: {
         items: {
@@ -74,7 +74,7 @@ export default recipe({
     return {
         [UI]: (<div>
         {/* Template literal with captures */}
-        {state.items.mapWithPattern(__ctHelpers.recipe({
+        {state.items.mapWithPattern(__ctHelpers.pattern({
                 type: "object",
                 properties: {
                     element: {

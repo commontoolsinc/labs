@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { handler, JSONSchema, NAME, recipe, UI } from "commontools";
+import { handler, JSONSchema, NAME, pattern, UI } from "commontools";
 
 const InputSchema = {
   type: "object",
@@ -50,7 +50,7 @@ const updateValue = handler<{ detail: { value: string } }, { value: string }>(
   },
 );
 
-export default recipe(
+export default pattern(
   InputSchema,
   OutputSchema,
   ({ superCoolField, auth }) => ({

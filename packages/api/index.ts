@@ -1,6 +1,6 @@
 /**
  * Public interface for the builder package. This module exports only the types
- * and functions that are part of the public recipe API.
+ * and functions that are part of the public pattern API.
  *
  * Workspace code should import these types via `@commontools/builder`.
  */
@@ -11,7 +11,7 @@ export declare const ID: unique symbol;
 export declare const ID_FIELD: unique symbol;
 
 // Should be Symbol("UI") or so, but this makes repeat() use these when
-// iterating over recipes.
+// iterating over patterns.
 export declare const TYPE: "$TYPE";
 export declare const NAME: "$NAME";
 export declare const UI: "$UI";
@@ -607,7 +607,7 @@ export interface IDerivable<T> {
   ): OpaqueRef<S[]>;
   mapWithPattern<S>(
     this: IsThisObject,
-    op: RecipeFactory<T extends Array<infer U> ? U : T, S>,
+    op: PatternFactory<T extends Array<infer U> ? U : T, S>,
     params: Record<string, any>,
   ): OpaqueRef<S[]>;
 }
@@ -1026,12 +1026,12 @@ export type AnyCellWrapping<T> =
 // TODO(seefeld): Subset of internal type, just enough to make it
 // differentiated. But this isn't part of the public API, so we need to find a
 // different way to handle this.
-export interface Recipe {
+export interface Pattern {
   argumentSchema: JSONSchema;
   resultSchema: JSONSchema;
 }
 export interface Module {
-  type: "ref" | "javascript" | "recipe" | "raw" | "isolated" | "passthrough";
+  type: "ref" | "javascript" | "pattern" | "raw" | "isolated" | "passthrough";
 }
 
 export type toJSON = {
@@ -1044,12 +1044,12 @@ export type Handler<T = any, R = any> = Module & {
 
 export type NodeFactory<T, R> =
   & ((inputs: Opaque<T>) => OpaqueRef<R>)
-  & (Module | Handler | Recipe)
+  & (Module | Handler | Pattern)
   & toJSON;
 
-export type RecipeFactory<T, R> =
+export type PatternFactory<T, R> =
   & ((inputs: Opaque<T>) => OpaqueRef<R>)
-  & Recipe
+  & Pattern
   & toJSON;
 
 export type ModuleFactory<T, R> =
@@ -1263,7 +1263,7 @@ export interface ImageData {
 export type BuiltInLLMTool =
   & { description?: string }
   & (
-    | { pattern: Recipe; handler?: never; extraParams?: Record<string, any> }
+    | { pattern: Pattern; handler?: never; extraParams?: Record<string, any> }
     | { handler: Stream<any> | OpaqueRef<any>; pattern?: never }
   );
 
@@ -1392,49 +1392,40 @@ export interface BuiltInCompileAndRunState<T> {
 
 // Function type definitions
 export interface PatternFunction {
-  // Primary overload: T and R inferred from function
+  // Function-only overload: T and R inferred from function
   <T, R>(
     fn: (input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<R> }) => Opaque<R>,
-  ): RecipeFactory<StripCell<T>, StripCell<R>>;
+  ): PatternFactory<StripCell<T>, StripCell<R>>;
 
-  // Single type param overload: T explicit, R inferred
+  // Function-only overload: T explicit, R inferred
   // SELF is typed as `never` - using it will produce a type error
   // Use pattern<T, R>() with both type params for typed SELF access
   <T>(
     fn: (input: OpaqueRef<Required<T>> & { [SELF]: never }) => any,
-  ): RecipeFactory<StripCell<T>, any>;
-}
+  ): PatternFactory<StripCell<T>, any>;
 
-/** @deprecated Use pattern() instead */
-export interface RecipeFunction {
-  // Function-only overload
-  <T, R>(
-    fn: (input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<R> }) => Opaque<R>,
-  ): RecipeFactory<StripCell<T>, StripCell<R>>;
-
-  <T>(
-    fn: (input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<any> }) => any,
-  ): RecipeFactory<StripCell<T>, StripCell<ReturnType<typeof fn>>>;
-
+  // Schema + function overload: T explicit, R inferred
   <T>(
     argumentSchema: string | JSONSchema,
     fn: (input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<any> }) => any,
-  ): RecipeFactory<StripCell<T>, StripCell<ReturnType<typeof fn>>>;
+  ): PatternFactory<StripCell<T>, StripCell<ReturnType<typeof fn>>>;
 
+  // Schema + function overload: T and R explicit
   <T, R>(
     argumentSchema: string | JSONSchema,
     fn: (
       input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<R> },
     ) => Opaque<R>,
-  ): RecipeFactory<StripCell<T>, StripCell<R>>;
+  ): PatternFactory<StripCell<T>, StripCell<R>>;
 
+  // Schema + schema + function overload
   <T, R>(
     argumentSchema: string | JSONSchema,
     resultSchema: JSONSchema,
     fn: (
       input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<R> },
     ) => Opaque<R>,
-  ): RecipeFactory<StripCell<T>, StripCell<R>>;
+  ): PatternFactory<StripCell<T>, StripCell<R>>;
 }
 
 /**
@@ -1442,7 +1433,7 @@ export interface RecipeFunction {
  * This is the actual runtime return type, not a cast.
  */
 export interface PatternToolResult<E = Record<PropertyKey, never>> {
-  pattern: Recipe;
+  pattern: Pattern;
   extraParams: E;
 }
 
@@ -1450,7 +1441,9 @@ export type PatternToolFunction = <
   T,
   E extends object = Record<PropertyKey, never>,
 >(
-  fnOrRecipe: ((input: OpaqueRef<Required<T>>) => any) | RecipeFactory<T, any>,
+  fnOrPattern:
+    | ((input: OpaqueRef<Required<T>>) => any)
+    | PatternFactory<T, any>,
   // Validate that E (after stripping cells) is a subset of T
   extraParams?: StripCell<E> extends Partial<T> ? Opaque<E> : never,
 ) => PatternToolResult<E>;
@@ -1714,12 +1707,12 @@ export type SchemaFunction = <T extends JSONSchema>(schema: T) => T;
 // The actual implementation is done by the TypeScript transformer
 export type ToSchemaFunction = <T>(options?: Partial<JSONSchema>) => JSONSchema;
 
-// Recipe environment types
-export interface RecipeEnvironment {
+// Pattern environment types
+export interface PatternEnvironment {
   readonly apiUrl: URL;
 }
 
-export type GetRecipeEnvironmentFunction = () => RecipeEnvironment;
+export type GetPatternEnvironmentFunction = () => PatternEnvironment;
 
 /**
  * Compare two cells or values for equality after resolving, i.e. after
@@ -1734,8 +1727,6 @@ export type EqualsFunction = (
 // Re-export all function types as values for destructuring imports
 // These will be implemented by the factory
 export declare const pattern: PatternFunction;
-/** @deprecated Use pattern() instead */
-export declare const recipe: RecipeFunction;
 export declare const patternTool: PatternToolFunction;
 export declare const lift: LiftFunction;
 export declare const handler: HandlerFunction;
@@ -1763,7 +1754,7 @@ export declare const createNodeFactory: CreateNodeFactoryFunction;
 export declare const cell: CellTypeConstructor<AsCell>["of"];
 export declare const equals: EqualsFunction;
 export declare const byRef: ByRefFunction;
-export declare const getRecipeEnvironment: GetRecipeEnvironmentFunction;
+export declare const getPatternEnvironment: GetPatternEnvironmentFunction;
 
 /**
  * Get the entity ID from a cell or value.

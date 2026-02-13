@@ -1,8 +1,8 @@
 import { getLogger } from "@commontools/utils/logger";
 import { isRecord } from "@commontools/utils/types";
 import type { MemorySpace, URI } from "@commontools/memory/interface";
-import { getTopFrame } from "./builder/recipe.ts";
-import { type Frame, type Module, type Recipe, TYPE } from "./builder/types.ts";
+import { getTopFrame } from "./builder/pattern.ts";
+import { type Frame, type Module, type Pattern, TYPE } from "./builder/types.ts";
 import type { Cancel } from "./cancel.ts";
 import {
   getCellOrThrow,
@@ -55,7 +55,7 @@ const logger = getLogger("scheduler", {
 export type { ErrorWithContext };
 
 export interface TelemetryAnnotations {
-  recipe: Recipe;
+  pattern: Pattern;
   module: Module;
   reads: NormalizedFullLink[];
   writes: NormalizedFullLink[];
@@ -317,7 +317,7 @@ export class Scheduler {
   ): SchedulerActionInfo | undefined {
     const annotated = action as Partial<TelemetryAnnotations>;
 
-    const recipeName = this.getOptionalName(annotated.recipe);
+    const patternName = this.getOptionalName(annotated.pattern);
     const moduleName = this.getOptionalName(annotated.module);
     const reads = Array.isArray(annotated.reads)
       ? annotated.reads.map((link) => this.formatTelemetryLink(link))
@@ -326,12 +326,12 @@ export class Scheduler {
       ? annotated.writes.map((link) => this.formatTelemetryLink(link))
       : undefined;
 
-    if (!recipeName && !moduleName && !reads?.length && !writes?.length) {
+    if (!patternName && !moduleName && !reads?.length && !writes?.length) {
       return undefined;
     }
 
     return {
-      recipeName,
+      patternName,
       moduleName,
       reads: reads?.length ? reads : undefined,
       writes: writes?.length ? writes : undefined,
@@ -1378,7 +1378,7 @@ export class Scheduler {
     }
 
     // Find source entities (read but not written by any action)
-    // These represent recipe inputs / external data
+    // These represent pattern inputs / external data
     const entityReaders = new Map<string, Set<string>>(); // entity -> action IDs that read it
     const writtenEntities = new Set<string>();
 
@@ -1910,7 +1910,7 @@ export class Scheduler {
     this.filterStats = { filtered: 0, executed: 0 };
   }
   private handleError(error: Error, action: any) {
-    const { pieceId, spellId, recipeId, space } = getPieceMetadataFromFrame(
+    const { pieceId, spellId, patternId, space } = getPieceMetadataFromFrame(
       (error as Error & { frame?: Frame }).frame,
     );
 
@@ -1923,7 +1923,7 @@ export class Scheduler {
     errorWithContext.action = action;
     if (pieceId) errorWithContext.pieceId = pieceId;
     if (spellId) errorWithContext.spellId = spellId;
-    if (recipeId) errorWithContext.recipeId = recipeId;
+    if (patternId) errorWithContext.patternId = patternId;
     if (space) errorWithContext.space = space as MemorySpace;
 
     for (const handler of this.errorHandlers) {
@@ -2152,7 +2152,7 @@ export class Scheduler {
     logger.timeEnd("scheduler", "execute", "event");
 
     // Process any newly subscribed actions that were added during event handling.
-    // This handles cases like event handlers that create sub-recipes whose
+    // This handles cases like event handlers that create sub-patterns whose
     // computations need their dependencies discovered before we build the workSet.
     if (this.pendingDependencyCollection.size > 0) {
       for (const action of this.pendingDependencyCollection) {
@@ -2643,7 +2643,7 @@ export function txToReactivityLog(
 
 function getPieceMetadataFromFrame(frame?: Frame): {
   spellId?: string;
-  recipeId?: string;
+  patternId?: string;
   space?: string;
   pieceId?: string;
 } {
@@ -2666,7 +2666,7 @@ function getPieceMetadataFromFrame(frame?: Frame): {
       resultRef: { type: "object", asCell: true },
     },
   });
-  result.recipeId = source.get()?.[TYPE];
+  result.patternId = source.get()?.[TYPE];
   const spellCell = source.get()?.spell;
   result.spellId = spellCell?.getAsNormalizedFullLink().id;
   const resultCell = source.get()?.resultRef;

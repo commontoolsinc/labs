@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { JSONSchema, NAME, recipe, UI } from "commontools";
+import { JSONSchema, NAME, pattern, UI } from "commontools";
 
 const InputSchema = {
   type: "object",
@@ -15,7 +15,7 @@ const InputSchema = {
 
 const OutputSchema = InputSchema;
 
-export default recipe(
+export default pattern(
   InputSchema,
   OutputSchema,
   ({ content }) => {

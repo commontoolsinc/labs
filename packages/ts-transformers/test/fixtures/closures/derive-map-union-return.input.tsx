@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { derive, recipe, UI } from "commontools";
+import { derive, pattern, UI } from "commontools";
 
 interface ContentPart {
   type: "text" | "image";
@@ -16,7 +16,7 @@ interface State {
   messages: Message[];
 }
 
-export default recipe<State>("DeriveMapUnionReturn", (state) => {
+export default pattern<State>("DeriveMapUnionReturn", (state) => {
   // This derive callback contains a nested map and returns string | null
   // The callback becomes synthetic during transformation, which previously
   // caused type inference to fail, resulting in a 'true' schema instead of

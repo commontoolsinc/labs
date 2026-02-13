@@ -1,12 +1,12 @@
 /// <cts-enable />
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 
 interface State {
   sortedTags: string[];
   tagCounts: Record<string, number>;
 }
 
-export default recipe<State>("MapElementAccessOpaque", (state) => {
+export default pattern<State>("MapElementAccessOpaque", (state) => {
   return {
     [UI]: (
       <div>

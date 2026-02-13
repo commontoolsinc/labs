@@ -36,7 +36,7 @@ export default function TestDerive() {
     } as const satisfies __ctHelpers.JSONSchema, {
         numbers,
         multiplier: multiplier
-    }, ({ numbers: nums, multiplier }) => nums.mapWithPattern(__ctHelpers.recipe({
+    }, ({ numbers: nums, multiplier }) => nums.mapWithPattern(__ctHelpers.pattern({
         type: "object",
         properties: {
             element: {

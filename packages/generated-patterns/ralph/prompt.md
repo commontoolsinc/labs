@@ -15,7 +15,7 @@ Steps:
    ONE random unchecked task, and for it:
    - Add `*.pattern.ts` + `*.ts` scenario files matching our existing
      conventions in `packages/generated-patterns/integration/patterns/`.
-   - Use CTS APIs (`handler`, `recipe`, `lift`, `str`, `cell`, `createCell`) to
+   - Use CTS APIs (`handler`, `pattern`, `lift`, `str`, `cell`, `createCell`) to
      realize the described structure. You can use `derive` as well, it is just a
      convenience wrapper around lift: `derive(x, x => x+1)` is the same as
      `lift(x => x+1)(x)`.

@@ -141,7 +141,7 @@ describe("Schema Lineage", () => {
     });
   });
 
-  describe("Schema Propagation from Aliases (without Recipes)", () => {
+  describe("Schema Propagation from Aliases (without Patterns)", () => {
     it("should track schema through deep aliases", () => {
       // Create a series of nested aliases with schemas
       const valueCell = runtime.getCell<{ count: number; name: string }>(
@@ -260,7 +260,7 @@ describe("Schema propagation end-to-end example", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
-  let recipe: ReturnType<typeof createBuilder>["commontools"]["recipe"];
+  let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
   let UI: ReturnType<typeof createBuilder>["commontools"]["UI"];
 
   beforeEach(() => {
@@ -273,7 +273,7 @@ describe("Schema propagation end-to-end example", () => {
     });
     tx = runtime.edit();
     const { commontools } = createBuilder();
-    ({ recipe, UI } = commontools);
+    ({ pattern, UI } = commontools);
   });
 
   afterEach(async () => {
@@ -282,9 +282,9 @@ describe("Schema propagation end-to-end example", () => {
     await storageManager?.close();
   });
 
-  it("should propagate schema through a recipe", () => {
-    // Create a recipe with schema
-    const testRecipe = recipe({
+  it("should propagate schema through a pattern", () => {
+    // Create a pattern with schema
+    const testPattern = pattern({
       type: "object",
       properties: {
         details: {
@@ -310,13 +310,13 @@ describe("Schema propagation end-to-end example", () => {
 
     const resultCell = runtime.getCell<any>(
       space,
-      "should propagate schema through a recipe",
+      "should propagate schema through a pattern",
       undefined,
       tx,
     );
     runtime.run(
       tx,
-      testRecipe,
+      testPattern,
       { details: { name: "hello", age: 14 } },
       resultCell,
     );

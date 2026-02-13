@@ -1,10 +1,10 @@
 import * as __ctHelpers from "commontools";
-import { recipe } from "commontools";
+import { pattern } from "commontools";
 interface TodoItem {
     title: string;
     done: boolean;
 }
-export default recipe({
+export default pattern({
     type: "object",
     properties: {
         items: {
@@ -65,7 +65,7 @@ export default recipe({
     required: ["mapped", "filtered"]
 } as const satisfies __ctHelpers.JSONSchema, ({ items }) => {
     // Map on opaque ref arrays should be transformed to mapWithPattern
-    const mapped = items.mapWithPattern(__ctHelpers.recipe({
+    const mapped = items.mapWithPattern(__ctHelpers.pattern({
         type: "object",
         properties: {
             element: {
@@ -96,7 +96,7 @@ export default recipe({
         asOpaque: true
     } as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: {} }) => item.title), {});
     // This should also be transformed
-    const filtered = items.mapWithPattern(__ctHelpers.recipe({
+    const filtered = items.mapWithPattern(__ctHelpers.pattern({
         type: "object",
         properties: {
             element: {

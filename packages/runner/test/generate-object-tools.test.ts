@@ -34,7 +34,7 @@ describe("generateObject with tools", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
-  let recipe: ReturnType<typeof createBuilder>["commontools"]["recipe"];
+  let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
   let handler: ReturnType<typeof createBuilder>["commontools"]["handler"];
   let str: ReturnType<typeof createBuilder>["commontools"]["str"];
   let Cell: ReturnType<typeof createBuilder>["commontools"]["Cell"];
@@ -44,7 +44,7 @@ describe("generateObject with tools", () => {
   let generateObject: ReturnType<
     typeof createBuilder
   >["commontools"]["generateObject"];
-  let dummyRecipe: any;
+  let dummyPattern: any;
 
   beforeEach(() => {
     clearMockResponses(); // Clear mocks from previous tests
@@ -56,8 +56,8 @@ describe("generateObject with tools", () => {
     tx = runtime.edit();
 
     const { commontools } = createBuilder();
-    ({ recipe, generateObject, handler, Cell, patternTool, str } = commontools);
-    dummyRecipe = recipe("Dummy Tool", () => ({}));
+    ({ pattern, generateObject, handler, Cell, patternTool, str } = commontools);
+    dummyPattern = pattern("Dummy Tool", () => ({}));
   });
 
   afterEach(async () => {
@@ -105,7 +105,7 @@ describe("generateObject with tools", () => {
       },
     );
 
-    const testRecipe = recipe<Record<string, never>>(
+    const testPattern = pattern<Record<string, never>>(
       "Generate Object with finalResult",
       () => {
         const result = generateObject({
@@ -114,7 +114,7 @@ describe("generateObject with tools", () => {
           tools: {
             dummy: {
               description: "A dummy tool to force tool-calling path",
-              pattern: dummyRecipe,
+              pattern: dummyPattern,
             },
           },
         });
@@ -125,11 +125,11 @@ describe("generateObject with tools", () => {
     const resultCell = runtime.getCell(
       space,
       "generateObject-finalResult-test",
-      testRecipe.resultSchema,
+      testPattern.resultSchema,
       tx,
     );
 
-    const result = runtime.run(tx, testRecipe, {}, resultCell);
+    const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
     // Wait for pending to become false using sink with timeout
@@ -171,7 +171,7 @@ describe("generateObject with tools", () => {
       },
     );
 
-    const testRecipe = recipe<Record<string, never>>(
+    const testPattern = pattern<Record<string, never>>(
       "Generate Object without tools",
       () => {
         const result = generateObject({
@@ -186,11 +186,11 @@ describe("generateObject with tools", () => {
     const resultCell = runtime.getCell(
       space,
       "generateObject-no-tools-test",
-      testRecipe.resultSchema,
+      testPattern.resultSchema,
       tx,
     );
 
-    const result = runtime.run(tx, testRecipe, {}, resultCell);
+    const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
     // Wait for pending to become false using sink with timeout
@@ -234,7 +234,7 @@ describe("generateObject with tools", () => {
       },
     );
 
-    const testRecipe = recipe<Record<string, never>>(
+    const testPattern = pattern<Record<string, never>>(
       "Generate Object with error",
       () => {
         const result = generateObject({
@@ -249,11 +249,11 @@ describe("generateObject with tools", () => {
     const resultCell = runtime.getCell(
       space,
       "generateObject-error-test",
-      testRecipe.resultSchema,
+      testPattern.resultSchema,
       tx,
     );
 
-    const result = runtime.run(tx, testRecipe, {}, resultCell);
+    const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
     // Wait for pending to become false using sink with timeout
@@ -315,7 +315,7 @@ describe("generateObject with tools", () => {
       },
     );
 
-    const testRecipe = recipe<Record<string, never>>(
+    const testPattern = pattern<Record<string, never>>(
       "Generate Object with schema validation",
       () => {
         const result = generateObject({
@@ -324,7 +324,7 @@ describe("generateObject with tools", () => {
           tools: {
             dummy: {
               description: "A dummy tool to force tool-calling path",
-              pattern: dummyRecipe,
+              pattern: dummyPattern,
             },
           },
         });
@@ -335,11 +335,11 @@ describe("generateObject with tools", () => {
     const resultCell = runtime.getCell(
       space,
       "generateObject-schema-test",
-      testRecipe.resultSchema,
+      testPattern.resultSchema,
       tx,
     );
 
-    const result = runtime.run(tx, testRecipe, {}, resultCell);
+    const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
     // Wait for pending to become false using sink with timeout
@@ -398,7 +398,7 @@ describe("generateObject with tools", () => {
       },
     );
 
-    const testRecipe = recipe<Record<string, never>>(
+    const testPattern = pattern<Record<string, never>>(
       "Generate Object with nested schema",
       () => {
         const result = generateObject({
@@ -407,7 +407,7 @@ describe("generateObject with tools", () => {
           tools: {
             dummy: {
               description: "A dummy tool to force tool-calling path",
-              pattern: dummyRecipe,
+              pattern: dummyPattern,
             },
           },
         });
@@ -418,11 +418,11 @@ describe("generateObject with tools", () => {
     const resultCell = runtime.getCell(
       space,
       "generateObject-nested-schema-test",
-      testRecipe.resultSchema,
+      testPattern.resultSchema,
       tx,
     );
 
-    const result = runtime.run(tx, testRecipe, {}, resultCell);
+    const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
     // Wait for pending to become false using sink with timeout
@@ -487,7 +487,7 @@ describe("generateObject with tools", () => {
       },
     );
 
-    const testRecipe = recipe<Record<string, never>>(
+    const testPattern = pattern<Record<string, never>>(
       "Generate Object with messages",
       () => {
         const result = generateObject({
@@ -496,7 +496,7 @@ describe("generateObject with tools", () => {
           tools: {
             dummy: {
               description: "A dummy tool to force tool-calling path",
-              pattern: dummyRecipe,
+              pattern: dummyPattern,
             },
           },
         });
@@ -507,11 +507,11 @@ describe("generateObject with tools", () => {
     const resultCell = runtime.getCell(
       space,
       "generateObject-messages-test",
-      testRecipe.resultSchema,
+      testPattern.resultSchema,
       tx,
     );
 
-    const result = runtime.run(tx, testRecipe, {}, resultCell);
+    const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
     // Wait for pending to become false using sink with timeout
@@ -660,7 +660,7 @@ describe("generateObject with tools", () => {
       },
     );
 
-    const testRecipe = recipe<Record<string, never>>(
+    const testPattern = pattern<Record<string, never>>(
       "Generate Object with multiple handler tools",
       () => {
         const dataSource = Cell.of({ ready: true });
@@ -687,11 +687,11 @@ describe("generateObject with tools", () => {
     const resultCell = runtime.getCell(
       space,
       "generateObject-multi-handler-test",
-      testRecipe.resultSchema,
+      testPattern.resultSchema,
       tx,
     );
 
-    const result = runtime.run(tx, testRecipe, {}, resultCell);
+    const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
     // Wait for pending to become false using sink with timeout
@@ -795,7 +795,7 @@ describe("generateObject with tools", () => {
       },
     );
 
-    const testRecipe = recipe<Record<string, never>>(
+    const testPattern = pattern<Record<string, never>>(
       "Generate Object with multiple pattern tools",
       () => {
         const itemsData = Cell.of([
@@ -805,7 +805,7 @@ describe("generateObject with tools", () => {
         ]);
 
         // Create a pattern tool similar to listMentionable in chatbot.tsx
-        const listItems = recipe<
+        const listItems = pattern<
           { items: Array<{ label: string; value: string }> },
           { result: Array<{ label: string; value: string }> }
         >(
@@ -819,7 +819,7 @@ describe("generateObject with tools", () => {
           },
         );
 
-        const countItems = recipe<
+        const countItems = pattern<
           { items: Array<any> },
           { count: number }
         >(
@@ -849,11 +849,11 @@ describe("generateObject with tools", () => {
     const resultCell = runtime.getCell(
       space,
       "generateObject-multi-pattern-test",
-      testRecipe.resultSchema,
+      testPattern.resultSchema,
       tx,
     );
 
-    const result = runtime.run(tx, testRecipe, {}, resultCell);
+    const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
     // Wait for pending to become false using sink with timeout
@@ -975,7 +975,7 @@ describe("generateObject with tools", () => {
     );
 
     // Pattern-based tool
-    const analyzeData = recipe({
+    const analyzeData = pattern({
       type: "object",
       properties: { data: { type: "array", items: { type: "number" } } },
       required: ["data"],
@@ -988,7 +988,7 @@ describe("generateObject with tools", () => {
       return { analysis };
     });
 
-    const testRecipe = recipe<Record<string, never>>(
+    const testPattern = pattern<Record<string, never>>(
       () => {
         const dataCell = Cell.of([1, 2, 3, 4, 5]);
 
@@ -1012,11 +1012,11 @@ describe("generateObject with tools", () => {
     const resultCell = runtime.getCell(
       space,
       "generateObject-mixed-tools-test",
-      testRecipe.resultSchema,
+      testPattern.resultSchema,
       tx,
     );
 
-    const result = runtime.run(tx, testRecipe, {}, resultCell);
+    const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
     // Wait for pending to become false using sink with timeout
@@ -1144,7 +1144,7 @@ describe("generateObject with tools", () => {
       },
     );
 
-    const testRecipe = recipe<Record<string, never>>(
+    const testPattern = pattern<Record<string, never>>(
       "Generate Object with parallel tools",
       () => {
         const result = generateObject({
@@ -1168,11 +1168,11 @@ describe("generateObject with tools", () => {
     const resultCell = runtime.getCell(
       space,
       "generateObject-parallel-tools-test",
-      testRecipe.resultSchema,
+      testPattern.resultSchema,
       tx,
     );
 
-    const result = runtime.run(tx, testRecipe, {}, resultCell);
+    const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
     // Wait for pending to become false using sink with timeout
@@ -1234,7 +1234,7 @@ describe("generateObject with tools", () => {
       },
     );
 
-    const testRecipe = recipe<Record<string, never>>(
+    const testPattern = pattern<Record<string, never>>(
       "Generate Object with link response",
       () => {
         const result = generateObject({
@@ -1243,7 +1243,7 @@ describe("generateObject with tools", () => {
           tools: {
             dummy: {
               description: "A dummy tool",
-              pattern: dummyRecipe,
+              pattern: dummyPattern,
             },
           },
         });
@@ -1265,7 +1265,7 @@ describe("generateObject with tools", () => {
       tx,
     );
 
-    const result = runtime.run(tx, testRecipe, {}, resultCell);
+    const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
     await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();

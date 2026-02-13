@@ -31,9 +31,9 @@
  * });
  * ```
  */
-import { getRecipeEnvironment, Writable } from "commontools";
+import { getPatternEnvironment, Writable } from "commontools";
 
-const env = getRecipeEnvironment();
+const env = getPatternEnvironment();
 
 // Re-export the Auth type for convenience
 export type { Auth } from "./google-auth-manager.tsx";

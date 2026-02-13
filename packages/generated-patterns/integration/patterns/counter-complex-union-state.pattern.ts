@@ -6,7 +6,7 @@ import {
   Default,
   derive,
   handler,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -174,7 +174,7 @@ const incrementReady = handler(
   },
 );
 
-export const counterWithComplexUnionState = recipe<ComplexUnionArgs>(
+export const counterWithComplexUnionState = pattern<ComplexUnionArgs>(
   "Counter With Complex Union State",
   ({ state, initialValue }) => {
     const defaultReadyNote = cell(READY_NOTE);

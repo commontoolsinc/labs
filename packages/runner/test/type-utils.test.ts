@@ -2,7 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   isModule,
-  isRecipe,
+  isPattern,
   type Opaque,
   type OpaqueRef,
 } from "../src/builder/types.ts";
@@ -59,15 +59,15 @@ describe("utility functions", () => {
     expect(isModule({ notModule: "something" })).toBe(false);
   });
 
-  it("isRecipe correctly identifies recipes", () => {
+  it("isPattern correctly identifies patterns", () => {
     expect(
-      isRecipe({
+      isPattern({
         argumentSchema: {},
         resultSchema: {},
         initial: {},
         nodes: [],
       }),
     ).toBe(true);
-    expect(isRecipe({ notRecipe: "something" })).toBe(false);
+    expect(isPattern({ notPattern: "something" })).toBe(false);
   });
 });

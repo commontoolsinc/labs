@@ -6,10 +6,10 @@ subject: Tutorial
 authors:
   - name: Ellyse Cedeno
     email: ellyse@common.tools
-keywords: commontools, state, Cell, Default, recipe inputs
+keywords: commontools, state, Cell, Default, pattern inputs
 abstract: |
   In this section, we learn how to use Default<> to automatically create and initialize
-  Cells for recipe inputs. This is the recommended pattern for managing recipe state.
+  Cells for pattern inputs. This is the recommended pattern for managing pattern state.
 ---
 
 # Using Defaults for Cells
@@ -17,14 +17,14 @@ abstract: |
 ## Introduction
 
 In previous chapters, we used `cell()` to create and manage state. While this
-works fine for learning, there's a better way to handle state in recipes: using
-`Default<>` in your recipe's input interface.
+works fine for learning, there's a better way to handle state in patterns: using
+`Default<>` in your pattern's input interface.
 
 We introduced `cell()` first to help you understand how Cells work without
 learning too many concepts at once. Now that you're comfortable with Cells,
 let's learn the recommended pattern.
 
-**Important:** For recipe inputs, you should almost always use `Default<>`
+**Important:** For pattern inputs, you should almost always use `Default<>`
 instead of `cell()`.
 
 ## Why Use Default<>?
@@ -33,9 +33,9 @@ instead of `cell()`.
 
 1. **Automatic Cell creation** - The runtime creates the Cell for you
 2. **Default values** - Specifies what value to use if none is provided
-3. **Schema generation** - Generates proper JSON schema for your recipe
+3. **Schema generation** - Generates proper JSON schema for your pattern
 4. **Works** - also at the time of this writing, `cell()` has some bugs, this is
-   a huge reason to avoid it. When you use `Default<>` in a recipe's input
+   a huge reason to avoid it. When you use `Default<>` in a pattern's input
    interface, the Common Tools runtime automatically creates a Cell and
    initializes it with your default value.
 
@@ -47,7 +47,7 @@ manually:
 **Using cell() (what we did before):**
 
 ```typescript
-export default recipe("Counter", () => {
+export default pattern("Counter", () => {
   const count = cell<number>(0); // Manual Cell creation
 
   return {
@@ -63,7 +63,7 @@ interface CounterState {
   count: Default<number, 100>;
 }
 
-export default recipe<CounterState>("Counter", (state) => {
+export default pattern<CounterState>("Counter", (state) => {
   // state.count is already a Cell<number> initialized to 100
 
   return {
@@ -84,7 +84,7 @@ import {
   Default,
   h,
   handler,
-  recipe,
+  pattern,
   UI,
   type Cell,
 } from "commontools";
@@ -99,7 +99,7 @@ const increment = handler<unknown, { count: Cell<number> }>(
   },
 );
 
-export default recipe<CounterState>("Counter with Default", (state) => {
+export default pattern<CounterState>("Counter with Default", (state) => {
   return {
     [UI]: (
       <div>
@@ -125,7 +125,7 @@ tells the runtime:
 
 **Line 26** passes the Cell to the handler, just like before.
 
-**Line 31** exports the Cell so other recipes can use it.
+**Line 31** exports the Cell so other patterns can use it.
 
 :::{dropdown} View complete code :animate: fade-in
 
@@ -135,13 +135,13 @@ tells the runtime:
 
 :::
 
-When you deploy this recipe, the counter starts at 100. If someone creates an
-instance of this recipe and provides a different value, it will start there
+When you deploy this pattern, the counter starts at 100. If someone creates an
+instance of this pattern and provides a different value, it will start there
 instead.
 
 ## Using Default with Arrays
 
-Arrays are common in recipes. Let's create a todo list that starts with a few
+Arrays are common in patterns. Let's create a todo list that starts with a few
 items already in it:
 
 ```{code-block} typescript
@@ -153,7 +153,7 @@ import {
   Default,
   h,
   handler,
-  recipe,
+  pattern,
   UI,
   type Cell,
 } from "commontools";
@@ -195,7 +195,7 @@ shape we'll need for the `<ct-message-input>` component we'll use later. The
 handler gets the message text, trims whitespace, and adds it to the array if
 it's not empty.
 
-Here's the complete todo list recipe:
+Here's the complete todo list pattern:
 
 ```{code-block} typescript
 :label: using_defaults_todo_complete
@@ -206,7 +206,7 @@ import {
   Default,
   h,
   handler,
-  recipe,
+  pattern,
   UI,
   type Cell,
 } from "commontools";
@@ -228,7 +228,7 @@ const addItem = handler<
   },
 );
 
-export default recipe<TodoListState>("Todo List", (state) => {
+export default pattern<TodoListState>("Todo List", (state) => {
   return {
     [UI]: (
       <div>
@@ -334,7 +334,7 @@ This approach is cleaner than reconstructing the entire object and avoids issues
 with the spread operator. Notice that `levelUp` only updates the level - it
 doesn't touch the score, which continues to accumulate.
 
-Here's the complete game stats recipe:
+Here's the complete game stats pattern:
 
 ```{code-block} typescript
 :label: using_defaults_object_complete
@@ -345,7 +345,7 @@ import {
   Default,
   h,
   handler,
-  recipe,
+  pattern,
   UI,
   type Cell,
 } from "commontools";
@@ -381,7 +381,7 @@ const levelUp = handler<unknown, { stats: Cell<Player> }>(
   },
 );
 
-export default recipe<GameState>("Game Stats with Default", (state) => {
+export default pattern<GameState>("Game Stats with Default", (state) => {
   return {
     [UI]: (
       <div>
@@ -418,7 +418,7 @@ properties.
 
 :::
 
-When you deploy this recipe, it starts with the default player name, level 10,
+When you deploy this pattern, it starts with the default player name, level 10,
 and score 500.
 
 ## Key Takeaways

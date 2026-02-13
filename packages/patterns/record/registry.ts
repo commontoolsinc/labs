@@ -120,7 +120,7 @@ export interface SubPieceDefinition {
 }
 
 // Helper to create SubPieceDefinition from ModuleMetadata
-// The moduleFactory is the actual recipe function that accepts input
+// The moduleFactory is the actual pattern function that accepts input
 function fromMetadata(
   meta: ModuleMetadata,
   moduleFactory: (input: Record<string, unknown>) => unknown,

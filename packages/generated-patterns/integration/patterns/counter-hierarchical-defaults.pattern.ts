@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, handler, lift, recipe, str } from "commontools";
+import { Cell, Default, handler, lift, pattern, str } from "commontools";
 
 interface FormattingConfig {
   prefix?: string;
@@ -82,7 +82,7 @@ const normalizeSettings = (input: SettingsConfig | undefined) => {
 
 const liftNormalizeSettings = lift(normalizeSettings);
 
-export const counterWithHierarchicalDefaults = recipe<HierarchicalDefaultsArgs>(
+export const counterWithHierarchicalDefaults = pattern<HierarchicalDefaultsArgs>(
   "Counter With Hierarchical Defaults",
   ({ value, settings }) => {
     const resolvedSettings = liftNormalizeSettings(settings);

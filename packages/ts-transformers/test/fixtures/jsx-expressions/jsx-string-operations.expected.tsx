@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 interface State {
     firstName: string;
     lastName: string;
@@ -7,7 +7,7 @@ interface State {
     message: string;
     count: number;
 }
-export default recipe({
+export default pattern({
     type: "object",
     properties: {
         firstName: {

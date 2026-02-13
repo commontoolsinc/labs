@@ -25,7 +25,7 @@ state.items.map((item) => item.price * state.discount);
 
 // Output: Schema-annotated form
 state.items.mapWithPattern(
-  recipe(
+  pattern(
     inputSchema,
     outputSchema,
     ({ element: item, params: { state } }) =>
@@ -99,7 +99,7 @@ works for scope detection.
 
 | Input Pattern         | Output                                   | Purpose                   |
 | --------------------- | ---------------------------------------- | ------------------------- |
-| `array.map(fn)`       | `array.mapWithPattern(recipe, captures)` | Explicit closure captures |
+| `array.map(fn)`       | `array.mapWithPattern(pattern, captures)` | Explicit closure captures |
 | `expr1 * expr2`       | `derive(schema, schema, inputs, fn)`     | Data flow boundary        |
 | `onClick={() => ...}` | `handler(eventSchema, stateSchema, fn)`  | Handler with dual schemas |
 | `Cell<T>`             | `{ type: "...", asCell: true }`          | Writable reactive ref     |

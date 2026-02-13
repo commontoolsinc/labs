@@ -5,7 +5,7 @@ import {
   derive,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
   toSchema,
 } from "commontools";
@@ -98,7 +98,7 @@ const computeLimits = lift(
 const liftToInteger = lift((input: number | undefined) => toInteger(input));
 const liftSanitizeHistory = lift(sanitizeHistory);
 
-export const counterWithDerivedMinMax = recipe<DerivedMinMaxArgs>(
+export const counterWithDerivedMinMax = pattern<DerivedMinMaxArgs>(
   "Counter With Derived Min Max",
   ({ value, history }) => {
     const currentValue = liftToInteger(value);

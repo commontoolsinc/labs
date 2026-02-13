@@ -7,7 +7,7 @@ import {
   lift,
   NAME,
   navigateTo,
-  recipe,
+  pattern,
   toSchema,
   UI,
   Writable,
@@ -28,9 +28,9 @@ interface AddPieceState {
 const AddPieceSchema = toSchema<AddPieceState>();
 
 // Simple piece that will be instantiated multiple times
-const SimpleRecipe = recipe<{ id: string }>(({ id }) => ({
-  [NAME]: computed(() => `SimpleRecipe: ${id}`),
-  [UI]: <div>Simple Recipe id {id}</div>,
+const SimplePiece = pattern<{ id: string }>(({ id }) => ({
+  [NAME]: computed(() => `SimplePiece: ${id}`),
+  [UI]: <div>Simple Piece id {id}</div>,
 }));
 
 // Lift that adds a piece to the array and navigates to it.
@@ -56,7 +56,7 @@ const addPieceAndNavigate = lift(
 
 // Handler that creates a new piece instance and adds it to the array.
 // Each invocation creates its own isInitialized cell for tracking.
-const createSimpleRecipe = handler<unknown, { cellRef: Writable<Piece[]> }>(
+const createSimplePiece = handler<unknown, { cellRef: Writable<Piece[]> }>(
   (_, { cellRef }) => {
     // Create isInitialized cell for this piece addition
     const isInitialized = Writable.of(false);
@@ -65,7 +65,7 @@ const createSimpleRecipe = handler<unknown, { cellRef: Writable<Piece[]> }>(
     const randomId = Math.floor(10000 + Math.random() * 90000).toString();
 
     // Create the piece with unique ID
-    const piece = SimpleRecipe({ id: randomId });
+    const piece = SimplePiece({ id: randomId });
 
     // Store the piece in the array and navigate
     return addPieceAndNavigate({ piece, cellRef, isInitialized });
@@ -80,13 +80,13 @@ const goToPiece = handler<unknown, { piece: Piece }>(
   },
 );
 
-// Recipe input/output type
-type RecipeInOutput = {
+// Pattern input/output type
+type PatternInOutput = {
   cellRef: Default<Piece[], []>;
 };
 
-// Main recipe that manages an array of piece references
-export default recipe<RecipeInOutput, RecipeInOutput>(
+// Main pattern that manages an array of piece references
+export default pattern<PatternInOutput, PatternInOutput>(
   "Pieces Launcher",
   ({ cellRef }) => {
     return {
@@ -115,7 +115,7 @@ export default recipe<RecipeInOutput, RecipeInOutput>(
           )}
 
           <ct-button
-            onClick={createSimpleRecipe({ cellRef })}
+            onClick={createSimplePiece({ cellRef })}
           >
             Create New Piece
           </ct-button>

@@ -18,7 +18,7 @@ export const RuntimeModuleIdentifiers: RuntimeModuleIdentifier[] = [
   // backwards compat
   "@commontools/builder",
   // backwards compat, for supporting { type Cell } from "@commontools/runner"
-  // from older recipes
+  // from older patterns
   "@commontools/runner",
 ];
 export function isRuntimeModuleIdentifier(

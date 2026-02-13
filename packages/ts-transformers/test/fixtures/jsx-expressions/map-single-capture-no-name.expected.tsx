@@ -1,6 +1,6 @@
 import * as __ctHelpers from "commontools";
-import { cell, recipe, UI } from "commontools";
-export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
+import { cell, pattern, UI } from "commontools";
+export default pattern(false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -89,7 +89,7 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, { people: people }, ({ people }) => people.get().length > 0), <ul>
-            {people.mapWithPattern(__ctHelpers.recipe({
+            {people.mapWithPattern(__ctHelpers.pattern({
                 type: "object",
                 properties: {
                     element: {

@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { Cell, derive, recipe, UI } from "commontools";
+import { Cell, derive, pattern, UI } from "commontools";
 interface Item {
     name: string;
     done: Cell<boolean>;
@@ -11,7 +11,7 @@ interface Assignment {
 // CT-1036: Property access on derived grouped objects with derived keys
 // This pattern groups items by a property, then maps over the group keys
 // and accesses the grouped object with each key.
-export default recipe({
+export default pattern({
     type: "object",
     properties: {
         items: {
@@ -271,7 +271,7 @@ export default recipe({
     // - Map over the result
     return {
         [UI]: (<div>
-          {aisleNames.mapWithPattern(__ctHelpers.recipe({
+          {aisleNames.mapWithPattern(__ctHelpers.pattern({
                 type: "object",
                 properties: {
                     element: {
@@ -429,7 +429,7 @@ export default recipe({
             } as const satisfies __ctHelpers.JSONSchema, {
                 groupedByAisle: groupedByAisle,
                 aisleName: aisleName
-            }, ({ groupedByAisle, aisleName }) => groupedByAisle[aisleName]! ?? [])).mapWithPattern(__ctHelpers.recipe({
+            }, ({ groupedByAisle, aisleName }) => groupedByAisle[aisleName]! ?? [])).mapWithPattern(__ctHelpers.pattern({
                 type: "object",
                 properties: {
                     element: {

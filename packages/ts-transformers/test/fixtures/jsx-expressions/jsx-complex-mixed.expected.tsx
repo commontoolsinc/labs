@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 interface Item {
     id: number;
     name: string;
@@ -12,7 +12,7 @@ interface State {
     discount: number;
     taxRate: number;
 }
-export default recipe({
+export default pattern({
     type: "object",
     properties: {
         items: {
@@ -141,7 +141,7 @@ export default recipe({
 
         <h3>Array with Complex Expressions</h3>
         <ul>
-          {state.items.mapWithPattern(__ctHelpers.recipe({
+          {state.items.mapWithPattern(__ctHelpers.pattern({
                 type: "object",
                 properties: {
                     element: {

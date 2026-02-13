@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, derive, recipe, UI } from "commontools";
+import { Cell, derive, pattern, UI } from "commontools";
 
 interface Item {
   name: string;
@@ -14,7 +14,7 @@ interface Assignment {
 // CT-1036: Property access on derived grouped objects with derived keys
 // This pattern groups items by a property, then maps over the group keys
 // and accesses the grouped object with each key.
-export default recipe<{ items: Item[] }>(
+export default pattern<{ items: Item[] }>(
   "Derived Property Access",
   ({ items }) => {
     // Create assignments with aisle data

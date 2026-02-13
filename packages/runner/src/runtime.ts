@@ -9,7 +9,7 @@ import type {
   JSONSchema,
   Module,
   NodeFactory,
-  Recipe,
+  Pattern,
   Schema,
 } from "./builder/types.ts";
 import { ContextualFlowControl } from "./cfc.ts";
@@ -21,7 +21,7 @@ import {
   resetCanonicalHashConfig,
   setCanonicalHashConfig,
 } from "@commontools/memory/reference";
-import { RecipeEnvironment, setRecipeEnvironment } from "./builder/env.ts";
+import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
 import type {
   ChangeGroup,
   CommitError,
@@ -43,14 +43,14 @@ import {
   NormalizedLink,
   parseLink,
 } from "./link-utils.ts";
-import { RecipeManager } from "./recipe-manager.ts";
+import { PatternManager } from "./pattern-manager.ts";
 import { ModuleRegistry } from "./module.ts";
 import { Runner } from "./runner.ts";
 import { registerBuiltins } from "./builtins/index.ts";
 import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
 import { toURI } from "./uri-utils.ts";
 import { isDeno } from "@commontools/utils/env";
-import { popFrame, pushFrame } from "./builder/recipe.ts";
+import { popFrame, pushFrame } from "./builder/pattern.ts";
 import type { Frame } from "./builder/types.ts";
 import type { ConsoleMessage } from "./interface.ts";
 
@@ -69,7 +69,7 @@ export type ErrorWithContext = Error & {
   action: Action;
   pieceId: string;
   space: MemorySpace;
-  recipeId: string;
+  patternId: string;
   spellId: string | undefined;
 };
 
@@ -100,7 +100,7 @@ export interface RuntimeOptions {
   storageManager: IStorageManager;
   consoleHandler?: ConsoleHandler;
   errorHandlers?: ErrorHandler[];
-  recipeEnvironment?: RecipeEnvironment;
+  patternEnvironment?: PatternEnvironment;
   navigateCallback?: NavigateCallback;
   debug?: boolean;
   telemetry?: RuntimeTelemetry;
@@ -143,13 +143,13 @@ export interface SpaceCellContents {
  * // Access services through the runtime instance
  * await runtime.storage.loadCell(cellLink);
  * await runtime.scheduler.idle();
- * const recipe = await runtime.recipeManager.compileRecipe(source);
+ * const pattern = await runtime.patternManager.compilePattern(source);
  * ```
  */
 export class Runtime {
   readonly id: string;
   readonly scheduler: Scheduler;
-  readonly recipeManager: RecipeManager;
+  readonly patternManager: PatternManager;
   readonly moduleRegistry: ModuleRegistry;
   readonly harness: Engine;
   readonly runner: Runner;
@@ -189,7 +189,7 @@ export class Runtime {
     this.storageManager = options.storageManager;
     this.userIdentityDID = options.storageManager.as.did() as DID;
     this.moduleRegistry = new ModuleRegistry(this);
-    this.recipeManager = new RecipeManager(this);
+    this.patternManager = new PatternManager(this);
     this.runner = new Runner(this);
     this.cfc = new ContextualFlowControl();
 
@@ -209,17 +209,17 @@ export class Runtime {
     // Set the navigate callback
     this.navigateCallback = options.navigateCallback;
 
-    // Handle recipe environment configuration
-    if (options.recipeEnvironment) {
+    // Handle pattern environment configuration
+    if (options.patternEnvironment) {
       // This is still a singleton. TODO(seefeld): Fix this.
-      setRecipeEnvironment(options.recipeEnvironment);
+      setPatternEnvironment(options.patternEnvironment);
     }
 
     if (options.debug) {
       console.log("Runtime initialized with services:", {
         scheduler: !!this.scheduler,
         storageManager: !!this.storageManager,
-        recipeManager: !!this.recipeManager,
+        patternManager: !!this.patternManager,
         moduleRegistry: !!this.moduleRegistry,
         harness: !!this.harness,
         runner: !!this.runner,
@@ -495,51 +495,51 @@ export class Runtime {
   // Convenience methods that delegate to the runner
   setup<T, R>(
     tx: IExtendedStorageTransaction | undefined,
-    recipeFactory: NodeFactory<T, R>,
+    patternFactory: NodeFactory<T, R>,
     argument: T,
     resultCell: Cell<R>,
   ): Promise<Cell<R>>;
   setup<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
-    recipe: Recipe | Module | undefined,
+    pattern: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
   ): Promise<Cell<R>>;
   setup<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
-    recipeOrModule: Recipe | Module | undefined,
+    patternOrModule: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
   ): Promise<Cell<R>> {
-    return this.runner.setup<T, R>(tx, recipeOrModule, argument, resultCell);
+    return this.runner.setup<T, R>(tx, patternOrModule, argument, resultCell);
   }
   run<T, R>(
     tx: IExtendedStorageTransaction | undefined,
-    recipeFactory: NodeFactory<T, R>,
+    patternFactory: NodeFactory<T, R>,
     argument: T,
     resultCell: Cell<R>,
   ): Cell<R>;
   run<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
-    recipe: Recipe | Module | undefined,
+    pattern: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
   ): Cell<R>;
   run<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
-    recipeOrModule: Recipe | Module | undefined,
+    patternOrModule: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
   ): Cell<R> {
-    return this.runner.run<T, R>(tx, recipeOrModule, argument, resultCell);
+    return this.runner.run<T, R>(tx, patternOrModule, argument, resultCell);
   }
 
   runSynced(
     resultCell: Cell<any>,
-    recipe: Recipe | Module,
+    pattern: Pattern | Module,
     inputs?: any,
   ) {
-    return this.runner.runSynced(resultCell, recipe, inputs);
+    return this.runner.runSynced(resultCell, pattern, inputs);
   }
 
   start<T = any>(resultCell: Cell<T>): Promise<boolean> {

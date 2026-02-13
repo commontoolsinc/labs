@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, handler, lift, recipe, str } from "commontools";
+import { Cell, Default, handler, lift, pattern, str } from "commontools";
 
 interface SubtotalGroupSeed {
   label?: string;
@@ -103,7 +103,7 @@ const liftResolvedLabel = lift(
   },
 );
 
-const subtotalGroup = recipe<SubtotalGroupArgs>(
+const subtotalGroup = pattern<SubtotalGroupArgs>(
   "Nested Totals Subgroup",
   ({ label, values, index }) => {
     const normalizedIndex = liftNormalizedIndex(index);
@@ -256,7 +256,7 @@ const liftTotalItems = lift((entries: { itemCount: number }[]) => {
   }, 0);
 });
 
-export const counterWithNestedComputedTotals = recipe<
+export const counterWithNestedComputedTotals = pattern<
   NestedComputedTotalsArgs
 >(
   "Counter With Nested Computed Totals",

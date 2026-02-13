@@ -31,7 +31,68 @@ const decrement = handler(false as const satisfies __ctHelpers.JSONSchema, {
 }) => {
     state.value.set(state.value.get() - 1);
 });
-export default pattern((state) => {
+export default pattern({
+    type: "object",
+    properties: {
+        value: {
+            type: "number"
+        }
+    },
+    required: ["value"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        $NAME: {
+            type: "string",
+            asOpaque: true
+        },
+        $UI: {
+            $ref: "#/$defs/JSXElement"
+        },
+        value: {
+            type: "number",
+            asOpaque: true
+        },
+        metadata: {
+            type: "object",
+            properties: {
+                next: {
+                    type: "number"
+                },
+                previous: {
+                    type: "number"
+                },
+                doubled: {
+                    type: "number"
+                }
+            },
+            required: ["next", "previous", "doubled"]
+        }
+    },
+    required: ["$NAME", "$UI", "value", "metadata"],
+    $defs: {
+        JSXElement: {
+            anyOf: [{
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    $ref: "#/$defs/UIRenderable",
+                    asOpaque: true
+                }]
+        },
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, (state) => {
     // These should NOT be transformed (statement context)
     const next = state.value + 1;
     const previous = state.value - 1;
@@ -153,68 +214,7 @@ export default pattern((state) => {
             doubled: doubled,
         },
     };
-}, {
-    type: "object",
-    properties: {
-        value: {
-            type: "number"
-        }
-    },
-    required: ["value"]
-} as const satisfies __ctHelpers.JSONSchema, {
-    type: "object",
-    properties: {
-        $NAME: {
-            type: "string",
-            asOpaque: true
-        },
-        $UI: {
-            $ref: "#/$defs/JSXElement"
-        },
-        value: {
-            type: "number",
-            asOpaque: true
-        },
-        metadata: {
-            type: "object",
-            properties: {
-                next: {
-                    type: "number"
-                },
-                previous: {
-                    type: "number"
-                },
-                doubled: {
-                    type: "number"
-                }
-            },
-            required: ["next", "previous", "doubled"]
-        }
-    },
-    required: ["$NAME", "$UI", "value", "metadata"],
-    $defs: {
-        JSXElement: {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    type: "object",
-                    properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
-                }]
-        },
-        UIRenderable: {
-            type: "object",
-            properties: {
-                $UI: {
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }
-            },
-            required: ["$UI"]
-        }
-    }
-} as const satisfies __ctHelpers.JSONSchema);
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

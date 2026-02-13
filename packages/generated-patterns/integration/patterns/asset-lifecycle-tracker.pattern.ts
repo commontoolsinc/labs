@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -402,7 +402,7 @@ const liftBusiestStage = lift((buckets: LifecycleBucket[]) => {
   return current;
 });
 
-export const assetLifecycleTracker = recipe<AssetLifecycleTrackerArgs>(
+export const assetLifecycleTracker = pattern<AssetLifecycleTrackerArgs>(
   "Asset Lifecycle Tracker",
   ({ assets }) => {
     const transitionLog = cell<TransitionEntry[]>([]);

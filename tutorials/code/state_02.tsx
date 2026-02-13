@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { type Cell, cell, handler, lift, recipe, UI } from "commontools";
+import { type Cell, cell, handler, lift, pattern, UI } from "commontools";
 
 const calcAC = (dex: number): number => 20 + Math.floor((dex - 10) / 2);
 
@@ -13,7 +13,7 @@ const updateName = handler<
   },
 );
 
-export default recipe("state test", () => {
+export default pattern("state test", () => {
   const characterName = cell<string>("");
   characterName.set("Lady Ellyxir");
   const dex = cell<number>(16);

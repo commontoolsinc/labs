@@ -40,7 +40,7 @@ export default pattern(({ customContent, items }) => {
             }
         } as const satisfies __ctHelpers.JSONSchema, {
             asCell: true
-        } as const satisfies __ctHelpers.JSONSchema, customContent, items.mapWithPattern(__ctHelpers.recipe({
+        } as const satisfies __ctHelpers.JSONSchema, customContent, items.mapWithPattern(__ctHelpers.pattern({
             type: "object",
             properties: {
                 element: {

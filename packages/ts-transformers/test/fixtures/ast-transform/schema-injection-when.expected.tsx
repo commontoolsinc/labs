@@ -1,10 +1,10 @@
 import * as __ctHelpers from "commontools";
-import { when, recipe, UI, NAME } from "commontools";
+import { when, pattern, UI, NAME } from "commontools";
 interface State {
     enabled: boolean;
     message: string;
 }
-export default recipe({
+export default pattern({
     type: "object",
     properties: {
         enabled: {

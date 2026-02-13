@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { derive, JSONSchema, NAME, recipe } from "commontools";
+import { derive, JSONSchema, NAME, pattern } from "commontools";
 
 const ExtractListsInputSchema = {
   type: "object",
@@ -24,7 +24,7 @@ const ExtractListsOutputSchema = {
   required: ["lists"],
 } as const satisfies JSONSchema;
 
-export default recipe(
+export default pattern(
   ExtractListsInputSchema,
   ExtractListsOutputSchema,
   ({ allCharms }) => {

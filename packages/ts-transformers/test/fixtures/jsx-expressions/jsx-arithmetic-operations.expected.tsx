@@ -1,12 +1,12 @@
 import * as __ctHelpers from "commontools";
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 interface State {
     count: number;
     price: number;
     discount: number;
     quantity: number;
 }
-export default recipe({
+export default pattern({
     type: "object",
     properties: {
         count: {

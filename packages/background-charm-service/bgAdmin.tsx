@@ -6,7 +6,7 @@ import {
   handler,
   lift,
   NAME,
-  recipe,
+  pattern,
   UI,
 } from "commontools";
 
@@ -166,7 +166,7 @@ const css = `
 }
 `;
 
-export default recipe<InputSchema, ResultSchema>(
+export default pattern<InputSchema, ResultSchema>(
   "BG Admin",
   ({ charms }) => {
     derive(charms, (charms) => {

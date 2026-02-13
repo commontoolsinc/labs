@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { Cell, Default, handler, recipe, UI } from "commontools";
+import { Cell, Default, handler, pattern, UI } from "commontools";
 interface Item {
     text: Default<string, "">;
 }
@@ -37,7 +37,7 @@ const removeItem = handler(true as const satisfies __ctHelpers.JSONSchema, {
 } as const satisfies __ctHelpers.JSONSchema, (_, _2) => {
     // Not relevant for repro
 });
-export default recipe({
+export default pattern({
     type: "object",
     properties: {
         items: {
@@ -94,7 +94,7 @@ export default recipe({
 } as const satisfies __ctHelpers.JSONSchema, ({ items }) => {
     return {
         [UI]: (<ul>
-          {items.mapWithPattern(__ctHelpers.recipe({
+          {items.mapWithPattern(__ctHelpers.pattern({
                 type: "object",
                 properties: {
                     element: {

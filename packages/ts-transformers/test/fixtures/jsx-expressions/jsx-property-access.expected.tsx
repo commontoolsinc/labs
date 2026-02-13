@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 interface User {
     name: string;
     age: number;
@@ -31,7 +31,7 @@ interface State {
     index: number;
     numbers: number[];
 }
-export default recipe({
+export default pattern({
     type: "object",
     properties: {
         user: {

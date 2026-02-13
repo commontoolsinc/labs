@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Default, recipe, UI } from "commontools";
+import { Default, pattern, UI } from "commontools";
 
 interface FriendListState {
   names: Default<
@@ -14,7 +14,7 @@ interface FriendListState {
   >;
 }
 
-export default recipe<FriendListState>("making lists - simple", (state) => {
+export default pattern<FriendListState>("making lists - simple", (state) => {
   return {
     [UI]: (
       <div>

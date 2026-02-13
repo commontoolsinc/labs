@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -193,7 +193,7 @@ const liftCanAdvance = lift((index: number) =>
 const liftCanRetreat = lift((index: number) => index > 0);
 const liftIsRunning = lift((current: CounterState) => current === "running");
 
-export const counterWithEnumerationState = recipe<EnumerationArgs>(
+export const counterWithEnumerationState = pattern<EnumerationArgs>(
   "Counter With Enumeration State",
   ({ state, value }) => {
     const transitions = cell<TransitionRecord[]>([]);

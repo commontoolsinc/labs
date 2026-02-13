@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -766,7 +766,7 @@ const rerouteStage = handler(
  * Builds a procurement approval workflow that tracks routing progress while
  * deriving deterministic spending summaries for the harness.
  */
-export const procurementRequest = recipe<ProcurementRequestArgs>(
+export const procurementRequest = pattern<ProcurementRequestArgs>(
   "Procurement Request Workflow",
   ({ requests }) => {
     const history = cell<string[]>(["1. Procurement queue initialized"]);

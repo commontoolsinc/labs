@@ -84,7 +84,7 @@ export default pattern(() => {
                 length: allCharms.length
             } }, ({ allCharms }) => allCharms.length)}</span>
         <ul>
-          {allCharms.mapWithPattern(__ctHelpers.recipe({
+          {allCharms.mapWithPattern(__ctHelpers.pattern({
                 type: "object",
                 properties: {
                     element: {

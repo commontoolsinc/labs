@@ -70,7 +70,7 @@ The `handler` function takes:
 :::{dropdown} Detailed explanation
 :animate: fade-in
 
-The `handler` function returns a factory that you call with your actual arguments to create the event handler. This factory pattern allows the handler to bind specific values from your recipe while still receiving events from the UI components.
+The `handler` function returns a factory that you call with your actual arguments to create the event handler. This factory pattern allows the handler to bind specific values from your pattern while still receiving events from the UI components.
 :::
 
 We'll start by writing our handler which takes the event emitted by the
@@ -139,7 +139,7 @@ This is because cells are persistent by default.
 
 Each cell is created with a `cause` that uniquely identifies it.
 We carefully construct the `cause` so that it remains the same
-each time a recipe is run, but also unique from other cells created.
+each time a pattern is run, but also unique from other cells created.
 This leads to automatic persistence when using the Common Tools
 runtime.
 :::

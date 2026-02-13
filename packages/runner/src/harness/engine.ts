@@ -1,4 +1,4 @@
-import { Recipe } from "../builder/types.ts";
+import { Pattern } from "../builder/types.ts";
 import { Console } from "./console.ts";
 import {
   Harness,
@@ -89,7 +89,7 @@ interface Internals {
   runtimeExports: Record<string, any> | undefined;
   // Callback will be called with a map of exported values to `RuntimeProgram`
   // after compilation and initial eval and before compilation returns, so
-  // before any e.g. recipe would be instantiated.
+  // before any e.g. pattern would be instantiated.
   exportsCallback: (exports: Map<any, RuntimeProgram>) => void;
 }
 
@@ -125,11 +125,11 @@ export class Engine extends EventTarget implements Harness {
     });
   }
 
-  // Compile and run a `Program`, returning the export default recipe.
+  // Compile and run a `Program`, returning the export default pattern.
   async run(
     program: RuntimeProgram,
     options: TypeScriptHarnessProcessOptions = {},
-  ): Promise<Recipe> {
+  ): Promise<Pattern> {
     const { main: exports, exportMap: _ } = await this.process(
       program,
       options,
@@ -137,10 +137,10 @@ export class Engine extends EventTarget implements Harness {
 
     const exportName = program.mainExport ?? "default";
     if (exports && !(exportName in exports)) {
-      throw new Error(`No "${exportName}" export found in compiled recipe.`);
+      throw new Error(`No "${exportName}" export found in compiled pattern.`);
     }
 
-    return exports![exportName] as Recipe;
+    return exports![exportName] as Pattern;
   }
 
   // Compile and run a `Program` with options, returning the compiled

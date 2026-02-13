@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 const dynamicKey = "value" as const;
 interface Item {
     value: number;
@@ -8,7 +8,7 @@ interface Item {
 interface State {
     items: Item[];
 }
-export default recipe({
+export default pattern({
     type: "object",
     properties: {
         items: {
@@ -66,7 +66,7 @@ export default recipe({
 } as const satisfies __ctHelpers.JSONSchema, (state) => {
     return {
         [UI]: (<div>
-        {state.items.mapWithPattern(__ctHelpers.recipe({
+        {state.items.mapWithPattern(__ctHelpers.pattern({
                 type: "object",
                 properties: {
                     element: {

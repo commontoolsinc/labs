@@ -5,7 +5,7 @@ import {
   JSONSchema,
   llm,
   NAME,
-  recipe,
+  pattern,
   Schema,
   str,
   UI,
@@ -97,7 +97,7 @@ const deleteItem = handler<never, { items: TodoItem[]; item: TodoItem }>(
   },
 );
 
-const Questions = recipe({
+const Questions = pattern({
   type: "object",
   properties: { items: { type: "array", items: ItemSchema } },
 }, {
@@ -131,7 +131,7 @@ const Questions = recipe({
   };
 });
 
-export default recipe(ListSchema, ResultSchema, ({ title, items }) => {
+export default pattern(ListSchema, ResultSchema, ({ title, items }) => {
   derive(items, (items) => {
     console.log("todo list items changed", { items });
   });

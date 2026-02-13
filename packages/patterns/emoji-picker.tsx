@@ -10,7 +10,7 @@ import {
   type Default,
   handler,
   NAME,
-  recipe,
+  pattern,
   UI,
   Writable,
 } from "commontools";
@@ -2685,7 +2685,7 @@ const clearSelection = handler<unknown, { selectedEmoji: Writable<string> }>(
 );
 
 // ===== The Pattern =====
-export const EmojiPicker = recipe<EmojiPickerInput, EmojiPickerInput>(
+export const EmojiPicker = pattern<EmojiPickerInput, EmojiPickerInput>(
   "EmojiPicker",
   ({ selectedEmoji }) => {
     const displayText = computed(() =>

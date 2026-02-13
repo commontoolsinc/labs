@@ -1,6 +1,6 @@
 import * as __ctHelpers from "commontools";
-import { cell, recipe, UI } from "commontools";
-export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
+import { cell, pattern, UI } from "commontools";
+export default pattern(false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
@@ -62,7 +62,7 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                     properties: {}
                 }]
         } as const satisfies __ctHelpers.JSONSchema, showList, <div>
-            {items.mapWithPattern(__ctHelpers.recipe({
+            {items.mapWithPattern(__ctHelpers.pattern({
                 type: "object",
                 properties: {
                     element: {

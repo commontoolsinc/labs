@@ -1,6 +1,6 @@
 /// <cts-enable />
 // Teaching example: CTS (CommonTools TypeScript) generates JSON Schemas from the
-// TypeScript types below. Recipes use typed inputs/outputs, and handlers take
+// TypeScript types below. Patterns use typed inputs/outputs, and handlers take
 // explicit `Cell<T>` parameters; the transform emits the correct asCell schema
 // automatically where mutation is required.
 import {
@@ -11,7 +11,7 @@ import {
   handler,
   NAME,
   navigateTo,
-  recipe,
+  pattern,
   str,
   UI,
 } from "commontools";
@@ -28,9 +28,9 @@ interface ChatMessage {
   timestamp: number;
 }
 
-// Recipe input (typed). The UI receives a reactive reference that supports
+// Pattern input (typed). The UI receives a reactive reference that supports
 // mapping (`messages.map(...)`). Writes should be performed in handlers.
-type MainRecipeInput = {
+type MainPatternInput = {
   messages: Default<ChatMessage[], []>;
 };
 
@@ -39,8 +39,8 @@ type UserSessionInput = {
   user: User;
 };
 
-// Session recipe result (typed): return User object alongside [NAME] and [UI].
-// CTS will carry these in the recipe result schema.
+// Session pattern result (typed): return User object alongside [NAME] and [UI].
+// CTS will carry these in the pattern result schema.
 type UserSessionResult = {
   messages: Default<ChatMessage[], []>;
   user: User;
@@ -92,8 +92,8 @@ const setUsername = handler<
   user.key("name").set(name);
 });
 
-// User Session Recipe - Individual instance with local state
-export const UserSession = recipe<
+// User Session Pattern - Individual instance with local state
+export const UserSession = pattern<
   UserSessionInput,
   UserSessionResult
 >(
@@ -160,7 +160,7 @@ export const UserSession = recipe<
 );
 
 // Handler to create a new user session. Receives typed parameters so the handler
-// can pass the reactive references directly into the child recipe and
+// can pass the reactive references directly into the child pattern and
 // keep all sessions linked to the same underlying state.
 const createUserSession = handler<
   never,
@@ -176,9 +176,9 @@ const createUserSession = handler<
   return navigateTo(sessionCharm);
 });
 
-// Main chat recipe: a state container with a button to spawn per-user sessions.
+// Main chat pattern: a state container with a button to spawn per-user sessions.
 // All sessions get the same `messages` reference so changes are shared.
-export default recipe<MainRecipeInput>(
+export default pattern<MainPatternInput>(
   "Main Chat State Container",
   ({ messages }) => {
     return {

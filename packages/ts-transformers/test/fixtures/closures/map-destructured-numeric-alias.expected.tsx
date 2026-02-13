@@ -1,11 +1,11 @@
 import * as __ctHelpers from "commontools";
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 interface State {
     entries: Array<{
         0: number;
     }>;
 }
-export default recipe({
+export default pattern({
     type: "object",
     properties: {
         entries: {
@@ -55,7 +55,7 @@ export default recipe({
 } as const satisfies __ctHelpers.JSONSchema, (state) => {
     return {
         [UI]: (<div>
-        {state.entries.mapWithPattern(__ctHelpers.recipe({
+        {state.entries.mapWithPattern(__ctHelpers.pattern({
                 type: "object",
                 properties: {
                     element: {

@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -519,7 +519,7 @@ const liftLatestChangeView = lift(
 const liftSanitizeSlots = lift(sanitizeSlots);
 const liftSanitizeAgents = lift(sanitizeAgents);
 
-export const callCenterSchedulePattern = recipe<CallCenterScheduleArgs>(
+export const callCenterSchedulePattern = pattern<CallCenterScheduleArgs>(
   "Call Center Schedule",
   ({ slots, agents, assignments }) => {
     const slotsList = liftSanitizeSlots(slots);

@@ -6,7 +6,7 @@ import {
   type SchemaWithoutCell,
   type Stream,
 } from "./types.ts";
-import { getTopFrame } from "./recipe.ts";
+import { getTopFrame } from "./pattern.ts";
 import { createCell } from "../cell.ts";
 
 /**
@@ -66,7 +66,7 @@ function opaqueRefWithCell<T>(
 }
 
 // Legacy opaqueRef for backward compatibility - creates proxies without Cell
-// This is used during recipe construction before we have a runtime
+// This is used during pattern construction before we have a runtime
 export function opaqueRef<S extends JSONSchema>(
   value: Opaque<SchemaWithoutCell<S>> | SchemaWithoutCell<S>,
   schema: S,

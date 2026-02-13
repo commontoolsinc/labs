@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, derive, handler, lift, recipe, str } from "commontools";
+import { Cell, Default, derive, handler, lift, pattern, str } from "commontools";
 
 interface FilteredProjectionArgs {
   counters: Default<number[], []>;
@@ -84,7 +84,7 @@ const liftExcluded = lift(
 
 const liftJoinedValues = lift((values: number[]) => values.join(", "));
 
-export const counterWithFilteredProjection = recipe<FilteredProjectionArgs>(
+export const counterWithFilteredProjection = pattern<FilteredProjectionArgs>(
   "Counter With Filtered Projection",
   ({ counters, threshold }) => {
     const sanitizedCounters = liftSanitizedCounters(counters);

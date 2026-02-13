@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { derive, recipe, UI } from "commontools";
+import { derive, pattern, UI } from "commontools";
 
 interface SubItem {
   id: number;
@@ -17,7 +17,7 @@ interface State {
   items: Item[];
 }
 
-export default recipe<State>("DeriveInsideMapWithMethodChain", (state) => {
+export default pattern<State>("DeriveInsideMapWithMethodChain", (state) => {
   return {
     [UI]: (
       <div>

@@ -70,7 +70,7 @@ Register keyboard shortcuts with a handler. These registrations are mediated by 
         code="KeyN"
         alt
         preventDefault
-        onct-keybind={createChatRecipe({ ... })}
+        onct-keybind={createChatPattern({ ... })}
     />
 ```
 
@@ -326,7 +326,7 @@ You can mix-and-match the above components to achieve practically any (standard)
         ```
 
       - ```{code-block} typescript
-        const EnterToSubmit = recipe(({ myHandler }) => {
+        const EnterToSubmit = pattern(({ myHandler }) => {
           return {
               [UI]: <ct-form onSubmit={myHandler}>
                 <ct-input></ct-input>

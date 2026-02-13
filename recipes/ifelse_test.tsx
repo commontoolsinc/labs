@@ -1,6 +1,6 @@
 /// <cts-enable />
 
-import { Cell, Default, handler, NAME, recipe, UI } from "commontools";
+import { Cell, Default, handler, NAME, pattern, UI } from "commontools";
 
 const incCounter = handler<undefined, { counter: Cell<number> }>(
   (_, { counter }) => {
@@ -8,7 +8,7 @@ const incCounter = handler<undefined, { counter: Cell<number> }>(
   },
 );
 
-export default recipe<{
+export default pattern<{
   counter: Default<number, 0>;
 }>("IfElseTest", ({ counter }) => {
   console.log("counter", counter);

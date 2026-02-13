@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -570,7 +570,7 @@ const liftLastChangeLabel = lift((change: CirculationChange | null) => {
   return `${change.note} (#${change.sequence})`;
 });
 
-export const libraryCheckoutSystem = recipe<LibraryCheckoutArgs>(
+export const libraryCheckoutSystem = pattern<LibraryCheckoutArgs>(
   "Library Checkout System",
   ({ catalog }) => {
     const eventSequence = cell(1);

@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -332,7 +332,7 @@ const liftActivityLogView = lift((entries: string[] | undefined) =>
   Array.isArray(entries) ? entries : []
 );
 
-export const sprintBurndown = recipe<SprintBurndownArgs>(
+export const sprintBurndown = pattern<SprintBurndownArgs>(
   "Sprint Burndown Tracker",
   ({ totalScope, sprintLength, snapshots }) => {
     const activityLog = cell<string[]>([]);

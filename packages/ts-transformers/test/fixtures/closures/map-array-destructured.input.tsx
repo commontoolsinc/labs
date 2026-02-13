@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 
 type PizzaEntry = [date: string, pizza: string];
 
@@ -8,7 +8,7 @@ interface State {
   scale: number;
 }
 
-export default recipe<State>("ArrayDestructured", (state) => {
+export default pattern<State>("ArrayDestructured", (state) => {
   return {
     [UI]: (
       <div>

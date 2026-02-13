@@ -1,6 +1,6 @@
 import { refer } from "merkle-reference/json";
 import { isRecord } from "@commontools/utils/types";
-import { getTopFrame } from "./builder/recipe.ts";
+import { getTopFrame } from "./builder/pattern.ts";
 import { isStreamValue } from "./builder/types.ts";
 import { toCell } from "./back-to-cell.ts";
 import { diffAndUpdate } from "./data-updating.ts";

@@ -19,7 +19,7 @@ import {
   Runtime,
   RuntimeTelemetry,
   RuntimeTelemetryEvent,
-  setRecipeEnvironment,
+  setPatternEnvironment,
   type SigilLink,
 } from "@commontools/runner";
 import {
@@ -251,7 +251,7 @@ export class RuntimeProcessor {
     const telemetry = new RuntimeTelemetry();
 
     setLLMUrl(data.apiUrl);
-    setRecipeEnvironment({ apiUrl: apiUrlObj });
+    setPatternEnvironment({ apiUrl: apiUrlObj });
 
     const session = {
       spaceIdentity,
@@ -270,7 +270,7 @@ export class RuntimeProcessor {
     const runtime = new Runtime({
       apiUrl: apiUrlObj,
       storageManager,
-      recipeEnvironment: { apiUrl: apiUrlObj },
+      patternEnvironment: { apiUrl: apiUrlObj },
       telemetry,
       experimental: data.experimental,
       consoleHandler: ({ metadata, method, args }) => {
@@ -323,7 +323,7 @@ export class RuntimeProcessor {
             message: error.message,
             pageId: error.pieceId,
             space: error.space,
-            recipeId: error.recipeId,
+            patternId: error.patternId,
             spellId: error.spellId,
             stackTrace: error.stack,
           });

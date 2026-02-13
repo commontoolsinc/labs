@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { derive, JSONSchema, NAME, recipe, str, UI } from "commontools";
+import { derive, JSONSchema, NAME, pattern, str, UI } from "commontools";
 
 // Reuse email schema from email-summarizer.tsx
 const EmailSchema = {
@@ -143,12 +143,12 @@ const EmailListOutputSchema = {
   required: ["title", "items"],
 } as const satisfies JSONSchema;
 
-export default recipe(
+export default pattern(
   EmailListInputSchema,
   EmailListOutputSchema,
   ({ emails, settings }) => {
     // Transform emails into list items with title field
-    // NOTE(@bf): without derive I get a "Error loading and compiling recipe: Error: Can't read value during recipe creation."
+    // NOTE(@bf): without derive I get a "Error loading and compiling pattern: Error: Can't read value during pattern creation."
     const items = derive(emails, (e) =>
       e.map((email) => {
         // Build title based on settings
@@ -215,7 +215,7 @@ export default recipe(
           <div>
             <p>
               Transforms emails into a standard list format with a "title" field
-              for compatibility with other list-based recipes.
+              for compatibility with other list-based patterns.
             </p>
           </div>
 

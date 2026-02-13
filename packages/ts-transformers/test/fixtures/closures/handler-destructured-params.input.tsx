@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, recipe, UI } from "commontools";
+import { Cell, pattern, UI } from "commontools";
 
 interface State {
   selectedValue: Cell<string>;
@@ -7,7 +7,7 @@ interface State {
 }
 
 // Test destructured event handler params with typed ct-select onct-change
-export default recipe<State>("Destructure", (state) => {
+export default pattern<State>("Destructure", (state) => {
   return {
     [UI]: (
       <ct-select

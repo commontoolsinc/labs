@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, handler, lift, recipe, str } from "commontools";
+import { Cell, Default, handler, lift, pattern, str } from "commontools";
 
 interface CounterRedoStackArgs {
   value: Default<number, 0>;
@@ -108,7 +108,7 @@ const liftStackLength = lift((entries: number[]) => entries.length);
 
 const liftStackNotEmpty = lift((entries: number[]) => entries.length > 0);
 
-export const counterRedoStack = recipe<CounterRedoStackArgs>(
+export const counterRedoStack = pattern<CounterRedoStackArgs>(
   "Counter Redo Stack",
   ({ value, undoStack, redoStack }) => {
     const currentValue = liftSanitizeNumber(value);

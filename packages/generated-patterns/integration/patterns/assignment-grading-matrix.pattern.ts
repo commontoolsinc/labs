@@ -5,7 +5,7 @@ import {
   derive,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -561,7 +561,7 @@ const liftAssignmentCountText = lift((matrix: GradeMatrixView) =>
   `${matrix.assignmentCount}`
 );
 
-export const assignmentGradingMatrix = recipe<AssignmentGradingMatrixArgs>(
+export const assignmentGradingMatrix = pattern<AssignmentGradingMatrixArgs>(
   "Assignment Grading Matrix",
   ({ students, assignments, grades }) => {
     const sanitizedStudents = liftSanitizeStudents(students);

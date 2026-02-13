@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -278,7 +278,7 @@ const liftHistoryView = lift((entries: string[] | undefined) =>
   Array.isArray(entries) ? [...entries] : []
 );
 
-export const supportTicketTriagePattern = recipe<SupportTicketArgs>(
+export const supportTicketTriagePattern = pattern<SupportTicketArgs>(
   "Support Ticket Triage",
   ({ tickets }) => {
     const sanitizedTickets = liftSanitizeTickets(tickets);

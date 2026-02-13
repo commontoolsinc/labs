@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { derive, JSONSchema, NAME, recipe, str, UI } from "commontools";
+import { derive, JSONSchema, NAME, pattern, str, UI } from "commontools";
 
 // Reuse calendar event schema from gcal.tsx
 const CalendarEventSchema = {
@@ -93,12 +93,12 @@ const CalendarListOutputSchema = {
   required: ["title", "items"],
 } as const satisfies JSONSchema;
 
-export default recipe(
+export default pattern(
   CalendarListInputSchema,
   CalendarListOutputSchema,
   ({ events }) => {
     // Transform calendar events into list items with title field
-    // NOTE(@bf): without derive I get a "Error loading and compiling recipe: Error: Can't read value during recipe creation."
+    // NOTE(@bf): without derive I get a "Error loading and compiling pattern: Error: Can't read value during pattern creation."
     const items = derive(events, (evts) =>
       evts.map((event) => {
         return {
@@ -125,7 +125,7 @@ export default recipe(
           <div>
             <p>
               Transforms calendar events into a standard list format with a
-              "title" field for compatibility with other list-based recipes.
+              "title" field for compatibility with other list-based patterns.
             </p>
           </div>
 

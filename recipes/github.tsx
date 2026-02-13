@@ -5,7 +5,7 @@ import {
   handler,
   JSONSchema,
   NAME,
-  recipe,
+  pattern,
   str,
   UI,
 } from "commontools";
@@ -89,7 +89,7 @@ async function getRecentCommits(
   return detailedCommits;
 }
 
-const recipeSchema = {
+const patternSchema = {
   type: "object",
   properties: {
     owner: { type: "string", default: "commontoolsinc" },
@@ -161,7 +161,7 @@ const refreshCommits = handler({}, {
   // state.commits.update(() => commits);
 });
 
-export default recipe(recipeSchema, outputSchema, ({ repo, owner }) => {
+export default pattern(patternSchema, outputSchema, ({ repo, owner }) => {
   const commits = cell<GitHubCommit[]>([]);
 
   return {

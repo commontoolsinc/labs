@@ -197,7 +197,7 @@ export function isFunctionParameter(
           if (callExpr.parent && ts.isCallExpression(callExpr.parent)) {
             const funcName = callExpr.parent.expression.getText();
             if (
-              funcName.includes("recipe") ||
+              funcName.includes("pattern") ||
               funcName.includes("handler") ||
               funcName.includes("lift")
             ) {
@@ -243,7 +243,7 @@ export function isFunctionParameter(
         if (callExpr.parent && ts.isCallExpression(callExpr.parent)) {
           const funcName = callExpr.parent.expression.getText();
           if (
-            funcName.includes("recipe") ||
+            funcName.includes("pattern") ||
             funcName.includes("handler") ||
             funcName.includes("lift")
           ) {

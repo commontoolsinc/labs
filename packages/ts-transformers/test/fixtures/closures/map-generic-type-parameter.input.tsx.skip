@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { recipe, OpaqueRef } from "commontools";
+import { pattern, OpaqueRef } from "commontools";
 
 interface Email {
   id: string;
@@ -28,7 +28,7 @@ function processWithType<T>(emails: OpaqueRef<Email[]>, _prompt: string) {
   });
 }
 
-export default recipe<State>("GenericTypeParameter", (state) => {
+export default pattern<State>("GenericTypeParameter", (state) => {
   const results = processWithType<string>(state.emails, state.prompt);
   return { results };
 });

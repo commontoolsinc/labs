@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -409,7 +409,7 @@ const updateField = handler(
   },
 );
 
-export const formWizardStepper = recipe<FormWizardStepperArgs>(
+export const formWizardStepper = pattern<FormWizardStepperArgs>(
   "Form Wizard Stepper",
   ({ steps, currentStepIndex, fieldValues }) => {
     const blockReason = cell<string | null>(null);

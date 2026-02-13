@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, handler, lift, recipe, str } from "commontools";
+import { Cell, Default, handler, lift, pattern, str } from "commontools";
 
 interface OptionalFallbackArgs {
   value: Default<number | null, null>;
@@ -33,7 +33,7 @@ const liftSafeValue = lift((inputs: { value?: number; fallback?: number }) => {
   return 10;
 });
 
-export const counterWithOptionalFallback = recipe<OptionalFallbackArgs>(
+export const counterWithOptionalFallback = pattern<OptionalFallbackArgs>(
   "Counter With Optional Fallback",
   ({ value, defaultValue }) => {
     const safeDefault = liftSafeDefault(defaultValue);

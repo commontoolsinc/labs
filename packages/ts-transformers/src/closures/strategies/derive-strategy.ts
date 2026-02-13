@@ -15,7 +15,7 @@ import {
   normalizeBindingName,
 } from "../../utils/identifiers.ts";
 import { CaptureCollector } from "../capture-collector.ts";
-import { RecipeBuilder } from "../utils/recipe-builder.ts";
+import { PatternBuilder } from "../utils/pattern-builder.ts";
 import { SchemaFactory } from "../utils/schema-factory.ts";
 
 /**
@@ -440,8 +440,8 @@ export function transformDeriveCall(
     options.typeRegistry,
   );
 
-  // Initialize RecipeBuilder
-  const builder = new RecipeBuilder(context);
+  // Initialize PatternBuilder
+  const builder = new PatternBuilder(context);
   builder.setCaptureTree(captureTree);
   builder.setCaptureRenames(captureNameMap);
 

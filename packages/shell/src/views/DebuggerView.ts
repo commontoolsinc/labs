@@ -1191,11 +1191,11 @@ export class XDebuggerView extends LitElement {
       }
 
       if (info) {
-        if (typeof info.recipeName === "string") {
+        if (typeof info.patternName === "string") {
           details.push(html`
             <div class="event-detail">
               <span class="event-detail-label">pattern:</span>
-              <span class="event-detail-value">${info.recipeName}</span>
+              <span class="event-detail-value">${info.patternName}</span>
             </div>
           `);
         }

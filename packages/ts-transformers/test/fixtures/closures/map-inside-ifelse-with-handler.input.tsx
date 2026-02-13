@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, handler, ifElse, recipe, UI } from "commontools";
+import { Cell, handler, ifElse, pattern, UI } from "commontools";
 
 interface Item {
   id: number;
@@ -18,7 +18,7 @@ const removeItem = handler<
   }
 });
 
-export default recipe<{ items: Item[]; hasItems: boolean }>(
+export default pattern<{ items: Item[]; hasItems: boolean }>(
   "CT-1035: Map with handler inside ifElse",
   ({ items, hasItems }) => {
     // CT-1035: Map inside ifElse branches should transform to mapWithPattern

@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -407,7 +407,7 @@ const updateJourney = handler(
   },
 );
 
-export const userJourneyMap = recipe<JourneyMapArgs>(
+export const userJourneyMap = pattern<JourneyMapArgs>(
   "User Journey Map",
   ({ milestones, anchorDay }) => {
     const changeLog = cell<string[]>([]);

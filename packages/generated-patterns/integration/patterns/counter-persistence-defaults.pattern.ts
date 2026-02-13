@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, handler, lift, recipe, str } from "commontools";
+import { Cell, Default, handler, lift, pattern, str } from "commontools";
 
 interface PersistenceDefaultsArgs {
   value: Default<number, 0>;
@@ -23,7 +23,7 @@ const liftSafeStep = lift((input: number | undefined) =>
   typeof input === "number" ? input : 1
 );
 
-export const counterWithPersistenceDefaults = recipe<PersistenceDefaultsArgs>(
+export const counterWithPersistenceDefaults = pattern<PersistenceDefaultsArgs>(
   "Counter With Persistence Defaults",
   ({ value, step }) => {
     const safeStep = liftSafeStep(step);

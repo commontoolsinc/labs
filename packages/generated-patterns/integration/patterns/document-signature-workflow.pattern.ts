@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -459,7 +459,7 @@ const liftActivityLog = lift((input: {
   return combined.length > 6 ? combined.slice(combined.length - 6) : combined;
 });
 
-export const documentSignatureWorkflow = recipe<DocumentSignatureWorkflowArgs>(
+export const documentSignatureWorkflow = pattern<DocumentSignatureWorkflowArgs>(
   "Document Signature Workflow",
   ({ documentTitle, signers }) => {
     const logEntries = cell<string[]>([]);

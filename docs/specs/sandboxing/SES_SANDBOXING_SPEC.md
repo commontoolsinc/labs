@@ -18,7 +18,7 @@ This specification describes a security architecture for sandboxing untrusted Ja
 
 1. **Compartment Reuse**: Load compiled pattern modules into a single Compartment per pattern; freeze all exports
 2. **No Surviving Closures**: Pattern code must not create closures that persist user data beyond a single invocation
-3. **Allowlisted Module-Scope Calls**: Only `pattern`, `recipe`, `lift`, `handler`, and top-level function definitions are permitted at module scope
+3. **Allowlisted Module-Scope Calls**: Only `pattern`, `pattern`, `lift`, `handler`, and top-level function definitions are permitted at module scope
 4. **Frozen Implementations**: All exported `lift` and `handler` implementations are frozen and callable directly
 5. **Dynamic Import Isolation**: External ESM imports (esm.sh) get fresh module instances per invocation
 
@@ -96,7 +96,7 @@ Pattern Source (.tsx)
 │  ┌──────────────────────────────────────────────────────┐  │
 │  │ Pattern Compartment (per-pattern, created once)       │  │
 │  │                                                       │  │
-│  │  Globals: { pattern, recipe, lift, handler, ... }    │  │
+│  │  Globals: { pattern, pattern, lift, handler, ... }    │  │
 │  │                                                       │  │
 │  │  Module Exports (frozen):                            │  │
 │  │  - MyPattern: { implementation: fn, schema: {...} }  │  │
@@ -146,15 +146,15 @@ Only these calls are permitted at module scope:
 
 ```typescript
 // ALLOWED at module scope
-import { pattern, recipe, lift, handler } from "@commontools/common-builder";
+import { pattern, pattern, lift, handler } from "@commontools/common-builder";
 
-// Pattern/Recipe definitions - these call their inner functions at load time
+// Pattern/Pattern definitions - these call their inner functions at load time
 // but user data is not available yet, so this is safe
 export const MyPattern = pattern<Input, Output>((props) => {
   // ...inner function runs at load time...
 });
 
-export const MyRecipe = recipe<Input, Output>("name", (props) => {
+export const MyPattern = pattern<Input, Output>("name", (props) => {
   // ...inner function runs at load time...
 });
 
@@ -301,7 +301,7 @@ const doubled = derive(props.value, x => x * multiplier);
 
 ### 4.4 Export Name Annotation
 
-Every module-scope `pattern`, `recipe`, `lift`, and `handler` must be annotated with its export name. This allows runtime verification that the implementation was indeed defined at module scope and thus frozen.
+Every module-scope `pattern`, `pattern`, `lift`, and `handler` must be annotated with its export name. This allows runtime verification that the implementation was indeed defined at module scope and thus frozen.
 
 ```typescript
 // Before annotation
@@ -391,7 +391,7 @@ function createPatternCompartment(
 
     // Builder functions
     pattern: harden(createPatternBuilder()),
-    recipe: harden(createRecipeBuilder()),
+    pattern: harden(createPatternBuilder()),
     lift: harden(createLiftBuilder()),
     handler: harden(createHandlerBuilder()),
     derive: harden(createDeriveBuilder()),
@@ -644,9 +644,9 @@ config.key = "value";  // Rejected (mutation)
 const CONFIG = Object.freeze({ key: "value" });
 ```
 
-#### 7.2.2 Pattern/Recipe Inner Functions Run at Load Time
+#### 7.2.2 Pattern/Pattern Inner Functions Run at Load Time
 
-When `pattern()` or `recipe()` is called, the inner function executes immediately:
+When `pattern()` or `pattern()` is called, the inner function executes immediately:
 
 ```typescript
 export const MyPattern = pattern((props) => {
@@ -1382,7 +1382,7 @@ Add `ModuleScopeValidationTransformer`:
 class ModuleScopeValidationTransformer {
   // Allowlist of permitted module-scope calls
   private allowedCalls = new Set([
-    'pattern', 'recipe', 'lift', 'handler',
+    'pattern', 'pattern', 'lift', 'handler',
     'Object.freeze', 'harden'
   ]);
 
@@ -1540,7 +1540,7 @@ export function createRuntimeGlobals(): Record<string, unknown> {
   return harden({
     // Builder functions
     pattern: createPatternBuilder(),
-    recipe: createRecipeBuilder(),
+    pattern: createPatternBuilder(),
     lift: createLiftBuilder(),
     handler: createHandlerBuilder(),
     derive: createDeriveBuilder(),
@@ -1834,12 +1834,12 @@ export const MyPattern = pattern(() => {
 ```typescript
 // Before
 const runner = new Runner(runtime);
-runner.start(recipe, inputs);
+runner.start(pattern, inputs);
 
 // After (if explicit lockdown control needed)
 CompartmentManager.applyLockdown();  // Call once at startup
 const runner = new Runner(runtime);
-runner.start(recipe, inputs);
+runner.start(pattern, inputs);
 ```
 
 ---

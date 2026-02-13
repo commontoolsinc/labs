@@ -32,7 +32,7 @@ type MinimalPiece = {
 
 type PiecesListInput = void;
 
-// Recipe returns only UI, no data outputs (only symbol properties)
+// Pattern returns only UI, no data outputs (only symbol properties)
 interface PiecesListOutput {
   [key: string]: unknown;
   backlinksIndex: {

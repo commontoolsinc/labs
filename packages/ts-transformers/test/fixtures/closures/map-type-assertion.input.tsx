@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { recipe, UI, OpaqueRef } from "commontools";
+import { pattern, UI, OpaqueRef } from "commontools";
 
 interface Item {
   id: number;
@@ -11,7 +11,7 @@ interface State {
   prefix: string;
 }
 
-export default recipe<State>("TypeAssertion", (state) => {
+export default pattern<State>("TypeAssertion", (state) => {
   // Type assertion to OpaqueRef<Item[]>
   const typedItems = state.items as OpaqueRef<Item[]>;
 

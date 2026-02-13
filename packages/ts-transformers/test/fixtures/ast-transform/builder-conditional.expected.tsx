@@ -1,10 +1,10 @@
 import * as __ctHelpers from "commontools";
-import { Default, NAME, recipe, UI } from "commontools";
-interface RecipeState {
+import { Default, NAME, pattern, UI } from "commontools";
+interface PatternState {
     count: Default<number, 0>;
     label: Default<string, "">;
 }
-export default recipe({
+export default pattern({
     type: "object",
     properties: {
         count: {

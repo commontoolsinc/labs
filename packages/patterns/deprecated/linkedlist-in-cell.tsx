@@ -4,7 +4,7 @@ import {
   derive,
   handler,
   NAME,
-  recipe,
+  pattern,
   UI,
   Writable,
 } from "commontools";
@@ -54,7 +54,7 @@ const addItem = handler<InputEventType, ListState>(
   },
 );
 
-export default recipe<InputSchema>(({ title }) => {
+export default pattern<InputSchema>(({ title }) => {
   const items_list = Writable.of<LinkedList>({ value: "1" });
 
   // Create a derived value for the linked list string representation

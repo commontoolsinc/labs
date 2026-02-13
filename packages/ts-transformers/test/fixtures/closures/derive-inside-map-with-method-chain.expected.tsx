@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { derive, recipe, UI } from "commontools";
+import { derive, pattern, UI } from "commontools";
 interface SubItem {
     id: number;
     name: string;
@@ -13,7 +13,7 @@ interface Item {
 interface State {
     items: Item[];
 }
-export default recipe({
+export default pattern({
     type: "object",
     properties: {
         items: {
@@ -97,7 +97,7 @@ export default recipe({
                 - subs is a derive callback parameter (unwrapped at runtime)
                 - .filter() returns a plain JS array
                 - Plain arrays don't have .mapWithPattern() */}
-        {state.items.mapWithPattern(__ctHelpers.recipe({
+        {state.items.mapWithPattern(__ctHelpers.pattern({
                 type: "object",
                 properties: {
                     element: {

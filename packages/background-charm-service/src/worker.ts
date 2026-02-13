@@ -104,7 +104,7 @@ async function initialize(
       as: identity,
       address: new URL("/api/storage/memory", toolshedUrl),
     }),
-    recipeEnvironment: { apiUrl },
+    patternEnvironment: { apiUrl },
     consoleHandler: consoleHandler,
     errorHandlers: [errorHandler],
     experimental,
@@ -210,8 +210,8 @@ async function runCharm(data: RunData): Promise<void> {
     // Check if error has context properties
     const errorMessage =
       (error instanceof Error && "space" in error && "pieceId" in error &&
-          "recipeId" in error)
-        ? `${error.message} @ ${error.space}:${error.pieceId} running ${error.recipeId}`
+          "patternId" in error)
+        ? `${error.message} @ ${error.space}:${error.pieceId} running ${error.patternId}`
         : String(error);
     console.error(
       `Error executing charm ${spaceId}/${pieceId}: ${errorMessage}`,

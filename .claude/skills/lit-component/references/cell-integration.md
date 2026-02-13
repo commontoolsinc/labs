@@ -15,7 +15,7 @@ Cells are reactive data containers from the Common Tools runtime (`@commontools/
 Use Cell integration when:
 - The component needs to render reactive data from the runtime
 - The component allows users to edit data that should sync back to the runtime
-- The component is part of a pattern/recipe UI that manipulates piece state
+- The component is part of a pattern/pattern UI that manipulates piece state
 
 Do NOT use Cell integration for:
 - Simple presentational components
@@ -210,7 +210,7 @@ return html`<ct-render .cell=${myCharmCell}></ct-render>`;
 
 The component automatically:
 - Extracts UI subcells
-- Loads recipes if needed
+- Loads patterns if needed
 - Handles cleanup
 
 ### Cell Type Checking
@@ -281,4 +281,4 @@ repeat(items, (item, index) => `${index}-${item.title}`, ...)
 See these components for complete examples demonstrating Cell integration patterns:
 - `ct-outliner` - Path-based operations, diff-based rendering with Cells
 - `ct-code-editor` - Bidirectional sync between Cell values and CodeMirror state
-- `ct-render` - Recipe loading and UI extraction with Cell subscriptions
+- `ct-render` - Pattern loading and UI extraction with Cell subscriptions

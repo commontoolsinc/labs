@@ -41,7 +41,7 @@ describe("counter direct operations test", () => {
     );
 
     // In pull mode, create a sink to keep the piece reactive when inputs change.
-    // Without this, setting values won't trigger recipe re-computation.
+    // Without this, setting values won't trigger pattern re-computation.
     const resultCell = cc.manager().getResult(piece.getCell());
     pieceSinkCancel = resultCell.sink(() => {});
   });

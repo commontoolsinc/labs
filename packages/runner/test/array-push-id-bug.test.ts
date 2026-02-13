@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Runtime } from "../src/runtime.ts";
 import { createQueryResultProxy } from "../src/query-result-proxy.ts";
-import { popFrame, pushFrame } from "../src/builder/recipe.ts";
+import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { isPrimitiveCellLink } from "../src/link-utils.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";

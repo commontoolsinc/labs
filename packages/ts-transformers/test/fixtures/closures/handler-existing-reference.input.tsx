@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { handler, recipe, UI } from "commontools";
+import { handler, pattern, UI } from "commontools";
 
 declare global {
   namespace JSX {
@@ -17,7 +17,7 @@ const existing = handler((_event, { state }: { state: State }) => {
   console.log(state.count);
 });
 
-export default recipe<State>("Existing", (state) => {
+export default pattern<State>("Existing", (state) => {
   return {
     [UI]: (
       <ct-button onClick={existing({ state })}>

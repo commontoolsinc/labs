@@ -5,7 +5,7 @@ import {
   derive,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -201,7 +201,7 @@ const liftEntryList = lift((value: GroupEntryInput[] | undefined) =>
 
 const liftLabelPieces = lift(summaryLabelText);
 
-export const counterWithGroupedSummary = recipe<GroupedSummaryArgs>(
+export const counterWithGroupedSummary = pattern<GroupedSummaryArgs>(
   "Counter With Grouped Summary",
   ({ entries, defaultAmount }) => {
     const defaultAmountValue = liftDefaultAmountValue(defaultAmount);

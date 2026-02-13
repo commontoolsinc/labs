@@ -26,7 +26,7 @@ IDENTITY_OWNER=$(mktemp)
 IDENTITY_USER1=$(mktemp)
 IDENTITY_USER2=$(mktemp)
 IDENTITY_USER3=$(mktemp)
-RECIPE_SRC="$SCRIPT_DIR/recipe/main.tsx"
+PATTERN_SRC="$SCRIPT_DIR/pattern/main.tsx"
 WORK_DIR=$(mktemp -d)
 
 # Create identities
@@ -60,7 +60,7 @@ echo ""
 
 # Test 1: Initial space creation - owner should have automatic access
 echo "Test 1: Initial space creation and owner access"
-CHARM_ID=$(ct charm new --main-export customRecipeExport $SPACE_ARGS_OWNER $RECIPE_SRC)
+CHARM_ID=$(ct charm new --main-export customPatternExport $SPACE_ARGS_OWNER $PATTERN_SRC)
 echo "Created charm: $CHARM_ID"
 
 if ! ct charm ls $SPACE_ARGS_OWNER | grep -q "$CHARM_ID"; then
@@ -118,7 +118,7 @@ success "USER1 with READ capability can query/read data"
 # Test 5: READ capability does not allow writes
 echo ""
 echo "Test 5: READ capability restrictions"
-if ct charm new --main-export customRecipeExport $SPACE_ARGS_USER1 $RECIPE_SRC 2>/dev/null; then
+if ct charm new --main-export customPatternExport $SPACE_ARGS_USER1 $PATTERN_SRC 2>/dev/null; then
   error "USER1 with READ should not be able to create charms"
 fi
 success "READ capability correctly prevents write operations"
@@ -136,7 +136,7 @@ fi
 success "USER2 with WRITE capability can read data"
 
 # Verify USER2 can write
-CHARM_ID2=$(ct charm new --main-export customRecipeExport $SPACE_ARGS_USER2 $RECIPE_SRC)
+CHARM_ID2=$(ct charm new --main-export customPatternExport $SPACE_ARGS_USER2 $PATTERN_SRC)
 if [ -z "$CHARM_ID2" ]; then
   error "USER2 with WRITE capability should be able to create charms"
 fi
@@ -156,7 +156,7 @@ fi
 success "USER1 capability correctly upgraded to WRITE"
 
 # Verify USER1 can now write
-CHARM_ID3=$(ct charm new --main-export customRecipeExport $SPACE_ARGS_USER1 $RECIPE_SRC)
+CHARM_ID3=$(ct charm new --main-export customPatternExport $SPACE_ARGS_USER1 $PATTERN_SRC)
 if [ -z "$CHARM_ID3" ]; then
   error "USER1 with upgraded WRITE capability should be able to create charms"
 fi
@@ -249,7 +249,7 @@ fi
 success "USER2 capability correctly downgraded to READ"
 
 # Verify USER2 can no longer write
-if ct charm new --main-export customRecipeExport $SPACE_ARGS_USER2 $RECIPE_SRC 2>/dev/null; then
+if ct charm new --main-export customPatternExport $SPACE_ARGS_USER2 $PATTERN_SRC 2>/dev/null; then
   error "USER2 with downgraded READ should not be able to create charms"
 fi
 success "Downgraded USER2 correctly restricted to READ operations"

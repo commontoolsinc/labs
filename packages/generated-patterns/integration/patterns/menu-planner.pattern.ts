@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -33,7 +33,7 @@ interface RecipeDefinition {
 interface PlannedMeal {
   day: string;
   meal: MealSlot;
-  recipe: string;
+  pattern: string;
 }
 
 const defaultRecipes: RecipeDefinition[] = [
@@ -72,7 +72,7 @@ interface MenuPlannerArgs {
 interface AssignmentEvent {
   day?: string;
   meal?: string;
-  recipe?: string;
+  pattern?: string;
 }
 
 interface ShoppingEntry {
@@ -165,9 +165,9 @@ const sanitizePlan = (
     const day = sanitizeText(entry?.day);
     if (!day || !validDays.has(day)) continue;
     const meal = sanitizeMealSlot(entry?.meal);
-    const recipe = sanitizeText(entry?.recipe);
-    if (!recipe || !validRecipes.has(recipe)) continue;
-    result.push({ day, meal, recipe });
+    const pattern = sanitizeText(entry?.pattern);
+    if (!pattern || !validRecipes.has(pattern)) continue;
+    result.push({ day, meal, pattern });
   }
   return result;
 };
@@ -187,7 +187,7 @@ const aggregateShopping = (
   const recipeMap = buildRecipeMap(recipes);
   const totals = new Map<string, ShoppingEntry>();
   for (const item of plan) {
-    const ingredients = recipeMap.get(item.recipe);
+    const ingredients = recipeMap.get(item.pattern);
     if (!ingredients) continue;
     for (const ingredient of ingredients) {
       const key = `${ingredient.name}__${ingredient.unit}`;
@@ -215,7 +215,7 @@ const ensurePlanStructure = (
   }
   for (const entry of plan) {
     if (!structure[entry.day]) continue;
-    structure[entry.day][entry.meal] = entry.recipe;
+    structure[entry.day][entry.meal] = entry.pattern;
   }
   return structure;
 };
@@ -262,7 +262,7 @@ const assignMeal = handler(
     const day = sanitizeText(event?.day) ?? dayList[0];
     if (!validDays.has(day)) return;
     const meal = sanitizeMealSlot(event?.meal);
-    const recipeName = sanitizeText(event?.recipe);
+    const recipeName = sanitizeText(event?.pattern);
     if (!recipeName || !validRecipes.has(recipeName)) return;
 
     const current = sanitizePlan(
@@ -273,7 +273,7 @@ const assignMeal = handler(
     const filtered = current.filter((entry) =>
       !(entry.day === day && entry.meal === meal)
     );
-    filtered.push({ day, meal, recipe: recipeName });
+    filtered.push({ day, meal, pattern: recipeName });
     context.plan.set(filtered);
 
     const sequenceValue = (context.sequence.get() ?? 0) + 1;
@@ -315,7 +315,7 @@ const clearMeal = handler(
   },
 );
 
-export const menuPlanner = recipe<MenuPlannerArgs>(
+export const menuPlanner = pattern<MenuPlannerArgs>(
   "Menu Planner",
   ({ days, recipes, plan }) => {
     const sequence = cell(0);

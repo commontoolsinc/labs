@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 
 interface Item {
   price: number;
@@ -10,7 +10,7 @@ interface State {
   discount: number;
 }
 
-export default recipe({
+export default pattern({
   type: "object",
   properties: {
     items: {
@@ -40,7 +40,7 @@ export default recipe({
     [UI]: (
       <div>
         {state.items.mapWithPattern(
-          recipe(({ element, params }: { element: Item; params: { discount: number } }) => (
+          pattern(({ element, params }: { element: Item; params: { discount: number } }) => (
             <span>{__ctHelpers.derive({ element_price: element.price, params_discount: params.discount }, ({ element_price, params_discount }) => element_price * params_discount)}</span>
           )),
           { discount: state.discount }

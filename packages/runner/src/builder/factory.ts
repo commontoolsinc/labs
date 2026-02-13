@@ -15,7 +15,7 @@ import {
   AuthSchema,
   ID,
   ID_FIELD,
-  isRecipe,
+  isPattern,
   NAME,
   schema,
   SELF,
@@ -23,7 +23,7 @@ import {
   UI,
 } from "./types.ts";
 import { h } from "@commontools/html";
-import { pattern, recipe } from "./recipe.ts";
+import { pattern } from "./pattern.ts";
 import { action, byRef, computed, derive, handler, lift } from "./module.ts";
 import {
   compileAndRun,
@@ -44,7 +44,7 @@ import {
 } from "./built-in.ts";
 import { cellConstructorFactory } from "../cell.ts";
 import { getEntityId } from "../create-ref.ts";
-import { getRecipeEnvironment } from "./env.ts";
+import { getPatternEnvironment } from "./env.ts";
 import type { RuntimeProgram } from "../harness/types.ts";
 
 // Runtime implementation of toSchema - this should never be called
@@ -65,13 +65,13 @@ export const createBuilder = (): {
   commontools: BuilderFunctionsAndConstants;
   exportsCallback: (exports: Map<any, RuntimeProgram>) => void;
 } => {
-  // Associate runtime programs with recipes after compilation and initial eval
-  // and before compilation returns, so before any e.g. recipe would be
+  // Associate runtime programs with patterns after compilation and initial eval
+  // and before compilation returns, so before any e.g. pattern would be
   // instantiated. This way they get saved with a way to rehydrate them.
   const exportsCallback = (exports: Map<any, RuntimeProgram>) => {
     for (const [value, program] of exports) {
-      if (isRecipe(value)) {
-        // This will associate the program with the recipe
+      if (isPattern(value)) {
+        // This will associate the program with the pattern
         value.program = program;
       }
     }
@@ -79,8 +79,8 @@ export const createBuilder = (): {
 
   return {
     commontools: {
-      // Recipe creation
-      recipe,
+      // Pattern creation
+      pattern,
       patternTool,
 
       // Module creation
@@ -105,7 +105,6 @@ export const createBuilder = (): {
       compileAndRun,
       navigateTo,
       wish,
-      pattern,
 
       // Cell creation
       cell: cellConstructorFactory<AsCell>("cell").of,
@@ -124,7 +123,7 @@ export const createBuilder = (): {
       byRef,
 
       // Environment
-      getRecipeEnvironment,
+      getPatternEnvironment,
 
       // Entity utilities
       getEntityId,

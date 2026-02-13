@@ -1,11 +1,11 @@
 /// <cts-enable />
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 
 interface State {
   items: Array<{ couponCode: string }>;
 }
 
-export default recipe<State>("MapDestructuredStringAlias", (state) => {
+export default pattern<State>("MapDestructuredStringAlias", (state) => {
   return {
     [UI]: (
       <div>

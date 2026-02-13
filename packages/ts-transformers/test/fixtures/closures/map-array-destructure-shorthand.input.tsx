@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 
 type ItemTuple = [item: string, count: number];
 
@@ -7,7 +7,7 @@ interface State {
   items: ItemTuple[];
 }
 
-export default recipe<State>("ArrayDestructureShorthand", ({ items }) => {
+export default pattern<State>("ArrayDestructureShorthand", ({ items }) => {
   return {
     [UI]: (
       <div>

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, derive, handler, recipe } from "commontools";
+import { Cell, Default, derive, handler, pattern } from "commontools";
 
 interface DelayedCounterArgs {
   value: Default<number, 0>;
@@ -17,7 +17,7 @@ const scheduleIncrement = handler(
   },
 );
 
-export const counterWithDelayedIncrement = recipe<DelayedCounterArgs>(
+export const counterWithDelayedIncrement = pattern<DelayedCounterArgs>(
   "Counter With Delayed Increment",
   ({ value, pending }) => {
     const drainPending = derive(

@@ -13,10 +13,10 @@ import { Cell, type JSONSchema, NAME, Runtime } from "@commontools/runner";
 import { PieceManager } from "./manager.ts";
 import { classifyWorkflow, generateWorkflowPlan } from "@commontools/llm";
 import { iterate } from "./iterate.ts";
-import { getIframeRecipe } from "./iframe/recipe.ts";
+import { getIframePattern } from "./iframe/pattern.ts";
 import { extractUserCode } from "./iframe/static.ts";
 import { formatPromptWithMentions } from "./format.ts";
-import { castNewRecipe } from "./iterate.ts";
+import { castNewPattern } from "./iterate.ts";
 import { applyDefaults, GenerationOptions } from "@commontools/llm";
 import { PieceSearchResult, searchPieces } from "./search.ts";
 import { console } from "./conditional-console.ts";
@@ -150,7 +150,7 @@ export async function classifyIntent(
       workflowType: "imagine",
       confidence: 1.0,
       reasoning:
-        "Automatically classified as 'imagine' because there is nothing to refer to (either no current piece or no iframe recipe).",
+        "Automatically classified as 'imagine' because there is nothing to refer to (either no current piece or no iframe pattern).",
     };
   }
 
@@ -170,13 +170,13 @@ function extractContext(piece: Cell<unknown>, runtime: Runtime) {
   let code: string | undefined;
 
   try {
-    const iframeRecipe = getIframeRecipe(piece, runtime);
+    const iframePattern = getIframePattern(piece, runtime);
     if (
-      iframeRecipe && iframeRecipe.iframe
+      iframePattern && iframePattern.iframe
     ) {
-      spec = iframeRecipe.iframe.spec;
-      schema = iframeRecipe.iframe.argumentSchema;
-      code = extractUserCode(iframeRecipe.iframe.src || "") ||
+      spec = iframePattern.iframe.spec;
+      schema = iframePattern.iframe.argumentSchema;
+      code = extractUserCode(iframePattern.iframe.src || "") ||
         undefined;
     }
   } catch {
@@ -712,7 +712,7 @@ export async function processWorkflow(
 
 /**
  * Format a spec to include user prompt and execution plan
- * This ensures the full context is preserved in the recipe
+ * This ensures the full context is preserved in the pattern
  */
 export function formatSpecWithPlanAndPrompt(
   originalSpec: string,
@@ -902,8 +902,8 @@ export function executeImagineWorkflow(
 
   form.input.references = allReferences;
 
-  // Cast a new recipe with references, spec, and schema
-  return castNewRecipe(
+  // Cast a new pattern with references, spec, and schema
+  return castNewPattern(
     pieceManager,
     form,
   );

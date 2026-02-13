@@ -1,3 +1,3 @@
-// Expose `getRecipeEnvironment` even if unused so that (dynamic) recipes
+// Expose `getPatternEnvironment` even if unused so that (dynamic) patterns
 // can still import from the host context.
-export { getRecipeEnvironment, setRecipeEnvironment } from "./builder/env.ts";
+export { getPatternEnvironment, setPatternEnvironment } from "./builder/env.ts";

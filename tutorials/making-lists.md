@@ -17,7 +17,7 @@ abstract: |
 ## Introduction
 
 Whatever it is you are building, you'll very likely need to display a list at
-some point. We'll go over how to do that within recipes.
+some point. We'll go over how to do that within patterns.
 
 Lists are essential for displaying collections of data—whether it's a todo list,
 a contact list, or a feed of messages.
@@ -31,7 +31,7 @@ Before we dive in, know that CommonTools components support **bidirectional bind
 Let's start simple: we'll create a list of our friends. We'll make an array of 5
 names using `Default<>` (from the previous chapter).
 
-We'll need the following imports for this recipe:
+We'll need the following imports for this pattern:
 
 ```{code-block} typescript
 :label: making_lists_imports
@@ -41,7 +41,7 @@ We'll need the following imports for this recipe:
 import {
   Default,
   h,
-  recipe,
+  pattern,
   UI,
 } from "commontools";
 ```
@@ -70,7 +70,7 @@ Lines 1-11 define our state interface. The `Default<>` type tells the runtime to
 create a Cell that holds an array of objects (each with a `name` property) and
 initialize it with our five friend names.
 
-With our state defined, we can now display the names in the recipe's [UI]. We'll use
+With our state defined, we can now display the names in the pattern's [UI]. We'll use
 the `.map()` function to iterate over each name and render it as a list item:
 
 ```{code-block} typescript
@@ -137,7 +137,7 @@ import {
   Default,
   h,
   handler,
-  recipe,
+  pattern,
   UI,
 } from "commontools";
 ```
@@ -246,7 +246,7 @@ Line 3 attaches the `removeItem` handler to each list item. We pass in
 the proxy returned from `.map()`, which the handler can compare using
 `.key(i).equals(friend)`.
 
-When you deploy this recipe, clicking on any name will remove it from the list.
+When you deploy this pattern, clicking on any name will remove it from the list.
 The UI automatically updates because the Cell changes.
 
 :::{dropdown} View complete code
@@ -379,7 +379,7 @@ Line 4 creates an `<input>` element with the current name as its value.
 Line 6 attaches the `onkeydown` event listener, which fires whenever a key is
 pressed while the input is focused. Our handler checks for the Enter key.
 
-When you deploy this recipe, you can click on any input field, type a new name,
+When you deploy this pattern, you can click on any input field, type a new name,
 and press Enter to update it.
 
 ### Combining Edit and Remove
@@ -438,7 +438,7 @@ We've demonstrated:
 - Detect specific key presses using the `onkeydown` event and `event.key`
 - Update specific items in an array using `.toSpliced()` with a replacement
   value
-- Combine multiple interactive features (editing and removing) in one recipe
+- Combine multiple interactive features (editing and removing) in one pattern
 - Reuse handlers across different UI elements (list items and buttons)
 
 ## Reordering Lists with Keybindings
@@ -665,7 +665,7 @@ Finally, we need to update our list items to be selectable:
 
 Line 1 adds the `onclick` handler to track which item is selected.
 
-When you deploy this recipe, you can click on any list item to select it, then
+When you deploy this pattern, you can click on any list item to select it, then
 press Ctrl+Up or Ctrl+Down to move it in the list.
 
 :::{dropdown} View complete code
@@ -741,7 +741,7 @@ Line 3 attaches our `addFriend` handler to detect when Enter is pressed.
 
 Line 4 adds placeholder text to show users what the input is for.
 
-When you deploy this recipe, you can type a name and press Enter to add it to
+When you deploy this pattern, you can type a name and press Enter to add it to
 the bottom of your friends list.
 
 :::{dropdown} View complete code
@@ -812,7 +812,7 @@ Lines 3-9 display the personal friends list with its own heading.
 
 Lines 11-17 display the work friends list with its own heading.
 
-When you deploy this recipe, you'll see two lists displayed next to each other.
+When you deploy this pattern, you'll see two lists displayed next to each other.
 
 Next, you can add functionality for editing, reordering, and removing items by
 reusing the same handlers we've already built. Simply pass the appropriate Cell

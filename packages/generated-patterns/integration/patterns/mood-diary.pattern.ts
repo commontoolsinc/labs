@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -337,7 +337,7 @@ const liftLatestEntry = lift((items: readonly MoodEntry[]) =>
   items.length === 0 ? null : items[items.length - 1]
 );
 
-export const moodDiaryPattern = recipe<MoodDiaryArgs>(
+export const moodDiaryPattern = pattern<MoodDiaryArgs>(
   "Mood Diary Pattern",
   ({ entries }) => {
     const runtimeSeed = cell(0);

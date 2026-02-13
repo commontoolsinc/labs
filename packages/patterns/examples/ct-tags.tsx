@@ -1,6 +1,6 @@
 /// <cts-enable />
 
-import { Default, handler, NAME, recipe, UI, Writable } from "commontools";
+import { Default, handler, NAME, pattern, UI, Writable } from "commontools";
 
 type Input = {
   tags: string[];
@@ -23,7 +23,7 @@ const updateTags = handler<
   state.tags.set(detail?.tags ?? []);
 });
 
-export default recipe<Input, Result>(
+export default pattern<Input, Result>(
   "ct-tags demo",
   ({ tags }) => {
     return {

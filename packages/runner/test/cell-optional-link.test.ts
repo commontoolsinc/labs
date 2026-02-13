@@ -6,7 +6,7 @@ import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { CellImpl } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
-import { popFrame, pushFrame } from "../src/builder/recipe.ts";
+import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator optional link");

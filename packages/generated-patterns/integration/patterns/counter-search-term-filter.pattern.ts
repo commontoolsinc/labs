@@ -5,7 +5,7 @@ import {
   derive,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -131,7 +131,7 @@ const updateCounterValue = handler(
   },
 );
 
-export const counterWithSearchTermFilter = recipe<SearchFilterArgs>(
+export const counterWithSearchTermFilter = pattern<SearchFilterArgs>(
   "Counter With Search Term Filter",
   ({ counters, search }) => {
     const sanitizedCounters = liftSanitizeCounterList(counters);

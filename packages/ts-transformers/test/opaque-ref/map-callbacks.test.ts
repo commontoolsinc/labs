@@ -8,7 +8,7 @@ const staticCache = new StaticCacheFS();
 const commontools = await staticCache.getText("types/commontools.d.ts");
 
 const SOURCE = `/// <cts-enable />
-import { h, recipe, UI, ifElse, NAME } from "commontools";
+import { h, pattern, UI, ifElse, NAME } from "commontools";
 
 interface Charm {
   id: string;
@@ -20,7 +20,7 @@ interface State {
   defaultName: string;
 }
 
-export default recipe<State>("CharmList", (state) => {
+export default pattern<State>("CharmList", (state) => {
   return {
     [UI]: (
       <section>
@@ -45,10 +45,10 @@ describe("OpaqueRef map callbacks", () => {
       types: { "commontools.d.ts": commontools },
     });
 
-    // Map callback should be transformed to recipe with schema for captured defaultName
+    // Map callback should be transformed to pattern with schema for captured defaultName
     assertStringIncludes(
       output,
-      "__ctHelpers.recipe({",
+      "__ctHelpers.pattern({",
     );
     // Check for correct parameter destructuring
     assertStringIncludes(

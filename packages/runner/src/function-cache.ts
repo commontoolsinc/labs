@@ -3,7 +3,7 @@ import type { Module } from "./builder/types.ts";
 /**
  * Cache for JavaScript functions keyed by their stringified module.
  * This allows us to avoid re-evaluating the same function strings multiple times
- * during recipe execution.
+ * during pattern execution.
  */
 export class FunctionCache {
   private cache = new Map<string, (...args: any[]) => any>();

@@ -5,7 +5,7 @@ import {
   handler,
   type JSONSchema,
   NAME,
-  recipe,
+  pattern,
   schema,
   str,
   UI,
@@ -66,7 +66,7 @@ const outputSchema = {
   },
 } as const satisfies JSONSchema;
 
-export default recipe(inputSchema, outputSchema, ({ values }) => {
+export default pattern(inputSchema, outputSchema, ({ values }) => {
   derive(values, (values) => {
     console.log("values#", values?.length);
   });

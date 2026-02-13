@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { type JSONSchema, NAME, recipe, str, UI } from "commontools";
+import { type JSONSchema, NAME, pattern, str, UI } from "commontools";
 import TurndownService from "turndown";
 
 const Input = {
@@ -30,7 +30,7 @@ function assert(condition: boolean, message: string) {
     throw new Error(message);
   }
 }
-export default recipe(
+export default pattern(
   Input,
   Output,
   (_state) => {

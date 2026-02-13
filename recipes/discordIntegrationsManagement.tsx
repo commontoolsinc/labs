@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { derive, JSONSchema, NAME, recipe, UI } from "commontools";
+import { derive, JSONSchema, NAME, pattern, UI } from "commontools";
 import type { Schema } from "commontools/schema";
 
 const IntegrationSpaceCharmSchema = {
@@ -28,7 +28,7 @@ const ResultSchema = {
   },
 } as const satisfies JSONSchema;
 
-export default recipe(
+export default pattern(
   InputSchema,
   ResultSchema,
   ({ charms }) => {

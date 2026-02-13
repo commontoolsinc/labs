@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, handler, lift, recipe, str } from "commontools";
+import { Cell, Default, handler, lift, pattern, str } from "commontools";
 
 interface KeyedMapArgs {
   counters: Default<Record<string, number>, { [key: string]: number }>;
@@ -26,7 +26,7 @@ const liftCount = lift((map: Record<string, number>) =>
   Object.keys(map).length
 );
 
-export const counterMapByKey = recipe<KeyedMapArgs>(
+export const counterMapByKey = pattern<KeyedMapArgs>(
   "Counter Map By Key",
   ({ counters }) => {
     const keys = liftKeys(counters);

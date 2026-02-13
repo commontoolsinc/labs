@@ -21,7 +21,7 @@ import {
   handler,
   ifElse,
   NAME,
-  recipe,
+  pattern,
   UI,
   Writable,
 } from "commontools";
@@ -166,7 +166,7 @@ function formatAccuracy(accuracy: number): string {
 }
 
 // ===== The Pattern =====
-export const LocationTrackModule = recipe<
+export const LocationTrackModule = pattern<
   LocationTrackModuleInput,
   LocationTrackModuleInput
 >("LocationTrackModule", ({ locations, label }) => {

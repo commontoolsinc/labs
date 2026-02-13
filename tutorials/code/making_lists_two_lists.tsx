@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { type Cell, Default, handler, recipe, UI } from "commontools";
+import { type Cell, Default, handler, pattern, UI } from "commontools";
 
 interface FriendListsState {
   personalFriends: Default<
@@ -162,7 +162,7 @@ const moveToList = handler<
   },
 );
 
-export default recipe<FriendListsState>(
+export default pattern<FriendListsState>(
   "making lists - two lists",
   (state) => {
     const moveUpHandler = moveItem({

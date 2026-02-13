@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { cell, recipe, handler } from "commontools";
+import { cell, pattern, handler } from "commontools";
 // 1. Top-level
 const _topLevel = cell(10, {
     type: "number"
@@ -27,15 +27,15 @@ class TestClass {
         return _inMethod;
     }
 }
-// 5. Inside recipe
-const testRecipe = recipe(false as const satisfies __ctHelpers.JSONSchema, {
+// 5. Inside pattern
+const testPattern = pattern(false as const satisfies __ctHelpers.JSONSchema, {
     type: "number",
     asCell: true
 } as const satisfies __ctHelpers.JSONSchema, () => {
-    const _inRecipe = cell(50, {
+    const _inPattern = cell(50, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema);
-    return _inRecipe;
+    return _inPattern;
 });
 // 6. Inside handler
 const testHandler = handler(false as const satisfies __ctHelpers.JSONSchema, false as const satisfies __ctHelpers.JSONSchema, () => {
@@ -50,7 +50,7 @@ export default function TestContextVariations() {
         regularFunction,
         arrowFunction,
         TestClass,
-        testRecipe,
+        testPattern,
         testHandler,
     };
 }

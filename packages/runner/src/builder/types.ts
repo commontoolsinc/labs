@@ -1,4 +1,5 @@
 import { isObject, type Mutable } from "@commontools/utils/types";
+import type { PatternBuilder } from "./pattern.ts";
 
 import type {
   ActionFunction,
@@ -20,7 +21,7 @@ import type {
   GenerateObjectFunction,
   GenerateTextFunction,
   GetEntityIdFunction,
-  GetRecipeEnvironmentFunction,
+  GetPatternEnvironmentFunction,
   HandlerFunction,
   HFunction,
   ID as IDSymbol,
@@ -36,10 +37,10 @@ import type {
   NavigateToFunction,
   Opaque,
   OpaqueRef,
+  Pattern,
+  PatternFactory,
   PatternFunction,
   PatternToolFunction,
-  Recipe,
-  RecipeFunction,
   schema as schemaFunction,
   SELF as SELFSymbol,
   StreamDataFunction,
@@ -65,7 +66,7 @@ export const ID_FIELD: typeof IDFieldSymbol = Symbol(
 ) as any;
 
 // Should be Symbol("UI") or so, but this makes repeat() use these when
-// iterating over recipes.
+// iterating over patterns.
 export const TYPE = "$TYPE";
 export const NAME = "$NAME";
 export const UI = "$UI";
@@ -111,11 +112,10 @@ export type {
   Opaque,
   OpaqueCell,
   OpaqueRef,
+  Pattern,
+  PatternFactory,
   PatternFunction,
   Props,
-  Recipe,
-  RecipeFactory,
-  RecipeFunction,
   RenderNode,
   Stream,
   StripCell,
@@ -139,7 +139,7 @@ export function isOpaqueRef<T = any>(
 }
 
 export type NodeRef = {
-  module: Module | Recipe | OpaqueRef<Module | Recipe>;
+  module: Module | Pattern | OpaqueRef<Module | Pattern>;
   inputs: Opaque<any>;
   outputs: OpaqueRef<any>;
   frame: Frame | undefined;
@@ -155,8 +155,8 @@ export function isStreamValue(value: unknown): value is StreamValue {
 
 declare module "@commontools/api" {
   export interface Module {
-    type: "ref" | "javascript" | "recipe" | "raw" | "isolated" | "passthrough";
-    implementation?: ((...args: any[]) => any) | Recipe | string;
+    type: "ref" | "javascript" | "pattern" | "raw" | "isolated" | "passthrough";
+    implementation?: ((...args: any[]) => any) | Pattern | string;
     wrapper?: "handler";
     argumentSchema?: JSONSchema;
     resultSchema?: JSONSchema;
@@ -179,39 +179,39 @@ export type Node = {
   outputs: JSONValue;
 };
 
-// Used to get back to original recipe from a JSONified representation.
-export const unsafe_originalRecipe = Symbol("unsafe_originalRecipe");
-export const unsafe_parentRecipe = Symbol("unsafe_parentRecipe");
+// Used to get back to original pattern from a JSONified representation.
+export const unsafe_originalPattern = Symbol("unsafe_originalPattern");
+export const unsafe_parentPattern = Symbol("unsafe_parentPattern");
 export const unsafe_materializeFactory = Symbol("unsafe_materializeFactory");
 
 declare module "@commontools/api" {
-  interface Recipe {
+  interface Pattern {
     argumentSchema: JSONSchema;
     resultSchema: JSONSchema;
     initial?: JSONValue;
     result: JSONValue;
     nodes: Node[];
     program?: RuntimeProgram;
-    [unsafe_originalRecipe]?: Recipe;
-    [unsafe_parentRecipe]?: Recipe;
+    [unsafe_originalPattern]?: Pattern;
+    [unsafe_parentPattern]?: Pattern;
     [unsafe_materializeFactory]?: (
       tx: IExtendedStorageTransaction,
     ) => (path: readonly PropertyKey[]) => unknown;
   }
 }
 
-export function isRecipe(value: unknown): value is Recipe {
+export function isPattern(value: unknown): value is Pattern {
   return (
     (typeof value === "function" || typeof value === "object") &&
     value !== null &&
-    (value as Recipe).argumentSchema !== undefined &&
-    (value as Recipe).resultSchema !== undefined &&
-    Array.isArray((value as Recipe).nodes)
+    (value as Pattern).argumentSchema !== undefined &&
+    (value as Pattern).resultSchema !== undefined &&
+    Array.isArray((value as Pattern).nodes)
   );
 }
 
 export type UnsafeBinding = {
-  recipe: Recipe;
+  pattern: Pattern;
   materialize: (path: readonly PropertyKey[]) => any;
   space: MemorySpace;
   tx: IExtendedStorageTransaction;
@@ -232,9 +232,8 @@ export type Frame = {
 
 // Builder functions interface
 export interface BuilderFunctionsAndConstants {
-  // Recipe creation
-  pattern: PatternFunction;
-  recipe: RecipeFunction;
+  // Pattern creation
+  pattern: PatternBuilder;
   patternTool: PatternToolFunction;
 
   // Module creation
@@ -277,7 +276,7 @@ export interface BuilderFunctionsAndConstants {
   byRef: ByRefFunction;
 
   // Environment
-  getRecipeEnvironment: GetRecipeEnvironmentFunction;
+  getPatternEnvironment: GetPatternEnvironmentFunction;
 
   // Entity utilities
   getEntityId: GetEntityIdFunction;

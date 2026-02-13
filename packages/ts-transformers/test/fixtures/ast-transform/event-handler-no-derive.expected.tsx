@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { Cell, Default, handler, recipe, UI } from "commontools";
+import { Cell, Default, handler, pattern, UI } from "commontools";
 declare global {
     namespace JSX {
         interface IntrinsicElements {
@@ -19,7 +19,7 @@ const handleClick = handler(true as const satisfies __ctHelpers.JSONSchema, {
 } as const satisfies __ctHelpers.JSONSchema, (_, { count }) => {
     count.set(count.get() + 1);
 });
-export default recipe({
+export default pattern({
     type: "object",
     properties: {
         count: {

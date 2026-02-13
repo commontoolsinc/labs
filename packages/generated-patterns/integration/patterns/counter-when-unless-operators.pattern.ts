@@ -10,7 +10,7 @@
  * Simple opaque refs (like `showPanel && value`) don't use when/unless,
  * only complex expressions that need derivation.
  */
-import { type Cell, Default, handler, lift, recipe, str } from "commontools";
+import { type Cell, Default, handler, lift, pattern, str } from "commontools";
 
 interface WhenUnlessArgs {
   items: Default<string[], []>;
@@ -101,7 +101,7 @@ const incrementCount = handler(
   },
 );
 
-export const counterWithWhenUnlessOperators = recipe<WhenUnlessArgs>(
+export const counterWithWhenUnlessOperators = pattern<WhenUnlessArgs>(
   "Counter With When Unless Operators",
   ({ items, showPanel, userName, count }) => {
     // Test 1: && with complex expression (items.length > 0)

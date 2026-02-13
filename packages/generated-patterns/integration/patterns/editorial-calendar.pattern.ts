@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { type Cell, cell, Default, handler, lift, recipe } from "commontools";
+import { type Cell, cell, Default, handler, lift, pattern } from "commontools";
 
 type PublishInput = string | number | undefined;
 
@@ -567,7 +567,7 @@ const liftLatestActivity = lift((log: readonly string[]) =>
   log.length > 0 ? log[log.length - 1] : "Calendar initialized"
 );
 
-export const editorialCalendar = recipe<EditorialCalendarArgs>(
+export const editorialCalendar = pattern<EditorialCalendarArgs>(
   "Editorial Calendar Pattern",
   ({ entries, channels }) => {
     const history = cell<string[]>(["Calendar initialized"]);

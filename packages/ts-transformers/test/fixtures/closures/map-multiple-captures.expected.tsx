@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 interface Item {
     price: number;
     quantity: number;
@@ -10,7 +10,7 @@ interface State {
     taxRate: number;
 }
 const shippingCost = 5.99;
-export default recipe({
+export default pattern({
     type: "object",
     properties: {
         items: {
@@ -75,7 +75,7 @@ export default recipe({
     const multiplier = 2;
     return {
         [UI]: (<div>
-        {state.items.mapWithPattern(__ctHelpers.recipe({
+        {state.items.mapWithPattern(__ctHelpers.pattern({
                 type: "object",
                 properties: {
                     element: {

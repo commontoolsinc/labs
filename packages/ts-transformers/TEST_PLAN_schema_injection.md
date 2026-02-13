@@ -135,7 +135,7 @@ This branch adds automatic schema injection for:
 - [ ] Inside function: `function f() { const c = cell(10); }`
 - [ ] Inside arrow function: `const f = () => { const c = cell(10); }`
 - [ ] Inside class method: `class C { method() { const c = cell(10); } }`
-- [ ] Inside recipe/pattern: `recipe(() => { const c = cell(10); })`
+- [ ] Inside pattern: `pattern(() => { const c = cell(10); })`
 - [ ] Inside handler: `handler(() => { const c = cell(10); })`
 
 ---
@@ -295,7 +295,7 @@ This branch adds automatic schema injection for:
 
 **Contexts:**
 
-- [ ] cell() inside recipe: `recipe(() => { const c = cell(10); })`
+- [ ] cell() inside pattern: `pattern(() => { const c = cell(10); })`
 - [ ] cell() inside pattern: `pattern(() => { const c = cell(10); })`
 - [ ] cell() inside handler: `handler(() => { const c = cell(10); })`
 - [ ] cell() inside derive callback: `derive(x, () => { const c = cell(10); })`

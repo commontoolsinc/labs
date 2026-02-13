@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 interface Item {
     id: number;
     name: string;
@@ -7,7 +7,7 @@ interface Item {
 interface State {
     items: Item[];
 }
-export default recipe({
+export default pattern({
     type: "object",
     properties: {
         items: {
@@ -66,7 +66,7 @@ export default recipe({
     return {
         [UI]: (<div>
         {/* Map with common shorthand index parameter names */}
-        {state.items.mapWithPattern(__ctHelpers.recipe({
+        {state.items.mapWithPattern(__ctHelpers.pattern({
                 type: "object",
                 properties: {
                     element: {
@@ -121,7 +121,7 @@ export default recipe({
           </div>)), {})}
 
         {/* Map with idx as index parameter */}
-        {state.items.mapWithPattern(__ctHelpers.recipe({
+        {state.items.mapWithPattern(__ctHelpers.pattern({
                 type: "object",
                 properties: {
                     element: {

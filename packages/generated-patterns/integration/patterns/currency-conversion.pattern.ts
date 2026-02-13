@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { type Cell, Default, handler, lift, recipe, str } from "commontools";
+import { type Cell, Default, handler, lift, pattern, str } from "commontools";
 
 interface CurrencyConversionArgs {
   baseCurrency: Default<string, "USD">;
@@ -203,7 +203,7 @@ const liftCurrencyCount = lift((codes: string[]) => codes.length);
 
 const liftAmountLabel = lift((value: number) => value.toFixed(2));
 
-export const currencyConversionPattern = recipe<CurrencyConversionArgs>(
+export const currencyConversionPattern = pattern<CurrencyConversionArgs>(
   "Currency Conversion Pattern",
   ({ amount, baseCurrency, rates, targets }) => {
     const baseCode = liftSanitizeCode(baseCurrency);

@@ -77,7 +77,7 @@ Specifically we have:
   could go even further (maybe some popular game toolkits are worth
   investigating here at some point in the future, since that's a good usecase
   for iframes)
-- Cells –- constructed typically by the runner when bringing up a recipe, within
+- Cells –- constructed typically by the runner when bringing up a pattern, within
   handlers or reactive functions and in some cases by parts of the shell to
   bootstrap things -- directly read from memory via schema query. They
   accumulate writes and wait for the scheduler to close out a transaction.
@@ -380,14 +380,14 @@ just there to make sure this reasoning is based on the current last state.
 For streams we want to write out all the processing cells that define handlers
 for this stream, so that they can be reloaded.
 
-### Changing recipe creation to just use `Cell` and get rid of `OpaqueRef`
+### Changing pattern creation to just use `Cell` and get rid of `OpaqueRef`
 
-`OpaqueRef` are just opaque `Cell`s. So we can vastly simplify recipe
+`OpaqueRef` are just opaque `Cell`s. So we can vastly simplify pattern
 generaetion by combining those.
 
 Essentially `lift` & co return cells instead. And the opaque cell passed in to
-the recipe function is already bound to the actual inputs (without revealing
-that to the recipe function).
+the pattern function is already bound to the actual inputs (without revealing
+that to the pattern function).
 
 The tricky bit is generating good causal ids for these cells, which isn't good
 right now either.

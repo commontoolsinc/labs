@@ -1,7 +1,7 @@
 /// <cts-enable />
-import { cell, computed, recipe } from "commontools";
+import { cell, computed, pattern } from "commontools";
 
-export default recipe(() => {
+export default pattern(() => {
   const a = cell(10);
   const b = cell(20);
 

@@ -3,13 +3,13 @@ import {
   Cell,
   cell,
   derive,
-  getRecipeEnvironment,
+  getPatternEnvironment,
   handler,
   ID,
   JSONSchema,
   Mutable,
   NAME,
-  recipe,
+  pattern,
   Schema,
   str,
   UI,
@@ -53,7 +53,7 @@ export const AuthSchema = {
   },
 } as const satisfies JSONSchema;
 
-const env = getRecipeEnvironment();
+const env = getPatternEnvironment();
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -1243,7 +1243,7 @@ const clearContacts = handler(
   },
 );
 
-export default recipe(
+export default pattern(
   PeopleImporterInputs,
   ResultSchema,
   ({ settings, auth }) => {

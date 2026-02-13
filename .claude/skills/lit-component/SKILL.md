@@ -14,7 +14,7 @@ Use this skill when:
 - Modifying existing Common UI v2 components
 - Implementing theme-aware components
 - Integrating components with Cell abstractions from the runtime
-- Building reactive components for pattern/recipe UIs
+- Building reactive components for pattern/pattern UIs
 - Debugging component lifecycle or reactivity issues
 
 ## Core Philosophy
@@ -375,7 +375,7 @@ Study these components to understand architectural patterns:
 
 **Advanced patterns:**
 - **Context provider:** `ct-theme` - Ambient configuration with `@provide`, `display: contents`, reactive Cell subscriptions
-- **Runtime rendering:** `ct-render` - Recipe loading, UI extraction, lifecycle management
+- **Runtime rendering:** `ct-render` - Pattern loading, UI extraction, lifecycle management
 - **Third-party integration:** `ct-code-editor` - CodeMirror lifecycle, Compartments, bidirectional sync, CellController
 - **Tree operations:** `ct-outliner` - Path-based operations, diff-based rendering, keyboard commands, MentionController
 

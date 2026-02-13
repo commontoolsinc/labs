@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { type Cell, Default, handler, lift, recipe, str } from "commontools";
+import { type Cell, Default, handler, lift, pattern, str } from "commontools";
 
 interface EpisodeSegmentInput {
   id?: unknown;
@@ -219,7 +219,7 @@ const liftTotalMinutes = lift(
 );
 
 /** Pattern orchestrating podcast episode segments into a timed outline. */
-export const podcastEpisodePlanner = recipe<PodcastEpisodePlannerArgs>(
+export const podcastEpisodePlanner = pattern<PodcastEpisodePlannerArgs>(
   "Podcast Episode Planner",
   ({ segments }) => {
     const segmentsView = liftSanitizeSegments(segments);

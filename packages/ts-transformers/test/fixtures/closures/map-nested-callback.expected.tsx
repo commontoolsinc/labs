@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 interface Tag {
     id: number;
     name: string;
@@ -13,7 +13,7 @@ interface State {
     items: Item[];
     prefix: string;
 }
-export default recipe({
+export default pattern({
     type: "object",
     properties: {
         items: {
@@ -93,7 +93,7 @@ export default recipe({
     return {
         [UI]: (<div>
         {/* Outer map captures state.prefix, inner map closes over item from outer callback */}
-        {state.items.mapWithPattern(__ctHelpers.recipe({
+        {state.items.mapWithPattern(__ctHelpers.pattern({
                 type: "object",
                 properties: {
                     element: {
@@ -173,7 +173,7 @@ export default recipe({
             } as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: { state } }) => (<div>
             {state.prefix}: {item.name}
             <ul>
-              {item.tags.mapWithPattern(__ctHelpers.recipe({
+              {item.tags.mapWithPattern(__ctHelpers.pattern({
                     type: "object",
                     properties: {
                         element: {

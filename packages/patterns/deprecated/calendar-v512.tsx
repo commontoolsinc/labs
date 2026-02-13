@@ -6,7 +6,7 @@ import {
   ifElse,
   lift,
   NAME,
-  recipe,
+  pattern,
   str,
   Stream,
   UI,
@@ -1994,7 +1994,7 @@ const _enableNoteEditing = handler<
   editingNoteId.set(noteId);
 });
 
-export default recipe<Input, Output>(
+export default pattern<Input, Output>(
   "calendar",
   (
     {
@@ -2443,7 +2443,7 @@ export default recipe<Input, Output>(
       },
     );
 
-    // Create the handler closure once at the recipe level
+    // Create the handler closure once at the pattern level
     const selectDayHandler = selectDayFromCalendar({
       currentDate,
       viewedYearMonth,

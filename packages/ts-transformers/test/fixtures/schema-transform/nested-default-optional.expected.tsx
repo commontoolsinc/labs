@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { type Cell, Default, handler, recipe } from "commontools";
+import { type Cell, Default, handler, pattern } from "commontools";
 interface OptionalBranch {
     counter?: number;
     label?: string;
@@ -60,7 +60,7 @@ const increment = handler(false as const satisfies __ctHelpers.JSONSchema, {
     const counter = (branch.counter ?? 0) + 1;
     context.state.set({ nested: { branch: { counter } } });
 });
-export default recipe({
+export default pattern({
     type: "object",
     properties: {
         state: {

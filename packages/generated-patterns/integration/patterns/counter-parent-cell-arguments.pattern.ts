@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { type Cell, Default, handler, lift, recipe, str } from "commontools";
+import { type Cell, Default, handler, lift, pattern, str } from "commontools";
 
 const sanitizeCount = (value: number | undefined): number => {
   if (typeof value !== "number" || !Number.isFinite(value)) return 0;
@@ -75,7 +75,7 @@ const liftAlignment = lift(
   (state: { parent: number; child: number }) => state.parent === state.child,
 );
 
-const childLinkedCounter = recipe<LinkedChildArgs>(
+const childLinkedCounter = pattern<LinkedChildArgs>(
   "Child Counter Referencing Parent Cells",
   ({ sharedValue, sharedStep }) => {
     const current = liftSanitizeCount(sharedValue);
@@ -104,7 +104,7 @@ interface ParentCellArgumentArgs {
   step: Default<number, 1>;
 }
 
-export const counterWithParentCellArguments = recipe<ParentCellArgumentArgs>(
+export const counterWithParentCellArguments = pattern<ParentCellArgumentArgs>(
   "Counter With Parent Cell Arguments",
   ({ value, step }) => {
     const current = liftSanitizeCount(value);

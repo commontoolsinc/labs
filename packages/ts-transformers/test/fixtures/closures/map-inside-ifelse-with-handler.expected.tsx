@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { Cell, handler, ifElse, recipe, UI } from "commontools";
+import { Cell, handler, ifElse, pattern, UI } from "commontools";
 interface Item {
     id: number;
     name: string;
@@ -43,7 +43,7 @@ const removeItem = handler(true as const satisfies __ctHelpers.JSONSchema, {
         items.set(currentItems.toSpliced(index, 1));
     }
 });
-export default recipe({
+export default pattern({
     type: "object",
     properties: {
         items: {
@@ -134,7 +134,7 @@ export default recipe({
                     }
                 }
             } as const satisfies __ctHelpers.JSONSchema, hasItems, <div>
-              {items.mapWithPattern(__ctHelpers.recipe({
+              {items.mapWithPattern(__ctHelpers.pattern({
                     type: "object",
                     properties: {
                         element: {

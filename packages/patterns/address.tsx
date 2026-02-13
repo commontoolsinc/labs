@@ -5,7 +5,7 @@
  * A composable pattern that can be used standalone or embedded in containers
  * like Record. Stores street, city, state, and ZIP with a label (Home, Work, etc.)
  */
-import { computed, type Default, NAME, recipe, UI } from "commontools";
+import { computed, type Default, NAME, pattern, UI } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
 // ===== Standard Labels =====
@@ -49,7 +49,7 @@ export interface AddressModuleInput {
 }
 
 // ===== The Pattern =====
-export const AddressModule = recipe<AddressModuleInput, AddressModuleInput>(
+export const AddressModule = pattern<AddressModuleInput, AddressModuleInput>(
   "AddressModule",
   ({ label, street, city, state, zip }) => {
     // Build display text from non-empty fields

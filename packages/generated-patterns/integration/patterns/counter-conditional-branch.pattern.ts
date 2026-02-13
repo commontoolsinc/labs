@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   ifElse,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -39,7 +39,7 @@ const adjustValue = handler(
   },
 );
 
-export const counterWithConditionalBranch = recipe<ConditionalBranchArgs>(
+export const counterWithConditionalBranch = pattern<ConditionalBranchArgs>(
   "Counter With Conditional Branch",
   ({ value, enabled }) => {
     const safeValue = computed(() => sanitizeCount(value));

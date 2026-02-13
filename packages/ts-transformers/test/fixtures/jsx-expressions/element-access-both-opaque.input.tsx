@@ -1,7 +1,7 @@
 /// <cts-enable />
-import { cell, recipe, UI } from "commontools";
+import { cell, pattern, UI } from "commontools";
 
-export default recipe("ElementAccessBothOpaque", (_state) => {
+export default pattern("ElementAccessBothOpaque", (_state) => {
   const items = cell(["apple", "banana", "cherry"]);
   const index = cell(1);
 

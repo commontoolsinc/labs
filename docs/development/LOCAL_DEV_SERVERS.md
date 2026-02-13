@@ -159,7 +159,7 @@ This happens when OAuth or API calls hit port 5173 (frontend) instead of port 80
 
 **Fix:** Ensure API calls use port 8000:
 - Deployment: `--api-url http://localhost:8000`
-- In patterns: Check `getRecipeEnvironment().apiUrl`
+- In patterns: Check `getPatternEnvironment().apiUrl`
 - Browser testing: Navigate to `http://localhost:5173` for UI, but API calls should target 8000
 
 ### UI Component Changes Not Appearing

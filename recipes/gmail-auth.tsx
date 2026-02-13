@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Default, NAME, recipe, UI } from "commontools";
+import { Default, NAME, pattern, UI } from "commontools";
 
 type CFC<T, C extends string> = T;
 type Secret<T> = CFC<T, "secret">;
@@ -35,7 +35,7 @@ interface Output {
   auth: Auth;
 }
 
-export default recipe<Input, Output>(
+export default pattern<Input, Output>(
   "Gmail Auth",
   ({ auth }) => {
     return {

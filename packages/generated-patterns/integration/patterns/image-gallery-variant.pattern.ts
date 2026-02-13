@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -194,7 +194,7 @@ const liftHistoryView = lift((value: string[] | undefined) =>
   Array.isArray(value) ? value : []
 );
 
-export const imageGalleryVariant = recipe<ImageGalleryVariantArgs>(
+export const imageGalleryVariant = pattern<ImageGalleryVariantArgs>(
   "Image Gallery Variant",
   ({ modes, variants, activeMode }) => {
     const selectionHistory = cell<string[]>([]);

@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -438,7 +438,7 @@ const removeWorkout = handler(
   },
 );
 
-export const workoutRoutinePlanner = recipe<WorkoutRoutinePlannerArgs>(
+export const workoutRoutinePlanner = pattern<WorkoutRoutinePlannerArgs>(
   "Workout Routine Planner",
   ({ days, catalog, plan }) => {
     const lastAction = cell("initialized");

@@ -54,7 +54,7 @@ export {
   parseLinkOrThrow,
   parseLLMFriendlyLink,
 } from "./link-utils.ts";
-export * from "./recipe-manager.ts";
+export * from "./pattern-manager.ts";
 
 // Builder functionality (migrated from @commontools/builder package)
 export { createBuilder } from "./builder/factory.ts";
@@ -65,19 +65,19 @@ export type {
 
 // Internal functions and exports needed by other packages
 export {
-  getRecipeEnvironment,
-  getRecipeEnvironment as builderGetRecipeEnvironment,
-  type RecipeEnvironment,
-  setRecipeEnvironment,
-  setRecipeEnvironment as builderSetRecipeEnvironment,
+  getPatternEnvironment,
+  getPatternEnvironment as builderGetPatternEnvironment,
+  type PatternEnvironment,
+  setPatternEnvironment,
+  setPatternEnvironment as builderSetPatternEnvironment,
 } from "./builder/env.ts";
 export {
   getTopFrame,
   popFrame,
   pushFrame,
   pushFrameFromCause,
-  recipeFromFrame,
-} from "./builder/recipe.ts";
+  patternFromFrame,
+} from "./builder/pattern.ts";
 export {
   AuthSchema,
   type Cell as BuilderCell,
@@ -87,7 +87,7 @@ export {
   ID_FIELD,
   isModule,
   isOpaqueRef as isOpaqueRef,
-  isRecipe,
+  isPattern,
   isStreamValue,
   type JSONObject,
   type JSONSchema,
@@ -100,8 +100,8 @@ export {
   type Opaque,
   type OpaqueRef,
   type Props,
-  type Recipe,
-  type RecipeFactory,
+  type Pattern,
+  type PatternFactory,
   type RenderNode,
   type Schema,
   schema,
@@ -111,8 +111,8 @@ export {
   TYPE,
   UI,
   unsafe_materializeFactory,
-  unsafe_originalRecipe,
-  unsafe_parentRecipe,
+  unsafe_originalPattern,
+  unsafe_parentPattern,
   type UnsafeBinding,
   type VNode,
 } from "./builder/types.ts";

@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 interface Item {
     maybe?: {
         value: number;
@@ -11,7 +11,7 @@ interface State {
     };
     items: Item[];
 }
-export default recipe({
+export default pattern({
     type: "object",
     properties: {
         maybe: {
@@ -81,7 +81,7 @@ export default recipe({
     return {
         [UI]: (<div>
         <span>{state.maybe?.value}</span>
-        {state.items.mapWithPattern(__ctHelpers.recipe({
+        {state.items.mapWithPattern(__ctHelpers.pattern({
                 type: "object",
                 properties: {
                     element: {

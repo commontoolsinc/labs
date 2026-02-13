@@ -156,7 +156,7 @@ The system uses merkle-tree hashing with CID-formatted output:
 However, entity data is generally **not content-addressed**. Entity IDs are
 stable addresses (analogous to IPNS names) that point to the most current
 version of the data. Hashes are primarily used for:
-- Recipe ID generation (derived from recipe definition)
+- Pattern ID generation (derived from pattern definition)
 - Request deduplication
 - Causal chain references (hashing the causal tree of what led to the data's
   existence, not the data content itself)
@@ -178,7 +178,7 @@ hashing — but does not participate in the IPFS network:
 
 Since entity IDs are addresses (not content hashes), the CID formatting adds
 encoding complexity without providing interoperability. A simpler hashing scheme
-would serve the actual use cases (recipe IDs, deduplication, causal chains)
+would serve the actual use cases (pattern IDs, deduplication, causal chains)
 equally well.
 
 ---
@@ -734,7 +734,7 @@ CRDTs could operate at multiple levels simultaneously:
 
 These layers work in harmony:
 - The space treats component CRDTs opaquely — just another value that changes
-- Recipes that understand specific CRDT types can work with the component's
+- Patterns that understand specific CRDT types can work with the component's
   native semantics (e.g., collaborative text editing with cursor positions)
 - The space-level CRDT handles structural changes (adding/removing fields)
 - Component-level CRDTs handle content changes within their boundaries

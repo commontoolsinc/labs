@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, cell, Default, handler, lift, recipe, str } from "commontools";
+import { Cell, cell, Default, handler, lift, pattern, str } from "commontools";
 
 type GateMode = "enabled" | "disabled";
 
@@ -86,7 +86,7 @@ const liftSafeCount = lift((count: number | undefined) =>
   typeof count === "number" && Number.isFinite(count) ? count : 0
 );
 
-export const counterWithDerivedHandlerGate = recipe<DerivedHandlerGateArgs>(
+export const counterWithDerivedHandlerGate = pattern<DerivedHandlerGateArgs>(
   "Counter With Derived Handler Gate",
   ({ value, gateMode }) => {
     const attemptLog = cell<string[]>([]);

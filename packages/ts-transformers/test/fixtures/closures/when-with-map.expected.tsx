@@ -56,7 +56,7 @@ export default pattern(({ showItems, items }) => {
                     required: ["$UI"]
                 }
             }
-        } as const satisfies __ctHelpers.JSONSchema, showItems, items.mapWithPattern(__ctHelpers.recipe({
+        } as const satisfies __ctHelpers.JSONSchema, showItems, items.mapWithPattern(__ctHelpers.pattern({
             type: "object",
             properties: {
                 element: {

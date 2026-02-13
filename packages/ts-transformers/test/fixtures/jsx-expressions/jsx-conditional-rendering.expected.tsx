@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { ifElse, recipe, UI } from "commontools";
+import { ifElse, pattern, UI } from "commontools";
 interface State {
     isActive: boolean;
     count: number;
@@ -8,7 +8,7 @@ interface State {
     hasPermission: boolean;
     isPremium: boolean;
 }
-export default recipe({
+export default pattern({
     type: "object",
     properties: {
         isActive: {

@@ -1,8 +1,8 @@
 import * as __ctHelpers from "commontools";
-import { cell, recipe, UI } from "commontools";
+import { cell, pattern, UI } from "commontools";
 // Tests triple && chain: a && b && c
 // Should produce nested when calls or derive the entire chain
-export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
+export default pattern(false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {

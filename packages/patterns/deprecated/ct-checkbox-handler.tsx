@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Default, ifElse, NAME, recipe, UI, Writable } from "commontools";
+import { Default, ifElse, NAME, pattern, UI, Writable } from "commontools";
 
 interface CheckboxSimpleInput {
   enabled: Writable<Default<boolean, false>>;
@@ -7,7 +7,7 @@ interface CheckboxSimpleInput {
 
 interface CheckboxSimpleOutput extends CheckboxSimpleInput {}
 
-export default recipe<CheckboxSimpleInput, CheckboxSimpleOutput>(
+export default pattern<CheckboxSimpleInput, CheckboxSimpleOutput>(
   "ct-checkbox simple demo",
   ({ enabled }) => {
     return {

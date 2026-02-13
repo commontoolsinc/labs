@@ -6,7 +6,7 @@ import {
   derive,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
   toSchema,
 } from "commontools";
@@ -200,7 +200,7 @@ const liftInteractionCount = lift((count: number | undefined) =>
 
 const liftSanitizeSnapshots = lift(sanitizeSnapshots);
 
-export const counterRangeSliderSimulation = recipe<RangeSliderArgs>(
+export const counterRangeSliderSimulation = pattern<RangeSliderArgs>(
   "Counter Range Slider Simulation",
   ({ min, max, value, step }) => {
     const interactions = cell(0);

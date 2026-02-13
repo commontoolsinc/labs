@@ -4,10 +4,10 @@ import {
   cell,
   Default,
   derive,
-  getRecipeEnvironment,
+  getPatternEnvironment,
   handler,
   NAME,
-  recipe,
+  pattern,
   str,
   UI,
 } from "commontools";
@@ -39,7 +39,7 @@ const turndown = new TurndownService({
   emDelimiter: "*",
 });
 
-const env = getRecipeEnvironment();
+const env = getPatternEnvironment();
 
 turndown.addRule("removeStyleTags", {
   filter: ["style"],
@@ -808,7 +808,7 @@ const updateGmailFilterQuery = handler<
   },
 );
 
-export default recipe<{
+export default pattern<{
   settings: Settings;
   auth: Auth;
 }>(

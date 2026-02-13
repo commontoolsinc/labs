@@ -52,7 +52,7 @@ state.items.map((item) => item.price * state.discount);
 
 ### 2. Destructuring aliases recover original names
 
-- Runtime still delivers `{ element, index, array, params }` to the recipe
+- Runtime still delivers `{ element, index, array, params }` to the pattern
   callback.
 - We destructure to the developer’s names
   (`({ element: item, params: { state } })`) so the callback body is untouched.

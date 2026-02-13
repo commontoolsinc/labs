@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 type ItemTuple = [
     item: string,
     count: number
@@ -7,7 +7,7 @@ type ItemTuple = [
 interface State {
     items: ItemTuple[];
 }
-export default recipe({
+export default pattern({
     type: "object",
     properties: {
         items: {
@@ -65,7 +65,7 @@ export default recipe({
         [UI]: (<div>
         {/* Array destructured parameter - without fix, 'item' would be
                 incorrectly captured in params due to shorthand usage in JSX */}
-        {items.mapWithPattern(__ctHelpers.recipe({
+        {items.mapWithPattern(__ctHelpers.pattern({
                 type: "object",
                 properties: {
                     element: {
@@ -113,7 +113,7 @@ export default recipe({
             } as const satisfies __ctHelpers.JSONSchema, ({ element: [item], params: {} }) => (<div data-item={item}>{item}</div>)), {})}
 
         {/* Multiple array destructured params */}
-        {items.mapWithPattern(__ctHelpers.recipe({
+        {items.mapWithPattern(__ctHelpers.pattern({
                 type: "object",
                 properties: {
                     element: {

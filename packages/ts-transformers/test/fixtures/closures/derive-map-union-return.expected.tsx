@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { derive, recipe, UI } from "commontools";
+import { derive, pattern, UI } from "commontools";
 interface ContentPart {
     type: "text" | "image";
     text?: string;
@@ -12,7 +12,7 @@ interface Message {
 interface State {
     messages: Message[];
 }
-export default recipe({
+export default pattern({
     type: "object",
     properties: {
         messages: {

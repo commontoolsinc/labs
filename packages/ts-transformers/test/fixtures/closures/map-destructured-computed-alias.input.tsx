@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 
 const dynamicKey = "value" as const;
 
@@ -12,7 +12,7 @@ interface State {
   items: Item[];
 }
 
-export default recipe<State>("MapDestructuredComputedAlias", (state) => {
+export default pattern<State>("MapDestructuredComputedAlias", (state) => {
   return {
     [UI]: (
       <div>

@@ -22,20 +22,20 @@ value cells, which then propagate through dataflow.
 
 The system supports two fundamental patterns of data flow:
 
-#### Dataflow: Value Cells → Recipe → Result Cell
+#### Dataflow: Value Cells → Pattern → Result Cell
 
 ```
 ┌─────────────┐     ┌─────────────┐
 │ input cell  │────>│             │     ┌─────────────┐
-└─────────────┘     │   recipe    │────>│ result cell │
+└─────────────┘     │   pattern    │────>│ result cell │
 ┌─────────────┐     │             │     └─────────────┘
 │ input cell  │────>│             │
 └─────────────┘     └─────────────┘
 ```
 
 This is **pull-based / demand-driven** reactivity:
-- Recipe declares dependencies on input cells
-- When any input changes, the recipe re-executes
+- Pattern declares dependencies on input cells
+- When any input changes, the pattern re-executes
 - Result cell receives the new computed value
 - Like a spreadsheet: change a cell, dependent formulas update
 
@@ -79,7 +79,7 @@ directly. What is persisted:
 - Ownership links (`sourceCell` chain)
 
 From this persistent data, the system can reconstruct the dataflow graph by
-loading recipes and registering handlers.
+loading patterns and registering handlers.
 
 The dependency graph is also **dynamic and state-dependent**. Conditional
 constructs like `ifElse(cond, left, right)` cause downstream nodes to react to
@@ -129,7 +129,7 @@ When `stream.send(event)` is called:
 When an event arrives but no handler is registered:
 
 1. Traverse `sourceCell` chain to find the process cell
-2. Load the recipe and start the piece
+2. Load the pattern and start the piece
 3. Re-queue the event
 
 This enables pieces to start on-demand when events arrive.
@@ -141,7 +141,7 @@ Cells are linked in an ownership hierarchy:
 ```
 resultCell ───source───> processCell
      ^                        │
-     │                        ├─ TYPE (recipe ID)
+     │                        ├─ TYPE (pattern ID)
      └────── resultRef ───────┘
 ```
 
@@ -149,13 +149,13 @@ The `source` property on a result cell points to its process cell. The process
 cell's `resultRef` property points back to the result cell.
 
 This chain enables:
-- Finding which recipe governs a cell
+- Finding which pattern governs a cell
 - Lazy piece loading (traverse to find owner)
 - Schema resolution (inherit from source)
 
 ### Handler Registration
 
-Handlers are registered when recipes run. They are stored in memory (not
+Handlers are registered when patterns run. They are stored in memory (not
 persisted) and re-register on piece restart.
 
 ### Change Detection

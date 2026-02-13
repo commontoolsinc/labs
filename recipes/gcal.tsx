@@ -2,13 +2,13 @@ import {
   Cell,
   cell,
   derive,
-  getRecipeEnvironment,
+  getPatternEnvironment,
   handler,
   ID,
   ifElse,
   JSONSchema,
   NAME,
-  recipe,
+  pattern,
   str,
   UI,
 } from "commontools";
@@ -52,7 +52,7 @@ export const AuthSchema = {
   },
 } as const satisfies JSONSchema;
 
-const env = getRecipeEnvironment();
+const env = getPatternEnvironment();
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -577,7 +577,7 @@ const clearEvents = handler(
   },
 );
 
-export default recipe(
+export default pattern(
   GcalImporterInputs,
   ResultSchema,
   ({ settings, auth }) => {

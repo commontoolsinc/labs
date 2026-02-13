@@ -7,14 +7,14 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { popFrame, pushFrame } from "../src/builder/recipe.ts";
+import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
 /**
- * Helper to run code within a lift/recipe context (inHandler: false)
+ * Helper to run code within a lift/pattern context (inHandler: false)
  * In this context, cells need explicit causes to create links
  */
 function withinLiftContext<T>(
@@ -29,7 +29,7 @@ function withinLiftContext<T>(
     tx,
     cause: { test: "lift context" },
     generatedIdCounter: 0,
-    inHandler: false, // Lift/recipe context
+    inHandler: false, // Lift/pattern context
     unsafe_binding: { space, tx },
   };
 

@@ -1,11 +1,11 @@
 import * as __ctHelpers from "commontools";
-import { Cell, recipe, UI } from "commontools";
+import { Cell, pattern, UI } from "commontools";
 interface State {
     selectedValue: Cell<string>;
     lastItems: Cell<string>;
 }
 // Test destructured event handler params with typed ct-select onct-change
-export default recipe({
+export default pattern({
     type: "object",
     properties: {
         selectedValue: {

@@ -9,7 +9,7 @@ import {
   ifElse,
   NAME,
   navigateTo,
-  recipe,
+  pattern,
   str,
   UI,
 } from "commontools";
@@ -29,7 +29,7 @@ interface ChatMessage {
   hidden?: boolean;
 }
 
-type MainRecipeInput = {
+type MainPatternInput = {
   messages: Default<ChatMessage[], []>;
 };
 
@@ -121,8 +121,8 @@ const setUsername = handler<
   }
 });
 
-// User Session Recipe - Individual instance with local state
-export const UserSession = recipe<
+// User Session Pattern - Individual instance with local state
+export const UserSession = pattern<
   UserSessionInput,
   UserSessionResult
 >(
@@ -221,7 +221,7 @@ const createUserSession = handler<
   return navigateTo(sessionCharm);
 });
 
-export default recipe<MainRecipeInput>(
+export default pattern<MainPatternInput>(
   "Canvas",
   ({ messages }) => {
     return {

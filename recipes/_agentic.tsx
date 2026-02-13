@@ -7,7 +7,7 @@ import {
   lift,
   llm,
   NAME,
-  recipe,
+  pattern,
   str,
   UI,
 } from "commontools";
@@ -52,7 +52,7 @@ const OutputSchema = {
 } as const satisfies JSONSchema;
 
 const wrapCode = (src: string) => `
-import { lift, recipe, derive, handler, llm } from "commontools";
+import { lift, pattern, derive, handler, llm } from "commontools";
 
 const math = lift((expression: string) => {
   console.log("math", expression);
@@ -65,7 +65,7 @@ const webresearch = lift((query: string) => {
   return call.result;
 });
 
-export default recipe("action", () => ${src});
+export default pattern("action", () => ${src});
 `;
 
 const systemPrompt = `
@@ -100,7 +100,7 @@ The answer is 2.
 /**
  * Executes a single step of the agentic process.
  */
-const step = recipe(
+const step = pattern(
   {
     type: "object",
     properties: {
@@ -143,7 +143,7 @@ const step = recipe(
     // We need to wrap this in a derive that checks for undefined to wait for the
     // async calls above to finish. Ideally we do something `ifElse` like and pass
     // `step` into it, but right now that would always eagerly run the passed in
-    // recipe anyway. We have to wait until the scheduler supports pull
+    // pattern anyway. We have to wait until the scheduler supports pull
     // scheduling.
     return derive(
       { messages, result, actionResult, steps },
@@ -187,7 +187,7 @@ const finalAnswer = lift((messages: string[]) => {
   else return lastMessage;
 });
 
-export default recipe(
+export default pattern(
   InputSchema,
   OutputSchema,
   ({ task, maxSteps }) => {
@@ -200,7 +200,7 @@ export default recipe(
 
     derive(result, (result) => result && console.log("Answer:", result));
 
-    // Return the recipe
+    // Return the pattern
     return {
       [NAME]: str`Answering: ${task}`,
       [UI]: (

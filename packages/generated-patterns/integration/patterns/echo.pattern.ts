@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { lift, recipe } from "commontools";
+import { lift, pattern } from "commontools";
 
 interface EchoArgs {
   message: string;
@@ -7,7 +7,7 @@ interface EchoArgs {
 
 const liftIdentity = lift((text: string) => text);
 
-export const echoRecipe = recipe<EchoArgs>("Echo", ({ message }) => {
+export const echoRecipe = pattern<EchoArgs>("Echo", ({ message }) => {
   const value = liftIdentity(message);
   return { message: value };
 });

@@ -6,7 +6,7 @@ import {
   derive,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -150,7 +150,7 @@ const liftLastUpdatedPath = lift(
 const liftPathLogView = lift(clampPathLog);
 
 /** Pattern updating nested counters by traversing key paths. */
-export const counterWithHierarchicalKeyPath = recipe<HierarchyArgs>(
+export const counterWithHierarchicalKeyPath = pattern<HierarchyArgs>(
   "Counter With Hierarchical Key Path",
   ({ hierarchy }) => {
     const updateCount = cell(0);

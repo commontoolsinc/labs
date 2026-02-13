@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { type Cell, cell, Default, handler, lift, recipe } from "commontools";
+import { type Cell, cell, Default, handler, lift, pattern } from "commontools";
 
 type RiskTier = "low" | "medium" | "high";
 
@@ -551,7 +551,7 @@ const adjustVendorResponse = handler(
   },
 );
 
-export const vendorRiskAssessment = recipe<VendorRiskAssessmentArgs>(
+export const vendorRiskAssessment = pattern<VendorRiskAssessmentArgs>(
   "Vendor Risk Assessment",
   ({ vendors }) => {
     const auditLog = cell<string[]>([]);

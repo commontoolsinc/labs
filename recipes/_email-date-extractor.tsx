@@ -7,7 +7,7 @@ import {
   lift,
   llm,
   NAME,
-  recipe,
+  pattern,
   str,
   UI,
 } from "commontools";
@@ -328,8 +328,8 @@ const getEmailContent = lift(
   },
 );
 
-// The main recipe
-export default recipe(
+// The main pattern
+export default pattern(
   EmailDateExtractorInputSchema,
   ResultSchema,
   ({ emails, settings }) => {
@@ -454,7 +454,7 @@ export default recipe(
       minConfidence: settings.minConfidence,
     });
 
-    // Return recipe results
+    // Return pattern results
     return {
       [NAME]:
         str`Email Date Extractor (${dateCount} dates from ${emailCount} emails)`,

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Default, handler, NAME, recipe, UI, Writable } from "commontools";
+import { Default, handler, NAME, pattern, UI, Writable } from "commontools";
 
 interface Item {
   text: Default<string, "">;
@@ -34,7 +34,7 @@ const removeItem = handler<unknown, ListState & { index: number }>(
   },
 );
 
-export default recipe<InputSchema>(
+export default pattern<InputSchema>(
   "Simple List with Remove",
   ({ title, items }) => {
     return {

@@ -8,7 +8,7 @@ import { dirname } from "@std/path/dirname";
 export const init = new Command()
   .name("init")
   .description(
-    "Initialize a TypeScript environment for evaluating recipes in external tools.",
+    "Initialize a TypeScript environment for evaluating patterns in external tools.",
   )
   .action(() => {
     return initWorkspace(Deno.cwd());
@@ -69,7 +69,7 @@ function createTsConfig() {
 }
 
 // Creates the necessary type definitions
-// in CWD so that recipes can be successfully parsed
+// in CWD so that patterns can be successfully parsed
 // and typed against a typical typescript environment in e.g. VSCode.
 //
 // This is achieved by creating a `node_modules/@types/` directory
@@ -77,7 +77,7 @@ function createTsConfig() {
 // implicitly loaded jsx-runtime (`react/jsx-runtime`) and the
 // environment types (`commontoolsenv`) loaded by the `tsconfig.json`.
 //
-// Also copies recipe documentation from docs/common to .ct-docs for reference.
+// Also copies pattern documentation from docs/common to .ct-docs for reference.
 async function initWorkspace(cwd: string) {
   const cache = new StaticCacheFS();
   const runtimeModuleTypes = await Engine.getRuntimeModuleTypes(
@@ -118,7 +118,7 @@ async function initWorkspace(cwd: string) {
     JSON.stringify(createTsConfig(), null, 2),
   );
 
-  // Copy recipe documentation files to .ct-docs folder
+  // Copy pattern documentation files to .ct-docs folder
   try {
     const ctDocsPath = join(cwd, ".ct-docs");
     await Deno.mkdir(ctDocsPath, { recursive: true });
@@ -146,7 +146,7 @@ async function initWorkspace(cwd: string) {
     }
   } catch (error) {
     console.warn(
-      "Warning: Could not copy recipe documentation:",
+      "Warning: Could not copy pattern documentation:",
       error instanceof Error ? error.message : String(error),
     );
   }

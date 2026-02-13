@@ -1,7 +1,7 @@
 import * as __ctHelpers from "commontools";
-import { Cell, cell, handler, ifElse, lift, NAME, navigateTo, OpaqueRef, recipe, UI, } from "commontools";
+import { Cell, cell, handler, ifElse, lift, NAME, navigateTo, OpaqueRef, pattern, UI, } from "commontools";
 // the simple charm (to which we'll store references within a cell)
-const SimpleRecipe = recipe(false as const satisfies __ctHelpers.JSONSchema, {
+const SimplePattern = pattern(false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         $NAME: {
@@ -35,8 +35,8 @@ const SimpleRecipe = recipe(false as const satisfies __ctHelpers.JSONSchema, {
         }
     }
 } as const satisfies __ctHelpers.JSONSchema, () => ({
-    [NAME]: "Some Simple Recipe",
-    [UI]: <div>Some Simple Recipe</div>,
+    [NAME]: "Some Simple Pattern",
+    [UI]: <div>Some Simple Pattern</div>,
 }));
 // Create a cell to store an array of charms
 const createCellRef = lift({
@@ -92,8 +92,8 @@ const addCharmAndNavigate = lift({
     }
     return undefined;
 });
-// Create a new SimpleRecipe and add it to the array
-const createSimpleRecipe = handler(true as const satisfies __ctHelpers.JSONSchema, {
+// Create a new SimplePattern and add it to the array
+const createSimplePattern = handler(true as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         cellRef: {
@@ -109,7 +109,7 @@ const createSimpleRecipe = handler(true as const satisfies __ctHelpers.JSONSchem
         type: "boolean"
     } as const satisfies __ctHelpers.JSONSchema);
     // Create the charm
-    const charm = SimpleRecipe({});
+    const charm = SimplePattern({});
     // Store the charm in the array and navigate
     return addCharmAndNavigate({ charm, cellRef, isInitialized });
 });
@@ -124,8 +124,8 @@ const goToCharm = handler(true as const satisfies __ctHelpers.JSONSchema, {
     console.log("goToCharm clicked");
     return navigateTo(charm);
 });
-// create the named cell inside the recipe body, so we do it just once
-export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
+// create the named cell inside the pattern body, so we do it just once
+export default pattern(false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         $NAME: {
@@ -213,7 +213,7 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, { typedCellRef: typedCellRef }, ({ typedCellRef }) => !typedCellRef?.length), <div>No charms created yet</div>, <ul>
-            {typedCellRef.mapWithPattern(__ctHelpers.recipe({
+            {typedCellRef.mapWithPattern(__ctHelpers.pattern({
                 type: "object",
                 properties: {
                     element: true,
@@ -281,7 +281,7 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
               </li>)), {})}
           </ul>)}
 
-        <ct-button onClick={createSimpleRecipe({ cellRef })}>
+        <ct-button onClick={createSimplePattern({ cellRef })}>
           Create New Charm
         </ct-button>
       </div>),

@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -389,7 +389,7 @@ const reassignShipment = handler(
   },
 );
 
-export const logisticsRouting = recipe<LogisticsRoutingArgs>(
+export const logisticsRouting = pattern<LogisticsRoutingArgs>(
   "Logistics Routing",
   ({ routes, shipments }) => {
     const routesList = liftSanitizeRoutes(routes);

@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 interface Item {
     id: number;
     price: number;
@@ -9,7 +9,7 @@ interface State {
     items: Item[];
     taxRate: number;
 }
-export default recipe({
+export default pattern({
     type: "object",
     properties: {
         items: {
@@ -135,7 +135,7 @@ export default recipe({
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.items
             } }, ({ state }) => state.items
-            .filter((item) => item.active)).mapWithPattern(__ctHelpers.recipe({
+            .filter((item) => item.active)).mapWithPattern(__ctHelpers.pattern({
             type: "object",
             properties: {
                 element: {

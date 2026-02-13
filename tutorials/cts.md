@@ -3,7 +3,7 @@ title: Common Type System
 short_title: Common Type System
 description: How to use the Common Type System to simplify types
 subject: Tutorial
-keywords: commontools, recipes, cts, types
+keywords: commontools, patterns, cts, types
 abstract: |
   The CTS (Common Type System) helps automatically convert types and common
   coding patterns for you. This leads to more readable and succint code.

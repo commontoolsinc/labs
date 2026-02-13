@@ -1,10 +1,10 @@
 import * as __ctHelpers from "commontools";
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 interface State {
     items: number[];
     highlight: string;
 }
-export default recipe({
+export default pattern({
     type: "object",
     properties: {
         items: {
@@ -52,7 +52,7 @@ export default recipe({
     const element = state.highlight;
     return {
         [UI]: (<div>
-        {state.items.mapWithPattern(__ctHelpers.recipe({
+        {state.items.mapWithPattern(__ctHelpers.pattern({
                 type: "object",
                 properties: {
                     element: {

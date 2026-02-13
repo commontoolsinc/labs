@@ -1,11 +1,11 @@
 /// <cts-enable />
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 
 interface State {
   label: string;
 }
 
-export default recipe<State>("Reserved", (state) => {
+export default pattern<State>("Reserved", (state) => {
   const __ct_handler_event = state.label;
   return {
     [UI]: (
