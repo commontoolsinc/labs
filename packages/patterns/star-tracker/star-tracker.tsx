@@ -52,6 +52,39 @@ type GrowthFlag = "accelerating" | "linear" | "decelerating" | "unknown";
 
 // === Pure helpers (module scope) ===
 
+const SKIP_OWNERS = new Set([
+  "orgs",
+  "blob",
+  "tree",
+  "issues",
+  "pulls",
+  "settings",
+  "topics",
+]);
+
+function parseReposFromText(text: string): RepoEntry[] {
+  const seen = new Set<string>();
+  const results: RepoEntry[] = [];
+  const add = (owner: string, repo: string) => {
+    const clean = repo.replace(/\.git$/, "");
+    const key = `${owner}/${clean}`.toLowerCase();
+    if (seen.has(key) || SKIP_OWNERS.has(owner.toLowerCase())) return;
+    seen.add(key);
+    results.push({ owner, repo: clean });
+  };
+  for (
+    const m of text.matchAll(
+      /github\.com\/([a-zA-Z0-9._-]+)\/([a-zA-Z0-9._-]+)/g,
+    )
+  ) add(m[1], m[2]);
+  for (
+    const m of text.matchAll(
+      /star-history\.(?:com|t9t\.io)\/#([a-zA-Z0-9._-]+)\/([a-zA-Z0-9._-]+)/g,
+    )
+  ) add(m[1], m[2]);
+  return results;
+}
+
 function formatStars(n: number): string {
   if (n >= 1000) return (n / 1000).toFixed(n >= 10000 ? 0 : 1) + "k";
   return String(n);
@@ -496,7 +529,10 @@ type SortMode = "stars" | "growth" | "name";
 
 export default pattern<StarTrackerInput, StarTrackerOutput>(
   ({ repos, githubToken }) => {
-    const tokenWish = wish<{ token: string }>({ query: "#githubToken" });
+    const tokenWish = wish<{ token: string }>({
+      query: "#githubToken",
+      scope: ["."],
+    });
 
     const effectiveToken = computed(() => {
       const wished = tokenWish.result?.token;
@@ -509,27 +545,12 @@ export default pattern<StarTrackerInput, StarTrackerOutput>(
 
     const addRepos = action((inputText: string) => {
       const text = inputText || addText.get();
-      const lines = text
-        .split("\n")
-        .map((l) => l.trim())
-        .filter((l) => l.includes("/"));
+      const parsed = parseReposFromText(text);
       const current = repos.get();
-      const newEntries: RepoEntry[] = [];
-      for (const line of lines) {
-        const match = line.match(
-          /(?:github\.com\/)?([a-zA-Z0-9._-]+)\/([a-zA-Z0-9._-]+)/,
-        );
-        if (match) {
-          const o = match[1];
-          const r = match[2];
-          const exists = current.some(
-            (e) => e && e.owner === o && e.repo === r,
-          );
-          if (!exists) {
-            newEntries.push({ owner: o, repo: r });
-          }
-        }
-      }
+      const newEntries = parsed.filter(
+        (p) =>
+          !current.some((e) => e && e.owner === p.owner && e.repo === p.repo),
+      );
       if (newEntries.length > 0) {
         repos.set([...current, ...newEntries]);
       }
@@ -615,7 +636,7 @@ export default pattern<StarTrackerInput, StarTrackerOutput>(
             <ct-hstack gap="2" align="end">
               <ct-textarea
                 $value={addText}
-                placeholder="Add repos (one per line):&#10;owner/repo"
+                placeholder="Paste repos or markdown:&#10;owner/repo or GitHub URLs"
                 rows={2}
                 style={{ flex: "1" }}
               />
