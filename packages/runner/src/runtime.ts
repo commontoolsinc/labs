@@ -85,7 +85,7 @@ export interface ExperimentalOptions {
   richStorableValues?: boolean;
   /** Enable the storable protocol ([DECONSTRUCT]/[RECONSTRUCT]) and SerializationContext-based boundary serialization. */
   storableProtocol?: boolean;
-  /** Enable /<Type>@<Version> JSON encoding, replacing legacy sigil/@-prefix/$-prefix conventions. */
+  /** Enable `/<Type>@<Version>` JSON encoding, replacing legacy sigil/`@`-prefix/`$`-prefix conventions. */
   unifiedJsonEncoding?: boolean;
 }
 

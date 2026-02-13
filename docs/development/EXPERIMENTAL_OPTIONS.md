@@ -9,7 +9,7 @@ affecting users who haven't opted in.
 
 | Flag | Env Var | Description |
 |------|---------|-------------|
-| `richStorableValues` | `EXPERIMENTAL_RICH_STORABLE_VALUES` | Enables the new storable value type system (bigint, Map, Set, Uint8Array, Date, StorableInstance). |
+| `richStorableValues` | `EXPERIMENTAL_RICH_STORABLE_VALUES` | Enables the new storable value type system (`bigint`, `Map`, `Set`, `Uint8Array`, `Date`, `StorableInstance`). |
 | `storableProtocol` | `EXPERIMENTAL_STORABLE_PROTOCOL` | Enables the storable protocol (`[DECONSTRUCT]`/`[RECONSTRUCT]`) and `SerializationContext`-based boundary serialization. |
 | `unifiedJsonEncoding` | `EXPERIMENTAL_UNIFIED_JSON_ENCODING` | Enables a unified JSON encoding scheme for all storable values. |
 

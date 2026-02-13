@@ -133,9 +133,9 @@ const EnvSchema = z.object({
   // ===========================================================================
   // Experimental space-model feature flags (see ExperimentalOptions in runner)
   // ===========================================================================
-  EXPERIMENTAL_RICH_STORABLE_VALUES: z.coerce.boolean().default(false),
-  EXPERIMENTAL_STORABLE_PROTOCOL: z.coerce.boolean().default(false),
-  EXPERIMENTAL_UNIFIED_JSON_ENCODING: z.coerce.boolean().default(false),
+  EXPERIMENTAL_RICH_STORABLE_VALUES: z.string().default("false").transform((v) => v === "true"),
+  EXPERIMENTAL_STORABLE_PROTOCOL: z.string().default("false").transform((v) => v === "true"),
+  EXPERIMENTAL_UNIFIED_JSON_ENCODING: z.string().default("false").transform((v) => v === "true"),
 });
 
 export type env = z.infer<typeof EnvSchema>;
