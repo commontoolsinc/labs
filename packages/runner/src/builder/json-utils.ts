@@ -225,17 +225,19 @@ export function moduleToJSON(module: Module) {
   // Why this helps: Using toJSONWithLegacyAliases ensures nested $alias bindings
   // get their nesting level incremented properly. Without this, aliases could be
   // bound to a specific doc too early, causing handlers to point at stale docs
-  // when the recipe is later executed in a different context.
+  // when the pattern is later executed in a different context.
   //
-  // We don't fully understand why the original code stringified recipe functions,
-  // but this defensive change ensures recipes passed as values (like to map())
+  // We don't fully understand why the original code stringified pattern functions,
+  // but this defensive change ensures patterns passed as values (like to map())
   // retain their structure and alias metadata.
-  if (module.type === "recipe" && implementation && isRecipe(implementation)) {
+  if (
+    module.type === "pattern" && implementation && isPattern(implementation)
+  ) {
     implementation = toJSONWithLegacyAliases(
       implementation as unknown as Opaque<any>,
       new Map(),
       false,
-    ) as unknown as Recipe;
+    ) as unknown as Pattern;
   } else if (typeof implementation === "function") {
     implementation = implementation.toString();
   }
