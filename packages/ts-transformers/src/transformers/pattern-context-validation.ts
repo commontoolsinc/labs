@@ -289,6 +289,9 @@ export class PatternContextValidationTransformer extends Transformer {
     // array-map on cells/opaques is transformed, so callbacks are allowed
     if (callKind.kind === "array-map") return true;
 
+    // patternTool handles closure capture for its callback
+    if (callKind.kind === "pattern-tool") return true;
+
     // Check builder-based safe wrappers (computed, action, lift, handler)
     // Note: derive is handled separately above (it has its own kind, not "builder")
     if (callKind.kind === "builder") {
