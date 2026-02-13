@@ -1,7 +1,7 @@
 /// <cts-enable />
 /**
- * Fixture: action closing over SELF requires Default<> inputs (not optional `?`)
- * to ensure the output schema's required properties are always satisfied.
+ * Fixture: action closing over SELF requires inputs with defaults so the
+ * piece data always satisfies the output schema's required properties.
  */
 import { action, type Default, NAME, pattern, SELF, UI, type VNode, Writable } from "commontools";
 
