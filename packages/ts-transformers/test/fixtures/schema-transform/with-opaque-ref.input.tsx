@@ -9,8 +9,8 @@ const model = toSchema<State>({
   "default": { value: 0 },
 });
 
-export default pattern(model, model, (cell) => {
-  const doubled = derive(cell.value, (v) => v * 2);
+export default pattern<State, State>(model, model, (cell) => {
+  const doubled = derive(cell.value, (v: number) => v * 2);
 
   return {
     [UI]: (

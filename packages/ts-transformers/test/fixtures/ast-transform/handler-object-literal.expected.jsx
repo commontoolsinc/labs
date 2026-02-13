@@ -24,11 +24,17 @@ const myHandler = handler(false as const satisfies __ctHelpers.JSONSchema, {
 export default pattern({
     type: "object",
     properties: {
-        value: { type: "number", asCell: true },
-        name: { type: "string", asCell: true },
+        value: {
+            type: "number",
+            asCell: true
+        },
+        name: {
+            type: "string",
+            asCell: true
+        }
     },
-    required: ["value"],
-}, {
+    required: ["value"]
+} as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         onClick1: {

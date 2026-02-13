@@ -15,7 +15,75 @@ interface Card {
 interface Input {
     card: Card;
 }
-export default pattern(({ card }) => {
+export default pattern({
+    type: "object",
+    properties: {
+        card: {
+            $ref: "#/$defs/Card"
+        }
+    },
+    required: ["card"],
+    $defs: {
+        Card: {
+            type: "object",
+            properties: {
+                title: {
+                    type: "string"
+                },
+                description: {
+                    type: "string"
+                }
+            },
+            required: ["title", "description"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        $UI: {
+            $ref: "#/$defs/JSXElement"
+        },
+        card: {
+            $ref: "#/$defs/Card",
+            asOpaque: true
+        }
+    },
+    required: ["$UI", "card"],
+    $defs: {
+        Card: {
+            type: "object",
+            properties: {
+                title: {
+                    type: "string"
+                },
+                description: {
+                    type: "string"
+                }
+            },
+            required: ["title", "description"]
+        },
+        JSXElement: {
+            anyOf: [{
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    $ref: "#/$defs/UIRenderable",
+                    asOpaque: true
+                }]
+        },
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, ({ card }) => {
     const isEditing = Cell.of(false, {
         type: "boolean"
     } as const satisfies __ctHelpers.JSONSchema);
@@ -158,75 +226,7 @@ export default pattern(({ card }) => {
       </ct-card>),
         card,
     };
-}, {
-    type: "object",
-    properties: {
-        card: {
-            $ref: "#/$defs/Card"
-        }
-    },
-    required: ["card"],
-    $defs: {
-        Card: {
-            type: "object",
-            properties: {
-                title: {
-                    type: "string"
-                },
-                description: {
-                    type: "string"
-                }
-            },
-            required: ["title", "description"]
-        }
-    }
-} as const satisfies __ctHelpers.JSONSchema, {
-    type: "object",
-    properties: {
-        $UI: {
-            $ref: "#/$defs/JSXElement"
-        },
-        card: {
-            $ref: "#/$defs/Card",
-            asOpaque: true
-        }
-    },
-    required: ["$UI", "card"],
-    $defs: {
-        Card: {
-            type: "object",
-            properties: {
-                title: {
-                    type: "string"
-                },
-                description: {
-                    type: "string"
-                }
-            },
-            required: ["title", "description"]
-        },
-        JSXElement: {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    type: "object",
-                    properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
-                }]
-        },
-        UIRenderable: {
-            type: "object",
-            properties: {
-                $UI: {
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }
-            },
-            required: ["$UI"]
-        }
-    }
-} as const satisfies __ctHelpers.JSONSchema);
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

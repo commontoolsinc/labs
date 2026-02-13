@@ -123,7 +123,66 @@ const addItem = handler // <
 }) => {
     items.push({ text: event.detail.message });
 });
-export default pattern(inputSchema, outputSchema, ({ title, items }) => {
+export default pattern({
+    type: "object",
+    properties: {
+        title: {
+            type: "string",
+            "default": "untitled"
+        },
+        items: {
+            type: "array",
+            items: {
+                $ref: "#/$defs/Item"
+            },
+            "default": []
+        }
+    },
+    required: ["title", "items"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                text: {
+                    type: "string",
+                    "default": ""
+                }
+            },
+            required: ["text"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        items_count: {
+            type: "number"
+        },
+        title: {
+            type: "string",
+            "default": "untitled"
+        },
+        items: {
+            type: "array",
+            items: {
+                $ref: "#/$defs/Item"
+            },
+            "default": []
+        }
+    },
+    required: ["items_count", "title", "items"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                text: {
+                    type: "string",
+                    "default": ""
+                }
+            },
+            required: ["text"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, ({ title, items }) => {
     const items_count = items.length;
     return {
         [NAME]: title,
@@ -132,7 +191,55 @@ export default pattern(inputSchema, outputSchema, ({ title, items }) => {
         <p>Basic pattern</p>
         <p>Items count: {items_count}</p>
         <ul>
-          {items.map((item: Item, index: number) => (<li key={index}>{item.text}</li>))}
+          {items.mapWithPattern(__ctHelpers.pattern({
+                type: "object",
+                properties: {
+                    element: {
+                        $ref: "#/$defs/Item"
+                    },
+                    index: {
+                        type: "number"
+                    },
+                    params: {
+                        type: "object",
+                        properties: {}
+                    }
+                },
+                required: ["element", "params"],
+                $defs: {
+                    Item: {
+                        type: "object",
+                        properties: {
+                            text: {
+                                type: "string",
+                                "default": ""
+                            }
+                        },
+                        required: ["text"]
+                    }
+                }
+            } as const satisfies __ctHelpers.JSONSchema, {
+                anyOf: [{
+                        $ref: "https://commonfabric.org/schemas/vnode.json"
+                    }, {
+                        type: "object",
+                        properties: {}
+                    }, {
+                        $ref: "#/$defs/UIRenderable",
+                        asOpaque: true
+                    }],
+                $defs: {
+                    UIRenderable: {
+                        type: "object",
+                        properties: {
+                            $UI: {
+                                $ref: "https://commonfabric.org/schemas/vnode.json"
+                            }
+                        },
+                        required: ["$UI"]
+                    }
+                }
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: item, index, params: {} }) => (<li key={index}>{item.text}</li>)), {})}
         </ul>
         <ct-message-input name="Send" placeholder="Type a message..." appearance="rounded" onct-send={addItem({ items })}/>
       </div>),

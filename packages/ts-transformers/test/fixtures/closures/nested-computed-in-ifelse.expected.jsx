@@ -11,7 +11,41 @@ import * as __ctHelpers from "commontools";
  * Fix: Added isInsideSafeCallbackWrapper check in rewriteChildExpressions
  */
 import { computed, ifElse, pattern, UI, Writable } from "commontools";
-export default pattern(() => {
+export default pattern({
+    type: "object",
+    properties: {},
+    additionalProperties: false
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        $UI: {
+            $ref: "#/$defs/JSXElement"
+        }
+    },
+    required: ["$UI"],
+    $defs: {
+        JSXElement: {
+            anyOf: [{
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    $ref: "#/$defs/UIRenderable",
+                    asOpaque: true
+                }]
+        },
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, () => {
     const showOuter = Writable.of(false, {
         type: "boolean"
     } as const satisfies __ctHelpers.JSONSchema);
@@ -95,41 +129,7 @@ export default pattern(() => {
                 })}>Case B</div>, <div>Hidden</div>)}
       </div>),
     };
-}, {
-    type: "object",
-    properties: {},
-    additionalProperties: false
-} as const satisfies __ctHelpers.JSONSchema, {
-    type: "object",
-    properties: {
-        $UI: {
-            $ref: "#/$defs/JSXElement"
-        }
-    },
-    required: ["$UI"],
-    $defs: {
-        JSXElement: {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    type: "object",
-                    properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
-                }]
-        },
-        UIRenderable: {
-            type: "object",
-            properties: {
-                $UI: {
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }
-            },
-            required: ["$UI"]
-        }
-    }
-} as const satisfies __ctHelpers.JSONSchema);
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

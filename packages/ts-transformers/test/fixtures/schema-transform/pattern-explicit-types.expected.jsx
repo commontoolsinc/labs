@@ -6,9 +6,7 @@ interface Input {
 interface Output extends Input {
     bar: number;
 }
-export default pattern((input) => {
-    return { ...input, bar: 123 };
-}, {
+export default pattern({
     type: "object",
     properties: {
         foo: {
@@ -27,7 +25,9 @@ export default pattern((input) => {
         }
     },
     required: ["bar", "foo"]
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __ctHelpers.JSONSchema, (input) => {
+    return { ...input, bar: 123 };
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

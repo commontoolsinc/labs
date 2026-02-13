@@ -6,30 +6,7 @@ interface MyEvent {
 interface State {
     value: Cell<string>;
 }
-export default pattern(({ value }) => {
-    return {
-        update: __ctHelpers.handler({
-            type: "object",
-            properties: {
-                data: {
-                    type: "string"
-                }
-            },
-            required: ["data"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "object",
-            properties: {
-                value: {
-                    type: "string",
-                    asCell: true
-                }
-            },
-            required: ["value"]
-        } as const satisfies __ctHelpers.JSONSchema, (e, { value }) => value.set(e.data))({
-            value: value
-        }),
-    };
-}, {
+export default pattern({
     type: "object",
     properties: {
         value: {
@@ -58,7 +35,30 @@ export default pattern(({ value }) => {
             required: ["data"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema);
+} as const satisfies __ctHelpers.JSONSchema, ({ value }) => {
+    return {
+        update: __ctHelpers.handler({
+            type: "object",
+            properties: {
+                data: {
+                    type: "string"
+                }
+            },
+            required: ["data"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "object",
+            properties: {
+                value: {
+                    type: "string",
+                    asCell: true
+                }
+            },
+            required: ["value"]
+        } as const satisfies __ctHelpers.JSONSchema, (e, { value }) => value.set(e.data))({
+            value: value
+        }),
+    };
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

@@ -17,7 +17,42 @@ interface Item {
     id: number;
     value: string;
 }
-export default pattern(({ items }) => {
+export default pattern({
+    type: "object",
+    properties: {
+        items: {
+            type: "array",
+            items: {
+                $ref: "#/$defs/Item"
+            },
+            asCell: true
+        }
+    },
+    required: ["items"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                id: {
+                    type: "number"
+                },
+                value: {
+                    type: "string"
+                }
+            },
+            required: ["id", "value"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        count: {
+            type: "number",
+            asOpaque: true
+        }
+    },
+    required: ["count"]
+} as const satisfies __ctHelpers.JSONSchema, ({ items }) => {
     // items.map() will be transformed to items.mapWithPattern()
     // derive has NO captures, so it won't be transformed by ClosureTransformer
     // The callback param has NO explicit type annotation
@@ -59,42 +94,7 @@ export default pattern(({ items }) => {
         asOpaque: true
     } as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: {} }) => item.value), {}), (arr) => arr.length);
     return { count };
-}, {
-    type: "object",
-    properties: {
-        items: {
-            type: "array",
-            items: {
-                $ref: "#/$defs/Item"
-            },
-            asCell: true
-        }
-    },
-    required: ["items"],
-    $defs: {
-        Item: {
-            type: "object",
-            properties: {
-                id: {
-                    type: "number"
-                },
-                value: {
-                    type: "string"
-                }
-            },
-            required: ["id", "value"]
-        }
-    }
-} as const satisfies __ctHelpers.JSONSchema, {
-    type: "object",
-    properties: {
-        count: {
-            type: "number",
-            asOpaque: true
-        }
-    },
-    required: ["count"]
-} as const satisfies __ctHelpers.JSONSchema);
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

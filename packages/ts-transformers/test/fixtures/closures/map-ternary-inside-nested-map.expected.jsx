@@ -23,7 +23,82 @@ interface PatternInput {
     ]>>;
     showInactive?: Default<boolean, false>;
 }
-export default pattern(({ items, showInactive }) => {
+export default pattern({
+    type: "object",
+    properties: {
+        items: {
+            type: "array",
+            items: {
+                $ref: "#/$defs/Item"
+            },
+            "default": [],
+            asCell: true
+        },
+        showInactive: {
+            type: "boolean",
+            "default": false
+        }
+    },
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                label: {
+                    type: "string"
+                },
+                tags: {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/Tag"
+                    }
+                }
+            },
+            required: ["label", "tags"]
+        },
+        Tag: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                },
+                active: {
+                    type: "boolean"
+                }
+            },
+            required: ["name", "active"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        $UI: {
+            $ref: "#/$defs/JSXElement"
+        }
+    },
+    required: ["$UI"],
+    $defs: {
+        JSXElement: {
+            anyOf: [{
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    $ref: "#/$defs/UIRenderable",
+                    asOpaque: true
+                }]
+        },
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, ({ items, showInactive }) => {
     const hasItems = __ctHelpers.derive({
         type: "object",
         properties: {
@@ -380,82 +455,7 @@ export default pattern(({ items, showInactive }) => {
         }), <p>No items</p>)}
       </div>),
     };
-}, {
-    type: "object",
-    properties: {
-        items: {
-            type: "array",
-            items: {
-                $ref: "#/$defs/Item"
-            },
-            "default": [],
-            asCell: true
-        },
-        showInactive: {
-            type: "boolean",
-            "default": false
-        }
-    },
-    $defs: {
-        Item: {
-            type: "object",
-            properties: {
-                label: {
-                    type: "string"
-                },
-                tags: {
-                    type: "array",
-                    items: {
-                        $ref: "#/$defs/Tag"
-                    }
-                }
-            },
-            required: ["label", "tags"]
-        },
-        Tag: {
-            type: "object",
-            properties: {
-                name: {
-                    type: "string"
-                },
-                active: {
-                    type: "boolean"
-                }
-            },
-            required: ["name", "active"]
-        }
-    }
-} as const satisfies __ctHelpers.JSONSchema, {
-    type: "object",
-    properties: {
-        $UI: {
-            $ref: "#/$defs/JSXElement"
-        }
-    },
-    required: ["$UI"],
-    $defs: {
-        JSXElement: {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    type: "object",
-                    properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
-                }]
-        },
-        UIRenderable: {
-            type: "object",
-            properties: {
-                $UI: {
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }
-            },
-            required: ["$UI"]
-        }
-    }
-} as const satisfies __ctHelpers.JSONSchema);
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

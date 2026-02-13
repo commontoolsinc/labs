@@ -99,6 +99,12 @@ export class SchemaGeneratorTransformer extends Transformer {
           : { ...(schema as Record<string, unknown>), ...optionsObj };
         const schemaAst = createSchemaAst(finalSchema, context.factory);
 
+        // Wrap in `as const satisfies JSONSchema` so that schema-inference
+        // overloads (e.g. CellTypeConstructor.of, WishFunction) can infer
+        // TypeScript types from the literal schema shape. Note: the
+        // PatternFunction schema-inference overloads were removed during the
+        // recipe→pattern refactor (see schema.ts comment), but other call
+        // sites still rely on this annotation.
         const constAssertion = context.factory.createAsExpression(
           schemaAst,
           context.factory.createTypeReferenceNode(

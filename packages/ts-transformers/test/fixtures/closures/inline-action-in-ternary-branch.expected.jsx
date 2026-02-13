@@ -16,7 +16,79 @@ interface State {
     card: Card;
     isEditing: Cell<boolean>;
 }
-export default pattern((state) => {
+export default pattern({
+    type: "object",
+    properties: {
+        card: {
+            $ref: "#/$defs/Card"
+        },
+        isEditing: {
+            type: "boolean",
+            asCell: true
+        }
+    },
+    required: ["card", "isEditing"],
+    $defs: {
+        Card: {
+            type: "object",
+            properties: {
+                title: {
+                    type: "string"
+                },
+                description: {
+                    type: "string"
+                }
+            },
+            required: ["title", "description"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        $UI: {
+            $ref: "#/$defs/JSXElement"
+        },
+        card: {
+            $ref: "#/$defs/Card",
+            asOpaque: true
+        }
+    },
+    required: ["$UI", "card"],
+    $defs: {
+        Card: {
+            type: "object",
+            properties: {
+                title: {
+                    type: "string"
+                },
+                description: {
+                    type: "string"
+                }
+            },
+            required: ["title", "description"]
+        },
+        JSXElement: {
+            anyOf: [{
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    $ref: "#/$defs/UIRenderable",
+                    asOpaque: true
+                }]
+        },
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, (state) => {
     return {
         [UI]: (<ct-card>
         {__ctHelpers.ifElse({
@@ -103,79 +175,7 @@ export default pattern((state) => {
       </ct-card>),
         card: state.card,
     };
-}, {
-    type: "object",
-    properties: {
-        card: {
-            $ref: "#/$defs/Card"
-        },
-        isEditing: {
-            type: "boolean",
-            asCell: true
-        }
-    },
-    required: ["card", "isEditing"],
-    $defs: {
-        Card: {
-            type: "object",
-            properties: {
-                title: {
-                    type: "string"
-                },
-                description: {
-                    type: "string"
-                }
-            },
-            required: ["title", "description"]
-        }
-    }
-} as const satisfies __ctHelpers.JSONSchema, {
-    type: "object",
-    properties: {
-        $UI: {
-            $ref: "#/$defs/JSXElement"
-        },
-        card: {
-            $ref: "#/$defs/Card",
-            asOpaque: true
-        }
-    },
-    required: ["$UI", "card"],
-    $defs: {
-        Card: {
-            type: "object",
-            properties: {
-                title: {
-                    type: "string"
-                },
-                description: {
-                    type: "string"
-                }
-            },
-            required: ["title", "description"]
-        },
-        JSXElement: {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    type: "object",
-                    properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
-                }]
-        },
-        UIRenderable: {
-            type: "object",
-            properties: {
-                $UI: {
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }
-            },
-            required: ["$UI"]
-        }
-    }
-} as const satisfies __ctHelpers.JSONSchema);
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

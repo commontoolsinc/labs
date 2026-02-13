@@ -6,7 +6,57 @@ interface State {
     }>;
     discount: number;
 }
-export default pattern((state) => {
+export default pattern({
+    type: "object",
+    properties: {
+        items: {
+            type: "array",
+            items: {
+                type: "object",
+                properties: {
+                    price: {
+                        type: "number"
+                    }
+                },
+                required: ["price"]
+            }
+        },
+        discount: {
+            type: "number"
+        }
+    },
+    required: ["items", "discount"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        $UI: {
+            $ref: "#/$defs/JSXElement"
+        }
+    },
+    required: ["$UI"],
+    $defs: {
+        JSXElement: {
+            anyOf: [{
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    $ref: "#/$defs/UIRenderable",
+                    asOpaque: true
+                }]
+        },
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, (state) => {
     return {
         [UI]: (<div>
         {state.items.mapWithPattern(__ctHelpers.pattern({
@@ -101,57 +151,7 @@ export default pattern((state) => {
             })}
       </div>),
     };
-}, {
-    type: "object",
-    properties: {
-        items: {
-            type: "array",
-            items: {
-                type: "object",
-                properties: {
-                    price: {
-                        type: "number"
-                    }
-                },
-                required: ["price"]
-            }
-        },
-        discount: {
-            type: "number"
-        }
-    },
-    required: ["items", "discount"]
-} as const satisfies __ctHelpers.JSONSchema, {
-    type: "object",
-    properties: {
-        $UI: {
-            $ref: "#/$defs/JSXElement"
-        }
-    },
-    required: ["$UI"],
-    $defs: {
-        JSXElement: {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    type: "object",
-                    properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
-                }]
-        },
-        UIRenderable: {
-            type: "object",
-            properties: {
-                $UI: {
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }
-            },
-            required: ["$UI"]
-        }
-    }
-} as const satisfies __ctHelpers.JSONSchema);
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
