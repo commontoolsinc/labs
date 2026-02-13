@@ -2,9 +2,10 @@ import ts from "typescript";
 import type { TransformationContext } from "../../core/mod.ts";
 import type { ClosureTransformationStrategy } from "./strategy.ts";
 import { detectCallKind, isFunctionLikeExpression } from "../../ast/mod.ts";
-import { groupCapturesByRoot } from "../../utils/capture-tree.ts";
-import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
-import { buildHierarchicalParamsValue } from "../../utils/capture-tree.ts";
+import {
+  buildHierarchicalParamsValue,
+  groupCapturesByRoot,
+} from "../../utils/capture-tree.ts";
 import { createPropertyName } from "../../utils/identifiers.ts";
 import { isOpaqueRefType } from "../../transformers/opaque-ref/opaque-ref.ts";
 
@@ -73,7 +74,7 @@ function transformPatternToolCall(
   context: TransformationContext,
   visitor: ts.Visitor,
 ): ts.CallExpression | undefined {
-  const { factory, checker } = context;
+  const { factory } = context;
 
   // Get the callback function (first argument)
   const callback = patternToolCall.arguments[0];
@@ -188,7 +189,7 @@ function buildCallbackWithCaptures(
   captureTree: Map<string, unknown>,
   context: TransformationContext,
 ): ts.ArrowFunction | ts.FunctionExpression {
-  const { factory, checker } = context;
+  const { factory } = context;
 
   // Get the original parameter (patternTool callbacks take a single parameter)
   const originalParam = originalCallback.parameters[0];
@@ -317,7 +318,7 @@ function addCapturesToTypeLiteral(
   captureTree: Map<string, unknown>,
   context: TransformationContext,
 ): ts.TypeLiteralNode {
-  const { factory, checker } = context;
+  const { factory } = context;
 
   // Get existing members
   const existingMembers = [...typeLiteral.members];

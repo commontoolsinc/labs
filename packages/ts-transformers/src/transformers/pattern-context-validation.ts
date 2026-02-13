@@ -444,8 +444,19 @@ export class PatternContextValidationTransformer extends Transformer {
    * - Move the reactive operation out of the standalone function
    * - Use patternTool() which handles closure capture automatically
    *
-   * Exception: Functions passed to patternTool() are handled by the
+   * Exception: Functions passed inline to patternTool() are handled by the
    * patternTool transformer and don't need validation here.
+   *
+   * Limitation: This check is purely syntactic — it only recognizes functions
+   * passed *inline* as the first argument to patternTool(). If a function is
+   * defined separately and then passed to patternTool(), e.g.:
+   *
+   *   const myFn = ({ query }) => { return computed(...) };
+   *   const tool = patternTool(myFn);
+   *
+   * ...the validator will still flag myFn, because it can't trace dataflow to
+   * see that it ends up as a patternTool argument. The workaround is to inline
+   * the function into the patternTool() call.
    */
   private validateStandaloneFunction(
     func: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration,
