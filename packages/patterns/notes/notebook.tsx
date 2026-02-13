@@ -29,58 +29,24 @@ import {
 // ===== Shared Utility Functions =====
 
 /**
- * Extract noteIds and titles from a list of items for tracking/removal.
- * Notes have noteId, notebooks have title only.
- */
-const collectItemIdentifiers = (
-  items: NotePiece[],
-): { noteIds: string[]; titles: string[] } => {
-  const noteIds: string[] = [];
-  const titles: string[] = [];
-  for (const item of items) {
-    const noteId = (item as any)?.noteId;
-    const title = (item as any)?.title;
-    if (noteId) {
-      noteIds.push(noteId);
-    } else if (title) {
-      titles.push(title);
-    }
-  }
-  return { noteIds, titles };
-};
-
-/**
- * Create a predicate to check if an item should be removed based on noteId or title.
- */
-const createRemovalPredicate = (
-  noteIds: string[],
-  titles: string[],
-): (n: any) => boolean => {
-  return (n: any) => {
-    if (n?.noteId && noteIds.includes(n.noteId)) return true;
-    if (!n?.noteId && n?.title && titles.includes(n.title)) return true;
-    return false;
-  };
-};
-
-/**
- * Remove items matching the predicate from all notebooks' notes arrays.
- * Optionally skip a target notebook (for move operations).
+ * Remove items from all notebooks' notes arrays using equals() for identity comparison.
+ * Optionally skip a target notebook index (for move operations).
  */
 const removeFromAllNotebooks = (
   notebooks: Writable<NotebookPiece[]>,
-  shouldRemove: (n: any) => boolean,
+  itemsToRemove: NotePiece[],
   skipIndex?: number,
 ): void => {
   const notebooksList = notebooks.get();
   for (let nbIdx = 0; nbIdx < notebooksList.length; nbIdx++) {
     if (skipIndex !== undefined && nbIdx === skipIndex) continue;
 
-    const nbCell = notebooks.key(nbIdx);
-    const nbNotesCell = nbCell.key("notes");
+    const nbNotesCell = notebooks.key(nbIdx).key("notes");
     const nbNotes = nbNotesCell.get() ?? [];
 
-    const filtered = nbNotes.filter((n: any) => !shouldRemove(n));
+    const filtered = nbNotes.filter(
+      (n: any) => !itemsToRemove.some((item) => equals(n, item as any)),
+    );
     if (filtered.length !== nbNotes.length) {
       nbNotesCell.set(filtered);
     }
@@ -129,9 +95,6 @@ interface NotebookOutput {
   isEditingTitle: boolean;
 }
 
-// NOTE: showNewNoteModal, cancelNewNotePrompt, createNote, createNestedNotebook
-// all converted to actions inside pattern (closing over self now works with Default<> inputs)
-
 // Handler to remove a note from this notebook (but keep it in the space)
 const removeFromNotebook = handler<
   void,
@@ -171,11 +134,9 @@ const handleDropOntoCurrentNotebook = handler<
   if (isDraggedInSelection && selected.length > 1) {
     // Multi-item move
     const itemsToMove = selected.map((idx) => notesList[idx]).filter(Boolean);
-    const { noteIds, titles } = collectItemIdentifiers(itemsToMove);
-    const shouldRemove = createRemovalPredicate(noteIds, titles);
 
     // Remove from all notebooks
-    removeFromAllNotebooks(notebooks, shouldRemove);
+    removeFromAllNotebooks(notebooks, itemsToMove);
 
     // Add all to this notebook (deduplicated)
     for (const item of itemsToMove) {
@@ -189,11 +150,7 @@ const handleDropOntoCurrentNotebook = handler<
     // Single-item move
     if (notesList.some((n) => equals(sourceCell, n as any))) return;
 
-    const sourceTitle = (sourceCell as any).key("title").get();
-    const shouldRemove = (n: any) =>
-      n?.title === sourceTitle || equals(sourceCell, n as any);
-
-    removeFromAllNotebooks(notebooks, shouldRemove);
+    removeFromAllNotebooks(notebooks, [sourceCell as any]);
     sourceCell.key("isHidden").set(true);
     notes.push(sourceCell as any);
   }
@@ -232,8 +189,6 @@ const handleDropOntoNotebook = handler<
   if (isDraggedInSelection && selected.length > 1) {
     // Multi-item move
     const itemsToMove = selected.map((idx) => currentList[idx]).filter(Boolean);
-    const { noteIds, titles } = collectItemIdentifiers(itemsToMove);
-    const shouldRemove = createRemovalPredicate(noteIds, titles);
 
     // Add all to target (deduplicated)
     for (const item of itemsToMove) {
@@ -244,17 +199,20 @@ const handleDropOntoNotebook = handler<
     }
 
     // Find target notebook index to skip it during removal
-    const targetTitle = targetNotebook.key("title").get();
     const notebooksList = notebooks.get();
     const targetIndex = notebooksList.findIndex(
-      (nb: any) => nb?.title === targetTitle,
+      (nb: any) => equals(nb, targetNotebook),
     );
 
     // Remove from all notebooks except target
-    removeFromAllNotebooks(notebooks, shouldRemove, targetIndex);
+    removeFromAllNotebooks(notebooks, itemsToMove, targetIndex);
 
     // Remove from current notebook
-    currentNotes.set(currentList.filter((n: any) => !shouldRemove(n)));
+    currentNotes.set(
+      currentList.filter(
+        (n: any) => !itemsToMove.some((item) => equals(n, item as any)),
+      ),
+    );
     selectedNoteIndices.set([]);
   } else {
     // Single-item move
@@ -322,8 +280,6 @@ const navigateToChild = handler<
   },
 );
 
-// NOTE: selectAllNotes and deselectAllNotes converted to actions inside pattern
-
 // Handler to permanently delete selected notes from the space
 const deleteSelectedNotes = handler<
   void,
@@ -338,17 +294,22 @@ const deleteSelectedNotes = handler<
   const notesList = notes.get();
   const itemsToDelete = selected.map((idx) => notesList[idx]).filter(Boolean);
 
-  const { noteIds, titles } = collectItemIdentifiers(itemsToDelete);
-  const shouldDelete = createRemovalPredicate(noteIds, titles);
-
   // Remove from all notebooks
-  removeFromAllNotebooks(notebooks, shouldDelete);
+  removeFromAllNotebooks(notebooks, itemsToDelete);
 
   // Remove from this notebook's notes array
-  notes.set(notesList.filter((n: any) => !shouldDelete(n)));
+  notes.set(
+    notesList.filter(
+      (n: any) => !itemsToDelete.some((item) => equals(n, item as any)),
+    ),
+  );
 
   // Remove from allPieces (permanent delete)
-  allPieces.set(allPieces.get().filter((piece: any) => !shouldDelete(piece)));
+  allPieces.set(
+    allPieces.get().filter(
+      (piece: any) => !itemsToDelete.some((item) => equals(piece, item as any)),
+    ),
+  );
 
   selectedNoteIndices.set([]);
 });
@@ -449,9 +410,6 @@ const moveSelectedToNotebook = handler<
   const notesList = notes.get();
   const notesToMove = selected.map((idx) => notesList[idx]).filter(Boolean);
 
-  const { noteIds, titles } = collectItemIdentifiers(notesToMove);
-  const shouldRemove = createRemovalPredicate(noteIds, titles);
-
   // Add to target notebook
   const targetNotebookNotes = notebooks.key(nbIndex).key("notes");
   (targetNotebookNotes as Writable<NotePiece[] | undefined>).push(
@@ -459,10 +417,14 @@ const moveSelectedToNotebook = handler<
   );
 
   // Remove from all notebooks except target
-  removeFromAllNotebooks(notebooks, shouldRemove, nbIndex);
+  removeFromAllNotebooks(notebooks, notesToMove, nbIndex);
 
   // Remove from this notebook
-  notes.set(notesList.filter((n: any) => !shouldRemove(n)));
+  notes.set(
+    notesList.filter(
+      (n: any) => !notesToMove.some((item) => equals(n, item as any)),
+    ),
+  );
 
   selectedNoteIndices.set([]);
   selectedMoveNotebook.set("");
@@ -507,15 +469,14 @@ const createNotebookFromPrompt = handler<
   allPieces.push(newNotebook);
 
   if (actionType === "move") {
-    const { noteIds, titles } = collectItemIdentifiers(selectedItems);
-    const shouldRemove = createRemovalPredicate(noteIds, titles);
-
     // Remove from all existing notebooks
-    removeFromAllNotebooks(notebooks, shouldRemove);
+    removeFromAllNotebooks(notebooks, selectedItems);
 
     // Remove from this notebook, then add new notebook
     notes.set([
-      ...notesList.filter((n: any) => !shouldRemove(n)),
+      ...notesList.filter(
+        (n: any) => !selectedItems.some((item) => equals(n, item as any)),
+      ),
       newNotebook,
     ]);
   } else {
@@ -529,10 +490,6 @@ const createNotebookFromPrompt = handler<
   pendingNotebookAction.set("");
   showNewNotebookPrompt.set(false);
 });
-
-// NOTE: cancelNewNotebookPrompt converted to action inside pattern
-
-// NOTE: startEditingTitle, stopEditingTitle, handleTitleKeydown converted to actions inside pattern
 
 // Handler to toggle checkbox selection with shift-click support
 const toggleNoteCheckbox = handler<
