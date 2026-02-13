@@ -1683,9 +1683,14 @@ export class Runner {
       );
     }
 
+    // CT-1230: Pass bindRecipes: false to prevent premature alias binding in recipe
+    // arguments. When a subpattern is passed to map(), its aliases should not be
+    // bound to the current doc yet - they need to remain unbound until the recipe
+    // is actually instantiated for each mapped item.
     const mappedInputBindings = unwrapOneLevelAndBindtoDoc(
       inputBindings,
       processCell,
+      { bindRecipes: false },
     );
     const mappedOutputBindings = unwrapOneLevelAndBindtoDoc(
       outputBindings,

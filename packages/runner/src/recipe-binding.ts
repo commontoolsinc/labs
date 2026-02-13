@@ -1,6 +1,7 @@
 import { isRecord } from "@commontools/utils/types";
 import type { StorableValue } from "@commontools/memory/interface";
 import {
+  isRecipe,
   type Recipe,
   unsafe_originalRecipe,
   unsafe_parentRecipe,
@@ -88,13 +89,19 @@ export function sendValueToBinding<T>(
  *
  * @param binding - The binding to unwrap.
  * @param docOrCell - The doc or cell to bind to.
+ * @param options - Optional configuration.
+ * @param options.bindRecipes - If false, skip binding aliases inside recipe values.
+ *   This is used by raw/map nodes to prevent premature alias binding. Default: true.
  * @returns The unwrapped binding.
  */
 export function unwrapOneLevelAndBindtoDoc<T, U>(
   binding: T,
   cell: Cell<U>,
+  options?: { bindRecipes?: boolean },
 ): T {
-  function convert(binding: unknown): unknown {
+  const bindRecipes = options?.bindRecipes !== false;
+
+  function convert(binding: unknown, bindToDoc: boolean): unknown {
     if (isLegacyAlias(binding)) {
       const alias = { ...binding.$alias };
       if (typeof alias.cell === "number") {
@@ -105,15 +112,62 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
         } else {
           alias.cell = alias.cell - 1;
         }
-      } else if (!alias.cell) {
+      } else if (!alias.cell && bindToDoc) {
         alias.cell = cell.entityId;
+      } else if (
+        // CT-1230 WORKAROUND: Rebind local recipe aliases to the current doc.
+        //
+        // Problem: When a subpattern is used in .map(), its internal/argument/resultRef
+        // aliases could be bound to a doc from a previous execution context. When the
+        // pattern runs again (e.g., adding a new item), these stale bindings caused
+        // stream sentinels to not be found, making handlers incorrectly treated as lifts.
+        //
+        // Why this helps: If we detect a local alias (internal/argument/resultRef path)
+        // that's already bound to a different doc than our current context, we rebind it.
+        // This ensures the alias points to the correct doc for this execution.
+        //
+        // We're uncertain if this is the right architectural fix or just masking a deeper
+        // issue with how recipes capture their execution context.
+        bindToDoc &&
+        alias.cell &&
+        Array.isArray(alias.path) &&
+        (alias.path[0] === "internal" ||
+          alias.path[0] === "argument" ||
+          alias.path[0] === "resultRef")
+      ) {
+        const currentId = (alias.cell as { "/": string })["/"];
+        if (currentId !== cell.entityId["/"]) {
+          alias.cell = cell.entityId;
+        }
+      } else if (!bindToDoc && alias.cell) {
+        // CT-1230 WORKAROUND: Clear previously-bound alias when not binding to doc.
+        //
+        // Problem: If a recipe was serialized with an alias already bound to a specific
+        // doc, and we're now in a context where we shouldn't bind (e.g., processing
+        // a recipe argument to map()), that stale binding could cause issues.
+        //
+        // Why this helps: Dropping the binding allows the alias to be properly re-bound
+        // when the recipe is actually executed in its correct context.
+        delete alias.cell;
       }
       return { $alias: alias };
     } else if (Array.isArray(binding)) {
-      return binding.map((value) => convert(value));
+      return binding.map((value) => convert(value, bindToDoc));
     } else if (isRecord(binding)) {
+      // CT-1230 WORKAROUND: Don't bind aliases inside recipe values when bindRecipes=false.
+      //
+      // Problem: When raw/map nodes receive a recipe as an input value, we were binding
+      // the aliases inside that recipe to the current doc. But those aliases should
+      // remain unbound until the recipe is actually instantiated/executed.
+      //
+      // Why this helps: By checking isRecipe() and respecting bindRecipes option, we
+      // avoid premature binding of nested recipe aliases.
+      const shouldBind = bindToDoc && (bindRecipes || !isRecipe(binding));
       const result: Record<string | symbol, unknown> = Object.fromEntries(
-        Object.entries(binding).map(([key, value]) => [key, convert(value)]),
+        Object.entries(binding).map(([key, value]) => [
+          key,
+          convert(value, shouldBind),
+        ]),
       );
       if (binding[unsafe_originalRecipe]) {
         result[unsafe_originalRecipe] = binding[unsafe_originalRecipe];
@@ -121,7 +175,7 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
       return result;
     } else return binding;
   }
-  return convert(binding) as T;
+  return convert(binding, true) as T;
 }
 
 export function unsafe_noteParentOnRecipes(
