@@ -34,7 +34,8 @@ export default pattern<
 
   const pickerResult = computed(() => {
     if (initialResults.length === 0) return undefined;
-    const idx = confirmedIndex ?? selectedIndex.get();
+    const idx = confirmedIndex; // Auto-unwraps to number | null
+    if (idx === null) return undefined; // Wait for user confirmation
     return initialResults[Math.min(idx, initialResults.length - 1)];
   });
 

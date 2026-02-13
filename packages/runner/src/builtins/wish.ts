@@ -562,17 +562,13 @@ export function wish(
           },
         );
       }
-      suggestionPatternFetchPromise.then(async (pattern) => {
+      suggestionPatternFetchPromise.then((pattern) => {
         if (pattern) {
-          try {
-            await runtime.runSynced(
-              suggestionPatternResultCell!,
-              pattern,
-              suggestionPatternInput,
-            );
-          } catch (e) {
-            console.error("[wish] Failed to run suggestion pattern", e);
-          }
+          runtime.runSynced(
+            suggestionPatternResultCell!,
+            pattern,
+            suggestionPatternInput,
+          );
         }
       });
     } else {
@@ -580,9 +576,7 @@ export function wish(
         suggestionPatternResultCell,
         suggestionPattern,
         suggestionPatternInput,
-      ).catch((e: unknown) => {
-        console.error("[wish] Failed to run suggestion pattern", e);
-      });
+      );
     }
 
     if (!providedTx) tx.commit();
