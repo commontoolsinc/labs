@@ -562,9 +562,10 @@ export function wish(
           },
         );
       }
-      suggestionPatternFetchPromise.then((pattern) => {
+      // Fire-and-forget: errors surface through global unhandled rejection handlers
+      void suggestionPatternFetchPromise.then((pattern) => {
         if (pattern) {
-          runtime.runSynced(
+          return runtime.runSynced(
             suggestionPatternResultCell!,
             pattern,
             suggestionPatternInput,
@@ -572,7 +573,8 @@ export function wish(
         }
       });
     } else {
-      runtime.runSynced(
+      // Fire-and-forget: errors surface through global unhandled rejection handlers
+      void runtime.runSynced(
         suggestionPatternResultCell,
         suggestionPattern,
         suggestionPatternInput,
