@@ -129,6 +129,13 @@ const EnvSchema = z.object({
 
   // In development, you can optionally proxy the upstream SHELL
   SHELL_URL: z.string().optional(),
+
+  // ===========================================================================
+  // Experimental space-model feature flags (see ExperimentalOptions in runner)
+  // ===========================================================================
+  EXPERIMENTAL_RICH_STORABLE_VALUES: z.coerce.boolean().default(false),
+  EXPERIMENTAL_STORABLE_PROTOCOL: z.coerce.boolean().default(false),
+  EXPERIMENTAL_UNIFIED_JSON_ENCODING: z.coerce.boolean().default(false),
 });
 
 export type env = z.infer<typeof EnvSchema>;

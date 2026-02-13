@@ -11,6 +11,11 @@ export type InitializationData = {
   did: string;
   toolshedUrl: string;
   rawIdentity: KeyPairRaw;
+  experimental?: {
+    richStorableValues?: boolean;
+    storableProtocol?: boolean;
+    unifiedJsonEncoding?: boolean;
+  };
 };
 
 export function isInitializationData(

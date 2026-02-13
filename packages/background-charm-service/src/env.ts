@@ -21,6 +21,11 @@ const envSchema = z.object({
   IDENTITY: z.string().optional(),
   // Toolshed configuration
   API_URL: z.string().default("http://localhost:8000"),
+
+  // Experimental space-model feature flags (see ExperimentalOptions in runner)
+  EXPERIMENTAL_RICH_STORABLE_VALUES: z.coerce.boolean().default(false),
+  EXPERIMENTAL_STORABLE_PROTOCOL: z.coerce.boolean().default(false),
+  EXPERIMENTAL_UNIFIED_JSON_ENCODING: z.coerce.boolean().default(false),
   // Background Charm Service: default is public space "toolshed-system"
   //SERVICE_DID: z.string().default(
   //  "did:key:z6Mkfuw7h6jDwqVb6wimYGys14JFcyTem4Kqvdj9DjpFhY88",

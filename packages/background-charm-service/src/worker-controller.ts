@@ -24,6 +24,11 @@ export interface WorkerOptions {
   toolshedUrl: string;
   identity: Identity;
   timeoutMs?: number;
+  experimental?: {
+    richStorableValues?: boolean;
+    storableProtocol?: boolean;
+    unifiedJsonEncoding?: boolean;
+  };
 }
 
 export class WorkerControllerErrorEvent extends Event {
@@ -50,6 +55,7 @@ export class WorkerController extends EventTarget {
   private toolshedUrl: string;
   private identity: Identity;
   private timeoutMs: number;
+  private experimental?: WorkerOptions["experimental"];
   private msgId: number = 0;
   private pending = new Map<
     number,
@@ -66,6 +72,7 @@ export class WorkerController extends EventTarget {
     this.identity = options.identity;
     this.toolshedUrl = options.toolshedUrl;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TASK_TIMEOUT;
+    this.experimental = options.experimental;
 
     console.log(`${this.did}: Creating worker controller`);
 
@@ -90,6 +97,7 @@ export class WorkerController extends EventTarget {
         did: this.did,
         toolshedUrl: this.toolshedUrl,
         rawIdentity: this.identity.serialize(),
+        experimental: this.experimental,
       });
       this.state = WorkerState.Ready;
     } catch (e) {

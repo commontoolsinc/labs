@@ -245,6 +245,20 @@ export class RuntimeInternals extends EventTarget {
       })`,
     );
 
+    // Fetch server config (includes experimental flags)
+    let experimental: {
+      richStorableValues?: boolean;
+      storableProtocol?: boolean;
+      unifiedJsonEncoding?: boolean;
+    } | undefined;
+    try {
+      const metaResponse = await fetch(new URL("/api/meta", apiUrl));
+      const meta = await metaResponse.json();
+      experimental = meta.experimental;
+    } catch (e) {
+      console.warn("Failed to fetch /api/meta for experimental flags:", e);
+    }
+
     // Worker script is bundled with shell assets, so load from shell origin
     // (not apiUrl which points to the backend/router)
     const transport = await WebWorkerRuntimeTransport.connect({
@@ -259,6 +273,7 @@ export class RuntimeInternals extends EventTarget {
       spaceIdentity: session.spaceIdentity,
       spaceDid: session.space,
       spaceName: session.spaceName,
+      experimental,
     });
 
     // Wait for PieceManager to sync
