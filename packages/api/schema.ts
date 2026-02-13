@@ -21,7 +21,6 @@ import type {
   ModuleFactory,
   Opaque,
   OpaqueRef,
-  SELF,
   Stream,
 } from "commontools";
 
