@@ -31,7 +31,11 @@ export const menuPlannerScenario: PatternIntegrationScenario<
       events: [
         {
           stream: "assignMeal",
-          payload: { day: "Monday", meal: "breakfast", pattern: "Oatmeal Bowl" },
+          payload: {
+            day: "Monday",
+            meal: "breakfast",
+            pattern: "Oatmeal Bowl",
+          },
         },
       ],
       expect: [

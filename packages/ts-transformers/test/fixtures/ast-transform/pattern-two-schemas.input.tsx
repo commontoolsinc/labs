@@ -3,7 +3,10 @@ import { pattern, type JSONSchema } from "commontools";
 import "commontools/schema";
 
 // Test that pattern with both schemas already present is not transformed
-export default pattern(
+interface Input { count: number }
+interface Result { doubled: number }
+
+export default pattern<Input, Result>(
   {
     type: "object",
     properties: {

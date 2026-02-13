@@ -406,10 +406,14 @@ export const patternTool = (<
   T,
   E extends Partial<T> = Record<PropertyKey, never>,
 >(
-  fnOrPattern: ((input: OpaqueRef<Required<T>>) => any) | PatternFactory<T, any>,
+  fnOrPattern:
+    | ((input: OpaqueRef<Required<T>>) => any)
+    | PatternFactory<T, any>,
   extraParams?: Opaque<E>,
 ): PatternToolResult<E> => {
-  const resolvedPattern = isPattern(fnOrPattern) ? fnOrPattern : pattern(fnOrPattern);
+  const resolvedPattern = isPattern(fnOrPattern)
+    ? fnOrPattern
+    : pattern(fnOrPattern);
 
   return {
     pattern: resolvedPattern,

@@ -144,7 +144,9 @@ async function phase1SavePatternAndData(
   const ctx = createTestContext(identity);
 
   // Compile and save the pattern
-  const compiled = await ctx.runtime.patternManager.compilePattern(patternProgram);
+  const compiled = await ctx.runtime.patternManager.compilePattern(
+    patternProgram,
+  );
   const patternId = ctx.runtime.patternManager.registerPattern(
     compiled,
     patternProgram,
@@ -180,7 +182,10 @@ async function phase2LoadAndVerify(
   const ctx = createTestContext(identity);
 
   // Load pattern from storage (fresh cache)
-  const pattern = await ctx.runtime.patternManager.loadPattern(patternId, space);
+  const pattern = await ctx.runtime.patternManager.loadPattern(
+    patternId,
+    space,
+  );
   console.log("Pattern loaded from storage");
 
   // Load data cell from storage
@@ -191,7 +196,12 @@ async function phase2LoadAndVerify(
   // Create result cell and run pattern
   const resultCell = getResultCell(ctx.runtime, space, RESULT_CELL_ID_PHASE_2);
   const tx = ctx.runtime.edit();
-  const runResult = ctx.runtime.run(tx, pattern, { data: dataCell }, resultCell);
+  const runResult = ctx.runtime.run(
+    tx,
+    pattern,
+    { data: dataCell },
+    resultCell,
+  );
   await tx.commit();
   await runResult.pull();
 
@@ -228,7 +238,10 @@ async function phase3ReactivityAndIsolation(
   const ctx = createTestContext(identity);
 
   // Load pattern from storage (fresh cache)
-  const pattern = await ctx.runtime.patternManager.loadPattern(patternId, space);
+  const pattern = await ctx.runtime.patternManager.loadPattern(
+    patternId,
+    space,
+  );
   console.log("Pattern loaded from storage (third runtime)");
 
   // Create a NEW input cell for Phase 3's instance (same initial values)

@@ -82,7 +82,9 @@ const normalizeSettings = (input: SettingsConfig | undefined) => {
 
 const liftNormalizeSettings = lift(normalizeSettings);
 
-export const counterWithHierarchicalDefaults = pattern<HierarchicalDefaultsArgs>(
+export const counterWithHierarchicalDefaults = pattern<
+  HierarchicalDefaultsArgs
+>(
   "Counter With Hierarchical Defaults",
   ({ value, settings }) => {
     const resolvedSettings = liftNormalizeSettings(settings);

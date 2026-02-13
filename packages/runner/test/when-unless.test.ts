@@ -108,7 +108,12 @@ describe("when and unless built-in functions", () => {
         undefined,
         tx,
       );
-      const result = runtime.run(tx, testPattern, { condition: 42 }, resultCell);
+      const result = runtime.run(
+        tx,
+        testPattern,
+        { condition: 42 },
+        resultCell,
+      );
       tx.commit();
 
       const value = await result.pull();
@@ -152,7 +157,12 @@ describe("when and unless built-in functions", () => {
         undefined,
         tx,
       );
-      const result = runtime.run(tx, testPattern, { condition: "" }, resultCell);
+      const result = runtime.run(
+        tx,
+        testPattern,
+        { condition: "" },
+        resultCell,
+      );
       tx.commit();
 
       const value = await result.pull();
@@ -303,7 +313,12 @@ describe("when and unless built-in functions", () => {
         undefined,
         tx,
       );
-      const result = runtime.run(tx, testPattern, { condition: 42 }, resultCell);
+      const result = runtime.run(
+        tx,
+        testPattern,
+        { condition: 42 },
+        resultCell,
+      );
       tx.commit();
 
       const value = await result.pull();
@@ -374,7 +389,12 @@ describe("when and unless built-in functions", () => {
         undefined,
         tx,
       );
-      const result = runtime.run(tx, testPattern, { condition: "" }, resultCell);
+      const result = runtime.run(
+        tx,
+        testPattern,
+        { condition: "" },
+        resultCell,
+      );
       tx.commit();
 
       const value = await result.pull();
@@ -397,7 +417,12 @@ describe("when and unless built-in functions", () => {
         undefined,
         tx,
       );
-      const result = runtime.run(tx, testPattern, { name: "Alice" }, resultCell);
+      const result = runtime.run(
+        tx,
+        testPattern,
+        { name: "Alice" },
+        resultCell,
+      );
       tx.commit();
 
       const value = await result.pull();

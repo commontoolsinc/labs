@@ -56,7 +56,8 @@ describe("generateObject with tools", () => {
     tx = runtime.edit();
 
     const { commontools } = createBuilder();
-    ({ pattern, generateObject, handler, Cell, patternTool, str } = commontools);
+    ({ pattern, generateObject, handler, Cell, patternTool, str } =
+      commontools);
     dummyPattern = pattern("Dummy Tool", () => ({}));
   });
 

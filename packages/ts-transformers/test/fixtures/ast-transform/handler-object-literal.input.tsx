@@ -11,7 +11,7 @@ const myHandler = handler((_, state: State) => {
   state.value.set(state.value.get() + 1);
 });
 
-export default pattern({
+export default pattern<State>({
   type: "object",
   properties: {
     value: { type: "number", asCell: true },

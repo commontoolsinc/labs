@@ -9,7 +9,7 @@ import {
   type Pattern,
 } from "../src/builder/types.ts";
 import { lift } from "../src/builder/module.ts";
-import { popFrame, pushFrame, pattern } from "../src/builder/pattern.ts";
+import { pattern, popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { opaqueRef } from "../src/builder/opaque-ref.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
@@ -395,7 +395,8 @@ describe("pattern", () => {
       },
     );
 
-    const { result, nodes, argumentSchema, resultSchema } = capitalizeSsnPattern;
+    const { result, nodes, argumentSchema, resultSchema } =
+      capitalizeSsnPattern;
     expect(isPattern(capitalizeSsnPattern)).toBe(true);
     expect(argumentSchema).toMatchObject(UserSchema);
     expect(nodes).toHaveLength(1);

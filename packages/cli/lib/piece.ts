@@ -196,7 +196,9 @@ export async function savePiecePattern(
   if (iframePattern) {
     const userCode = extractUserCode(iframePattern.src);
     if (!userCode) {
-      throw new Error(`No user code found in iframe pattern "${config.piece}".`);
+      throw new Error(
+        `No user code found in iframe pattern "${config.piece}".`,
+      );
     }
     await Deno.writeTextFile(
       join(outPath, "main.iframe.js"),

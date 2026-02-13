@@ -70,7 +70,11 @@ describe("PatternManager program persistence", () => {
     expect(metaFileNames).toEqual(["/main.tsx", "/util.ts"].sort());
 
     // Verify we can re-load and run the saved pattern
-    const loaded = await runtime.patternManager.loadPattern(patternId, space, tx);
+    const loaded = await runtime.patternManager.loadPattern(
+      patternId,
+      space,
+      tx,
+    );
     const resultCell = runtime.getCell<{ result: number }>(
       space,
       "pattern-manager: run loaded",
@@ -166,7 +170,9 @@ describe("PatternManager.compileOrGetPattern", () => {
   });
 
   it("returns cached pattern on second call (same instance)", async () => {
-    const first = await runtime.patternManager.compileOrGetPattern(simpleProgram);
+    const first = await runtime.patternManager.compileOrGetPattern(
+      simpleProgram,
+    );
     const second = await runtime.patternManager.compileOrGetPattern(
       simpleProgram,
     );
@@ -176,7 +182,9 @@ describe("PatternManager.compileOrGetPattern", () => {
   });
 
   it("compiles different patterns for different programs", async () => {
-    const first = await runtime.patternManager.compileOrGetPattern(simpleProgram);
+    const first = await runtime.patternManager.compileOrGetPattern(
+      simpleProgram,
+    );
     const second = await runtime.patternManager.compileOrGetPattern(
       differentProgram,
     );

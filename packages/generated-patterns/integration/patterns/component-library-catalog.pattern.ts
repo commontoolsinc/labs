@@ -718,7 +718,11 @@ function sanitizeRegistrationEntries(
     if (!entry || typeof entry !== "object") continue;
     const component = componentMap.get(entry.componentId);
     if (!component) continue;
-    const pattern = sanitizeRecipeLabel(entry.pattern, component, component.name);
+    const pattern = sanitizeRecipeLabel(
+      entry.pattern,
+      component,
+      component.name,
+    );
     const allowed = new Set(component.props);
     const props = entry.props
       .filter((prop: string) => allowed.has(prop))

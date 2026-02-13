@@ -23,9 +23,9 @@ import {
   unsafe_originalPattern,
 } from "./builder/types.ts";
 import {
+  patternFromFrame,
   popFrame,
   pushFrameFromCause,
-  patternFromFrame,
 } from "./builder/pattern.ts";
 import { type Cell, isCell } from "./cell.ts";
 import { type Action } from "./scheduler.ts";
@@ -474,7 +474,9 @@ export class Runner {
           const previousPatternId = currentPatternId;
           currentPatternId = newPatternId;
 
-          const resolved = this.runtime.patternManager.patternById(newPatternId);
+          const resolved = this.runtime.patternManager.patternById(
+            newPatternId,
+          );
           if (!resolved) {
             // Async load for pattern change after initial start.
             // Errors are logged here since there's no caller to propagate to.
@@ -623,7 +625,10 @@ export class Runner {
     }
     const pattern = this.runtime.patternManager.patternById(patternId);
     if (!pattern) {
-      return this.runtime.patternManager.loadPattern(patternId, resultCell.space)
+      return this.runtime.patternManager.loadPattern(
+        patternId,
+        resultCell.space,
+      )
         .then((loaded) => {
           if (loaded) {
             return this.doStart(rootCell, seenCells);

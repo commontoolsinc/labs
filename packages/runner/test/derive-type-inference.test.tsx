@@ -253,14 +253,17 @@ describe("derive type inference", () => {
       }
 
       // Create a pattern that returns an object with an array property
-      const Chatbot = pattern<ChatbotInput, ChatbotOutput>("TestChatbot", () => {
-        const messagesRef = Cell.of<BuiltInLLMMessage[]>()
-          .getAsOpaqueRefProxy();
+      const Chatbot = pattern<ChatbotInput, ChatbotOutput>(
+        "TestChatbot",
+        () => {
+          const messagesRef = Cell.of<BuiltInLLMMessage[]>()
+            .getAsOpaqueRefProxy();
 
-        return {
-          messages: messagesRef,
-        };
-      });
+          return {
+            messages: messagesRef,
+          };
+        },
+      );
 
       // Call the pattern - this is like `const omnibot = Chatbot(...)`
       const omnibot = Chatbot({});

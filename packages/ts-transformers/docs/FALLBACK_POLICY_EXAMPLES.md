@@ -359,13 +359,13 @@ accepts `unknown` to enable wrapping any function.
 
 ## Summary Table
 
-| Function    | Explicit Types | Partial Types                  | No Types                       | Philosophy                      |
-| ----------- | -------------- | ------------------------------ | ------------------------------ | ------------------------------- |
+| Function    | Explicit Types | Partial Types                  | No Types                       | Philosophy                       |
+| ----------- | -------------- | ------------------------------ | ------------------------------ | -------------------------------- |
 | **Pattern** | ✅ Transforms  | ✅ Transforms                  | ❌ No transform                | Strict: patterns should be typed |
-| **Handler** | ✅ Transforms  | ✅ Transforms (uses `unknown`) | ✅ Transforms (uses `unknown`) | Lenient: events are dynamic     |
-| **Pattern** | ✅ Transforms  | ✅ Transforms                  | ✅ Minimal transform           | Flexible: inference optional    |
-| **Derive**  | ✅ Transforms  | ✅ Transforms (uses `unknown`) | ✅ Transforms (uses `unknown`) | Moderate: tries to infer        |
-| **Lift**    | ✅ Transforms  | ✅ Transforms (uses `unknown`) | ✅ Transforms (uses `unknown`) | Moderate: wraps any function    |
+| **Handler** | ✅ Transforms  | ✅ Transforms (uses `unknown`) | ✅ Transforms (uses `unknown`) | Lenient: events are dynamic      |
+| **Pattern** | ✅ Transforms  | ✅ Transforms                  | ✅ Minimal transform           | Flexible: inference optional     |
+| **Derive**  | ✅ Transforms  | ✅ Transforms (uses `unknown`) | ✅ Transforms (uses `unknown`) | Moderate: tries to infer         |
+| **Lift**    | ✅ Transforms  | ✅ Transforms (uses `unknown`) | ✅ Transforms (uses `unknown`) | Moderate: wraps any function     |
 
 ## Key Questions for Phase 3
 

@@ -21,7 +21,6 @@ import type {
   ModuleFactory,
   Opaque,
   OpaqueRef,
-  PatternFactory,
   SELF,
   Stream,
 } from "commontools";
@@ -323,18 +322,14 @@ export type SchemaWithoutCell<
 // ===== Module Augmentation for Schema-based Overloads =====
 
 declare module "commontools" {
-  // Augment PatternFunction with schema-based overload
-  interface PatternFunction {
-    <IS extends JSONSchema = JSONSchema, OS extends JSONSchema = JSONSchema>(
-      fn: (
-        input: OpaqueRef<Schema<IS>> & {
-          [SELF]: OpaqueRef<Schema<OS>>;
-        },
-      ) => Opaque<Schema<OS>>,
-      argumentSchema: IS,
-      resultSchema: OS,
-    ): PatternFactory<SchemaWithoutCell<IS>, SchemaWithoutCell<OS>>;
-  }
+  // NOTE: PatternFunction schema-based overloads were removed during the
+  // recipe→pattern refactor. The old RecipeFunction had overloads here that
+  // inferred TypeScript types from JSONSchema literals (e.g. allowing
+  // `recipe(schema, fn)` to infer the callback parameter types from the schema).
+  // These were only used in test fixtures, not production code, so they were
+  // dropped rather than ported to the new PatternFunction signatures. If you
+  // need schema-inference overloads for pattern(), add them here following the
+  // schemas-first argument order: `pattern(argumentSchema, resultSchema, fn)`.
 
   // Augment LiftFunction with schema-based overload
   interface LiftFunction {

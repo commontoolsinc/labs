@@ -2,7 +2,12 @@ import { getLogger } from "@commontools/utils/logger";
 import { isRecord } from "@commontools/utils/types";
 import type { MemorySpace, URI } from "@commontools/memory/interface";
 import { getTopFrame } from "./builder/pattern.ts";
-import { type Frame, type Module, type Pattern, TYPE } from "./builder/types.ts";
+import {
+  type Frame,
+  type Module,
+  type Pattern,
+  TYPE,
+} from "./builder/types.ts";
 import type { Cancel } from "./cancel.ts";
 import {
   getCellOrThrow,

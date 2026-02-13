@@ -43,7 +43,7 @@ const addItem = handler // <
   },
 );
 
-export default pattern(inputSchema, outputSchema, ({ title, items }) => {
+export default pattern<InputSchemaInterface, OutputSchemaInterface>(inputSchema, outputSchema, ({ title, items }) => {
   const items_count = items.length;
 
   return {

@@ -2069,7 +2069,10 @@ describe("wish built-in", () => {
       };
 
       const compiled = await runtime.patternManager.compilePattern(program);
-      const patternId = runtime.patternManager.registerPattern(compiled, program);
+      const patternId = runtime.patternManager.registerPattern(
+        compiled,
+        program,
+      );
       const loadedPattern = await runtime.patternManager.loadPattern(
         patternId,
         space,
@@ -2121,7 +2124,10 @@ describe("wish built-in", () => {
       };
 
       const compiled = await runtime.patternManager.compilePattern(program);
-      const patternId = runtime.patternManager.registerPattern(compiled, program);
+      const patternId = runtime.patternManager.registerPattern(
+        compiled,
+        program,
+      );
       const loadedPattern = await runtime.patternManager.loadPattern(
         patternId,
         space,

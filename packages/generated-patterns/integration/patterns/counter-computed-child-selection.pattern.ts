@@ -84,7 +84,9 @@ const fallbackSelection: ChildView = {
   label: "Counter 1 value 0",
 };
 
-export const counterComputedChildSelection = pattern<ComputedChildSelectionArgs>(
+export const counterComputedChildSelection = pattern<
+  ComputedChildSelectionArgs
+>(
   "Counter With Computed Child Selection",
   ({ counts }) => {
     const normalizedCounts = computed(() => sanitizeCounts(counts));

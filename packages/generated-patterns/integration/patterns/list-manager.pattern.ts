@@ -1,5 +1,13 @@
 /// <cts-enable />
-import { Cell, Default, derive, handler, lift, pattern, str } from "commontools";
+import {
+  Cell,
+  Default,
+  derive,
+  handler,
+  lift,
+  pattern,
+  str,
+} from "commontools";
 
 interface Item {
   label: string;

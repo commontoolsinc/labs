@@ -73,10 +73,10 @@ export {
 } from "./builder/env.ts";
 export {
   getTopFrame,
+  patternFromFrame,
   popFrame,
   pushFrame,
   pushFrameFromCause,
-  patternFromFrame,
 } from "./builder/pattern.ts";
 export {
   AuthSchema,
@@ -99,9 +99,9 @@ export {
   type NodeFactory,
   type Opaque,
   type OpaqueRef,
-  type Props,
   type Pattern,
   type PatternFactory,
+  type Props,
   type RenderNode,
   type Schema,
   schema,

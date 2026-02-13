@@ -279,7 +279,8 @@ on TypeScript's understanding, even when that might not match user expectations.
 
 **Priority 3: Additional Runtime Functions**
 
-- [ ] `pattern-variations` - Comprehensive pattern() testing (with/without schema)
+- [ ] `pattern-variations` - Comprehensive pattern() testing (with/without
+      schema)
 - [ ] `handler-variations` - Comprehensive handler() testing (with/without
       schema)
 - [ ] `wish-function` - Test wish() schema injection

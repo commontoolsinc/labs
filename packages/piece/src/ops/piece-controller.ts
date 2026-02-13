@@ -120,7 +120,10 @@ export class PieceController<T = unknown> {
     const space = this.#manager.getSpace();
     // Ensure the pattern is loaded first - this populates the metadata
     await this.#manager.runtime.patternManager.loadPattern(patternId, space);
-    return this.#manager.runtime.patternManager.loadPatternMeta(patternId, space);
+    return this.#manager.runtime.patternManager.loadPatternMeta(
+      patternId,
+      space,
+    );
   }
 
   // Returns an `IFramePattern` for the piece, or `undefined`

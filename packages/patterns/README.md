@@ -80,7 +80,8 @@ keywords/features.
 
 - examples/ct-render.tsx: Rendering sub-patterns with ct-render component
   - **Data types**: number (counter value)
-  - **Keywords**: ct-render, $cell, nested patterns, pattern composition, handler
+  - **Keywords**: ct-render, $cell, nested patterns, pattern composition,
+    handler
 
 - ct-select.tsx: Dropdown select component with various value types
   - **Data types**: string, number

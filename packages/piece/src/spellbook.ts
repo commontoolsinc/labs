@@ -103,7 +103,9 @@ export async function saveSpell(
 ): Promise<boolean> {
   try {
     // Get all the required data from commontools first
-    const patternMetaResult = runtime.patternManager.getPatternMeta(spell as any);
+    const patternMetaResult = runtime.patternManager.getPatternMeta(
+      spell as any,
+    );
     const { src, spec, parents } = patternMetaResult || {};
     if (!isRecord(spell)) {
       throw new Error("Invalid spell.");

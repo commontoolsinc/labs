@@ -138,7 +138,9 @@ const liftBuildValidationSnapshot = (input: {
   };
 };
 
-export const counterWithCrossFieldValidation = pattern<CrossFieldValidationArgs>(
+export const counterWithCrossFieldValidation = pattern<
+  CrossFieldValidationArgs
+>(
   "Counter With Cross Field Validation",
   ({ value, limit, step }) => {
     const auditTrail = cell<ValidationEntry[]>([], { type: "array" });
