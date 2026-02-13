@@ -1,17 +1,17 @@
 import * as __ctHelpers from "commontools";
 /**
- * Regression: .map() on a property access of a computed result inside
- * another computed() should NOT be transformed to .mapWithPattern().
+ * Regression: .map() on a computed result assigned to a local variable
+ * inside another computed() should NOT be transformed to .mapWithPattern().
  *
  * Inside a derive callback, OpaqueRef values are unwrapped to plain JS,
- * so `result.tasks` is a plain array.
+ * so `localVar` is a plain array and .mapWithPattern() doesn't exist on it.
  */
-import { computed, recipe, UI } from "commontools";
+import { computed, pattern, UI } from "commontools";
 interface Item {
     name: string;
-    done: boolean;
+    price: number;
 }
-export default recipe({
+export default pattern({
     type: "object",
     properties: {
         items: {
@@ -29,11 +29,11 @@ export default recipe({
                 name: {
                     type: "string"
                 },
-                done: {
-                    type: "boolean"
+                price: {
+                    type: "number"
                 }
             },
-            required: ["name", "done"]
+            required: ["name", "price"]
         }
     }
 } as const satisfies __ctHelpers.JSONSchema, {
@@ -67,7 +67,7 @@ export default recipe({
         }
     }
 } as const satisfies __ctHelpers.JSONSchema, ({ items }) => {
-    const result = __ctHelpers.derive({
+    const filtered = __ctHelpers.derive({
         type: "object",
         properties: {
             items: {
@@ -86,28 +86,19 @@ export default recipe({
                     name: {
                         type: "string"
                     },
-                    done: {
-                        type: "boolean"
+                    price: {
+                        type: "number"
                     }
                 },
-                required: ["name", "done"]
+                required: ["name", "price"]
             }
         }
     } as const satisfies __ctHelpers.JSONSchema, {
-        type: "object",
-        properties: {
-            tasks: {
-                type: "array",
-                items: {
-                    $ref: "#/$defs/Item",
-                    asOpaque: true
-                }
-            },
-            view: {
-                type: "string"
-            }
+        type: "array",
+        items: {
+            $ref: "#/$defs/Item",
+            asOpaque: true
         },
-        required: ["tasks", "view"],
         $defs: {
             Item: {
                 type: "object",
@@ -115,38 +106,29 @@ export default recipe({
                     name: {
                         type: "string"
                     },
-                    done: {
-                        type: "boolean"
+                    price: {
+                        type: "number"
                     }
                 },
-                required: ["name", "done"]
+                required: ["name", "price"]
             }
         }
-    } as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => ({
-        tasks: items.filter((i) => !i.done),
-        view: "inbox",
-    }));
+    } as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => items.filter((i) => i.price > 100));
     return {
         [UI]: (<div>
         {__ctHelpers.derive({
                 type: "object",
                 properties: {
-                    result: {
-                        type: "object",
-                        properties: {
-                            tasks: {
-                                type: "array",
-                                items: {
-                                    $ref: "#/$defs/Item",
-                                    asOpaque: true
-                                },
-                                asOpaque: true
-                            }
+                    filtered: {
+                        type: "array",
+                        items: {
+                            $ref: "#/$defs/Item",
+                            asOpaque: true
                         },
-                        required: ["tasks"]
+                        asOpaque: true
                     }
                 },
-                required: ["result"],
+                required: ["filtered"],
                 $defs: {
                     Item: {
                         type: "object",
@@ -154,11 +136,11 @@ export default recipe({
                             name: {
                                 type: "string"
                             },
-                            done: {
-                                type: "boolean"
+                            price: {
+                                type: "number"
                             }
                         },
-                        required: ["name", "done"]
+                        required: ["name", "price"]
                     }
                 }
             } as const satisfies __ctHelpers.JSONSchema, {
@@ -178,10 +160,9 @@ export default recipe({
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, { result: {
-                    tasks: result.tasks
-                } }, ({ result }) => {
-                return result.tasks.map((task) => <li>{task.name}</li>);
+            } as const satisfies __ctHelpers.JSONSchema, { filtered: filtered }, ({ filtered }) => {
+                const localVar = filtered;
+                return localVar.map((item) => <li>{item.name}</li>);
             })}
       </div>),
     };

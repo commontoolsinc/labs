@@ -10,7 +10,33 @@ interface TestOutput {
     title: string;
     count: number;
 }
-export default pattern(({ title, [SELF]: self }) => {
+export default pattern({
+    type: "object",
+    properties: {
+        title: {
+            type: "string",
+            "default": ""
+        }
+    },
+    required: ["title"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        title: {
+            type: "string"
+        },
+        count: {
+            type: "number"
+        },
+        $NAME: {
+            type: "string"
+        },
+        $UI: {
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }
+    },
+    required: ["title", "count", "$NAME", "$UI"]
+} as const satisfies __ctHelpers.JSONSchema, ({ title, [SELF]: self }) => {
     const count = Writable.of(0, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema);
@@ -95,33 +121,7 @@ export default pattern(({ title, [SELF]: self }) => {
         title,
         count,
     };
-}, {
-    type: "object",
-    properties: {
-        title: {
-            type: "string",
-            "default": ""
-        }
-    },
-    required: ["title"]
-} as const satisfies __ctHelpers.JSONSchema, {
-    type: "object",
-    properties: {
-        title: {
-            type: "string"
-        },
-        count: {
-            type: "number"
-        },
-        $NAME: {
-            type: "string"
-        },
-        $UI: {
-            $ref: "https://commonfabric.org/schemas/vnode.json"
-        }
-    },
-    required: ["title", "count", "$NAME", "$UI"]
-} as const satisfies __ctHelpers.JSONSchema);
+});
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

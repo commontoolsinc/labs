@@ -6,14 +6,14 @@
  * Inside a derive callback, OpaqueRef values are unwrapped to plain JS,
  * so `result.tasks` is a plain array.
  */
-import { computed, recipe, UI } from "commontools";
+import { computed, pattern, UI } from "commontools";
 
 interface Item {
   name: string;
   done: boolean;
 }
 
-export default recipe<{ items: Item[] }>("ComputedPropertyAccessMap", ({ items }) => {
+export default pattern<{ items: Item[] }>(({ items }) => {
   const result = computed(() => ({
     tasks: items.filter((i) => !i.done),
     view: "inbox",
