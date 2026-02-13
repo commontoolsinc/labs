@@ -43,6 +43,7 @@ export default pattern<Record<string, never>>((_) => {
     context: {
       emails: emailString,
     },
+    initialResults: [],
   });
 
   return {
