@@ -1219,4 +1219,37 @@ Deno.test("Standalone Function Validation", async (t) => {
       );
     },
   );
+
+  await t.step(
+    "errors only on inner function, not outer, when nested function has reactive ops",
+    async () => {
+      const source = `/// <cts-enable />
+      import { computed, Cell } from "commontools";
+
+      const count = {} as Cell<number>;
+
+      const outer = () => {
+        // Nested function uses computed() — error should be on inner,
+        // not on outer, because validateStandaloneFunction skips
+        // nested function bodies when walking the outer function.
+        const inner = () => {
+          return computed(() => count.get() * 2);
+        };
+        return inner;
+      };
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics).filter(
+        (e) => e.type === "standalone-function:reactive-operation",
+      );
+      // Exactly 1 error — on the inner function, not the outer
+      assertEquals(
+        errors.length,
+        1,
+        "Should flag inner standalone function but not outer",
+      );
+    },
+  );
 });
