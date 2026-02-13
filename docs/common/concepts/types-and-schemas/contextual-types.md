@@ -36,3 +36,18 @@ export default pattern<WritableInput>(({ items }) => {
   };
 });
 ```
+
+## Schema Visibility
+
+Schemas act as a visibility filter at runtime. When you read a reference typed as `SomeInterface`, only properties declared in that interface are visible — everything else is dropped, even if the underlying data contains it.
+
+```typescript
+// If Notebook.notes is typed as NotePiece[]...
+interface NotePiece { title?: string; noteId?: string; }
+
+// ...then parentNotebook is invisible when reading through notes,
+// even though the Note's own data contains it.
+notebook.notes[0].parentNotebook  // undefined (not in NotePiece)
+```
+
+**Fix:** Add the property to the shared interface so it's visible through the schema.
