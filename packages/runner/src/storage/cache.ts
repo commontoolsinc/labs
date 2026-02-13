@@ -1104,9 +1104,10 @@ export class Replica {
     );
 
     // These push transaction that will commit desired state to a remote.
+    const immediate = source?.immediate === true;
     const commitPromise = this.remote.transact({
       changes: getChanges([...claims, ...changedFacts] as Statement[]),
-    });
+    }, immediate ? { immediate } : undefined);
     this.commitPromises.add(commitPromise);
     const result = await commitPromise;
     this.commitPromises.delete(commitPromise);
@@ -1881,11 +1882,13 @@ export class Provider implements IStorageProvider {
     }
   }
 
-  synced() {
-    return Promise.all([
+  async synced() {
+    // Flush any debounced batch so pending transacts start immediately.
+    await this.workspace.remote.flush();
+    await Promise.all([
       Promise.all(this.serverSubscriptions.getAllPromises()),
       Promise.all(this.workspace.commitPromises),
-    ]) as unknown as Promise<void>;
+    ]);
   }
 
   get<T extends StorableValue = StorableValue>(

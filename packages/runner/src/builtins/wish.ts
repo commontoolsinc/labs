@@ -14,8 +14,6 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { type JSONSchema, NAME, type Recipe, UI } from "../builder/types.ts";
 import { getRecipeEnvironment } from "../env.ts";
 
-const WISH_TSX_PATH = getRecipeEnvironment().apiUrl +
-  "api/patterns/system/wish.tsx";
 const SUGGESTION_TSX_PATH = getRecipeEnvironment().apiUrl +
   "api/patterns/system/suggestion.tsx";
 
@@ -469,32 +467,6 @@ async function resolveBase(
   throw new WishError(`Wish target "${parsed.key}" is not recognized.`);
 }
 
-// fetchWishPattern runs at runtime scope, shared across all wish invocations
-let wishPatternFetchPromise: Promise<Recipe | undefined> | undefined;
-let wishPattern: Recipe | undefined;
-
-async function fetchWishPattern(
-  runtime: Runtime,
-): Promise<Recipe | undefined> {
-  try {
-    const program = await runtime.harness.resolve(
-      new HttpProgramResolver(WISH_TSX_PATH),
-    );
-
-    if (!program) {
-      throw new WishError("Can't load wish.tsx");
-    }
-    const pattern = await runtime.recipeManager.compileRecipe(program);
-
-    if (!pattern) throw new WishError("Can't compile wish.tsx");
-
-    return pattern;
-  } catch (e) {
-    console.error("[wish] fetchWishPattern: Failed to load wish.tsx", e);
-    return undefined;
-  }
-}
-
 // fetchSuggestionPattern runs at runtime scope, shared across all wish invocations
 let suggestionPatternFetchPromise: Promise<Recipe | undefined> | undefined;
 let suggestionPattern: Recipe | undefined;
@@ -548,64 +520,22 @@ export function wish(
   parentCell: Cell<any>,
   runtime: Runtime,
 ): Action {
-  // Per-instance wish pattern loading.
-  let wishPatternInput: WishParams | undefined;
-  let wishPatternResultCell: Cell<WishState<any>> | undefined;
-
-  async function launchWishPattern(
-    input?: WishParams & { candidates?: Cell<Cell<unknown>[]> },
-    providedTx?: IExtendedStorageTransaction,
-  ): Promise<Cell<WishState<any>>> {
-    if (input) wishPatternInput = input;
-
-    const tx = providedTx || runtime.edit();
-
-    if (!wishPatternResultCell) {
-      wishPatternResultCell = runtime.getCell(
-        parentCell.space,
-        { wish: { wishPattern: cause } },
-        undefined,
-        tx,
-      );
-
-      addCancel(() => runtime.runner.stop(wishPatternResultCell!));
-    }
-
-    // Wait for pattern to be loaded
-    if (!wishPattern) {
-      if (!wishPatternFetchPromise) {
-        wishPatternFetchPromise = fetchWishPattern(runtime).then((pattern) => {
-          wishPattern = pattern;
-          return pattern;
-        });
-      }
-      await wishPatternFetchPromise;
-    }
-
-    // Now run the pattern - await to ensure it's set up before returning
-    if (wishPattern) {
-      await runtime.runSynced(
-        wishPatternResultCell,
-        wishPattern,
-        wishPatternInput,
-      );
-    } else {
-      console.error("[wish] launchWishPattern: Pattern failed to load!");
-    }
-
-    if (!providedTx) await tx.commit();
-
-    return wishPatternResultCell;
-  }
-
   // Per-instance suggestion pattern result cell
   let suggestionPatternInput:
-    | { situation: string; context: Record<string, any> }
+    | {
+      situation: string;
+      context: Record<string, any>;
+      initialResults?: unknown;
+    }
     | undefined;
   let suggestionPatternResultCell: Cell<WishState<any>> | undefined;
 
   function launchSuggestionPattern(
-    input: { situation: string; context: Record<string, any> },
+    input: {
+      situation: string;
+      context: Record<string, any>;
+      initialResults?: unknown;
+    },
     providedTx?: IExtendedStorageTransaction,
   ) {
     suggestionPatternInput = input;
@@ -632,9 +562,10 @@ export function wish(
           },
         );
       }
-      suggestionPatternFetchPromise.then((pattern) => {
+      // Fire-and-forget: errors surface through global unhandled rejection handlers
+      void suggestionPatternFetchPromise.then((pattern) => {
         if (pattern) {
-          runtime.runSynced(
+          return runtime.runSynced(
             suggestionPatternResultCell!,
             pattern,
             suggestionPatternInput,
@@ -642,7 +573,8 @@ export function wish(
         }
       });
     } else {
-      runtime.runSynced(
+      // Fire-and-forget: errors surface through global unhandled rejection handlers
+      void runtime.runSynced(
         suggestionPatternResultCell,
         suggestionPattern,
         suggestionPatternInput,
@@ -671,7 +603,7 @@ export function wish(
           tx,
           {
             result: undefined,
-            candidates: undefined,
+            candidates: [],
             error: errorMsg,
             [UI]: errorUI(errorMsg),
           } satisfies WishState<any>,
@@ -723,29 +655,66 @@ export function wish(
               [UI]: resultUI ?? cellLinkUI(uniqueResultCells[0]),
             });
           } else {
-            // Multiple results - launch picker pattern
-            const wishPatternCell = await launchWishPattern({
-              ...targetValue as WishParams,
-              candidates: candidatesCell,
-            }, tx);
-
-            if (wishPattern) {
-              // Return reactive references into the picker cell
-              sendResult(tx, {
-                result: wishPatternCell.key("result"),
-                candidates: candidatesCell,
-                [UI]: wishPatternCell.key(UI),
+            // Multiple results — await pattern load + run (like the old
+            // launchWishPattern). Fall back to first result on failure.
+            if (!suggestionPatternFetchPromise) {
+              suggestionPatternFetchPromise = fetchSuggestionPattern(
+                runtime,
+              ).then((p) => {
+                suggestionPattern = p;
+                return p;
               });
+            }
+            await suggestionPatternFetchPromise;
+
+            let pickerReady = false;
+            if (suggestionPattern) {
+              if (!suggestionPatternResultCell) {
+                suggestionPatternResultCell = runtime.getCell(
+                  parentCell.space,
+                  {
+                    wish: {
+                      suggestionPattern: cause,
+                      situation: query,
+                    },
+                  },
+                  undefined,
+                  tx,
+                );
+                addCancel(
+                  () => runtime.runner.stop(suggestionPatternResultCell!),
+                );
+              }
+              suggestionPatternInput = {
+                situation: query,
+                context: context ?? {},
+                initialResults: candidatesCell,
+              };
+              try {
+                await runtime.runSynced(
+                  suggestionPatternResultCell,
+                  suggestionPattern,
+                  suggestionPatternInput,
+                );
+                pickerReady = true;
+              } catch (e) {
+                console.warn(
+                  "[wish] Failed to run suggestion pattern for picker:",
+                  e,
+                );
+              }
+            }
+
+            if (pickerReady) {
+              sendResult(tx, suggestionPatternResultCell);
             } else {
-              // Picker pattern failed to load — fall back to first result
-              console.warn(
-                `[wish] Picker pattern unavailable for ${uniqueResultCells.length} candidates, falling back to first result`,
-              );
-              const resultUI = uniqueResultCells[0].key(UI).get();
+              // Pattern unavailable or failed — fall back to first result
+              const fallbackUI = uniqueResultCells[0].key(UI).get() ??
+                cellLinkUI(uniqueResultCells[0]);
               sendResult(tx, {
                 result: uniqueResultCells[0],
                 candidates: candidatesCell,
-                [UI]: resultUI ?? cellLinkUI(uniqueResultCells[0]),
+                [UI]: fallbackUI,
               });
             }
           }
@@ -755,7 +724,7 @@ export function wish(
             tx,
             {
               result: undefined,
-              candidates: undefined,
+              candidates: [],
               error: errorMsg,
               [UI]: errorUI(errorMsg),
             } satisfies WishState<any>,
@@ -778,7 +747,7 @@ export function wish(
         tx,
         {
           result: undefined,
-          candidates: undefined,
+          candidates: [],
           error: errorMsg,
           [UI]: errorUI(errorMsg),
         } satisfies WishState<any>,

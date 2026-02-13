@@ -213,11 +213,36 @@ export function createJsonSchema(
 
 export function moduleToJSON(module: Module) {
   const { toJSON: _, ...rest } = module as Module & { toJSON: () => any };
+  let implementation = module.implementation;
+
+  // CT-1230 WORKAROUND: Preserve recipe structure when serializing recipe modules.
+  //
+  // Problem: When a subpattern is passed to .map(), the recipe's implementation
+  // was being stringified (e.g., "(inputs2) => { ... }") instead of preserving
+  // the actual recipe structure. This caused "Invalid recipe" errors at runtime
+  // because isRecipe() check failed on the string.
+  //
+  // Why this helps: Using toJSONWithLegacyAliases ensures nested $alias bindings
+  // get their nesting level incremented properly. Without this, aliases could be
+  // bound to a specific doc too early, causing handlers to point at stale docs
+  // when the recipe is later executed in a different context.
+  //
+  // We don't fully understand why the original code stringified recipe functions,
+  // but this defensive change ensures recipes passed as values (like to map())
+  // retain their structure and alias metadata.
+  if (module.type === "recipe" && implementation && isRecipe(implementation)) {
+    implementation = toJSONWithLegacyAliases(
+      implementation as unknown as Opaque<any>,
+      new Map(),
+      false,
+    ) as unknown as Recipe;
+  } else if (typeof implementation === "function") {
+    implementation = implementation.toString();
+  }
+
   return {
     ...rest,
-    implementation: typeof module.implementation === "function"
-      ? module.implementation.toString()
-      : module.implementation,
+    implementation,
   };
 }
 

@@ -2077,6 +2077,7 @@ describe("Recipe Runner", () => {
             default: [],
           },
         },
+        required: ["values"],
       } as const satisfies JSONSchema,
       // Output schema
       {
@@ -2113,6 +2114,7 @@ describe("Recipe Runner", () => {
               properties: {
                 values: { type: "array", items: { type: "number" } },
               },
+              required: ["values"],
             },
             asCell: true,
           },
@@ -2180,10 +2182,12 @@ describe("Recipe Runner", () => {
               properties: {
                 values: { type: "array", items: { type: "number" } },
               },
+              required: ["values"],
             },
             default: [],
           },
         },
+        required: ["groups"],
       } as const satisfies JSONSchema,
       {
         type: "object",

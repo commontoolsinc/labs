@@ -55,6 +55,7 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
   #nextMsgId = 0;
   #timeoutMs = DEFAULT_TIMEOUT_MS;
   #initialized = false;
+  #disposed = false;
   #transport: RuntimeTransport;
   #subscribed = new Map<
     `${string}:${string}:${string}`,
@@ -165,6 +166,7 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
       return;
     }
     this.#subscribed.delete(key);
+    if (this.#disposed) return;
     const _ = await this.request<RequestType.CellUnsubscribe>({
       type: RequestType.CellUnsubscribe,
       cell: cell.ref(),
@@ -175,6 +177,7 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
   }
 
   async dispose(): Promise<void> {
+    this.#disposed = true;
     for (const pending of this.#pendingRequests.values()) {
       clearTimeout(pending.timeoutId);
       pending.deferred.reject(new Error("Disposing runtime connection"));
@@ -284,6 +287,7 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
     event: import("../protocol/mod.ts").SerializedDomEvent,
     nodeId: number,
   ): void {
+    if (this.#disposed) return;
     // Use request but don't await - fire and forget
     this.request<RequestType.VDomEvent>({
       type: RequestType.VDomEvent,
@@ -315,6 +319,7 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
    * Request the worker to stop VDOM rendering for a mount.
    */
   async unmountVDom(mountId: number): Promise<void> {
+    if (this.#disposed) return;
     await this.request<RequestType.VDomUnmount>({
       type: RequestType.VDomUnmount,
       mountId,

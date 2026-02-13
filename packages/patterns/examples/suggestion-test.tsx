@@ -1,12 +1,20 @@
 /// <cts-enable />
 import { Default, NAME, pattern, UI, Writable } from "commontools";
 import Suggestion from "../system/suggestion.tsx";
+import Summary from "../suggestable/summary.tsx";
+import Checklist from "../suggestable/checklist.tsx";
+import Question from "../suggestable/question.tsx";
+import Diagram from "../suggestable/diagram.tsx";
+import BudgetPlanner from "../suggestable/budget-planner.tsx";
+import PeopleList from "../suggestable/people-list.tsx";
+import EventList from "../suggestable/event-list.tsx";
 
 export default pattern<{ title: Default<string, "Suggestion Tester"> }>(
   ({ title }) => {
     const suggestion = Suggestion({
       situation: "gimme counter plz",
       context: {},
+      initialResults: [],
     });
 
     const suggestion2 = Suggestion({
@@ -15,6 +23,7 @@ export default pattern<{ title: Default<string, "Suggestion Tester"> }>(
         content: "This is the expected content",
         value: Writable.of(0),
       },
+      initialResults: [],
     });
 
     return {
@@ -24,16 +33,54 @@ export default pattern<{ title: Default<string, "Suggestion Tester"> }>(
           <h1>Suggestion Tester</h1>
           <h2>Counter</h2>
           <ct-cell-context $cell={suggestion} label="Counter Suggestion">
-            {suggestion.result ? suggestion.result : "waiting..."}
+            {suggestion}
           </ct-cell-context>
 
           <h2>Note</h2>
           <ct-cell-context $cell={suggestion2} label="Note Suggestion">
-            {suggestion2.result ? suggestion2.result : "waiting..."}
+            {suggestion2}
           </ct-cell-context>
+          <hr />
+
+          <Summary
+            topic="Count items in the list and categorize"
+            context={{ list: ["baboon", "fish", "donkey", "horse"] }}
+          />
+
+          <hr />
+
+          <Checklist
+            topic="What do I need to do to go see these animals?"
+            context={{ list: ["baboon", "fish", "donkey", "horse"] }}
+          />
+
+          <hr />
+
+          <Question
+            topic="I'm looking to improve my fitness level"
+            context={{ list: ["calisthenics", "yoga"] }}
+          />
+
+          <hr />
+
+          <Diagram
+            topic="Diagram of the animal kingdom"
+            context={{ list: ["baboon", "fish", "donkey", "horse"] }}
+          />
+
+          <hr />
+
+          <PeopleList />
+
+          <hr />
+
+          <EventList />
+
+          <hr />
+
+          <BudgetPlanner maxAmount={1000} topic="Weekend trip" />
         </div>
       ),
-      suggestion,
     };
   },
 );

@@ -1310,7 +1310,7 @@ export interface BuiltInLLMGenerateObjectState<T> {
 
 export interface BuiltInLLMDialogState {
   pending: boolean;
-  error: unknown;
+  error?: unknown;
   cancelGeneration: Stream<void>;
   addMessage: Stream<BuiltInLLMMessage>;
   flattenedTools: Record<string, any>;
@@ -1620,7 +1620,7 @@ export type FetchDataFunction = <T>(
     options?: FetchOptions;
     result?: T;
   }>,
-) => OpaqueRef<{ pending: boolean; result: T; error: any }>;
+) => OpaqueRef<{ pending: boolean; result: T; error?: any }>;
 
 export type FetchProgramFunction = (
   params: Opaque<{ url: string }>,
@@ -1630,7 +1630,7 @@ export type FetchProgramFunction = (
     files: Array<{ name: string; contents: string }>;
     main: string;
   } | undefined;
-  error: any;
+  error?: any;
 }>;
 
 export type StreamDataFunction = <T>(
@@ -1639,7 +1639,7 @@ export type StreamDataFunction = <T>(
     options?: FetchOptions;
     result?: T;
   }>,
-) => OpaqueRef<{ pending: boolean; result: T; error: any }>;
+) => OpaqueRef<{ pending: boolean; result: T; error?: any }>;
 
 export type CompileAndRunFunction = <T = any, S = any>(
   params: Opaque<BuiltInCompileAndRunParams<T>>,
@@ -1662,10 +1662,11 @@ export type WishParams = {
 };
 
 export type WishState<T> = {
+  // A failed wish should have result of undefined and candidates of []
   result: T | undefined;
-  candidates: T[] | undefined;
-  error: any;
-  [UI]: VNode | undefined;
+  candidates: T[];
+  error?: any;
+  [UI]?: VNode;
 };
 
 export type NavigateToFunction = (cell: OpaqueRef<any>) => OpaqueRef<boolean>;

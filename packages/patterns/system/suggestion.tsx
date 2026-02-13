@@ -1,11 +1,14 @@
 /// <cts-enable />
 import {
   computed,
+  type Default,
   generateObject,
+  ifElse,
   pattern,
   patternTool,
   toSchema,
   UI,
+  type VNode,
   wish,
   type WishState,
   Writable,
@@ -13,19 +16,37 @@ import {
 import { fetchAndRunPattern, listPatternIndex } from "./common-tools.tsx";
 
 export default pattern<
-  { situation: string; context: { [id: string]: any } },
-  WishState<Writable<any>>
->(({ situation, context }) => {
-  // Get user profile text from home pattern
+  {
+    situation: string;
+    context: { [id: string]: any };
+    initialResults: Default<Writable<unknown>[], []>;
+  },
+  WishState<Writable<any>> & { [UI]: VNode }
+>(({ situation, context, initialResults }) => {
+  // --- Picker state (used when initialResults is non-empty) ---
+  const selectedIndex = Writable.of(0);
+  const userConfirmedIndex = Writable.of<number | null>(null);
+
+  const confirmedIndex = computed(() => {
+    if (initialResults.length === 1) return 0;
+    return userConfirmedIndex.get();
+  });
+
+  const pickerResult = computed(() => {
+    if (initialResults.length === 0) return undefined;
+    const idx = confirmedIndex; // Auto-unwraps to number | null
+    if (idx === null) return undefined; // Wait for user confirmation
+    return initialResults[Math.min(idx, initialResults.length - 1)];
+  });
+
+  // --- LLM state (freeform query path) ---
   const profile = wish<string>({ query: "#profile" });
 
-  // Build profile context string for the system prompt
   const profileContext = computed(() => {
     const profileText = profile.result;
     return profileText ? `\n\n--- User Context ---\n${profileText}\n---` : "";
   });
 
-  // Build system prompt with profile context
   const systemPrompt = computed(() => {
     const profileCtx = profileContext;
     return `Find a useful pattern, run it, pass link to final result.${profileCtx}
@@ -45,16 +66,51 @@ Use the user context above to personalize your suggestions when relevant.`;
     schema: toSchema<{ cell: Writable<any> }>(),
   });
 
-  const result = computed(() => suggestion.result?.cell);
+  const llmResult = computed(() => suggestion.result?.cell);
+
+  // Reactively select between picker and LLM result. This must be a named
+  // computed variable — the CTS transformer leaves named Cells as-is in the
+  // return object, which lets wish.ts read the result via .get().
+  const result = computed(() => {
+    if (initialResults.length > 0) return pickerResult;
+    return llmResult;
+  });
+
+  // Pre-create VNodes outside the computed so they're stable across
+  // re-evaluations (creating VNodes inside a computed causes the
+  // reconciler to re-mount the DOM, losing inner subscriptions).
+  const freeformUI = (
+    <ct-cell-context $cell={llmResult}>
+      {computed(() => llmResult ?? "Searching...")}
+    </ct-cell-context>
+  );
+
+  const pickerUI = (
+    <ct-card>
+      <h2>Choose Result ({initialResults.length})</h2>
+      <ct-picker $items={initialResults} $selectedIndex={selectedIndex} />
+      <ct-button
+        variant="primary"
+        onClick={() => userConfirmedIndex.set(selectedIndex.get())}
+      >
+        Confirm Selection
+      </ct-button>
+    </ct-card>
+  );
 
   return {
     result,
-    candidates: undefined,
-    error: undefined,
+    candidates: initialResults,
+    // [UI] must be a static VNode — the reconciler breaks if it's a computed.
+    // Use ifElse as a child to switch between modes at the reactive level.
     [UI]: (
-      <ct-cell-context $cell={result}>
-        {computed(() => result ?? "Searching...")}
-      </ct-cell-context>
+      <div style="display:contents">
+        {ifElse(
+          computed(() => initialResults.length > 0),
+          pickerUI,
+          freeformUI,
+        )}
+      </div>
     ),
   };
 });

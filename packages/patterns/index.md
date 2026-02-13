@@ -800,6 +800,210 @@ interface ReadingItemDetailOutput {
 
 ---
 
+# Suggestable Patterns
+
+Lightweight, LLM-powered utility patterns designed as building blocks for the
+suggestion system (`system/suggestion.tsx`). Each takes `topic` and `context`
+inputs and produces a focused output.
+
+## `suggestable/summary.tsx`
+
+Generates a concise summary of provided context using an LLM.
+
+**Keywords:** summary, generateText, suggestion-fuel
+
+### Input Schema
+
+```ts
+type SummaryInput = {
+  topic?: Default<string, "">;
+  context?: Default<Record<string, any>, Record<string, never>>;
+};
+```
+
+### Output Schema
+
+```ts
+type SummaryOutput = {
+  topic: string;
+  summary: string;
+  pending: boolean;
+};
+```
+
+## `suggestable/checklist.tsx`
+
+Generates a checklist of actionable steps from a topic and context.
+
+**Keywords:** checklist, generateObject, suggestion-fuel
+
+### Input Schema
+
+```ts
+type ChecklistInput = {
+  topic?: Default<string, "">;
+  context?: Default<Record<string, any>, Record<string, never>>;
+};
+```
+
+### Output Schema
+
+```ts
+type ChecklistItem = {
+  label: string;
+  done: Default<boolean, false>;
+};
+
+type ChecklistOutput = {
+  topic: string;
+  items: ChecklistItem[];
+  pending: boolean;
+};
+```
+
+## `suggestable/question.tsx`
+
+Generates a clarifying question with optional multiple-choice options.
+
+**Keywords:** question, generateObject, suggestion-fuel
+
+### Input Schema
+
+```ts
+type QuestionInput = {
+  topic?: Default<string, "">;
+  context?: Default<Record<string, any>, Record<string, never>>;
+};
+```
+
+### Output Schema
+
+```ts
+type QuestionOutput = {
+  topic: string;
+  question: string;
+  options: string[];
+  answer: Writable<string>;
+  pending: boolean;
+};
+```
+
+## `suggestable/diagram.tsx`
+
+Generates an ASCII diagram illustrating relationships, flows, or structures.
+Rendered in a `<pre>` tag with monospace styling.
+
+**Keywords:** diagram, ASCII, generateText, suggestion-fuel
+
+### Input Schema
+
+```ts
+type DiagramInput = {
+  topic?: Default<string, "">;
+  context?: Default<Record<string, any>, Record<string, never>>;
+};
+```
+
+### Output Schema
+
+```ts
+type DiagramOutput = {
+  topic: string;
+  diagram: string;
+  pending: boolean;
+};
+```
+
+## `suggestable/budget-planner.tsx`
+
+Generates a budget breakdown with editable amounts for each category. The LLM
+suggests spending categories that sum to the given budget ceiling.
+
+**Keywords:** budget, generateObject, suggestion-fuel
+
+### Input Schema
+
+```ts
+type BudgetInput = {
+  topic?: Default<string, "">;
+  context?: Default<Record<string, any>, Record<string, never>>;
+  maxAmount?: Default<number, 1000>;
+};
+```
+
+### Output Schema
+
+```ts
+type BudgetItem = {
+  name: string;
+  amount: Default<number, 0>;
+};
+
+type BudgetOutput = {
+  topic: string;
+  items: BudgetItem[];
+  total: number;
+  remaining: number;
+  pending: boolean;
+};
+```
+
+## `suggestable/people-list.tsx`
+
+Displays people from local data using the wish system.
+
+**Keywords:** people, wish, suggestion-fuel
+
+### Input Schema
+
+```ts
+type PersonListInput = Record<string, never>;
+```
+
+### Output Schema
+
+```ts
+type Person = {
+  contact: {
+    name: string;
+    email: Default<string, "">;
+  };
+};
+
+type PersonListOutput = {
+  people: Person[];
+};
+```
+
+## `suggestable/event-list.tsx`
+
+Displays events from local data using the wish system.
+
+**Keywords:** events, wish, suggestion-fuel
+
+### Input Schema
+
+```ts
+type EventListInput = Record<string, never>;
+```
+
+### Output Schema
+
+```ts
+type Event = {
+  title: string;
+  date: string;
+  time: string;
+  notes: string;
+};
+
+type EventListOutput = {
+  events: Event[];
+};
+```
+
+---
+
 # System Patterns
 
 ## `system/favorites-manager.tsx`
