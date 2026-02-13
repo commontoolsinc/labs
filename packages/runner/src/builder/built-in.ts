@@ -116,7 +116,7 @@ export const fetchData = createNodeFactory({
     options?: FetchOptions;
     result?: T;
   }>,
-) => OpaqueRef<{ pending: boolean; result: T; error: unknown }>;
+) => OpaqueRef<{ pending: boolean; result: T; error?: unknown }>;
 
 export const fetchProgram = createNodeFactory({
   type: "ref",
@@ -129,7 +129,7 @@ export const fetchProgram = createNodeFactory({
     files: Array<{ name: string; contents: string }>;
     main: string;
   } | undefined;
-  error: unknown;
+  error?: unknown;
 }>;
 
 export const streamData = createNodeFactory({
@@ -141,7 +141,7 @@ export const streamData = createNodeFactory({
     options?: FetchOptions;
     result?: T;
   }>,
-) => OpaqueRef<{ pending: boolean; result: T; error: unknown }>;
+) => OpaqueRef<{ pending: boolean; result: T; error?: unknown }>;
 
 // ifElse with optional schema arguments (backward compatible)
 // See SIGNATURE_ARGS documentation above for why we use arguments.length

@@ -39,7 +39,7 @@ export function compileAndRun(
   let cellsInitialized = false;
   let pending: Cell<boolean>;
   let result: Cell<string | undefined>;
-  let error: Cell<string | undefined>;
+  let error: Cell<string | null>;
   let errors: Cell<
     | Array<
       {
@@ -76,7 +76,7 @@ export function compileAndRun(
         tx,
       );
 
-      error = runtime.getCell<string | undefined>(
+      error = runtime.getCell<string | null>(
         parentCell.space,
         { compile: { error: cause } },
         undefined,
@@ -169,7 +169,7 @@ export function compileAndRun(
 
     runtime.runner.stop(result);
     resultWithLog.set(undefined);
-    errorWithLog.set(undefined);
+    errorWithLog.set(null);
     errorsWithLog.set(undefined);
 
     // Undefined inputs => Undefined output, not pending

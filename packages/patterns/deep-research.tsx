@@ -33,7 +33,7 @@ export default pattern<
     question: string;
     result: Writable<ResearchResult | undefined>;
     pending: boolean;
-    error: unknown;
+    error?: unknown;
   }
 >(({ question, context }) => {
   const research = generateObject({
