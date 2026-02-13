@@ -18,30 +18,40 @@ corresponding experimental behavior.
 
 ## Enabling Flags Locally
 
-Set the corresponding environment variables before starting the server:
+Set the corresponding environment variables before starting the server. The env
+vars must be present both when **building the shell** (for browser-side flags)
+and when **running the server** (for server-side flags):
 
 ```bash
-# Enable a single flag
-EXPERIMENTAL_RICH_STORABLE_VALUES=true deno task start
+# Enable a single flag (build + run)
+EXPERIMENTAL_RICH_STORABLE_VALUES=true deno task dev
 
 # Enable multiple flags
 EXPERIMENTAL_RICH_STORABLE_VALUES=true \
 EXPERIMENTAL_STORABLE_PROTOCOL=true \
-deno task start
+deno task dev
 ```
 
 The same env vars work for all entry points:
 
 - **Toolshed server** (`packages/toolshed`): parsed via the Zod env schema in
   `env.ts`.
+- **Shell build** (`packages/shell`): injected at build time via
+  `felt.config.ts` defines, read from globals in `src/lib/env.ts`.
 - **Background charm service** (`packages/background-charm-service`): parsed in
   `src/env.ts` and threaded to worker processes via IPC.
 - **CLI script** (`scripts/main.ts`): read directly from `Deno.env`.
 
+**Important:** Because the shell uses build-time injection, toggling flags for
+the browser requires rebuilding the shell. Server-side flags take effect
+immediately on restart without a rebuild.
+
 ## How Flags Propagate
 
-The full propagation chain ensures every `Runtime` instance -- server-side and
-browser-side -- receives the same experimental configuration:
+### Server-side (Deno processes)
+
+Server-side propagation is straightforward: env vars are parsed and passed
+directly to `new Runtime({ experimental: { ... } })`.
 
 ```
 Server Process (Deno)
@@ -50,18 +60,27 @@ Server Process (Deno)
   |
   +-- toolshed/env.ts        --> Zod parses env vars
   +-- toolshed/index.ts      --> new Runtime({ experimental: { ... } })
-  |                               +-- setExperimentalStorableConfig(...)
+                                    +-- setExperimentalStorableConfig(...)
+```
+
+### Browser-side (build-time injection)
+
+Browser-side flags are injected at build time and carried to the Web Worker
+via the IPC protocol:
+
+```
+Build Time (shell)
   |
-  +-- GET /api/meta           --> { did: "...", experimental: { richStorableValues: true, ... } }
-                                    |
-                              HTTP response
-                                    |
-Browser (Main Thread)               v
+  +-- ENV: EXPERIMENTAL_RICH_STORABLE_VALUES=true
   |
-  +-- shell/runtime.ts       --> fetch("/api/meta")
-  |                               extracts experimental flags
+  +-- felt.config.ts          --> esbuild define: $EXPERIMENTAL_RICH_STORABLE_VALUES
+  +-- src/lib/env.ts           --> EXPERIMENTAL.richStorableValues = true
   |
-  +-- RuntimeClient.initialize(transport, { ..., experimental })
+Browser (Main Thread)
+  |
+  +-- shell/runtime.ts        --> reads EXPERIMENTAL from env.ts
+  |
+  +-- RuntimeClient.initialize(transport, { ..., experimental: EXPERIMENTAL })
         |
         | postMessage (IPC)
         | InitializationData { ..., experimental: { richStorableValues: true } }
@@ -78,10 +97,9 @@ Browser Web Worker
 
 Key points:
 
-1. The **server** is the single source of truth. It parses env vars and exposes
-   them via `/api/meta`.
-2. The **shell** fetches `/api/meta` at runtime (no rebuild needed to toggle
-   flags).
+1. The **env vars** are the single source of truth. They must be set at build
+   time (for the shell) and at server start time (for toolshed).
+2. The **shell build** bakes the flags into the JS bundle via esbuild defines.
 3. The **IPC protocol** carries the flags from the main thread to the Web Worker
    via `InitializationData`.
 4. The **Runtime constructor** calls `setExperimentalStorableConfig()`, which
@@ -107,26 +125,12 @@ service.
 
 ## Verifying Flags Are Working
 
-### Check the `/api/meta` endpoint
+### Check the build output
 
-With the server running:
-
-```bash
-curl http://localhost:8000/api/meta | jq .
-```
-
-Expected output (with `EXPERIMENTAL_RICH_STORABLE_VALUES=true`):
-
-```json
-{
-  "did": "did:key:z6Mk...",
-  "experimental": {
-    "richStorableValues": true,
-    "storableProtocol": false,
-    "unifiedJsonEncoding": false
-  }
-}
-```
+After building the shell with flags enabled, the values are baked into the
+bundle. You can verify by inspecting the `EXPERIMENTAL` export from
+`src/lib/env.ts` in the browser console or by adding a temporary
+`console.log(EXPERIMENTAL)` to the shell code.
 
 ### Run the experimental options tests
 
