@@ -223,8 +223,18 @@ export function isStorableValue(value: unknown): value is StorableValueLayer {
  */
 export function toStorableValue(value: unknown): StorableValueLayer {
   if (currentConfig.richStorableValues) {
-    throw new Error("richStorableValues not yet implemented");
+    return toStorableValueNew(value);
   }
+  return toStorableValueLegacy(value);
+}
+
+/** Stub for the extended type system path. Not yet implemented. */
+function toStorableValueNew(_value: unknown): StorableValueLayer {
+  throw new Error("richStorableValues not yet implemented");
+}
+
+/** Legacy implementation of `toStorableValue()` for the JSON-only type system. */
+function toStorableValueLegacy(value: unknown): StorableValueLayer {
   switch (typeof value) {
     case "boolean":
     case "string":
@@ -319,8 +329,18 @@ const PROCESSING = Symbol("PROCESSING");
  */
 export function toDeepStorableValue(value: unknown): StorableValue {
   if (currentConfig.richStorableValues) {
-    throw new Error("richStorableValues not yet implemented");
+    return toDeepStorableValueNew(value);
   }
+  return toDeepStorableValueLegacy(value);
+}
+
+/** Stub for the extended recursive conversion path. Not yet implemented. */
+function toDeepStorableValueNew(_value: unknown): StorableValue {
+  throw new Error("richStorableValues not yet implemented");
+}
+
+/** Legacy implementation of `toDeepStorableValue()` for the JSON-only type system. */
+function toDeepStorableValueLegacy(value: unknown): StorableValue {
   // The internal helper can return OMIT for nested values that should be
   // omitted, but at the top level this never happens (OMIT is only returned
   // when converted.size > 0, i.e., in nested calls).
@@ -372,10 +392,11 @@ function toDeepStorableValueInternal(
     );
   }
 
-  // Try to convert the top level to storable form.
+  // Try to convert the top level to storable form. Calls the legacy function
+  // directly since toDeepStorableValueInternal is part of the legacy path.
   let value: StorableValueLayer;
   try {
-    value = toStorableValue(original);
+    value = toStorableValueLegacy(original);
   } catch (e) {
     // Clean up converted map before propagating error.
     if (isOriginalRecord) {
