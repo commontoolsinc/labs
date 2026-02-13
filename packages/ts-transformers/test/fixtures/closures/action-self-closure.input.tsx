@@ -1,14 +1,7 @@
 /// <cts-enable />
 /**
- * Test: Actions closing over SELF with Default<> inputs
- *
- * When all input properties use Default<T, V> (not optional `?`), the piece
- * always has values for every property. This means `self` (which is the piece
- * itself) satisfies the output schema's `required` array at runtime.
- *
- * The output schema should mark `title` as required (since Default<> ensures
- * a value always exists), and the handler's context schema should mark `self`
- * as required.
+ * Fixture: action closing over SELF requires Default<> inputs (not optional `?`)
+ * to ensure the output schema's required properties are always satisfied.
  */
 import { action, type Default, NAME, pattern, SELF, UI, type VNode, Writable } from "commontools";
 
