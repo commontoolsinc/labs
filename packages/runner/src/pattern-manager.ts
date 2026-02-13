@@ -121,6 +121,19 @@ export class PatternManager {
     return cell;
   }
 
+  /** Legacy fallback: read pattern meta from the old {recipeId, type: "recipe"} cause. */
+  private getLegacyRecipeMetaCell(
+    { patternId, space }: { patternId: string; space: MemorySpace },
+    tx?: IExtendedStorageTransaction,
+  ): Cell<PatternMeta> {
+    return this.runtime.getCell(
+      space,
+      { recipeId: patternId, type: "recipe" },
+      patternMetaSchema,
+      tx,
+    );
+  }
+
   private findOriginalPattern(pattern: Pattern): Pattern {
     while (pattern[unsafe_originalPattern]) {
       pattern = pattern[unsafe_originalPattern];
@@ -134,7 +147,12 @@ export class PatternManager {
   ): Promise<PatternMeta> {
     const cell = this.getPatternMetaCell({ patternId, space });
     await cell.sync();
-    return cell.get();
+    if (cell.get()?.id) return cell.get();
+
+    // Fall back to legacy {recipeId, type: "recipe"} cause
+    const legacyCell = this.getLegacyRecipeMetaCell({ patternId, space });
+    await legacyCell.sync();
+    return legacyCell.get();
   }
 
   getPatternMeta(
@@ -360,9 +378,16 @@ export class PatternManager {
     space: MemorySpace,
     tx?: IExtendedStorageTransaction,
   ): Promise<Pattern> {
-    const metaCell = this.getPatternMetaCell({ patternId, space }, tx);
+    let metaCell = this.getPatternMetaCell({ patternId, space }, tx);
     await metaCell.sync();
-    const patternMeta = metaCell.get();
+    let patternMeta = metaCell.get();
+
+    // Fall back to legacy {recipeId, type: "recipe"} cause
+    if (!patternMeta?.src && !patternMeta?.program) {
+      metaCell = this.getLegacyRecipeMetaCell({ patternId, space }, tx);
+      await metaCell.sync();
+      patternMeta = metaCell.get();
+    }
 
     if (!patternMeta.src && !patternMeta.program) {
       throw new Error(`Pattern ${patternId} has no stored source`);

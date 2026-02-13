@@ -1414,9 +1414,32 @@ function loadLinkedPattern(
   if (address === undefined) {
     return;
   }
-  const { ok: entry, error } = tx.read(address);
-  if (error) {
+  const result = tx.read(address);
+  if (result.error) {
     return;
+  }
+  let entry = result.ok;
+  // Fall back to legacy {recipeId, type: "recipe"} cause for backwards compat
+  if (
+    (entry === null || entry.value === undefined) &&
+    "$TYPE" in value && isString(value["$TYPE"])
+  ) {
+    const patternId = value["$TYPE"];
+    const legacyEntityId = refer({
+      causal: { recipeId: patternId, type: "recipe" },
+    });
+    const legacyShortId = legacyEntityId.toJSON()["/"];
+    const legacyAddress: IMemorySpaceAddress = {
+      space: address.space,
+      id: `of:${legacyShortId}` as IMemorySpaceAddress["id"],
+      type: "application/json" as MIME,
+      path: [],
+    };
+    const legacyResult = tx.read(legacyAddress);
+    if (!legacyResult.error) {
+      entry = legacyResult.ok;
+      address = legacyAddress;
+    }
   }
   if (entry === null || entry.value === undefined) {
     return;
