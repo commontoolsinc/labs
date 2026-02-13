@@ -227,21 +227,6 @@ const addItems = handler<
   });
 });
 
-// PatternTool for omnibot to search items
-const searchItemsImpl = ({
-  items,
-  query,
-}: {
-  items: ShoppingItem[];
-  query: string;
-}) => {
-  return computed(() =>
-    items.filter((item: ShoppingItem) =>
-      item.title.toLowerCase().includes(query.toLowerCase())
-    )
-  );
-};
-
 // Handler to navigate to store mapper
 const openStoreMapper = handler<unknown, Record<string, never>>(
   (_event, _state) => {
@@ -345,7 +330,16 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
   const correctionTitle = Writable.of<string>("");
 
   // Create search tool for omnibot
-  const searchItems = patternTool(searchItemsImpl, { items });
+  const searchItems = patternTool(
+    ({ items, query }: { items: ShoppingItem[]; query: string }) => {
+      return computed(() =>
+        items.filter((item: ShoppingItem) =>
+          item.title.toLowerCase().includes(query.toLowerCase())
+        )
+      );
+    },
+    { items },
+  );
 
   // Computed for whether correction panel is open
   const isCorrecting = computed(() => correctionIndex.get() >= 0);

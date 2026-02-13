@@ -265,34 +265,6 @@ const goToViewer = handler<
   );
 });
 
-// Grep function for patternTool - filters content lines by query
-const grepFn = (
-  { query, content }: { query: string; content: string },
-) => {
-  return computed(() => {
-    return content.split("\n").filter((c) => c.includes(query));
-  });
-};
-
-// Translate function for patternTool - translates content to specified language
-const translateFn = (
-  { language, content }: {
-    language: string;
-    content: string;
-  },
-) => {
-  const genResult = generateText({
-    system: computed(() => `Translate the content to ${language}.`),
-    prompt: computed(() => `<to_translate>${content}</to_translate>`),
-  });
-
-  return computed(() => {
-    if (genResult.pending) return undefined;
-    if (genResult.result == null) return "Error occurred";
-    return genResult.result;
-  });
-};
-
 // Menu: All Notes (find existing only - can't create due to circular imports)
 const menuAllNotebooks = handler<
   void,
@@ -644,8 +616,30 @@ const Note = pattern<Input, Output>(
       parentNotebook,
       isHidden,
       noteId,
-      grep: patternTool(grepFn, { content }),
-      translate: patternTool(translateFn, { content }),
+      grep: patternTool(
+        ({ query, content }: { query: string; content: string }) => {
+          return computed(() => {
+            return content.split("\n").filter((c) => c.includes(query));
+          });
+        },
+        { content },
+      ),
+      translate: patternTool(
+        ({ language, content }: { language: string; content: string }) => {
+          const genResult = generateText({
+            system: computed(() => `Translate the content to ${language}.`),
+            prompt: computed(
+              () => `<to_translate>${content}</to_translate>`,
+            ),
+          });
+          return computed(() => {
+            if (genResult.pending) return undefined;
+            if (genResult.result == null) return "Error occurred";
+            return genResult.result;
+          });
+        },
+        { content },
+      ),
       editContent: handleEditContent({ content }),
       // Minimal UI for embedding in containers (e.g., Record modules)
       embeddedUI: editorUI,
