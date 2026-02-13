@@ -38,8 +38,6 @@ import type {
   Opaque,
   OpaqueRef,
   Pattern,
-  PatternFactory,
-  PatternFunction,
   PatternToolFunction,
   schema as schemaFunction,
   SELF as SELFSymbol,

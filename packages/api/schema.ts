@@ -24,7 +24,6 @@ import type {
   PatternFactory,
   SELF,
   Stream,
-  StripCell,
 } from "commontools";
 
 // ===== Helper Types =====

@@ -14,7 +14,7 @@ Use this skill when:
 - Modifying existing Common UI v2 components
 - Implementing theme-aware components
 - Integrating components with Cell abstractions from the runtime
-- Building reactive components for pattern/pattern UIs
+- Building reactive components for pattern UIs
 - Debugging component lifecycle or reactivity issues
 
 ## Core Philosophy

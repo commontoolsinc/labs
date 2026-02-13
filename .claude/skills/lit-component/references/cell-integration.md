@@ -15,7 +15,7 @@ Cells are reactive data containers from the Common Tools runtime (`@commontools/
 Use Cell integration when:
 - The component needs to render reactive data from the runtime
 - The component allows users to edit data that should sync back to the runtime
-- The component is part of a pattern/pattern UI that manipulates piece state
+- The component is part of a pattern UI that manipulates piece state
 
 Do NOT use Cell integration for:
 - Simple presentational components
