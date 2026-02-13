@@ -101,7 +101,7 @@ export interface InitializationData {
   spaceIdentity?: KeyPairRaw;
   // Default timeout in milliseconds.
   timeoutMs?: number;
-  // Experimental space-model feature flags, fetched from the server's /api/meta.
+  // Experimental space-model feature flags.
   experimental?: {
     richStorableValues?: boolean;
     storableProtocol?: boolean;
