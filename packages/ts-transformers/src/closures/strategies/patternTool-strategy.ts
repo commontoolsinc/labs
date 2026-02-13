@@ -532,16 +532,21 @@ function isModuleScopedDeclaration(decl: ts.Declaration): boolean {
 }
 
 /**
- * Check if a type is a Cell-like type (Cell, OpaqueRef, etc.)
- * that represents reactive state.
+ * Check if a type is a CellLike type (Cell, Writable, OpaqueCell, Stream).
+ *
+ * Excludes OpaqueRef/OpaqueRefMethods — those are proxy wrappers for pattern
+ * parameters, not values created at module scope. Module-scoped reactive
+ * variables come from cell(), Cell.of(), Writable.of(), etc.
+ *
+ * See also: isCellLikeOrOpaqueRefType in pattern-context-validation.ts,
+ * which additionally matches OpaqueRef for validating .map() receivers.
  */
 function isCellLikeType(type: ts.Type, checker: ts.TypeChecker): boolean {
-  // Check if it's an OpaqueRef type
+  // Brand-based check catches some cases where string matching might not
   if (isOpaqueRefType(type, checker)) {
     return true;
   }
 
-  // Check the type name for Cell-like types
   const typeStr = checker.typeToString(type);
   const cellLikePatterns = [
     "Cell<",
