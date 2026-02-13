@@ -18,7 +18,7 @@ const OutputSchema = InputSchema;
 export default pattern(
   InputSchema,
   OutputSchema,
-  ({ content }) => {
+  ({ content }: any) => {
     return {
       [NAME]: "<ct-input /> test",
       [UI]: (

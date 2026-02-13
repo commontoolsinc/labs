@@ -27,7 +27,7 @@ const ExtractListsOutputSchema = {
 export default pattern(
   ExtractListsInputSchema,
   ExtractListsOutputSchema,
-  ({ allCharms }) => {
+  ({ allCharms }: any) => {
     const results = derive(allCharms, (cs: any[] | undefined) => {
       return cs?.reduce(
         (

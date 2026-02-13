@@ -31,7 +31,7 @@ const ResultSchema = {
 export default pattern(
   InputSchema,
   ResultSchema,
-  ({ charms }) => {
+  ({ charms }: any) => {
     derive(charms, (charms) => {
       console.log("charms", charms);
     });

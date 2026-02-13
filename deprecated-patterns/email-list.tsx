@@ -146,11 +146,11 @@ const EmailListOutputSchema = {
 export default pattern(
   EmailListInputSchema,
   EmailListOutputSchema,
-  ({ emails, settings }) => {
+  ({ emails, settings }: any) => {
     // Transform emails into list items with title field
     // NOTE(@bf): without derive I get a "Error loading and compiling pattern: Error: Can't read value during pattern creation."
     const items = derive(emails, (e) =>
-      e.map((email) => {
+      e.map((email: any) => {
         // Build title based on settings
         const titleParts = [];
 
@@ -243,7 +243,7 @@ export default pattern(
                 </tr>
               </thead>
               <tbody>
-                {items.map((item) => (
+                {items.map((item: any) => (
                   <tr>
                     <td>{str`${item.title}`}</td>
                     <td>{str`${item.email.subject}`}</td>

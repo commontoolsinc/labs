@@ -96,11 +96,11 @@ const CalendarListOutputSchema = {
 export default pattern(
   CalendarListInputSchema,
   CalendarListOutputSchema,
-  ({ events }) => {
+  ({ events }: any) => {
     // Transform calendar events into list items with title field
     // NOTE(@bf): without derive I get a "Error loading and compiling pattern: Error: Can't read value during pattern creation."
     const items = derive(events, (evts) =>
-      evts.map((event) => {
+      evts.map((event: any) => {
         return {
           title: event.summary || event.description,
           event, // Include full event as metadata
@@ -142,7 +142,7 @@ export default pattern(
                 </tr>
               </thead>
               <tbody>
-                {items.map((item) => (
+                {items.map((item: any) => (
                   <tr>
                     <td>{item.title}</td>
                     <td>{str`${item.event.summary || "Untitled"}`}</td>

@@ -66,7 +66,7 @@ const outputSchema = {
   },
 } as const satisfies JSONSchema;
 
-export default pattern(inputSchema, outputSchema, ({ values }) => {
+export default pattern(inputSchema, outputSchema, ({ values }: any) => {
   derive(values, (values) => {
     console.log("values#", values?.length);
   });
@@ -83,7 +83,7 @@ export default pattern(inputSchema, outputSchema, ({ values }) => {
           Add Value
         </button>
         <div>
-          {values.map((value, index) => (
+          {values.map((value: any, index: any) => (
             <div>
               {index}: {value}
             </div>

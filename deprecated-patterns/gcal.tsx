@@ -580,7 +580,7 @@ const clearEvents = handler(
 export default pattern(
   GcalImporterInputs,
   ResultSchema,
-  ({ settings, auth }) => {
+  ({ settings, auth }: any) => {
     const events = cell<CalendarEvent[]>([]);
     const calendars = cell<Calendar[]>([]);
 

@@ -22,7 +22,7 @@ const OutputSchema = InputSchema;
 export default pattern(
   InputSchema,
   OutputSchema,
-  ({ title, content }) => {
+  ({ title, content }: any) => {
     return {
       [NAME]: title,
       [UI]: (

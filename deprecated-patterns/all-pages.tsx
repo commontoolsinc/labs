@@ -27,7 +27,7 @@ const ExtractPagesOutputSchema = {
 export default pattern(
   ExtractPagesInputSchema,
   ExtractPagesOutputSchema,
-  ({ allCharms }) => {
+  ({ allCharms }: any) => {
     const results = derive(allCharms, (cs: any[] | undefined) => {
       return cs?.reduce(
         (

@@ -60,7 +60,7 @@ const inputSchema = toSchema<InputState>({
 
 const outputSchema = toSchema<NumberStory>();
 
-export default pattern(inputSchema, outputSchema, (cell) => {
+export default pattern(inputSchema, outputSchema, (cell: any) => {
   // Use generateObject to get structured data from the LLM
   const { result: object, pending } = generateObject<NumberStory>(
     generatePrompt({ number: cell.number }),

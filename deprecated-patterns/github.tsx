@@ -161,7 +161,7 @@ const refreshCommits = handler({}, {
   // state.commits.update(() => commits);
 });
 
-export default pattern(patternSchema, outputSchema, ({ repo, owner }) => {
+export default pattern(patternSchema, outputSchema, ({ repo, owner }: any) => {
   const commits = cell<GitHubCommit[]>([]);
 
   return {
