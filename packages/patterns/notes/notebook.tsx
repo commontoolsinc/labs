@@ -107,6 +107,26 @@ interface NotebookOutput {
     title: string;
     notesData?: Array<{ title: string; content: string }>;
   }>;
+  // Test-accessible action streams
+  selectAllNotes: Stream<void>;
+  deselectAllNotes: Stream<void>;
+  deleteSelected: Stream<void>;
+  duplicateSelected: Stream<void>;
+  showNewNoteModal: Stream<void>;
+  cancelNewNote: Stream<void>;
+  showNewNotebookModal: Stream<void>;
+  cancelNewNotebook: Stream<void>;
+  cancelNewNestedNotebook: Stream<void>;
+  startEditTitle: Stream<void>;
+  stopEditTitle: Stream<void>;
+  // Test-accessible state
+  selectedNoteIndices: number[];
+  selectedCount: number;
+  hasSelection: boolean;
+  showNewNotePrompt: boolean;
+  showNewNotebookPrompt: boolean;
+  showNewNestedNotebookPrompt: boolean;
+  isEditingTitle: boolean;
 }
 
 // NOTE: showNewNoteModal, cancelNewNotePrompt, createNote, createNestedNotebook
@@ -1513,6 +1533,31 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
       createNotes: handleCreateNotes({ notes, allPieces, self }),
       setTitle: handleSetTitle({ title }),
       createNotebook: handleCreateNotebook({ allPieces }),
+      // Test-accessible action streams
+      selectAllNotes: selectAllNotesAction,
+      deselectAllNotes: deselectAllNotesAction,
+      deleteSelected: deleteSelectedNotes({
+        notes,
+        selectedNoteIndices,
+        allPieces,
+        notebooks,
+      }),
+      duplicateSelected: doDuplicateSelectedNotes,
+      showNewNoteModal: showNewNoteModalAction,
+      cancelNewNote: cancelNewNotePromptAction,
+      showNewNotebookModal: showNewNotebookModalAction,
+      cancelNewNotebook: cancelNewNotebookPromptAction,
+      cancelNewNestedNotebook: cancelNewNestedNotebookPromptAction,
+      startEditTitle: startEditingTitleAction,
+      stopEditTitle: stopEditingTitleAction,
+      // Test-accessible state
+      selectedNoteIndices,
+      selectedCount,
+      hasSelection,
+      showNewNotePrompt,
+      showNewNotebookPrompt,
+      showNewNestedNotebookPrompt,
+      isEditingTitle,
     };
   },
 );

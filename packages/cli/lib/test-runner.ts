@@ -49,11 +49,20 @@ export interface TestResult {
   durationMs: number;
 }
 
+export interface NavigationEvent {
+  /** Name ($NAME) of the navigation target, if available */
+  name?: string;
+  /** Index of the action that triggered this navigation */
+  afterActionIndex: number;
+}
+
 export interface TestRunResult {
   path: string;
   results: TestResult[];
   totalDurationMs: number;
   error?: string;
+  /** Navigation events recorded during the test run */
+  navigations: NavigationEvent[];
 }
 
 export interface TestRunnerOptions {
@@ -80,9 +89,25 @@ export async function runTestPattern(
     "@commontools/runner/storage/cache.deno"
   );
   const storageManager = StorageManager.emulate({ as: identity });
+
+  // Track navigation events for assertions and verbose output
+  const navigations: NavigationEvent[] = [];
+  let currentActionIndex = -1;
+
   const runtime = new Runtime({
     storageManager,
     apiUrl: new URL(import.meta.url),
+    navigateCallback: (target) => {
+      const name = (target.key("$NAME") as Cell<string | undefined>).get();
+      navigations.push({
+        name,
+        afterActionIndex: currentActionIndex,
+      });
+      if (options.verbose) {
+        const label = typeof name === "string" ? name : "(unnamed)";
+        console.log(`    → navigateTo: ${label}`);
+      }
+    },
   });
   const engine = new Engine(runtime);
 
@@ -209,6 +234,7 @@ export async function runTestPattern(
         // It's an action - invoke it
         actionCount++;
         lastActionIndex = i;
+        currentActionIndex = i;
         const actionName = `action_${actionCount}`;
 
         if (options.verbose) {
@@ -288,6 +314,7 @@ export async function runTestPattern(
       path: testPath,
       results,
       totalDurationMs: performance.now() - startTime,
+      navigations,
     };
   } catch (err) {
     let errorMessage = err instanceof Error ? err.message : String(err);
@@ -306,6 +333,7 @@ export async function runTestPattern(
       path: testPath,
       results: [],
       totalDurationMs: performance.now() - startTime,
+      navigations,
       error: errorMessage,
     };
   } finally {
@@ -351,6 +379,17 @@ export async function runTests(
         } else {
           totalFailed++;
         }
+      }
+
+      // Print navigation summary if any navigations occurred
+      if (result.navigations.length > 0) {
+        console.log(
+          `  📍 ${result.navigations.length} navigation(s): ${
+            result.navigations
+              .map((n) => n.name ?? "(unnamed)")
+              .join(", ")
+          }`,
+        );
       }
     }
   }

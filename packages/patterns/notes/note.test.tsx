@@ -6,6 +6,8 @@
  * - Initial state with provided values
  * - Edit content via editContent stream
  * - NAME computed from title
+ * - Menu toggle behavior
+ * - Title editing behavior
  *
  * Run: deno task ct test packages/patterns/notes/note.test.tsx --verbose
  */
@@ -59,7 +61,7 @@ export default pattern(() => {
   });
 
   // ==========================================================================
-  // Actions
+  // Actions - Content Editing
   // ==========================================================================
 
   const action_edit_content = action(() => {
@@ -76,8 +78,49 @@ export default pattern(() => {
     note.editContent.send({ detail: { value: "" } });
   });
 
-  // No mutation actions needed — parentNotebook is set at creation time
-  // and can only be changed by notebook.tsx actions (which require wish())
+  // ==========================================================================
+  // Actions - Menu Toggle
+  // ==========================================================================
+
+  const action_toggle_menu = action(() => {
+    note.toggleMenu.send();
+  });
+
+  const action_toggle_menu_again = action(() => {
+    note.toggleMenu.send();
+  });
+
+  const action_toggle_menu_for_close = action(() => {
+    note.toggleMenu.send();
+  });
+
+  const action_close_menu = action(() => {
+    note.closeMenu.send();
+  });
+
+  // ==========================================================================
+  // Actions - Title Editing
+  // ==========================================================================
+
+  const action_start_editing = action(() => {
+    note.startEditingTitle.send();
+  });
+
+  const action_stop_editing = action(() => {
+    note.stopEditingTitle.send();
+  });
+
+  // ==========================================================================
+  // Actions - Create New Note (wish + SELF machinery)
+  // ==========================================================================
+
+  const action_create_new_note = action(() => {
+    note.createNewNote.send();
+  });
+
+  const action_create_from_parented = action(() => {
+    noteWithParent.createNewNote.send();
+  });
 
   // ==========================================================================
   // Assertions - Initial State
@@ -165,6 +208,58 @@ export default pattern(() => {
   const assert_content_cleared = computed(() => note.content === "");
 
   // ==========================================================================
+  // Assertions - Menu Toggle
+  // ==========================================================================
+
+  const assert_initial_menu_closed = computed(
+    () => note.menuOpen === false,
+  );
+
+  const assert_menu_open = computed(
+    () => note.menuOpen === true,
+  );
+
+  const assert_menu_closed_after_toggle = computed(
+    () => note.menuOpen === false,
+  );
+
+  const assert_menu_closed_via_close = computed(
+    () => note.menuOpen === false,
+  );
+
+  // ==========================================================================
+  // Assertions - Title Editing
+  // ==========================================================================
+
+  const assert_initial_not_editing = computed(
+    () => note.isEditingTitle === false,
+  );
+
+  const assert_editing_title = computed(
+    () => note.isEditingTitle === true,
+  );
+
+  const assert_stopped_editing = computed(
+    () => note.isEditingTitle === false,
+  );
+
+  // ==========================================================================
+  // Assertions - Create New Note (wish + SELF machinery)
+  // ==========================================================================
+
+  // After creating new note, original note should be unchanged
+  const assert_note_unchanged_after_create = computed(
+    () => note.title === "Test Note" && note.noteId === "test-note-123",
+  );
+
+  // After creating new note from parented note, original should be unchanged
+  const assert_parented_note_unchanged = computed(
+    () =>
+      noteWithParent.title === "Child Note" &&
+      noteWithParent.noteId === "child-note-1",
+  );
+
+  // ==========================================================================
   // Test Sequence
   // ==========================================================================
   return {
@@ -205,6 +300,29 @@ export default pattern(() => {
 
       { action: action_clear_content },
       { assertion: assert_content_cleared },
+
+      // === Menu toggle behavior ===
+      { assertion: assert_initial_menu_closed },
+      { action: action_toggle_menu },
+      { assertion: assert_menu_open },
+      { action: action_toggle_menu_again },
+      { assertion: assert_menu_closed_after_toggle },
+      { action: action_toggle_menu_for_close },
+      { action: action_close_menu },
+      { assertion: assert_menu_closed_via_close },
+
+      // === Title editing behavior ===
+      { assertion: assert_initial_not_editing },
+      { action: action_start_editing },
+      { assertion: assert_editing_title },
+      { action: action_stop_editing },
+      { assertion: assert_stopped_editing },
+
+      // === Create new note (wish + SELF machinery) ===
+      { action: action_create_new_note },
+      { assertion: assert_note_unchanged_after_create },
+      { action: action_create_from_parented },
+      { assertion: assert_parented_note_unchanged },
     ],
     note,
     noteWithParent,

@@ -42,10 +42,19 @@ interface NoteOutput {
   grep: PatternToolResult<{ content: string }>;
   translate: PatternToolResult<{ content: string }>;
   editContent: Stream<{ detail: { value: string } }>;
+  createNewNote: Stream<void>;
   /** Parent notebook reference, null if not in a notebook */
   parentNotebook: NotebookPiece | null;
   /** Minimal UI for embedding in containers like Record. Use via ct-render variant="embedded". */
   embeddedUI: VNode;
+  // Test-accessible state
+  menuOpen: boolean;
+  isEditingTitle: boolean;
+  // Test-accessible action streams
+  toggleMenu: Stream<void>;
+  closeMenu: Stream<void>;
+  startEditingTitle: Stream<void>;
+  stopEditingTitle: Stream<void>;
 }
 
 // ===== Module-scope handlers (reused with different bindings) =====
@@ -508,7 +517,16 @@ const Note = pattern<NoteInput, NoteOutput>(
       grep: patternTool(grepFn, { content }),
       translate: patternTool(translateFn, { content }),
       editContent,
+      createNewNote,
       embeddedUI: editorUI,
+      // Test-accessible state
+      menuOpen,
+      isEditingTitle,
+      // Test-accessible action streams
+      toggleMenu,
+      closeMenu,
+      startEditingTitle,
+      stopEditingTitle,
     };
   },
 );

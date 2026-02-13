@@ -41,6 +41,10 @@ interface NoteMdOutput {
   processedContent: string;
   /** Stream to toggle checkboxes in content */
   checkboxToggle: Stream<{ detail: { index: number; checked: boolean } }>;
+  /** Whether backlinks section should be visible */
+  hasBacklinks: boolean;
+  /** Stream to navigate back to source note for editing */
+  goToEdit: Stream<void>;
 }
 
 export default pattern<NoteMdInput, NoteMdOutput>(
@@ -192,6 +196,8 @@ export default pattern<NoteMdInput, NoteMdOutput>(
       embeddedUI: markdownViewer,
       processedContent,
       checkboxToggle: handleCheckboxToggle,
+      hasBacklinks,
+      goToEdit,
     };
   },
 );
