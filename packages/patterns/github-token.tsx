@@ -19,8 +19,8 @@ export default pattern<
         </label>
         <ct-input $value={token} placeholder="ghp_..." type="password" />
         <span style={{ fontSize: "11px", color: "var(--ct-color-gray-500)" }}>
-          Favorite this piece (click the star) so other patterns can find it via
-          wish.
+          Other patterns in the same space can discover this token automatically
+          via wish.
         </span>
       </ct-vstack>
     ),

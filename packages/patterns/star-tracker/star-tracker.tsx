@@ -82,6 +82,16 @@ function parseReposFromText(text: string): RepoEntry[] {
       /star-history\.(?:com|t9t\.io)\/#([a-zA-Z0-9._-]+)\/([a-zA-Z0-9._-]+)/g,
     )
   ) add(m[1], m[2]);
+  // Plain owner/repo at line start or after whitespace/punctuation.
+  // Skip if owner looks like a domain (contains dot) or repo has a file extension.
+  for (
+    const m of text.matchAll(
+      /(?:^|[\s(\[,])([a-zA-Z0-9_-]+)\/([a-zA-Z0-9_-]+)(?=[\s)\],:#!?]|$)/gm,
+    )
+  ) {
+    if (m[1].includes(".") || m[2].includes(".")) continue;
+    add(m[1], m[2]);
+  }
   return results;
 }
 
@@ -600,18 +610,13 @@ export default pattern<StarTrackerInput, StarTrackerOutput>(
 
           <ct-vscroll flex showScrollbar fadeEdges>
             <div>
-              {computed(() =>
-                repos
-                  .get()
-                  .filter((e) => e && e.owner && e.repo)
-                  .map((entry) => (
-                    <RepoCard
-                      owner={entry.owner}
-                      repo={entry.repo}
-                      githubToken={effectiveToken}
-                    />
-                  ))
-              )}
+              {repos.map((entry) => (
+                <RepoCard
+                  owner={entry.owner}
+                  repo={entry.repo}
+                  githubToken={effectiveToken}
+                />
+              ))}
             </div>
           </ct-vscroll>
 
