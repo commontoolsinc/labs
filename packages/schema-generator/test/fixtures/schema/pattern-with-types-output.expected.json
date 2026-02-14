@@ -1,0 +1,38 @@
+{
+  "$defs": {
+    "Item": {
+      "properties": {
+        "text": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "items": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Item"
+      },
+      "type": "array"
+    },
+    "items_count": {
+      "type": "number"
+    },
+    "title": {
+      "default": "untitled",
+      "type": "string"
+    }
+  },
+  "required": [
+    "items",
+    "items_count",
+    "title"
+  ],
+  "type": "object"
+}
