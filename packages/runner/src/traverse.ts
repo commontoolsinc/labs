@@ -527,7 +527,7 @@ export abstract class BaseObjectTraverser {
     } else if (isPrimitive(doc.value)) {
       return doc.value;
     } else if (Array.isArray(doc.value)) {
-      const newValue: StorableDatum[] = [];
+      const newValue: Immutable<StorableValue>[] = [];
       using t = this.tracker.include(doc.value, true, newValue, doc);
       if (t === null) {
         return this.tracker.getExisting(doc.value, true);
@@ -631,7 +631,7 @@ export abstract class BaseObjectTraverser {
         const [valueDoc, _] = this.getDocAtPath(redirDoc, [], DefaultSelector);
         return this.traverseDAG(valueDoc, defaultValue, itemLink);
       } else {
-        const newValue: Record<string, any> = {};
+        const newValue: Record<string, Immutable<StorableValue>> = {};
         using t = this.tracker.include(doc.value, true, newValue, doc);
         if (t === null) {
           return this.tracker.getExisting(doc.value, true);
@@ -1734,7 +1734,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
         : { error: new Error("Invalid type") };
     } else if (Array.isArray(doc.value)) {
       if (this.isValidType(schemaObj, "array")) {
-        const newValue: any = [];
+        const newValue: Immutable<StorableValue>[] = [];
         // Our link is based on the last link in the chain and not the first.
         const newLink = link ?? getNormalizedLink(
           doc.address,
@@ -1744,7 +1744,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
         if (t === null) {
           // newValue will be converted to a createObject result by the
           // function that added it to the tracker, so don't do that here
-          return this.tracker.getExisting(doc.value, schema);
+          return { ok: this.tracker.getExisting(doc.value, schema) };
         }
         const entries = this.traverseArrayWithSchema(doc, schemaObj, newLink);
         if (!Array.isArray(entries)) {
@@ -1769,7 +1769,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
         if (t === null) {
           // newValue will be converted to a createObject result by the
           // function that added it to the tracker, so don't do that here
-          return this.tracker.getExisting(doc.value, schemaObj);
+          return { ok: this.tracker.getExisting(doc.value, schemaObj) };
         }
         const entries = this.traverseObjectWithSchema(doc, schemaObj, newLink);
         if (entries === undefined || entries === null) {
