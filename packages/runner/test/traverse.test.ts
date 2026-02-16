@@ -210,7 +210,6 @@ describe("SchemaObjectTraverser missing value handling", () => {
     // Missing properties become undefined
     expect(result).toEqual({
       present: "here",
-      missing: undefined,
       alsoPresent: "also here",
     });
     expect("missing" in (result as Record<string, unknown>)).toBe(false);
@@ -385,7 +384,7 @@ describe("SchemaObjectTraverser missing value handling", () => {
       value: docValue,
     });
 
-    // Missing elements become null (consistent with toJSON, toStorableValue, etc.)
+    // Missing elements become undefined when allowed
     expect(result).toEqual(["present", undefined, "also-present"]);
   });
 });
