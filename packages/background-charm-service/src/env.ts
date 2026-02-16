@@ -23,6 +23,10 @@ const envSchema = z.object({
   API_URL: z.string().default("http://localhost:8000"),
 
   // Experimental space-model feature flags (see ExperimentalOptions in runner)
+  // Note: We intentionally avoid z.coerce.boolean() here. Zod's coerce uses
+  // Boolean(), which treats any non-empty string as truthy -- so setting an
+  // env var to "false" would incorrectly enable the flag. The other boolean
+  // env vars in this file have the same latent bug.
   EXPERIMENTAL_RICH_STORABLE_VALUES: z.string().default("false").transform((
     v,
   ) => v === "true"),
