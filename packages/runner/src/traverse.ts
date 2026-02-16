@@ -1548,20 +1548,21 @@ export class SchemaObjectTraverser<V extends JSONValue>
           docPath,
           selector.path,
         ]);
-        // If we have an asCell, we don't know that we've reached the end of
-        // the write-redirect chain, so don't create a cell.
-        // In the future, getAtPath could be altered to convey whether we found
-        // a valid undefined node, and we can handle this better, but right now
-        // there's no way for that to happen.
         if (
-          nextSelector && nextSelector.schema !== undefined &&
-          !SchemaObjectTraverser.asCellOrStream(nextSelector.schema)
+          nextSelector?.schema === undefined ||
+          SchemaObjectTraverser.asCellOrStream(nextSelector.schema)
         ) {
+          // If we don't have a schema, we don't allow undefined
+          // If we have a schema with asCell, we can't create a cell for this,
+          // since we can't follow all the write-redirect links.
+          // In the future, getAtPath could be altered to convey whether we
+          // found a valid undefined node, and we can handle this better, but
+          // right now there's no way for that to happen.
+          return { error: new Error("Encountered link to undefined value") };
+        } else {
           return this.isValidType(nextSelector.schema, "undefined")
             ? { ok: this.traversePrimitive(nextDoc, nextSelector.schema) }
             : { error: new Error("Encountered link to undefined value") };
-        } else {
-          return { error: new Error("Encountered link to undefined value") };
         }
       }
       if (!deepEqual(nextDoc.address.path, nextSelector!.path)) {
@@ -2197,13 +2198,17 @@ export class SchemaObjectTraverser<V extends JSONValue>
           redirDoc,
         ],
       );
-      if (SchemaObjectTraverser.asCellOrStream(schema)) {
-        // We can't create a cell for this, since we can't follow all the
-        // write-redirect links.
+      if (
+        redirSelector?.schema === undefined ||
+        SchemaObjectTraverser.asCellOrStream(redirSelector.schema)
+      ) {
+        // If we don't have a schema, we don't allow undefined
+        // If we have a schema with asCell, we can't create a cell for this,
+        // since we can't follow all the write-redirect links.
         return { error: new Error("Encountered link to undefined value") };
       } else {
-        return this.isValidType(schema, "undefined")
-          ? { ok: this.traversePrimitive(doc, schema) }
+        return this.isValidType(redirSelector.schema, "undefined")
+          ? { ok: this.traversePrimitive(redirDoc, redirSelector!.schema!) }
           : { error: new Error("Encountered link to undefined value") };
       }
     }
