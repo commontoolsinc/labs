@@ -2208,7 +2208,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
         return { error: new Error("Encountered link to undefined value") };
       } else {
         return this.isValidType(redirSelector.schema, "undefined")
-          ? { ok: this.traversePrimitive(redirDoc, redirSelector!.schema!) }
+          ? { ok: this.traversePrimitive(redirDoc, redirSelector.schema) }
           : { error: new Error("Encountered link to undefined value") };
       }
     }
