@@ -2,7 +2,6 @@ import { refer } from "@commontools/memory/reference";
 import { MIME } from "@commontools/memory/interface";
 import type { JSONSchemaObj } from "@commontools/api";
 import type {
-  JSONValue,
   MemorySpace,
   Result,
   SchemaPathSelector,
