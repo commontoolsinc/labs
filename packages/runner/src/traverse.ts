@@ -1548,7 +1548,13 @@ export class SchemaObjectTraverser<V extends JSONValue>
           docPath,
           selector.path,
         ]);
-        return { ok: undefined };
+        if (nextSelector && nextSelector.schema !== undefined) {
+          return this.isValidType(selector.schema!, "undefined")
+            ? { ok: undefined }
+            : { error: new Error("Encountered link to undefined value") };
+        } else {
+          return { error: new Error("Encountered link to undefined value") };
+        }
       }
       if (!deepEqual(nextDoc.address.path, nextSelector!.path)) {
         throw new Error("New doc path doesn't match selector path");
@@ -2183,7 +2189,9 @@ export class SchemaObjectTraverser<V extends JSONValue>
           redirDoc,
         ],
       );
-      return { ok: undefined };
+      return this.isValidType(schema, "undefined")
+        ? { ok: undefined }
+        : { error: new Error("Encountered link to undefined value") };
     }
     // For the runtime, where we don't traverse cells, we just want
     // to create a cell object and don't walk into the object beyond
