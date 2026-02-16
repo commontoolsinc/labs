@@ -23,6 +23,7 @@ export interface RepoEntry {
 interface StarTrackerInput {
   repos: Writable<Default<RepoEntry[], []>>;
   githubToken: Writable<Default<string, "">>;
+  visibleRepos: Writable<Default<RepoEntry[], []>>;
 }
 
 interface StarTrackerOutput {
@@ -238,6 +239,10 @@ const FLAG_DOTS: Record<string, string> = {
   decelerating: "▼",
   unknown: "·",
 };
+
+function sliceVisible(repos: RepoEntry[], limit: number): RepoEntry[] {
+  return repos.filter((e) => e && e.owner && e.repo).slice(0, limit);
+}
 
 // === Sub-pattern for each repo row ===
 
@@ -538,7 +543,7 @@ export const RepoCard = pattern<RepoCardInput>(
 type SortMode = "stars" | "growth" | "name";
 
 export default pattern<StarTrackerInput, StarTrackerOutput>(
-  ({ repos, githubToken }) => {
+  ({ repos, githubToken, visibleRepos }) => {
     const tokenWish = wish<{ token: string }>({
       query: "#githubToken",
       scope: ["."],
@@ -552,6 +557,16 @@ export default pattern<StarTrackerInput, StarTrackerOutput>(
 
     const addText = Writable.of("");
     const sortMode = Writable.of<SortMode>("stars");
+    const PAGE_SIZE = 25;
+    const visibleCount = Writable.of(PAGE_SIZE);
+
+    // Initial sync for when pattern loads with existing data
+    const _initSync = action(
+      ({ allRepos, limit }: { allRepos: RepoEntry[]; limit: number }) => {
+        visibleRepos.set(sliceVisible(allRepos, limit));
+      },
+    );
+    _initSync.send({ allRepos: repos, limit: visibleCount });
 
     const addRepos = action((inputText: string) => {
       const text = inputText || addText.get();
@@ -563,6 +578,7 @@ export default pattern<StarTrackerInput, StarTrackerOutput>(
       );
       if (newEntries.length > 0) {
         repos.set([...current, ...newEntries]);
+        visibleRepos.set(sliceVisible(repos.get(), visibleCount.get()));
       }
       addText.set("");
     });
@@ -572,13 +588,20 @@ export default pattern<StarTrackerInput, StarTrackerOutput>(
       repos.set(
         current.filter((r) => r && !(r.owner === owner && r.repo === repo)),
       );
+      visibleRepos.set(sliceVisible(repos.get(), visibleCount.get()));
     });
 
     const addFromInput = action(() => {
       addRepos.send(addText.get());
     });
 
+    const showMore = action(() => {
+      visibleCount.set(visibleCount.get() + PAGE_SIZE);
+      visibleRepos.set(sliceVisible(repos.get(), visibleCount.get()));
+    });
+
     const totalCount = computed(() => repos.get().length);
+    const hasMore = computed(() => repos.get().length > visibleCount.get());
 
     return {
       [NAME]: computed(() => `Star Tracker (${totalCount} repos)`),
@@ -610,13 +633,31 @@ export default pattern<StarTrackerInput, StarTrackerOutput>(
 
           <ct-vscroll flex showScrollbar fadeEdges>
             <div>
-              {repos.map((entry) => (
+              {visibleRepos.map((entry) => (
                 <RepoCard
                   owner={entry.owner}
                   repo={entry.repo}
                   githubToken={effectiveToken}
                 />
               ))}
+              {computed(() =>
+                hasMore
+                  ? (
+                    <div
+                      style={{
+                        textAlign: "center",
+                        padding: "12px",
+                      }}
+                    >
+                      <ct-button variant="secondary" onClick={showMore}>
+                        {computed(() =>
+                          `Show more (${visibleCount} of ${totalCount})`
+                        )}
+                      </ct-button>
+                    </div>
+                  )
+                  : null
+              )}
             </div>
           </ct-vscroll>
 
