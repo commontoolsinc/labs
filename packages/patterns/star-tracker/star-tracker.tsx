@@ -23,7 +23,6 @@ export interface RepoEntry {
 interface StarTrackerInput {
   repos: Writable<Default<RepoEntry[], []>>;
   githubToken: Writable<Default<string, "">>;
-  visibleRepos: Writable<Default<RepoEntry[], []>>;
 }
 
 interface StarTrackerOutput {
@@ -543,7 +542,7 @@ export const RepoCard = pattern<RepoCardInput>(
 type SortMode = "stars" | "growth" | "name";
 
 export default pattern<StarTrackerInput, StarTrackerOutput>(
-  ({ repos, githubToken, visibleRepos }) => {
+  ({ repos, githubToken }) => {
     const tokenWish = wish<{ token: string }>({
       query: "#githubToken",
       scope: ["."],
@@ -559,14 +558,9 @@ export default pattern<StarTrackerInput, StarTrackerOutput>(
     const sortMode = Writable.of<SortMode>("stars");
     const PAGE_SIZE = 25;
     const visibleCount = Writable.of(PAGE_SIZE);
-
-    // Initial sync for when pattern loads with existing data
-    const _initSync = action(
-      ({ allRepos, limit }: { allRepos: RepoEntry[]; limit: number }) => {
-        visibleRepos.set(sliceVisible(allRepos, limit));
-      },
+    const visibleRepos = computed(() =>
+      sliceVisible(repos.get(), visibleCount.get())
     );
-    _initSync.send({ allRepos: repos, limit: visibleCount });
 
     const addRepos = action((inputText: string) => {
       const text = inputText || addText.get();
@@ -578,7 +572,6 @@ export default pattern<StarTrackerInput, StarTrackerOutput>(
       );
       if (newEntries.length > 0) {
         repos.set([...current, ...newEntries]);
-        visibleRepos.set(sliceVisible(repos.get(), visibleCount.get()));
       }
       addText.set("");
     });
@@ -588,7 +581,6 @@ export default pattern<StarTrackerInput, StarTrackerOutput>(
       repos.set(
         current.filter((r) => r && !(r.owner === owner && r.repo === repo)),
       );
-      visibleRepos.set(sliceVisible(repos.get(), visibleCount.get()));
     });
 
     const addFromInput = action(() => {
@@ -597,7 +589,6 @@ export default pattern<StarTrackerInput, StarTrackerOutput>(
 
     const showMore = action(() => {
       visibleCount.set(visibleCount.get() + PAGE_SIZE);
-      visibleRepos.set(sliceVisible(repos.get(), visibleCount.get()));
     });
 
     const totalCount = computed(() => repos.get().length);
