@@ -13,6 +13,7 @@
 ./scripts/restart-local-dev.sh --force       # Force kill first
 ./scripts/restart-local-dev.sh --clear-cache # Clear disposable caches (preserves spaces)
 ./scripts/restart-local-dev.sh --dangerously-clear-all-spaces # Clear databases/spaces
+./scripts/check-local-dev.sh          # Health check both servers
 ```
 
 **URLs:**
@@ -78,10 +79,12 @@ ss -tlnp 'sport = :5173'  # Shell
 ### Verifying Servers Are Running
 
 ```bash
-# Health checks (should return 200)
-curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/_health  # Toolshed
-curl -s -o /dev/null -w "%{http_code}" http://localhost:5173          # Shell
+./scripts/check-local-dev.sh
 ```
+
+This checks both process presence and HTTP health, exiting non-zero if
+anything is wrong. It supports the same `--port-offset`, `--shell-port`, and
+`--toolshed-port` flags as the other scripts.
 
 ### Common Issues
 

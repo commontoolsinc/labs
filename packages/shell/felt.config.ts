@@ -43,6 +43,9 @@ const config: Config = {
       "$EXPERIMENTAL_UNIFIED_JSON_ENCODING": Deno.env.get(
         "EXPERIMENTAL_UNIFIED_JSON_ENCODING",
       ),
+      "$EXPERIMENTAL_CANONICAL_HASHING": Deno.env.get(
+        "EXPERIMENTAL_CANONICAL_HASHING",
+      ),
     },
     supported: {
       // Provide polyfills for `using` resource management

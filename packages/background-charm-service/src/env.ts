@@ -36,6 +36,9 @@ const envSchema = z.object({
   EXPERIMENTAL_UNIFIED_JSON_ENCODING: z.string().default("false").transform((
     v,
   ) => v === "true"),
+  EXPERIMENTAL_CANONICAL_HASHING: z.string().default("false").transform((
+    v,
+  ) => v === "true"),
   // Background Charm Service: default is public space "toolshed-system"
   //SERVICE_DID: z.string().default(
   //  "did:key:z6Mkfuw7h6jDwqVb6wimYGys14JFcyTem4Kqvdj9DjpFhY88",
