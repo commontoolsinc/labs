@@ -377,53 +377,52 @@ export default pattern<Input, Output>(
     });
 
     // Generate markdown outline
-    const outline = derive(
-      [sortedAisles, departments, itemLocations],
-      (
-        [aislesSorted, depts, corrections]: [
-          Aisle[],
-          Department[],
-          ItemLocation[],
-        ],
-      ) => {
-        const lines: string[] = [];
+    const outline = computed(() => {
+      const aislesSorted = [...aisles.get()].sort((a, b) => {
+        const numA = parseInt(a.name.match(/^\d+/)?.[0] || "999", 10);
+        const numB = parseInt(b.name.match(/^\d+/)?.[0] || "999", 10);
+        if (numA !== numB) return numA - numB;
+        return a.name.localeCompare(b.name);
+      });
+      const depts = departments.get();
+      const corrections = itemLocations.get();
+      const lines: string[] = [];
 
-        // Aisles
-        for (const aisle of aislesSorted) {
-          const knownItems = corrections
-            .filter((c) => c.correctAisle === `Aisle ${aisle.name}`)
-            .map((c) => c.itemName);
-          const knownStr = knownItems.length > 0
-            ? ` (Known items: ${knownItems.join(", ")})`
-            : "";
-          lines.push(`# Aisle ${aisle.name}${knownStr}`);
-          lines.push(aisle.description || "(no description)");
-          lines.push("");
-        }
+      // Aisles
+      for (const aisle of aislesSorted) {
+        const knownItems = corrections
+          .filter((c) => c.correctAisle === `Aisle ${aisle.name}`)
+          .map((c) => c.itemName);
+        const knownStr = knownItems.length > 0
+          ? ` (Known items: ${knownItems.join(", ")})`
+          : "";
+        lines.push(`# Aisle ${aisle.name}${knownStr}`);
+        lines.push(aisle.description || "(no description)");
+        lines.push("");
+      }
 
-        // Departments with locations
-        const assignedDepts = depts.filter(
-          (d) =>
-            d.location !== "unassigned" &&
-            d.location !== "not-in-store" &&
-            d.location !== "in-center-aisle",
-        );
-        for (const dept of assignedDepts) {
-          const locStr = dept.location.replace("-", " ");
-          const knownItems = corrections
-            .filter((c) => c.correctAisle === dept.name)
-            .map((c) => c.itemName);
-          const knownStr = knownItems.length > 0
-            ? ` (Known items: ${knownItems.join(", ")})`
-            : "";
-          lines.push(`# ${dept.name} (${locStr})${knownStr}`);
-          lines.push(dept.description || "(no description)");
-          lines.push("");
-        }
+      // Departments with locations
+      const assignedDepts = depts.filter(
+        (d) =>
+          d.location !== "unassigned" &&
+          d.location !== "not-in-store" &&
+          d.location !== "in-center-aisle",
+      );
+      for (const dept of assignedDepts) {
+        const locStr = dept.location.replace("-", " ");
+        const knownItems = corrections
+          .filter((c) => c.correctAisle === dept.name)
+          .map((c) => c.itemName);
+        const knownStr = knownItems.length > 0
+          ? ` (Known items: ${knownItems.join(", ")})`
+          : "";
+        lines.push(`# ${dept.name} (${locStr})${knownStr}`);
+        lines.push(dept.description || "(no description)");
+        lines.push("");
+      }
 
-        return lines.join("\n");
-      },
-    );
+      return lines.join("\n");
+    });
 
     // Counts for reactive arrays
     const aisleCount = computed(() => aisles.get().length);
@@ -519,10 +518,8 @@ export default pattern<Input, Output>(
                 marginTop: "0.5rem",
               }}
             >
-              {derive(
-                [aisleCount, deptCount, entranceCount],
-                ([a, d, e]: [number, number, number]) =>
-                  `${a} aisles • ${d} departments • ${e} entrances`,
+              {computed(() =>
+                `${aisleCount} aisles • ${deptCount} departments • ${entranceCount} entrances`
               )}
             </div>
           </div>
@@ -1587,14 +1584,11 @@ export default pattern<Input, Output>(
                                   re-uploading.
                                 </div>,
                                 derive(
-                                  [extraction.extractedAisles, aisles],
-                                  ([
-                                    extracted,
-                                    currentAisles,
-                                  ]: [
-                                    { aisles: ExtractedAisle[] },
-                                    Aisle[],
-                                  ]) => {
+                                  extraction.extractedAisles,
+                                  (
+                                    extracted: { aisles: ExtractedAisle[] },
+                                  ) => {
+                                    const currentAisles = aisles.get();
                                     if (
                                       !extracted?.aisles ||
                                       extracted.aisles.length === 0
