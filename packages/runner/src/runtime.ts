@@ -17,6 +17,10 @@ import {
   resetExperimentalStorableConfig,
   setExperimentalStorableConfig,
 } from "@commontools/memory/storable-value";
+import {
+  resetCanonicalHashConfig,
+  setCanonicalHashConfig,
+} from "@commontools/memory/reference";
 import { RecipeEnvironment, setRecipeEnvironment } from "./builder/env.ts";
 import type {
   ChangeGroup,
@@ -87,6 +91,8 @@ export interface ExperimentalOptions {
   storableProtocol?: boolean;
   /** Enable `/<Type>@<Version>` JSON encoding, replacing legacy sigil/`@`-prefix/`$`-prefix conventions. */
   unifiedJsonEncoding?: boolean;
+  /** Enable canonical hashing, replacing merkle-reference CID-based hashing. */
+  canonicalHashing?: boolean;
 }
 
 export interface RuntimeOptions {
@@ -163,10 +169,12 @@ export class Runtime {
       richStorableValues: false,
       storableProtocol: false,
       unifiedJsonEncoding: false,
+      canonicalHashing: false,
       ...options.experimental,
     };
     // Propagate experimental flags to the memory layer's ambient config.
     setExperimentalStorableConfig(this.experimental);
+    setCanonicalHashConfig(this.experimental.canonicalHashing);
     this.id = options.storageManager.id;
     this.apiUrl = new URL(options.apiUrl);
     this.staticCache = isDeno()
@@ -260,6 +268,7 @@ export class Runtime {
 
     // Reset experimental storable config to defaults
     resetExperimentalStorableConfig();
+    resetCanonicalHashConfig();
 
     // Clear the current runtime reference
     // Removed setCurrentRuntime call - no longer using singleton pattern

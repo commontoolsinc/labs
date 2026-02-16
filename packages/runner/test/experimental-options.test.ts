@@ -10,6 +10,11 @@ import {
   toDeepStorableValue,
   toStorableValue,
 } from "@commontools/memory/storable-value";
+import {
+  refer,
+  resetCanonicalHashConfig,
+  setCanonicalHashConfig,
+} from "@commontools/memory/reference";
 
 const signer = await Identity.fromPassphrase("test experimental");
 
@@ -22,6 +27,7 @@ const signer = await Identity.fromPassphrase("test experimental");
 describe("ExperimentalOptions", () => {
   afterEach(() => {
     resetExperimentalStorableConfig();
+    resetCanonicalHashConfig();
   });
 
   describe("Runtime construction", () => {
@@ -35,6 +41,7 @@ describe("ExperimentalOptions", () => {
         richStorableValues: false,
         storableProtocol: false,
         unifiedJsonEncoding: false,
+        canonicalHashing: false,
       });
       await runtime.dispose();
       await sm.close();
@@ -51,6 +58,7 @@ describe("ExperimentalOptions", () => {
         richStorableValues: true,
         storableProtocol: false,
         unifiedJsonEncoding: false,
+        canonicalHashing: false,
       });
       await runtime.dispose();
       await sm.close();
@@ -144,6 +152,65 @@ describe("ExperimentalOptions", () => {
       await sm.close();
 
       expect(getExperimentalStorableConfig().richStorableValues).toBe(false);
+    });
+  });
+
+  describe("refer() with canonicalHashing flag", () => {
+    it("works normally when canonicalHashing is false (default)", () => {
+      const ref = refer("hello");
+      expect(ref).toBeDefined();
+      expect(typeof ref.toString()).toBe("string");
+    });
+
+    it("throws when canonicalHashing is true", () => {
+      setCanonicalHashConfig(true);
+      expect(() => {
+        refer("hello");
+      }).toThrow("canonicalHashing not yet implemented");
+    });
+
+    it("works again after reset", () => {
+      setCanonicalHashConfig(true);
+      resetCanonicalHashConfig();
+      const ref = refer("hello");
+      expect(ref).toBeDefined();
+    });
+  });
+
+  describe("Runtime sets and resets canonicalHashing config", () => {
+    it("constructing Runtime with canonicalHashing causes refer() to throw", async () => {
+      const sm = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: sm,
+        experimental: { canonicalHashing: true },
+      });
+
+      expect(() => {
+        refer("test");
+      }).toThrow("canonicalHashing not yet implemented");
+
+      await runtime.dispose();
+      await sm.close();
+    });
+
+    it("disposing Runtime resets canonicalHashing so refer() works again", async () => {
+      const sm = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: sm,
+        experimental: { canonicalHashing: true },
+      });
+
+      expect(() => refer("test")).toThrow(
+        "canonicalHashing not yet implemented",
+      );
+
+      await runtime.dispose();
+      await sm.close();
+
+      const ref = refer("test");
+      expect(ref).toBeDefined();
     });
   });
 });

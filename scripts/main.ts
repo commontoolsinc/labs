@@ -105,6 +105,8 @@ async function main() {
         Deno.env.get("EXPERIMENTAL_STORABLE_PROTOCOL") === "true",
       unifiedJsonEncoding:
         Deno.env.get("EXPERIMENTAL_UNIFIED_JSON_ENCODING") === "true",
+      canonicalHashing:
+        Deno.env.get("EXPERIMENTAL_CANONICAL_HASHING") === "true",
     },
   });
   const pieceManager = new PieceManager(session, runtime);

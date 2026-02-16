@@ -146,6 +146,9 @@ const EnvSchema = z.object({
   EXPERIMENTAL_UNIFIED_JSON_ENCODING: z.string().default("false").transform((
     v,
   ) => v === "true"),
+  EXPERIMENTAL_CANONICAL_HASHING: z.string().default("false").transform((
+    v,
+  ) => v === "true"),
 });
 
 export type env = z.infer<typeof EnvSchema>;

@@ -12,6 +12,7 @@ affecting users who haven't opted in.
 | `richStorableValues` | `EXPERIMENTAL_RICH_STORABLE_VALUES` | Enables the new storable value type system (`bigint`, `Map`, `Set`, `Uint8Array`, `Date`, `StorableInstance`). |
 | `storableProtocol` | `EXPERIMENTAL_STORABLE_PROTOCOL` | Enables the storable protocol (`[DECONSTRUCT]`/`[RECONSTRUCT]`) and `SerializationContext`-based boundary serialization. |
 | `unifiedJsonEncoding` | `EXPERIMENTAL_UNIFIED_JSON_ENCODING` | Enables a unified JSON encoding scheme for all storable values. |
+| `canonicalHashing` | `EXPERIMENTAL_CANONICAL_HASHING` | Enables canonical hashing, replacing merkle-reference CID-based hashing (see Section 6 of the formal spec). |
 
 All flags default to `false`. Setting any flag to `true` activates the
 corresponding experimental behavior.
@@ -61,6 +62,7 @@ Server Process (Deno)
   +-- toolshed/env.ts        --> Zod parses env vars
   +-- toolshed/index.ts      --> new Runtime({ experimental: { ... } })
                                     +-- setExperimentalStorableConfig(...)
+                                    +-- setCanonicalHashConfig(...)
 ```
 
 ### Browser-side (build-time injection)
@@ -91,8 +93,11 @@ Browser Web Worker
   +-- RuntimeProcessor.initialize(data)
         +-- new Runtime({ ..., experimental: data.experimental })
               +-- setExperimentalStorableConfig(...)
-                   +-- currentConfig.richStorableValues = true
-                        +-- toStorableValue() checks currentConfig
+              |    +-- currentConfig.richStorableValues = true
+              |         +-- toStorableValue() checks currentConfig
+              +-- setCanonicalHashConfig(...)
+                   +-- canonicalHashingEnabled = true
+                        +-- refer() dispatches to canonicalHash()
 ```
 
 Key points:
@@ -150,9 +155,10 @@ The flags are defined in `packages/runner/src/runtime.ts` as the
 with defaults (all `false`) and stores the resolved result as
 `runtime.experimental` (type `Required<ExperimentalOptions>`).
 
-The memory layer uses a module-level ambient config variable (`currentConfig` in
-`packages/memory/storable-value.ts`) set by `setExperimentalStorableConfig()`.
-This means:
+The memory layer uses module-level ambient config variables:
+`currentConfig` in `packages/memory/storable-value.ts` (set by
+`setExperimentalStorableConfig()`) and `canonicalHashingEnabled` in
+`packages/memory/reference.ts` (set by `setCanonicalHashConfig()`). This means:
 
 - Only one set of experimental flags is active per JavaScript context at a time.
 - In the browser, the Web Worker is a separate JS context, so its flags are

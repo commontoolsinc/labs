@@ -5,6 +5,7 @@ declare global {
   var $EXPERIMENTAL_RICH_STORABLE_VALUES: string | undefined;
   var $EXPERIMENTAL_STORABLE_PROTOCOL: string | undefined;
   var $EXPERIMENTAL_UNIFIED_JSON_ENCODING: string | undefined;
+  var $EXPERIMENTAL_CANONICAL_HASHING: string | undefined;
 }
 
 export const ENVIRONMENT: "development" | "production" =
@@ -22,4 +23,5 @@ export const EXPERIMENTAL = {
   richStorableValues: $EXPERIMENTAL_RICH_STORABLE_VALUES === "true",
   storableProtocol: $EXPERIMENTAL_STORABLE_PROTOCOL === "true",
   unifiedJsonEncoding: $EXPERIMENTAL_UNIFIED_JSON_ENCODING === "true",
+  canonicalHashing: $EXPERIMENTAL_CANONICAL_HASHING === "true",
 };

@@ -23,6 +23,7 @@ const initializeRuntime = () => {
         richStorableValues: env.EXPERIMENTAL_RICH_STORABLE_VALUES,
         storableProtocol: env.EXPERIMENTAL_STORABLE_PROTOCOL,
         unifiedJsonEncoding: env.EXPERIMENTAL_UNIFIED_JSON_ENCODING,
+        canonicalHashing: env.EXPERIMENTAL_CANONICAL_HASHING,
       },
     });
     console.log("Runtime initialized successfully");

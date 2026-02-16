@@ -35,6 +35,7 @@ const runtime = new Runtime({
     richStorableValues: env.EXPERIMENTAL_RICH_STORABLE_VALUES,
     storableProtocol: env.EXPERIMENTAL_STORABLE_PROTOCOL,
     unifiedJsonEncoding: env.EXPERIMENTAL_UNIFIED_JSON_ENCODING,
+    canonicalHashing: env.EXPERIMENTAL_CANONICAL_HASHING,
   },
 });
 const service = new BackgroundCharmService({
