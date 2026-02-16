@@ -253,20 +253,6 @@ interface RepoCardInput {
 
 export const RepoCard = pattern<RepoCardInput>(
   ({ owner, repo, githubToken }) => {
-    const headers = computed(() => {
-      const h: Record<string, string> = {};
-      if (githubToken) h["Authorization"] = `Bearer ${githubToken}`;
-      return h;
-    });
-
-    const starHeaders = computed(() => {
-      const h: Record<string, string> = {
-        Accept: "application/vnd.github.v3.star+json",
-      };
-      if (githubToken) h["Authorization"] = `Bearer ${githubToken}`;
-      return h;
-    });
-
     const repoUrl = computed(() => {
       if (owner && repo) return `https://api.github.com/repos/${owner}/${repo}`;
       return "";
@@ -275,7 +261,11 @@ export const RepoCard = pattern<RepoCardInput>(
     const repoInfo = fetchData<RepoInfo>({
       url: repoUrl,
       mode: "json",
-      options: computed(() => ({ headers: headers })),
+      options: computed(() => {
+        const h: Record<string, string> = {};
+        if (githubToken) h["Authorization"] = `Bearer ${githubToken}`;
+        return { headers: h };
+      }),
     });
 
     const stars = computed(() => repoInfo.result?.stargazers_count ?? 0);
@@ -288,7 +278,13 @@ export const RepoCard = pattern<RepoCardInput>(
     const pageUrl3 = computed(() => starPageUrl(owner, repo, 3, stars));
     const pageUrl4 = computed(() => starPageUrl(owner, repo, 4, stars));
 
-    const starOpts = computed(() => ({ headers: starHeaders }));
+    const starOpts = computed(() => {
+      const h: Record<string, string> = {
+        Accept: "application/vnd.github.v3.star+json",
+      };
+      if (githubToken) h["Authorization"] = `Bearer ${githubToken}`;
+      return { headers: h };
+    });
 
     const page0 = fetchData<StarEvent[]>({
       url: pageUrl0,
