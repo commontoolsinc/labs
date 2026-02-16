@@ -239,7 +239,7 @@ const FLAG_DOTS: Record<string, string> = {
   unknown: "·",
 };
 
-function sliceVisible(repos: RepoEntry[], limit: number): RepoEntry[] {
+function sliceVisible(repos: readonly RepoEntry[], limit: number): RepoEntry[] {
   return repos.filter((e) => e && e.owner && e.repo).slice(0, limit);
 }
 
@@ -642,7 +642,7 @@ export default pattern<StarTrackerInput, StarTrackerOutput>(
                     >
                       <ct-button variant="secondary" onClick={showMore}>
                         {computed(() =>
-                          `Show more (${visibleCount} of ${totalCount})`
+                          `Show more (${visibleCount.get()} of ${totalCount})`
                         )}
                       </ct-button>
                     </div>
