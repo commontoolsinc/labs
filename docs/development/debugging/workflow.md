@@ -12,7 +12,7 @@ Fix all type errors before deploying. Most issues are caught here.
 
 ### 2. Match Error to Doc
 
-- **Type errors** - [@writeable](../../common/concepts/types-and-schemas/writeable.md)
+- **Type errors** - [@writeable](../../common/concepts/types-and-schemas/writable.md)
 - **Reactivity issues** - [@reactivity](../../common/concepts/reactivity.md)
 - **Component questions** - [@COMPONENTS](../../common/components/COMPONENTS.md)
 - **Pattern examples** - [@index](../../../packages/patterns/index.md)

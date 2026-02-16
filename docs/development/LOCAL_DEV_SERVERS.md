@@ -118,7 +118,7 @@ SHELL_URL=http://localhost:5173 deno task dev
 
 # 4. Start frontend (Terminal 2)
 cd packages/shell
-deno task dev-local
+TOOLSHED_PORT=8000 deno task dev-local
 ```
 
 **Alternative: Local shell with cloud backend:**
@@ -166,6 +166,10 @@ When editing `ct-*` components in `packages/ui/`, restart the local dev server t
 ---
 
 ## Background Piece Service (Optional)
+
+> **Note:** This package is still named `background-charm-service` in the
+> codebase. "Charm" is the legacy name for "piece"; they refer to the same
+> concept.
 
 The background-charm-service polls registered pieces and triggers their `bgUpdater` handlers server-side. This is **optional** - only needed if you're testing background/scheduled piece execution.
 

@@ -28,10 +28,20 @@ circuit as current will flow through it. Different analogy could be to think of
 [piece] as a process, where's [spell] would be a program and [cell]s would be
 program inputs and outputs.
 
-There are a few more specific terms for [some cells](piece-cell-diagram.md) within the piece.
+There are a few more specific terms for cells within the piece:
+
 - Result Cell -- This is the main piece cell. The UI will be built here.
 - Process Cell -- This holds much of the working state of the piece.
 - Pattern Cell -- Contains the pattern source code.
+
+```mermaid
+flowchart TD
+    A["Result Cell"]
+    A --source--> B["Process Cell"]
+    B --value.resultRef--> A
+    B --value.spell--> C["Pattern Cell"]
+    D@{ shape: procs, label: "Data Cells"} --source--> B
+```
 
 ## CRDT (Conflict-free Replicated Data Type)
 
@@ -41,7 +51,8 @@ systems. Used selectively, e.g. for collaborative text editing.
 ## Space
 
 Space is primarily a sharing boundary, designed to enforce access control.
-Spaces are identified by unique [did:key] identifiers.
+Spaces are identified by unique [did:key] identifiers. Users control access and
+permissions via [UCAN]s and [ACL]s.
 
 > ℹ️ Currently each space has a corresponding sqlite database to store all of
 > its state.
@@ -94,35 +105,31 @@ actions.
 
 ## LLM (Large Language Model)
 
-AI models such as Claude or ChatGPT that can be called from recipes for
+AI models such as Claude or ChatGPT that can be called from patterns for
 AI-generated outputs.
 
 ## Reactive Framework
 
-The runtime engine behind Open Ocean that computes state updates in a
+The runtime engine behind Common Tools that computes state updates in a
 deterministic way, using dependency graphs of reactive cells.
 
-## Recipe
+## Pattern
 
 A function that defines a reactive graph. Can produce UI, derived data, or
-streams. Used like components in other reactive frameworks.
+streams. Used like components in other reactive frameworks. (Previously called
+"recipe" in older documentation.)
 
 ## CTS (Common TypeScript)
 
-Typescript dialect that is pre-processed in recipes to preserve familiar
+Typescript dialect that is pre-processed in patterns to preserve familiar
 Typescript patterns when using Cells and shared storage. This leverages the
 typescript compiler to parse the AST (Abstract Syntax Tree) of the code, and
 make appropriate transformations.
 
 ## Safe Rendering
 
-The secure, isolated rendering of recipe-generated UI, considered part of the
+The secure, isolated rendering of pattern-generated UI, considered part of the
 Trusted Computing Base (TCB).
-
-## Space
-
-A namespace for user data, identified by a [did:key]. Users control access and
-permissions via [UCAN]s and ACLs.
 
 ## Spell
 
@@ -188,7 +195,7 @@ Nursery eviction occurs in several scenarios:
 
 The minimal set of components that must be trusted to enforce security. This
 includes rendering infrastructure (e.g. web components), and excludes
-user-authored recipes, which are sandboxed.
+user-authored patterns, which are sandboxed.
 
 ## UCAN (User Controlled Authorization Network)
 
@@ -197,7 +204,7 @@ tokens.
 
 ## VDOM (Virtual DOM)
 
-A data representation of UI elements returned by recipes, which the runtime
+A data representation of UI elements returned by patterns, which the runtime
 turns into rendered HTML.
 
 [spell]: #spell
@@ -213,7 +220,7 @@ turns into rendered HTML.
 [llm]: #llm-large-language-model
 [memory]: #memory
 [reactive-framework]: #reactive-framework
-[recipe]: #recipe
+[pattern]: #pattern
 [safe-rendering]: #safe-rendering
 [space]: #space
 [tcb]: #tcb-trusted-computing-base
