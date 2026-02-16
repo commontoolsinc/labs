@@ -1190,7 +1190,9 @@ export class Runner {
     // Check if $event is a stream alias
     let streamLink: NormalizedFullLink | undefined = undefined;
     if (isRecord(inputs) && "$event" in inputs) {
-      let value: JSONValue | undefined = inputs.$event as JSONValue | undefined;
+      let value: StorableDatum | undefined = inputs.$event as
+        | StorableDatum
+        | undefined;
       while (isWriteRedirectLink(value)) {
         const maybeStreamLink = resolveLink(
           this.runtime,

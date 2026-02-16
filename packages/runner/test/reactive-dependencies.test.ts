@@ -8,7 +8,7 @@ import {
   type SortedAndCompactPaths,
 } from "../src/reactive-dependencies.ts";
 import type { Action, SpaceAndURI } from "../src/scheduler.ts";
-import type { JSONValue } from "../src/builder/types.ts";
+import type { StorableDatum } from "@commontools/memory/interface";
 import type {
   IMemorySpaceAddress,
   MemoryAddressPathComponent,
@@ -726,7 +726,7 @@ describe("determineTriggeredActions", () => {
       const result = determineTriggeredActions(
         dependencies,
         { a: 1 },
-        { a: undefined } as unknown as JSONValue,
+        { a: undefined } as StorableDatum,
       );
       expect(result).toEqual([action1]);
     });
@@ -1548,8 +1548,8 @@ describe("determineTriggeredActions", () => {
         dependencies.set(action, [[`item${i}`]]);
       }
 
-      const before: JSONValue = {};
-      const after: JSONValue = {};
+      const before: StorableDatum = {};
+      const after: StorableDatum = {};
       for (let i = 0; i < 1000; i++) {
         (before as any)[`item${i}`] = i;
         (after as any)[`item${i}`] = i;
@@ -1698,8 +1698,8 @@ describe("determineTriggeredActions", () => {
 
       const result = determineTriggeredActions(
         dependencies,
-        before as JSONValue,
-        after as JSONValue,
+        before as StorableDatum,
+        after as StorableDatum,
       );
 
       // Action B and C should trigger because __#0 appeared,
@@ -1843,8 +1843,8 @@ describe("determineTriggeredActions", () => {
 
       const result = determineTriggeredActions(
         dependencies,
-        before as JSONValue,
-        after as JSONValue,
+        before as StorableDatum,
+        after as StorableDatum,
       );
 
       // Should trigger
@@ -1962,8 +1962,8 @@ Deno.bench("determineTriggeredActions - many dependencies", () => {
 
   determineTriggeredActions(
     dependencies,
-    before as JSONValue,
-    after as JSONValue,
+    before as StorableDatum,
+    after as StorableDatum,
   );
 });
 
@@ -2071,7 +2071,7 @@ Deno.bench("determineTriggeredActions - complex real-world", () => {
 
   determineTriggeredActions(
     dependencies,
-    before as JSONValue,
-    after as JSONValue,
+    before as StorableDatum,
+    after as StorableDatum,
   );
 });

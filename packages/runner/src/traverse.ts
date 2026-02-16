@@ -252,7 +252,7 @@ export class CompoundCycleTracker<EqualKey, DeepEqualKey, Value = unknown> {
 }
 
 export type PointerCycleTracker = CompoundCycleTracker<
-  Immutable<JSONValue>,
+  Immutable<StorableDatum>,
   JSONSchema | undefined,
   any
 >;
@@ -297,7 +297,7 @@ export class ManagedStorageTransaction implements IStorageTransaction {
   }
   write(
     _address: IMemorySpaceAddress,
-    _value?: JSONValue,
+    _value?: StorableDatum,
   ): Result<IAttestation, WriterError | WriteError> {
     throw new Error("Method not implemented.");
   }
@@ -325,16 +325,6 @@ export type BaseMemoryAddress = Omit<IMemoryAddress, "path">;
 export interface ObjectStorageManager {
   // load the object for the specified key
   load(address: BaseMemoryAddress): IAttestation | null;
-}
-
-export type OptJSONValue =
-  | undefined
-  | JSONValue
-  | OptJSONArray
-  | OptJSONObject;
-interface OptJSONArray extends Array<OptJSONValue> {}
-interface OptJSONObject {
-  [key: string]: OptJSONValue;
 }
 
 // Create objects based on the data and schema (in the link)
@@ -484,7 +474,7 @@ export abstract class BaseObjectTraverser {
     protected tx: IExtendedStorageTransaction,
     protected selector: SchemaPathSelector = DefaultSelector,
     protected tracker: PointerCycleTracker = new CompoundCycleTracker<
-      Immutable<JSONValue>,
+      Immutable<StorableDatum>,
       JSONSchema | undefined
     >(),
     protected schemaTracker: MapSet<string, SchemaPathSelector> = new MapSet<
@@ -512,7 +502,7 @@ export abstract class BaseObjectTraverser {
    */
   protected traverseDAG(
     doc: IMemorySpaceAttestation,
-    defaultValue?: JSONValue,
+    defaultValue?: StorableDatum,
     itemLink?: NormalizedFullLink,
   ): Immutable<StorableValue> {
     if (doc.value === undefined) {
@@ -819,7 +809,7 @@ export function getAtPath(
       curDoc = {
         ...curDoc,
         address: { ...curDoc.address, path: [...curDoc.address.path, part] },
-        value: cursorObj[part] as Immutable<JSONValue>,
+        value: cursorObj[part] as Immutable<StorableDatum>,
       };
     } else {
       // we can only descend into pointers, objects, and arrays
@@ -1458,13 +1448,13 @@ export function isPrimitive(val: unknown): val is Primitive {
   return val === null || (type !== "object" && type !== "function");
 }
 
-export class SchemaObjectTraverser<V extends JSONValue>
+export class SchemaObjectTraverser<V extends StorableDatum>
   extends BaseObjectTraverser {
   constructor(
     tx: IExtendedStorageTransaction,
     selector: SchemaPathSelector = DefaultSelector,
     tracker: PointerCycleTracker = new CompoundCycleTracker<
-      Immutable<JSONValue>,
+      Immutable<StorableDatum>,
       JSONSchema | undefined
     >(),
     schemaTracker: MapSet<string, SchemaPathSelector> = new MapSet<
@@ -1845,7 +1835,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
   ): Immutable<StorableValue> {
     const arrayObj: Immutable<StorableDatum>[] = [];
     for (
-      const [index, item] of (doc.value as Immutable<JSONValue>[]).entries()
+      const [index, item] of (doc.value as Immutable<StorableDatum>[]).entries()
     ) {
       const itemSchema = this.cfc.schemaAtPath(schema, [index.toString()]);
       let curDoc: IMemorySpaceAttestation = {
@@ -2248,7 +2238,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
   private applyDefault(
     doc: IMemorySpaceAttestation,
     schema: JSONSchema,
-  ): JSONValue | undefined {
+  ): StorableDatum | undefined {
     if (isObject(schema) && schema.default !== undefined) {
       const link = getNormalizedLink(doc.address, schema);
       return this.objectCreator.applyDefault(link, schema.default);

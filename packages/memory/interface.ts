@@ -13,22 +13,35 @@ export type { JSONValue, Reference };
  * `JSONValue` but is specifically intended for use at storage boundaries
  * (values going into or coming out of the database).
  *
- * `undefined` is allowed at the top level to indicate removal of a stored value.
+ * Note: Once the `richStorableValues` experiment graduates and the rich path
+ * becomes the default, `StorableValue = StorableDatum | undefined` will be a
+ * redundant union (since `StorableDatum` includes `undefined`). The alias is
+ * retained for compatibility and readability at call sites.
  */
 export type StorableValue = StorableDatum | undefined;
 
 /**
- * A storable value that is definitely present (not `undefined`). This is the
- * type used for nested values within arrays and objects, where `undefined`
- * is not a valid JSON value.
+ * The full set of values that the storage layer can represent.
+ *
+ * The stage 1 additions (`undefined` and `Error`) are accepted at the type
+ * level unconditionally, but the runtime conversion functions only preserve
+ * them when the experimental `richStorableValues` flag is ON. When the flag
+ * is OFF, `Error` is eagerly converted to `{"@Error": ...}`, `undefined` in
+ * arrays is converted to `null`, and `undefined` object properties are
+ * omitted -- matching current behavior.
  */
 export type StorableDatum =
+  // -- Primitives (status quo) --
   | null
   | boolean
   | number
   | string
+  // -- Containers (status quo) --
   | StorableArray
-  | StorableObject;
+  | StorableObject
+  // -- Stage 1 additions (experimental: richStorableValues) --
+  | undefined
+  | Error;
 
 /** An array of storable data. */
 export interface StorableArray extends ArrayLike<StorableDatum> {}
@@ -602,14 +615,15 @@ export interface Unclaimed<T extends string = MIME, Of extends string = URI> {
 
 /**
  * `Assertion` is just like a {@link Statement} except the value MUST be inline
- * {@link JSONValue} as opposed to reference to one. {@link Assertion}s are used
- * to assert facts, wile {@link Statement}s are used to retract them. This allows
- * retracting over the wire without having to sending JSON values back and forth.
+ * {@link StorableDatum} as opposed to reference to one. {@link Assertion}s are
+ * used to assert facts, while {@link Statement}s are used to retract them. This
+ * allows retracting over the wire without having to send JSON values back and
+ * forth.
  */
 export interface Assertion<
   T extends string = MIME,
   Of extends string = URI,
-  Is extends JSONValue = JSONValue,
+  Is extends StorableDatum = StorableDatum,
 > {
   the: T;
   of: Of;
@@ -627,7 +641,7 @@ export interface Assertion<
 export interface Retraction<
   T extends string = MIME,
   Of extends string = URI,
-  Is extends JSONValue = JSONValue,
+  Is extends StorableDatum = StorableDatum,
 > {
   the: T;
   of: Of;
@@ -638,7 +652,7 @@ export interface Retraction<
 export interface Invariant<
   T extends string = MIME,
   Of extends string = URI,
-  Is extends JSONValue = JSONValue,
+  Is extends StorableDatum = StorableDatum,
 > {
   the: T;
   of: Of;
@@ -656,13 +670,13 @@ export interface Invariant<
 export type Fact<
   T extends string = MIME,
   Of extends string = URI,
-  Is extends JSONValue = JSONValue,
+  Is extends StorableDatum = StorableDatum,
 > = Assertion<T, Of, Is> | Retraction<T, Of, Is>;
 
 export type Statement<
   T extends string = MIME,
   Of extends string = URI,
-  Is extends JSONValue = JSONValue,
+  Is extends StorableDatum = StorableDatum,
 > = Assertion<T, Of, Is> | Retraction<T, Of, Is> | Invariant<T, Of, Is>;
 
 export type State = Fact | Unclaimed;
@@ -719,9 +733,10 @@ export type CommitFact<Subject extends MemorySpace = MemorySpace> = Assertion<
 export type ClaimFact = true;
 
 // ⚠️ Note we use `void` as opposed to `undefined` because the latter makes it
-// incompatible with JSONValue.
+// incompatible with the `Is` type parameter (which defaults to `StorableDatum`
+// and previously defaulted to `JSONValue`).
 export type RetractFact = { is?: void };
-export type AssertFact<Is extends JSONValue = JSONValue> = { is: Is };
+export type AssertFact<Is extends StorableDatum = StorableDatum> = { is: Is };
 // This is the structure of a bunch of our objects
 export type OfTheCause<T> = {
   [of in URI]: {
@@ -734,7 +749,7 @@ export type OfTheCause<T> = {
 export type Changes<
   T extends string = MIME,
   Of extends string = URI,
-  Is extends JSONValue = JSONValue,
+  Is extends StorableDatum = StorableDatum,
 > = {
   [of in Of]: {
     [the in T]: {
@@ -746,7 +761,7 @@ export type Changes<
 export type FactSelection<
   T extends string = MIME,
   Of extends string = URI,
-  Is extends JSONValue = JSONValue,
+  Is extends StorableDatum = StorableDatum,
 > = {
   [of in Of]: {
     [the in T]: {

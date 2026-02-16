@@ -5,8 +5,8 @@ import {
   deepEqual,
   JSONObject,
   type JSONSchema,
-  type JSONValue,
 } from "../src/index.ts";
+import type { StorableDatum } from "@commontools/memory/interface";
 import {
   CompoundCycleTracker,
   ManagedStorageTransaction,
@@ -40,7 +40,7 @@ describe("Query", () => {
     Revision<State>
   >();
   let emulatedStorageTx: IExtendedStorageTransaction;
-  let tracker: CompoundCycleTracker<JSONValue, JSONSchema | undefined>;
+  let tracker: CompoundCycleTracker<StorableDatum, JSONSchema | undefined>;
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -54,7 +54,7 @@ describe("Query", () => {
     const manager = new StoreObjectManager(store);
     const managerTx = new ManagedStorageTransaction(manager);
     emulatedStorageTx = new ExtendedStorageTransaction(managerTx);
-    tracker = new CompoundCycleTracker<JSONValue, JSONSchema | undefined>();
+    tracker = new CompoundCycleTracker<StorableDatum, JSONSchema | undefined>();
   });
 
   afterEach(async () => {
