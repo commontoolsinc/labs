@@ -2,6 +2,50 @@ import { isInstance, isRecord } from "@commontools/utils/types";
 import type { StorableValue, StorableValueLayer } from "./interface.ts";
 
 /**
+ * Configuration for experimental storable-value features gated behind
+ * `RuntimeOptions.experimental`. Uses ambient (module-level) state so that
+ * deep call sites can check flags without parameter threading.
+ *
+ * See Section 1 of the formal spec (`docs/specs/space-model-formal-spec/`).
+ */
+export interface ExperimentalStorableConfig {
+  /** When `true`, `toStorableValue` and `toDeepStorableValue` use the
+   *  extended type system (bigint, Map, Set, Uint8Array, Date, etc.). */
+  richStorableValues: boolean;
+}
+
+const defaultConfig: ExperimentalStorableConfig = {
+  richStorableValues: false,
+};
+
+let currentConfig: ExperimentalStorableConfig = { ...defaultConfig };
+
+/**
+ * Activates experimental storable-value features. Called by the `Runtime`
+ * constructor to propagate `ExperimentalOptions` into the memory layer.
+ * Merges the provided partial config with defaults.
+ */
+export function setExperimentalStorableConfig(
+  config: Partial<ExperimentalStorableConfig>,
+): void {
+  currentConfig = { ...defaultConfig, ...config };
+}
+
+/** Returns the current experimental storable-value configuration. */
+export function getExperimentalStorableConfig(): ExperimentalStorableConfig {
+  return currentConfig;
+}
+
+/**
+ * Restores experimental storable-value configuration to defaults. Called by
+ * `Runtime.dispose()` to avoid leaking flags between runtime instances or
+ * test runs.
+ */
+export function resetExperimentalStorableConfig(): void {
+  currentConfig = { ...defaultConfig };
+}
+
+/**
  * Character code for digit `0`.
  */
 const CHAR_CODE_0 = "0".charCodeAt(0);
@@ -178,6 +222,19 @@ export function isStorableValue(value: unknown): value is StorableValueLayer {
  * @throws Error if the value can't be converted to a JSON-encodable form.
  */
 export function toStorableValue(value: unknown): StorableValueLayer {
+  if (currentConfig.richStorableValues) {
+    return toStorableValueNew(value);
+  }
+  return toStorableValueLegacy(value);
+}
+
+/** Stub for the extended type system path. Not yet implemented. */
+function toStorableValueNew(_value: unknown): StorableValueLayer {
+  throw new Error("richStorableValues not yet implemented");
+}
+
+/** Legacy implementation of `toStorableValue()` for the JSON-only type system. */
+function toStorableValueLegacy(value: unknown): StorableValueLayer {
   switch (typeof value) {
     case "boolean":
     case "string":
@@ -271,6 +328,19 @@ const PROCESSING = Symbol("PROCESSING");
  * @throws Error if the value (or any nested value) can't be converted.
  */
 export function toDeepStorableValue(value: unknown): StorableValue {
+  if (currentConfig.richStorableValues) {
+    return toDeepStorableValueNew(value);
+  }
+  return toDeepStorableValueLegacy(value);
+}
+
+/** Stub for the extended recursive conversion path. Not yet implemented. */
+function toDeepStorableValueNew(_value: unknown): StorableValue {
+  throw new Error("richStorableValues not yet implemented");
+}
+
+/** Legacy implementation of `toDeepStorableValue()` for the JSON-only type system. */
+function toDeepStorableValueLegacy(value: unknown): StorableValue {
   // The internal helper can return OMIT for nested values that should be
   // omitted, but at the top level this never happens (OMIT is only returned
   // when converted.size > 0, i.e., in nested calls).
@@ -322,10 +392,11 @@ function toDeepStorableValueInternal(
     );
   }
 
-  // Try to convert the top level to storable form.
+  // Try to convert the top level to storable form. Calls the legacy function
+  // directly since toDeepStorableValueInternal is part of the legacy path.
   let value: StorableValueLayer;
   try {
-    value = toStorableValue(original);
+    value = toStorableValueLegacy(original);
   } catch (e) {
     // Clean up converted map before propagating error.
     if (isOriginalRecord) {

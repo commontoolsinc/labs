@@ -13,6 +13,7 @@ import {
 import { WebWorkerRuntimeTransport } from "@commontools/runtime-client/transports/web-worker";
 import { getLogger } from "@commontools/utils/logger";
 import { AppView, navigate } from "../../shared/mod.ts";
+import { EXPERIMENTAL } from "./env.ts";
 
 const logger = getLogger("shell.runtime", {
   enabled: false,
@@ -259,6 +260,7 @@ export class RuntimeInternals extends EventTarget {
       spaceIdentity: session.spaceIdentity,
       spaceDid: session.space,
       spaceName: session.spaceName,
+      experimental: EXPERIMENTAL,
     });
 
     // Wait for PieceManager to sync
