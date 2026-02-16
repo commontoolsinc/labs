@@ -97,7 +97,7 @@ See `docs/development/debugging/cli-debugging.md` for debugging patterns.
 | Commands hang | Check Tailnet connection for `*.ts.net` URLs |
 | Permission denied | `chmod 600 claude.key` |
 | JSON parse error | Check nested quotes, no trailing commas |
-| Local servers not responding | `./scripts/restart-local-dev.sh --force` |
+| Local servers not responding | `./scripts/check-local-dev.sh` then `./scripts/restart-local-dev.sh --force` |
 
 ## References
 
