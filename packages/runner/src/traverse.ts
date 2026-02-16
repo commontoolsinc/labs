@@ -1548,9 +1548,17 @@ export class SchemaObjectTraverser<V extends JSONValue>
           docPath,
           selector.path,
         ]);
-        if (nextSelector && nextSelector.schema !== undefined) {
-          return this.isValidType(selector.schema!, "undefined")
-            ? { ok: undefined }
+        // If we have an asCell, we don't know that we've reached the end of
+        // the write-redirect chain, so don't create a cell.
+        // In the future, getAtPath could be altered to convey whether we found
+        // a valid undefined node, and we can handle this better, but right now
+        // there's no way for that to happen.
+        if (
+          nextSelector && nextSelector.schema !== undefined &&
+          !SchemaObjectTraverser.asCellOrStream(nextSelector.schema)
+        ) {
+          return this.isValidType(nextSelector.schema, "undefined")
+            ? { ok: this.traversePrimitive(nextDoc, nextSelector.schema) }
             : { error: new Error("Encountered link to undefined value") };
         } else {
           return { error: new Error("Encountered link to undefined value") };
@@ -1720,7 +1728,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
       return (defaultValue !== undefined)
         ? { ok: defaultValue }
         : this.isValidType(schemaObj, "undefined")
-        ? { ok: undefined }
+        ? { ok: this.traversePrimitive(doc, schemaObj) }
         : { error: new Error("Invalid type") };
     } else if (doc.value === null) {
       return this.isValidType(schemaObj, "null")
@@ -2189,9 +2197,15 @@ export class SchemaObjectTraverser<V extends JSONValue>
           redirDoc,
         ],
       );
-      return this.isValidType(schema, "undefined")
-        ? { ok: undefined }
-        : { error: new Error("Encountered link to undefined value") };
+      if (SchemaObjectTraverser.asCellOrStream(schema)) {
+        // We can't create a cell for this, since we can't follow all the
+        // write-redirect links.
+        return { error: new Error("Encountered link to undefined value") };
+      } else {
+        return this.isValidType(schema, "undefined")
+          ? { ok: this.traversePrimitive(doc, schema) }
+          : { error: new Error("Encountered link to undefined value") };
+      }
     }
     // For the runtime, where we don't traverse cells, we just want
     // to create a cell object and don't walk into the object beyond
@@ -2234,11 +2248,11 @@ export class SchemaObjectTraverser<V extends JSONValue>
 
   private traversePrimitive(
     doc: IMemorySpaceAttestation,
-    schemaObj: JSONSchemaObj,
+    schema: JSONSchema,
   ): Immutable<StorableValue> {
-    if (SchemaObjectTraverser.asCellOrStream(schemaObj)) {
+    if (SchemaObjectTraverser.asCellOrStream(schema)) {
       return this.objectCreator.createObject(
-        getNormalizedLink(doc.address, schemaObj),
+        getNormalizedLink(doc.address, schema),
         doc.value,
       );
     } else {
