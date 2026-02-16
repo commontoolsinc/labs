@@ -377,53 +377,52 @@ export default pattern<Input, Output>(
     });
 
     // Generate markdown outline
-    const outline = derive(
-      [sortedAisles, departments, itemLocations],
-      (
-        [aislesSorted, depts, corrections]: [
-          Aisle[],
-          Department[],
-          ItemLocation[],
-        ],
-      ) => {
-        const lines: string[] = [];
+    const outline = computed(() => {
+      const aislesSorted = [...aisles.get()].sort((a, b) => {
+        const numA = parseInt(a.name.match(/^\d+/)?.[0] || "999", 10);
+        const numB = parseInt(b.name.match(/^\d+/)?.[0] || "999", 10);
+        if (numA !== numB) return numA - numB;
+        return a.name.localeCompare(b.name);
+      });
+      const depts = departments.get();
+      const corrections = itemLocations.get();
+      const lines: string[] = [];
 
-        // Aisles
-        for (const aisle of aislesSorted) {
-          const knownItems = corrections
-            .filter((c) => c.correctAisle === `Aisle ${aisle.name}`)
-            .map((c) => c.itemName);
-          const knownStr = knownItems.length > 0
-            ? ` (Known items: ${knownItems.join(", ")})`
-            : "";
-          lines.push(`# Aisle ${aisle.name}${knownStr}`);
-          lines.push(aisle.description || "(no description)");
-          lines.push("");
-        }
+      // Aisles
+      for (const aisle of aislesSorted) {
+        const knownItems = corrections
+          .filter((c) => c.correctAisle === `Aisle ${aisle.name}`)
+          .map((c) => c.itemName);
+        const knownStr = knownItems.length > 0
+          ? ` (Known items: ${knownItems.join(", ")})`
+          : "";
+        lines.push(`# Aisle ${aisle.name}${knownStr}`);
+        lines.push(aisle.description || "(no description)");
+        lines.push("");
+      }
 
-        // Departments with locations
-        const assignedDepts = depts.filter(
-          (d) =>
-            d.location !== "unassigned" &&
-            d.location !== "not-in-store" &&
-            d.location !== "in-center-aisle",
-        );
-        for (const dept of assignedDepts) {
-          const locStr = dept.location.replace("-", " ");
-          const knownItems = corrections
-            .filter((c) => c.correctAisle === dept.name)
-            .map((c) => c.itemName);
-          const knownStr = knownItems.length > 0
-            ? ` (Known items: ${knownItems.join(", ")})`
-            : "";
-          lines.push(`# ${dept.name} (${locStr})${knownStr}`);
-          lines.push(dept.description || "(no description)");
-          lines.push("");
-        }
+      // Departments with locations
+      const assignedDepts = depts.filter(
+        (d) =>
+          d.location !== "unassigned" &&
+          d.location !== "not-in-store" &&
+          d.location !== "in-center-aisle",
+      );
+      for (const dept of assignedDepts) {
+        const locStr = dept.location.replace("-", " ");
+        const knownItems = corrections
+          .filter((c) => c.correctAisle === dept.name)
+          .map((c) => c.itemName);
+        const knownStr = knownItems.length > 0
+          ? ` (Known items: ${knownItems.join(", ")})`
+          : "";
+        lines.push(`# ${dept.name} (${locStr})${knownStr}`);
+        lines.push(dept.description || "(no description)");
+        lines.push("");
+      }
 
-        return lines.join("\n");
-      },
-    );
+      return lines.join("\n");
+    });
 
     // Counts for reactive arrays
     const aisleCount = computed(() => aisles.get().length);
@@ -519,10 +518,8 @@ export default pattern<Input, Output>(
                 marginTop: "0.5rem",
               }}
             >
-              {derive(
-                [aisleCount, deptCount, entranceCount],
-                ([a, d, e]: [number, number, number]) =>
-                  `${a} aisles • ${d} departments • ${e} entrances`,
+              {computed(() =>
+                `${aisleCount} aisles • ${deptCount} departments • ${entranceCount} entrances`
               )}
             </div>
           </div>
@@ -1586,148 +1583,143 @@ export default pattern<Input, Output>(
                                   Error analyzing photo. Please try removing and
                                   re-uploading.
                                 </div>,
-                                derive(
-                                  [extraction.extractedAisles, aisles],
-                                  ([
-                                    extracted,
-                                    currentAisles,
-                                  ]: [
-                                    { aisles: ExtractedAisle[] },
-                                    Aisle[],
-                                  ]) => {
-                                    if (
-                                      !extracted?.aisles ||
-                                      extracted.aisles.length === 0
-                                    ) {
-                                      return (
-                                        <div
-                                          style={{
-                                            fontSize: "12px",
-                                            color: "#999",
-                                          }}
-                                        >
-                                          No aisles detected in photo
-                                        </div>
-                                      );
-                                    }
-
-                                    // Helper function to check if aisle exists
-                                    // Uses .some() directly on currentAisles (works with reactive proxies)
-                                    const aisleExists = (name: string) => {
-                                      try {
-                                        return currentAisles.some(
-                                          (existing: Aisle) =>
-                                            existing?.name?.toLowerCase?.() ===
-                                              name.toLowerCase(),
-                                        );
-                                      } catch {
-                                        return false;
-                                      }
-                                    };
-
-                                    // Count new aisles
-                                    const newCount = extracted.aisles.filter(
-                                      (e) => !aisleExists(e.name),
-                                    ).length;
-
+                                computed(() => {
+                                  const extracted: {
+                                    aisles: ExtractedAisle[];
+                                  } = extraction.extractedAisles;
+                                  const currentAisles = aisles.get();
+                                  if (
+                                    !extracted?.aisles ||
+                                    extracted.aisles.length === 0
+                                  ) {
                                     return (
-                                      <ct-vstack gap="1">
-                                        {/* Batch add button */}
-                                        {newCount > 0 && (
-                                          <ct-button
-                                            size="sm"
-                                            variant="primary"
-                                            onClick={addAllExtractedAisles({
-                                              aisles,
-                                              extractedList: extracted.aisles,
-                                              hiddenPhotoIds,
-                                              photoId: extraction.photo.id,
-                                            })}
-                                            style="margin-bottom: 0.5rem;"
-                                          >
-                                            + Add All {newCount} New Aisles
-                                          </ct-button>
-                                        )}
+                                      <div
+                                        style={{
+                                          fontSize: "12px",
+                                          color: "#999",
+                                        }}
+                                      >
+                                        No aisles detected in photo
+                                      </div>
+                                    );
+                                  }
 
-                                        {/* Individual aisle results */}
-                                        {extracted.aisles.map(
-                                          (extractedAisle: ExtractedAisle) => {
-                                            const exists = aisleExists(
-                                              extractedAisle.name,
-                                            );
-                                            return (
-                                              <ct-hstack
-                                                gap="2"
-                                                align="center"
-                                                style={`padding: 0.5rem; background: ${
-                                                  exists ? "#fef3c7" : "#dcfce7"
-                                                }; border-radius: 4px;`}
-                                              >
-                                                <div style={{ flex: 1 }}>
-                                                  <strong>
-                                                    Aisle {extractedAisle.name}
-                                                  </strong>
-                                                  {exists && (
-                                                    <span
-                                                      style={{
-                                                        color: "#92400e",
-                                                        marginLeft: "0.5rem",
-                                                        fontSize: "11px",
-                                                      }}
-                                                    >
-                                                      (exists)
-                                                    </span>
-                                                  )}
-                                                  <div
+                                  // Helper function to check if aisle exists
+                                  // Uses .some() directly on currentAisles (works with reactive proxies)
+                                  const aisleExists = (name: string) => {
+                                    try {
+                                      return currentAisles.some(
+                                        (existing: Aisle) =>
+                                          existing?.name?.toLowerCase?.() ===
+                                            name.toLowerCase(),
+                                      );
+                                    } catch {
+                                      return false;
+                                    }
+                                  };
+
+                                  // Count new aisles
+                                  const newCount = extracted.aisles.filter(
+                                    (e) => !aisleExists(e.name),
+                                  ).length;
+
+                                  return (
+                                    <ct-vstack gap="1">
+                                      {/* Batch add button */}
+                                      {newCount > 0 && (
+                                        <ct-button
+                                          size="sm"
+                                          variant="primary"
+                                          onClick={addAllExtractedAisles({
+                                            aisles,
+                                            extractedList: extracted.aisles,
+                                            hiddenPhotoIds,
+                                            photoId: extraction.photo.id,
+                                          })}
+                                          style="margin-bottom: 0.5rem;"
+                                        >
+                                          + Add All {newCount} New Aisles
+                                        </ct-button>
+                                      )}
+
+                                      {/* Individual aisle results */}
+                                      {extracted.aisles.map(
+                                        (extractedAisle: ExtractedAisle) => {
+                                          const exists = aisleExists(
+                                            extractedAisle.name,
+                                          );
+                                          return (
+                                            <ct-hstack
+                                              gap="2"
+                                              align="center"
+                                              style={`padding: 0.5rem; background: ${
+                                                exists ? "#fef3c7" : "#dcfce7"
+                                              }; border-radius: 4px;`}
+                                            >
+                                              <div style={{ flex: 1 }}>
+                                                <strong>
+                                                  Aisle {extractedAisle.name}
+                                                </strong>
+                                                {exists && (
+                                                  <span
                                                     style={{
-                                                      fontSize: "12px",
-                                                      color: "#6b7280",
+                                                      color: "#92400e",
+                                                      marginLeft: "0.5rem",
+                                                      fontSize: "11px",
                                                     }}
                                                   >
-                                                    {(extractedAisle.products ||
-                                                      []).join(", ") ||
-                                                      "(no products)"}
-                                                  </div>
+                                                    (exists)
+                                                  </span>
+                                                )}
+                                                <div
+                                                  style={{
+                                                    fontSize: "12px",
+                                                    color: "#6b7280",
+                                                  }}
+                                                >
+                                                  {(extractedAisle.products ||
+                                                    []).join(", ") ||
+                                                    "(no products)"}
                                                 </div>
-                                                {exists
-                                                  ? (
-                                                    <ct-button
-                                                      size="sm"
-                                                      variant="secondary"
-                                                      onClick={mergeExtractedAisle(
-                                                        {
-                                                          aisles,
-                                                          extracted:
-                                                            extractedAisle,
-                                                        },
-                                                      )}
-                                                    >
-                                                      Merge
-                                                    </ct-button>
-                                                  )
-                                                  : (
-                                                    <ct-button
-                                                      size="sm"
-                                                      variant="primary"
-                                                      onClick={addExtractedAisle(
-                                                        {
-                                                          aisles,
-                                                          extracted:
-                                                            extractedAisle,
-                                                        },
-                                                      )}
-                                                    >
-                                                      Add
-                                                    </ct-button>
-                                                  )}
-                                              </ct-hstack>
-                                            );
-                                          },
-                                        )}
-                                      </ct-vstack>
-                                    );
-                                  },
-                                ),
+                                              </div>
+                                              {exists
+                                                ? (
+                                                  <ct-button
+                                                    size="sm"
+                                                    variant="secondary"
+                                                    onClick={mergeExtractedAisle(
+                                                      {
+                                                        aisles,
+                                                        extracted:
+                                                          extractedAisle,
+                                                      },
+                                                    )}
+                                                  >
+                                                    Merge
+                                                  </ct-button>
+                                                )
+                                                : (
+                                                  <ct-button
+                                                    size="sm"
+                                                    variant="primary"
+                                                    onClick={addExtractedAisle(
+                                                      {
+                                                        aisles,
+                                                        extracted:
+                                                          extractedAisle,
+                                                      },
+                                                    )}
+                                                  >
+                                                    Add
+                                                  </ct-button>
+                                                )}
+                                            </ct-hstack>
+                                          );
+                                        },
+                                      )}
+                                    </ct-vstack>
+                                  );
+                                }),
                               ),
                             )}
                           </div>,
