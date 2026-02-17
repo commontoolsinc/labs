@@ -11,7 +11,7 @@ import { createQueryResultProxy } from "../src/query-result-proxy.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { popFrame, pushFrame } from "../src/builder/recipe.ts";
+import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
