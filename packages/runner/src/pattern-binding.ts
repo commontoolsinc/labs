@@ -90,16 +90,16 @@ export function sendValueToBinding<T>(
  * @param binding - The binding to unwrap.
  * @param docOrCell - The doc or cell to bind to.
  * @param options - Optional configuration.
- * @param options.bindRecipes - If false, skip binding aliases inside recipe values.
+ * @param options.bindPatterns - If false, skip binding aliases inside pattern values.
  *   This is used by raw/map nodes to prevent premature alias binding. Default: true.
  * @returns The unwrapped binding.
  */
 export function unwrapOneLevelAndBindtoDoc<T, U>(
   binding: T,
   cell: Cell<U>,
-  options?: { bindRecipes?: boolean },
+  options?: { bindPatterns?: boolean },
 ): T {
-  const bindRecipes = options?.bindRecipes !== false;
+  const bindPatterns = options?.bindPatterns !== false;
 
   function convert(binding: unknown, bindToDoc: boolean): unknown {
     if (isLegacyAlias(binding)) {
@@ -115,7 +115,7 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
       } else if (!alias.cell && bindToDoc) {
         alias.cell = cell.entityId;
       } else if (
-        // CT-1230 WORKAROUND: Rebind local recipe aliases to the current doc.
+        // CT-1230 WORKAROUND: Rebind local pattern aliases to the current doc.
         //
         // Problem: When a subpattern is used in .map(), its internal/argument/resultRef
         // aliases could be bound to a doc from a previous execution context. When the
@@ -127,7 +127,7 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
         // This ensures the alias points to the correct doc for this execution.
         //
         // We're uncertain if this is the right architectural fix or just masking a deeper
-        // issue with how recipes capture their execution context.
+        // issue with how patterns capture their execution context.
         bindToDoc &&
         alias.cell &&
         Array.isArray(alias.path) &&
@@ -142,27 +142,27 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
       } else if (!bindToDoc && alias.cell) {
         // CT-1230 WORKAROUND: Clear previously-bound alias when not binding to doc.
         //
-        // Problem: If a recipe was serialized with an alias already bound to a specific
+        // Problem: If a pattern was serialized with an alias already bound to a specific
         // doc, and we're now in a context where we shouldn't bind (e.g., processing
-        // a recipe argument to map()), that stale binding could cause issues.
+        // a pattern argument to map()), that stale binding could cause issues.
         //
         // Why this helps: Dropping the binding allows the alias to be properly re-bound
-        // when the recipe is actually executed in its correct context.
+        // when the pattern is actually executed in its correct context.
         delete alias.cell;
       }
       return { $alias: alias };
     } else if (Array.isArray(binding)) {
       return binding.map((value) => convert(value, bindToDoc));
     } else if (isRecord(binding)) {
-      // CT-1230 WORKAROUND: Don't bind aliases inside recipe values when bindRecipes=false.
+      // CT-1230 WORKAROUND: Don't bind aliases inside pattern values when bindPatterns=false.
       //
-      // Problem: When raw/map nodes receive a recipe as an input value, we were binding
-      // the aliases inside that recipe to the current doc. But those aliases should
-      // remain unbound until the recipe is actually instantiated/executed.
+      // Problem: When raw/map nodes receive a pattern as an input value, we were binding
+      // the aliases inside that pattern to the current doc. But those aliases should
+      // remain unbound until the pattern is actually instantiated/executed.
       //
-      // Why this helps: By checking isPattern() and respecting bindRecipes option, we
-      // avoid premature binding of nested recipe aliases.
-      const shouldBind = bindToDoc && (bindRecipes || !isPattern(binding));
+      // Why this helps: By checking isPattern() and respecting bindPatterns option, we
+      // avoid premature binding of nested pattern aliases.
+      const shouldBind = bindToDoc && (bindPatterns || !isPattern(binding));
       const result: Record<string | symbol, unknown> = Object.fromEntries(
         Object.entries(binding).map(([key, value]) => [
           key,

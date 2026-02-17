@@ -135,7 +135,7 @@ outstanding gaps, and the focused roadmap we intend to pursue.
 
 - **Async transformations** – Once closures are handled, assess whether wrapping
   reactive values inside template literals and `await` chains is still a blocker
-  for recipes.
+  for patterns.
 - **Performance & diagnostics** – If rule count grows, revisit lightweight
   instrumentation (timing, rule-level debug logging) rather than the heavy
   “transformation engine” originally proposed.

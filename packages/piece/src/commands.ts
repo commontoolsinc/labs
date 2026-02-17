@@ -124,7 +124,7 @@ export async function addGithubPattern(
   runOptions: unknown,
 ): Promise<Cell<unknown>> {
   const response = await fetch(
-    `https://raw.githubusercontent.com/commontoolsinc/labs/refs/heads/main/recipes/${filename}?${Date.now()}`,
+    `https://raw.githubusercontent.com/commontoolsinc/labs/refs/heads/main/deprecated-patterns/${filename}?${Date.now()}`,
   );
   if (!response.ok) {
     throw new Error(

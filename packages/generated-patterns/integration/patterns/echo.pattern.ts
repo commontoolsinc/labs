@@ -7,9 +7,9 @@ interface EchoArgs {
 
 const liftIdentity = lift((text: string) => text);
 
-export const echoRecipe = pattern<EchoArgs>("Echo", ({ message }) => {
+export const echoPattern = pattern<EchoArgs>("Echo", ({ message }) => {
   const value = liftIdentity(message);
   return { message: value };
 });
 
-export default echoRecipe;
+export default echoPattern;

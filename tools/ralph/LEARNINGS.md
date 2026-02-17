@@ -36,7 +36,7 @@ with the Common Tools framework.
 
 - Keep patterns offline-friendly (no network or LLM dependencies)
 - Follow existing conventions from the patterns directory
-- Use CTS APIs: `handler`, `recipe`, `lift`, `str`, `cell`, `createCell`
+- Use CTS APIs: `handler`, `pattern`, `lift`, `str`, `cell`, `createCell`
 
 ## Testing Notes
 

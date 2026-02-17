@@ -1,7 +1,7 @@
 # Pattern Learnings
 
 Use this as the prompt for new pattern runs. Focus on deterministic, reusable,
-offline-friendly recipes that the harness can assert confidently.
+offline-friendly patterns that the harness can assert confidently.
 
 ## Core Mindset
 
@@ -150,9 +150,9 @@ offline-friendly recipes that the harness can assert confidently.
 - Seed bucket derives from a canonical status list so empty statuses still
   surface deterministic entries for assertions.
 
-## Composition & Child Recipes
+## Composition & Child Patterns
 
-- Pass argument cells straight into child recipes; let each child sanitize its
+- Pass argument cells straight into child patterns; let each child sanitize its
   own inputs so shared handlers stay synchronous.
 - Use guard cells to control conditional instantiation, and keep the guard in
   sync with status derives so re-instantiating a child resets defaults cleanly.
@@ -190,7 +190,7 @@ offline-friendly recipes that the harness can assert confidently.
 
 - Extract reusable sanitizer and formatter helpers so multiple handlers and
   derives can share them without drift.
-- Treat recipes as building blocks. Compose them instead of re-implementing
+- Treat patterns as building blocks. Compose them instead of re-implementing
   similar flows; parameterize shared logic with cells rather than global state.
 - Document key invariants through derives and summary strings so harness output
   stays human-readable while remaining machine-checkable.

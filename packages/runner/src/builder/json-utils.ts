@@ -215,12 +215,12 @@ export function moduleToJSON(module: Module) {
   const { toJSON: _, ...rest } = module as Module & { toJSON: () => any };
   let implementation = module.implementation;
 
-  // CT-1230 WORKAROUND: Preserve recipe structure when serializing recipe modules.
+  // CT-1230 WORKAROUND: Preserve pattern structure when serializing pattern modules.
   //
-  // Problem: When a subpattern is passed to .map(), the recipe's implementation
+  // Problem: When a subpattern is passed to .map(), the pattern's implementation
   // was being stringified (e.g., "(inputs2) => { ... }") instead of preserving
-  // the actual recipe structure. This caused "Invalid recipe" errors at runtime
-  // because isRecipe() check failed on the string.
+  // the actual pattern structure. This caused "Invalid pattern" errors at runtime
+  // because isPattern() check failed on the string.
   //
   // Why this helps: Using toJSONWithLegacyAliases ensures nested $alias bindings
   // get their nesting level incremented properly. Without this, aliases could be

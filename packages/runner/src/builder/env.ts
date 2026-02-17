@@ -17,13 +17,13 @@ let globalEnv = {
     : new URL(new URL(globalThis.location.href).origin),
 };
 
-// Sets the `PatternEnvironment` for all recipes executed
+// Sets the `PatternEnvironment` for all patterns executed
 // within this JavaScript context.
 export function setPatternEnvironment(env: PatternEnvironment) {
   globalEnv = env;
 }
 
-// Gets the `PatternEnvironment` for all recipes executed
+// Gets the `PatternEnvironment` for all patterns executed
 // within this JavaScript context.
 //
 // User-visible.

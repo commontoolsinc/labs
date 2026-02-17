@@ -31,7 +31,7 @@ describe("background charm counter tests", () => {
           "..",
           "..",
           "..",
-          "recipes",
+          "deprecated-patterns",
           "bgCounter.tsx",
         ),
       ),

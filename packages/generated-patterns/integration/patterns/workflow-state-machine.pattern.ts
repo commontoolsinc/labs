@@ -282,6 +282,4 @@ export const workflowStateMachine = pattern<WorkflowArgs>(
   },
 );
 
-export const pattern = workflowStateMachine;
-
 export default workflowStateMachine;

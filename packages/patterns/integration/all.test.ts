@@ -8,7 +8,7 @@ import { FileSystemProgramResolver } from "@commontools/js-compiler";
 
 const { API_URL, SPACE_NAME } = env;
 
-describe("Compile all recipes", () => {
+describe("Compile all patterns", () => {
   const skippedPatterns = [
     "system/link-tool.tsx", // Utility handlers, not a standalone pattern
   ];
