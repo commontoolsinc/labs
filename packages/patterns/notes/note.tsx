@@ -265,6 +265,33 @@ const goToViewer = handler<
   );
 });
 
+// Grep sub-pattern for patternTool - filters content lines by query
+const grepPattern = pattern<
+  { query: string; content: string },
+  string[]
+>(({ query, content }) => {
+  return computed(() => {
+    return content.split("\n").filter((c: string) => c.includes(query));
+  });
+});
+
+// Translate sub-pattern for patternTool - translates content to specified language
+const translatePattern = pattern<
+  { language: string; content: string },
+  string | undefined
+>(({ language, content }) => {
+  const genResult = generateText({
+    system: computed(() => `Translate the content to ${language}.`),
+    prompt: computed(() => `<to_translate>${content}</to_translate>`),
+  });
+
+  return computed(() => {
+    if (genResult.pending) return undefined;
+    if (genResult.result == null) return "Error occurred";
+    return genResult.result;
+  });
+});
+
 // Menu: All Notes (find existing only - can't create due to circular imports)
 const menuAllNotebooks = handler<
   void,
@@ -616,30 +643,8 @@ const Note = pattern<Input, Output>(
       parentNotebook,
       isHidden,
       noteId,
-      grep: patternTool(
-        ({ query, content }: { query: string; content: string }) => {
-          return computed(() => {
-            return content.split("\n").filter((c) => c.includes(query));
-          });
-        },
-        { content },
-      ),
-      translate: patternTool(
-        ({ language, content }: { language: string; content: string }) => {
-          const genResult = generateText({
-            system: computed(() => `Translate the content to ${language}.`),
-            prompt: computed(
-              () => `<to_translate>${content}</to_translate>`,
-            ),
-          });
-          return computed(() => {
-            if (genResult.pending) return undefined;
-            if (genResult.result == null) return "Error occurred";
-            return genResult.result;
-          });
-        },
-        { content },
-      ),
+      grep: patternTool(grepPattern, { content }),
+      translate: patternTool(translatePattern, { content }),
       editContent: handleEditContent({ content }),
       // Minimal UI for embedding in containers (e.g., Record modules)
       embeddedUI: editorUI,
