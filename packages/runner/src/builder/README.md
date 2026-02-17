@@ -104,7 +104,7 @@ reads `{ foo: { bar: ... } }` and writes a different cell reference for `foo`.
 In principle, if `bar` has never been read, we wouldn't listen to changes just
 on `bar` (assuming the reference `foo` remains the same). But by definition none
 of the other values could depend on that `bar`, so this should be fine: At this
-level, i.e. beyond what the recipe marks read-only, modules can change cell
+level, i.e. beyond what the pattern marks read-only, modules can change cell
 references.
 
 To summarize the implications for the implementation:
