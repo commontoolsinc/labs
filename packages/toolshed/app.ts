@@ -16,6 +16,7 @@ import meta from "@/routes/meta/meta.index.ts";
 import shell from "@/routes/shell/shell.index.ts";
 import staticRoute from "@/routes/static/static.index.ts";
 import patterns from "@/routes/patterns/patterns.index.ts";
+import sandboxExec from "@/routes/sandbox/exec/exec.index.ts";
 
 const app = createApp();
 
@@ -37,6 +38,7 @@ const routes = [
   meta,
   staticRoute,
   patterns,
+  sandboxExec,
 ] as const;
 
 routes.forEach((route) => {

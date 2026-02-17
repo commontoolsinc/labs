@@ -179,6 +179,44 @@ export const readWebpage = pattern<
   return ifElse(error, { error }, result);
 });
 
+/**
+ * Execute a bash command in a persistent cloud sandbox.
+ * The sandbox preserves installed packages and files across calls.
+ */
+type BashRequest = {
+  /** The bash command to execute. */
+  command: string;
+  /** Working directory for the command. */
+  workingDirectory?: string;
+  /** Timeout in milliseconds. Defaults to 60000. */
+  timeout?: number;
+  /** Additional environment variables as key-value pairs. */
+  environment?: Record<string, string>;
+  /** Sandbox identifier. Automatically provided — do not set. */
+  sandboxId: string;
+};
+
+type BashResult = {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+};
+
+export const bash = pattern<BashRequest, BashResult | { error: string }>(
+  ({ command, workingDirectory, timeout, environment, sandboxId }) => {
+    const { result, error } = fetchData<BashResult>({
+      url: "/api/sandbox/exec",
+      mode: "json",
+      options: {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: { sandboxId, command, workingDirectory, timeout, environment },
+      },
+    });
+    return ifElse(error, { error }, result);
+  },
+);
+
 type ToolsInput = {
   list: ListItem[];
 };
