@@ -19,6 +19,33 @@ import {
 } from "commontools";
 import { fetchAndRunPattern, listPatternIndex } from "./common-tools.tsx";
 
+// Sanitize generateObject's accumulated messages for use in llmDialog.
+// After cell serialization round-trip, tool-result messages have an internal
+// output format ({ type: "json", value: ... }) that the Vercel AI SDK rejects.
+// FIXME(ben): Find a way to include tool-call context (pattern URLs, @link refs) so
+// the dialog model knows what was previously launched. Current approach strips
+// too much context — the model can't effectively refine the result without
+// knowing which pattern was used or the result cell link.
+function sanitizeMessagesForDialog(msgs: any[]): BuiltInLLMMessage[] {
+  const result: BuiltInLLMMessage[] = [];
+  for (const msg of msgs) {
+    if (msg.role === "tool") continue; // Drop tool-result messages entirely
+    if (msg.role === "assistant" && Array.isArray(msg.content)) {
+      // Keep only text parts from assistant messages (strip tool-call parts)
+      const textParts = msg.content.filter(
+        (p: any) => p.type === "text" && p.text?.trim(),
+      );
+      if (textParts.length > 0) {
+        result.push({ role: "assistant", content: textParts });
+      }
+      continue;
+    }
+    // Pass user/system messages through as-is
+    result.push(msg);
+  }
+  return result;
+}
+
 // --- Module-level handlers ---
 const sendFollowUp = handler<
   { detail: { message: string } },
@@ -29,10 +56,12 @@ const sendFollowUp = handler<
   }
 >((event, { dialogMessages, suggestionMessages, addMessage }) => {
   // Seed dialog with generateObject's conversation on first follow-up
+  // Note: suggestionMessages is a computed, CTS auto-unwraps it to a plain
+  // value in handler state bindings — do NOT call .get() on it.
   if (dialogMessages.get().length === 0) {
-    const msgs = suggestionMessages.get();
+    const msgs = suggestionMessages;
     if (msgs && msgs.length > 0) {
-      dialogMessages.set([...msgs]);
+      dialogMessages.set(sanitizeMessagesForDialog(msgs));
     }
   }
   addMessage.send({
@@ -67,10 +96,11 @@ const answerQuestion = handler<
   event,
   { pendingQuestion, dialogMessages, suggestionMessages, addMessage },
 ) => {
+  // Same as sendFollowUp — suggestionMessages is auto-unwrapped by CTS.
   if (dialogMessages.get().length === 0) {
-    const msgs = suggestionMessages.get();
+    const msgs = suggestionMessages;
     if (msgs && msgs.length > 0) {
-      dialogMessages.set([...msgs]);
+      dialogMessages.set(sanitizeMessagesForDialog(msgs));
     }
   }
   pendingQuestion.set(null);
@@ -166,7 +196,10 @@ Always call presentResult when you have a new result to show.`;
       askUser: { handler: askUserTool({ pendingQuestion }) },
     },
     model: "anthropic:claude-haiku-4-5",
-    context,
+    // NOTE: Intentionally NOT passing `context` here. The context cells contain
+    // complex running patterns ($UI, $mentionable, etc.) that cause circular
+    // reference errors when llmDialog tries to serialize them for the LLM.
+    // The dialog has fetchAndRunPattern/listPatternIndex tools which is sufficient.
   });
 
   const suggestionMessages = computed(() => suggestion.messages);
