@@ -233,39 +233,12 @@ const handleDropOntoNotebook = handler<
   }
 });
 
-// Navigate to All Notes piece if it exists (found by name in allPieces)
-// Module-scope handler avoids closure-over-wish issue (see traverse.ts required-property bug)
-const goToAllNotes = handler<
-  void,
-  { allPieces: Writable<NotePiece[]> }
->((_, { allPieces }) => {
-  const pieces = allPieces.get();
-  const existing = pieces.find((piece: any) => {
-    const name = piece?.[NAME];
-    return typeof name === "string" && name.startsWith("All Notes");
-  });
-  if (existing) {
-    return navigateTo(existing);
-  }
-});
-
 // Handler for clicking on a backlink
 const handleBacklinkClick = handler<
   void,
   { piece: Writable<MentionablePiece> }
 >(
   (_, { piece }) => navigateTo(piece),
-);
-
-// Handler to navigate to parent notebook
-const goToParent = handler<
-  void,
-  { parentNotebook: Writable<NotebookPiece | null> }
->(
-  (_, { parentNotebook }) => {
-    const p = parentNotebook.get();
-    if (p) navigateTo(p);
-  },
 );
 
 // Handler to navigate to a child (note or notebook) - sets parent for back navigation
@@ -522,90 +495,6 @@ const toggleNoteCheckbox = handler<
   lastSelectedNoteIndex.set(index);
 });
 
-// LLM-callable handler: Create a single note in this notebook
-const handleCreateNote = handler<
-  { title: string; content: string },
-  {
-    notes: Writable<NotePiece[]>;
-    allPieces: Writable<NotePiece[]>;
-    self: any;
-  }
->(({ title: noteTitle, content }, { notes, allPieces, self }) => {
-  const newNote = Note({
-    title: noteTitle,
-    content,
-    isHidden: true,
-    noteId: generateId(),
-    parentNotebook: self, // Set parent for back navigation
-  });
-  allPieces.push(newNote as any); // Required for persistence
-  notes.push(newNote);
-  return newNote;
-});
-
-// LLM-callable handler: Create multiple notes in bulk
-const handleCreateNotes = handler<
-  { notesData: Array<{ title: string; content: string }> },
-  {
-    notes: Writable<NotePiece[]>;
-    allPieces: Writable<NotePiece[]>;
-    self: any;
-  }
->(({ notesData }, { notes, allPieces, self }) => {
-  // Collect notes first, then batch push (reduces N reactive cycles to 1)
-  const created: NotePiece[] = [];
-  for (const data of notesData) {
-    created.push(Note({
-      title: data.title,
-      content: data.content,
-      isHidden: true,
-      noteId: generateId(),
-      parentNotebook: self, // Set parent for back navigation
-    }));
-  }
-  allPieces.push(...created); // Required for persistence
-  notes.push(...created);
-  return created;
-});
-
-// LLM-callable handler: Rename the notebook
-const handleSetTitle = handler<
-  { newTitle: string },
-  { title: Writable<string> }
->(({ newTitle }, { title }) => {
-  title.set(newTitle);
-  return newTitle;
-});
-
-// LLM-callable handler: Create a new notebook (optionally with notes)
-// Note: If no notesData provided, notebook is created empty; a default note is created lazily when opened
-const handleCreateNotebook = handler<
-  { title: string; notesData?: Array<{ title: string; content: string }> },
-  { allPieces: Writable<NotePiece[]> }
->(({ title: nbTitle, notesData }, { allPieces }) => {
-  // Create notes with isHidden: true so they don't appear in DefaultPieceList
-  const notesToAdd: NotePiece[] = [];
-  if (notesData && notesData.length > 0) {
-    for (const data of notesData) {
-      notesToAdd.push(Note({
-        title: data.title,
-        content: data.content,
-        isHidden: true,
-        noteId: generateId(),
-      }));
-    }
-  }
-
-  // Create the notebook with the notes (empty if no notesData)
-  const newNotebook = Notebook({
-    title: nbTitle,
-    notes: notesToAdd,
-  });
-
-  allPieces.push(newNotebook);
-  return newNotebook;
-});
-
 const Notebook = pattern<NotebookInput, NotebookOutput>(
   ({ title, notes, isNotebook, isHidden, parentNotebook, [SELF]: self }) => {
     // Type-based discovery for notebooks and "All Notes" piece
@@ -684,7 +573,21 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
       selectedMoveNotebook.set("");
     });
 
-    const goToAllNotesAction = goToAllNotes({ allPieces });
+    const goToAllNotesAction = action(() => {
+      const pieces = allPieces.get();
+      const existing = pieces.find((piece: any) => {
+        const name = piece?.[NAME];
+        return typeof name === "string" && name.startsWith("All Notes");
+      });
+      if (existing) {
+        return navigateTo(existing);
+      }
+    });
+
+    const goToParentAction = action(() => {
+      const p = parentNotebook.get();
+      if (p) navigateTo(p);
+    });
 
     const selectAllNotesAction = action(() => {
       const notesList = notes.get();
@@ -707,6 +610,81 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
     // ===== Actions (close over notes, allPieces, self) =====
     // These work because all inputs use Default<> (not optional ?), so self
     // always satisfies the output schema's required properties at runtime.
+
+    // LLM-callable: Create a single note in this notebook
+    const createNoteStreamAction = action(
+      ({ title: noteTitle, content }: { title: string; content: string }) => {
+        const newNote = Note({
+          title: noteTitle,
+          content,
+          isHidden: true,
+          noteId: generateId(),
+          parentNotebook: self,
+        });
+        allPieces.push(newNote as any);
+        notes.push(newNote);
+        return newNote;
+      },
+    );
+
+    // LLM-callable: Create multiple notes in bulk
+    const createNotesStreamAction = action(
+      (
+        { notesData }: {
+          notesData: Array<{ title: string; content: string }>;
+        },
+      ) => {
+        const created: NotePiece[] = [];
+        for (const data of notesData) {
+          created.push(Note({
+            title: data.title,
+            content: data.content,
+            isHidden: true,
+            noteId: generateId(),
+            parentNotebook: self,
+          }));
+        }
+        allPieces.push(...created);
+        notes.push(...created);
+        return created;
+      },
+    );
+
+    // LLM-callable: Rename the notebook
+    const setTitleAction = action(({ newTitle }: { newTitle: string }) => {
+      title.set(newTitle);
+      return newTitle;
+    });
+
+    // LLM-callable: Create a new notebook (optionally with notes)
+    const createNotebookStreamAction = action(
+      (
+        { title: nbTitle, notesData }: {
+          title: string;
+          notesData?: Array<{ title: string; content: string }>;
+        },
+      ) => {
+        const notesToAdd: NotePiece[] = [];
+        if (notesData && notesData.length > 0) {
+          for (const data of notesData) {
+            notesToAdd.push(Note({
+              title: data.title,
+              content: data.content,
+              isHidden: true,
+              noteId: generateId(),
+            }));
+          }
+        }
+
+        const newNotebook = Notebook({
+          title: nbTitle,
+          notes: notesToAdd,
+        });
+
+        allPieces.push(newNotebook);
+        return newNotebook;
+      },
+    );
 
     // Create note - shared logic for "Create" and "Create Another" buttons
     const createNoteAction = action(() => {
@@ -986,7 +964,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                   <ct-chip
                     label={parentNotebookLabel}
                     interactive
-                    onct-click={goToParent({ parentNotebook })}
+                    onct-click={goToParentAction}
                   />
                 </ct-hstack>
                 {/* Spacer when no parent */}
@@ -1486,10 +1464,10 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
       // Make notes discoverable via [[ autocomplete system-wide
       mentionable: notes,
       // LLM-callable streams for omnibot integration
-      createNote: handleCreateNote({ notes, allPieces, self }),
-      createNotes: handleCreateNotes({ notes, allPieces, self }),
-      setTitle: handleSetTitle({ title }),
-      createNotebook: handleCreateNotebook({ allPieces }),
+      createNote: createNoteStreamAction,
+      createNotes: createNotesStreamAction,
+      setTitle: setTitleAction,
+      createNotebook: createNotebookStreamAction,
       // Test-accessible action streams
       selectAllNotes: selectAllNotesAction,
       deselectAllNotes: deselectAllNotesAction,

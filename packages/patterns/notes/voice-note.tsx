@@ -1,5 +1,6 @@
 /// <cts-enable />
 import {
+  action,
   computed,
   type Default,
   handler,
@@ -33,14 +34,6 @@ type Output = {
   notes: Default<TranscriptionData[], []>;
 };
 
-const handleTranscriptionComplete = handler<
-  { detail: { transcription: TranscriptionData } },
-  { notes: Writable<TranscriptionData[]> }
->(({ detail }, { notes }) => {
-  // Add the transcription to our notes list
-  notes.push(detail.transcription);
-});
-
 const handleDeleteNote = handler<
   undefined,
   { noteId: string; notes: Writable<TranscriptionData[]> }
@@ -53,6 +46,12 @@ const handleDeleteNote = handler<
 const VoiceNote = pattern<Input, Output>(({ title }) => {
   const transcription = Writable.of<TranscriptionData | null>(null);
   const notes = Writable.of<TranscriptionData[]>([]);
+
+  const handleTranscriptionComplete = action(
+    ({ detail }: { detail: { transcription: TranscriptionData } }) => {
+      notes.push(detail.transcription);
+    },
+  );
 
   // Computed values for type-safe JSX access
   const hasTranscription = computed(() => transcription.get() !== null);
@@ -89,9 +88,7 @@ const VoiceNote = pattern<Input, Output>(({ title }) => {
                 autoTranscribe
                 maxDuration={120}
                 showWaveform
-                onct-transcription-complete={handleTranscriptionComplete({
-                  notes,
-                })}
+                onct-transcription-complete={handleTranscriptionComplete}
               />
 
               {hasTranscription && (

@@ -79,7 +79,7 @@ export interface NoteInput {
 }
 
 export interface NotebookInput {
-  title?: Default<string, "Notebook">;
+  title?: Writable<Default<string, "Notebook">>;
   notes?: Writable<Default<NotePiece[], []>>;
   isNotebook?: Default<boolean, true>;
   isHidden?: Default<boolean, false>;

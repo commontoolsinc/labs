@@ -59,12 +59,6 @@ interface NoteOutput {
 
 // ===== Module-scope handlers (reused with different bindings) =====
 
-// Used in ct-code-editor - no state binding needed, just forwards event
-const handlePieceLinkClick = handler<
-  { detail: { piece: Writable<MentionablePiece> } },
-  Record<string, never>
->(({ detail }) => navigateTo(detail.piece));
-
 // Used in ct-code-editor - binds mentionable and allPieces
 const handleNewBacklink = handler<
   {
@@ -174,6 +168,11 @@ const Note = pattern<NoteInput, NoteOutput>(
     const backlinks = Writable.of<MentionablePiece[]>([]);
 
     // ===== Actions =====
+
+    const handlePieceLinkClick = action(
+      ({ detail }: { detail: { piece: Writable<MentionablePiece> } }) =>
+        navigateTo(detail.piece),
+    );
 
     const toggleMenu = action(() => menuOpen.set(!menuOpen.get()));
     const closeMenu = action(() => menuOpen.set(false));
@@ -318,7 +317,7 @@ const Note = pattern<NoteInput, NoteOutput>(
         $mentionable={mentionable}
         $mentioned={mentioned}
         $pattern={patternJson}
-        onbacklink-click={handlePieceLinkClick({})}
+        onbacklink-click={handlePieceLinkClick}
         onbacklink-create={handleNewBacklink({ mentionable, allPieces })}
         language="text/markdown"
         theme="light"
