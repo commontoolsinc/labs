@@ -1,7 +1,7 @@
 # Pattern DX
 
-When creating patterns all cells are really proxies for future cells. They can be
-nested and assigned to each other.
+When creating patterns all cells are really proxies for future cells. They can
+be nested and assigned to each other.
 
 ## Internal structure
 
@@ -48,8 +48,8 @@ do a pass to optimize these away somewhat.
 
 When invoking a pattern, the following steps happen:
 
-- The pattern is invoked with the cell it should populate (almost always that's a
-  new cell, prefilled with references to inputs)
+- The pattern is invoked with the cell it should populate (almost always that's
+  a new cell, prefilled with references to inputs)
 - Default values are populated, unless there is already something there
 - Initial values are populated, overwriting what is there already
 - Nodes are registered with inputs as assumed dependencies
@@ -70,8 +70,8 @@ computation for slow jobs / imports / etc.
 
 There are two levels of indirections for cells:
 
-- The aliasing at pattern level, which is as static as the pattern (i.e. an inner
-  module can't rewire the aliases)
+- The aliasing at pattern level, which is as static as the pattern (i.e. an
+  inner module can't rewire the aliases)
 - The cell references in the data itself, which can be overriden.
 
 As an example: Say a pattern is invoked, and a cell bound to `a.b` in its

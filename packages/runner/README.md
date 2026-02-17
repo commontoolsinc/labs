@@ -318,9 +318,9 @@ console.log(nameCell.get()); // "Alice"
 
 ### Running Patterns
 
-Patterns define computational graphs that process data. Patterns are created using
-the Builder package and executed by the Runner, which manages dependencies and
-updates results automatically.
+Patterns define computational graphs that process data. Patterns are created
+using the Builder package and executed by the Runner, which manages dependencies
+and updates results automatically.
 
 ```typescript
 import { Runtime } from "@commontools/runner";
@@ -372,7 +372,11 @@ const resultCell = runtime.documentMap.getDoc(
 );
 
 // Run the pattern
-const result = runtime.runner.run(doubleNumberPattern, { value: 5 }, resultCell);
+const result = runtime.runner.run(
+  doubleNumberPattern,
+  { value: 5 },
+  resultCell,
+);
 
 // Await the computation graph to settle
 await runtime.idle();
@@ -713,8 +717,8 @@ components interact:
 2. **Validation** → Schema validation ensures data conforms to expected
    structure (so far only on get, not yet on write)
 3. **Processing** → Patterns transform data according to their logic
-4. **Reactivity** → Changes propagate to dependent cells and patterns through the
-   unified sigil-based linking system
+4. **Reactivity** → Changes propagate to dependent cells and patterns through
+   the unified sigil-based linking system
 5. **Storage** → Updated data is persisted to storage if configured
 6. **Synchronization** → Changes are synchronized across clients if enabled
 
