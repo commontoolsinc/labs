@@ -502,6 +502,44 @@ describe("serialization", () => {
       const obj = result as Record<string, unknown>;
       expect(obj["/Link@1"]).toEqual({ id: "abc" });
     });
+
+    it("deep-freezes /quote result objects", () => {
+      const { context, runtime } = makeTestContext();
+      const data = {
+        "/quote": { "/Link@1": { id: "abc" } },
+      } as SerializedForm;
+      const result = deserialize(data, context, runtime) as Record<
+        string,
+        unknown
+      >;
+      expect(Object.isFrozen(result)).toBe(true);
+      expect(Object.isFrozen(result["/Link@1"])).toBe(true);
+    });
+
+    it("deep-freezes /quote result arrays", () => {
+      const { context, runtime } = makeTestContext();
+      const data = {
+        "/quote": [1, { nested: "obj" }, [2, 3]],
+      } as SerializedForm;
+      const result = deserialize(data, context, runtime) as unknown[];
+      expect(Object.isFrozen(result)).toBe(true);
+      expect(Object.isFrozen(result[1])).toBe(true);
+      expect(Object.isFrozen(result[2])).toBe(true);
+    });
+
+    it("mutation of /quote result throws", () => {
+      const { context, runtime } = makeTestContext();
+      const data = {
+        "/quote": { key: "val" },
+      } as SerializedForm;
+      const result = deserialize(data, context, runtime) as Record<
+        string,
+        unknown
+      >;
+      expect(() => {
+        result.key = "changed";
+      }).toThrow();
+    });
   });
 
   // --------------------------------------------------------------------------
