@@ -6,7 +6,7 @@ import type { ReconstructionContext } from "../storable-protocol.ts";
 import { DECONSTRUCT, isStorable, RECONSTRUCT } from "../storable-protocol.ts";
 import type { StorableClass, StorableInstance } from "../storable-protocol.ts";
 import type { StorableValue } from "../interface.ts";
-import type { SerializedForm } from "../serialization-context.ts";
+import type { SerializedForm } from "../json-serialization-context.ts";
 import { UnknownStorable } from "../unknown-storable.ts";
 import { ProblematicStorable } from "../problematic-storable.ts";
 

@@ -1,16 +1,19 @@
 import type { StorableValue } from "./interface.ts";
 import {
-  DECONSTRUCT,
-  isStorable,
   RECONSTRUCT,
   type ReconstructionContext,
 } from "./storable-protocol.ts";
-import type {
-  SerializationContext,
-  SerializedForm,
-} from "./serialization-context.ts";
+import type { SerializationContext } from "./serialization-context.ts";
+import type { SerializedForm } from "./json-serialization-context.ts";
 import { UnknownStorable } from "./unknown-storable.ts";
 import { ProblematicStorable } from "./problematic-storable.ts";
+import {
+  createDefaultRegistry,
+  type TypeHandlerRegistry,
+} from "./type-handlers.ts";
+
+/** Shared default handler registry, created once. */
+const defaultRegistry: TypeHandlerRegistry = createDefaultRegistry();
 
 /**
  * Recursively freeze arrays and plain objects. Primitives pass through
@@ -44,83 +47,42 @@ function deepFreeze(value: SerializedForm): SerializedForm {
  * Serialize a storable value for boundary crossing. Recursively processes
  * nested values. See Section 4.5 of the formal spec.
  *
+ * Type handlers are dispatched via the `registry`. If no handler matches,
+ * the value is treated as a primitive, array, or plain object.
+ *
  * Circular references are detected and throw an error.
  */
 export function serialize(
   value: StorableValue,
-  context: SerializationContext,
+  context: SerializationContext<SerializedForm>,
   _seen?: Set<object>,
+  registry: TypeHandlerRegistry = defaultRegistry,
 ): SerializedForm {
-  // --- StorableInstance (custom protocol) ---
-  if (isStorable(value)) {
+  // --- Try type handlers first ---
+  const handler = registry.findSerializer(value);
+  if (handler) {
     const seen = _seen ?? new Set<object>();
-    if (seen.has(value as object)) {
-      throw new Error("Circular reference detected during serialization");
-    }
-    seen.add(value as object);
 
-    let result: SerializedForm;
-
-    // UnknownStorable and ProblematicStorable: use preserved typeTag
-    // and re-serialize their stored state.
-    if (value instanceof UnknownStorable) {
-      const serializedState = serialize(value.state, context, seen);
-      result = context.encode(value.typeTag, serializedState);
-    } else if (value instanceof ProblematicStorable) {
-      const serializedState = serialize(value.state, context, seen);
-      result = context.encode(value.typeTag, serializedState);
-    } else {
-      const state = value[DECONSTRUCT]();
-      const tag = context.getTagFor(value);
-      const serializedState = serialize(state, context, seen);
-      result = context.encode(tag, serializedState);
-    }
-
-    seen.delete(value as object);
-    return result;
-  }
-
-  // --- Built-in JS types with derived StorableInstance form (Section 1.4.1) ---
-
-  if (value instanceof Error) {
-    const seen = _seen ?? new Set<object>();
-    if (seen.has(value)) {
-      throw new Error("Circular reference detected during serialization");
-    }
-    seen.add(value);
-
-    const state: Record<string, SerializedForm> = {
-      name: serialize(value.name, context, seen) as SerializedForm,
-      message: serialize(value.message, context, seen) as SerializedForm,
-    };
-    if (value.stack !== undefined) {
-      state.stack = serialize(value.stack, context, seen) as SerializedForm;
-    }
-    if (value.cause !== undefined) {
-      state.cause = serialize(
-        value.cause as StorableValue,
-        context,
-        seen,
-      ) as SerializedForm;
-    }
-    // Copy custom enumerable properties.
-    for (const key of Object.keys(value)) {
-      if (!(key in state)) {
-        state[key] = serialize(
-          (value as unknown as Record<string, unknown>)[key] as StorableValue,
-          context,
-          seen,
-        ) as SerializedForm;
+    // Cycle detection for object-typed values.
+    if (value !== null && typeof value === "object") {
+      if (seen.has(value as object)) {
+        throw new Error("Circular reference detected during serialization");
       }
+      seen.add(value as object);
     }
 
-    seen.delete(value);
-    return context.encode("Error@1", state as SerializedForm);
-  }
+    const result = handler.serialize(
+      value,
+      context,
+      (v: StorableValue) => serialize(v, context, seen, registry),
+    );
 
-  // --- `undefined` ---
-  if (value === undefined) {
-    return context.encode("Undefined@1", null);
+    // Remove from seen set to allow shared references.
+    if (value !== null && typeof value === "object") {
+      seen.delete(value as object);
+    }
+
+    return result;
   }
 
   // --- Primitives ---
@@ -140,6 +102,11 @@ export function serialize(
     seen.add(value);
 
     const result: SerializedForm[] = [];
+    // Note: this loop iterates by index over `value.length`. For very sparse
+    // arrays with a large `.length` but few actual elements, this is O(length)
+    // not O(elements). The inner hole-counting loop coalesces consecutive
+    // absent indices into run-length-encoded `/hole` entries, so the output
+    // is compact, but the iteration cost is proportional to `.length`.
     let i = 0;
     while (i < value.length) {
       if (!(i in value)) {
@@ -152,7 +119,7 @@ export function serialize(
         result.push(context.encode("hole", count));
       } else {
         result.push(
-          serialize(value[i] as StorableValue, context, seen),
+          serialize(value[i] as StorableValue, context, seen, registry),
         );
         i++;
       }
@@ -175,7 +142,7 @@ export function serialize(
       value as Record<string, StorableValue>,
     )
   ) {
-    result[key] = serialize(val, context, seen);
+    result[key] = serialize(val, context, seen, registry);
   }
 
   seen.delete(value as object);
@@ -195,11 +162,15 @@ export function serialize(
  * Deserialize a wire-format value back into rich runtime types. Requires a
  * `ReconstructionContext` for reconstituting types that need runtime context
  * (e.g., `Cell` interning). See Section 4.5 of the formal spec.
+ *
+ * Tagged values are dispatched to handlers via tag lookup. Structural meta-
+ * tags (`object`, `quote`) and primitives/arrays/objects are handled inline.
  */
 export function deserialize(
   data: SerializedForm,
-  context: SerializationContext,
+  context: SerializationContext<SerializedForm>,
   runtime: ReconstructionContext,
+  registry: TypeHandlerRegistry = defaultRegistry,
 ): StorableValue {
   const decoded = context.decode(data);
   if (decoded !== null) {
@@ -212,7 +183,7 @@ export function deserialize(
       const inner = state as Record<string, SerializedForm>;
       const result: Record<string, StorableValue> = {};
       for (const [key, val] of Object.entries(inner)) {
-        result[key] = deserialize(val, context, runtime);
+        result[key] = deserialize(val, context, runtime, registry);
       }
       return Object.freeze(result);
     }
@@ -225,16 +196,20 @@ export function deserialize(
       return deepFreeze(state) as StorableValue;
     }
 
-    // `Undefined@1`: produces the JS value `undefined`.
-    if (tag === "Undefined@1") {
-      return undefined;
+    // --- Type handler dispatch (map-based tag lookup) ---
+    const handler = registry.getDeserializer(tag);
+    if (handler) {
+      return handler.deserialize(
+        state,
+        context,
+        runtime,
+        (v: SerializedForm) => deserialize(v, context, runtime, registry),
+      );
     }
 
-    // `hole` outside of array deserialization is treated as an unknown type
-    // for safety (array deserialization handles `hole` inline below).
-
+    // --- Class registry fallback (for tags not in handler registry) ---
     const cls = context.getClassFor(tag);
-    const deserializedState = deserialize(state, context, runtime);
+    const deserializedState = deserialize(state, context, runtime, registry);
 
     if (cls) {
       // In lenient mode, catch reconstruction failures and wrap them.
@@ -277,7 +252,8 @@ export function deserialize(
   // run-length encoding -- the state is a positive integer indicating how
   // many consecutive holes to skip.
   if (Array.isArray(data)) {
-    // First pass: compute the logical length.
+    // First pass: compute the logical length. This iterates over the
+    // wire-format entries (not the logical length), so it is O(entries).
     let logicalLength = 0;
     for (const entry of data) {
       const entryDecoded = context.decode(entry);
@@ -296,7 +272,7 @@ export function deserialize(
         // Skip `state` indices -- leave them absent, creating true holes.
         targetIndex += entryDecoded.state as number;
       } else {
-        result[targetIndex] = deserialize(entry, context, runtime);
+        result[targetIndex] = deserialize(entry, context, runtime, registry);
         targetIndex++;
       }
     }
@@ -306,7 +282,7 @@ export function deserialize(
   // Plain objects: recursively deserialize values, then freeze.
   const result: Record<string, StorableValue> = {};
   for (const [key, val] of Object.entries(data)) {
-    result[key] = deserialize(val, context, runtime);
+    result[key] = deserialize(val, context, runtime, registry);
   }
   return Object.freeze(result);
 }

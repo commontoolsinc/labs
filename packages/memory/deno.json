@@ -46,8 +46,10 @@
     "./storable-value": "./storable-value.ts",
     "./storable-protocol": "./storable-protocol.ts",
     "./serialization-context": "./serialization-context.ts",
+    "./json-serialization-context": "./json-serialization-context.ts",
     "./json-encoding": "./json-encoding.ts",
     "./serialization": "./serialization.ts",
+    "./type-handlers": "./type-handlers.ts",
     "./unknown-storable": "./unknown-storable.ts",
     "./problematic-storable": "./problematic-storable.ts"
   },

@@ -30,8 +30,8 @@ export interface StorableInstance {
 }
 
 /**
- * A class that can reconstruct instances from essential state. The static
- * `[RECONSTRUCT]` method is separate from the constructor to support
+ * A class that can reconstruct storable instances from essential state. The
+ * static `[RECONSTRUCT]` method is separate from the constructor to support
  * reconstruction-specific context and instance interning.
  * See Section 2.4 of the formal spec.
  */
@@ -40,6 +40,20 @@ export interface StorableClass<T extends StorableInstance> {
    * Reconstruct an instance from essential state. Nested values in `state`
    * have already been reconstructed by the serialization system. May return
    * an existing instance (interning) rather than creating a new one.
+   */
+  [RECONSTRUCT](state: StorableValue, context: ReconstructionContext): T;
+}
+
+/**
+ * A converter that can reconstruct arbitrary values (not necessarily
+ * `StorableInstance`s) from essential state. Used for built-in JS types like
+ * `Error` that participate in the serialization protocol but don't implement
+ * `StorableInstance`. See Section 1.4.1 of the formal spec.
+ */
+export interface StorableConverter<T> {
+  /**
+   * Reconstruct a value from essential state. Nested values in `state`
+   * have already been reconstructed by the serialization system.
    */
   [RECONSTRUCT](state: StorableValue, context: ReconstructionContext): T;
 }
