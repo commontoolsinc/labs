@@ -360,6 +360,54 @@ export function createQueryResultProxy<T>(
 
       return true;
     },
+    ownKeys: () => {
+      const readTx = (tx?.status().status === "ready") ? tx : runtime.edit();
+      const current = readTx.readValueOrThrow(link);
+      if (isRecord(current)) {
+        return Reflect.ownKeys(current);
+      }
+      return Reflect.ownKeys(value);
+    },
+    getOwnPropertyDescriptor: (target, prop) => {
+      // For properties that exist on the original target (e.g. array `length`),
+      // delegate to the target to satisfy proxy invariants for non-configurable
+      // properties.
+      const targetDesc = Object.getOwnPropertyDescriptor(target, prop);
+      if (targetDesc && !targetDesc.configurable) {
+        return targetDesc;
+      }
+      if (typeof prop === "symbol") {
+        return Object.getOwnPropertyDescriptor(value, prop);
+      }
+      const readTx = (tx?.status().status === "ready") ? tx : runtime.edit();
+      const current = readTx.readValueOrThrow(link) as typeof value;
+      if (isRecord(current) && prop in current) {
+        return {
+          configurable: true,
+          enumerable: true,
+          writable: writable,
+          value: createQueryResultProxy(
+            runtime,
+            tx,
+            { ...link, path: [...link.path, prop as string] },
+            depth + 1,
+            writable,
+          ),
+        };
+      }
+      return undefined;
+    },
+    has: (_target, prop) => {
+      if (typeof prop === "symbol") {
+        return prop in value;
+      }
+      const readTx = (tx?.status().status === "ready") ? tx : runtime.edit();
+      const current = readTx.readValueOrThrow(link);
+      if (isRecord(current)) {
+        return prop in current;
+      }
+      return prop in value;
+    },
   }) as T;
 
   // Cache the proxy in the appropriate cache before returning
