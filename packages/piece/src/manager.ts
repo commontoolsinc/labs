@@ -940,9 +940,6 @@ export const getPatternIdFromPiece = (piece: Cell<unknown>): string => {
   return sourceCell.get()?.[TYPE]!;
 };
 
-/** @deprecated Use getPatternIdFromPiece instead */
-export const getRecipeIdFromPiece = getPatternIdFromPiece;
-
 async function getCellByIdOrPiece(
   manager: PieceManager,
   cellId: string,

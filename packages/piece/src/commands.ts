@@ -140,9 +140,6 @@ export async function addGithubPattern(
   );
 }
 
-/** @deprecated Use addGithubPattern instead */
-export const addGithubRecipe = addGithubPattern;
-
 /**
  * Modify a piece with the given prompt. This replaces the separate Etherate/Extend functionality.
  * The prompt will be processed for mentions and the current piece will be included in the context.

@@ -578,9 +578,6 @@ export async function compilePattern(
   return pattern;
 }
 
-/** @deprecated Use compilePattern instead */
-export const compileRecipe = compilePattern;
-
 export async function compileAndRunPattern(
   pieceManager: PieceManager,
   patternSrc: string,
@@ -607,12 +604,3 @@ export async function compileAndRunPattern(
     llmRequestId,
   );
 }
-
-/** @deprecated Use compileAndRunPattern instead */
-export const compileAndRunRecipe = compileAndRunPattern;
-
-/** @deprecated Use generateNewPatternVersion instead */
-export const generateNewRecipeVersion = generateNewPatternVersion;
-
-/** @deprecated Use castNewPattern instead */
-export const castNewRecipe = castNewPattern;

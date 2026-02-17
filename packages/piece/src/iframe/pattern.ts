@@ -11,9 +11,6 @@ export type IFramePattern = {
   name: string;
 };
 
-/** @deprecated Use IFramePattern instead */
-export type IFrameRecipe = IFramePattern;
-
 export const buildFullPattern = (iframe: IFramePattern) => {
   const properties = typeof iframe.resultSchema === "boolean"
     ? undefined
@@ -50,9 +47,6 @@ ${result}
   export default runIframePattern(inst);
   `;
 };
-
-/** @deprecated Use buildFullPattern instead */
-export const buildFullRecipe = buildFullPattern;
 
 function parseIframePattern(source: string): IFramePattern {
   // Extract content between IFRAME-V0 comments
@@ -97,6 +91,3 @@ export const getIframePattern = (
     return { patternId, src };
   }
 };
-
-/** @deprecated Use getIframePattern instead */
-export const getIframeRecipe = getIframePattern;

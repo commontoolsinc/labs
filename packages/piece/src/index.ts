@@ -1,9 +1,4 @@
-export {
-  getPatternIdFromPiece,
-  getRecipeIdFromPiece,
-  pieceId,
-  PieceManager,
-} from "./manager.ts";
+export { getPatternIdFromPiece, pieceId, PieceManager } from "./manager.ts";
 export {
   addFavorite,
   getHomeFavorites,
@@ -23,13 +18,9 @@ export {
 export { searchPieces } from "./search.ts";
 export {
   castNewPattern,
-  castNewRecipe,
   compileAndRunPattern,
-  compileAndRunRecipe,
   compilePattern,
-  compileRecipe,
   generateNewPatternVersion,
-  generateNewRecipeVersion,
   genSrc,
   iterate,
 } from "./iterate.ts";
@@ -40,7 +31,6 @@ export {
 } from "./iframe/static.ts";
 export {
   addGithubPattern,
-  addGithubRecipe,
   castSpellAsPiece,
   createDataPiece,
   fixItPiece,
@@ -49,11 +39,8 @@ export {
 } from "./commands.ts";
 export {
   buildFullPattern,
-  buildFullRecipe,
   getIframePattern,
-  getIframeRecipe,
   type IFramePattern,
-  type IFrameRecipe,
 } from "./iframe/pattern.ts";
 export { type ParsedMention, type ProcessedPrompt } from "./imagine.ts";
 export { formatPromptWithMentions, parseComposerDocument } from "./format.ts";
