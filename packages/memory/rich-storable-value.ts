@@ -139,14 +139,15 @@ function toDeepRichStorableValueInternal(
 ): StorableValue {
   const isOriginalRecord = isRecord(original);
 
-  if (isOriginalRecord) {
+  if (isOriginalRecord && converted.has(original)) {
     const cached = converted.get(original);
     if (cached === PROCESSING) {
       throw new Error("Cannot store circular reference");
     }
-    if (cached !== undefined) {
-      return cached as StorableValue;
-    }
+    return cached as StorableValue;
+  }
+
+  if (isOriginalRecord) {
     converted.set(original, PROCESSING);
   }
 

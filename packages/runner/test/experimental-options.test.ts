@@ -183,6 +183,28 @@ describe("ExperimentalOptions", () => {
       const result = toDeepStorableValue({ a: 1, b: undefined });
       expect(result).toEqual({ a: 1 });
     });
+
+    it("caches correctly when toJSON() returns undefined (no false cache miss)", () => {
+      setExperimentalStorableConfig({ richStorableValues: true });
+      // An object whose toJSON() returns undefined. In the rich path, undefined
+      // is a valid StorableValue, so this gets stored in the converted map as
+      // `undefined`. The bug (before the has() fix) would treat a subsequent
+      // lookup as a cache miss because `converted.get(obj) === undefined` can't
+      // distinguish "stored undefined" from "key not found".
+      const undef = { toJSON: () => undefined };
+      const result = toDeepStorableValue({ a: undef, b: undef }) as Record<
+        string,
+        unknown
+      >;
+      // Both slots should be undefined (the converted value).
+      expect(result.a).toBe(undefined);
+      expect(result.b).toBe(undefined);
+      expect(Object.hasOwn(result, "a")).toBe(true);
+      expect(Object.hasOwn(result, "b")).toBe(true);
+      // No error thrown -- without the fix, the second encounter would re-mark
+      // the object as PROCESSING and then attempt to re-convert it, which could
+      // produce incorrect results or throw on circular reference detection.
+    });
   });
 
   describe("isStorableValue with richStorableValues flag", () => {
