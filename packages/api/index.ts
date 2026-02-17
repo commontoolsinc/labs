@@ -1305,6 +1305,7 @@ export interface BuiltInLLMGenerateObjectState<T> {
   result?: T;
   partial?: string;
   error?: unknown;
+  messages?: BuiltInLLMMessage[];
   cancelGeneration: Stream<void>;
 }
 
