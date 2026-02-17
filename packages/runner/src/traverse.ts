@@ -25,6 +25,7 @@ import { getLogger } from "../../utils/src/logger.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import type { JSONObject, JSONSchema } from "./builder/types.ts";
 import {
+  addressKey,
   createDataCellURI,
   isPrimitiveCellLink,
   NormalizedFullLink,
@@ -505,12 +506,16 @@ export abstract class BaseObjectTraverser {
     defaultValue?: StorableDatum,
     itemLink?: NormalizedFullLink,
   ): Immutable<StorableValue> {
-    // Memoize by cell address to avoid exponential path explosion in DAGs.
-    // When multiple parents share children, every unique path triggers a full
-    // re-traversal. Caching by address collapses this to one visit per cell.
+    // Memoize by cell address + itemLink to avoid exponential path explosion
+    // in DAGs. When multiple parents share children, every unique path triggers
+    // a full re-traversal. Caching collapses this to one visit per cell.
+    // itemLink must be part of the key because the same data reached through
+    // different links produces different query result proxies / cell identities.
     // Skip when defaultValue is provided since it can alter the result.
     if (defaultValue === undefined) {
-      const memoKey = doc.address.id + "|" + doc.address.path.join("/");
+      const memoKey = itemLink
+        ? addressKey(doc.address) + "|" + addressKey(itemLink)
+        : addressKey(doc.address);
       const cached = this.dagMemo.get(memoKey);
       if (cached !== undefined) {
         return cached;
@@ -585,10 +590,10 @@ export abstract class BaseObjectTraverser {
       const newLink = getNormalizedLink(doc.address, true);
       const arrayResult = this.objectCreator.createObject(newLink, newValue);
       if (defaultValue === undefined) {
-        this.dagMemo.set(
-          doc.address.id + "|" + doc.address.path.join("/"),
-          arrayResult,
-        );
+        const memoKey = itemLink
+          ? addressKey(doc.address) + "|" + addressKey(itemLink)
+          : addressKey(doc.address);
+        this.dagMemo.set(memoKey, arrayResult);
       }
       return arrayResult;
     } else if (isRecord(doc.value)) {
@@ -671,10 +676,10 @@ export abstract class BaseObjectTraverser {
         const newLink = itemLink ?? getNormalizedLink(doc.address, true);
         const recordResult = this.objectCreator.createObject(newLink, newValue);
         if (defaultValue === undefined) {
-          this.dagMemo.set(
-            doc.address.id + "|" + doc.address.path.join("/"),
-            recordResult,
-          );
+          const memoKey = itemLink
+            ? addressKey(doc.address) + "|" + addressKey(itemLink)
+            : addressKey(doc.address);
+          this.dagMemo.set(memoKey, recordResult);
         }
         return recordResult;
       }
