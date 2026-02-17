@@ -81,6 +81,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       spaceIdentity: options.spaceIdentity?.serialize(),
       spaceDid: options.spaceDid,
       spaceName: options.spaceName,
+      experimental: options.experimental,
     });
     return new RuntimeClient(initialized, options);
   }

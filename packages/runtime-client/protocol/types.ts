@@ -101,6 +101,12 @@ export interface InitializationData {
   spaceIdentity?: KeyPairRaw;
   // Default timeout in milliseconds.
   timeoutMs?: number;
+  // Experimental space-model feature flags.
+  experimental?: {
+    richStorableValues?: boolean;
+    storableProtocol?: boolean;
+    unifiedJsonEncoding?: boolean;
+  };
 }
 
 export interface InitializeRequest extends BaseRequest {

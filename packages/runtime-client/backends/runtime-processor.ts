@@ -272,6 +272,7 @@ export class RuntimeProcessor {
       storageManager,
       recipeEnvironment: { apiUrl: apiUrlObj },
       telemetry,
+      experimental: data.experimental,
       consoleHandler: ({ metadata, method, args }) => {
         // Deep-walk args to convert uncloneable objects (Cells, Proxies,
         // functions) into cloneable representations for postMessage.

@@ -2,6 +2,7 @@ import * as Reference from "merkle-reference";
 import { isDeno } from "@commontools/utils/env";
 import { LRUCache } from "@commontools/utils/cache";
 import { createSHA256, type IHasher } from "hash-wasm";
+import { canonicalHash } from "./canonical-hash.ts";
 export * from "merkle-reference";
 
 /**
@@ -10,6 +11,31 @@ export * from "merkle-reference";
 export type HashImplementation = "node:crypto" | "hash-wasm" | "noble";
 
 let activeHashImpl: HashImplementation = "noble";
+
+/**
+ * Module-level flag for canonical hashing mode, set by the `Runtime`
+ * constructor via `setCanonicalHashConfig()`. When enabled, `refer()`
+ * dispatches to the canonical hash stub instead of merkle-reference.
+ */
+let canonicalHashingEnabled = false;
+
+/**
+ * Activates or deactivates canonical hashing mode. Called by the `Runtime`
+ * constructor to propagate `ExperimentalOptions.canonicalHashing` into the
+ * memory layer.
+ */
+export function setCanonicalHashConfig(enabled: boolean): void {
+  canonicalHashingEnabled = enabled;
+}
+
+/**
+ * Restores canonical hashing mode to its default (disabled). Called by
+ * `Runtime.dispose()` to avoid leaking flags between runtime instances or
+ * test runs.
+ */
+export function resetCanonicalHashConfig(): void {
+  canonicalHashingEnabled = false;
+}
 
 // Don't know why deno does not seem to see there is a `fromString` so we just
 // workaround it like this.
@@ -155,6 +181,12 @@ const isUnclaimed = (
  * Falls back to @noble/hashes if neither is available.
  */
 export const refer = <T>(source: T): Reference.View<T> => {
+  if (canonicalHashingEnabled) {
+    // Stub: will be replaced with real canonical hash + Reference wrapper
+    canonicalHash(source);
+    // canonicalHash throws, so this is unreachable for now
+  }
+
   // Cache {the, of} patterns (unclaimed facts)
   if (isUnclaimed(source)) {
     // Use null character as delimiter to avoid collisions if the/of contain '|'

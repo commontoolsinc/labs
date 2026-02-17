@@ -19,6 +19,12 @@ const initializeRuntime = () => {
         address: new URL("/api/storage/memory", env.MEMORY_URL),
         as: identity,
       }),
+      experimental: {
+        richStorableValues: env.EXPERIMENTAL_RICH_STORABLE_VALUES,
+        storableProtocol: env.EXPERIMENTAL_STORABLE_PROTOCOL,
+        unifiedJsonEncoding: env.EXPERIMENTAL_UNIFIED_JSON_ENCODING,
+        canonicalHashing: env.EXPERIMENTAL_CANONICAL_HASHING,
+      },
     });
     console.log("Runtime initialized successfully");
     console.log("Configured to remote storage:", env.MEMORY_URL);

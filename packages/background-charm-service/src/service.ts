@@ -99,6 +99,7 @@ export class BackgroundCharmService {
           toolshedUrl: this.toolshedUrl,
           identity: this.identity,
           timeoutMs: this.workerTimeoutMs,
+          experimental: this.runtime.experimental,
         });
         this.charmSchedulers.set(did, scheduler);
         scheduler.start();

@@ -13,6 +13,14 @@ import type {
   Schema,
 } from "./builder/types.ts";
 import { ContextualFlowControl } from "./cfc.ts";
+import {
+  resetExperimentalStorableConfig,
+  setExperimentalStorableConfig,
+} from "@commontools/memory/storable-value";
+import {
+  resetCanonicalHashConfig,
+  setCanonicalHashConfig,
+} from "@commontools/memory/reference";
 import { RecipeEnvironment, setRecipeEnvironment } from "./builder/env.ts";
 import type {
   ChangeGroup,
@@ -68,6 +76,25 @@ export type ErrorWithContext = Error & {
 export type ErrorHandler = (error: ErrorWithContext) => void;
 export type NavigateCallback = (target: Cell<any>) => void;
 
+/**
+ * Feature flags for the space-model data-layer changes. Each flag gates an
+ * independent piece of the new storable-value pipeline so that the features
+ * can be enabled incrementally. Passed via `RuntimeOptions.experimental` and
+ * propagated to the memory layer as ambient config.
+ *
+ * See the formal spec at `docs/specs/space-model-formal-spec/`.
+ */
+export interface ExperimentalOptions {
+  /** Enable the new storable value type system (bigint, Map, Set, Uint8Array, Date, StorableInstance). */
+  richStorableValues?: boolean;
+  /** Enable the storable protocol ([DECONSTRUCT]/[RECONSTRUCT]) and SerializationContext-based boundary serialization. */
+  storableProtocol?: boolean;
+  /** Enable `/<Type>@<Version>` JSON encoding, replacing legacy sigil/`@`-prefix/`$`-prefix conventions. */
+  unifiedJsonEncoding?: boolean;
+  /** Enable canonical hashing, replacing merkle-reference CID-based hashing. */
+  canonicalHashing?: boolean;
+}
+
 export interface RuntimeOptions {
   apiUrl: URL;
   storageManager: IStorageManager;
@@ -77,6 +104,8 @@ export interface RuntimeOptions {
   navigateCallback?: NavigateCallback;
   debug?: boolean;
   telemetry?: RuntimeTelemetry;
+  /** Optional feature flags for experimental space-model data-layer changes. */
+  experimental?: ExperimentalOptions;
 }
 
 /**
@@ -129,11 +158,23 @@ export class Runtime {
   readonly staticCache: StaticCache;
   readonly storageManager: IStorageManager;
   readonly telemetry: RuntimeTelemetry;
+  /** Resolved experimental flags (all properties present, defaulting to `false`). */
+  readonly experimental: Required<ExperimentalOptions>;
   readonly apiUrl: URL;
   readonly userIdentityDID: DID;
   private defaultFrame?: Frame;
 
   constructor(options: RuntimeOptions) {
+    this.experimental = {
+      richStorableValues: false,
+      storableProtocol: false,
+      unifiedJsonEncoding: false,
+      canonicalHashing: false,
+      ...options.experimental,
+    };
+    // Propagate experimental flags to the memory layer's ambient config.
+    setExperimentalStorableConfig(this.experimental);
+    setCanonicalHashConfig(this.experimental.canonicalHashing);
     this.id = options.storageManager.id;
     this.apiUrl = new URL(options.apiUrl);
     this.staticCache = isDeno()
@@ -224,6 +265,10 @@ export class Runtime {
 
     // Dispose the Engine (clears TypeScriptCompiler, UnsafeEvalRuntime source maps, console hook)
     this.harness.dispose();
+
+    // Reset experimental storable config to defaults
+    resetExperimentalStorableConfig();
+    resetCanonicalHashConfig();
 
     // Clear the current runtime reference
     // Removed setCurrentRuntime call - no longer using singleton pattern

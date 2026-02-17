@@ -1,4 +1,4 @@
-import type { JSONValue, URI } from "./interface.ts";
+import type { StorableDatum, URI } from "./interface.ts";
 import {
   Assertion,
   Fact,
@@ -29,7 +29,11 @@ export const unclaimedRef = (
   { the, of }: { the: MIME; of: URI },
 ): Ref.View<Unclaimed> => refer({ the, of });
 
-export const assert = <Is extends JSONValue, T extends MIME, Of extends URI>({
+export const assert = <
+  Is extends StorableDatum,
+  T extends MIME,
+  Of extends URI,
+>({
   the,
   of,
   is,
@@ -100,7 +104,7 @@ export const iterate = function* (
 export function normalizeFact<
   T extends MIME,
   Of extends URI,
-  Is extends JSONValue,
+  Is extends StorableDatum,
 >(
   arg: {
     the: T;
@@ -118,7 +122,7 @@ export function normalizeFact<
 export function normalizeFact<
   T extends MIME,
   Of extends URI,
-  Is extends JSONValue,
+  Is extends StorableDatum,
 >(
   arg: {
     the: T;
@@ -135,7 +139,7 @@ export function normalizeFact<
 export function normalizeFact<
   T extends MIME,
   Of extends URI,
-  Is extends JSONValue,
+  Is extends StorableDatum,
 >(
   arg: {
     the: T;

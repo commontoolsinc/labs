@@ -86,7 +86,7 @@ async function initialize(
     return;
   }
 
-  const { did, toolshedUrl, rawIdentity } = data;
+  const { did, toolshedUrl, rawIdentity, experimental } = data;
   const identity = await Identity.deserialize(rawIdentity);
   const apiUrl = new URL(toolshedUrl);
 
@@ -107,6 +107,7 @@ async function initialize(
     recipeEnvironment: { apiUrl },
     consoleHandler: consoleHandler,
     errorHandlers: [errorHandler],
+    experimental,
   });
   manager = new PieceManager(currentSession, runtime);
   await manager.ready;

@@ -34,6 +34,18 @@ const config: Config = {
       "$ENVIRONMENT": ENVIRONMENT,
       "$API_URL": Deno.env.get("API_URL"),
       "$COMMIT_SHA": Deno.env.get("COMMIT_SHA"),
+      "$EXPERIMENTAL_RICH_STORABLE_VALUES": Deno.env.get(
+        "EXPERIMENTAL_RICH_STORABLE_VALUES",
+      ),
+      "$EXPERIMENTAL_STORABLE_PROTOCOL": Deno.env.get(
+        "EXPERIMENTAL_STORABLE_PROTOCOL",
+      ),
+      "$EXPERIMENTAL_UNIFIED_JSON_ENCODING": Deno.env.get(
+        "EXPERIMENTAL_UNIFIED_JSON_ENCODING",
+      ),
+      "$EXPERIMENTAL_CANONICAL_HASHING": Deno.env.get(
+        "EXPERIMENTAL_CANONICAL_HASHING",
+      ),
     },
     supported: {
       // Provide polyfills for `using` resource management

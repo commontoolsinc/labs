@@ -13,6 +13,7 @@
 ./scripts/restart-local-dev.sh --force       # Force kill first
 ./scripts/restart-local-dev.sh --clear-cache # Clear disposable caches (preserves spaces)
 ./scripts/restart-local-dev.sh --dangerously-clear-all-spaces # Clear databases/spaces
+./scripts/check-local-dev.sh          # Health check both servers
 ```
 
 **URLs:**
@@ -78,10 +79,12 @@ ss -tlnp 'sport = :5173'  # Shell
 ### Verifying Servers Are Running
 
 ```bash
-# Health checks (should return 200)
-curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/_health  # Toolshed
-curl -s -o /dev/null -w "%{http_code}" http://localhost:5173          # Shell
+./scripts/check-local-dev.sh
 ```
+
+This checks both process presence and HTTP health, exiting non-zero if
+anything is wrong. It supports the same `--port-offset`, `--shell-port`, and
+`--toolshed-port` flags as the other scripts.
 
 ### Common Issues
 
@@ -118,7 +121,7 @@ SHELL_URL=http://localhost:5173 deno task dev
 
 # 4. Start frontend (Terminal 2)
 cd packages/shell
-deno task dev-local
+TOOLSHED_PORT=8000 deno task dev-local
 ```
 
 **Alternative: Local shell with cloud backend:**
@@ -166,6 +169,10 @@ When editing `ct-*` components in `packages/ui/`, restart the local dev server t
 ---
 
 ## Background Piece Service (Optional)
+
+> **Note:** This package is still named `background-charm-service` in the
+> codebase. "Charm" is the legacy name for "piece"; they refer to the same
+> concept.
 
 The background-charm-service polls registered pieces and triggers their `bgUpdater` handlers server-side. This is **optional** - only needed if you're testing background/scheduled piece execution.
 

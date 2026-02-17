@@ -98,6 +98,16 @@ async function main() {
       address: new URL("/api/storage/memory", toolshedUrl),
     }),
     blobbyServerUrl: toolshedUrl,
+    experimental: {
+      richStorableValues:
+        Deno.env.get("EXPERIMENTAL_RICH_STORABLE_VALUES") === "true",
+      storableProtocol:
+        Deno.env.get("EXPERIMENTAL_STORABLE_PROTOCOL") === "true",
+      unifiedJsonEncoding:
+        Deno.env.get("EXPERIMENTAL_UNIFIED_JSON_ENCODING") === "true",
+      canonicalHashing:
+        Deno.env.get("EXPERIMENTAL_CANONICAL_HASHING") === "true",
+    },
   });
   const pieceManager = new PieceManager(session, runtime);
   await pieceManager.ready;

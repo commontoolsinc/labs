@@ -31,6 +31,12 @@ const runtime = new Runtime({
     as: identity,
     address: new URL("/api/storage/memory", env.API_URL),
   }),
+  experimental: {
+    richStorableValues: env.EXPERIMENTAL_RICH_STORABLE_VALUES,
+    storableProtocol: env.EXPERIMENTAL_STORABLE_PROTOCOL,
+    unifiedJsonEncoding: env.EXPERIMENTAL_UNIFIED_JSON_ENCODING,
+    canonicalHashing: env.EXPERIMENTAL_CANONICAL_HASHING,
+  },
 });
 const service = new BackgroundCharmService({
   identity,
