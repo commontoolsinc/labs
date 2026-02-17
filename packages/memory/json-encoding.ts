@@ -104,7 +104,7 @@ export class JsonEncodingContext implements SerializationContext {
     // Note: Link@1, Stream@1, Map@1, Set@1, Bytes@1, Date@1, BigInt@1
     // are NOT registered -- they belong to future rounds.
     this.registry.set("Error@1", ErrorClass);
-    // Undefined@1 and Hole@1 are handled inline by serialize/deserialize,
+    // Undefined@1 and `hole` are handled inline by serialize/deserialize,
     // not through the class registry.
   }
 

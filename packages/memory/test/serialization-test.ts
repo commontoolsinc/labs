@@ -299,14 +299,14 @@ describe("serialization", () => {
   // --------------------------------------------------------------------------
 
   describe("sparse arrays", () => {
-    it("serializes [1,,3] with Hole@1", () => {
+    it("serializes [1,,3] with /hole", () => {
       const { context } = makeTestContext();
       // deno-lint-ignore no-sparse-arrays
       const arr = [1, , 3] as StorableValue;
       const result = serialize(arr, context) as SerializedForm[];
       expect(result.length).toBe(3);
       expect(result[0]).toBe(1);
-      expect(result[1]).toEqual({ "/Hole@1": 1 });
+      expect(result[1]).toEqual({ "/hole": 1 });
       expect(result[2]).toBe(3);
     });
 
@@ -325,9 +325,9 @@ describe("serialization", () => {
       // deno-lint-ignore no-sparse-arrays
       const arr = [1, , , , 5] as StorableValue;
       const result = serialize(arr, context) as SerializedForm[];
-      expect(result.length).toBe(3); // [1, {"/Hole@1": 3}, 5]
+      expect(result.length).toBe(3); // [1, {"/hole": 3}, 5]
       expect(result[0]).toBe(1);
-      expect(result[1]).toEqual({ "/Hole@1": 3 });
+      expect(result[1]).toEqual({ "/hole": 3 });
       expect(result[2]).toBe(5);
     });
 
@@ -393,9 +393,9 @@ describe("serialization", () => {
       ) as SerializedForm[];
       expect(result).toEqual([
         1,
-        { "/Hole@1": 1 },
+        { "/hole": 1 },
         { "/Undefined@1": null },
-        { "/Hole@1": 1 },
+        { "/hole": 1 },
         3,
       ]);
     });
@@ -575,15 +575,15 @@ describe("serialization", () => {
       });
     });
 
-    it("Hole@1 outside array is treated as unknown type", () => {
+    it("/hole outside array is treated as unknown type", () => {
       const { context, runtime } = makeTestContext();
-      const data = { "/Hole@1": 5 } as SerializedForm;
+      const data = { "/hole": 5 } as SerializedForm;
       const result = deserialize(data, context, runtime);
-      // Should be UnknownStorable since Hole@1 is not in the class registry
+      // Should be UnknownStorable since `hole` is not in the class registry
       // and is encountered outside array context.
       expect(result).toBeInstanceOf(UnknownStorable);
       const unknown = result as unknown as UnknownStorable;
-      expect(unknown.typeTag).toBe("Hole@1");
+      expect(unknown.typeTag).toBe("hole");
       expect(unknown.state).toBe(5);
     });
   });
