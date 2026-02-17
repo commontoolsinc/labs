@@ -1,5 +1,10 @@
 import { isInstance, isRecord } from "@commontools/utils/types";
 import type { StorableValue, StorableValueLayer } from "./interface.ts";
+import {
+  isRichStorableValue,
+  toDeepRichStorableValue,
+  toRichStorableValue,
+} from "./rich-storable-value.ts";
 
 /**
  * Configuration for experimental storable-value features gated behind
@@ -175,6 +180,9 @@ function hasToJSONMethod(
  * @returns `true` if the value is storable per se, `false` otherwise.
  */
 export function isStorableValue(value: unknown): value is StorableValueLayer {
+  if (currentConfig.richStorableValues) {
+    return isRichStorableValue(value);
+  }
   switch (typeof value) {
     case "boolean":
     case "string":
@@ -228,9 +236,9 @@ export function toStorableValue(value: unknown): StorableValueLayer {
   return toStorableValueLegacy(value);
 }
 
-/** Stub for the extended type system path. Not yet implemented. */
-function toStorableValueNew(_value: unknown): StorableValueLayer {
-  throw new Error("richStorableValues not yet implemented");
+/** Extended type system path: preserves Error and undefined. */
+function toStorableValueNew(value: unknown): StorableValueLayer {
+  return toRichStorableValue(value);
 }
 
 /** Legacy implementation of `toStorableValue()` for the JSON-only type system. */
@@ -334,9 +342,9 @@ export function toDeepStorableValue(value: unknown): StorableValue {
   return toDeepStorableValueLegacy(value);
 }
 
-/** Stub for the extended recursive conversion path. Not yet implemented. */
-function toDeepStorableValueNew(_value: unknown): StorableValue {
-  throw new Error("richStorableValues not yet implemented");
+/** Extended recursive conversion path: preserves Error and undefined. */
+function toDeepStorableValueNew(value: unknown): StorableValue {
+  return toDeepRichStorableValue(value);
 }
 
 /** Legacy implementation of `toDeepStorableValue()` for the JSON-only type system. */
