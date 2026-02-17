@@ -13,6 +13,34 @@ import { UnknownStorable } from "./unknown-storable.ts";
 import { ProblematicStorable } from "./problematic-storable.ts";
 
 /**
+ * Recursively freeze arrays and plain objects. Primitives pass through
+ * unchanged. Used by the `/quote` deserialization path to ensure the freeze
+ * guarantee applies uniformly to all `deserialize()` output.
+ */
+function deepFreeze(value: SerializedForm): SerializedForm {
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) {
+      if (i in value) {
+        value[i] = deepFreeze(value[i]);
+      }
+    }
+    Object.freeze(value);
+    return value;
+  }
+
+  const obj = value as Record<string, SerializedForm>;
+  for (const key of Object.keys(obj)) {
+    obj[key] = deepFreeze(obj[key]);
+  }
+  Object.freeze(obj);
+  return obj;
+}
+
+/**
  * Serialize a storable value for boundary crossing. Recursively processes
  * nested values. See Section 4.5 of the formal spec.
  *
@@ -180,9 +208,11 @@ export function deserialize(
     }
 
     // `/quote` literal handling (Section 5.6): return the inner value as-is
-    // with no deserialization of nested special forms.
+    // with no deserialization of nested special forms. Deep-freeze arrays and
+    // plain objects so the freeze guarantee applies uniformly to all
+    // `deserialize()` output.
     if (tag === "quote") {
-      return state as StorableValue;
+      return deepFreeze(state) as StorableValue;
     }
 
     // `Undefined@1`: produces the JS value `undefined`.
