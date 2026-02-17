@@ -8,6 +8,7 @@ import { resolveLink } from "./link-resolution.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
 import { type Cell, createCell, recursivelyAddIDIfNeeded } from "./cell.ts";
 import { type Runtime } from "./runtime.ts";
+import { ignoreReadForScheduling } from "./scheduler.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { toURI } from "./uri-utils.ts";
 
@@ -359,6 +360,47 @@ export function createQueryResultProxy<T>(
       );
 
       return true;
+    },
+    ownKeys: () => {
+      const readTx = (tx?.status().status === "ready") ? tx : runtime.edit();
+      const current = readTx.readValueOrThrow(link, {
+        meta: ignoreReadForScheduling,
+      });
+      if (isRecord(current)) {
+        return Reflect.ownKeys(current);
+      }
+      return Reflect.ownKeys(value);
+    },
+    getOwnPropertyDescriptor: (target, prop) => {
+      // For properties that exist on the original target (e.g. array `length`),
+      // delegate to the target to satisfy proxy invariants for non-configurable
+      // properties.
+      const targetDesc = Object.getOwnPropertyDescriptor(target, prop);
+      if (targetDesc && !targetDesc.configurable) {
+        return targetDesc;
+      }
+      if (typeof prop === "symbol") {
+        return Object.getOwnPropertyDescriptor(value, prop);
+      }
+      const readTx = (tx?.status().status === "ready") ? tx : runtime.edit();
+      const current = readTx.readValueOrThrow(link, {
+        meta: ignoreReadForScheduling,
+      }) as typeof value;
+      if (isRecord(current) && prop in current) {
+        return {
+          configurable: true,
+          enumerable: true,
+          writable: true,
+          value: createQueryResultProxy(
+            runtime,
+            tx,
+            { ...link, path: [...link.path, prop as string] },
+            depth + 1,
+            writable,
+          ),
+        };
+      }
+      return undefined;
     },
   }) as T;
 
