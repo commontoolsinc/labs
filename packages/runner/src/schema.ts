@@ -4,6 +4,7 @@ import { Immutable, isObject, isRecord } from "@commontools/utils/types";
 import { JSONSchemaMutable } from "@commontools/runner";
 import { ContextualFlowControl } from "./cfc.ts";
 import { type JSONSchema } from "./builder/types.ts";
+import type { JSONValue } from "@commontools/api";
 import { type StorableDatum } from "@commontools/memory/interface";
 import { createCell, isCell } from "./cell.ts";
 import { readMaybeLink, resolveLink } from "./link-resolution.ts";
@@ -309,8 +310,8 @@ function mergeDefaults(
     result.default = {
       ...result.default,
       ...defaultValue,
-    } as Readonly<StorableDatum>;
-  } else result.default = defaultValue;
+    } as JSONValue;
+  } else result.default = defaultValue as JSONValue;
 
   return result;
 }

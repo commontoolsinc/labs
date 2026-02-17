@@ -1,5 +1,9 @@
-import type { JSONObject, JSONValue } from "@commontools/api";
-import type { MemorySpace, MIME } from "@commontools/memory/interface";
+import type { JSONObject } from "@commontools/api";
+import type {
+  MemorySpace,
+  MIME,
+  StorableDatum,
+} from "@commontools/memory/interface";
 import type { SchemaPathSelector, URI } from "../src/storage/interface.ts";
 import {
   type BaseMemoryAddress,
@@ -39,7 +43,7 @@ const selector: SchemaPathSelector = {
   },
 };
 
-type SimpleRevision<Is extends JSONValue = JSONValue> = {
+type SimpleRevision<Is extends StorableDatum = StorableDatum> = {
   of: URI;
   the: string;
   cause: string;

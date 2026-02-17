@@ -2,14 +2,14 @@
 import { ChangeSet, compactChangeSet } from "../src/data-updating.ts";
 import * as Attestation from "../src/storage/transaction/attestation.ts";
 import type { IAttestation } from "../src/storage/interface.ts";
-import type { JSONValue } from "../src/builder/types.ts";
+import type { StorableDatum } from "@commontools/memory/interface";
 
 const space = "did:test:space" as `did:${string}:${string}`;
 const docId = "test:doc" as `${string}:${string}`;
 
 // Create a source document to write to
 function makeSource(size: number): IAttestation {
-  const value: Record<string, JSONValue> = {};
+  const value: Record<string, StorableDatum> = {};
   for (let i = 0; i < size; i++) {
     value["item" + i] = { a: 1, b: 2, c: 3 };
   }

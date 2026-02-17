@@ -3,10 +3,10 @@ import { expect } from "@std/expect";
 import { refer } from "merkle-reference/json";
 import type {
   Entity,
-  JSONValue,
   Revision,
   SchemaPathSelector,
   State,
+  StorableDatum,
   URI,
 } from "@commontools/memory/interface";
 import {
@@ -32,7 +32,7 @@ import {
 function getTraverser(
   store: Map<string, Revision<State>>,
   selector: SchemaPathSelector,
-): SchemaObjectTraverser<JSONValue> {
+): SchemaObjectTraverser<StorableDatum> {
   const manager = new StoreObjectManager(store);
   const managedTx = new ManagedStorageTransaction(manager);
   const tx = new ExtendedStorageTransaction(managedTx);
@@ -389,7 +389,7 @@ describe("SchemaObjectTraverser array traversal", () => {
         },
       };
     }
-    function makeRevision(id: URI, value: JSONValue): Revision<State> {
+    function makeRevision(id: URI, value: StorableDatum): Revision<State> {
       return {
         the: "application/json",
         of: id,
@@ -414,7 +414,7 @@ describe("SchemaObjectTraverser array traversal", () => {
           },
         };
       }
-      function makeRevision(id: URI, value: JSONValue): Revision<State> {
+      function makeRevision(id: URI, value: StorableDatum): Revision<State> {
         return {
           the: "application/json",
           of: id,
@@ -443,7 +443,7 @@ describe("SchemaObjectTraverser array traversal", () => {
       const managedTx = new ManagedStorageTransaction(manager);
       const tx = new ExtendedStorageTransaction(managedTx);
       const tracker = new CompoundCycleTracker<
-        Immutable<JSONValue>,
+        Immutable<StorableDatum>,
         JSONSchema | undefined
       >();
       const cfc = new ContextualFlowControl();
@@ -455,7 +455,7 @@ describe("SchemaObjectTraverser array traversal", () => {
           path: ["value", "foo"],
           space: "did:null:null",
         } as IMemorySpaceAddress,
-        value: (revA.is as any).value.foo as JSONValue,
+        value: (revA.is as any).value.foo as StorableDatum,
       };
       const docASelector = {
         path: ["value", "foo"],
@@ -508,7 +508,7 @@ describe("SchemaObjectTraverser array traversal", () => {
       const managedTx = new ManagedStorageTransaction(manager);
       const tx = new ExtendedStorageTransaction(managedTx);
       const tracker = new CompoundCycleTracker<
-        Immutable<JSONValue>,
+        Immutable<StorableDatum>,
         JSONSchema | undefined
       >();
       const cfc = new ContextualFlowControl();
@@ -520,7 +520,7 @@ describe("SchemaObjectTraverser array traversal", () => {
           path: ["value", "current"],
           space: "did:null:null",
         } as IMemorySpaceAddress,
-        value: (revA.is as any).value.current as JSONValue,
+        value: (revA.is as any).value.current as StorableDatum,
       };
       const docASelector = { path: ["value", "current"], schema: true };
       const [curDoc, _selector1] = getAtPath(
@@ -574,7 +574,7 @@ describe("SchemaObjectTraverser array traversal", () => {
       const managedTx = new ManagedStorageTransaction(manager);
       const tx = new ExtendedStorageTransaction(managedTx);
       const tracker = new CompoundCycleTracker<
-        Immutable<JSONValue>,
+        Immutable<StorableDatum>,
         JSONSchema | undefined
       >();
       const cfc = new ContextualFlowControl();
@@ -586,7 +586,7 @@ describe("SchemaObjectTraverser array traversal", () => {
           path: ["value", "current"],
           space: "did:null:null",
         } as IMemorySpaceAddress,
-        value: (revA.is as any).value.current as JSONValue,
+        value: (revA.is as any).value.current as StorableDatum,
       };
       const docASelector = {
         path: ["value", "current"],
@@ -655,7 +655,7 @@ describe("getAtPath array index validation", () => {
     const managedTx = new ManagedStorageTransaction(manager);
     const tx = new ExtendedStorageTransaction(managedTx);
     const tracker: PointerCycleTracker = new CompoundCycleTracker<
-      Immutable<JSONValue>,
+      Immutable<StorableDatum>,
       JSONSchema | undefined
     >();
     const cfc = new ContextualFlowControl();
