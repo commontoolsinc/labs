@@ -400,7 +400,9 @@ reconstructed by the serialization system.
 The system follows an **immutable-forward** design:
 
 - **Plain objects and arrays** are frozen (`Object.freeze()`) upon
-  reconstruction.
+  reconstruction. This applies to all `deserialize()` output paths, including
+  `/quote` (Section 5.6) — the freeze is a property of the deserialization
+  boundary, not of whether type-tag reconstruction occurred.
 - **`StorableInstance`s** should ideally be frozen as well — this is the north
   star, though not yet a strict requirement.
 - **No distinction** is made between regular and null-prototype plain objects;
@@ -748,6 +750,25 @@ export function deserialize(
   if (decoded !== null) {
     const { tag, state } = decoded;
 
+    // `/object` unwrapping (Section 5.6): strip the wrapper and take the
+    // inner object's keys literally; inner values go through normal
+    // deserialization.
+    if (tag === 'object') {
+      const inner = state as Record<string, SerializedForm>;
+      const result: Record<string, StorableValue> = {};
+      for (const [key, val] of Object.entries(inner)) {
+        result[key] = deserialize(val, context, runtime);
+      }
+      return Object.freeze(result);
+    }
+
+    // `/quote` literal handling (Section 5.6): return the inner value with
+    // no deserialization of nested special forms. Deep-freeze arrays and
+    // plain objects to uphold the immutability guarantee (Section 2.9).
+    if (tag === 'quote') {
+      return deepFreeze(state as StorableValue);
+    }
+
     // `Undefined@1`: stateless type whose reconstruction produces the JS
     // value `undefined`.
     if (tag === 'Undefined@1') {
@@ -814,6 +835,29 @@ export function deserialize(
     result[key] = deserialize(val, context, runtime);
   }
   return Object.freeze(result);
+}
+
+/**
+ * Recursively freeze all plain objects and arrays in a value tree.
+ * Used by `/quote` deserialization to uphold the immutability guarantee
+ * (Section 2.9) on values that skip type-tag interpretation.
+ */
+function deepFreeze(value: StorableValue): StorableValue {
+  if (value === null || typeof value !== 'object') {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) {
+      if (i in value) {
+        deepFreeze(value[i]);
+      }
+    }
+    return Object.freeze(value);
+  }
+  for (const val of Object.values(value)) {
+    deepFreeze(val as StorableValue);
+  }
+  return Object.freeze(value);
 }
 ```
 
@@ -1007,6 +1051,14 @@ of any nested special forms:
 
 Deserializes to: `{ "/Link@1": { "id": "..." } }` — the inner structure is
 *not* reconstructed. It remains a plain object.
+
+**Freeze guarantee.** Although `/quote` skips type-tag interpretation, the
+result is still deep-frozen (arrays and plain objects within the quoted value
+are frozen via `Object.freeze()`). The immutability guarantee (Section 2.9)
+is a property of `deserialize()` output, not of whether reconstruction
+occurred. A caller receiving a value from `deserialize()` can always assume
+it is immutable, regardless of whether it came from a `/quote` path, a
+reconstructed type, or a plain literal.
 
 Use cases:
 - Storing schemas or examples that describe special types without instantiating
