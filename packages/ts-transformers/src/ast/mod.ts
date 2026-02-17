@@ -6,6 +6,7 @@ export {
   isInsideRestrictedContext,
   isInsideSafeCallbackWrapper,
   isInsideSafeWrapper,
+  isStandaloneFunctionDefinition,
   RESTRICTED_CONTEXT_BUILDERS,
   SAFE_WRAPPER_BUILDERS,
 } from "./reactive-context.ts";

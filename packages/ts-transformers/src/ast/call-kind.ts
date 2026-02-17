@@ -88,7 +88,8 @@ export type CallKind =
   | { kind: "cell-factory"; symbol?: ts.Symbol; factoryName: string }
   | { kind: "cell-for"; symbol?: ts.Symbol }
   | { kind: "wish"; symbol?: ts.Symbol }
-  | { kind: "generate-object"; symbol?: ts.Symbol };
+  | { kind: "generate-object"; symbol?: ts.Symbol }
+  | { kind: "pattern-tool"; symbol?: ts.Symbol };
 
 export function detectCallKind(
   call: ts.CallExpression,
@@ -129,6 +130,9 @@ function resolveExpressionKind(
     }
     if (name === "generateObject") {
       return { kind: "generate-object" };
+    }
+    if (name === "patternTool") {
+      return { kind: "pattern-tool" };
     }
     if (BUILDER_SYMBOL_NAMES.has(name)) {
       return { kind: "builder", builderName: name };
@@ -180,6 +184,9 @@ function resolveExpressionKind(
     }
     if (name === "generateObject") {
       return { kind: "generate-object" };
+    }
+    if (name === "patternTool") {
+      return { kind: "pattern-tool" };
     }
     if (BUILDER_SYMBOL_NAMES.has(name)) {
       return { kind: "builder", builderName: name };
@@ -288,6 +295,10 @@ function resolveSymbolKind(
     return { kind: "generate-object", symbol: resolved };
   }
 
+  if (name === "patternTool" && isCommonToolsSymbol(resolved)) {
+    return { kind: "pattern-tool", symbol: resolved };
+  }
+
   if (BUILDER_SYMBOL_NAMES.has(name) && isCommonToolsSymbol(resolved)) {
     return { kind: "builder", symbol: resolved, builderName: name };
   }
@@ -319,6 +330,10 @@ function resolveSymbolKind(
 
   if (name === "generateObject") {
     return { kind: "generate-object", symbol: resolved };
+  }
+
+  if (name === "patternTool") {
+    return { kind: "pattern-tool", symbol: resolved };
   }
 
   if (BUILDER_SYMBOL_NAMES.has(name)) {
