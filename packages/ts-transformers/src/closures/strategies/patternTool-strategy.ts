@@ -493,41 +493,27 @@ function extractBindingNames(
  * Check if a declaration is at module scope (top level of a source file).
  */
 function isModuleScopedDeclaration(decl: ts.Declaration): boolean {
-  // Walk up to find if this is at source file level
-  let current: ts.Node = decl;
-  while (current.parent) {
-    // Check if the immediate parent is a variable statement at source file level
-    if (ts.isVariableDeclaration(current)) {
-      const varDeclList = current.parent;
-      if (ts.isVariableDeclarationList(varDeclList)) {
-        const varStatement = varDeclList.parent;
-        if (
-          ts.isVariableStatement(varStatement) &&
-          ts.isSourceFile(varStatement.parent)
-        ) {
-          return true;
-        }
-      }
+  // For variable declarations, check if the containing variable statement
+  // is directly at source file level. We must NOT walk further up the tree,
+  // because ancestor nodes (e.g. a module-scoped `const Note = pattern(...)`)
+  // would falsely match for locally-declared variables inside callbacks.
+  if (ts.isVariableDeclaration(decl)) {
+    const varDeclList = decl.parent;
+    if (ts.isVariableDeclarationList(varDeclList)) {
+      const varStatement = varDeclList.parent;
+      return (
+        ts.isVariableStatement(varStatement) &&
+        ts.isSourceFile(varStatement.parent)
+      );
     }
-
-    // Check for const/let/var at source file level
-    if (
-      ts.isVariableStatement(current) &&
-      ts.isSourceFile(current.parent)
-    ) {
-      return true;
-    }
-
-    // Check for function declarations at source file level
-    if (
-      ts.isFunctionDeclaration(current) &&
-      ts.isSourceFile(current.parent)
-    ) {
-      return true;
-    }
-
-    current = current.parent;
+    return false;
   }
+
+  // For function declarations, check if directly at source file level
+  if (ts.isFunctionDeclaration(decl)) {
+    return !!decl.parent && ts.isSourceFile(decl.parent);
+  }
+
   return false;
 }
 
