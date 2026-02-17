@@ -8,7 +8,6 @@ import { resolveLink } from "./link-resolution.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
 import { type Cell, createCell, recursivelyAddIDIfNeeded } from "./cell.ts";
 import { type Runtime } from "./runtime.ts";
-import { ignoreReadForScheduling } from "./scheduler.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { toURI } from "./uri-utils.ts";
 
@@ -363,9 +362,7 @@ export function createQueryResultProxy<T>(
     },
     ownKeys: () => {
       const readTx = (tx?.status().status === "ready") ? tx : runtime.edit();
-      const current = readTx.readValueOrThrow(link, {
-        meta: ignoreReadForScheduling,
-      });
+      const current = readTx.readValueOrThrow(link);
       if (isRecord(current)) {
         return Reflect.ownKeys(current);
       }
@@ -383,14 +380,12 @@ export function createQueryResultProxy<T>(
         return Object.getOwnPropertyDescriptor(value, prop);
       }
       const readTx = (tx?.status().status === "ready") ? tx : runtime.edit();
-      const current = readTx.readValueOrThrow(link, {
-        meta: ignoreReadForScheduling,
-      }) as typeof value;
+      const current = readTx.readValueOrThrow(link) as typeof value;
       if (isRecord(current) && prop in current) {
         return {
           configurable: true,
           enumerable: true,
-          writable: true,
+          writable: writable,
           value: createQueryResultProxy(
             runtime,
             tx,
@@ -407,9 +402,7 @@ export function createQueryResultProxy<T>(
         return prop in value;
       }
       const readTx = (tx?.status().status === "ready") ? tx : runtime.edit();
-      const current = readTx.readValueOrThrow(link, {
-        meta: ignoreReadForScheduling,
-      });
+      const current = readTx.readValueOrThrow(link);
       if (isRecord(current)) {
         return prop in current;
       }
