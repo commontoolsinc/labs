@@ -485,6 +485,7 @@ export abstract class BaseObjectTraverser {
       new StandardObjectCreator(),
     protected traverseCells = true,
   ) {}
+  protected dagMemo = new Map<string, Immutable<StorableValue>>();
   abstract traverse(doc: IMemorySpaceAttestation): Immutable<StorableValue>;
   /**
    * Attempt to traverse the document as a directed acyclic graph.
@@ -504,6 +505,18 @@ export abstract class BaseObjectTraverser {
     defaultValue?: StorableDatum,
     itemLink?: NormalizedFullLink,
   ): Immutable<StorableValue> {
+    // Memoize by cell address to avoid exponential path explosion in DAGs.
+    // When multiple parents share children, every unique path triggers a full
+    // re-traversal. Caching by address collapses this to one visit per cell.
+    // Skip when defaultValue is provided since it can alter the result.
+    if (defaultValue === undefined) {
+      const memoKey = doc.address.id + "|" + doc.address.path.join("/");
+      const cached = this.dagMemo.get(memoKey);
+      if (cached !== undefined) {
+        return cached;
+      }
+    }
+
     if (doc.value === undefined) {
       // If we have a default, annotate it and return it
       // Otherwise, return undefined
@@ -570,7 +583,14 @@ export abstract class BaseObjectTraverser {
       }
       // Our link is based on the last link in the chain and not the first.
       const newLink = getNormalizedLink(doc.address, true);
-      return this.objectCreator.createObject(newLink, newValue);
+      const arrayResult = this.objectCreator.createObject(newLink, newValue);
+      if (defaultValue === undefined) {
+        this.dagMemo.set(
+          doc.address.id + "|" + doc.address.path.join("/"),
+          arrayResult,
+        );
+      }
+      return arrayResult;
     } else if (isRecord(doc.value)) {
       // First, see if we need special handling
       if (isPrimitiveCellLink(doc.value)) {
@@ -649,7 +669,14 @@ export abstract class BaseObjectTraverser {
         }
         // Our link is based on the last link in the chain and not the first.
         const newLink = itemLink ?? getNormalizedLink(doc.address, true);
-        return this.objectCreator.createObject(newLink, newValue);
+        const recordResult = this.objectCreator.createObject(newLink, newValue);
+        if (defaultValue === undefined) {
+          this.dagMemo.set(
+            doc.address.id + "|" + doc.address.path.join("/"),
+            recordResult,
+          );
+        }
+        return recordResult;
       }
     } else {
       logger.error(
