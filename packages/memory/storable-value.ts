@@ -231,14 +231,9 @@ export function isStorableValue(value: unknown): value is StorableValueLayer {
  */
 export function toStorableValue(value: unknown): StorableValueLayer {
   if (currentConfig.richStorableValues) {
-    return toStorableValueNew(value);
+    return toRichStorableValue(value);
   }
   return toStorableValueLegacy(value);
-}
-
-/** Extended type system path: preserves Error and undefined. */
-function toStorableValueNew(value: unknown): StorableValueLayer {
-  return toRichStorableValue(value);
 }
 
 /** Legacy implementation of `toStorableValue()` for the JSON-only type system. */
@@ -337,14 +332,9 @@ const PROCESSING = Symbol("PROCESSING");
  */
 export function toDeepStorableValue(value: unknown): StorableValue {
   if (currentConfig.richStorableValues) {
-    return toDeepStorableValueNew(value);
+    return toDeepRichStorableValue(value);
   }
   return toDeepStorableValueLegacy(value);
-}
-
-/** Extended recursive conversion path: preserves Error and undefined. */
-function toDeepStorableValueNew(value: unknown): StorableValue {
-  return toDeepRichStorableValue(value);
 }
 
 /** Legacy implementation of `toDeepStorableValue()` for the JSON-only type system. */
