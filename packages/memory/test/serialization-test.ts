@@ -21,69 +21,11 @@ function makeTestContext() {
   return { context, runtime };
 }
 
-/** Creates a lenient test context. */
-function makeLenientTestContext() {
-  const context = new JsonEncodingContext({ lenient: true });
-  const runtime: ReconstructionContext = {
-    getCell(_ref) {
-      throw new Error("getCell not implemented in test runtime");
-    },
-  };
-  return { context, runtime };
-}
-
 /** Helper: serialize then deserialize (round-trip). */
 function roundTrip(value: StorableValue): StorableValue {
   const { context, runtime } = makeTestContext();
   const serialized = serialize(value, context);
   return deserialize(serialized, context, runtime);
-}
-
-/** Deep structural equality check that respects sparse arrays. */
-function expectDeepEqual(actual: StorableValue, expected: StorableValue): void {
-  if (actual instanceof Error && expected instanceof Error) {
-    expect(actual.name).toBe(expected.name);
-    expect(actual.message).toBe(expected.message);
-    if (expected.cause !== undefined) {
-      expectDeepEqual(
-        actual.cause as StorableValue,
-        expected.cause as StorableValue,
-      );
-    }
-    return;
-  }
-
-  if (Array.isArray(actual) && Array.isArray(expected)) {
-    expect(actual.length).toBe(expected.length);
-    for (let i = 0; i < expected.length; i++) {
-      expect(i in actual).toBe(i in expected);
-      if (i in expected) {
-        expectDeepEqual(actual[i], expected[i]);
-      }
-    }
-    return;
-  }
-
-  if (
-    actual !== null &&
-    expected !== null &&
-    typeof actual === "object" &&
-    typeof expected === "object" &&
-    !Array.isArray(actual) &&
-    !Array.isArray(expected)
-  ) {
-    const actualObj = actual as Record<string, StorableValue>;
-    const expectedObj = expected as Record<string, StorableValue>;
-    expect(Object.keys(actualObj).sort()).toEqual(
-      Object.keys(expectedObj).sort(),
-    );
-    for (const key of Object.keys(expectedObj)) {
-      expectDeepEqual(actualObj[key], expectedObj[key]);
-    }
-    return;
-  }
-
-  expect(actual).toBe(expected);
 }
 
 // ============================================================================
