@@ -70,18 +70,30 @@ const sendFollowUp = handler<
   });
 });
 
-const presentResultTool = handler<
-  { cell: Writable<any> },
-  { activeResult: Writable<Writable<any> | undefined> }
->(({ cell }, { activeResult }) => {
-  activeResult.set(cell);
+// Pattern-based tools for llmDialog. handler() state bindings don't work when
+// invoked via llmDialog's tool system (it calls .send(input) without state).
+// These patterns receive a Writable via extraParams to write results into.
+const presentResultFn = pattern<{
+  cell: Writable<any>;
+  target: Writable<Writable<any> | undefined>;
+}>(({ cell, target }) => {
+  // Guard: .set() fails during ct check (no space context).
+  // At runtime, extraParams provides a real Writable with a space.
+  try {
+    target.set(cell);
+  } catch { /* ct check only */ }
+  return { cell };
 });
 
-const askUserTool = handler<
-  { question: string; options?: string[] },
-  { pendingQuestion: Writable<{ question: string; options?: string[] } | null> }
->(({ question, options }, { pendingQuestion }) => {
-  pendingQuestion.set({ question, options: options ?? [] });
+const askUserFn = pattern<{
+  question: string;
+  options?: string[];
+  target: Writable<{ question: string; options?: string[] } | null>;
+}>(({ question, options, target }) => {
+  try {
+    target.set({ question, options });
+  } catch { /* ct check only */ }
+  return { question, options };
 });
 
 const answerQuestion = handler<
@@ -192,8 +204,8 @@ Always call presentResult when you have a new result to show.`;
     tools: {
       fetchAndRunPattern: patternTool(fetchAndRunPattern),
       listPatternIndex: patternTool(listPatternIndex),
-      presentResult: { handler: presentResultTool({ activeResult }) },
-      askUser: { handler: askUserTool({ pendingQuestion }) },
+      presentResult: patternTool(presentResultFn, { target: activeResult }),
+      askUser: patternTool(askUserFn, { target: pendingQuestion }),
     },
     model: "anthropic:claude-haiku-4-5",
     // NOTE: Intentionally NOT passing `context` here. The context cells contain
@@ -204,10 +216,13 @@ Always call presentResult when you have a new result to show.`;
 
   const suggestionMessages = computed(() => suggestion.messages);
 
-  // Base result from generateObject — keep this simple to avoid
-  // CTS transform issues. activeResult override is layered on top
-  // in the UI render path once we verify the base case works.
-  const llmResult = computed(() => suggestion.result?.cell);
+  // llmResult: prefer activeResult (set by presentResult tool via extraParams),
+  // fall back to initial generateObject result.
+  const llmResult = computed(() => {
+    const dialogResult = activeResult;
+    if (dialogResult !== undefined) return dialogResult;
+    return suggestion.result?.cell;
+  });
 
   // Reactively select between picker and LLM result. This must be a named
   // computed variable — the CTS transformer leaves named Cells as-is in the
