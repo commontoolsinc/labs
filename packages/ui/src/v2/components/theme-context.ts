@@ -325,8 +325,8 @@ export function createThemeVariant(
 }
 
 /**
- * Merge a partial theme with the default theme, supporting recipe-style partial objects
- * @param partialTheme - Partial theme object that may contain recipe-style properties
+ * Merge a partial theme with the default theme, supporting pattern-style partial objects
+ * @param partialTheme - Partial theme object that may contain pattern-style properties
  * @param baseTheme - Base theme to merge with (defaults to defaultTheme)
  * @returns Full CTTheme with merged properties
  */
@@ -338,10 +338,10 @@ export function mergeWithDefaultTheme(
     return baseTheme;
   }
 
-  // Handle recipe-style theme objects with specific properties
+  // Handle pattern-style theme objects with specific properties
   const mergedTheme = { ...baseTheme };
 
-  // Map common recipe theme properties to CTTheme properties
+  // Map common pattern theme properties to CTTheme properties
   if (partialTheme.accentColor) {
     mergedTheme.colors = {
       ...mergedTheme.colors,
