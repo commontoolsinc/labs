@@ -41,6 +41,7 @@
     "./commit": "./commit.ts",
     "./codec": "./codec.ts",
     "./reference": "./reference.ts",
+    "./rich-storable-value": "./rich-storable-value.ts",
     "./schema": "./schema.ts",
     "./storable-value": "./storable-value.ts"
   },
