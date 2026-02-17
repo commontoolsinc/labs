@@ -1,11 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { refer } from "merkle-reference/json";
-import {
-  deepEqual,
-  JSONObject,
-  type JSONSchema,
-} from "../src/index.ts";
+import { deepEqual, JSONObject, type JSONSchema } from "../src/index.ts";
 import type { StorableDatum } from "@commontools/memory/interface";
 import {
   CompoundCycleTracker,
