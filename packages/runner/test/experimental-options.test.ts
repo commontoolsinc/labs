@@ -166,6 +166,17 @@ describe("ExperimentalOptions", () => {
       expect(result[1]).toBe(err);
     });
 
+    it("preserves sparse array holes when flag is ON", () => {
+      setExperimentalStorableConfig({ richStorableValues: true });
+      // deno-lint-ignore no-sparse-arrays
+      const sparse = [1, , 3];
+      const result = toDeepStorableValue(sparse) as unknown[];
+      expect(result.length).toBe(3);
+      expect(0 in result).toBe(true);
+      expect(1 in result).toBe(false); // hole preserved
+      expect(2 in result).toBe(true);
+    });
+
     it("returns to flag-OFF behavior after reset", () => {
       setExperimentalStorableConfig({ richStorableValues: true });
       resetExperimentalStorableConfig();
@@ -191,6 +202,19 @@ describe("ExperimentalOptions", () => {
     it("accepts [undefined] when flag is ON", () => {
       setExperimentalStorableConfig({ richStorableValues: true });
       expect(isStorableValue([undefined])).toBe(true);
+    });
+
+    it("accepts sparse arrays when flag is ON", () => {
+      setExperimentalStorableConfig({ richStorableValues: true });
+      // deno-lint-ignore no-sparse-arrays
+      const sparse = [1, , 3];
+      expect(isStorableValue(sparse)).toBe(true);
+    });
+
+    it("rejects sparse arrays when flag is OFF", () => {
+      // deno-lint-ignore no-sparse-arrays
+      const sparse = [1, , 3];
+      expect(isStorableValue(sparse)).toBe(false);
     });
 
     it("returns to flag-OFF behavior after reset", () => {
