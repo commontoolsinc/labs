@@ -53,21 +53,31 @@ export function serialize(
 ): SerializedForm {
   // --- StorableInstance (custom protocol) ---
   if (isStorable(value)) {
+    const seen = _seen ?? new Set<object>();
+    if (seen.has(value as object)) {
+      throw new Error("Circular reference detected during serialization");
+    }
+    seen.add(value as object);
+
+    let result: SerializedForm;
+
     // UnknownStorable and ProblematicStorable: use preserved typeTag
     // and re-serialize their stored state.
     if (value instanceof UnknownStorable) {
-      const serializedState = serialize(value.state, context, _seen);
-      return context.encode(value.typeTag, serializedState);
-    }
-    if (value instanceof ProblematicStorable) {
-      const serializedState = serialize(value.state, context, _seen);
-      return context.encode(value.typeTag, serializedState);
+      const serializedState = serialize(value.state, context, seen);
+      result = context.encode(value.typeTag, serializedState);
+    } else if (value instanceof ProblematicStorable) {
+      const serializedState = serialize(value.state, context, seen);
+      result = context.encode(value.typeTag, serializedState);
+    } else {
+      const state = value[DECONSTRUCT]();
+      const tag = context.getTagFor(value);
+      const serializedState = serialize(state, context, seen);
+      result = context.encode(tag, serializedState);
     }
 
-    const state = value[DECONSTRUCT]();
-    const tag = context.getTagFor(value);
-    const serializedState = serialize(state, context, _seen);
-    return context.encode(tag, serializedState);
+    seen.delete(value as object);
+    return result;
   }
 
   // --- Built-in JS types with derived StorableInstance form (Section 1.4.1) ---
