@@ -1,84 +1,12 @@
-import { RECONSTRUCT } from "./storable-protocol.ts";
+import type { StorableClass, StorableInstance } from "./storable-protocol.ts";
+import type { SerializationContext } from "./serialization-context.ts";
 import type {
-  ReconstructionContext,
-  StorableClass,
-  StorableInstance,
-} from "./storable-protocol.ts";
-import type {
-  SerializationContext,
+  JsonValue,
   SerializedForm,
-} from "./serialization-context.ts";
-import type { StorableValue } from "./interface.ts";
+} from "./json-serialization-context.ts";
+import { ErrorConverter } from "./type-handlers.ts";
 import { UnknownStorable } from "./unknown-storable.ts";
 import { ProblematicStorable } from "./problematic-storable.ts";
-
-/**
- * Reconstructor for `Error@1`. Creates an `Error` (or subclass based on
- * `name`) from the deconstructed state.
- */
-const ErrorClass: StorableClass<StorableInstance> = {
-  [RECONSTRUCT](
-    state: StorableValue,
-    _context: ReconstructionContext,
-  ): StorableInstance {
-    const s = state as Record<string, StorableValue>;
-    const name = (s.name as string) ?? "Error";
-    const message = (s.message as string) ?? "";
-
-    // Construct the appropriate Error subclass based on name.
-    let error: Error;
-    switch (name) {
-      case "TypeError":
-        error = new TypeError(message);
-        break;
-      case "RangeError":
-        error = new RangeError(message);
-        break;
-      case "SyntaxError":
-        error = new SyntaxError(message);
-        break;
-      case "ReferenceError":
-        error = new ReferenceError(message);
-        break;
-      case "URIError":
-        error = new URIError(message);
-        break;
-      case "EvalError":
-        error = new EvalError(message);
-        break;
-      default:
-        error = new Error(message);
-        break;
-    }
-
-    // Set name explicitly (covers custom names like "MyError").
-    if (error.name !== name) {
-      error.name = name;
-    }
-
-    if (s.stack !== undefined) {
-      error.stack = s.stack as string;
-    }
-    if (s.cause !== undefined) {
-      error.cause = s.cause;
-    }
-
-    // Copy custom enumerable properties, skipping prototype-sensitive keys.
-    for (const key of Object.keys(s)) {
-      if (
-        key !== "name" && key !== "message" && key !== "stack" &&
-        key !== "cause" && key !== "__proto__" && key !== "constructor"
-      ) {
-        (error as unknown as Record<string, unknown>)[key] = s[key];
-      }
-    }
-
-    // Error instances aren't StorableInstance per se (they don't have
-    // [DECONSTRUCT]), but the serializer handles them via hardcoded branches.
-    // Return as unknown cast to satisfy the interface.
-    return error as unknown as StorableInstance;
-  },
-};
 
 /**
  * JSON serialization context implementing the `/<Type>@<Version>` wire format
@@ -86,7 +14,7 @@ const ErrorClass: StorableClass<StorableInstance> = {
  * types in scope and handles encoding/decoding of tagged values.
  * See Section 5.2 of the formal spec.
  */
-export class JsonEncodingContext implements SerializationContext {
+export class JsonEncodingContext implements SerializationContext<JsonValue> {
   /** Tag -> class registry for known types. */
   private readonly registry = new Map<
     string,
@@ -100,12 +28,17 @@ export class JsonEncodingContext implements SerializationContext {
   constructor(options?: { lenient?: boolean }) {
     this.lenient = options?.lenient ?? false;
 
-    // Register built-in types for this scope.
+    // Register built-in types for this scope. ErrorConverter is compatible
+    // with StorableClass since RECONSTRUCT returns Error (which is acceptable
+    // per the widened StorableConverter interface, cast here for the registry).
     // Note: Link@1, Stream@1, Map@1, Set@1, Bytes@1, Date@1, BigInt@1
     // are NOT registered -- they belong to future rounds.
-    this.registry.set("Error@1", ErrorClass);
-    // Undefined@1 and `hole` are handled inline by serialize/deserialize,
-    // not through the class registry.
+    this.registry.set(
+      "Error@1",
+      ErrorConverter as unknown as StorableClass<StorableInstance>,
+    );
+    // Undefined@1 and `hole` are handled by type handlers, not the class
+    // registry.
   }
 
   /** Get the wire format tag for a storable instance's type. */
@@ -117,7 +50,7 @@ export class JsonEncodingContext implements SerializationContext {
       return value.typeTag;
     }
     // Shouldn't be reached for the types in scope -- Error, undefined, and
-    // Hole are handled by serialize() directly. Future rounds will add
+    // Hole are handled by type handlers directly. Future rounds will add
     // Cell/Stream/etc. here.
     throw new Error(
       `JsonEncodingContext: no tag registered for value: ${value}`,
