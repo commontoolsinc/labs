@@ -622,6 +622,20 @@ describe("serialization", () => {
       );
     });
 
+    it("throws on StorableInstance whose state references itself", () => {
+      const { context } = makeTestContext();
+      // Create an UnknownStorable whose state transitively references itself.
+      const us = new UnknownStorable("Test@1", null);
+      // Mutate state to create a cycle: us -> [us] -> us.
+      (us as unknown as { state: StorableValue }).state = [
+        us,
+      ] as unknown as StorableValue;
+      expect(() => serialize(us as unknown as StorableValue, context))
+        .toThrow(
+          "Circular reference",
+        );
+    });
+
     it("allows shared references (same object at multiple positions)", () => {
       const { context } = makeTestContext();
       const shared = { val: 42 } as unknown as StorableValue;

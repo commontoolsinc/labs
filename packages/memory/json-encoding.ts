@@ -63,11 +63,11 @@ const ErrorClass: StorableClass<StorableInstance> = {
       error.cause = s.cause;
     }
 
-    // Copy custom enumerable properties.
+    // Copy custom enumerable properties, skipping prototype-sensitive keys.
     for (const key of Object.keys(s)) {
       if (
         key !== "name" && key !== "message" && key !== "stack" &&
-        key !== "cause"
+        key !== "cause" && key !== "__proto__" && key !== "constructor"
       ) {
         (error as unknown as Record<string, unknown>)[key] = s[key];
       }
