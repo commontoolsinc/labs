@@ -694,7 +694,7 @@ export function serialize(
 
   // --- Arrays ---
   // Sparse arrays are supported: runs of consecutive holes (absent indices)
-  // are serialized as a single `Hole@1` entry whose state is the run length
+  // are serialized as a single `hole` entry whose state is the run length
   // (a positive integer). This is distinct from explicit `undefined`
   // (serialized as `Undefined@1`). See Section 1.5.
   if (Array.isArray(value)) {
@@ -708,7 +708,7 @@ export function serialize(
           count++;
           i++;
         }
-        result.push(context.encode('Hole@1', count));
+        result.push(context.encode('hole', count));
       } else {
         result.push(serialize(value[i], context));
         i++;
@@ -775,9 +775,9 @@ export function deserialize(
       return undefined;
     }
 
-    // `Hole@1` is not valid outside of array deserialization; if encountered
+    // `hole` is not valid outside of array deserialization; if encountered
     // at top level or in an object, treat as an unknown type for safety.
-    // (Array deserialization handles `Hole@1` inline — see below.)
+    // (Array deserialization handles `hole` inline — see below.)
 
     const cls = context.getClassFor(tag);
     const deserializedState = deserialize(state, context, runtime); // recursive
@@ -797,17 +797,17 @@ export function deserialize(
     return data;
   }
 
-  // Arrays: recursively deserialize elements. `Hole@1` entries use
+  // Arrays: recursively deserialize elements. `hole` entries use
   // run-length encoding — the state is a positive integer indicating how
   // many consecutive holes to skip. Those indices are left absent in the
   // result array, creating true holes.
   if (Array.isArray(data)) {
     // First pass: compute the logical length (sum of run lengths for
-    // `Hole@1` entries plus one for each non-hole entry).
+    // `hole` entries plus one for each non-hole entry).
     let logicalLength = 0;
     for (const entry of data) {
       const entryDecoded = context.decode(entry);
-      if (entryDecoded !== null && entryDecoded.tag === 'Hole@1') {
+      if (entryDecoded !== null && entryDecoded.tag === 'hole') {
         logicalLength += entryDecoded.state as number;
       } else {
         logicalLength++;
@@ -818,7 +818,7 @@ export function deserialize(
     let targetIndex = 0;
     for (const entry of data) {
       const entryDecoded = context.decode(entry);
-      if (entryDecoded !== null && entryDecoded.tag === 'Hole@1') {
+      if (entryDecoded !== null && entryDecoded.tag === 'hole') {
         // Skip `state` indices — leave them absent, creating true holes.
         targetIndex += entryDecoded.state as number;
       } else {
@@ -952,8 +952,8 @@ round-trip correctly.
 
 // Array holes (run-length encoded; value is a positive integer; only valid
 // inside arrays)
-// Tag: "Hole@1"
-// { "/Hole@1": <count> }   e.g. { "/Hole@1": 1 }, { "/Hole@1": 5 }
+// Tag: "hole"
+// { "/hole": <count> }   e.g. { "/hole": 1 }, { "/hole": 5 }
 
 // Stream markers (stateless -- value is null)
 // Tag: "Stream@1"
@@ -982,15 +982,15 @@ round-trip correctly.
 
 > **Sparse array encoding in JSON.** Even when an array contains holes, it is
 > serialized as a JSON array. Runs of consecutive holes are represented by
-> `Hole@1` entries, each carrying the run length as a positive integer. This
+> `hole` entries, each carrying the run length as a positive integer. This
 > preserves the array-as-array structure while efficiently encoding sparse
 > arrays:
 >
 > - `[1, , undefined, 3]` serializes as
->   `[1, { "/Hole@1": 1 }, { "/Undefined@1": null }, 3]`.
-> - `[1, , , , 5]` serializes as `[1, { "/Hole@1": 3 }, 5]`.
+>   `[1, { "/hole": 1 }, { "/Undefined@1": null }, 3]`.
+> - `[1, , , , 5]` serializes as `[1, { "/hole": 3 }, 5]`.
 > - A very sparse array like `a = []; a[1000000] = 'x'` serializes as
->   `[{ "/Hole@1": 1000000 }, "x"]`.
+>   `[{ "/hole": 1000000 }, "x"]`.
 
 ### 5.4 Detection
 
@@ -1188,7 +1188,7 @@ export function canonicalHash(
   //                        hash.)
   //
   //                        When hashing from the wire format, each
-  //                        `Hole@1` entry maps directly to one
+  //                        `hole` entry maps directly to one
   //                        `TAG_HOLE + uint32(N)` in the hash (since
   //                        the wire format also uses maximal runs).
   //                        When hashing from an in-memory array, the

@@ -139,7 +139,7 @@ export function serialize(
           count++;
           i++;
         }
-        result.push(context.encode("Hole@1", count));
+        result.push(context.encode("hole", count));
       } else {
         result.push(
           serialize(value[i] as StorableValue, context, seen),
@@ -220,8 +220,8 @@ export function deserialize(
       return undefined;
     }
 
-    // `Hole@1` outside of array deserialization is treated as an unknown type
-    // for safety (array deserialization handles Hole@1 inline below).
+    // `hole` outside of array deserialization is treated as an unknown type
+    // for safety (array deserialization handles `hole` inline below).
 
     const cls = context.getClassFor(tag);
     const deserializedState = deserialize(state, context, runtime);
@@ -263,7 +263,7 @@ export function deserialize(
     return data;
   }
 
-  // Arrays: recursively deserialize elements. `Hole@1` entries use
+  // Arrays: recursively deserialize elements. `hole` entries use
   // run-length encoding -- the state is a positive integer indicating how
   // many consecutive holes to skip.
   if (Array.isArray(data)) {
@@ -271,7 +271,7 @@ export function deserialize(
     let logicalLength = 0;
     for (const entry of data) {
       const entryDecoded = context.decode(entry);
-      if (entryDecoded !== null && entryDecoded.tag === "Hole@1") {
+      if (entryDecoded !== null && entryDecoded.tag === "hole") {
         logicalLength += entryDecoded.state as number;
       } else {
         logicalLength++;
@@ -282,7 +282,7 @@ export function deserialize(
     let targetIndex = 0;
     for (const entry of data) {
       const entryDecoded = context.decode(entry);
-      if (entryDecoded !== null && entryDecoded.tag === "Hole@1") {
+      if (entryDecoded !== null && entryDecoded.tag === "hole") {
         // Skip `state` indices -- leave them absent, creating true holes.
         targetIndex += entryDecoded.state as number;
       } else {
