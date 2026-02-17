@@ -467,7 +467,7 @@ export class PatternContextValidationTransformer extends Transformer {
     checker: ts.TypeChecker,
   ): void {
     // Skip if this function is passed to patternTool()
-    if (this.isPatternToolArgument(func)) {
+    if (this.isPatternToolArgument(func, checker)) {
       return;
     }
 
@@ -555,6 +555,7 @@ export class PatternContextValidationTransformer extends Transformer {
    */
   private isPatternToolArgument(
     func: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration,
+    checker: ts.TypeChecker,
   ): boolean {
     // Function declarations can't be passed as arguments
     if (ts.isFunctionDeclaration(func)) return false;
@@ -565,19 +566,9 @@ export class PatternContextValidationTransformer extends Transformer {
     // Check if this function is the first argument
     if (parent.arguments[0] !== func) return false;
 
-    // Check if the call is to patternTool
-    const callee = parent.expression;
-    if (ts.isIdentifier(callee) && callee.text === "patternTool") {
-      return true;
-    }
-    if (
-      ts.isPropertyAccessExpression(callee) &&
-      callee.name.text === "patternTool"
-    ) {
-      return true;
-    }
-
-    return false;
+    // Use detectCallKind for consistent call detection
+    const callKind = detectCallKind(parent, checker);
+    return callKind?.kind === "pattern-tool";
   }
 
   /**

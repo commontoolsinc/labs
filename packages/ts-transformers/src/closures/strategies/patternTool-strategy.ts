@@ -4,6 +4,7 @@ import type { ClosureTransformationStrategy } from "./strategy.ts";
 import { detectCallKind, isFunctionLikeExpression } from "../../ast/mod.ts";
 import {
   buildHierarchicalParamsValue,
+  type CaptureTreeNode,
   groupCapturesByRoot,
 } from "../../utils/capture-tree.ts";
 import { createPropertyName } from "../../utils/identifiers.ts";
@@ -123,8 +124,7 @@ function transformPatternToolCall(
   if (
     existingExtraParams && ts.isObjectLiteralExpression(existingExtraParams)
   ) {
-    // Combine existing properties with captures
-    // Captures come first, existing properties override if there are duplicates
+    // Merge: captures take precedence over existing properties with the same name
     const existingProperties = existingExtraParams.properties.filter((prop) => {
       // Skip properties that are being captured (captures win)
       if (ts.isPropertyAssignment(prop) && ts.isIdentifier(prop.name)) {
@@ -186,7 +186,7 @@ function transformPatternToolCall(
 function buildCallbackWithCaptures(
   originalCallback: ts.ArrowFunction | ts.FunctionExpression,
   transformedBody: ts.ConciseBody,
-  captureTree: Map<string, unknown>,
+  captureTree: Map<string, CaptureTreeNode>,
   context: TransformationContext,
 ): ts.ArrowFunction | ts.FunctionExpression {
   const { factory } = context;
@@ -315,7 +315,7 @@ function buildCallbackWithCaptures(
  */
 function addCapturesToTypeLiteral(
   typeLiteral: ts.TypeLiteralNode,
-  captureTree: Map<string, unknown>,
+  captureTree: Map<string, CaptureTreeNode>,
   context: TransformationContext,
 ): ts.TypeLiteralNode {
   const { factory } = context;
@@ -520,15 +520,18 @@ function isModuleScopedDeclaration(decl: ts.Declaration): boolean {
 /**
  * Check if a type is a CellLike type (Cell, Writable, OpaqueCell, Stream).
  *
- * Excludes OpaqueRef/OpaqueRefMethods — those are proxy wrappers for pattern
- * parameters, not values created at module scope. Module-scoped reactive
- * variables come from cell(), Cell.of(), Writable.of(), etc.
+ * This function is used to decide which module-scoped variables to capture
+ * in patternTool() extraParams. In practice, module-scoped reactive variables
+ * come from cell(), Cell.of(), Writable.of(), etc. — never OpaqueRef (which
+ * is a proxy wrapper for pattern parameters, always pattern-scoped).
+ *
+ * The isOpaqueRefType brand check is included as a safety net; it shouldn't
+ * match in practice because isModuleScopedDeclaration filters first.
  *
  * See also: isCellLikeOrOpaqueRefType in pattern-context-validation.ts,
  * which additionally matches OpaqueRef for validating .map() receivers.
  */
 function isCellLikeType(type: ts.Type, checker: ts.TypeChecker): boolean {
-  // Brand-based check catches some cases where string matching might not
   if (isOpaqueRefType(type, checker)) {
     return true;
   }
