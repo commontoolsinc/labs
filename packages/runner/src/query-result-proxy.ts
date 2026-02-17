@@ -402,6 +402,19 @@ export function createQueryResultProxy<T>(
       }
       return undefined;
     },
+    has: (_target, prop) => {
+      if (typeof prop === "symbol") {
+        return prop in value;
+      }
+      const readTx = (tx?.status().status === "ready") ? tx : runtime.edit();
+      const current = readTx.readValueOrThrow(link, {
+        meta: ignoreReadForScheduling,
+      });
+      if (isRecord(current)) {
+        return prop in current;
+      }
+      return prop in value;
+    },
   }) as T;
 
   // Cache the proxy in the appropriate cache before returning

@@ -213,6 +213,29 @@ describe("CT-1240: query result proxy enumeration", () => {
     expect(Object.keys(proxy)).toEqual([]);
   });
 
+  it("'in' operator returns true for existing keys and false for missing keys", () => {
+    const cell = runtime.getCell<{ a: number; b: string }>(
+      space,
+      "test-has-trap",
+      undefined,
+      tx,
+    );
+    cell.set({ a: 1, b: "hello" });
+
+    const proxy = createQueryResultProxy<{ a: number; b: string }>(
+      runtime,
+      tx,
+      cell.getAsNormalizedFullLink(),
+      0,
+      false,
+    );
+
+    expect("a" in proxy).toBe(true);
+    expect("b" in proxy).toBe(true);
+    expect("c" in proxy).toBe(false);
+    expect("nonExistentKey" in proxy).toBe(false);
+  });
+
   it("after mutation via set trap, ownKeys reflects new state", () => {
     const cell = runtime.getCell<{ a: number; b?: number }>(
       space,
