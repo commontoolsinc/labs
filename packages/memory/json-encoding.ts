@@ -14,7 +14,8 @@ import { ProblematicStorable } from "./problematic-storable.ts";
  * types in scope and handles encoding/decoding of tagged values.
  * See Section 5.2 of the formal spec.
  */
-export class JsonEncodingContext implements SerializationContext<JsonWireValue> {
+export class JsonEncodingContext
+  implements SerializationContext<JsonWireValue> {
   /** Tag -> class registry for known types. */
   private readonly registry = new Map<
     string,
@@ -99,5 +100,15 @@ export class JsonEncodingContext implements SerializationContext<JsonWireValue> 
     const tag = key.slice(1);
     const state = (data as Record<string, SerializedForm>)[key];
     return { tag, state };
+  }
+
+  /** Convert a JsonWireValue tree to UTF-8-encoded JSON bytes. */
+  finalize(data: SerializedForm): Uint8Array {
+    return new TextEncoder().encode(JSON.stringify(data));
+  }
+
+  /** Parse UTF-8-encoded JSON bytes back into a JsonWireValue tree. */
+  parse(bytes: Uint8Array): SerializedForm {
+    return JSON.parse(new TextDecoder().decode(bytes)) as SerializedForm;
   }
 }

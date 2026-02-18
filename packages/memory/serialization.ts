@@ -16,6 +16,60 @@ import {
 const defaultRegistry: TypeHandlerRegistry = createDefaultRegistry();
 
 /**
+ * A serialization context that can produce and consume `Uint8Array` bytes.
+ * Extends the base `SerializationContext` with `finalize()` and `parse()`
+ * methods for boundary crossing. `JsonEncodingContext` implements this.
+ */
+export interface ByteSerializationContext<WireFormat>
+  extends SerializationContext<WireFormat> {
+  /** Convert a wire-format tree to bytes for boundary crossing. */
+  finalize(data: WireFormat): Uint8Array;
+  /** Parse bytes back into a wire-format tree. */
+  parse(bytes: Uint8Array): WireFormat;
+}
+
+// ---------------------------------------------------------------------------
+// Public API: Uint8Array boundary
+// ---------------------------------------------------------------------------
+
+/**
+ * Serialize a storable value to bytes for boundary crossing. Builds an
+ * internal wire-format tree via the context, then converts to `Uint8Array`
+ * via `context.finalize()`. See Section 4.5 of the formal spec.
+ *
+ * This is the intended public API for serialization at system boundaries.
+ * The tree-level `serialize()` function is also exported for internal use
+ * and testing.
+ */
+export function serializeToBytes(
+  value: StorableValue,
+  context: ByteSerializationContext<SerializedForm>,
+  registry: TypeHandlerRegistry = defaultRegistry,
+): Uint8Array {
+  const tree = serialize(value, context, undefined, registry);
+  return context.finalize(tree);
+}
+
+/**
+ * Deserialize bytes back into rich runtime types. Parses the `Uint8Array`
+ * via `context.parse()` into an internal wire-format tree, then walks it
+ * to reconstruct runtime values.
+ *
+ * This is the intended public API for deserialization at system boundaries.
+ * The tree-level `deserialize()` function is also exported for internal use
+ * and testing.
+ */
+export function deserializeFromBytes(
+  bytes: Uint8Array,
+  context: ByteSerializationContext<SerializedForm>,
+  runtime: ReconstructionContext,
+  registry: TypeHandlerRegistry = defaultRegistry,
+): StorableValue {
+  const tree = context.parse(bytes);
+  return deserialize(tree, context, runtime, registry);
+}
+
+/**
  * Recursively freeze arrays and plain objects. Primitives pass through
  * unchanged. Used by the `/quote` deserialization path to ensure the freeze
  * guarantee applies uniformly to all `deserialize()` output.
