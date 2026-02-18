@@ -56,6 +56,11 @@ export async function tryClaimMutex<T extends Record<string, any>>(
   let inputHash = "";
   let inputs = {} as T;
 
+  // Wait for all pending computeds to settle before reading inputs.
+  // Without this, computed inputs (e.g. options) may still be undefined
+  // on the first run because the scheduler hasn't evaluated them yet.
+  await runtime.idle();
+
   await runtime.editWithRetry((tx) => {
     const currentInternal = internal.withTx(tx).get();
     const isPending = pending.withTx(tx).get();
