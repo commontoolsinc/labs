@@ -652,15 +652,16 @@ aligns with the reactive system's assumption that values don't mutate in place.
 
 > **Immutability of native object wrappers.** Under the three-layer
 > architecture, deserialization produces `StorableInstance` wrappers
-> (`StorableMap`, `StorableSet`, etc.), not raw native types. Since the wrappers
-> are plain objects (not `Map`/`Set`/`Date`/`Uint8Array` instances), they can
-> be frozen with `Object.freeze()` like any other `StorableInstance`. The
-> underlying native objects stored inside wrappers (e.g., `StorableMap.map`)
-> are not directly exposed to consumers of `StorableValue` — callers who need
-> the native types use `nativeValueFromStorableValue()` (Section 8), which
-> returns `FrozenMap` and `FrozenSet` (effectively-immutable wrappers) for
-> collection types, preserving the immutability guarantee even after
-> unwrapping.
+> (`StorableMap`, `StorableSet`, etc.), not raw native types. Because the
+> system controls the shape of these wrapper classes, they can be properly
+> frozen with `Object.freeze()` — unlike the native types they wrap (e.g.,
+> `Object.freeze()` on a `Map` does not prevent mutation via `set()`/`delete()`).
+> The underlying native objects stored inside wrappers (e.g.,
+> `StorableMap.map`) are not directly exposed to consumers of `StorableValue`
+> — callers who need the native types use `nativeValueFromStorableValue()`
+> (Section 8), which returns `FrozenMap` and `FrozenSet`
+> (effectively-immutable wrappers) for collection types, preserving the
+> immutability guarantee even after unwrapping.
 
 ---
 
