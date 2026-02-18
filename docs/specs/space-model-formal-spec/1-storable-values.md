@@ -186,7 +186,7 @@ content-level identity (see Section 6.3).
 
 | Wrapper Class | Wraps | Type Tag | Deconstructed State | Notes |
 |---------------|-------|----------|---------------------|-------|
-| `StorableError` | `Error` | `Error@1` | `{ type, name, message, stack?, cause?, ...custom }` | Captures `type` (constructor name, e.g. `"TypeError"`), `name` (`.name` property, which may differ from constructor name), `message`, `stack` (if present), `cause` (if present), and custom enumerable properties. The conversion layer (Section 8.2) recursively converts nested values (including `cause` and custom properties) before wrapping, ensuring all values are `StorableValue` when `[DECONSTRUCT]` runs. |
+| `StorableError` | `Error` | `Error@1` | `{ type, name, message, stack?, cause?, ...custom }` | `type` is the constructor name (e.g. `"TypeError"`). `name` is the `.name` property if it differs from `type`, or `null` if it matches (the common case). Includes `message`, `stack` (if present), `cause` (if present), and custom enumerable properties. The conversion layer (Section 8.2) recursively converts nested values (including `cause` and custom properties) before wrapping, ensuring all values are `StorableValue` when `[DECONSTRUCT]` runs. |
 | `StorableMap` | `Map` | `Map@1` | `[[key, value], ...]` | Entry pairs as an array of two-element arrays. Insertion order is preserved. Keys and values are recursively processed. |
 | `StorableSet` | `Set` | `Set@1` | `[value, ...]` | Elements as an array. Iteration order is preserved. Values are recursively processed. |
 | `StorableDate` | `Date` | `Date@1` | `string` (ISO 8601 UTC) | Deconstructed state is a string — the serializer recurses into it and finds a primitive. |
@@ -249,12 +249,14 @@ export class StorableError implements StorableInstance {
     // simply extracts the already-converted state.
     //
     // `type` is the constructor name (e.g. "TypeError"), while `name` is
-    // the `.name` property (which may differ if overridden). Both are
-    // preserved so that `[RECONSTRUCT]` can pick the right constructor
-    // class AND restore `.name` faithfully.
+    // the `.name` property (which may differ if overridden). Since
+    // `type === name` is the common case, `name` is emitted as `null`
+    // when it matches `type` to avoid redundancy. `[RECONSTRUCT]`
+    // interprets `null` name as "same as type."
+    const type = this.error.constructor.name;
     const state: Record<string, StorableValue> = {
-      type:    this.error.constructor.name,
-      name:    this.error.name,
+      type,
+      name:    this.error.name === type ? null : this.error.name,
       message: this.error.message,
     };
     if (this.error.stack !== undefined) {
@@ -278,9 +280,9 @@ export class StorableError implements StorableInstance {
     const s = state as Record<string, StorableValue>;
     // Use `type` (constructor name) for class lookup. Fall back to `name`
     // for backward compatibility with data serialized before `type` was
-    // added.
+    // added. A `null` or absent `name` means "same as type."
     const type = (s.type as string) ?? (s.name as string) ?? 'Error';
-    const name = (s.name as string) ?? type;
+    const name = (s.name as string | null) ?? type;
     const message = (s.message as string) ?? '';
     let error: Error;
     switch (type) {
