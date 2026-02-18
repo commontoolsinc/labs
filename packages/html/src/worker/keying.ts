@@ -36,7 +36,7 @@ export function generateKey(node: unknown): string {
  */
 function cellReplacer(_key: string, value: unknown): unknown {
   if (isCell(value)) {
-    // Use getAsNormalizedFullLink which returns the same format as CellHandle.toJSON()
+    // Use getAsNormalizedFullLink
     return value.getAsNormalizedFullLink();
   }
   return value;
