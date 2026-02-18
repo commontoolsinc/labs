@@ -186,7 +186,7 @@ content-level identity (see Section 6.3).
 
 | Wrapper Class | Wraps | Type Tag | Deconstructed State | Notes |
 |---------------|-------|----------|---------------------|-------|
-| `StorableError` | `Error` | `Error@1` | `{ name, message, stack?, cause?, ...custom }` | Captures `name`, `message`, `stack` (if present), `cause` (if present), and custom enumerable properties. The conversion layer (Section 8.2) recursively converts nested values (including `cause` and custom properties) before wrapping, ensuring all values are `StorableValue` when `[DECONSTRUCT]` runs. |
+| `StorableError` | `Error` | `Error@1` | `{ type, name, message, stack?, cause?, ...custom }` | `type` is the constructor name (e.g. `"TypeError"`). `name` is the `.name` property if it differs from `type`, or `null` if it matches (the common case). Includes `message`, `stack` (if present), `cause` (if present), and custom enumerable properties. The conversion layer (Section 8.2) recursively converts nested values (including `cause` and custom properties) before wrapping, ensuring all values are `StorableValue` when `[DECONSTRUCT]` runs. |
 | `StorableMap` | `Map` | `Map@1` | `[[key, value], ...]` | Entry pairs as an array of two-element arrays. Insertion order is preserved. Keys and values are recursively processed. |
 | `StorableSet` | `Set` | `Set@1` | `[value, ...]` | Elements as an array. Iteration order is preserved. Values are recursively processed. |
 | `StorableDate` | `Date` | `Date@1` | `string` (ISO 8601 UTC) | Deconstructed state is a string — the serializer recurses into it and finds a primitive. |
@@ -203,6 +203,24 @@ Each wrapper class:
 - **Carries a `typeTag` property** (e.g., `"Error@1"`) used by the
   serialization context for tag resolution, following the pattern established
   by `UnknownStorable` and `ProblematicStorable`.
+
+#### Extra Enumerable Properties
+
+**`StorableError`** MAY carry extra enumerable properties beyond the standard
+fields (`type`, `name`, `message`, `stack`, `cause`). Custom properties on `Error`
+objects are common JavaScript practice (e.g., `error.code`, `error.statusCode`),
+so `StorableError` preserves them: `[DECONSTRUCT]` includes them in its output,
+and `[RECONSTRUCT]` restores them on the reconstructed `Error`.
+
+**`StorableMap`, `StorableSet`, `StorableDate`, `StorableUint8Array`** must NOT
+carry extra enumerable properties. Their `[DECONSTRUCT]` output contains only the
+essential native data (entries, items, timestamp, bytes respectively). Any extra
+enumerable properties on the source native object are **silently dropped** during
+conversion (Section 8.2) — the conversion layer does not copy them onto the
+wrapper. This matches the treatment of arrays, where extra non-index properties
+cause rejection (Section 1.5). The rationale is that unlike `Error`, the other
+native types have no established convention for custom properties, and preserving
+them would add complexity without clear use cases.
 
 #### 1.4.2 `StorableError`
 
@@ -229,8 +247,16 @@ export class StorableError implements StorableInstance {
     // is responsible for recursively converting Error internals (cause,
     // custom properties) BEFORE wrapping into StorableError. This method
     // simply extracts the already-converted state.
+    //
+    // `type` is the constructor name (e.g. "TypeError"), while `name` is
+    // the `.name` property (which may differ if overridden). Since
+    // `type === name` is the common case, `name` is emitted as `null`
+    // when it matches `type` to avoid redundancy. `[RECONSTRUCT]`
+    // interprets `null` name as "same as type."
+    const type = this.error.constructor.name;
     const state: Record<string, StorableValue> = {
-      name:    this.error.name,
+      type,
+      name:    this.error.name === type ? null : this.error.name,
       message: this.error.message,
     };
     if (this.error.stack !== undefined) {
@@ -252,10 +278,14 @@ export class StorableError implements StorableInstance {
     _context: ReconstructionContext,
   ): StorableError {
     const s = state as Record<string, StorableValue>;
-    const name = (s.name as string) ?? 'Error';
+    // Use `type` (constructor name) for class lookup. Fall back to `name`
+    // for backward compatibility with data serialized before `type` was
+    // added. A `null` or absent `name` means "same as type."
+    const type = (s.type as string) ?? (s.name as string) ?? 'Error';
+    const name = (s.name as string | null) ?? type;
     const message = (s.message as string) ?? '';
     let error: Error;
-    switch (name) {
+    switch (type) {
       case 'TypeError':      error = new TypeError(message);      break;
       case 'RangeError':     error = new RangeError(message);     break;
       case 'SyntaxError':    error = new SyntaxError(message);    break;
@@ -268,7 +298,7 @@ export class StorableError implements StorableInstance {
     if (s.stack !== undefined) error.stack = s.stack as string;
     if (s.cause !== undefined) error.cause = s.cause;
     for (const key of Object.keys(s)) {
-      if (!['name', 'message', 'stack', 'cause', '__proto__', 'constructor'].includes(key)) {
+      if (!['type', 'name', 'message', 'stack', 'cause', '__proto__', 'constructor'].includes(key)) {
         (error as Record<string, unknown>)[key] = s[key];
       }
     }
@@ -1165,7 +1195,7 @@ round-trip correctly.
 
 // Errors
 // Tag: "Error@1"
-// { "/Error@1": { name: string, message: string, stack?: string, cause?: ..., ... } }
+// { "/Error@1": { type: string, name: string, message: string, stack?: string, cause?: ..., ... } }
 
 // Undefined (stateless -- value is null)
 // Tag: "Undefined@1"
@@ -1623,11 +1653,11 @@ export function toDeepStorableValue(
 |------------|--------|
 | `null`, `boolean`, `number`, `string`, `undefined`, `bigint` | Returned as-is (primitives are `StorableValue` directly). `-0` is normalized to `0`. Non-finite numbers (`NaN`, `Infinity`) cause rejection. |
 | `StorableInstance` (including wrapper classes) | Returned as-is (already `StorableValue`). |
-| `Error` | Wrapped into `StorableError`. Before wrapping, `cause` and custom enumerable properties are recursively converted to `StorableValue` (deep variant) or left as-is (shallow variant). This ensures that by the time `StorableError.[DECONSTRUCT]` runs, all nested values are already valid `StorableValue`. |
-| `Map` | Wrapped into `StorableMap`. Keys and values are recursively converted (deep variant only). |
-| `Set` | Wrapped into `StorableSet`. Elements are recursively converted (deep variant only). |
-| `Date` | Wrapped into `StorableDate`. |
-| `Uint8Array` | Wrapped into `StorableUint8Array`. |
+| `Error` | Wrapped into `StorableError`. Before wrapping, `cause` and custom enumerable properties are recursively converted to `StorableValue` (deep variant) or left as-is (shallow variant). Extra enumerable properties are preserved (see Section 1.4.1). This ensures that by the time `StorableError.[DECONSTRUCT]` runs, all nested values are already valid `StorableValue`. |
+| `Map` | Wrapped into `StorableMap`. Keys and values are recursively converted (deep variant only). Extra enumerable properties on the `Map` object are silently dropped (see Section 1.4.1). |
+| `Set` | Wrapped into `StorableSet`. Elements are recursively converted (deep variant only). Extra enumerable properties on the `Set` object are silently dropped (see Section 1.4.1). |
+| `Date` | Wrapped into `StorableDate`. Extra enumerable properties on the `Date` object are silently dropped (see Section 1.4.1). |
+| `Uint8Array` | Wrapped into `StorableUint8Array`. Extra enumerable properties on the `Uint8Array` object are silently dropped (see Section 1.4.1). |
 | `StorableValue[]` | Shallow: returned as-is (frozen if `freeze` is true). Deep: elements recursively converted (frozen at each level if `freeze` is true). |
 | `{ [key: string]: StorableValue }` | Shallow: returned as-is (frozen if `freeze` is true). Deep: values recursively converted (frozen at each level if `freeze` is true). |
 
