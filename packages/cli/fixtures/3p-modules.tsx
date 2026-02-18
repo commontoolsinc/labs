@@ -31,8 +31,6 @@ function assert(condition: boolean, message: string) {
   }
 }
 export default pattern(
-  Input,
-  Output,
   (_state) => {
     const html = `
     <div id="root">
@@ -61,4 +59,6 @@ export default pattern(
       ),
     };
   },
+  Input,
+  Output,
 );

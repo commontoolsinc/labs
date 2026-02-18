@@ -11,14 +11,22 @@ const model = schema({
   default: { message: "from named export" },
 });
 
-export const myNamedPattern = pattern(model, model, (cell) => {
-  return {
-    message: cell.message,
-  };
-});
+export const myNamedPattern = pattern(
+  (cell) => {
+    return {
+      message: cell.message,
+    };
+  },
+  model,
+  model,
+);
 
-export default pattern(model, model, (_cell) => {
-  return {
-    message: "from default export",
-  };
-});
+export default pattern(
+  (_cell) => {
+    return {
+      message: "from default export",
+    };
+  },
+  model,
+  model,
+);

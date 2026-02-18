@@ -97,16 +97,7 @@ const deleteItem = handler<never, { items: TodoItem[]; item: TodoItem }>(
   },
 );
 
-const Questions = pattern({
-  type: "object",
-  properties: { items: { type: "array", items: ItemSchema } },
-}, {
-  type: "object",
-  properties: {
-    questions: { type: "array", items: { type: "string" } },
-    results: { type: "array", items: { type: "string" } },
-  },
-}, ({ items }) => {
+const Questions = pattern(({ items }) => {
   const results = items.map((item) => {
     const question = llm({
       system:
@@ -129,62 +120,75 @@ const Questions = pattern({
     questions,
     results,
   };
+}, {
+  type: "object",
+  properties: { items: { type: "array", items: ItemSchema } },
+}, {
+  type: "object",
+  properties: {
+    questions: { type: "array", items: { type: "string" } },
+    results: { type: "array", items: { type: "string" } },
+  },
 });
 
-export default pattern(ListSchema, ResultSchema, ({ title, items }) => {
-  derive(items, (items) => {
-    console.log("todo list items changed", { items });
-  });
+export default pattern(
+  ({ title, items }) => {
+    derive(items, (items) => {
+      console.log("todo list items changed", { items });
+    });
 
-  // TODO(@bf): why any needed?
-  const { results, questions } = Questions({ items }) as any;
+    // TODO(@bf): why any needed?
+    const { results, questions } = Questions({ items }) as any;
 
-  return {
-    [NAME]: title,
-    [UI]: (
-      <os-container>
-        <ct-input
-          value={title}
-          placeholder="List title"
-          onct-input={updateTitle({ title })}
-          customStyle="font-size: 20px; font-family: monospace; text-decoration: underline;"
-        />
-        <ct-vstack gap="1">
-          {results.map((
-            { title, question, item }: {
-              title: string;
-              question: string;
-              item: any;
-            },
-          ) => (
-            <li>
-              <ct-vstack>
-                <blockquote>
-                  {title}
-                </blockquote>
-                <ct-alert>{question}</ct-alert>
-                <ct-button
-                  outline
-                  variant="danger"
-                  onclick={deleteItem({ item, items })}
-                >
-                  Delete
-                </ct-button>
-              </ct-vstack>
-            </li>
-          ))}
-        </ct-vstack>
-        <ct-message-input
-          name="Add"
-          placeholder="New question"
-          appearance="rounded"
-          onct-send={addTask({ items })}
-        />
-      </os-container>
-    ),
-    title,
-    items: results,
-    questions,
-    addItem: addItem({ items }),
-  };
-});
+    return {
+      [NAME]: title,
+      [UI]: (
+        <os-container>
+          <ct-input
+            value={title}
+            placeholder="List title"
+            onct-input={updateTitle({ title })}
+            customStyle="font-size: 20px; font-family: monospace; text-decoration: underline;"
+          />
+          <ct-vstack gap="1">
+            {results.map((
+              { title, question, item }: {
+                title: string;
+                question: string;
+                item: any;
+              },
+            ) => (
+              <li>
+                <ct-vstack>
+                  <blockquote>
+                    {title}
+                  </blockquote>
+                  <ct-alert>{question}</ct-alert>
+                  <ct-button
+                    outline
+                    variant="danger"
+                    onclick={deleteItem({ item, items })}
+                  >
+                    Delete
+                  </ct-button>
+                </ct-vstack>
+              </li>
+            ))}
+          </ct-vstack>
+          <ct-message-input
+            name="Add"
+            placeholder="New question"
+            appearance="rounded"
+            onct-send={addTask({ items })}
+          />
+        </os-container>
+      ),
+      title,
+      items: results,
+      questions,
+      addItem: addItem({ items }),
+    };
+  },
+  ListSchema,
+  ResultSchema,
+);
