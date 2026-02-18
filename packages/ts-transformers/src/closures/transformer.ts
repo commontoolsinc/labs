@@ -5,6 +5,7 @@ import { ActionStrategy } from "./strategies/action-strategy.ts";
 import { MapStrategy } from "./strategies/map-strategy.ts";
 import { DeriveStrategy } from "./strategies/derive-strategy.ts";
 import { HandlerStrategy } from "./strategies/handler-strategy.ts";
+import { PatternToolStrategy } from "./strategies/patternTool-strategy.ts";
 import type { ClosureTransformationStrategy } from "./strategies/strategy.ts";
 
 export class ClosureTransformer extends Transformer {
@@ -24,6 +25,7 @@ function createClosureTransformVisitor(
     new HandlerStrategy(),
     new ActionStrategy(),
     new MapStrategy(),
+    new PatternToolStrategy(),
     new DeriveStrategy(),
   ];
 

@@ -1052,3 +1052,204 @@ Deno.test("Pattern Context Validation - Map on Fallback", async (t) => {
     },
   );
 });
+
+Deno.test("Standalone Function Validation", async (t) => {
+  await t.step(
+    "errors on computed() inside standalone function",
+    async () => {
+      const source = `/// <cts-enable />
+      import { computed, Cell } from "commontools";
+
+      const count = {} as Cell<number>;
+
+      const helper = () => {
+        return computed(() => count.get() * 2);
+      };
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertEquals(errors[0]!.type, "standalone-function:reactive-operation");
+      assertEquals(
+        errors[0]!.message.includes("computed()"),
+        true,
+        "Error should mention computed()",
+      );
+    },
+  );
+
+  await t.step(
+    "errors on derive() inside standalone function",
+    async () => {
+      const source = `/// <cts-enable />
+      import { derive, Cell } from "commontools";
+
+      const value = {} as Cell<number>;
+
+      const helper = () => {
+        return derive(() => value.get() * 2);
+      };
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertEquals(errors[0]!.type, "standalone-function:reactive-operation");
+      assertEquals(
+        errors[0]!.message.includes("derive()"),
+        true,
+        "Error should mention derive()",
+      );
+    },
+  );
+
+  await t.step(
+    "errors on .map() on reactive type inside standalone function",
+    async () => {
+      const source = `/// <cts-enable />
+      import { cell } from "commontools";
+
+      const items = cell(["a", "b", "c"]);
+
+      const helper = () => {
+        return items.map((item) => item.toUpperCase());
+      };
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertEquals(errors[0]!.type, "standalone-function:reactive-operation");
+      assertEquals(
+        errors[0]!.message.includes(".map()"),
+        true,
+        "Error should mention .map()",
+      );
+    },
+  );
+
+  await t.step(
+    "allows reactive operations in functions passed to patternTool()",
+    async () => {
+      const source = `/// <cts-enable />
+      import { patternTool, derive, Cell } from "commontools";
+
+      const multiplier = {} as Cell<number>;
+
+      const tool = patternTool(({ query }: { query: string }) => {
+        return derive(() => query.length * multiplier.get());
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "Reactive operations inside patternTool() should be allowed",
+      );
+    },
+  );
+
+  await t.step(
+    "allows plain array .map() inside standalone function",
+    async () => {
+      const source = `/// <cts-enable />
+      const helper = () => {
+        const items = ["a", "b", "c"];
+        return items.map((item) => item.toUpperCase());
+      };
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "Plain array .map() should be allowed in standalone functions",
+      );
+    },
+  );
+
+  await t.step(
+    "allows standalone function without reactive operations",
+    async () => {
+      const source = `/// <cts-enable />
+      const helper = (x: number) => {
+        return x * 2 + 10;
+      };
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "Standalone functions without reactive operations should be allowed",
+      );
+    },
+  );
+
+  await t.step(
+    "allows reactive operations inside pattern body (not standalone)",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern, computed, Cell } from "commontools";
+
+      export default pattern<{ count: Cell<number> }>(({ count }) => {
+        const doubled = computed(() => count.get() * 2);
+        return { doubled };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "Reactive operations directly in pattern body should be allowed",
+      );
+    },
+  );
+
+  await t.step(
+    "errors only on inner function, not outer, when nested function has reactive ops",
+    async () => {
+      const source = `/// <cts-enable />
+      import { computed, Cell } from "commontools";
+
+      const count = {} as Cell<number>;
+
+      const outer = () => {
+        // Nested function uses computed() — error should be on inner,
+        // not on outer, because validateStandaloneFunction skips
+        // nested function bodies when walking the outer function.
+        const inner = () => {
+          return computed(() => count.get() * 2);
+        };
+        return inner;
+      };
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics).filter(
+        (e) => e.type === "standalone-function:reactive-operation",
+      );
+      // Exactly 1 error — on the inner function, not the outer
+      assertEquals(
+        errors.length,
+        1,
+        "Should flag inner standalone function but not outer",
+      );
+    },
+  );
+});

@@ -128,7 +128,7 @@ function isInlineJsxEventHandler(
  * they're called from. If they're only called from safe wrappers (like computed),
  * they're actually safe.
  */
-function isStandaloneFunctionDefinition(
+export function isStandaloneFunctionDefinition(
   func: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration,
 ): boolean {
   // Function declarations are always standalone

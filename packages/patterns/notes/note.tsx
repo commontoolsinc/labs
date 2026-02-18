@@ -103,15 +103,21 @@ const handleBacklinkClick = handler<
 
 // ===== Utility functions =====
 
-// Grep function for patternTool - filters content lines by query
-const grepFn = ({ query, content }: { query: string; content: string }) => {
-  return computed(() => content.split("\n").filter((c) => c.includes(query)));
-};
+// Grep sub-pattern for patternTool - filters content lines by query
+const grepPattern = pattern<
+  { query: string; content: string },
+  string[]
+>(({ query, content }) => {
+  return computed(() => {
+    return content.split("\n").filter((c: string) => c.includes(query));
+  });
+});
 
-// Translate function for patternTool - translates content to specified language
-const translateFn = (
-  { language, content }: { language: string; content: string },
-) => {
+// Translate sub-pattern for patternTool - translates content to specified language
+const translatePattern = pattern<
+  { language: string; content: string },
+  string | undefined
+>(({ language, content }) => {
   const genResult = generateText({
     system: computed(() => `Translate the content to ${language}.`),
     prompt: computed(() => `<to_translate>${content}</to_translate>`),
@@ -122,7 +128,7 @@ const translateFn = (
     if (genResult.result == null) return "Error occurred";
     return genResult.result;
   });
-};
+});
 
 // ===== Pattern =====
 
@@ -512,8 +518,8 @@ const Note = pattern<NoteInput, NoteOutput>(
       isHidden,
       noteId,
       parentNotebook,
-      grep: patternTool(grepFn, { content }),
-      translate: patternTool(translateFn, { content }),
+      grep: patternTool(grepPattern, { content }),
+      translate: patternTool(translatePattern, { content }),
       editContent,
       createNewNote,
       embeddedUI: editorUI,
