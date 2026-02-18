@@ -186,13 +186,14 @@ const updateItemByTitleHandler = handler<
   items.set(newItems);
 });
 
-// ===== Sub-pattern: subtask row with collapsible suggestion =====
+// ===== Sub-patterns for subtask rendering =====
 
 interface SubtaskItem {
   label: string;
   done: Default<boolean, false>;
 }
 
+/** Renders a single subtask row with collapsible AI suggestion */
 const SubtaskRow = pattern<
   { subtask: SubtaskItem; parentTitle: string },
   { [UI]: VNode; [NAME]: string }
@@ -219,6 +220,24 @@ const SubtaskRow = pattern<
           />
         </details>
       </div>
+    ),
+  };
+});
+
+/** Renders a list of subtasks — must receive subtaskItems as a direct input
+ *  so the CTS transformer can convert .map() to .mapWithPattern() */
+const SubtasksList = pattern<
+  { subtaskItems: SubtaskItem[]; parentTitle: string },
+  { [UI]: VNode; [NAME]: string }
+>(({ subtaskItems, parentTitle }) => {
+  return {
+    [NAME]: "Subtasks List",
+    [UI]: (
+      <ct-vstack gap="1">
+        {subtaskItems.map((subtask) => (
+          <SubtaskRow subtask={subtask} parentTitle={parentTitle} />
+        ))}
+      </ct-vstack>
     ),
   };
 });
@@ -269,7 +288,12 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
       model: "anthropic:claude-haiku-4-5",
     });
 
-    return { item, subtasks };
+    // Extract items array via computed (?.  not allowed in reactive JSX context)
+    const subtaskItems = computed(() => {
+      return subtasks.result?.items || [];
+    });
+
+    return { item, subtasks, subtaskItems };
   });
 
   // Compact UI - embeddable widget without ct-screen wrapper
@@ -369,16 +393,10 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
                       <div style="color: var(--ct-color-gray-400); font-size: 0.8rem; padding: 4px;">
                         Generating subtasks...
                       </div>,
-                      <div>
-                        {entry.subtasks.result?.items?.map(
-                          (subtask: SubtaskItem) => (
-                            <SubtaskRow
-                              subtask={subtask}
-                              parentTitle={entry.item.title}
-                            />
-                          ),
-                        )}
-                      </div>,
+                      <SubtasksList
+                        subtaskItems={entry.subtaskItems}
+                        parentTitle={entry.item.title}
+                      />,
                     )}
                   </ct-vstack>
                 </details>
