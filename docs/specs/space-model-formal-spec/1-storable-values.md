@@ -121,7 +121,8 @@ type StorableNativeObject =
   | Map<StorableValue | StorableNativeObject, StorableValue | StorableNativeObject>
   | Set<StorableValue | StorableNativeObject>
   | Date
-  | Uint8Array;
+  | Uint8Array
+  | Blob;
 ```
 
 The `StorableNativeObject` type exists solely at function parameter/return
@@ -1812,10 +1813,10 @@ etc.).
  * Wrapper classes are unwrapped to their native equivalents:
  *
  * - `StorableError`      -> `Error`
- * - `StorableMap`        -> `FrozenMap`
- * - `StorableSet`        -> `FrozenSet`
+ * - `StorableMap`        -> `FrozenMap` (when frozen) or `Map` (when not)
+ * - `StorableSet`        -> `FrozenSet` (when frozen) or `Set` (when not)
  * - `StorableDate`       -> `Date`
- * - `StorableUint8Array` -> `Uint8Array`
+ * - `StorableUint8Array` -> `Blob` (when frozen) or `Uint8Array` (when not)
  *
  * Non-wrapper `StorableInstance` values (`Cell`, `Stream`, `UnknownStorable`,
  * `ProblematicStorable`, etc.) pass through unchanged.
@@ -1823,41 +1824,44 @@ etc.).
  * **Shallow:** Only unwraps the top-level value. Array elements and object
  * property values are not recursively unwrapped.
  *
- * **Immutability is preserved for collections.** `StorableMap` and
- * `StorableSet` unwrap to `FrozenMap` and `FrozenSet` respectively —
- * effectively-immutable wrappers around `Map` and `Set` that expose
- * read-only interfaces and throw on mutation attempts. This preserves
- * the immutable-forward guarantee even in the "JS wild west" layer.
- * Other native types (`Error`, `Date`, `Uint8Array`) are returned as
- * their standard mutable forms.
+ * **Immutability is preserved for collections and binary data.** When
+ * `freeze` is `true` (the default), `StorableMap` and `StorableSet` unwrap
+ * to `FrozenMap` and `FrozenSet` respectively — effectively-immutable
+ * wrappers around `Map` and `Set` that expose read-only interfaces and
+ * throw on mutation attempts. `StorableUint8Array` unwraps to `Blob`,
+ * which is inherently immutable (see rationale below). This preserves the
+ * immutable-forward guarantee even in the "JS wild west" layer. When
+ * `freeze` is `false`, mutable native types are returned instead.
  */
 export function nativeValueFromStorableValue(
   value: StorableValue,
+  freeze?: boolean, // default: true
 ): StorableValue | StorableNativeObject;
 
 /**
  * Deep variant: recursively unwraps wrapper classes throughout the value tree.
- * Arrays and plain objects in the output are NOT frozen (they may contain
- * native types that the caller expects to use normally).
+ * The `freeze` parameter controls whether immutable variants are used for
+ * collections and binary data (default: `true`).
  */
 export function deepNativeValueFromStorableValue(
   value: StorableValue,
+  freeze?: boolean, // default: true
 ): StorableValue | StorableNativeObject;
 ```
 
 #### Unwrapping Rules
 
-| Input | Output |
-|-------|--------|
-| `StorableError` | `Error` (mutable) |
-| `StorableMap` | `FrozenMap` (read-only `Map` wrapper; throws on mutation) |
-| `StorableSet` | `FrozenSet` (read-only `Set` wrapper; throws on mutation) |
-| `StorableDate` | `Date` (mutable) |
-| `StorableUint8Array` | `Uint8Array` (mutable) |
-| Other `StorableInstance` | Passed through unchanged |
-| Primitives | Passed through unchanged |
-| Arrays (deep variant) | Recursively unwrapped; output array is NOT frozen |
-| Plain objects (deep variant) | Recursively unwrapped; output object is NOT frozen |
+| Input | Output (frozen) | Output (not frozen) |
+|-------|-----------------|---------------------|
+| `StorableError` | `Error` | `Error` |
+| `StorableMap` | `FrozenMap` (read-only; throws on mutation) | `Map` (mutable) |
+| `StorableSet` | `FrozenSet` (read-only; throws on mutation) | `Set` (mutable) |
+| `StorableDate` | `Date` | `Date` |
+| `StorableUint8Array` | `Blob` (inherently immutable) | `Uint8Array` (mutable) |
+| Other `StorableInstance` | Passed through unchanged | Passed through unchanged |
+| Primitives | Passed through unchanged | Passed through unchanged |
+| Arrays (deep variant) | Recursively unwrapped; output array is NOT frozen | Same |
+| Plain objects (deep variant) | Recursively unwrapped; output object is NOT frozen | Same |
 
 The output type is `StorableValue | StorableNativeObject`, reflecting that the
 result may contain native JS types at any depth.
@@ -1871,6 +1875,14 @@ result may contain native JS types at any depth.
 > storable layer remains effectively immutable even after unwrapping. The exact
 > API of `FrozenMap` and `FrozenSet` is an implementation decision.
 
+> **Why `Blob` for frozen `Uint8Array`?** `Object.freeze()` does not prevent
+> mutation of typed array contents — the indexed elements of a `Uint8Array`
+> remain writable on a frozen instance. `Blob` is the standard Web API type
+> for immutable binary data: once created, its contents cannot be modified.
+> Callers who need byte-level access can use `await blob.arrayBuffer()` or
+> `blob.stream()` to read the data. When `freeze` is `false`, a regular
+> mutable `Uint8Array` is returned instead.
+
 ### 8.6 Round-Trip Guarantees
 
 For any supported value `v`:
@@ -1881,9 +1893,10 @@ deepNativeValueFromStorableValue(toDeepStorableValue(v))
 
 produces a value that is structurally equivalent to `v` — the same data at the
 same positions. The round-tripped value is not necessarily `===` to the original
-(wrapping and unwrapping creates new objects), and the **types may change** for
-collections: a mutable `Map` becomes a `FrozenMap`, and a mutable `Set` becomes
-a `FrozenSet`. The data content is preserved; the mutability is not.
+(wrapping and unwrapping creates new objects), and the **types may change** when
+frozen: a mutable `Map` becomes a `FrozenMap`, a mutable `Set` becomes a
+`FrozenSet`, and a `Uint8Array` becomes a `Blob`. The data content is preserved;
+the mutability is not.
 
 Similarly, for any `StorableValue` `sv`:
 
