@@ -194,7 +194,8 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
   );
 
   const index = BacklinksIndex({ allPieces });
-  const doList = DoList({});
+  const doListItems = Writable.of<any[]>([]);
+  const doList = DoList({ items: doListItems });
 
   const fab = OmniboxFAB({
     mentionable: index.mentionable,
