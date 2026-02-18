@@ -100,12 +100,15 @@ export class StorableError extends StorableNativeWrapper {
    * into nested values -- the serialization system handles that.
    *
    * `type` is the constructor name (e.g. "TypeError") used for reconstruction.
-   * `name` is the potentially-overridden `.name` property on the instance.
+   * `name` is the `.name` property -- emitted as `null` when it equals `type`
+   * (the common case) to avoid redundancy.
    */
   [DECONSTRUCT](): StorableValue {
+    const type = this.error.constructor.name;
+    const name = this.error.name;
     const state: Record<string, StorableValue> = {
-      type: this.error.constructor.name,
-      name: this.error.name,
+      type,
+      name: name === type ? null : name,
       message: this.error.message,
     };
     if (this.error.stack !== undefined) {
@@ -138,7 +141,8 @@ export class StorableError extends StorableNativeWrapper {
   ): StorableError {
     const s = state as Record<string, StorableValue>;
     const type = (s.type as string) ?? (s.name as string) ?? "Error";
-    const name = (s.name as string) ?? "Error";
+    // null name means "same as type" (the common case optimization).
+    const name = (s.name as string | null) ?? type;
     const message = (s.message as string) ?? "";
 
     const ErrorClass = errorClassFromType(type);

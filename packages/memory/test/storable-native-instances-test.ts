@@ -54,16 +54,23 @@ describe("storable-native-instances", () => {
       expect(se instanceof StorableNativeWrapper).toBe(true);
     });
 
-    it("[DECONSTRUCT] returns type, name, message, stack", () => {
+    it("[DECONSTRUCT] returns type, name=null (common case), message, stack", () => {
       const se = new StorableError(new Error("hello"));
       const state = se[DECONSTRUCT]() as Record<string, StorableValue>;
       expect(state.type).toBe("Error");
-      expect(state.name).toBe("Error");
+      expect(state.name).toBe(null);
       expect(state.message).toBe("hello");
       expect(typeof state.stack).toBe("string");
     });
 
-    it("[DECONSTRUCT] type reflects constructor, name reflects .name", () => {
+    it("[DECONSTRUCT] name is null when type === name (TypeError)", () => {
+      const se = new StorableError(new TypeError("bad"));
+      const state = se[DECONSTRUCT]() as Record<string, StorableValue>;
+      expect(state.type).toBe("TypeError");
+      expect(state.name).toBe(null);
+    });
+
+    it("[DECONSTRUCT] name is non-null when type !== name", () => {
       const err = new TypeError("bad");
       err.name = "CustomName";
       const se = new StorableError(err);
@@ -123,10 +130,10 @@ describe("storable-native-instances", () => {
       expect("stack" in state).toBe(false);
     });
 
-    it("[RECONSTRUCT] creates StorableError from state", () => {
+    it("[RECONSTRUCT] creates StorableError from state (null name = same as type)", () => {
       const state = {
         type: "Error",
-        name: "Error",
+        name: null,
         message: "hello",
       } as StorableValue;
       const result = StorableError[RECONSTRUCT](state, dummyContext);
@@ -136,7 +143,7 @@ describe("storable-native-instances", () => {
       expect(result.error.message).toBe("hello");
     });
 
-    it("[RECONSTRUCT] creates correct Error subclass from type", () => {
+    it("[RECONSTRUCT] creates correct Error subclass from type (null name)", () => {
       const cases: [string, ErrorConstructor][] = [
         ["TypeError", TypeError],
         ["RangeError", RangeError],
@@ -146,7 +153,7 @@ describe("storable-native-instances", () => {
         ["EvalError", EvalError],
       ];
       for (const [type, cls] of cases) {
-        const state = { type, name: type, message: "test" } as StorableValue;
+        const state = { type, name: null, message: "test" } as StorableValue;
         const result = StorableError[RECONSTRUCT](state, dummyContext);
         expect(result.error).toBeInstanceOf(cls);
         expect(result.error.name).toBe(type);
@@ -186,7 +193,7 @@ describe("storable-native-instances", () => {
     it("[RECONSTRUCT] restores cause and custom properties", () => {
       const state = {
         type: "Error",
-        name: "Error",
+        name: null,
         message: "with extras",
         cause: "something went wrong",
         code: 404,
