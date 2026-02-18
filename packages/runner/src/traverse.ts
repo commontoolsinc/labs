@@ -534,7 +534,7 @@ export abstract class BaseObjectTraverser {
     } else if (isPrimitive(doc.value)) {
       return doc.value;
     } else if (Array.isArray(doc.value)) {
-      const newValue: StorableDatum[] = [];
+      const newValue: Immutable<StorableValue>[] = [];
       using t = this.tracker.include(doc.value, true, newValue, doc);
       if (t === null) {
         return this.tracker.getExisting(doc.value, true);
@@ -646,7 +646,7 @@ export abstract class BaseObjectTraverser {
         const [valueDoc, _] = this.getDocAtPath(redirDoc, [], DefaultSelector);
         return this.traverseDAG(valueDoc, defaultValue, itemLink);
       } else {
-        const newValue: Record<string, any> = {};
+        const newValue: Record<string, Immutable<StorableValue>> = {};
         using t = this.tracker.include(doc.value, true, newValue, doc);
         if (t === null) {
           return this.tracker.getExisting(doc.value, true);
@@ -1503,6 +1503,10 @@ export function isPrimitive(val: unknown): val is Primitive {
   return val === null || (type !== "object" && type !== "function");
 }
 
+type TraverseResult<T> = { ok: T; error?: never } | {
+  ok?: never;
+  error: Error;
+};
 export class SchemaObjectTraverser<V extends StorableDatum>
   extends BaseObjectTraverser {
   constructor(
@@ -1536,17 +1540,21 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     link?: NormalizedFullLink,
   ): Immutable<StorableValue> {
     this.schemaTracker.add(getTrackerKey(doc.address), this.selector);
-    const rv = this.traverseWithSelector(doc, this.selector, link);
-    if (rv === undefined) {
-      // This helps track down mismatched schemas
+    const { ok: val, error } = this.traverseWithSelector(
+      doc,
+      this.selector,
+      link,
+    );
+    if (error !== undefined) {
+      // This helps track down mismatched schemas, but may be fine
       logger.debug("traverse", () => [
-        "Call to traverse returned undefined",
+        "Call to traverse failed validation",
         doc,
         JSON.stringify(this.selector?.schema, undefined, 2),
         this.getDebugValue(doc),
       ]);
     }
-    return rv;
+    return val;
   }
 
   // Traverse the specified doc with the selector.
@@ -1559,7 +1567,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     doc: IMemorySpaceAttestation,
     selector: SchemaPathSelector,
     link?: NormalizedFullLink,
-  ): Immutable<StorableValue> {
+  ): TraverseResult<Immutable<StorableValue>> {
     const docPath = doc.address.path;
     if (deepEqual(docPath, selector.path)) {
       return this.traverseWithSchema(doc, selector.schema!, link);
@@ -1570,7 +1578,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     ) {
       // There's a mismatch in the initial part, so this will not match
       logger.debug("traverse", () => ["path mismatch", docPath, selector.path]);
-      return undefined;
+      return { error: new Error("Path mismatch") };
     } else { // valuePath length < selector.path.length
       const [nextDoc, nextSelector] = this.getDocAtPath(
         doc,
@@ -1579,12 +1587,28 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         "writeRedirect",
       );
       if (nextDoc.value === undefined) {
+        // While this is technically acceptable, log it
         logger.debug("traverse", () => [
           "value is undefined",
           docPath,
           selector.path,
         ]);
-        return undefined;
+        if (
+          nextSelector?.schema === undefined ||
+          SchemaObjectTraverser.asCellOrStream(nextSelector.schema)
+        ) {
+          // If we don't have a schema, we don't allow undefined
+          // If we have a schema with asCell, we can't create a cell for this,
+          // since we can't follow all the write-redirect links.
+          // In the future, getAtPath could be altered to convey whether we
+          // found a valid undefined node, and we can handle this better, but
+          // right now there's no way for that to happen.
+          return { error: new Error("Encountered link to undefined value") };
+        } else {
+          return this.isValidType(nextSelector.schema, "undefined")
+            ? { ok: this.traversePrimitive(nextDoc, nextSelector.schema) }
+            : { error: new Error("Encountered link to undefined value") };
+        }
       }
       if (!deepEqual(nextDoc.address.path, nextSelector!.path)) {
         throw new Error("New doc path doesn't match selector path");
@@ -1607,15 +1631,15 @@ export class SchemaObjectTraverser<V extends StorableDatum>
    * @param doc
    * @param schema
    * @param link optional top level link information that we may need to
-   *  pass to the object creator later
-   * @returns the traversed value, or undefined if the doc does not match
-   *  the schema
+   *   pass to the object creator later
+   * @returns the traversed value, wrapped in a Result object, or an error if
+   *   the doc does not match the schema
    */
   traverseWithSchema(
     doc: IMemorySpaceAttestation,
     schema: JSONSchema,
     link?: NormalizedFullLink,
-  ): Immutable<StorableValue> {
+  ): TraverseResult<Immutable<StorableValue>> {
     // Track both the unresolved version of our schema (possibly with top
     // level $ref) and the resolved version.
     let resolved: JSONSchema | undefined = schema;
@@ -1627,7 +1651,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
           "traverse",
           () => ["Failed to resolve schema ref", schema],
         );
-        return undefined;
+        return { error: new Error("Failed to resolve schema ref") };
       }
     }
     if (isObject(resolved)) {
@@ -1650,8 +1674,12 @@ export class SchemaObjectTraverser<V extends StorableDatum>
           }
           const mergedSchema = mergeSchemaOption(restSchema, optionSchema);
           // TODO(@ubik2): do i need to merge the link schema?
-          const val = this.traverseWithSchema(doc, mergedSchema, link);
-          if (val !== undefined) {
+          const { ok: val, error } = this.traverseWithSchema(
+            doc,
+            mergedSchema,
+            link,
+          );
+          if (error === undefined) {
             // We may just have a cell match, so the first match is what we
             // will return, but in this case, we still want to evaluate with
             // all the schema options, so we know to include all the potential
@@ -1663,8 +1691,8 @@ export class SchemaObjectTraverser<V extends StorableDatum>
           matches as StorableDatum[],
           resolved,
         );
-        if (merged !== undefined) {
-          return merged;
+        if (matches.length > 0) {
+          return { ok: merged };
         }
         // None of the anyOf patterns matched
         logger.info(
@@ -1676,7 +1704,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
             this.getDebugValue(doc),
           ],
         );
-        return undefined;
+        return { error: new Error("No matching anyOf") };
       } else if (resolved.allOf) {
         let lastVal;
         const { allOf, ...restSchema } = resolved;
@@ -1686,31 +1714,35 @@ export class SchemaObjectTraverser<V extends StorableDatum>
               "traverse",
               () => ["Encountered false in allOf", resolved],
             );
-            return undefined;
+            return { error: new Error("Encountered false in allOf") };
           }
           const mergedSchema = mergeSchemaOption(restSchema, optionSchema);
           // TODO(@ubik2): do i need to merge the link schema?
-          const val = this.traverseWithSchema(doc, mergedSchema, link);
-          if (val !== undefined) {
-            // FIXME(@ubik2): these value objects should be merged. While this
-            // isn't JSONSchema spec, when we have an allOf with branches where
-            // name is set in one schema, but the address is ignored, and a
-            // second option where address is set, and name is ignored, we want
-            // to include both.
-            lastVal = val;
-          } else {
+          const { ok: val, error } = this.traverseWithSchema(
+            doc,
+            mergedSchema,
+            link,
+          );
+          if (error !== undefined) {
             // One of the allOf patterns failed to match
             logger.debug(
               "traverse",
               () => ["Failed entry in allOf", doc, optionSchema, resolved],
             );
-            return undefined;
+            return { error };
           }
+          // FIXME(@ubik2): these value objects should be merged. While this
+          // isn't JSONSchema spec, when we have an allOf with branches where
+          // name is set in one schema, but the address is ignored, and a
+          // second option where address is set, and name is ignored, we want
+          // to include both.
+          lastVal = val;
         }
         if (allOf.length > 0) {
-          return lastVal;
+          return { ok: lastVal };
         }
         // If we have allOf: [], just ignore it and continue
+        // TODO(@ubik2) -- maybe swap the schema to true
       }
     }
     if (
@@ -1720,44 +1752,49 @@ export class SchemaObjectTraverser<V extends StorableDatum>
       const defaultValue = isObject(resolved) ? resolved["default"] : undefined;
       // A value of true or {} means we match anything
       // Resolve the rest of the doc, and return
-      return this.traverseDAG(doc, defaultValue, link);
+      return { ok: this.traverseDAG(doc, defaultValue, link) };
     } else if (
       ContextualFlowControl.isFalseSchema(resolved) &&
       !SchemaObjectTraverser.asCellOrStream(resolved)
     ) {
       // This value rejects all objects - just return
-      return undefined;
+      return { error: new Error("Schema is false") };
     } else if (!isObject(resolved)) {
       logger.warn(
         "traverse",
         () => ["Invalid schema is not an object", resolved],
       );
-      return undefined;
+      throw new Error("Schema is neither boolean nor an object");
     }
     const schemaObj = resolved;
     if (doc.value === undefined) {
       // If we have a default, annotate it and return it
       // Otherwise, return undefined
-      return this.applyDefault(doc, schema);
+      const defaultValue = this.applyDefault(doc, schema);
+      return (defaultValue !== undefined)
+        ? { ok: defaultValue }
+        : this.isValidType(schemaObj, "undefined")
+        ? { ok: this.traversePrimitive(doc, schemaObj) }
+        : { error: new Error("Invalid type") };
     } else if (doc.value === null) {
       return this.isValidType(schemaObj, "null")
-        ? this.traversePrimitive(doc, schemaObj)
-        : undefined;
+        ? { ok: this.traversePrimitive(doc, schemaObj) }
+        : { error: new Error("Invalid type") };
     } else if (isString(doc.value)) {
       return this.isValidType(schemaObj, "string")
-        ? this.traversePrimitive(doc, schemaObj)
-        : undefined;
+        ? { ok: this.traversePrimitive(doc, schemaObj) }
+        : { error: new Error("Invalid type") };
     } else if (isNumber(doc.value)) {
       return this.isValidType(schemaObj, "number")
-        ? this.traversePrimitive(doc, schemaObj)
-        : undefined;
+        ? { ok: this.traversePrimitive(doc, schemaObj) }
+        : { error: new Error("Invalid type") };
     } else if (isBoolean(doc.value)) {
       return this.isValidType(schemaObj, "boolean")
-        ? this.traversePrimitive(doc, schemaObj)
-        : undefined;
+        ? { ok: this.traversePrimitive(doc, schemaObj) }
+        : { error: new Error("Invalid type") };
     } else if (Array.isArray(doc.value)) {
       if (this.isValidType(schemaObj, "array")) {
-        const newValue: any = [];
+        const newValue: Immutable<StorableValue>[] = [];
         // Our link is based on the last link in the chain and not the first.
         const newLink = link ?? getNormalizedLink(
           doc.address,
@@ -1767,18 +1804,18 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         if (t === null) {
           // newValue will be converted to a createObject result by the
           // function that added it to the tracker, so don't do that here
-          return this.tracker.getExisting(doc.value, schema);
+          return { ok: this.tracker.getExisting(doc.value, schema) };
         }
         const entries = this.traverseArrayWithSchema(doc, schemaObj, newLink);
         if (!Array.isArray(entries)) {
-          return undefined;
+          return { error: new Error("Invalid array") };
         }
         for (const item of entries) {
           newValue.push(item);
         }
-        return this.objectCreator.createObject(newLink, newValue);
+        return { ok: this.objectCreator.createObject(newLink, newValue) };
       }
-      return undefined;
+      return { error: new Error("Invalid type") };
     } else if (isObject(doc.value)) {
       if (isPrimitiveCellLink(doc.value)) {
         // When traversing a pointer, use the unresolved schema, so we have
@@ -1792,23 +1829,26 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         if (t === null) {
           // newValue will be converted to a createObject result by the
           // function that added it to the tracker, so don't do that here
-          return this.tracker.getExisting(doc.value, schemaObj);
+          return { ok: this.tracker.getExisting(doc.value, schemaObj) };
         }
         const entries = this.traverseObjectWithSchema(doc, schemaObj, newLink);
         if (entries === undefined || entries === null) {
-          return undefined;
+          return { error: new Error("Invalid object") };
         }
         for (const [k, v] of Object.entries(entries)) {
           newValue[k] = v;
         }
         // TODO(@ubik2): We should be able to remove this cast when we make
         // our return types more correct (we can hold cells/functions).
-        return this.objectCreator.createObject(
-          newLink,
-          newValue as StorableDatum,
-        );
+        return {
+          ok: this.objectCreator.createObject(
+            newLink,
+            newValue as StorableDatum,
+          ),
+        };
       }
     }
+    return { error: new Error("Unexpected type for doc value") };
   }
 
   private isValidType(
@@ -1887,8 +1927,8 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     doc: IMemorySpaceAttestation,
     schema: JSONSchemaObj,
     _link?: NormalizedFullLink,
-  ): Immutable<StorableValue> {
-    const arrayObj: Immutable<StorableDatum>[] = [];
+  ): Immutable<StorableValue>[] | undefined {
+    const arrayObj: Immutable<StorableValue>[] = [];
     for (
       const [index, item] of (doc.value as Immutable<StorableDatum>[]).entries()
     ) {
@@ -2008,10 +2048,11 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         // We want those links to point directly at the linked cells, instead
         // of using our path (e.g. ["items", "0"]), so don't pass in a
         // modified link.
-        const val = this.traverseWithSelector(curDoc, curSelector);
-        if (val !== undefined) {
-          arrayObj.push(val);
-        } else {
+        const { ok: val, error } = this.traverseWithSelector(
+          curDoc,
+          curSelector,
+        );
+        if (error !== undefined) {
           // If our item doesn't match our schema, we may be able to use null
           if (this.isValidType(curSelector.schema!, "null")) {
             arrayObj.push(null);
@@ -2023,6 +2064,8 @@ export class SchemaObjectTraverser<V extends StorableDatum>
             );
             return undefined;
           }
+        } else {
+          arrayObj.push(val);
         }
       }
     }
@@ -2051,8 +2094,8 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     doc: IMemorySpaceAttestation,
     schema: JSONSchemaObj,
     _link?: NormalizedFullLink,
-  ): Immutable<StorableValue> {
-    const filteredObj: Record<string, Immutable<StorableDatum>> = {};
+  ): Record<string, Immutable<StorableValue>> | undefined {
+    const filteredObj: Record<string, Immutable<StorableValue>> = {};
     for (const [propKey, propValue] of Object.entries(doc.value!)) {
       // We'll use marker schemas to detect some places where we want special
       // schema behavior
@@ -2098,8 +2141,8 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         filteredObj[propKey] = val;
       } else {
         const propDoc = { address: propAddress, value: propValue };
-        const val = this.traverseWithSchema(propDoc, propSchema);
-        if (val !== undefined) {
+        const { ok: val, error } = this.traverseWithSchema(propDoc, propSchema);
+        if (error === undefined) {
           filteredObj[propKey] = val;
         }
       }
@@ -2124,11 +2167,11 @@ export class SchemaObjectTraverser<V extends StorableDatum>
           path: [...doc.address.path, propKey],
         };
         if (SchemaObjectTraverser.asCellOrStream(propSchema)) {
-          const val = this.traverseWithSchema({
+          const { ok: val, error } = this.traverseWithSchema({
             address: propAddress,
             value: undefined,
           }, propSchema);
-          if (val !== undefined) {
+          if (error === undefined) {
             logger.debug(
               "traverse",
               () => ["merging asCell/asStream default", propKey, val],
@@ -2182,7 +2225,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     doc: IMemorySpaceAttestation,
     schema: JSONSchema,
     link?: NormalizedFullLink,
-  ): Immutable<StorableValue> {
+  ): TraverseResult<Immutable<StorableValue>> {
     const selector = { path: doc.address.path, schema };
     const [redirDoc, redirSelector] = this.getDocAtPath(
       doc,
@@ -2191,6 +2234,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
       "writeRedirect",
     );
     if (redirDoc.value === undefined) {
+      // This may be ok, but log it anyhow
       logger.info(
         "traversePointerWithSchema",
         () => [
@@ -2199,7 +2243,19 @@ export class SchemaObjectTraverser<V extends StorableDatum>
           redirDoc,
         ],
       );
-      return undefined;
+      if (
+        redirSelector?.schema === undefined ||
+        SchemaObjectTraverser.asCellOrStream(redirSelector.schema)
+      ) {
+        // If we don't have a schema, we don't allow undefined
+        // If we have a schema with asCell, we can't create a cell for this,
+        // since we can't follow all the write-redirect links.
+        return { error: new Error("Encountered link to undefined value") };
+      } else {
+        return this.isValidType(redirSelector.schema, "undefined")
+          ? { ok: this.traversePrimitive(redirDoc, redirSelector.schema) }
+          : { error: new Error("Encountered link to undefined value") };
+      }
     }
     // For the runtime, where we don't traverse cells, we just want
     // to create a cell object and don't walk into the object beyond
@@ -2227,7 +2283,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
           combinedSchema,
         }],
       );
-      return this.objectCreator.createObject(cellLink, undefined);
+      return { ok: this.objectCreator.createObject(cellLink, undefined) };
     }
 
     // our link should point to the target of the last redirect
@@ -2242,11 +2298,11 @@ export class SchemaObjectTraverser<V extends StorableDatum>
 
   private traversePrimitive(
     doc: IMemorySpaceAttestation,
-    schemaObj: JSONSchemaObj,
+    schema: JSONSchema,
   ): Immutable<StorableValue> {
-    if (SchemaObjectTraverser.asCellOrStream(schemaObj)) {
+    if (SchemaObjectTraverser.asCellOrStream(schema)) {
       return this.objectCreator.createObject(
-        getNormalizedLink(doc.address, schemaObj),
+        getNormalizedLink(doc.address, schema),
         doc.value,
       );
     } else {
