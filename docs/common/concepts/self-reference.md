@@ -1,48 +1,39 @@
 # Self-Referential Types with SELF
 
-Use `SELF` to get a reference to the pattern's own output, useful for:
-- Creating children with a parent reference back to self
-- Adding self to a collection (e.g., registering in a list)
+Use `SELF` to get a reference to the pattern's own output. This enables recursive structures like trees, parent-child relationships, and self-registration.
 
-## Example
+## Quick Start
 
 ```typescript
-import { Default, pattern, SELF, UI, Writable } from "commontools";
+import { pattern, SELF, Writable, UI } from "commontools";
 
-interface Input {
-  label: Default<string, "Untitled">;
-  parent: Default<Output | null, null>;
-  registry: Writable<Default<Output[], []>>;
-}
-interface Output {
-  label: string;
-  parent: Output | null;
-  children: Output[];
+interface TreeNodeInput {
+  name: string;
+  parent: TreeNodeOutput | null;
 }
 
-const Node = pattern<Input, Output>(
-  ({ label, parent, registry, [SELF]: self }) => {
-    const children = Writable.of<Output[]>([]);
+interface TreeNodeOutput {
+  name: string;
+  parent: TreeNodeOutput | null;
+  children: TreeNodeOutput[];
+}
+
+const TreeNode = pattern<TreeNodeInput, TreeNodeOutput>(
+  ({ name, parent, [SELF]: self }) => {
+    const children = Writable.of<TreeNodeOutput[]>([]);
 
     return {
-      label,
+      name,
       parent,
       children,
       [UI]: (
-        <div>
-          <button onClick={() => children.push(Node({ label: "Child", parent: self, registry }))}>
-            Add Child
-          </button>
-          <button onClick={() => registry.push(self)}>
-            Add to Registry
-          </button>
-        </div>
+        <button onClick={() => children.push(TreeNode({ name: "Child", parent: self }))}>
+          Add Child
+        </button>
       ),
     };
-  },
+  }
 );
-
-export default Node;
 ```
 
 ## SELF in Actions
@@ -73,4 +64,6 @@ interface Input { title: Default<string, "Untitled">; }
 
 ## See Also
 
-- `packages/patterns/self-reference-test.tsx` - Working example
+- `packages/patterns/self-reference-test.tsx` - Canonical example
+- `packages/patterns/notes/notebook.tsx` - Real-world parent-child usage
+- `packages/patterns/notes/note.tsx` - Reading parent from self

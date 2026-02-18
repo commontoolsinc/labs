@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { equals, lift, NAME, pattern, UI, Writable } from "commontools";
+import { equals, lift, NAME, pattern, UI, wish, Writable } from "commontools";
 
 /**
  * Type for pieces used in the mentionable/backlinks system.
@@ -23,9 +23,7 @@ export type WritableBacklinks = {
   backlinks?: Writable<WritableBacklinks[]>;
 };
 
-type Input = {
-  allPieces: MentionablePiece[];
-};
+type Input = Record<string, never>;
 
 type Output = {
   mentionable: MentionablePiece[];
@@ -115,7 +113,10 @@ const computeMentionable = lift<
   return out;
 });
 
-const BacklinksIndex = pattern<Input, Output>(({ allPieces }) => {
+const BacklinksIndex = pattern<Input, Output>(() => {
+  const { allPieces } =
+    wish<{ allPieces: MentionablePiece[] }>({ query: "#default" }).result;
+
   computeIndex({ allPieces } as { allPieces: WritableBacklinks[] });
 
   // Compute mentionable list from allPieces reactively

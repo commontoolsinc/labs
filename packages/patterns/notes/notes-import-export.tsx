@@ -7,6 +7,7 @@ import {
   NAME,
   navigateTo,
   pattern,
+  type Stream,
   UI,
   type VNode,
   Writable,
@@ -48,9 +49,10 @@ interface Input {
   title?: Default<string, "All Notes">;
   importMarkdown?: Default<string, "">;
   /** Pass allPieces directly from default-app for proper cell sharing */
-  allPieces?: NotePiece[];
+  allPieces?: Writable<NotePiece[]>;
 }
 
+/** Manages all notes and notebooks in the space. #allNotes */
 interface Output {
   [NAME]?: string;
   [UI]?: VNode;
@@ -59,6 +61,32 @@ interface Output {
   noteCount: number;
   notebookCount: number;
   mentionable: NotePiece[];
+
+  // Observable state for testing
+  notes: readonly NotePiece[];
+  notebooks: readonly NotebookPiece[];
+  detectedDuplicates: readonly DetectedDuplicate[];
+  showDuplicateModal: boolean;
+  showImportModal: boolean;
+  showImportProgressModal: boolean;
+  importComplete: boolean;
+  selectedNoteIndices: readonly number[];
+  selectedNotebookIndices: readonly number[];
+
+  // Actions as Stream<T> for testing
+  analyzeImport: Stream<void>;
+  openImportModal: Stream<void>;
+  closeImportModal: Stream<void>;
+  importSkipDuplicates: Stream<void>;
+  importAllAsCopies: Stream<void>;
+  cancelImport: Stream<void>;
+  createNote: Stream<void>;
+  selectAllNotes: Stream<void>;
+  deselectAllNotes: Stream<void>;
+  selectAllNotebooks: Stream<void>;
+  deselectAllNotebooks: Stream<void>;
+  openExportAllModal: Stream<void>;
+  closeExportAllModal: Stream<void>;
 }
 
 // Helper to resolve proxy value to primitive string
@@ -357,21 +385,24 @@ function topologicalSortNotebooks(notebooks: ParsedNotebook[]): number[] {
 // Import Execution
 // ============================================================================
 
-type DetectedDuplicate = {
+// Exported for tests
+export type DetectedDuplicate = {
   title: string;
   noteId?: string;
   existingNotebook: string;
+  isNotebook?: boolean;
 };
 
 function performImport(
   parsedNotes: ParsedNote[],
   allPieces: Writable<NotePiece[]>,
-  notebooks: Writable<NotebookPiece[]>,
+  notebooks: NotebookPiece[],
   skipTitles: Set<string>,
+  skipNotebookTitles: Set<string>,
   rawMarkdown?: string,
   onComplete?: () => void,
 ) {
-  const notebooksList = notebooks.get();
+  const notebooksList = notebooks;
 
   // Build set of existing notebook names
   const existingNames = new Set<string>();
@@ -408,7 +439,9 @@ function performImport(
     }
   }
   for (const nb of parsedNotebooks) {
-    notebooksNeeded.add(nb.title);
+    if (!skipNotebookTitles.has(nb.title)) {
+      notebooksNeeded.add(nb.title);
+    }
   }
 
   // Phase 1: Create all notes
@@ -517,6 +550,7 @@ function performImport(
     for (const idx of sortedIndices) {
       const nbData = parsedNotebooks[idx];
       if (!nbData) continue;
+      if (skipNotebookTitles.has(nbData.title)) continue;
 
       const actualName = getUniqueTitle(nbData.title);
       const notesForNotebook = notesByNotebook.get(nbData.title) ?? [];
@@ -550,6 +584,7 @@ function performImport(
     }
   } else {
     for (const nbName of notebooksNeeded) {
+      if (skipNotebookTitles.has(nbName)) continue;
       const actualName = getUniqueTitle(nbName);
       const notesForNotebook = notesByNotebook.get(nbName) ?? [];
       const newNb = Notebook({
@@ -609,6 +644,227 @@ function performImport(
   }
 
   onComplete?.();
+}
+
+// ============================================================================
+// Centralized Import Processing Types & Functions
+// ============================================================================
+
+/**
+ * Result from analyzing markdown content for import.
+ */
+type ImportAnalysisResult = {
+  parsedNotes: ParsedNote[];
+  parsedNotebooks: ParsedNotebook[];
+  duplicates: DetectedDuplicate[];
+  importSummary: string;
+};
+
+/**
+ * Context needed for processing import results.
+ * Passed from pattern body to allow module-scope function to update state.
+ */
+type ImportProcessingContext = {
+  allPieces: Writable<NotePiece[]>;
+  notebooks: NotebookPiece[];
+  pendingImportData: Writable<string>;
+  detectedDuplicates: Writable<DetectedDuplicate[]>;
+  showDuplicateModal: Writable<boolean>;
+  showImportModal: Writable<boolean>;
+  showPasteSection: Writable<boolean>;
+  showImportProgressModal: Writable<boolean>;
+  importProgressMessage: Writable<string>;
+  importComplete: Writable<boolean>;
+};
+
+/**
+ * Analyzes markdown content for import, detecting duplicates against existing notes/notebooks.
+ * Shared by both paste and file upload import paths.
+ */
+function analyzeImportContent(
+  markdown: string,
+  existingNotes: NotePiece[],
+  existingNotebooks: NotebookPiece[],
+): ImportAnalysisResult | null {
+  const parsedNotes = parseNotesFromMarkdown(markdown);
+  const parsedNotebooks = parseNotebooksFromMarkdown(markdown);
+
+  if (parsedNotes.length === 0 && parsedNotebooks.length === 0) {
+    return null;
+  }
+
+  // Check for duplicate notes
+  const existingNotesByTitle = new Map<string, NotePiece>();
+  existingNotes.forEach((note: NotePiece) => {
+    const title = note?.title;
+    if (title) existingNotesByTitle.set(title, note);
+  });
+
+  const duplicates: DetectedDuplicate[] = [];
+
+  // Detect duplicate notes
+  for (const noteData of parsedNotes) {
+    if (existingNotesByTitle.has(noteData.title)) {
+      duplicates.push({
+        title: noteData.title,
+        noteId: noteData.noteId,
+        existingNotebook: "this space",
+        isNotebook: false,
+      });
+    }
+  }
+
+  // Detect duplicate notebooks
+  const existingNotebookTitles = new Set<string>();
+  existingNotebooks.forEach((nb: NotebookPiece) => {
+    const cleanTitle = getCleanNotebookTitle(nb);
+    if (cleanTitle) existingNotebookTitles.add(cleanTitle);
+  });
+
+  for (const nbData of parsedNotebooks) {
+    if (existingNotebookTitles.has(nbData.title)) {
+      duplicates.push({
+        title: `📓 ${nbData.title}`,
+        existingNotebook: "this space",
+        isNotebook: true,
+      });
+    }
+  }
+
+  // Build import summary
+  const itemCounts: string[] = [];
+  if (parsedNotes.length > 0) {
+    itemCounts.push(
+      `${parsedNotes.length} note${parsedNotes.length !== 1 ? "s" : ""}`,
+    );
+  }
+  if (parsedNotebooks.length > 0) {
+    itemCounts.push(
+      `${parsedNotebooks.length} notebook${
+        parsedNotebooks.length !== 1 ? "s" : ""
+      }`,
+    );
+  }
+  const importSummary = itemCounts.join(" and ");
+
+  return { parsedNotes, parsedNotebooks, duplicates, importSummary };
+}
+
+/**
+ * Process import analysis result - handles both duplicate detection flow
+ * and direct import flow. Called by both paste and file upload paths.
+ */
+function processImportResult(
+  markdown: string,
+  result: ImportAnalysisResult,
+  ctx: ImportProcessingContext,
+): void {
+  const { parsedNotes, duplicates, importSummary } = result;
+
+  // Close import modal and reset paste section visibility
+  ctx.showImportModal.set(false);
+  ctx.showPasteSection.set(true);
+
+  if (duplicates.length > 0) {
+    // Duplicates detected - show duplicate modal for user decision
+    ctx.pendingImportData.set(markdown);
+    ctx.detectedDuplicates.set(duplicates);
+    ctx.showDuplicateModal.set(true);
+  } else {
+    // No duplicates - proceed with import directly
+    ctx.importComplete.set(false);
+    ctx.importProgressMessage.set(`Importing ${importSummary}...`);
+    ctx.showImportProgressModal.set(true);
+
+    performImport(
+      parsedNotes,
+      ctx.allPieces,
+      ctx.notebooks,
+      new Set(),
+      new Set(),
+      markdown,
+    );
+
+    ctx.importProgressMessage.set(`Imported ${importSummary}!`);
+    ctx.importComplete.set(true);
+  }
+}
+
+/**
+ * Execute a pending import after user has made a decision about duplicates.
+ * Used by both "Skip Duplicates" and "Import as Copies" flows.
+ *
+ * @param skipDuplicates - If true, skip items that were detected as duplicates.
+ *                         If false, import everything (duplicates become copies).
+ * @param ctx - The import context with state and dependencies
+ */
+function executePendingImport(
+  skipDuplicates: boolean,
+  ctx: ImportProcessingContext,
+): void {
+  const markdown = ctx.pendingImportData.get();
+  if (!markdown) {
+    return;
+  }
+
+  const parsedNotes = parseNotesFromMarkdown(markdown);
+  const parsedNotebooks = parseNotebooksFromMarkdown(markdown);
+  const duplicates = ctx.detectedDuplicates.get();
+
+  // Build skip sets if skipping duplicates
+  const skipNoteTitles = new Set<string>();
+  const skipNotebookTitles = new Set<string>();
+
+  if (skipDuplicates) {
+    for (const d of duplicates) {
+      if (d.isNotebook) {
+        // Remove the 📓 prefix that was added for display
+        skipNotebookTitles.add(d.title.replace(/^📓\s*/, ""));
+      } else {
+        skipNoteTitles.add(d.title);
+      }
+    }
+  }
+
+  // Calculate import counts for summary
+  const noteImportCount = parsedNotes.length -
+    (skipDuplicates ? skipNoteTitles.size : 0);
+  const notebookImportCount = parsedNotebooks.length -
+    (skipDuplicates ? skipNotebookTitles.size : 0);
+
+  const itemCounts: string[] = [];
+  if (noteImportCount > 0) {
+    itemCounts.push(
+      `${noteImportCount} note${noteImportCount !== 1 ? "s" : ""}`,
+    );
+  }
+  if (notebookImportCount > 0) {
+    itemCounts.push(
+      `${notebookImportCount} notebook${notebookImportCount !== 1 ? "s" : ""}`,
+    );
+  }
+  const importSummary = itemCounts.join(" and ") || "items";
+
+  // Clear duplicate state and show progress
+  ctx.pendingImportData.set("");
+  ctx.detectedDuplicates.set([]);
+  ctx.showDuplicateModal.set(false);
+  ctx.importComplete.set(false);
+  ctx.importProgressMessage.set(`Importing ${importSummary}...`);
+  ctx.showImportProgressModal.set(true);
+
+  // Execute the import
+  performImport(
+    parsedNotes,
+    ctx.allPieces,
+    ctx.notebooks,
+    skipNoteTitles,
+    skipNotebookTitles,
+    markdown,
+  );
+
+  ctx.importProgressMessage.set(`Imported ${importSummary}!`);
+  ctx.importComplete.set(true);
 }
 
 // ============================================================================
@@ -677,38 +933,6 @@ const toggleNotebookCheckbox = handler<
   lastSelectedNotebookIndex.set(index);
 });
 
-// Select all/deselect all handlers
-const selectAllNotes = handler<
-  Record<string, never>,
-  { notes: Writable<NotePiece[]>; selectedNoteIndices: Writable<number[]> }
->((_, { notes, selectedNoteIndices }) => {
-  selectedNoteIndices.set(notes.get().map((_, i) => i));
-});
-
-const deselectAllNotes = handler<
-  Record<string, never>,
-  { selectedNoteIndices: Writable<number[]> }
->((_, { selectedNoteIndices }) => {
-  selectedNoteIndices.set([]);
-});
-
-const selectAllNotebooks = handler<
-  Record<string, never>,
-  {
-    notebooks: Writable<NotebookPiece[]>;
-    selectedNotebookIndices: Writable<number[]>;
-  }
->((_, { notebooks, selectedNotebookIndices }) => {
-  selectedNotebookIndices.set(notebooks.get().map((_, i) => i));
-});
-
-const deselectAllNotebooks = handler<
-  Record<string, never>,
-  { selectedNotebookIndices: Writable<number[]> }
->((_, { selectedNotebookIndices }) => {
-  selectedNotebookIndices.set([]);
-});
-
 // Navigate to note
 const goToNote = handler<void, { note: Writable<NotePiece> }>(
   (_, { note }) => navigateTo(note),
@@ -725,7 +949,7 @@ const goToNotebook = handler<void, { notebook: Writable<NotebookPiece> }>(
 
 // Toggle individual note visibility
 const toggleNoteVisibility = handler<
-  Record<string, never>,
+  void,
   { note: Writable<NotePiece> }
 >((_, { note }) => {
   const isHiddenCell = note.key("isHidden");
@@ -735,993 +959,12 @@ const toggleNoteVisibility = handler<
 
 // Toggle individual notebook visibility
 const toggleNotebookVisibility = handler<
-  Record<string, never>,
+  void,
   { notebook: Writable<NotebookPiece> }
 >((_, { notebook }) => {
   const isHiddenCell = notebook.key("isHidden");
   const current = isHiddenCell.get() ?? false;
   isHiddenCell.set(!current);
-});
-
-// Toggle all notes visibility (bulk)
-const toggleAllNotesVisibility = handler<
-  Record<string, never>,
-  { notes: Writable<NotePiece[]> }
->((_, { notes }) => {
-  const notesList = notes.get();
-  if (notesList.length === 0) return;
-
-  const anyVisible = notesList.some((n: any) => !n?.isHidden);
-  const newHiddenState = anyVisible;
-
-  notesList.forEach((_n: any, idx: number) => {
-    const noteCell = notes.key(idx);
-    noteCell.key("isHidden").set(newHiddenState);
-  });
-});
-
-// Toggle all notebooks visibility (bulk)
-const toggleAllNotebooksVisibility = handler<
-  Record<string, never>,
-  { notebooks: Writable<NotebookPiece[]> }
->((_, { notebooks }) => {
-  const notebooksList = notebooks.get();
-  if (notebooksList.length === 0) return;
-
-  const anyVisible = notebooksList.some((nb: any) => !nb?.isHidden);
-  const newHiddenState = anyVisible;
-
-  notebooksList.forEach((_nb: any, idx: number) => {
-    const notebookCell = notebooks.key(idx);
-    notebookCell.key("isHidden").set(newHiddenState);
-  });
-});
-
-// Create a new note
-const createNote = handler<
-  Record<string, never>,
-  { allPieces: Writable<NotePiece[]> }
->((_, { allPieces }) => {
-  const note = Note({
-    title: "New Note",
-    content: "",
-    noteId: generateId(),
-  });
-  allPieces.push(note);
-});
-
-// Duplicate selected notes (reserved for future use)
-const _duplicateSelectedNotes = handler<
-  Record<string, never>,
-  {
-    notes: Writable<NotePiece[]>;
-    selectedNoteIndices: Writable<number[]>;
-    allPieces: Writable<NotePiece[]>;
-  }
->((_, { notes, selectedNoteIndices, allPieces }) => {
-  const selected = selectedNoteIndices.get();
-  const notesList = notes.get();
-
-  const copies: NotePiece[] = [];
-  for (const idx of selected) {
-    const original = notesList[idx];
-    if (original) {
-      copies.push(Note({
-        title: (original.title ?? "Note") + " (Copy)",
-        content: original.content ?? "",
-        noteId: generateId(),
-      }));
-    }
-  }
-  allPieces.push(...copies);
-  selectedNoteIndices.set([]);
-});
-
-// Delete selected notes
-const deleteSelectedNotes = handler<
-  Record<string, never>,
-  {
-    notes: Writable<NotePiece[]>;
-    selectedNoteIndices: Writable<number[]>;
-    allPieces: Writable<NotePiece[]>;
-    notebooks: Writable<NotebookPiece[]>;
-  }
->((_, { notes, selectedNoteIndices, allPieces, notebooks }) => {
-  const selected = selectedNoteIndices.get();
-  const notesList = notes.get();
-  const allPiecesList = allPieces.get();
-  const notebooksList = notebooks.get();
-
-  const noteIdsToDelete: string[] = [];
-  for (const idx of selected) {
-    const item = notesList[idx];
-    const noteId = (item as any)?.noteId;
-    if (noteId) noteIdsToDelete.push(noteId);
-  }
-
-  const shouldDelete = (n: any) => {
-    if (n?.noteId && noteIdsToDelete.includes(n.noteId)) return true;
-    return false;
-  };
-
-  // Remove from all notebooks
-  for (let nbIdx = 0; nbIdx < notebooksList.length; nbIdx++) {
-    const nbCell = notebooks.key(nbIdx);
-    const nbNotesCell = nbCell.key("notes");
-    const nbNotes = nbNotesCell.get() ?? [];
-
-    const filtered = nbNotes.filter((n: any) => !shouldDelete(n));
-    if (filtered.length !== nbNotes.length) {
-      nbNotesCell.set(filtered);
-    }
-  }
-
-  // Remove from allPieces
-  const filteredPieces = allPiecesList.filter((piece: any) =>
-    !shouldDelete(piece)
-  );
-  allPieces.set(filteredPieces);
-
-  selectedNoteIndices.set([]);
-});
-
-// Add selected notes to a notebook
-const addToNotebook = handler<
-  { target?: { value: string }; detail?: { value: string } },
-  {
-    notebooks: Writable<NotebookPiece[]>;
-    notes: Writable<NotePiece[]>;
-    selectedNoteIndices: Writable<number[]>;
-    selectedNotebook: Writable<string>;
-    showNewNotebookPrompt: Writable<boolean>;
-    pendingNotebookAction: Writable<"add" | "move" | "">;
-  }
->((event, state) => {
-  const value = event.target?.value ?? event.detail?.value ?? "";
-  if (!value) return;
-
-  if (value === "new") {
-    state.pendingNotebookAction.set("add");
-    state.showNewNotebookPrompt.set(true);
-    state.selectedNotebook.set("");
-    return;
-  }
-
-  const nbIndex = parseInt(value, 10);
-  if (nbIndex < 0) return;
-
-  const selected = state.selectedNoteIndices.get();
-  const notesList = state.notes.get();
-  const notebookCell = state.notebooks.key(nbIndex);
-  const notebookNotes = notebookCell.key("notes");
-
-  for (const idx of selected) {
-    const note = notesList[idx];
-    if (note) {
-      (notebookNotes as Writable<NotePiece[] | undefined>).push(note);
-      state.notes.key(idx).key("isHidden").set(true);
-    }
-  }
-
-  state.selectedNoteIndices.set([]);
-  state.selectedNotebook.set("");
-});
-
-// Move selected notes to a notebook
-const moveToNotebook = handler<
-  { target?: { value: string }; detail?: { value: string } },
-  {
-    notebooks: Writable<NotebookPiece[]>;
-    notes: Writable<NotePiece[]>;
-    selectedNoteIndices: Writable<number[]>;
-    selectedMoveNotebook: Writable<string>;
-    showNewNotebookPrompt: Writable<boolean>;
-    pendingNotebookAction: Writable<"add" | "move" | "">;
-  }
->((event, state) => {
-  const value = event.target?.value ?? event.detail?.value ?? "";
-  if (!value) return;
-
-  if (value === "new") {
-    state.pendingNotebookAction.set("move");
-    state.showNewNotebookPrompt.set(true);
-    state.selectedMoveNotebook.set("");
-    return;
-  }
-
-  const nbIndex = parseInt(value, 10);
-  if (nbIndex < 0) return;
-
-  const selected = state.selectedNoteIndices.get();
-  const notesList = state.notes.get();
-  const notebooksList = state.notebooks.get();
-  const targetNotebookCell = state.notebooks.key(nbIndex);
-  const targetNotebookNotes = targetNotebookCell.key("notes");
-
-  const selectedNoteIds: string[] = [];
-  const itemsToMove: NotePiece[] = [];
-
-  for (const idx of selected) {
-    const item = notesList[idx];
-    if (!item) continue;
-
-    const noteId = (item as any)?.noteId;
-    if (noteId) selectedNoteIds.push(noteId);
-    itemsToMove.push(item);
-
-    state.notes.key(idx).key("isHidden").set(true);
-  }
-
-  const shouldRemove = (n: any) => {
-    if (n?.noteId && selectedNoteIds.includes(n.noteId)) return true;
-    return false;
-  };
-
-  // Remove from all notebooks except target
-  for (let nbIdx = 0; nbIdx < notebooksList.length; nbIdx++) {
-    if (nbIdx === nbIndex) continue;
-
-    const nbCell = state.notebooks.key(nbIdx);
-    const nbNotesCell = nbCell.key("notes");
-    const nbNotes = nbNotesCell.get() ?? [];
-
-    const filtered = nbNotes.filter((n: any) => !shouldRemove(n));
-    if (filtered.length !== nbNotes.length) {
-      nbNotesCell.set(filtered);
-    }
-  }
-
-  // Add to target
-  for (const item of itemsToMove) {
-    (targetNotebookNotes as Writable<NotePiece[] | undefined>).push(item);
-  }
-
-  state.selectedNoteIndices.set([]);
-  state.selectedMoveNotebook.set("");
-});
-
-// Clone selected notebooks (shallow copy)
-const cloneSelectedNotebooks = handler<
-  Record<string, never>,
-  {
-    notebooks: Writable<NotebookPiece[]>;
-    selectedNotebookIndices: Writable<number[]>;
-    allPieces: Writable<NotePiece[]>;
-  }
->((_, { notebooks, selectedNotebookIndices, allPieces }) => {
-  const selected = selectedNotebookIndices.get();
-  const notebooksList = notebooks.get();
-
-  const copies: NotePiece[] = [];
-  for (const idx of selected) {
-    const original = notebooksList[idx];
-    if (original) {
-      const baseTitle = getCleanNotebookTitle(original);
-      copies.push(Notebook({
-        title: baseTitle + " (Clone)",
-        notes: [...(original?.notes ?? [])],
-      }));
-    }
-  }
-  allPieces.push(...copies);
-  selectedNotebookIndices.set([]);
-});
-
-// Duplicate selected notebooks (deep copy)
-const duplicateSelectedNotebooks = handler<
-  Record<string, never>,
-  {
-    notebooks: Writable<NotebookPiece[]>;
-    selectedNotebookIndices: Writable<number[]>;
-    allPieces: Writable<NotePiece[]>;
-  }
->((_, { notebooks, selectedNotebookIndices, allPieces }) => {
-  const selected = selectedNotebookIndices.get();
-  const notebooksList = notebooks.get();
-
-  const newItems: NotePiece[] = [];
-
-  for (const idx of selected) {
-    const original = notebooksList[idx];
-    if (original) {
-      const newNotes = (original.notes ?? []).map((note) =>
-        Note({
-          title: note.title ?? "Note",
-          content: note.content ?? "",
-          isHidden: true,
-          noteId: generateId(),
-        })
-      );
-
-      newItems.push(...newNotes);
-
-      const baseTitle = getCleanNotebookTitle(original);
-      newItems.push(Notebook({
-        title: baseTitle + " (Copy)",
-        notes: newNotes,
-      }));
-    }
-  }
-
-  allPieces.push(...newItems);
-  selectedNotebookIndices.set([]);
-});
-
-// Show delete notebooks confirmation modal
-const confirmDeleteNotebooks = handler<
-  Record<string, never>,
-  {
-    selectedNotebookIndices: Writable<number[]>;
-    showDeleteNotebookModal: Writable<boolean>;
-  }
->((_, { selectedNotebookIndices, showDeleteNotebookModal }) => {
-  if (selectedNotebookIndices.get().length > 0) {
-    showDeleteNotebookModal.set(true);
-  }
-});
-
-// Delete notebooks only (keep notes visible)
-const deleteNotebooksOnly = handler<
-  Record<string, never>,
-  {
-    notebooks: Writable<NotebookPiece[]>;
-    selectedNotebookIndices: Writable<number[]>;
-    allPieces: Writable<NotePiece[]>;
-    showDeleteNotebookModal: Writable<boolean>;
-  }
->((
-  _,
-  { notebooks, selectedNotebookIndices, allPieces, showDeleteNotebookModal },
-) => {
-  const selected = selectedNotebookIndices.get();
-  const notebooksList = notebooks.get();
-  const allPiecesList = allPieces.get();
-
-  if (!selected || selected.length === 0) {
-    showDeleteNotebookModal.set(false);
-    return;
-  }
-
-  // Make contained notes visible
-  for (const idx of selected) {
-    const nb = notebooksList[idx];
-    const nbNotes = (nb as any)?.notes ?? [];
-    for (const note of nbNotes) {
-      const noteId = (note as any)?.noteId;
-      if (noteId) {
-        for (let i = 0; i < allPiecesList.length; i++) {
-          if ((allPiecesList[i] as any)?.noteId === noteId) {
-            allPieces.key(i).key("isHidden").set(false);
-            break;
-          }
-        }
-      }
-    }
-  }
-
-  // Find notebook indices in allPieces
-  const notebookIndicesInAllPieces: number[] = [];
-  for (let i = 0; i < allPiecesList.length; i++) {
-    if (isNotebookPiece(allPiecesList[i])) {
-      notebookIndicesInAllPieces.push(i);
-    }
-  }
-
-  // Map selected to allPieces indices
-  const allPiecesIndicesToDelete = new Set<number>();
-  for (const selectedIdx of selected) {
-    const allPiecesIdx = notebookIndicesInAllPieces[selectedIdx];
-    if (allPiecesIdx !== undefined) {
-      allPiecesIndicesToDelete.add(allPiecesIdx);
-    }
-  }
-
-  const filteredPieces = allPiecesList.filter((_, i) =>
-    !allPiecesIndicesToDelete.has(i)
-  );
-  allPieces.set(filteredPieces);
-
-  selectedNotebookIndices.set([]);
-  showDeleteNotebookModal.set(false);
-});
-
-// Delete notebooks AND their notes
-const deleteNotebooksAndNotes = handler<
-  Record<string, never>,
-  {
-    notebooks: Writable<NotebookPiece[]>;
-    selectedNotebookIndices: Writable<number[]>;
-    allPieces: Writable<NotePiece[]>;
-    showDeleteNotebookModal: Writable<boolean>;
-  }
->((
-  _,
-  { notebooks, selectedNotebookIndices, allPieces, showDeleteNotebookModal },
-) => {
-  const selected = selectedNotebookIndices.get();
-  const notebooksList = notebooks.get();
-  const allPiecesList = allPieces.get();
-
-  if (!selected || selected.length === 0) {
-    showDeleteNotebookModal.set(false);
-    return;
-  }
-
-  // Collect noteIds to delete
-  const noteIdsToDelete: string[] = [];
-  for (const idx of selected) {
-    const nb = notebooksList[idx];
-    const nbNotes = (nb as any)?.notes ?? [];
-    for (const note of nbNotes) {
-      const noteId = (note as any)?.noteId;
-      if (noteId) noteIdsToDelete.push(noteId);
-    }
-  }
-
-  // Find notebook indices in allPieces
-  const notebookIndicesInAllPieces: number[] = [];
-  for (let i = 0; i < allPiecesList.length; i++) {
-    if (isNotebookPiece(allPiecesList[i])) {
-      notebookIndicesInAllPieces.push(i);
-    }
-  }
-
-  const allPiecesIndicesToDelete = new Set<number>();
-  for (const selectedIdx of selected) {
-    const allPiecesIdx = notebookIndicesInAllPieces[selectedIdx];
-    if (allPiecesIdx !== undefined) {
-      allPiecesIndicesToDelete.add(allPiecesIdx);
-    }
-  }
-
-  const filteredPieces = allPiecesList.filter((piece: any, i) => {
-    if (allPiecesIndicesToDelete.has(i)) return false;
-    const noteId = piece?.noteId;
-    if (noteId && noteIdsToDelete.includes(noteId)) return false;
-    return true;
-  });
-  allPieces.set(filteredPieces);
-
-  selectedNotebookIndices.set([]);
-  showDeleteNotebookModal.set(false);
-});
-
-const cancelDeleteNotebooks = handler<
-  Record<string, never>,
-  { showDeleteNotebookModal: Writable<boolean> }
->((_, { showDeleteNotebookModal }) => {
-  showDeleteNotebookModal.set(false);
-});
-
-// ============================================================================
-// PHASE 7: Create Operations
-// ============================================================================
-
-// Show standalone new notebook modal
-const showStandaloneNotebookModal = handler<
-  void,
-  { showStandaloneNotebookPrompt: Writable<boolean> }
->((_, { showStandaloneNotebookPrompt }) =>
-  showStandaloneNotebookPrompt.set(true)
-);
-
-// Create standalone notebook and open
-const createStandaloneNotebookAndOpen = handler<
-  void,
-  {
-    standaloneNotebookTitle: Writable<string>;
-    showStandaloneNotebookPrompt: Writable<boolean>;
-    allPieces: Writable<NotePiece[]>;
-  }
->((_, { standaloneNotebookTitle, showStandaloneNotebookPrompt, allPieces }) => {
-  const title = standaloneNotebookTitle.get().trim() || "New Notebook";
-  const nb = Notebook({ title });
-  allPieces.push(nb);
-  showStandaloneNotebookPrompt.set(false);
-  standaloneNotebookTitle.set("");
-  return navigateTo(nb);
-});
-
-// Create standalone notebook and continue
-const createStandaloneNotebookAndContinue = handler<
-  void,
-  {
-    standaloneNotebookTitle: Writable<string>;
-    allPieces: Writable<NotePiece[]>;
-  }
->((_, { standaloneNotebookTitle, allPieces }) => {
-  const title = standaloneNotebookTitle.get().trim() || "New Notebook";
-  const nb = Notebook({ title });
-  allPieces.push(nb);
-  standaloneNotebookTitle.set("");
-});
-
-// Cancel standalone notebook prompt
-const cancelStandaloneNotebookPrompt = handler<
-  void,
-  {
-    showStandaloneNotebookPrompt: Writable<boolean>;
-    standaloneNotebookTitle: Writable<string>;
-  }
->((_, { showStandaloneNotebookPrompt, standaloneNotebookTitle }) => {
-  showStandaloneNotebookPrompt.set(false);
-  standaloneNotebookTitle.set("");
-});
-
-// Create notebook from prompt (for add/move flows)
-const createNotebookFromPrompt = handler<
-  void,
-  {
-    newNotebookName: Writable<string>;
-    showNewNotebookPrompt: Writable<boolean>;
-    pendingNotebookAction: Writable<"add" | "move" | "">;
-    selectedNoteIndices: Writable<number[]>;
-    notes: Writable<NotePiece[]>;
-    allPieces: Writable<NotePiece[]>;
-    notebooks: Writable<NotebookPiece[]>;
-  }
->((_, state) => {
-  const name = state.newNotebookName.get().trim() || "New Notebook";
-  const actionType = state.pendingNotebookAction.get();
-  const selected = state.selectedNoteIndices.get();
-
-  const selectedItems: NotePiece[] = [];
-  const selectedNoteIds: string[] = [];
-
-  for (const idx of selected) {
-    const item = state.notes.key(idx).get();
-    if (item) {
-      selectedItems.push(item);
-      const noteId = (item as any)?.noteId;
-      if (noteId) selectedNoteIds.push(noteId);
-    }
-  }
-
-  const shouldRemove = (n: any) => {
-    if (n?.noteId && selectedNoteIds.includes(n.noteId)) return true;
-    return false;
-  };
-
-  const newNotebook = Notebook({ title: name, notes: selectedItems });
-  state.allPieces.push(newNotebook);
-
-  // Mark selected items as hidden
-  for (const idx of selected) {
-    state.notes.key(idx).key("isHidden").set(true);
-  }
-
-  // For move: remove from existing notebooks
-  if (actionType === "move") {
-    const notebooksList = state.notebooks.get();
-    for (let nbIdx = 0; nbIdx < notebooksList.length; nbIdx++) {
-      const nbCell = state.notebooks.key(nbIdx);
-      const nbNotesCell = nbCell.key("notes");
-      const nbNotes = nbNotesCell.get() ?? [];
-      const filtered = nbNotes.filter((n: any) => !shouldRemove(n));
-      if (filtered.length !== nbNotes.length) {
-        nbNotesCell.set(filtered);
-      }
-    }
-  }
-
-  state.selectedNoteIndices.set([]);
-  state.newNotebookName.set("");
-  state.pendingNotebookAction.set("");
-  state.showNewNotebookPrompt.set(false);
-});
-
-// Cancel new notebook prompt
-const cancelNewNotebookPrompt = handler<
-  void,
-  {
-    showNewNotebookPrompt: Writable<boolean>;
-    newNotebookName: Writable<string>;
-    pendingNotebookAction: Writable<"add" | "move" | "">;
-    selectedNotebook: Writable<string>;
-    selectedMoveNotebook: Writable<string>;
-  }
->((_, state) => {
-  state.showNewNotebookPrompt.set(false);
-  state.newNotebookName.set("");
-  state.pendingNotebookAction.set("");
-  state.selectedNotebook.set("");
-  state.selectedMoveNotebook.set("");
-});
-
-// ============================================================================
-// PHASE 9-10: Export & Import Handlers
-// ============================================================================
-
-// Open Export All modal
-const openExportAllModal = handler<
-  void,
-  {
-    showExportAllModal: Writable<boolean>;
-    allPieces: Writable<NotePiece[]>;
-    notebooks: Writable<NotebookPiece[]>;
-    exportedMarkdown: Writable<string>;
-  }
->((_, { showExportAllModal, allPieces, notebooks, exportedMarkdown }) => {
-  const allPiecesArray = [...allPieces.get()];
-  const result = generateExport(
-    allPiecesArray,
-    [...notebooks.get()],
-    allPiecesArray,
-  );
-  exportedMarkdown.set(result.markdown);
-  showExportAllModal.set(true);
-});
-
-// Close Export All modal
-const closeExportAllModal = handler<
-  void,
-  { showExportAllModal: Writable<boolean> }
->((_, { showExportAllModal }) => showExportAllModal.set(false));
-
-// Export selected notebooks
-const exportSelectedNotebooks = handler<
-  Record<string, never>,
-  {
-    notebooks: Writable<NotebookPiece[]>;
-    selectedNotebookIndices: Writable<number[]>;
-    showExportNotebooksModal: Writable<boolean>;
-    exportNotebooksMarkdown: Writable<string>;
-  }
->((
-  _,
-  {
-    notebooks,
-    selectedNotebookIndices,
-    showExportNotebooksModal,
-    exportNotebooksMarkdown,
-  },
-) => {
-  const selected = selectedNotebookIndices.get();
-  const notebooksList = notebooks.get();
-
-  const allNotes: { title: string; content: string; notebookName: string }[] =
-    [];
-  for (const idx of selected) {
-    const nb = notebooksList[idx];
-    const cleanName = getCleanNotebookTitle(nb);
-    const nbNotes = nb?.notes ?? [];
-    for (const note of nbNotes) {
-      if (note?.title !== undefined && note?.content !== undefined) {
-        allNotes.push({
-          title: note.title ?? "Untitled",
-          content: note.content ?? "",
-          notebookName: cleanName,
-        });
-      }
-    }
-  }
-
-  if (allNotes.length > 0) {
-    const lines = allNotes.map((note) => {
-      const escapedTitle = note.title.replace(/"/g, "&quot;");
-      return `${NOTE_START_MARKER} title="${escapedTitle}" notebooks="${note.notebookName}" -->\n\n${note.content}\n\n${NOTE_END_MARKER}`;
-    });
-
-    const timestamp = new Date().toISOString();
-    const header =
-      `<!-- Common Tools Export - ${timestamp} -->\n<!-- Notes: ${allNotes.length}, Notebooks: ${selected.length} -->\n\n`;
-
-    exportNotebooksMarkdown.set(header + lines.join("\n\n"));
-  } else {
-    exportNotebooksMarkdown.set(
-      "<!-- No notes found in selected notebooks -->",
-    );
-  }
-  showExportNotebooksModal.set(true);
-});
-
-// Close export notebooks modal
-const closeExportNotebooksModal = handler<
-  Record<string, never>,
-  {
-    showExportNotebooksModal: Writable<boolean>;
-    exportNotebooksMarkdown: Writable<string>;
-    selectedNotebookIndices: Writable<number[]>;
-  }
->((
-  _,
-  {
-    showExportNotebooksModal,
-    exportNotebooksMarkdown,
-    selectedNotebookIndices,
-  },
-) => {
-  showExportNotebooksModal.set(false);
-  exportNotebooksMarkdown.set("");
-  selectedNotebookIndices.set([]);
-});
-
-// Open Import modal
-const openImportModal = handler<
-  void,
-  { showImportModal: Writable<boolean> }
->((_, { showImportModal }) => showImportModal.set(true));
-
-// Close Import modal
-const closeImportModal = handler<
-  void,
-  {
-    showImportModal: Writable<boolean>;
-    importMarkdown: Writable<string>;
-    showPasteSection: Writable<boolean>;
-  }
->((_, { showImportModal, importMarkdown, showPasteSection }) => {
-  showImportModal.set(false);
-  importMarkdown.set("");
-  showPasteSection.set(true);
-});
-
-// Hide paste section
-const _hidePasteSection = handler<
-  Record<string, never>,
-  { showPasteSection: Writable<boolean> }
->((_, { showPasteSection }) => showPasteSection.set(false));
-
-// Analyze import and detect duplicates
-const analyzeImport = handler<
-  Record<string, never>,
-  {
-    importMarkdown: Writable<string>;
-    notes: Writable<NotePiece[]>;
-    allPieces: Writable<NotePiece[]>;
-    notebooks: Writable<NotebookPiece[]>;
-    showDuplicateModal: Writable<boolean>;
-    detectedDuplicates: Writable<DetectedDuplicate[]>;
-    pendingImportData: Writable<string>;
-    showImportModal: Writable<boolean>;
-    showImportProgressModal: Writable<boolean>;
-    importProgressMessage: Writable<string>;
-    importComplete: Writable<boolean>;
-    showPasteSection: Writable<boolean>;
-  }
->((_, state) => {
-  const markdown = state.importMarkdown.get();
-  const parsedNotes = parseNotesFromMarkdown(markdown);
-  const parsedNotebooks = parseNotebooksFromMarkdown(markdown);
-
-  if (parsedNotes.length === 0 && parsedNotebooks.length === 0) return;
-
-  const existingNotes = state.notes.get();
-  const existingByTitle = new Map<string, NotePiece>();
-  existingNotes.forEach((note: any) => {
-    const title = note?.title;
-    if (title) existingByTitle.set(title, note);
-  });
-
-  const duplicates: DetectedDuplicate[] = [];
-  for (const noteData of parsedNotes) {
-    if (existingByTitle.has(noteData.title)) {
-      duplicates.push({
-        title: noteData.title,
-        noteId: noteData.noteId,
-        existingNotebook: "this space",
-      });
-    }
-  }
-
-  const itemCounts: string[] = [];
-  if (parsedNotes.length > 0) {
-    itemCounts.push(
-      `${parsedNotes.length} note${parsedNotes.length !== 1 ? "s" : ""}`,
-    );
-  }
-  if (parsedNotebooks.length > 0) {
-    itemCounts.push(
-      `${parsedNotebooks.length} notebook${
-        parsedNotebooks.length !== 1 ? "s" : ""
-      }`,
-    );
-  }
-  const importSummary = itemCounts.join(" and ");
-
-  if (duplicates.length > 0) {
-    state.pendingImportData.set(markdown);
-    state.detectedDuplicates.set(duplicates);
-    state.showDuplicateModal.set(true);
-    state.showImportModal.set(false);
-    state.showPasteSection.set(true);
-  } else {
-    state.importMarkdown.set("");
-    state.showImportModal.set(false);
-    state.showPasteSection.set(true);
-    state.importComplete.set(false);
-    state.importProgressMessage.set(`Importing ${importSummary}...`);
-    state.showImportProgressModal.set(true);
-
-    performImport(
-      parsedNotes,
-      state.allPieces,
-      state.notebooks,
-      new Set(),
-      markdown,
-    );
-
-    state.importProgressMessage.set(`Imported ${importSummary}!`);
-    state.importComplete.set(true);
-  }
-});
-
-// Handle file upload for import
-const handleImportFileUpload = handler<
-  { detail: { files: Array<{ url: string; name: string }> } },
-  {
-    importMarkdown: Writable<string>;
-    notes: Writable<NotePiece[]>;
-    allPieces: Writable<NotePiece[]>;
-    notebooks: Writable<NotebookPiece[]>;
-    showDuplicateModal: Writable<boolean>;
-    detectedDuplicates: Writable<DetectedDuplicate[]>;
-    pendingImportData: Writable<string>;
-    showImportModal: Writable<boolean>;
-    showImportProgressModal: Writable<boolean>;
-    importProgressMessage: Writable<string>;
-    importComplete: Writable<boolean>;
-    showPasteSection: Writable<boolean>;
-  }
->(({ detail }, state) => {
-  const files = detail?.files ?? [];
-  if (files.length === 0) return;
-
-  const dataUrl = files[0].url;
-  const base64Part = dataUrl.split(",")[1];
-  if (!base64Part) return;
-
-  const binaryString = atob(base64Part);
-  const bytes = Uint8Array.from(binaryString, (char) => char.charCodeAt(0));
-  const content = new TextDecoder().decode(bytes);
-
-  const parsedNotes = parseNotesFromMarkdown(content);
-  const parsedNotebooks = parseNotebooksFromMarkdown(content);
-
-  if (parsedNotes.length === 0 && parsedNotebooks.length === 0) {
-    console.warn("Import: No notes or notebooks found in file");
-    return;
-  }
-
-  const existingNotes = state.notes.get();
-  const existingByTitle = new Map<string, NotePiece>();
-  existingNotes.forEach((note: any) => {
-    const title = note?.title;
-    if (title) existingByTitle.set(title, note);
-  });
-
-  const duplicates: DetectedDuplicate[] = [];
-  for (const noteData of parsedNotes) {
-    if (existingByTitle.has(noteData.title)) {
-      duplicates.push({
-        title: noteData.title,
-        noteId: noteData.noteId,
-        existingNotebook: "this space",
-      });
-    }
-  }
-
-  const itemCounts: string[] = [];
-  if (parsedNotes.length > 0) {
-    itemCounts.push(
-      `${parsedNotes.length} note${parsedNotes.length !== 1 ? "s" : ""}`,
-    );
-  }
-  if (parsedNotebooks.length > 0) {
-    itemCounts.push(
-      `${parsedNotebooks.length} notebook${
-        parsedNotebooks.length !== 1 ? "s" : ""
-      }`,
-    );
-  }
-  const importSummary = itemCounts.join(" and ");
-
-  if (duplicates.length > 0) {
-    state.pendingImportData.set(content);
-    state.detectedDuplicates.set(duplicates);
-    state.showDuplicateModal.set(true);
-    state.showImportModal.set(false);
-    state.showPasteSection.set(true);
-  } else {
-    state.showImportModal.set(false);
-    state.showPasteSection.set(true);
-    state.importComplete.set(false);
-    state.importProgressMessage.set(`Importing ${importSummary}...`);
-    state.showImportProgressModal.set(true);
-
-    performImport(
-      parsedNotes,
-      state.allPieces,
-      state.notebooks,
-      new Set(),
-      content,
-    );
-
-    state.importProgressMessage.set(`Imported ${importSummary}!`);
-    state.importComplete.set(true);
-  }
-});
-
-// Import skipping duplicates
-const importSkipDuplicates = handler<
-  Record<string, never>,
-  {
-    pendingImportData: Writable<string>;
-    allPieces: Writable<NotePiece[]>;
-    notebooks: Writable<NotebookPiece[]>;
-    detectedDuplicates: Writable<DetectedDuplicate[]>;
-    showDuplicateModal: Writable<boolean>;
-    importMarkdown: Writable<string>;
-    showImportProgressModal: Writable<boolean>;
-    importProgressMessage: Writable<string>;
-    importComplete: Writable<boolean>;
-  }
->((_, state) => {
-  const markdown = state.pendingImportData.get();
-  const parsed = parseNotesFromMarkdown(markdown);
-  const duplicates = state.detectedDuplicates.get();
-
-  const skipTitles = new Set(duplicates.map((d) => d.title));
-  const importCount = parsed.length - skipTitles.size;
-
-  state.pendingImportData.set("");
-  state.detectedDuplicates.set([]);
-  state.importMarkdown.set("");
-  state.showDuplicateModal.set(false);
-  state.importComplete.set(false);
-  state.importProgressMessage.set(`Importing ${importCount} notes...`);
-  state.showImportProgressModal.set(true);
-
-  performImport(parsed, state.allPieces, state.notebooks, skipTitles, markdown);
-
-  state.importProgressMessage.set(`Imported ${importCount} notes!`);
-  state.importComplete.set(true);
-});
-
-// Import all as copies
-const importAllAsCopies = handler<
-  Record<string, never>,
-  {
-    pendingImportData: Writable<string>;
-    allPieces: Writable<NotePiece[]>;
-    notebooks: Writable<NotebookPiece[]>;
-    showDuplicateModal: Writable<boolean>;
-    detectedDuplicates: Writable<DetectedDuplicate[]>;
-    importMarkdown: Writable<string>;
-    showImportProgressModal: Writable<boolean>;
-    importProgressMessage: Writable<string>;
-    importComplete: Writable<boolean>;
-  }
->((_, state) => {
-  const markdown = state.pendingImportData.get();
-  const parsed = parseNotesFromMarkdown(markdown);
-
-  state.pendingImportData.set("");
-  state.detectedDuplicates.set([]);
-  state.importMarkdown.set("");
-  state.showDuplicateModal.set(false);
-  state.importComplete.set(false);
-  state.importProgressMessage.set(`Importing ${parsed.length} notes...`);
-  state.showImportProgressModal.set(true);
-
-  performImport(parsed, state.allPieces, state.notebooks, new Set(), markdown);
-
-  state.importProgressMessage.set(`Imported ${parsed.length} notes!`);
-  state.importComplete.set(true);
-});
-
-// Cancel import
-const cancelImport = handler<
-  Record<string, never>,
-  {
-    showDuplicateModal: Writable<boolean>;
-    detectedDuplicates: Writable<DetectedDuplicate[]>;
-    pendingImportData: Writable<string>;
-  }
->((_, state) => {
-  state.showDuplicateModal.set(false);
-  state.detectedDuplicates.set([]);
-  state.pendingImportData.set("");
 });
 
 // Helper to generate export filename
@@ -1738,12 +981,14 @@ const getExportFilename = (prefix: string) => {
 const NotesImportExport = pattern<Input, Output>(
   ({ title, importMarkdown, allPieces }) => {
     // allPieces is passed directly from default-app for proper cell sharing
-    // This is the only reliable way to share the cell - wish({ query: "#default" }) doesn't work in this context
+    // Used for both reads (filtering) and writes (push new notes/notebooks during import)
+    // Note: wish({ scope: ["."] }) is not used here because allPieces is a direct prop,
+    // not from the mentionable list. The emoji filtering is reliable for this context.
 
     // Filter to only notes using 📝 marker in NAME (same pattern as notebooks)
     // Note: Using NAME prefix is more reliable than checking title/content through proxy
     const notes = computed(() =>
-      (allPieces ?? []).filter((piece: any) => {
+      (allPieces?.get() ?? []).filter((piece: any) => {
         const name = piece?.[NAME];
         return typeof name === "string" && name.startsWith("📝");
       })
@@ -1751,7 +996,7 @@ const NotesImportExport = pattern<Input, Output>(
 
     // Filter to only notebooks using 📓 marker in NAME
     const notebooks = computed(() =>
-      (allPieces ?? []).filter((piece: any) => isNotebookPiece(piece))
+      (allPieces?.get() ?? []).filter((piece: any) => isNotebookPiece(piece))
     );
 
     // Counts
@@ -1857,18 +1102,736 @@ const NotesImportExport = pattern<Input, Output>(
       return result;
     });
 
+    // ========================================================================
+    // Actions (converted from handlers - close over pattern variables)
+    // ========================================================================
+
+    // Selection actions
+    const selectAllNotes = action(() => {
+      selectedNoteIndices.set(notes.map((_: any, i: number) => i));
+    });
+
+    const deselectAllNotes = action(() => {
+      selectedNoteIndices.set([]);
+    });
+
+    const selectAllNotebooks = action(() => {
+      selectedNotebookIndices.set(notebooks.map((_: any, i: number) => i));
+    });
+
+    const deselectAllNotebooks = action(() => {
+      selectedNotebookIndices.set([]);
+    });
+
+    // Visibility bulk actions
+    const toggleAllNotesVisibility = action(() => {
+      if (notes.length === 0) return;
+
+      const anyVisible = notes.some((n: any) => !n?.isHidden);
+      const newHiddenState = anyVisible;
+
+      // notes is a computed filter of allPieces, so we need to find the actual index in allPieces
+      const notesList = notes;
+      const allPiecesList = allPieces.get();
+
+      notesList.forEach((note: any) => {
+        const noteId = note?.noteId;
+        if (!noteId) return;
+
+        const allPiecesIdx = allPiecesList.findIndex((p: any) =>
+          p?.noteId === noteId
+        );
+        if (allPiecesIdx >= 0) {
+          allPieces.key(allPiecesIdx).key("isHidden").set(newHiddenState);
+        }
+      });
+    });
+
+    const toggleAllNotebooksVisibility = action(() => {
+      if (notebooks.length === 0) return;
+
+      const anyVisible = notebooks.some((nb: any) => !nb?.isHidden);
+      const newHiddenState = anyVisible;
+
+      // notebooks is a computed filter of allPieces, find indices in allPieces
+      const notebooksList = notebooks;
+      const allPiecesList = allPieces.get();
+
+      notebooksList.forEach((nb: any) => {
+        const nbName = (nb as any)?.[NAME];
+        if (!nbName) return;
+
+        const allPiecesIdx = allPiecesList.findIndex((p: any) =>
+          (p as any)?.[NAME] === nbName
+        );
+        if (allPiecesIdx >= 0) {
+          allPieces.key(allPiecesIdx).key("isHidden").set(newHiddenState);
+        }
+      });
+    });
+
+    // CRUD operations
+    const createNote = action(() => {
+      const note = Note({
+        title: "New Note",
+        content: "",
+        noteId: generateId(),
+      });
+      allPieces.push(note);
+    });
+
+    const _duplicateSelectedNotes = action(() => {
+      const selected = selectedNoteIndices.get();
+      const notesList = notes;
+
+      for (const idx of selected) {
+        const original = notesList[idx];
+        if (original) {
+          const newNote = Note({
+            title: (original.title ?? "Note") + " (Copy)",
+            content: original.content ?? "",
+            noteId: generateId(),
+          });
+          allPieces.push(newNote);
+        }
+      }
+      selectedNoteIndices.set([]);
+    });
+
+    const deleteSelectedNotes = action(() => {
+      const selected = selectedNoteIndices.get();
+
+      const noteIdsToDelete: string[] = [];
+      for (const idx of selected) {
+        const item = notes[idx];
+        const noteId = (item as any)?.noteId;
+        if (noteId) noteIdsToDelete.push(noteId);
+      }
+
+      const shouldDelete = (n: any) => {
+        if (n?.noteId && noteIdsToDelete.includes(n.noteId)) return true;
+        return false;
+      };
+
+      // Remove from all notebooks
+      const notebooksList = notebooks;
+      const allPiecesList = allPieces.get();
+
+      notebooksList.forEach((nb: any) => {
+        const nbName = (nb as any)?.[NAME];
+        if (!nbName) return;
+
+        const nbIdx = allPiecesList.findIndex((p: any) =>
+          (p as any)?.[NAME] === nbName
+        );
+        if (nbIdx < 0) return;
+
+        const nbNotesCell = allPieces.key(nbIdx).key("notes");
+        const nbNotes = nbNotesCell.get() ?? [];
+
+        const filtered = nbNotes.filter((n: any) => !shouldDelete(n));
+        if (filtered.length !== nbNotes.length) {
+          nbNotesCell.set(filtered);
+        }
+      });
+
+      // Remove from allPieces
+      const filteredPieces = allPiecesList.filter((piece: any) =>
+        !shouldDelete(piece)
+      );
+      allPieces.set(filteredPieces);
+
+      selectedNoteIndices.set([]);
+    });
+
+    const cloneSelectedNotebooks = action(() => {
+      const selected = selectedNotebookIndices.get();
+
+      for (const idx of selected) {
+        const original = notebooks[idx];
+        if (original) {
+          const baseTitle = getCleanNotebookTitle(original);
+          const nb = Notebook({
+            title: baseTitle + " (Clone)",
+            notes: [...((original as any)?.notes ?? [])],
+          });
+          allPieces.push(nb);
+        }
+      }
+      selectedNotebookIndices.set([]);
+    });
+
+    const duplicateSelectedNotebooks = action(() => {
+      const selected = selectedNotebookIndices.get();
+
+      for (const idx of selected) {
+        const original = notebooks[idx];
+        if (original) {
+          const newNotes = ((original as any).notes ?? []).map((note: any) =>
+            Note({
+              title: note.title ?? "Note",
+              content: note.content ?? "",
+              isHidden: true,
+              noteId: generateId(),
+            })
+          );
+
+          for (const note of newNotes) {
+            allPieces.push(note);
+          }
+
+          const baseTitle = getCleanNotebookTitle(original);
+          const nb = Notebook({
+            title: baseTitle + " (Copy)",
+            notes: newNotes,
+          });
+          allPieces.push(nb);
+        }
+      }
+      selectedNotebookIndices.set([]);
+    });
+
+    // Notebook operations
+    const addToNotebook = action(
+      (event: { target?: { value: string }; detail?: { value: string } }) => {
+        const value = event.target?.value ?? event.detail?.value ?? "";
+        if (!value) return;
+
+        if (value === "new") {
+          pendingNotebookAction.set("add");
+          showNewNotebookPrompt.set(true);
+          selectedNotebook.set("");
+          return;
+        }
+
+        const nbIndex = parseInt(value, 10);
+        if (nbIndex < 0) return;
+
+        const selected = selectedNoteIndices.get();
+        const notebooksList = notebooks;
+        const allPiecesList = allPieces.get();
+
+        // Find the notebook in allPieces
+        const targetNotebook = notebooksList[nbIndex];
+        const targetNbName = (targetNotebook as any)?.[NAME];
+        if (!targetNbName) return;
+
+        const targetNbIdx = allPiecesList.findIndex((p: any) =>
+          (p as any)?.[NAME] === targetNbName
+        );
+        if (targetNbIdx < 0) return;
+
+        const notebookNotes = allPieces.key(targetNbIdx).key("notes");
+
+        for (const idx of selected) {
+          const note = notes[idx];
+          if (note) {
+            notebookNotes.push(note);
+
+            // Find note in allPieces and set isHidden
+            const noteId = (note as any)?.noteId;
+            if (noteId) {
+              const noteIdx = allPiecesList.findIndex((p: any) =>
+                p?.noteId === noteId
+              );
+              if (noteIdx >= 0) {
+                allPieces.key(noteIdx).key("isHidden").set(true);
+              }
+            }
+          }
+        }
+
+        selectedNoteIndices.set([]);
+        selectedNotebook.set("");
+      },
+    );
+
+    const moveToNotebook = action(
+      (event: { target?: { value: string }; detail?: { value: string } }) => {
+        const value = event.target?.value ?? event.detail?.value ?? "";
+        if (!value) return;
+
+        if (value === "new") {
+          pendingNotebookAction.set("move");
+          showNewNotebookPrompt.set(true);
+          selectedMoveNotebook.set("");
+          return;
+        }
+
+        const nbIndex = parseInt(value, 10);
+        if (nbIndex < 0) return;
+
+        const selected = selectedNoteIndices.get();
+        const notebooksList = notebooks;
+        const allPiecesList = allPieces.get();
+
+        // Find target notebook in allPieces
+        const targetNotebook = notebooksList[nbIndex];
+        const targetNbName = (targetNotebook as any)?.[NAME];
+        if (!targetNbName) return;
+
+        const targetNbIdx = allPiecesList.findIndex((p: any) =>
+          (p as any)?.[NAME] === targetNbName
+        );
+        if (targetNbIdx < 0) return;
+
+        const targetNotebookNotes = allPieces.key(targetNbIdx).key("notes");
+
+        const selectedNoteIds: string[] = [];
+        const itemsToMove: NotePiece[] = [];
+
+        for (const idx of selected) {
+          const item = notes[idx];
+          if (!item) continue;
+
+          const noteId = (item as any)?.noteId;
+          if (noteId) selectedNoteIds.push(noteId);
+          itemsToMove.push(item);
+
+          // Find note in allPieces and set isHidden
+          if (noteId) {
+            const noteIdx = allPiecesList.findIndex((p: any) =>
+              p?.noteId === noteId
+            );
+            if (noteIdx >= 0) {
+              allPieces.key(noteIdx).key("isHidden").set(true);
+            }
+          }
+        }
+
+        const shouldRemove = (n: any) => {
+          if (n?.noteId && selectedNoteIds.includes(n.noteId)) return true;
+          return false;
+        };
+
+        // Remove from all notebooks except target
+        notebooksList.forEach((nb: any, localIdx: number) => {
+          if (localIdx === nbIndex) return; // Skip target notebook
+
+          const nbName = (nb as any)?.[NAME];
+          if (!nbName) return;
+
+          const nbIdx = allPiecesList.findIndex((p: any) =>
+            (p as any)?.[NAME] === nbName
+          );
+          if (nbIdx < 0) return;
+
+          const nbNotesCell = allPieces.key(nbIdx).key("notes");
+          const nbNotes = nbNotesCell.get() ?? [];
+
+          const filtered = nbNotes.filter((n: any) => !shouldRemove(n));
+          if (filtered.length !== nbNotes.length) {
+            nbNotesCell.set(filtered);
+          }
+        });
+
+        // Add to target
+        for (const item of itemsToMove) {
+          targetNotebookNotes.push(item);
+        }
+
+        selectedNoteIndices.set([]);
+        selectedMoveNotebook.set("");
+      },
+    );
+
+    const confirmDeleteNotebooks = action(() => {
+      if (selectedNotebookIndices.get().length > 0) {
+        showDeleteNotebookModal.set(true);
+      }
+    });
+
+    const deleteNotebooksOnly = action(() => {
+      const selected = selectedNotebookIndices.get();
+      const allPiecesList = allPieces.get();
+
+      if (!selected || selected.length === 0) {
+        showDeleteNotebookModal.set(false);
+        return;
+      }
+
+      // Make contained notes visible
+      for (const idx of selected) {
+        const nb = notebooks[idx];
+        const nbNotes = (nb as any)?.notes ?? [];
+        for (const note of nbNotes) {
+          const noteId = (note as any)?.noteId;
+          if (noteId) {
+            for (let i = 0; i < allPiecesList.length; i++) {
+              if ((allPiecesList[i] as any)?.noteId === noteId) {
+                allPieces.key(i).key("isHidden").set(false);
+                break;
+              }
+            }
+          }
+        }
+      }
+
+      // Find notebook indices in allPieces
+      const notebookIndicesInAllPieces: number[] = [];
+      for (let i = 0; i < allPiecesList.length; i++) {
+        if (isNotebookPiece(allPiecesList[i])) {
+          notebookIndicesInAllPieces.push(i);
+        }
+      }
+
+      // Map selected to allPieces indices
+      const allPiecesIndicesToDelete = new Set<number>();
+      for (const selectedIdx of selected) {
+        const allPiecesIdx = notebookIndicesInAllPieces[selectedIdx];
+        if (allPiecesIdx !== undefined) {
+          allPiecesIndicesToDelete.add(allPiecesIdx);
+        }
+      }
+
+      const filteredPieces = allPiecesList.filter((_: any, i: number) =>
+        !allPiecesIndicesToDelete.has(i)
+      );
+      allPieces.set(filteredPieces);
+
+      selectedNotebookIndices.set([]);
+      showDeleteNotebookModal.set(false);
+    });
+
+    const deleteNotebooksAndNotes = action(() => {
+      const selected = selectedNotebookIndices.get();
+      const allPiecesList = allPieces.get();
+
+      if (!selected || selected.length === 0) {
+        showDeleteNotebookModal.set(false);
+        return;
+      }
+
+      // Collect noteIds to delete
+      const noteIdsToDelete: string[] = [];
+      for (const idx of selected) {
+        const nb = notebooks[idx];
+        const nbNotes = (nb as any)?.notes ?? [];
+        for (const note of nbNotes) {
+          const noteId = (note as any)?.noteId;
+          if (noteId) noteIdsToDelete.push(noteId);
+        }
+      }
+
+      // Find notebook indices in allPieces
+      const notebookIndicesInAllPieces: number[] = [];
+      for (let i = 0; i < allPiecesList.length; i++) {
+        if (isNotebookPiece(allPiecesList[i])) {
+          notebookIndicesInAllPieces.push(i);
+        }
+      }
+
+      const allPiecesIndicesToDelete = new Set<number>();
+      for (const selectedIdx of selected) {
+        const allPiecesIdx = notebookIndicesInAllPieces[selectedIdx];
+        if (allPiecesIdx !== undefined) {
+          allPiecesIndicesToDelete.add(allPiecesIdx);
+        }
+      }
+
+      const filteredPieces = allPiecesList.filter((piece: any, i: number) => {
+        if (allPiecesIndicesToDelete.has(i)) return false;
+        const noteId = piece?.noteId;
+        if (noteId && noteIdsToDelete.includes(noteId)) return false;
+        return true;
+      });
+      allPieces.set(filteredPieces);
+
+      selectedNotebookIndices.set([]);
+      showDeleteNotebookModal.set(false);
+    });
+
+    const cancelDeleteNotebooks = action(() => {
+      showDeleteNotebookModal.set(false);
+    });
+
+    // Standalone notebook modal actions
+    const showStandaloneNotebookModal = action(() => {
+      showStandaloneNotebookPrompt.set(true);
+    });
+
+    const createStandaloneNotebookAndOpen = action(() => {
+      const title = standaloneNotebookTitle.get().trim() || "New Notebook";
+      const nb = Notebook({ title });
+      allPieces.push(nb);
+      showStandaloneNotebookPrompt.set(false);
+      standaloneNotebookTitle.set("");
+      return navigateTo(nb);
+    });
+
+    const createStandaloneNotebookAndContinue = action(() => {
+      const title = standaloneNotebookTitle.get().trim() || "New Notebook";
+      const nb = Notebook({ title });
+      allPieces.push(nb);
+      standaloneNotebookTitle.set("");
+    });
+
+    const cancelStandaloneNotebookPrompt = action(() => {
+      showStandaloneNotebookPrompt.set(false);
+      standaloneNotebookTitle.set("");
+    });
+
+    // New notebook prompt actions
+    const createNotebookFromPrompt = action(() => {
+      const name = newNotebookName.get().trim() || "New Notebook";
+      const actionType = pendingNotebookAction.get();
+      const selected = selectedNoteIndices.get();
+
+      const selectedItems: NotePiece[] = [];
+      const selectedNoteIds: string[] = [];
+
+      for (const idx of selected) {
+        const item = notes[idx];
+        if (item) {
+          selectedItems.push(item);
+          const noteId = (item as any)?.noteId;
+          if (noteId) selectedNoteIds.push(noteId);
+        }
+      }
+
+      const shouldRemove = (n: any) => {
+        if (n?.noteId && selectedNoteIds.includes(n.noteId)) return true;
+        return false;
+      };
+
+      const newNotebook = Notebook({ title: name, notes: selectedItems });
+      allPieces.push(newNotebook);
+
+      // Mark selected items as hidden
+      const allPiecesList = allPieces.get();
+      for (const idx of selected) {
+        const note = notes[idx];
+        const noteId = (note as any)?.noteId;
+        if (noteId) {
+          const noteIdx = allPiecesList.findIndex((p: any) =>
+            p?.noteId === noteId
+          );
+          if (noteIdx >= 0) {
+            allPieces.key(noteIdx).key("isHidden").set(true);
+          }
+        }
+      }
+
+      // For move: remove from existing notebooks
+      if (actionType === "move") {
+        const notebooksList = notebooks;
+        notebooksList.forEach((nb: any) => {
+          const nbName = (nb as any)?.[NAME];
+          if (!nbName) return;
+
+          const nbIdx = allPiecesList.findIndex((p: any) =>
+            (p as any)?.[NAME] === nbName
+          );
+          if (nbIdx < 0) return;
+
+          const nbNotesCell = allPieces.key(nbIdx).key("notes");
+          const nbNotes = nbNotesCell.get() ?? [];
+          const filtered = nbNotes.filter((n: any) => !shouldRemove(n));
+          if (filtered.length !== nbNotes.length) {
+            nbNotesCell.set(filtered);
+          }
+        });
+      }
+
+      selectedNoteIndices.set([]);
+      newNotebookName.set("");
+      pendingNotebookAction.set("");
+      showNewNotebookPrompt.set(false);
+    });
+
+    const cancelNewNotebookPrompt = action(() => {
+      showNewNotebookPrompt.set(false);
+      newNotebookName.set("");
+      pendingNotebookAction.set("");
+      selectedNotebook.set("");
+      selectedMoveNotebook.set("");
+    });
+
+    // Export actions
+    const openExportAllModal = action(() => {
+      const allPiecesArray = [...allPieces.get()];
+      const result = generateExport(
+        allPiecesArray,
+        [...notebooks],
+        allPiecesArray,
+      );
+      exportedMarkdown.set(result.markdown);
+      showExportAllModal.set(true);
+    });
+
+    const closeExportAllModal = action(() => {
+      showExportAllModal.set(false);
+    });
+
+    const exportSelectedNotebooks = action(() => {
+      const selected = selectedNotebookIndices.get();
+
+      const allNotes: {
+        title: string;
+        content: string;
+        notebookName: string;
+      }[] = [];
+      for (const idx of selected) {
+        const nb = notebooks[idx];
+        const cleanName = getCleanNotebookTitle(nb);
+        const nbNotes = (nb as any)?.notes ?? [];
+        for (const note of nbNotes) {
+          if (note?.title !== undefined && note?.content !== undefined) {
+            allNotes.push({
+              title: note.title ?? "Untitled",
+              content: note.content ?? "",
+              notebookName: cleanName,
+            });
+          }
+        }
+      }
+
+      if (allNotes.length > 0) {
+        const lines = allNotes.map((note) => {
+          const escapedTitle = note.title.replace(/"/g, "&quot;");
+          return `${NOTE_START_MARKER} title="${escapedTitle}" notebooks="${note.notebookName}" -->\n\n${note.content}\n\n${NOTE_END_MARKER}`;
+        });
+
+        const timestamp = new Date().toISOString();
+        const header =
+          `<!-- Common Tools Export - ${timestamp} -->\n<!-- Notes: ${allNotes.length}, Notebooks: ${selected.length} -->\n\n`;
+
+        exportNotebooksMarkdown.set(header + lines.join("\n\n"));
+      } else {
+        exportNotebooksMarkdown.set(
+          "<!-- No notes found in selected notebooks -->",
+        );
+      }
+      showExportNotebooksModal.set(true);
+    });
+
+    const closeExportNotebooksModal = action(() => {
+      showExportNotebooksModal.set(false);
+      exportNotebooksMarkdown.set("");
+      selectedNotebookIndices.set([]);
+    });
+
+    // Import actions
+    const openImportModal = action(() => {
+      showImportModal.set(true);
+    });
+
+    const closeImportModal = action(() => {
+      showImportModal.set(false);
+      showPasteSection.set(true);
+    });
+
+    const _hidePasteSection = action(() => {
+      showPasteSection.set(false);
+    });
+
+    // ========================================================================
+    // Import Actions - use centralized helpers at module scope
+    // ========================================================================
+
+    const analyzeImport = action(() => {
+      const markdown = importMarkdown;
+      const result = analyzeImportContent(markdown, [...notes], [...notebooks]);
+      if (!result) return;
+      processImportResult(markdown, result, {
+        allPieces,
+        notebooks: [...notebooks],
+        pendingImportData,
+        detectedDuplicates,
+        showDuplicateModal,
+        showImportModal,
+        showPasteSection,
+        showImportProgressModal,
+        importProgressMessage,
+        importComplete,
+      });
+    });
+
+    const handleImportFileUpload = action(
+      (event: { detail: { files: Array<{ url: string; name: string }> } }) => {
+        const files = event.detail?.files ?? [];
+        if (files.length === 0) return;
+
+        const dataUrl = files[0].url;
+        const base64Part = dataUrl.split(",")[1];
+        if (!base64Part) return;
+
+        const binaryString = atob(base64Part);
+        const bytes = Uint8Array.from(
+          binaryString,
+          (char) => char.charCodeAt(0),
+        );
+        const content = new TextDecoder().decode(bytes);
+
+        const result = analyzeImportContent(content, [...notes], [
+          ...notebooks,
+        ]);
+        if (!result) return;
+        processImportResult(content, result, {
+          allPieces,
+          notebooks: [...notebooks],
+          pendingImportData,
+          detectedDuplicates,
+          showDuplicateModal,
+          showImportModal,
+          showPasteSection,
+          showImportProgressModal,
+          importProgressMessage,
+          importComplete,
+        });
+      },
+    );
+
+    const importSkipDuplicates = action(() => {
+      executePendingImport(true, {
+        allPieces,
+        notebooks: [...notebooks],
+        pendingImportData,
+        detectedDuplicates,
+        showDuplicateModal,
+        showImportModal,
+        showPasteSection,
+        showImportProgressModal,
+        importProgressMessage,
+        importComplete,
+      });
+    });
+
+    const importAllAsCopies = action(() => {
+      executePendingImport(false, {
+        allPieces,
+        notebooks: [...notebooks],
+        pendingImportData,
+        detectedDuplicates,
+        showDuplicateModal,
+        showImportModal,
+        showPasteSection,
+        showImportProgressModal,
+        importProgressMessage,
+        importComplete,
+      });
+    });
+
+    const cancelImport = action(() => {
+      showDuplicateModal.set(false);
+      detectedDuplicates.set([]);
+      pendingImportData.set("");
+    });
+
     // Action: duplicate selected notes
     const doDuplicateSelectedNotes = action(() => {
       const selected = selectedNoteIndices.get();
+      const notesList = notes;
+
       for (const idx of selected) {
-        const original = notes.key(idx);
+        const original = notesList[idx];
         if (original) {
           const newNote = Note({
             title: ((original as any).title ?? "Note") + " (Copy)",
             content: (original as any).content ?? "",
             noteId: generateId(),
           });
-          allPieces.push(newNote as any);
+          allPieces.push(newNote);
         }
       }
       selectedNoteIndices.set([]);
@@ -1893,18 +1856,13 @@ const NotesImportExport = pattern<Input, Output>(
             <ct-hstack gap="2">
               <ct-button
                 variant="ghost"
-                onClick={openImportModal({ showImportModal })}
+                onClick={openImportModal}
               >
                 Import
               </ct-button>
               <ct-button
                 variant="ghost"
-                onClick={openExportAllModal({
-                  showExportAllModal,
-                  allPieces,
-                  notebooks,
-                  exportedMarkdown,
-                })}
+                onClick={openExportAllModal}
               >
                 Export All
               </ct-button>
@@ -1929,7 +1887,7 @@ const NotesImportExport = pattern<Input, Output>(
                     <ct-button
                       size="sm"
                       variant="ghost"
-                      onClick={createNote({ allPieces })}
+                      onClick={createNote}
                     >
                       + New Note
                     </ct-button>
@@ -1948,7 +1906,7 @@ const NotesImportExport = pattern<Input, Output>(
                             textAlign: "center",
                             cursor: "pointer",
                           }}
-                          onClick={toggleAllNotesVisibility({ notes })}
+                          onClick={toggleAllNotesVisibility}
                         >
                           Visible
                         </th>
@@ -2058,8 +2016,8 @@ const NotesImportExport = pattern<Input, Output>(
                         )}
                         onct-change={computed(() =>
                           selectedNoteIndices.get().length === notes.length
-                            ? deselectAllNotes({ selectedNoteIndices })
-                            : selectAllNotes({ notes, selectedNoteIndices })
+                            ? deselectAllNotes
+                            : selectAllNotes
                         )}
                       />
                     </div>
@@ -2088,28 +2046,14 @@ const NotesImportExport = pattern<Input, Output>(
                       items={notebookAddItems}
                       placeholder="Add to..."
                       style={{ width: "140px" }}
-                      onChange={addToNotebook({
-                        notebooks,
-                        notes,
-                        selectedNoteIndices,
-                        selectedNotebook,
-                        showNewNotebookPrompt,
-                        pendingNotebookAction,
-                      })}
+                      onChange={addToNotebook}
                     />
                     <ct-select
                       $value={selectedMoveNotebook}
                       items={notebookMoveItems}
                       placeholder="Move to..."
                       style={{ width: "140px" }}
-                      onChange={moveToNotebook({
-                        notebooks,
-                        notes,
-                        selectedNoteIndices,
-                        selectedMoveNotebook,
-                        showNewNotebookPrompt,
-                        pendingNotebookAction,
-                      })}
+                      onChange={moveToNotebook}
                     />
                     <ct-button
                       size="sm"
@@ -2121,12 +2065,7 @@ const NotesImportExport = pattern<Input, Output>(
                     <ct-button
                       size="sm"
                       variant="ghost"
-                      onClick={deleteSelectedNotes({
-                        notes,
-                        selectedNoteIndices,
-                        allPieces,
-                        notebooks,
-                      })}
+                      onClick={deleteSelectedNotes}
                       style={{ color: "var(--ct-color-danger, #dc3545)" }}
                     >
                       Delete
@@ -2151,9 +2090,7 @@ const NotesImportExport = pattern<Input, Output>(
                     <ct-button
                       size="sm"
                       variant="ghost"
-                      onClick={showStandaloneNotebookModal({
-                        showStandaloneNotebookPrompt,
-                      })}
+                      onClick={showStandaloneNotebookModal}
                     >
                       + New Notebook
                     </ct-button>
@@ -2171,7 +2108,7 @@ const NotesImportExport = pattern<Input, Output>(
                             textAlign: "center",
                             cursor: "pointer",
                           }}
-                          onClick={toggleAllNotebooksVisibility({ notebooks })}
+                          onClick={toggleAllNotebooksVisibility}
                         >
                           Visible
                         </th>
@@ -2266,11 +2203,8 @@ const NotesImportExport = pattern<Input, Output>(
                         onct-change={computed(() =>
                           selectedNotebookIndices.get().length ===
                               notebooks.length
-                            ? deselectAllNotebooks({ selectedNotebookIndices })
-                            : selectAllNotebooks({
-                              notebooks,
-                              selectedNotebookIndices,
-                            })
+                            ? deselectAllNotebooks
+                            : selectAllNotebooks
                         )}
                       />
                     </div>
@@ -2297,44 +2231,28 @@ const NotesImportExport = pattern<Input, Output>(
                     <ct-button
                       size="sm"
                       variant="ghost"
-                      onClick={exportSelectedNotebooks({
-                        notebooks,
-                        selectedNotebookIndices,
-                        showExportNotebooksModal,
-                        exportNotebooksMarkdown,
-                      })}
+                      onClick={exportSelectedNotebooks}
                     >
                       Export
                     </ct-button>
                     <ct-button
                       size="sm"
                       variant="ghost"
-                      onClick={cloneSelectedNotebooks({
-                        notebooks,
-                        selectedNotebookIndices,
-                        allPieces,
-                      })}
+                      onClick={cloneSelectedNotebooks}
                     >
                       Clone
                     </ct-button>
                     <ct-button
                       size="sm"
                       variant="ghost"
-                      onClick={duplicateSelectedNotebooks({
-                        notebooks,
-                        selectedNotebookIndices,
-                        allPieces,
-                      })}
+                      onClick={duplicateSelectedNotebooks}
                     >
                       Duplicate
                     </ct-button>
                     <ct-button
                       size="sm"
                       variant="ghost"
-                      onClick={confirmDeleteNotebooks({
-                        selectedNotebookIndices,
-                        showDeleteNotebookModal,
-                      })}
+                      onClick={confirmDeleteNotebooks}
                       style={{ color: "var(--ct-color-danger, #dc3545)" }}
                     >
                       Delete
@@ -2376,7 +2294,7 @@ const NotesImportExport = pattern<Input, Output>(
             >
               <ct-button
                 variant="ghost"
-                onClick={closeExportAllModal({ showExportAllModal })}
+                onClick={closeExportAllModal}
               >
                 Cancel
               </ct-button>
@@ -2420,11 +2338,7 @@ const NotesImportExport = pattern<Input, Output>(
             >
               <ct-button
                 variant="ghost"
-                onClick={closeExportNotebooksModal({
-                  showExportNotebooksModal,
-                  exportNotebooksMarkdown,
-                  selectedNotebookIndices,
-                })}
+                onClick={closeExportNotebooksModal}
               >
                 Cancel
               </ct-button>
@@ -2458,20 +2372,7 @@ const NotesImportExport = pattern<Input, Output>(
                 accept=".md,.txt,.markdown"
                 buttonText="Upload File"
                 showPreview={false}
-                onct-change={handleImportFileUpload({
-                  importMarkdown,
-                  notes,
-                  allPieces,
-                  notebooks,
-                  showDuplicateModal,
-                  detectedDuplicates,
-                  pendingImportData,
-                  showImportModal,
-                  showImportProgressModal,
-                  importProgressMessage,
-                  importComplete,
-                  showPasteSection,
-                })}
+                onct-change={handleImportFileUpload}
               />
               <ct-vstack
                 gap="2"
@@ -2503,30 +2404,13 @@ const NotesImportExport = pattern<Input, Output>(
             >
               <ct-button
                 variant="ghost"
-                onClick={closeImportModal({
-                  showImportModal,
-                  importMarkdown,
-                  showPasteSection,
-                })}
+                onClick={closeImportModal}
               >
                 Cancel
               </ct-button>
               <ct-button
                 variant="primary"
-                onClick={analyzeImport({
-                  importMarkdown,
-                  notes,
-                  allPieces,
-                  notebooks,
-                  showDuplicateModal,
-                  detectedDuplicates,
-                  pendingImportData,
-                  showImportModal,
-                  showImportProgressModal,
-                  importProgressMessage,
-                  importComplete,
-                  showPasteSection,
-                })}
+                onClick={analyzeImport}
               >
                 Import
               </ct-button>
@@ -2565,43 +2449,19 @@ const NotesImportExport = pattern<Input, Output>(
             >
               <ct-button
                 variant="ghost"
-                onClick={cancelImport({
-                  showDuplicateModal,
-                  detectedDuplicates,
-                  pendingImportData,
-                })}
+                onClick={cancelImport}
               >
                 Cancel
               </ct-button>
               <ct-button
                 variant="ghost"
-                onClick={importSkipDuplicates({
-                  pendingImportData,
-                  allPieces,
-                  notebooks,
-                  detectedDuplicates,
-                  showDuplicateModal,
-                  importMarkdown,
-                  showImportProgressModal,
-                  importProgressMessage,
-                  importComplete,
-                })}
+                onClick={importSkipDuplicates}
               >
                 Skip Duplicates
               </ct-button>
               <ct-button
                 variant="primary"
-                onClick={importAllAsCopies({
-                  pendingImportData,
-                  allPieces,
-                  notebooks,
-                  showDuplicateModal,
-                  detectedDuplicates,
-                  importMarkdown,
-                  showImportProgressModal,
-                  importProgressMessage,
-                  importComplete,
-                })}
+                onClick={importAllAsCopies}
               >
                 Import as Copies
               </ct-button>
@@ -2658,27 +2518,13 @@ const NotesImportExport = pattern<Input, Output>(
             >
               <ct-button
                 variant="ghost"
-                onClick={cancelNewNotebookPrompt({
-                  showNewNotebookPrompt,
-                  newNotebookName,
-                  pendingNotebookAction,
-                  selectedNotebook,
-                  selectedMoveNotebook,
-                })}
+                onClick={cancelNewNotebookPrompt}
               >
                 Cancel
               </ct-button>
               <ct-button
                 variant="primary"
-                onClick={createNotebookFromPrompt({
-                  newNotebookName,
-                  showNewNotebookPrompt,
-                  pendingNotebookAction,
-                  selectedNoteIndices,
-                  notes,
-                  allPieces,
-                  notebooks,
-                })}
+                onClick={createNotebookFromPrompt}
               >
                 Create
               </ct-button>
@@ -2704,29 +2550,19 @@ const NotesImportExport = pattern<Input, Output>(
             >
               <ct-button
                 variant="ghost"
-                onClick={cancelStandaloneNotebookPrompt({
-                  showStandaloneNotebookPrompt,
-                  standaloneNotebookTitle,
-                })}
+                onClick={cancelStandaloneNotebookPrompt}
               >
                 Cancel
               </ct-button>
               <ct-button
                 variant="ghost"
-                onClick={createStandaloneNotebookAndContinue({
-                  standaloneNotebookTitle,
-                  allPieces,
-                })}
+                onClick={createStandaloneNotebookAndContinue}
               >
                 Create Another
               </ct-button>
               <ct-button
                 variant="primary"
-                onClick={createStandaloneNotebookAndOpen({
-                  standaloneNotebookTitle,
-                  showStandaloneNotebookPrompt,
-                  allPieces,
-                })}
+                onClick={createStandaloneNotebookAndOpen}
               >
                 Create
               </ct-button>
@@ -2754,29 +2590,19 @@ const NotesImportExport = pattern<Input, Output>(
             >
               <ct-button
                 variant="ghost"
-                onClick={cancelDeleteNotebooks({ showDeleteNotebookModal })}
+                onClick={cancelDeleteNotebooks}
               >
                 Cancel
               </ct-button>
               <ct-button
                 variant="ghost"
-                onClick={deleteNotebooksOnly({
-                  notebooks,
-                  selectedNotebookIndices,
-                  allPieces,
-                  showDeleteNotebookModal,
-                })}
+                onClick={deleteNotebooksOnly}
               >
                 Keep Notes
               </ct-button>
               <ct-button
                 variant="primary"
-                onClick={deleteNotebooksAndNotes({
-                  notebooks,
-                  selectedNotebookIndices,
-                  allPieces,
-                  showDeleteNotebookModal,
-                })}
+                onClick={deleteNotebooksAndNotes}
                 style={{ background: "var(--ct-color-danger, #dc3545)" }}
               >
                 Delete All
@@ -2791,6 +2617,32 @@ const NotesImportExport = pattern<Input, Output>(
       noteCount,
       notebookCount,
       mentionable: notes,
+
+      // Observable state for testing
+      notes,
+      notebooks,
+      detectedDuplicates: computed(() => detectedDuplicates.get()),
+      showDuplicateModal: computed(() => showDuplicateModal.get()),
+      showImportModal: computed(() => showImportModal.get()),
+      showImportProgressModal: computed(() => showImportProgressModal.get()),
+      importComplete: computed(() => importComplete.get()),
+      selectedNoteIndices: computed(() => selectedNoteIndices.get()),
+      selectedNotebookIndices: computed(() => selectedNotebookIndices.get()),
+
+      // Actions for testing
+      analyzeImport,
+      openImportModal,
+      closeImportModal,
+      importSkipDuplicates,
+      importAllAsCopies,
+      cancelImport,
+      createNote,
+      selectAllNotes,
+      deselectAllNotes,
+      selectAllNotebooks,
+      deselectAllNotebooks,
+      openExportAllModal,
+      closeExportAllModal,
     };
   },
 );
