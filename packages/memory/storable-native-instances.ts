@@ -391,30 +391,30 @@ export class FrozenDate extends Date {
     Object.freeze(this);
   }
 
-  private _throw(): never {
+  #throw(): never {
     throw new TypeError("Cannot mutate a FrozenDate");
   }
 
   override setTime(_time: number): number {
-    this._throw();
+    this.#throw();
   }
   override setMilliseconds(_ms: number): number {
-    this._throw();
+    this.#throw();
   }
   override setUTCMilliseconds(_ms: number): number {
-    this._throw();
+    this.#throw();
   }
   override setSeconds(_sec: number, _ms?: number): number {
-    this._throw();
+    this.#throw();
   }
   override setUTCSeconds(_sec: number, _ms?: number): number {
-    this._throw();
+    this.#throw();
   }
   override setMinutes(_min: number, _sec?: number, _ms?: number): number {
-    this._throw();
+    this.#throw();
   }
   override setUTCMinutes(_min: number, _sec?: number, _ms?: number): number {
-    this._throw();
+    this.#throw();
   }
   override setHours(
     _hours: number,
@@ -422,7 +422,7 @@ export class FrozenDate extends Date {
     _sec?: number,
     _ms?: number,
   ): number {
-    this._throw();
+    this.#throw();
   }
   override setUTCHours(
     _hours: number,
@@ -430,33 +430,33 @@ export class FrozenDate extends Date {
     _sec?: number,
     _ms?: number,
   ): number {
-    this._throw();
+    this.#throw();
   }
   override setDate(_date: number): number {
-    this._throw();
+    this.#throw();
   }
   override setUTCDate(_date: number): number {
-    this._throw();
+    this.#throw();
   }
   override setMonth(_month: number, _date?: number): number {
-    this._throw();
+    this.#throw();
   }
   override setUTCMonth(_month: number, _date?: number): number {
-    this._throw();
+    this.#throw();
   }
   override setFullYear(
     _year: number,
     _month?: number,
     _date?: number,
   ): number {
-    this._throw();
+    this.#throw();
   }
   override setUTCFullYear(
     _year: number,
     _month?: number,
     _date?: number,
   ): number {
-    this._throw();
+    this.#throw();
   }
 }
 
