@@ -23,6 +23,7 @@ export * from "./components/ct-heading/index.ts";
 export * from "./components/ct-alert/index.ts";
 export * from "./components/ct-autocomplete/index.ts";
 export * from "./components/ct-autolayout/index.ts";
+export * from "./components/ct-autostart/index.ts";
 export * from "./components/ct-aspect-ratio/index.ts";
 export * from "./components/ct-audio-visualizer/index.ts";
 export * from "./components/ct-badge/index.ts";

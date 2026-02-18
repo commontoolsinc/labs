@@ -2876,6 +2876,7 @@ interface CTThemeElement extends CTHTMLElement {}
 interface CTCodeEditorElement extends CTHTMLElement {}
 interface CTCodeEditorLegacyElement extends CTHTMLElement {}
 interface CTScreenElement extends CTHTMLElement {}
+interface CTAutostartElement extends CTHTMLElement {}
 interface CTAutoLayoutElement extends CTHTMLElement {}
 interface CTButtonElement extends CTHTMLElement {}
 interface CTCopyButtonElement extends CTHTMLElement {}
@@ -3718,6 +3719,10 @@ interface CTCodeEditorAttributes<T> extends CTHTMLAttributes<T> {
   "onct-blur"?: any;
   "onbacklink-click"?: any;
   "onbacklink-create"?: any;
+}
+
+interface CTAutostartAttributes<T> extends CTHTMLAttributes<T> {
+  "onstart"?: any;
 }
 
 interface CTAutoLayoutAttributes<T> extends CTHTMLAttributes<T> {
@@ -4568,6 +4573,10 @@ declare global {
       "ct-screen": CTDOM.DetailedHTMLProps<
         CTHTMLAttributes<CTScreenElement>,
         CTScreenElement
+      >;
+      "ct-autostart": CTDOM.DetailedHTMLProps<
+        CTAutostartAttributes<CTAutostartElement>,
+        CTAutostartElement
       >;
       "ct-autolayout": CTDOM.DetailedHTMLProps<
         CTAutoLayoutAttributes<CTAutoLayoutElement>,

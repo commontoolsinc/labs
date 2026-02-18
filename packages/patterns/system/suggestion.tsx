@@ -106,6 +106,9 @@ Use the user context above to personalize your suggestions when relevant.`;
   // reconciler to re-mount the DOM, losing inner subscriptions).
   const freeformUI = (
     <div style="display:contents">
+      <ct-autostart
+        onstart={triggerGeneration({ addMessage, situation })}
+      />
       <ct-cell-context $cell={llmResult}>
         {ifElse(
           computed(() => !!llmResult),
@@ -113,12 +116,7 @@ Use the user context above to personalize your suggestions when relevant.`;
           ifElse(
             computed(() => !!pending),
             <span>Searching...</span>,
-            <ct-button
-              variant="primary"
-              onClick={triggerGeneration({ addMessage, situation })}
-            >
-              Generate Suggestion
-            </ct-button>,
+            undefined,
           ),
         )}
       </ct-cell-context>
