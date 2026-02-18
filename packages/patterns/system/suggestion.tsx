@@ -68,30 +68,32 @@ const askUserHandler = handler<
 });
 
 const answerQuestion = handler<
-  { detail: { message: string } },
+  { detail: { answer: string } },
   {
     pendingQuestion: Writable<{ question: string; options?: string[] } | null>;
     dialogMessages: Writable<BuiltInLLMMessage[]>;
     suggestionMessages: any;
     addMessage: Stream<BuiltInLLMMessage>;
   }
->((
-  event,
-  { pendingQuestion, dialogMessages, suggestionMessages, addMessage },
-) => {
-  // Same as sendFollowUp — pass raw messages through.
-  if (dialogMessages.get().length === 0) {
-    const msgs = suggestionMessages;
-    if (msgs && msgs.length > 0) {
-      dialogMessages.set(msgs);
+>(
+  (
+    event,
+    { pendingQuestion, dialogMessages, suggestionMessages, addMessage },
+  ) => {
+    // Same as sendFollowUp — pass raw messages through.
+    if (dialogMessages.get().length === 0) {
+      const msgs = suggestionMessages;
+      if (msgs && msgs.length > 0) {
+        dialogMessages.set(msgs);
+      }
     }
-  }
-  pendingQuestion.set(null);
-  addMessage.send({
-    role: "user",
-    content: [{ type: "text" as const, text: event.detail.message }],
-  });
-});
+    pendingQuestion.set(null);
+    addMessage.send({
+      role: "user",
+      content: [{ type: "text" as const, text: event.detail.answer }],
+    });
+  },
+);
 
 export default pattern<
   {
@@ -150,7 +152,10 @@ Use the user context above to personalize your suggestions when relevant.`;
   });
   const dialogMessages = Writable.of<BuiltInLLMMessage[]>([]);
   const pendingQuestion = Writable.of<
-    { question: string; options?: string[] } | null
+    {
+      question: string;
+      options?: string[];
+    } | null
   >(null);
 
   const dialogSystemPrompt = computed(() => {
@@ -158,15 +163,17 @@ Use the user context above to personalize your suggestions when relevant.`;
     return `You are helping the user refine a result. You previously found and launched a pattern for them.${profileCtx}
 
 Tools:
-- fetchAndRunPattern({ url, args }): Fetch a pattern from a URL and run it.
+- fetchAndRunPattern({ url, args }): Fetch a pattern from a URL and run it. Returns { result: { "@link": "..." }, ... }.
 - listPatternIndex(): List all available patterns with their URLs.
-- finalResult({ cell }): Present a result to the user. Pass the cell from fetchAndRunPattern.
+- finalResult({ cell }): Present a result to the user. Pass the result @link from fetchAndRunPattern's output.
 - askUser({ question, options? }): Ask the user a clarifying question. STOP after calling this.
 
 When the user asks to change or improve the result:
 1. Call listPatternIndex() to find the right pattern URL
-2. Call fetchAndRunPattern({ url: "<pattern-url>", args: {} }) to launch it
-3. Call finalResult({ cell }) with the resulting cell to display it`;
+2. Call fetchAndRunPattern({ url, args: {} }) to launch it
+3. The response will contain a "result" field with an @link — pass that EXACT @link as the "cell" to finalResult
+   Example: fetchAndRunPattern returns { "result": { "@link": "/of:abc/..." } }
+   Then call: finalResult({ "cell": { "@link": "/of:abc/..." } })`;
   });
 
   // NOTE: Intentionally NOT passing `context` here. The context cells contain
@@ -179,8 +186,18 @@ When the user asks to change or improve the result:
     tools: {
       fetchAndRunPattern: patternTool(fetchAndRunPattern),
       listPatternIndex: patternTool(listPatternIndex),
-      askUser: { handler: askUserHandler({ pendingQuestion }) },
-      finalResult: { handler: presentResult({ activeResult }) },
+      askUser: {
+        handler: askUserHandler({ pendingQuestion }),
+        description:
+          "Ask the user a clarifying question. STOP after calling this.",
+      },
+      finalResult: {
+        handler: presentResult({ activeResult }),
+        description:
+          "Present a result to the user. Pass the result @link from fetchAndRunPattern output as the cell parameter. " +
+          'Example: if fetchAndRunPattern returns { "result": { "@link": "/of:abc/..." } }, ' +
+          'call finalResult({ "cell": { "@link": "/of:abc/..." } })',
+      },
     },
     model: "anthropic:claude-sonnet-4-5",
     builtinTools: false,
@@ -222,28 +239,19 @@ When the user asks to change or improve the result:
       )}
       {ifElse(
         computed(() => pendingQuestion.get() !== null),
-        <div>
-          <ct-card>
-            <p>{computed(() => pendingQuestion.get()?.question ?? "")}</p>
-            {computed(() => {
-              const q = pendingQuestion.get();
-              if (!q?.options?.length) return "";
-              return q.options.join(" | ");
-            })}
-          </ct-card>
-          <ct-message-input
-            placeholder="Type your answer..."
-            onct-send={answerQuestion({
-              pendingQuestion,
-              dialogMessages,
-              suggestionMessages,
-              addMessage: dialog.addMessage,
-            })}
-          />
-        </div>,
+        <ct-question
+          question={computed(() => pendingQuestion.get()?.question ?? "")}
+          options={computed(() => pendingQuestion.get()?.options ?? [])}
+          onct-answer={answerQuestion({
+            pendingQuestion,
+            dialogMessages,
+            suggestionMessages,
+            addMessage: dialog.addMessage,
+          })}
+        />,
         ifElse(
-          computed(() =>
-            !suggestion.pending && suggestion.result !== undefined
+          computed(
+            () => !suggestion.pending && suggestion.result !== undefined,
           ),
           <ct-message-input
             placeholder="Refine this result..."
