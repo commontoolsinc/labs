@@ -14,6 +14,7 @@ import {
 } from "commontools";
 import Chatbot from "../chatbot.tsx";
 import {
+  bash,
   calculator,
   fetchAndRunPattern,
   listPatternIndex,
@@ -93,6 +94,10 @@ export default pattern<OmniboxFABInput>(
       wish<MentionablePiece[]>({ query: "#mentionable" }).result;
     const recentPieces = wish<MentionablePiece[]>({ query: "#recent" }).result;
 
+    const sandboxId = Writable.of(
+      `omnibot-${Math.random().toString(36).slice(2, 10)}`,
+    );
+
     const profile = wish<string>({ query: "#profile" });
 
     const profileContext = computed(() => {
@@ -112,6 +117,7 @@ Tool usage priority:
 - Attach relevant items to conversation after instantiation/retrieval if they support ongoing tasks
 - Remove attachments when no longer relevant
 - Search web only as last resort when nothing exists in the space
+- Use bash to run shell commands in a persistent Linux sandbox (Ubuntu). Installed packages and files persist across calls.
 
 Be matter-of-fact. Prefer action to explanation.`;
     });
@@ -135,6 +141,7 @@ Be matter-of-fact. Prefer action to explanation.`;
         listMentionable: patternTool(listMentionable, { mentionable }),
         listRecent: patternTool(listRecent, { recentPieces }),
         updateProfile: patternTool(updateProfile),
+        bash: patternTool(bash, { sandboxId }),
       },
     });
 

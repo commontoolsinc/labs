@@ -149,6 +149,14 @@ const EnvSchema = z.object({
   EXPERIMENTAL_CANONICAL_HASHING: z.string().default("false").transform((
     v,
   ) => v === "true"),
+
+  // ===========================================================================
+  // Sandbox Service
+  //   * /routes/sandbox/exec
+  // ===========================================================================
+  SANDBOX_SERVICE_URL: z.string().default(
+    "https://sandbox.stage.commontools.dev",
+  ),
 });
 
 export type env = z.infer<typeof EnvSchema>;
