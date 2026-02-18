@@ -1,46 +1,48 @@
 import * as __ctHelpers from "commontools";
 import { cell, derive, pattern, patternTool, type PatternToolResult } from "commontools";
-const multiplier = cell(2, {
-    type: "number"
-} as const satisfies __ctHelpers.JSONSchema);
-const offset = cell(10, {
-    type: "number"
+const content = cell("Hello world\nGoodbye world", {
+    type: "string"
 } as const satisfies __ctHelpers.JSONSchema);
 type Output = {
-    tool: PatternToolResult<{
-        offset: number;
+    grepTool: PatternToolResult<{
+        content: string;
     }>;
 };
-// Test: patternTool with an existing extraParam, and a new capture
-// The function has { value: number, offset: number } as input type
-// We provide offset via extraParams, and the transformer should capture multiplier
 export default pattern(() => {
-    const tool = patternTool(({ value, offset, multiplier }: {
-        value: number;
-        offset: number;
-        multiplier: unknown;
+    const grepTool = patternTool(({ query, content }: {
+        query: string;
+        content: string;
     }) => {
-        return derive({
+        return __ctHelpers.derive({
             type: "object",
             properties: {
-                value: {
-                    type: "number"
+                input: {
+                    type: "object",
+                    properties: {
+                        query: {
+                            type: "string"
+                        }
+                    },
+                    required: ["query"]
                 },
-                offset: {
-                    type: "number"
+                content: {
+                    type: "string"
                 }
             },
-            required: ["value", "offset"]
+            required: ["input", "content"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { value, offset }, ({ value, offset }) => {
-            return value * multiplier.get() + offset;
+            type: "array",
+            items: {
+                type: "string"
+            }
+        } as const satisfies __ctHelpers.JSONSchema, {
+            input: { query },
+            content: content
+        }, ({ input: { query }, content }) => {
+            return content.split("\n").filter((c: string) => c.includes(query));
         });
-    }, {
-        multiplier: multiplier,
-        offset
-    });
-    return { tool };
+    }, { content });
+    return { grepTool };
 }, {
     type: "object",
     properties: {},
@@ -48,28 +50,28 @@ export default pattern(() => {
 } as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
-        tool: {
+        grepTool: {
             type: "object",
             properties: {
                 pattern: {
-                    $ref: "#/$defs/Recipe"
+                    $ref: "#/$defs/Pattern"
                 },
                 extraParams: {
                     type: "object",
                     properties: {
-                        offset: {
-                            type: "number"
+                        content: {
+                            type: "string"
                         }
                     },
-                    required: ["offset"]
+                    required: ["content"]
                 }
             },
             required: ["pattern", "extraParams"]
         }
     },
-    required: ["tool"],
+    required: ["grepTool"],
     $defs: {
-        Recipe: {
+        Pattern: {
             type: "object",
             properties: {
                 argumentSchema: true,

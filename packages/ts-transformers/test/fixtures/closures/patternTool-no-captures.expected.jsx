@@ -1,48 +1,35 @@
 import * as __ctHelpers from "commontools";
-import { cell, derive, pattern, patternTool, type PatternToolResult } from "commontools";
-const content = cell("Hello world\nGoodbye world", {
-    type: "string"
-} as const satisfies __ctHelpers.JSONSchema);
+import { derive, pattern, patternTool, type PatternToolResult } from "commontools";
 type Output = {
-    grepTool: PatternToolResult<{
-        content: string;
-    }>;
+    tool: PatternToolResult<Record<string, never>>;
 };
+// No external captures - should not be transformed by PatternToolStrategy
 export default pattern(() => {
-    const grepTool = patternTool(({ query, content }: {
+    const tool = patternTool(({ query, content }: {
         query: string;
         content: string;
     }) => {
-        return __ctHelpers.derive({
+        return derive({
             type: "object",
             properties: {
-                input: {
-                    type: "object",
-                    properties: {
-                        query: {
-                            type: "string"
-                        }
-                    },
-                    required: ["query"]
+                query: {
+                    type: "string"
                 },
                 content: {
                     type: "string"
                 }
             },
-            required: ["input", "content"]
+            required: ["query", "content"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "array",
             items: {
                 type: "string"
             }
-        } as const satisfies __ctHelpers.JSONSchema, {
-            input: { query },
-            content: content
-        }, ({ input: { query }, content }) => {
+        } as const satisfies __ctHelpers.JSONSchema, { query, content }, ({ query, content }) => {
             return content.split("\n").filter((c: string) => c.includes(query));
         });
-    }, { content });
-    return { grepTool };
+    });
+    return { tool };
 }, {
     type: "object",
     properties: {},
@@ -50,28 +37,24 @@ export default pattern(() => {
 } as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
-        grepTool: {
+        tool: {
             type: "object",
             properties: {
                 pattern: {
-                    $ref: "#/$defs/Recipe"
+                    $ref: "#/$defs/Pattern"
                 },
                 extraParams: {
                     type: "object",
-                    properties: {
-                        content: {
-                            type: "string"
-                        }
-                    },
-                    required: ["content"]
+                    properties: {},
+                    additionalProperties: false
                 }
             },
             required: ["pattern", "extraParams"]
         }
     },
-    required: ["grepTool"],
+    required: ["tool"],
     $defs: {
-        Recipe: {
+        Pattern: {
             type: "object",
             properties: {
                 argumentSchema: true,

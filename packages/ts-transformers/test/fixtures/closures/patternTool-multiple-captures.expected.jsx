@@ -44,7 +44,7 @@ export default pattern(() => {
             type: "object",
             properties: {
                 pattern: {
-                    $ref: "#/$defs/Recipe"
+                    $ref: "#/$defs/Pattern"
                 },
                 extraParams: {
                     type: "object",
@@ -57,7 +57,7 @@ export default pattern(() => {
     },
     required: ["tool"],
     $defs: {
-        Recipe: {
+        Pattern: {
             type: "object",
             properties: {
                 argumentSchema: true,
