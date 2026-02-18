@@ -3,7 +3,7 @@
  * Test Pattern: GoogleAuthManager
  *
  * Tests the GoogleAuthManager pattern behavior:
- * - Initial state (loading/not-found when no auth exists)
+ * - Initial state (loading when no auth exists)
  * - Helper computed values (isReady, currentEmail, currentState)
  * - AuthInfo structure
  *
@@ -40,15 +40,15 @@ export default pattern(() => {
   // Assertions - Initial State
   // ==========================================================================
 
-  // When no auth pieces exist, state should be loading or not-found
+  // When no auth pieces exist, state should be loading
   const assert_default_not_ready = computed(() =>
     authDefault.isReady === false
   );
 
   const assert_default_state_initial = computed(() => {
     const state = authDefault.currentState;
-    // Initial state is either "loading" (wish in progress) or "not-found" (no matches)
-    return state === "loading" || state === "not-found";
+    // Initial state is "loading" (wish in progress or no matches)
+    return state === "loading";
   });
 
   const assert_default_auth_null = computed(() => authDefault.auth === null);

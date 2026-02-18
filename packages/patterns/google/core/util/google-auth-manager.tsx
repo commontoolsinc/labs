@@ -79,9 +79,7 @@ export type ScopeKey = keyof typeof SCOPE_MAP;
  * Each state maps to specific UI and behavior.
  */
 export type AuthState =
-  | "loading" // Wish in progress
-  | "selecting" // Multiple matches, showing picker
-  | "not-found" // No matching auth favorited
+  | "loading" // Wish in progress or no auth found
   | "needs-login" // Auth piece found but user not signed in
   | "missing-scopes" // Authenticated but missing required scopes
   | "token-expired" // Token has expired
@@ -113,7 +111,6 @@ export interface AuthInfo {
   statusText: string;
   piece: unknown;
   userChip: unknown;
-  pieceUI: unknown;
 }
 
 /** Account type for multi-account support */
@@ -152,8 +149,6 @@ interface GoogleAuthPiece {
 // Status colors
 const STATUS_COLORS: Record<AuthState, string> = {
   loading: "var(--ct-color-yellow-500, #eab308)",
-  selecting: "var(--ct-color-blue-500, #3b82f6)",
-  "not-found": "var(--ct-color-red-500, #ef4444)",
   "needs-login": "var(--ct-color-red-500, #ef4444)",
   "missing-scopes": "var(--ct-color-orange-500, #f97316)",
   "token-expired": "var(--ct-color-red-500, #ef4444)",
@@ -163,8 +158,6 @@ const STATUS_COLORS: Record<AuthState, string> = {
 // Status messages
 const STATUS_MESSAGES: Record<AuthState, string> = {
   loading: "Loading auth...",
-  selecting: "Select an account",
-  "not-found": "No Google Auth found - please create one",
   "needs-login": "Please sign in to your Google Auth",
   "missing-scopes": "Additional permissions needed",
   "token-expired": "Session expired - please re-authenticate",
@@ -195,6 +188,14 @@ function formatTimeRemaining(ms: number | null): string {
 }
 
 // =============================================================================
+// HELPERS
+// =============================================================================
+
+function debugLog(enabled: boolean, ...args: unknown[]) {
+  if (enabled) console.log("[GoogleAuth]", ...args);
+}
+
+// =============================================================================
 // MAIN PATTERN
 // =============================================================================
 
@@ -202,7 +203,7 @@ export const GoogleAuthManager = pattern<
   GoogleAuthManagerInput,
   GoogleAuthManagerOutput
 >(
-  ({ requiredScopes, accountType }) => {
+  ({ requiredScopes, accountType, debugMode }) => {
     // ========================================================================
     // WISH SETUP - Writable tag with accountType sync
     // ========================================================================
@@ -238,7 +239,9 @@ export const GoogleAuthManager = pattern<
     // Token expiry
     const isTokenExpired = computed(() => {
       const expiresAt = auth?.expiresAt ?? 0;
-      return expiresAt > 0 && expiresAt < Date.now();
+      const value = expiresAt > 0 && expiresAt < Date.now();
+      debugLog(debugMode as boolean, "isTokenExpired:", value);
+      return value;
     });
 
     const tokenTimeRemaining = computed((): number | null => {
@@ -262,9 +265,11 @@ export const GoogleAuthManager = pattern<
     // Scope verification
     const missingScopes = computed((): ScopeKey[] => {
       const granted: string[] = (auth?.scope ?? []) as string[];
-      return (requiredScopes as ScopeKey[]).filter(
+      const value = (requiredScopes as ScopeKey[]).filter(
         (key) => !granted.includes(SCOPE_MAP[key]),
       );
+      debugLog(debugMode as boolean, "missingScopes:", value);
+      return value;
     });
     const hasRequiredScopes = computed(
       () => (missingScopes as ScopeKey[]).length === 0,
@@ -276,18 +281,23 @@ export const GoogleAuthManager = pattern<
 
     // State machine
     const currentState = computed((): AuthState => {
-      if (!hasAuth) return "loading";
-      if (!hasToken || !hasEmail) return "needs-login";
-      if (!hasRequiredScopes) return "missing-scopes";
-      if (isTokenExpired) return "token-expired";
-      return "ready";
+      let value: AuthState;
+      if (!hasAuth) value = "loading";
+      else if (!hasToken || !hasEmail) value = "needs-login";
+      else if (!hasRequiredScopes) value = "missing-scopes";
+      else if (isTokenExpired) value = "token-expired";
+      else value = "ready";
+      debugLog(debugMode as boolean, "state:", value);
+      return value;
     });
 
     // isReady computed directly from booleans (matches minimal version pattern)
-    const isReady = computed(
-      () => hasToken && !isTokenExpired && hasRequiredScopes,
-    );
-    const currentEmail = computed(() => (auth?.user?.email ?? "") as string);
+    const isReady = computed(() => {
+      const value = hasToken && !isTokenExpired && hasRequiredScopes;
+      debugLog(debugMode as boolean, "isReady:", value);
+      return value;
+    });
+    const currentEmail = computed(() => auth?.user?.email ?? "");
 
     const statusDotColor = computed(
       () => STATUS_COLORS[currentState as AuthState] ?? STATUS_COLORS.loading,
@@ -308,22 +318,21 @@ export const GoogleAuthManager = pattern<
     // Assemble authInfo from sub-computeds
     const authInfo = computed((): AuthInfo => ({
       state: currentState as AuthState,
-      auth: (auth ?? null) as Auth | null,
+      auth: auth ?? null,
       authCell: auth,
-      email: (currentEmail ?? "") as string,
+      email: currentEmail ?? "",
       hasRequiredScopes: hasRequiredScopes as boolean,
       grantedScopes: ((auth?.scope ?? []) as string[]).slice(),
       missingScopes: Array.from(missingScopes as ScopeKey[]),
-      tokenExpiresAt: (auth?.expiresAt ?? null) as number | null,
+      tokenExpiresAt: auth?.expiresAt ?? null,
       isTokenExpired: isTokenExpired as boolean,
       tokenTimeRemaining: tokenTimeRemaining as number | null,
       tokenExpiryWarning: tokenExpiryWarning as TokenExpiryWarning,
-      tokenExpiryDisplay: (tokenExpiryDisplay ?? "") as string,
-      statusDotColor: (statusDotColor ?? STATUS_COLORS.loading) as string,
-      statusText: (statusText ?? "") as string,
+      tokenExpiryDisplay: tokenExpiryDisplay ?? "",
+      statusDotColor: statusDotColor ?? STATUS_COLORS.loading,
+      statusText: statusText ?? "",
       piece: wishResult.result ?? null,
       userChip: wishResult.result?.userChip ?? null,
-      pieceUI: null,
     }));
 
     // ========================================================================
@@ -746,7 +755,7 @@ export const GoogleAuthManager = pattern<
     // RETURN
     // ========================================================================
     return {
-      auth: computed(() => (auth ?? null) as Auth | null),
+      auth: computed(() => auth ?? null),
       authInfo,
       isReady,
       currentEmail,
