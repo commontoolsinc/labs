@@ -25,6 +25,7 @@ import { getLogger } from "../../utils/src/logger.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import type { JSONObject, JSONSchema } from "./builder/types.ts";
 import {
+  addressKey,
   createDataCellURI,
   isPrimitiveCellLink,
   NormalizedFullLink,
@@ -485,6 +486,7 @@ export abstract class BaseObjectTraverser {
       new StandardObjectCreator(),
     protected traverseCells = true,
   ) {}
+  protected dagMemo = new Map<string, Immutable<StorableValue>>();
   abstract traverse(doc: IMemorySpaceAttestation): Immutable<StorableValue>;
   /**
    * Attempt to traverse the document as a directed acyclic graph.
@@ -504,6 +506,22 @@ export abstract class BaseObjectTraverser {
     defaultValue?: StorableDatum,
     itemLink?: NormalizedFullLink,
   ): Immutable<StorableValue> {
+    // Memoize by cell address + itemLink to avoid exponential path explosion
+    // in DAGs. When multiple parents share children, every unique path triggers
+    // a full re-traversal. Caching collapses this to one visit per cell.
+    // itemLink must be part of the key because the same data reached through
+    // different links produces different query result proxies / cell identities.
+    // Skip when defaultValue is provided since it can alter the result.
+    if (defaultValue === undefined) {
+      const memoKey = itemLink
+        ? addressKey(doc.address) + "|" + addressKey(itemLink)
+        : addressKey(doc.address);
+      const cached = this.dagMemo.get(memoKey);
+      if (cached !== undefined) {
+        return cached;
+      }
+    }
+
     if (doc.value === undefined) {
       // If we have a default, annotate it and return it
       // Otherwise, return undefined
@@ -536,6 +554,7 @@ export abstract class BaseObjectTraverser {
         };
         // We follow the first link in array elements so we don't have
         // strangeness with setting item at 0 to item at 1
+        let arrayElementLink = itemLink;
         if (isPrimitiveCellLink(item)) {
           const [redirDoc, redirSelector] = this.getDocAtPath(
             docItem,
@@ -546,7 +565,7 @@ export abstract class BaseObjectTraverser {
           const [linkDoc, _selector] = this.nextLink(redirDoc, redirSelector);
           // our item link should point one past the last redirect, but it may
           // be invalid (in which case, we should base the link on redirDoc).
-          itemLink = getNormalizedLink(
+          arrayElementLink = getNormalizedLink(
             linkDoc.value !== undefined ? linkDoc.address : redirDoc.address,
           );
           // We can follow all the links, since we don't need to track cells
@@ -559,7 +578,7 @@ export abstract class BaseObjectTraverser {
             );
           }
         }
-        return this.traverseDAG(docItem, itemDefault, itemLink);
+        return this.traverseDAG(docItem, itemDefault, arrayElementLink);
       });
       // We copy the contents of our result into newValue so that if we have a
       // cycle, we can return newValue before we actually finish populating it.
@@ -570,7 +589,14 @@ export abstract class BaseObjectTraverser {
       }
       // Our link is based on the last link in the chain and not the first.
       const newLink = getNormalizedLink(doc.address, true);
-      return this.objectCreator.createObject(newLink, newValue);
+      const arrayResult = this.objectCreator.createObject(newLink, newValue);
+      if (defaultValue === undefined) {
+        const memoKey = itemLink
+          ? addressKey(doc.address) + "|" + addressKey(itemLink)
+          : addressKey(doc.address);
+        this.dagMemo.set(memoKey, arrayResult);
+      }
+      return arrayResult;
     } else if (isRecord(doc.value)) {
       // First, see if we need special handling
       if (isPrimitiveCellLink(doc.value)) {
@@ -649,7 +675,14 @@ export abstract class BaseObjectTraverser {
         }
         // Our link is based on the last link in the chain and not the first.
         const newLink = itemLink ?? getNormalizedLink(doc.address, true);
-        return this.objectCreator.createObject(newLink, newValue);
+        const recordResult = this.objectCreator.createObject(newLink, newValue);
+        if (defaultValue === undefined) {
+          const memoKey = itemLink
+            ? addressKey(doc.address) + "|" + addressKey(itemLink)
+            : addressKey(doc.address);
+          this.dagMemo.set(memoKey, recordResult);
+        }
+        return recordResult;
       }
     } else {
       logger.error(

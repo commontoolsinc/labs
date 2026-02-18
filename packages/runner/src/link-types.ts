@@ -204,6 +204,15 @@ export function areNormalizedLinksSame(
 }
 
 /**
+ * Serialize an address to a string key for use in Maps/Sets/memoization.
+ * Includes space, id, type, and path — the same fields compared by
+ * areNormalizedLinksSame.
+ */
+export function addressKey(addr: IMemorySpaceAddress): string {
+  return JSON.stringify([addr.space, addr.id, addr.type, addr.path]);
+}
+
+/**
  * Encodes a JSON Pointer path according to RFC 6901.
  * Each token has ~ replaced with ~0 and / replaced with ~1, then joined with /.
  * @param path - Array of path tokens to encode
