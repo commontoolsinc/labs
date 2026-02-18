@@ -66,7 +66,15 @@ export async function tryClaimMutex<T extends Record<string, any>>(
     const isPending = pending.withTx(tx).get();
     const now = Date.now();
 
-    inputs = inputsCell.getAsQueryResult([], tx);
+    // Snapshot inputs as plain data while the transaction is active.
+    // getAsQueryResult returns a QueryResultProxy that lazily resolves
+    // entity-decomposed nested properties (e.g. options.headers) through
+    // the transaction. Once the transaction commits, the proxy falls back
+    // to ad-hoc reads that can't follow entity links reliably. Serializing
+    // here forces full materialization within the transaction scope.
+    inputs = JSON.parse(
+      JSON.stringify(inputsCell.getAsQueryResult([], tx)),
+    ) as T;
     inputHash = computeInputHash(tx, inputsCell);
 
     // Can claim if:
