@@ -238,11 +238,20 @@ describe("storable-native-instances", () => {
       expect(restored.error.name).toBe("SpecialType");
     });
 
-    it("toNativeValue returns the wrapped error", () => {
+    it("toNativeValue(true) returns frozen error", () => {
       const err = new Error("native");
       const se = new StorableError(err);
-      expect(se.toNativeValue(true)).toBe(err);
-      expect(se.toNativeValue(false)).toBe(err);
+      const result = se.toNativeValue(true);
+      expect(result).toBe(err);
+      expect(Object.isFrozen(result)).toBe(true);
+    });
+
+    it("toNativeValue(false) returns unfrozen error", () => {
+      const err = new Error("native");
+      const se = new StorableError(err);
+      const result = se.toNativeValue(false);
+      expect(result).toBe(err);
+      expect(Object.isFrozen(result)).toBe(false);
     });
   });
 
@@ -331,10 +340,20 @@ describe("storable-native-instances", () => {
       expect(() => sd[DECONSTRUCT]()).toThrow("not yet implemented");
     });
 
-    it("StorableDate.toNativeValue returns the Date", () => {
+    it("StorableDate.toNativeValue(true) returns frozen Date", () => {
       const date = new Date("2024-01-01");
       const sd = new StorableDate(date);
-      expect(sd.toNativeValue(true)).toBe(date);
+      const result = sd.toNativeValue(true);
+      expect(result).toBe(date);
+      expect(Object.isFrozen(result)).toBe(true);
+    });
+
+    it("StorableDate.toNativeValue(false) returns unfrozen Date", () => {
+      const date = new Date("2024-01-01");
+      const sd = new StorableDate(date);
+      const result = sd.toNativeValue(false);
+      expect(result).toBe(date);
+      expect(Object.isFrozen(result)).toBe(false);
     });
 
     it("StorableUint8Array implements StorableInstance", () => {
@@ -348,10 +367,29 @@ describe("storable-native-instances", () => {
       expect(() => su[DECONSTRUCT]()).toThrow("not yet implemented");
     });
 
-    it("StorableUint8Array.toNativeValue returns the Uint8Array", () => {
+    it("StorableUint8Array.toNativeValue(true) returns Blob", () => {
       const bytes = new Uint8Array([1, 2, 3]);
       const su = new StorableUint8Array(bytes);
-      expect(su.toNativeValue(true)).toBe(bytes);
+      const result = su.toNativeValue(true);
+      expect(result).toBeInstanceOf(Blob);
+      expect((result as Blob).size).toBe(3);
+      expect((result as Blob).type).toBe("");
+    });
+
+    it("StorableUint8Array.toNativeValue(true) Blob contains correct data", async () => {
+      const bytes = new Uint8Array([10, 20, 30]);
+      const su = new StorableUint8Array(bytes);
+      const blob = su.toNativeValue(true) as Blob;
+      const buf = await blob.arrayBuffer();
+      expect(new Uint8Array(buf)).toEqual(new Uint8Array([10, 20, 30]));
+    });
+
+    it("StorableUint8Array.toNativeValue(false) returns Uint8Array", () => {
+      const bytes = new Uint8Array([1, 2, 3]);
+      const su = new StorableUint8Array(bytes);
+      const result = su.toNativeValue(false);
+      expect(result).toBe(bytes);
+      expect(result).toBeInstanceOf(Uint8Array);
     });
   });
 
@@ -472,11 +510,12 @@ describe("storable-native-instances", () => {
   // --------------------------------------------------------------------------
 
   describe("nativeValueFromStorableValue", () => {
-    it("unwraps StorableError to Error", () => {
+    it("unwraps StorableError to frozen Error (default)", () => {
       const err = new TypeError("test");
       const se = new StorableError(err);
       const result = nativeValueFromStorableValue(se as StorableValue);
       expect(result).toBe(err);
+      expect(Object.isFrozen(result)).toBe(true);
     });
 
     it("unwraps StorableMap to FrozenMap (default frozen)", () => {
@@ -511,17 +550,26 @@ describe("storable-native-instances", () => {
       expect(result).not.toBeInstanceOf(FrozenSet);
     });
 
-    it("unwraps StorableDate to Date", () => {
+    it("unwraps StorableDate to frozen Date (default)", () => {
       const date = new Date("2024-01-01");
       const sd = new StorableDate(date);
       const result = nativeValueFromStorableValue(sd as StorableValue);
       expect(result).toBe(date);
+      expect(Object.isFrozen(result)).toBe(true);
     });
 
-    it("unwraps StorableUint8Array to Uint8Array", () => {
+    it("unwraps StorableUint8Array to Blob (default frozen)", () => {
       const bytes = new Uint8Array([1, 2, 3]);
       const su = new StorableUint8Array(bytes);
       const result = nativeValueFromStorableValue(su as StorableValue);
+      expect(result).toBeInstanceOf(Blob);
+      expect((result as Blob).size).toBe(3);
+    });
+
+    it("unwraps StorableUint8Array to Uint8Array when frozen=false", () => {
+      const bytes = new Uint8Array([1, 2, 3]);
+      const su = new StorableUint8Array(bytes);
+      const result = nativeValueFromStorableValue(su as StorableValue, false);
       expect(result).toBe(bytes);
     });
 

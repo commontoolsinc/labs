@@ -125,7 +125,8 @@ export class StorableError extends StorableNativeWrapper {
     return state as StorableValue;
   }
 
-  toNativeValue(_frozen: boolean): Error {
+  toNativeValue(frozen: boolean): Error {
+    if (frozen) Object.freeze(this.error);
     return this.error;
   }
 
@@ -246,7 +247,12 @@ export class StorableDate extends StorableNativeWrapper {
     throw new Error("StorableDate: not yet implemented");
   }
 
-  toNativeValue(_frozen: boolean): Date {
+  toNativeValue(frozen: boolean): Date {
+    // Object.freeze prevents property modification but does NOT prevent
+    // Date mutation methods (setTime, setFullYear, etc.) from modifying
+    // the internal [[DateValue]] slot. A FrozenDate wrapper (like
+    // FrozenMap/FrozenSet) would be needed for full immutability.
+    if (frozen) Object.freeze(this.date);
     return this.date;
   }
 
@@ -274,7 +280,15 @@ export class StorableUint8Array extends StorableNativeWrapper {
     throw new Error("StorableUint8Array: not yet implemented");
   }
 
-  toNativeValue(_frozen: boolean): Uint8Array {
+  /**
+   * When `frozen` is true, returns a `Blob` (immutable by nature) instead of
+   * a `Uint8Array` (which `Object.freeze()` cannot protect -- typed arrays
+   * allow element mutation even when frozen). Callers must handle the Blob's
+   * async API (e.g. `blob.arrayBuffer()`). When `frozen` is false, returns
+   * the `Uint8Array` directly.
+   */
+  toNativeValue(frozen: boolean): Blob | Uint8Array {
+    if (frozen) return new Blob([this.bytes]);
     return this.bytes;
   }
 
