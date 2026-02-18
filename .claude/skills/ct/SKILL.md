@@ -56,7 +56,7 @@ export CT_IDENTITY=./claude.key
 |------|---------|
 | `--no-run` | Type check only, don't execute |
 | `--no-check` | Execute without type checking |
-| `--show-transformed` | Show transformed TS source (how the compiler rewrites reactive constructs) |
+| `--show-transformed` | Show the transformed TypeScript after compilation |
 | `--verbose-errors` | Show original TS errors alongside simplified hints |
 | `--pattern-json` | Print the evaluated pattern export as JSON |
 | `--output <path>` | Store compiled JS to a file |
