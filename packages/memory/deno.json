@@ -51,7 +51,8 @@
     "./serialization": "./serialization.ts",
     "./type-handlers": "./type-handlers.ts",
     "./unknown-storable": "./unknown-storable.ts",
-    "./problematic-storable": "./problematic-storable.ts"
+    "./problematic-storable": "./problematic-storable.ts",
+    "./storable-native-instances": "./storable-native-instances.ts"
   },
   "imports": {
     "@db/sqlite": "jsr:@db/sqlite@^0.12.0",
