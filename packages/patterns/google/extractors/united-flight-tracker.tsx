@@ -476,7 +476,7 @@ interface Output {
 
 export default pattern<Input, Output>(({ overrideAuth }) => {
   // Use GmailExtractor building block with LLM extraction
-  const extractor = GmailExtractor<EmailAnalysisResult>({
+  const extractor = GmailExtractor({
     gmailQuery: UNITED_GMAIL_QUERY,
     extraction: {
       promptTemplate: EXTRACTION_PROMPT_TEMPLATE,
@@ -497,7 +497,7 @@ export default pattern<Input, Output>(({ overrideAuth }) => {
       ...item,
       emailSubject: item.email?.subject,
       // Alias analysis.result as result for backward compatibility in flight aggregation
-      result: item.analysis?.result,
+      result: item.analysis?.result as EmailAnalysisResult | undefined,
     })) || []
   );
 
@@ -525,7 +525,7 @@ export default pattern<Input, Output>(({ overrideAuth }) => {
 
     // Process each email analysis
     for (const analysisItem of sortedAnalyses) {
-      const result = analysisItem.result;
+      const result = analysisItem.result as EmailAnalysisResult | undefined;
       if (!result || !result.flights) continue;
 
       const emailType = result.emailType;
@@ -1589,138 +1589,145 @@ export default pattern<Input, Output>(({ overrideAuth }) => {
                     LLM Analysis Results:
                   </h4>
                   <ct-vstack gap="2">
-                    {emailAnalyses.map((item) => (
-                      <div
-                        style={{
-                          padding: "12px",
-                          backgroundColor: "white",
-                          borderRadius: "6px",
-                          border: computed(() =>
-                            item.pending
-                              ? "1px solid #fbbf24"
-                              : item.error
-                              ? "1px solid #ef4444"
-                              : "1px solid #10b981"
-                          ),
-                          fontSize: "12px",
-                        }}
-                      >
-                        <div
-                          style={{ fontWeight: "600", marginBottom: "4px" }}
-                        >
-                          {item.emailSubject}
-                        </div>
+                    {emailAnalyses.map((item) => {
+                      const debugResult = item.result as
+                        | EmailAnalysisResult
+                        | undefined;
+                      return (
                         <div
                           style={{
-                            fontSize: "11px",
-                            color: "#6b7280",
-                            marginBottom: "8px",
-                          }}
-                        >
-                          Date: {item.emailDate}
-                        </div>
-
-                        {/* Pending */}
-                        <div
-                          style={{
-                            display: item.pending ? "flex" : "none",
-                            alignItems: "center",
-                            gap: "4px",
-                            color: "#f59e0b",
-                          }}
-                        >
-                          <ct-loader size="sm" />
-                          <span>Analyzing...</span>
-                        </div>
-
-                        {/* Error */}
-                        <div
-                          style={{
-                            display: item.error ? "block" : "none",
-                            color: "#dc2626",
-                          }}
-                        >
-                          Error: {computed(
-                            () => (item.error ? String(item.error) : ""),
-                          )}
-                        </div>
-
-                        {/* Result */}
-                        <div
-                          style={{
-                            display: computed(() =>
-                              !item.pending && !item.error && item.result
-                                ? "block"
-                                : "none"
+                            padding: "12px",
+                            backgroundColor: "white",
+                            borderRadius: "6px",
+                            border: computed(() =>
+                              item.pending
+                                ? "1px solid #fbbf24"
+                                : item.error
+                                ? "1px solid #ef4444"
+                                : "1px solid #10b981"
                             ),
+                            fontSize: "12px",
                           }}
                         >
                           <div
+                            style={{ fontWeight: "600", marginBottom: "4px" }}
+                          >
+                            {item.email?.subject}
+                          </div>
+                          <div
                             style={{
-                              padding: "8px",
-                              backgroundColor: "#f3f4f6",
-                              borderRadius: "4px",
+                              fontSize: "11px",
+                              color: "#6b7280",
+                              marginBottom: "8px",
                             }}
                           >
-                            <div>
-                              <strong>Type:</strong>{" "}
-                              {computed(() => item.result?.emailType || "N/A")}
-                            </div>
-                            <div style={{ marginTop: "4px" }}>
-                              <strong>Summary:</strong>{" "}
-                              {computed(() => item.result?.summary || "N/A")}
-                            </div>
-                            <div style={{ marginTop: "4px" }}>
-                              <strong>Flights:</strong> {computed(() =>
-                                JSON.stringify(
-                                  item.result?.flights || [],
-                                  null,
-                                  2,
-                                )
-                              )}
-                            </div>
-                            <div
-                              style={{
-                                marginTop: "4px",
-                                display: computed(() =>
-                                  item.result?.checkInAvailable !== undefined
-                                    ? "block"
-                                    : "none"
-                                ),
-                              }}
-                            >
-                              <strong>Check-in Available:</strong>{" "}
-                              {computed(() =>
-                                item.result?.checkInAvailable ? "Yes" : "No"
-                              )}
-                            </div>
+                            Date: {item.emailDate}
                           </div>
 
-                          {/* Raw email content */}
-                          <details style={{ marginTop: "8px" }}>
-                            <summary
-                              style={{ cursor: "pointer", color: "#2563eb" }}
-                            >
-                              Show raw email content
-                            </summary>
-                            <pre
+                          {/* Pending */}
+                          <div
+                            style={{
+                              display: item.pending ? "flex" : "none",
+                              alignItems: "center",
+                              gap: "4px",
+                              color: "#f59e0b",
+                            }}
+                          >
+                            <ct-loader size="sm" />
+                            <span>Analyzing...</span>
+                          </div>
+
+                          {/* Error */}
+                          <div
+                            style={{
+                              display: item.error ? "block" : "none",
+                              color: "#dc2626",
+                            }}
+                          >
+                            Error: {computed(
+                              () => (item.error ? String(item.error) : ""),
+                            )}
+                          </div>
+
+                          {/* Result */}
+                          <div
+                            style={{
+                              display: computed(() =>
+                                !item.pending && !item.error && debugResult
+                                  ? "block"
+                                  : "none"
+                              ),
+                            }}
+                          >
+                            <div
                               style={{
-                                marginTop: "8px",
                                 padding: "8px",
                                 backgroundColor: "#f3f4f6",
                                 borderRadius: "4px",
-                                fontSize: "10px",
-                                overflow: "auto",
-                                maxHeight: "300px",
-                                whiteSpace: "pre-wrap",
                               }}
                             >
+                              <div>
+                                <strong>Type:</strong>{" "}
+                                {computed(() =>
+                                  debugResult?.emailType || "N/A"
+                                )}
+                              </div>
+                              <div style={{ marginTop: "4px" }}>
+                                <strong>Summary:</strong>{" "}
+                                {computed(() => debugResult?.summary || "N/A")}
+                              </div>
+                              <div style={{ marginTop: "4px" }}>
+                                <strong>Flights:</strong> {computed(() =>
+                                  JSON.stringify(
+                                    debugResult?.flights || [],
+                                    null,
+                                    2,
+                                  )
+                                )}
+                              </div>
+                              <div
+                                style={{
+                                  marginTop: "4px",
+                                  display: computed(() =>
+                                    debugResult?.checkInAvailable !== undefined
+                                      ? "block"
+                                      : "none"
+                                  ),
+                                }}
+                              >
+                                <strong>Check-in Available:</strong>{" "}
+                                {computed(() =>
+                                  debugResult?.checkInAvailable ? "Yes" : "No"
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Raw email content */}
+                            <details style={{ marginTop: "8px" }}>
+                              <summary
+                                style={{ cursor: "pointer", color: "#2563eb" }}
+                              >
+                                Show raw email content
+                              </summary>
+                              <pre
+                                style={{
+                                  marginTop: "8px",
+                                  padding: "8px",
+                                  backgroundColor: "#f3f4f6",
+                                  borderRadius: "4px",
+                                  fontSize: "10px",
+                                  overflow: "auto",
+                                  maxHeight: "300px",
+                                  whiteSpace: "pre-wrap",
+                                }}
+                              >
                               {item.email.markdownContent}
-                            </pre>
-                          </details>
+                              </pre>
+                            </details>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </ct-vstack>
                 </div>
               </details>

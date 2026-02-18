@@ -422,7 +422,7 @@ interface PatternOutput {
 
 export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
   // Use GmailExtractor building block for email fetching and LLM extraction
-  const extractor = GmailExtractor<TicketAnalysisResult>({
+  const extractor = GmailExtractor({
     gmailQuery: TICKET_GMAIL_QUERY,
     extraction: {
       promptTemplate: EXTRACTION_PROMPT_TEMPLATE,
@@ -451,7 +451,9 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
 
     // Sort emails by date (newest first) so we keep most recent data
     const sortedAnalyses = [...(rawAnalyses || [])]
-      .filter((a) => a?.analysis?.result?.isTicket)
+      .filter((a) =>
+        (a?.analysis?.result as TicketAnalysisResult | undefined)?.isTicket
+      )
       .sort((a, b) => {
         const dateA = new Date(a.emailDate || 0).getTime();
         const dateB = new Date(b.emailDate || 0).getTime();
@@ -460,7 +462,9 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
       });
 
     for (const analysisItem of sortedAnalyses) {
-      const result = analysisItem.analysis?.result;
+      const result = analysisItem.analysis?.result as
+        | TicketAnalysisResult
+        | undefined;
       if (!result || !result.isTicket) continue;
       if (result.ticketSource === "not_a_ticket") continue;
 
@@ -988,171 +992,165 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                     LLM Analysis Results:
                   </h4>
                   <ct-vstack gap="2">
-                    {rawAnalyses.map((analysisItem) => (
-                      <div
-                        style={{
-                          padding: "12px",
-                          backgroundColor: "white",
-                          borderRadius: "6px",
-                          border: computed(() =>
-                            analysisItem.pending
-                              ? "1px solid #fbbf24"
-                              : analysisItem.error
-                              ? "1px solid #ef4444"
-                              : analysisItem.analysis?.result?.isTicket
-                              ? "1px solid #10b981"
-                              : "1px solid #d1d5db"
-                          ),
-                          fontSize: "12px",
-                        }}
-                      >
+                    {rawAnalyses.map((analysisItem) => {
+                      const debugResult = analysisItem.analysis?.result as
+                        | TicketAnalysisResult
+                        | undefined;
+                      return (
                         <div
                           style={{
-                            fontWeight: "600",
-                            marginBottom: "4px",
-                            color: "#111827",
-                          }}
-                        >
-                          {analysisItem.email.subject}
-                        </div>
-
-                        <div
-                          style={{
-                            display: analysisItem.pending ? "flex" : "none",
-                            alignItems: "center",
-                            gap: "4px",
-                            color: "#f59e0b",
-                            marginTop: "4px",
-                          }}
-                        >
-                          <ct-loader size="sm" />
-                          <span>Analyzing...</span>
-                        </div>
-
-                        <div
-                          style={{
-                            display: analysisItem.error ? "block" : "none",
-                            color: "#dc2626",
-                            marginTop: "4px",
-                          }}
-                        >
-                          Error: {computed(() =>
-                            analysisItem.error ? String(analysisItem.error) : ""
-                          )}
-                        </div>
-
-                        <div
-                          style={{
-                            display: computed(() =>
-                              !analysisItem.pending &&
-                                !analysisItem.error &&
-                                analysisItem.analysis?.result
-                                ? "block"
-                                : "none"
+                            padding: "12px",
+                            backgroundColor: "white",
+                            borderRadius: "6px",
+                            border: computed(() =>
+                              analysisItem.pending
+                                ? "1px solid #fbbf24"
+                                : analysisItem.error
+                                ? "1px solid #ef4444"
+                                : debugResult?.isTicket
+                                ? "1px solid #10b981"
+                                : "1px solid #d1d5db"
                             ),
+                            fontSize: "12px",
                           }}
                         >
                           <div
                             style={{
-                              marginTop: "8px",
-                              padding: "8px",
-                              backgroundColor: computed(() =>
-                                analysisItem.analysis?.result?.isTicket
-                                  ? "#d1fae5"
-                                  : "#f3f4f6"
-                              ),
-                              borderRadius: "4px",
+                              fontWeight: "600",
+                              marginBottom: "4px",
+                              color: "#111827",
                             }}
                           >
-                            <div style={{ color: "#374151" }}>
-                              <strong>Is Ticket:</strong> {computed(() =>
-                                analysisItem.analysis?.result?.isTicket
-                                  ? "Yes ✓"
-                                  : "No"
-                              )}
-                            </div>
+                            {analysisItem.email.subject}
+                          </div>
+
+                          <div
+                            style={{
+                              display: analysisItem.pending ? "flex" : "none",
+                              alignItems: "center",
+                              gap: "4px",
+                              color: "#f59e0b",
+                              marginTop: "4px",
+                            }}
+                          >
+                            <ct-loader size="sm" />
+                            <span>Analyzing...</span>
+                          </div>
+
+                          <div
+                            style={{
+                              display: analysisItem.error ? "block" : "none",
+                              color: "#dc2626",
+                              marginTop: "4px",
+                            }}
+                          >
+                            Error: {computed(() =>
+                              analysisItem.error
+                                ? String(analysisItem.error)
+                                : ""
+                            )}
+                          </div>
+
+                          <div
+                            style={{
+                              display: computed(() =>
+                                !analysisItem.pending &&
+                                  !analysisItem.error &&
+                                  debugResult
+                                  ? "block"
+                                  : "none"
+                              ),
+                            }}
+                          >
                             <div
                               style={{
-                                color: "#374151",
-                                marginTop: "4px",
-                                display: computed(() =>
-                                  analysisItem.analysis?.result?.isTicket
-                                    ? "block"
-                                    : "none"
+                                marginTop: "8px",
+                                padding: "8px",
+                                backgroundColor: computed(() =>
+                                  debugResult?.isTicket ? "#d1fae5" : "#f3f4f6"
                                 ),
+                                borderRadius: "4px",
                               }}
                             >
-                              <strong>Type:</strong> {computed(
-                                () =>
-                                  analysisItem.analysis?.result?.ticketSource ||
-                                  "N/A",
-                              )}
-                            </div>
-                            <div
-                              style={{
-                                color: "#374151",
-                                marginTop: "4px",
-                                display: computed(() =>
-                                  analysisItem.analysis?.result?.isTicket
-                                    ? "block"
-                                    : "none"
-                                ),
-                              }}
-                            >
-                              <strong>Event:</strong> {computed(
-                                () =>
-                                  analysisItem.analysis?.result?.eventName ||
-                                  "N/A",
-                              )}
-                            </div>
-                            <div
-                              style={{
-                                color: "#374151",
-                                marginTop: "4px",
-                                display: computed(() =>
-                                  analysisItem.analysis?.result?.eventDate
-                                    ? "block"
-                                    : "none"
-                                ),
-                              }}
-                            >
-                              <strong>Date:</strong> {computed(() =>
-                                formatDate(
-                                  analysisItem.analysis?.result?.eventDate,
-                                )
-                              )}
-                            </div>
-                            <div
-                              style={{
-                                color: "#374151",
-                                marginTop: "4px",
-                                display: computed(() =>
-                                  analysisItem.analysis?.result
-                                      ?.confirmationCode
-                                    ? "block"
-                                    : "none"
-                                ),
-                              }}
-                            >
-                              <strong>Confirmation:</strong> {computed(
-                                () =>
-                                  analysisItem.analysis?.result
-                                    ?.confirmationCode || "",
-                              )}
-                            </div>
-                            <div
-                              style={{ color: "#374151", marginTop: "4px" }}
-                            >
-                              <strong>Summary:</strong> {computed(
-                                () =>
-                                  analysisItem.analysis?.result?.summary ||
-                                  "N/A",
-                              )}
+                              <div style={{ color: "#374151" }}>
+                                <strong>Is Ticket:</strong>{" "}
+                                {computed(() =>
+                                  debugResult?.isTicket ? "Yes ✓" : "No"
+                                )}
+                              </div>
+                              <div
+                                style={{
+                                  color: "#374151",
+                                  marginTop: "4px",
+                                  display: computed(() =>
+                                    debugResult?.isTicket ? "block" : "none"
+                                  ),
+                                }}
+                              >
+                                <strong>Type:</strong> {computed(
+                                  () =>
+                                    debugResult?.ticketSource ||
+                                    "N/A",
+                                )}
+                              </div>
+                              <div
+                                style={{
+                                  color: "#374151",
+                                  marginTop: "4px",
+                                  display: computed(() =>
+                                    debugResult?.isTicket ? "block" : "none"
+                                  ),
+                                }}
+                              >
+                                <strong>Event:</strong> {computed(
+                                  () =>
+                                    debugResult?.eventName ||
+                                    "N/A",
+                                )}
+                              </div>
+                              <div
+                                style={{
+                                  color: "#374151",
+                                  marginTop: "4px",
+                                  display: computed(() =>
+                                    debugResult?.eventDate ? "block" : "none"
+                                  ),
+                                }}
+                              >
+                                <strong>Date:</strong> {computed(() =>
+                                  formatDate(
+                                    debugResult?.eventDate,
+                                  )
+                                )}
+                              </div>
+                              <div
+                                style={{
+                                  color: "#374151",
+                                  marginTop: "4px",
+                                  display: computed(() =>
+                                    debugResult?.confirmationCode
+                                      ? "block"
+                                      : "none"
+                                  ),
+                                }}
+                              >
+                                <strong>Confirmation:</strong> {computed(
+                                  () => debugResult?.confirmationCode || "",
+                                )}
+                              </div>
+                              <div
+                                style={{ color: "#374151", marginTop: "4px" }}
+                              >
+                                <strong>Summary:</strong> {computed(
+                                  () => debugResult?.summary ||
+                                    "N/A",
+                                )}
+                              </div>
                             </div>
                           </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </ct-vstack>
                 </div>
               </details>

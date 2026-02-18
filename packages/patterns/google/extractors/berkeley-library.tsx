@@ -571,7 +571,7 @@ export default pattern<PatternInput, PatternOutput>(
     dueDateOverrides,
   }) => {
     // Use GmailExtractor building block for email fetching and LLM extraction
-    const extractor = GmailExtractor<EmailAnalysisResult>({
+    const extractor = GmailExtractor({
       gmailQuery: LIBRARY_GMAIL_QUERY,
       extraction: {
         promptTemplate: EXTRACTION_PROMPT_TEMPLATE,
@@ -609,7 +609,9 @@ export default pattern<PatternInput, PatternOutput>(
         return [];
       }
       const sortedAnalyses = [...rawAnalyses]
-        .filter((a) => a?.analysis?.result?.items)
+        .filter((a) =>
+          (a?.analysis?.result as EmailAnalysisResult | undefined)?.items
+        )
         .sort((a, b) => {
           const dateA = new Date(a.emailDate || 0).getTime();
           const dateB = new Date(b.emailDate || 0).getTime();
@@ -617,7 +619,9 @@ export default pattern<PatternInput, PatternOutput>(
         });
 
       for (const analysisItem of sortedAnalyses) {
-        const result = analysisItem.analysis?.result;
+        const result = analysisItem.analysis?.result as
+          | EmailAnalysisResult
+          | undefined;
         if (!result?.items) continue;
 
         for (const item of result.items) {
@@ -680,7 +684,9 @@ export default pattern<PatternInput, PatternOutput>(
         return [];
       }
       for (const analysisItem of rawAnalyses) {
-        const result = analysisItem.analysis?.result;
+        const result = analysisItem.analysis?.result as
+          | EmailAnalysisResult
+          | undefined;
         if (!result?.items) continue;
 
         for (const item of result.items) {
@@ -731,7 +737,9 @@ export default pattern<PatternInput, PatternOutput>(
 
       if (!rawAnalyses) return items;
       for (const analysisItem of rawAnalyses) {
-        const result = analysisItem.analysis?.result;
+        const result = analysisItem.analysis?.result as
+          | EmailAnalysisResult
+          | undefined;
         if (!result?.items) continue;
 
         for (const item of result.items) {
@@ -954,9 +962,16 @@ export default pattern<PatternInput, PatternOutput>(
       // Omnibot actions - bind handlers with current state
       markAsReturned: markAsReturnedHandler({
         manuallyReturned,
-        rawAnalyses,
+        rawAnalyses: rawAnalyses as Array<
+          { analysis?: { result?: LibraryEmailAnalysis } }
+        >,
       }),
-      dismissHold: dismissHoldHandler({ dismissedHolds, rawAnalyses }),
+      dismissHold: dismissHoldHandler({
+        dismissedHolds,
+        rawAnalyses: rawAnalyses as Array<
+          { analysis?: { result?: LibraryEmailAnalysis } }
+        >,
+      }),
 
       [UI]: (
         <ct-screen>
@@ -1644,142 +1659,145 @@ export default pattern<PatternInput, PatternOutput>(
                       LLM Analysis Results:
                     </h4>
                     <ct-vstack gap="2">
-                      {rawAnalyses.map((analysisItem) => (
-                        <div
-                          style={{
-                            padding: "12px",
-                            backgroundColor: "white",
-                            borderRadius: "6px",
-                            border: computed(() =>
-                              analysisItem.pending
-                                ? "1px solid #fbbf24"
-                                : analysisItem.error
-                                ? "1px solid #ef4444"
-                                : "1px solid #10b981"
-                            ),
-                            fontSize: "12px",
-                          }}
-                        >
+                      {rawAnalyses.map((analysisItem) => {
+                        const debugResult = analysisItem.analysis?.result as
+                          | EmailAnalysisResult
+                          | undefined;
+                        return (
                           <div
                             style={{
-                              fontWeight: "600",
-                              marginBottom: "4px",
-                              color: "#111827",
-                            }}
-                          >
-                            {analysisItem.email.subject}
-                          </div>
-
-                          <div
-                            style={{
-                              display: analysisItem.pending ? "flex" : "none",
-                              alignItems: "center",
-                              gap: "4px",
-                              color: "#f59e0b",
-                              marginTop: "4px",
-                            }}
-                          >
-                            <ct-loader size="sm" />
-                            <span>Analyzing...</span>
-                          </div>
-
-                          <div
-                            style={{
-                              display: analysisItem.error ? "block" : "none",
-                              color: "#dc2626",
-                              marginTop: "4px",
-                            }}
-                          >
-                            Error:{" "}
-                            {computed(() =>
-                              analysisItem.error
-                                ? String(analysisItem.error)
-                                : ""
-                            )}
-                          </div>
-
-                          <div
-                            style={{
-                              display: computed(() =>
-                                !analysisItem.pending && !analysisItem.error &&
-                                  analysisItem.analysis?.result
-                                  ? "block"
-                                  : "none"
+                              padding: "12px",
+                              backgroundColor: "white",
+                              borderRadius: "6px",
+                              border: computed(() =>
+                                analysisItem.pending
+                                  ? "1px solid #fbbf24"
+                                  : analysisItem.error
+                                  ? "1px solid #ef4444"
+                                  : "1px solid #10b981"
                               ),
+                              fontSize: "12px",
                             }}
                           >
                             <div
                               style={{
-                                marginTop: "8px",
-                                padding: "8px",
-                                backgroundColor: "#f3f4f6",
-                                borderRadius: "4px",
+                                fontWeight: "600",
+                                marginBottom: "4px",
+                                color: "#111827",
                               }}
                             >
-                              <div style={{ color: "#374151" }}>
-                                <strong>Email Type:</strong>{" "}
-                                {computed(() =>
-                                  analysisItem.analysis?.result?.emailType ||
-                                  "N/A"
-                                )}
-                              </div>
+                              {analysisItem.email.subject}
+                            </div>
+
+                            <div
+                              style={{
+                                display: analysisItem.pending ? "flex" : "none",
+                                alignItems: "center",
+                                gap: "4px",
+                                color: "#f59e0b",
+                                marginTop: "4px",
+                              }}
+                            >
+                              <ct-loader size="sm" />
+                              <span>Analyzing...</span>
+                            </div>
+
+                            <div
+                              style={{
+                                display: analysisItem.error ? "block" : "none",
+                                color: "#dc2626",
+                                marginTop: "4px",
+                              }}
+                            >
+                              Error: {computed(() =>
+                                analysisItem.error
+                                  ? String(analysisItem.error)
+                                  : ""
+                              )}
+                            </div>
+
+                            <div
+                              style={{
+                                display: computed(() =>
+                                  !analysisItem.pending &&
+                                    !analysisItem.error &&
+                                    debugResult
+                                    ? "block"
+                                    : "none"
+                                ),
+                              }}
+                            >
                               <div
-                                style={{ color: "#374151", marginTop: "4px" }}
-                              >
-                                <strong>Summary:</strong>{" "}
-                                {computed(() =>
-                                  analysisItem.analysis?.result?.summary ||
-                                  "N/A"
-                                )}
-                              </div>
-                              <div
-                                style={{
-                                  color: "#374151",
-                                  marginTop: "4px",
-                                  display: computed(() =>
-                                    analysisItem.analysis?.result?.accountHolder
-                                      ? "block"
-                                      : "none"
-                                  ),
-                                }}
-                              >
-                                <strong>Account Holder:</strong>{" "}
-                                {computed(() => analysisItem.analysis?.result
-                                  ?.accountHolder || ""
-                                )}
-                              </div>
-                              <div style={{ marginTop: "8px" }}>
-                                <strong>Extracted Items:</strong> (
-                                {computed(() =>
-                                  analysisItem.analysis?.result?.items
-                                    ?.length || 0
-                                )}
-                                )
-                              </div>
-                              <pre
                                 style={{
                                   marginTop: "8px",
                                   padding: "8px",
-                                  backgroundColor: "#ffffff",
+                                  backgroundColor: "#f3f4f6",
                                   borderRadius: "4px",
-                                  fontSize: "10px",
-                                  overflow: "auto",
-                                  maxHeight: "200px",
-                                  border: "1px solid #e5e7eb",
                                 }}
                               >
+                                <div style={{ color: "#374151" }}>
+                                  <strong>Email Type:</strong> {computed(() =>
+                                    debugResult?.emailType ||
+                                    "N/A"
+                                  )}
+                                </div>
+                                <div
+                                  style={{ color: "#374151", marginTop: "4px" }}
+                                >
+                                  <strong>Summary:</strong> {computed(() =>
+                                    debugResult?.summary ||
+                                    "N/A"
+                                  )}
+                                </div>
+                                <div
+                                  style={{
+                                    color: "#374151",
+                                    marginTop: "4px",
+                                    display: computed(() =>
+                                      debugResult?.accountHolder
+                                        ? "block"
+                                        : "none"
+                                    ),
+                                  }}
+                                >
+                                  <strong>Account Holder:</strong>{" "}
+                                  {computed(() =>
+                                    debugResult?.accountHolder || ""
+                                  )}
+                                </div>
+                                <div style={{ marginTop: "8px" }}>
+                                  <strong>Extracted Items:</strong> (
+                                  {computed(() =>
+                                    debugResult?.items
+                                      ?.length || 0
+                                  )}
+                                  )
+                                </div>
+                                <pre
+                                  style={{
+                                    marginTop: "8px",
+                                    padding: "8px",
+                                    backgroundColor: "#ffffff",
+                                    borderRadius: "4px",
+                                    fontSize: "10px",
+                                    overflow: "auto",
+                                    maxHeight: "200px",
+                                    border: "1px solid #e5e7eb",
+                                  }}
+                                >
                                 {computed(() =>
                                   JSON.stringify(
-                                    analysisItem.analysis?.result?.items || [],
+                                    debugResult?.items || [],
                                     null,
                                     2,
                                   )
                                 )}
-                              </pre>
+                                </pre>
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </ct-vstack>
                   </div>
                 </details>

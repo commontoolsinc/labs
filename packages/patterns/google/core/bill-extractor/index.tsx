@@ -64,7 +64,14 @@
  * });
  * ```
  */
-import { computed, Default, handler, Stream, Writable } from "commontools";
+import {
+  computed,
+  Default,
+  handler,
+  pattern,
+  Stream,
+  Writable,
+} from "commontools";
 import GmailExtractor from "../gmail-extractor.tsx";
 import type { Auth } from "../gmail-extractor.tsx";
 import ProcessingStatus from "../processing-status.tsx";
@@ -169,7 +176,7 @@ export interface BillExtractorOutput {
   rawAnalyses: Array<{
     emailId: string;
     emailDate: string;
-    analysis?: { result?: BillAnalysis };
+    analysis?: { result?: unknown };
   }>;
   paymentConfirmations: Record<string, string[]>;
 
@@ -198,9 +205,9 @@ export interface BillExtractorOutput {
     previewUI: JSX.Element;
     summaryStatsUI: JSX.Element;
     overdueAlertUI: JSX.Element;
-    websiteLinkUI: JSX.Element | null;
+    websiteLinkUI: JSX.Element;
     /** Banner shown when supportsAutoDetect is false */
-    manualTrackingBannerUI: JSX.Element | null;
+    manualTrackingBannerUI: JSX.Element;
   };
 
   // Access to underlying GmailExtractor (for advanced use)
@@ -343,8 +350,8 @@ export function processBills(
  * Patterns use this for data processing and provide their own UI rendering
  * for list iteration (which must be at pattern scope for reactive context).
  */
-function BillExtractor(input: BillExtractorInput): BillExtractorOutput {
-  const {
+const BillExtractor = pattern<BillExtractorInput, BillExtractorOutput>(
+  ({
     gmailQuery,
     extractionPrompt,
     identifierType,
@@ -357,316 +364,325 @@ function BillExtractor(input: BillExtractorInput): BillExtractorOutput {
     demoMode,
     limit,
     supportsAutoDetect,
-  } = input;
-
-  const resolvedBrandColor = brandColor ?? "#3b82f6";
-  const resolvedSupportsAutoDetect = supportsAutoDetect ?? true;
-
-  // Use GmailExtractor building block for email fetching and LLM extraction
-  const extractor = GmailExtractor<BillAnalysis>({
-    gmailQuery,
-    extraction: {
-      schema: BILL_EXTRACTION_SCHEMA,
-      promptTemplate: extractionPrompt,
-    },
-    title: `${shortName} Emails`,
-    resolveInlineImages: false,
-    limit: limit ?? 100,
-    overrideAuth,
-  });
-
-  // Extract payment confirmations for auto-marking bills as paid
-  const paymentConfirmations = computed(() => {
-    const confirmations: Record<string, Set<string>> = {};
-
-    for (const item of extractor.rawAnalyses || []) {
-      const result = item.analysis?.result;
-      if (!result) continue;
-
-      if (
-        result.emailType === "payment_received" &&
-        result.identifier &&
-        result.paymentDate
-      ) {
-        const key = result.identifier;
-        if (!confirmations[key]) confirmations[key] = new Set();
-        confirmations[key].add(result.paymentDate);
-      }
-    }
-
-    const sortedResult: Record<string, string[]> = {};
-    for (const idKey of Object.keys(confirmations).sort()) {
-      sortedResult[idKey] = [...confirmations[idKey]].sort((a, b) =>
-        a.localeCompare(b)
-      );
-    }
-    return sortedResult;
-  });
-
-  // Process analyses and build bill list with domain-specific logic
-  const bills = computed(() => {
-    const billMap: Record<string, TrackedBill> = {};
-    // Use .get() to access Writable values inside computed
-    const paidKeys = manuallyPaid?.get() || [];
-    const payments = paymentConfirmations || {};
-    const isDemoMode = demoMode?.get() ?? true;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    const sortedAnalyses = [...(extractor.rawAnalyses || [])]
-      .filter((a) => a?.analysis?.result)
-      .sort((a, b) => {
-        const dateA = new Date(a.emailDate || 0).getTime();
-        const dateB = new Date(b.emailDate || 0).getTime();
-        if (dateB !== dateA) return dateB - dateA;
-        return (a.emailId || "").localeCompare(b.emailId || "");
-      });
-
-    for (const analysisItem of sortedAnalyses) {
-      const result = analysisItem.analysis?.result;
-      if (!result) continue;
-
-      const isBillEmail = result.emailType === "bill_due" ||
-        result.emailType === "payment_reminder";
-      const isStatementWithBillInfo = result.emailType === "statement_ready" &&
-        result.dueDate &&
-        (result.amount || result.statementBalance);
-
-      if (!isBillEmail && !isStatementWithBillInfo) continue;
-      if (!result.identifier || !result.dueDate) continue;
-
-      const billAmount = result.amount || result.statementBalance || 0;
-      const key = createBillKey(result.identifier, result.dueDate);
-      if (billMap[key]) continue;
-
-      const daysUntilDue = calculateDaysUntilDue(result.dueDate, today);
-      const isManuallyPaid = paidKeys.includes(key);
-
-      const idPayments = payments[result.identifier] || [];
-      const dueDateMs = parseDateToMs(result.dueDate);
-      const matchingPayment = idPayments.find((paymentDate) => {
-        const paymentMs = parseDateToMs(paymentDate);
-        if (isNaN(dueDateMs) || isNaN(paymentMs)) return false;
-        const daysDiff = (paymentMs - dueDateMs) / (1000 * 60 * 60 * 24);
-        return daysDiff >= -30 && daysDiff <= 60;
-      });
-
-      const autoPaid = !!matchingPayment;
-      const isLikelyPaid = !isManuallyPaid &&
-        !autoPaid &&
-        daysUntilDue < LIKELY_PAID_THRESHOLD_DAYS;
-      const isPaid = isManuallyPaid || autoPaid || isLikelyPaid;
-
-      let status: BillStatus;
-      if (isLikelyPaid) status = "likely_paid";
-      else if (isPaid) status = "paid";
-      else if (daysUntilDue < 0) status = "overdue";
-      else status = "unpaid";
-
-      billMap[key] = {
-        key,
-        identifier: result.identifier,
-        amount: demoPrice(billAmount, isDemoMode),
-        dueDate: result.dueDate,
-        status,
-        isPaid,
-        paidDate: matchingPayment || undefined,
-        emailDate: analysisItem.emailDate,
-        emailId: analysisItem.emailId,
-        isManuallyPaid,
-        isLikelyPaid,
-        daysUntilDue,
-      };
-    }
-
-    return Object.values(billMap).sort(
-      (a, b) => a.daysUntilDue - b.daysUntilDue,
+  }) => {
+    const resolvedBrandColor = computed(() => brandColor ?? "#3b82f6");
+    const resolvedSupportsAutoDetect = computed(() =>
+      supportsAutoDetect ?? true
     );
-  });
 
-  // Filtered lists
-  const unpaidBills = computed(() =>
-    bills.filter((bill) => !bill.isPaid && !bill.isLikelyPaid)
-  );
-  const likelyPaidBills = computed(() =>
-    bills
-      .filter((bill) => bill.isLikelyPaid)
-      .sort((a, b) => b.dueDate.localeCompare(a.dueDate))
-  );
-  const paidBills = computed(() =>
-    bills
-      .filter((bill) => bill.isPaid && !bill.isLikelyPaid)
-      .sort((a, b) => b.dueDate.localeCompare(a.dueDate))
-  );
-  const totalUnpaid = computed(() =>
-    unpaidBills.reduce((sum, bill) => sum + bill.amount, 0)
-  );
-  const overdueCount = computed(() =>
-    unpaidBills.filter((bill) => bill.daysUntilDue < 0).length
-  );
+    // Use GmailExtractor building block for email fetching and LLM extraction
+    const extractor = GmailExtractor({
+      gmailQuery,
+      extraction: {
+        schema: BILL_EXTRACTION_SCHEMA,
+        promptTemplate: extractionPrompt,
+      },
+      title: computed(() => `${shortName} Emails`),
+      resolveInlineImages: false,
+      limit: computed(() => limit ?? 100),
+      overrideAuth,
+    });
 
-  // ==========================================================================
-  // SIMPLE UI COMPONENTS (no list iteration)
-  // ==========================================================================
+    // Extract payment confirmations for auto-marking bills as paid
+    const paymentConfirmations = computed(() => {
+      const confirmations: Record<string, Set<string>> = {};
 
-  // Preview UI for compact display (cards, etc.)
-  const previewUI = (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: "12px",
-        padding: "8px 12px",
-      }}
-    >
-      <div
-        style={{
-          width: "36px",
-          height: "36px",
-          borderRadius: "8px",
-          backgroundColor: computed(() =>
-            overdueCount > 0 ? "#fee2e2" : "#eff6ff"
-          ),
-          border: computed(() =>
-            overdueCount > 0 ? "2px solid #ef4444" : "2px solid #3b82f6"
-          ),
-          color: computed(() => (overdueCount > 0 ? "#b91c1c" : "#1d4ed8")),
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontWeight: "bold",
-          fontSize: "16px",
-        }}
-      >
-        {computed(() => unpaidBills?.length || 0)}
-      </div>
-      <div style={{ flex: 1 }}>
-        <div style={{ fontWeight: "600", fontSize: "14px" }}>
-          {shortName} Bills
-        </div>
-        <div style={{ fontSize: "12px", color: "#6b7280" }}>
-          {computed(() => formatCurrency(totalUnpaid))} due
-          <span
-            style={{
-              color: "#dc2626",
-              marginLeft: "4px",
-              display: computed(() => (overdueCount > 0 ? "inline" : "none")),
-            }}
-          >
-            ({computed(() => overdueCount)} overdue)
-          </span>
-        </div>
-        <ProcessingStatus
-          totalCount={extractor.emailCount}
-          pendingCount={extractor.pendingCount}
-          completedCount={extractor.completedCount}
-        />
-      </div>
-    </div>
-  );
+      for (const item of extractor.rawAnalyses || []) {
+        const result = item.analysis?.result as BillAnalysis | undefined;
+        if (!result) continue;
 
-  // Summary stats UI
-  const summaryStatsUI = (
-    <div
-      style={{
-        display: "flex",
-        gap: "16px",
-        padding: "16px",
-        backgroundColor: "#f3f4f6",
-        borderRadius: "8px",
-      }}
-    >
-      <div>
-        <div
-          style={{
-            fontSize: "28px",
-            fontWeight: "bold",
-            color: "#1d4ed8",
-          }}
-        >
-          {computed(() => formatCurrency(totalUnpaid))}
-        </div>
-        <div style={{ fontSize: "12px", color: "#666" }}>Total Unpaid</div>
-      </div>
-      <div
-        style={{
-          borderLeft: "1px solid #d1d5db",
-          paddingLeft: "16px",
-        }}
-      >
-        <div
-          style={{
-            fontSize: "28px",
-            fontWeight: "bold",
-            color: computed(() => (overdueCount > 0 ? "#dc2626" : "#059669")),
-          }}
-        >
-          {computed(() => unpaidBills?.length || 0)}
-        </div>
-        <div style={{ fontSize: "12px", color: "#666" }}>Unpaid Bills</div>
-      </div>
-      <div
-        style={{
-          borderLeft: "1px solid #d1d5db",
-          paddingLeft: "16px",
-          display: computed(() => (overdueCount > 0 ? "block" : "none")),
-        }}
-      >
-        <div
-          style={{
-            fontSize: "28px",
-            fontWeight: "bold",
-            color: "#dc2626",
-          }}
-        >
-          {computed(() => overdueCount)}
-        </div>
-        <div style={{ fontSize: "12px", color: "#666" }}>Overdue</div>
-      </div>
-    </div>
-  );
+        if (
+          result.emailType === "payment_received" &&
+          result.identifier &&
+          result.paymentDate
+        ) {
+          const key = result.identifier;
+          if (!confirmations[key]) confirmations[key] = new Set();
+          confirmations[key].add(result.paymentDate);
+        }
+      }
 
-  // Overdue alert UI
-  const overdueAlertUI = (
-    <div
-      style={{
-        padding: "16px",
-        backgroundColor: "#fee2e2",
-        borderRadius: "12px",
-        border: "2px solid #ef4444",
-        display: computed(() => (overdueCount > 0 ? "block" : "none")),
-      }}
-    >
+      const sortedResult: Record<string, string[]> = {};
+      for (const idKey of Object.keys(confirmations).sort()) {
+        sortedResult[idKey] = [...confirmations[idKey]].sort((a, b) =>
+          a.localeCompare(b)
+        );
+      }
+      return sortedResult;
+    });
+
+    // Process analyses and build bill list with domain-specific logic
+    const bills = computed(() => {
+      const billMap: Record<string, TrackedBill> = {};
+      // Use .get() to access Writable values inside computed
+      const paidKeys = manuallyPaid?.get() || [];
+      const payments = paymentConfirmations || {};
+      const isDemoMode = demoMode?.get() ?? true;
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const sortedAnalyses = [...(extractor.rawAnalyses || [])]
+        .filter((a) => a?.analysis?.result)
+        .sort((a, b) => {
+          const dateA = new Date(a.emailDate || 0).getTime();
+          const dateB = new Date(b.emailDate || 0).getTime();
+          if (dateB !== dateA) return dateB - dateA;
+          return (a.emailId || "").localeCompare(b.emailId || "");
+        });
+
+      for (const analysisItem of sortedAnalyses) {
+        const result = analysisItem.analysis?.result as
+          | BillAnalysis
+          | undefined;
+        if (!result) continue;
+
+        const isBillEmail = result.emailType === "bill_due" ||
+          result.emailType === "payment_reminder";
+        const isStatementWithBillInfo =
+          result.emailType === "statement_ready" &&
+          result.dueDate &&
+          (result.amount || result.statementBalance);
+
+        if (!isBillEmail && !isStatementWithBillInfo) continue;
+        if (!result.identifier || !result.dueDate) continue;
+
+        const billAmount = result.amount || result.statementBalance || 0;
+        const key = createBillKey(result.identifier, result.dueDate);
+        if (billMap[key]) continue;
+
+        const daysUntilDue = calculateDaysUntilDue(result.dueDate, today);
+        const isManuallyPaid = paidKeys.includes(key);
+
+        const idPayments = payments[result.identifier] || [];
+        const dueDateMs = parseDateToMs(result.dueDate);
+        const matchingPayment = idPayments.find((paymentDate) => {
+          const paymentMs = parseDateToMs(paymentDate);
+          if (isNaN(dueDateMs) || isNaN(paymentMs)) return false;
+          const daysDiff = (paymentMs - dueDateMs) / (1000 * 60 * 60 * 24);
+          return daysDiff >= -30 && daysDiff <= 60;
+        });
+
+        const autoPaid = !!matchingPayment;
+        const isLikelyPaid = !isManuallyPaid &&
+          !autoPaid &&
+          daysUntilDue < LIKELY_PAID_THRESHOLD_DAYS;
+        const isPaid = isManuallyPaid || autoPaid || isLikelyPaid;
+
+        let status: BillStatus;
+        if (isLikelyPaid) status = "likely_paid";
+        else if (isPaid) status = "paid";
+        else if (daysUntilDue < 0) status = "overdue";
+        else status = "unpaid";
+
+        billMap[key] = {
+          key,
+          identifier: result.identifier,
+          amount: demoPrice(billAmount, isDemoMode),
+          dueDate: result.dueDate,
+          status,
+          isPaid,
+          paidDate: matchingPayment || undefined,
+          emailDate: analysisItem.emailDate,
+          emailId: analysisItem.emailId,
+          isManuallyPaid,
+          isLikelyPaid,
+          daysUntilDue,
+        };
+      }
+
+      return Object.values(billMap).sort(
+        (a, b) => a.daysUntilDue - b.daysUntilDue,
+      );
+    });
+
+    // Filtered lists
+    const unpaidBills = computed(() =>
+      bills.filter((bill) => !bill.isPaid && !bill.isLikelyPaid)
+    );
+    const likelyPaidBills = computed(() =>
+      bills
+        .filter((bill) => bill.isLikelyPaid)
+        .sort((a, b) => b.dueDate.localeCompare(a.dueDate))
+    );
+    const paidBills = computed(() =>
+      bills
+        .filter((bill) => bill.isPaid && !bill.isLikelyPaid)
+        .sort((a, b) => b.dueDate.localeCompare(a.dueDate))
+    );
+    const totalUnpaid = computed(() =>
+      unpaidBills.reduce((sum, bill) => sum + bill.amount, 0)
+    );
+    const overdueCount = computed(() =>
+      unpaidBills.filter((bill) => bill.daysUntilDue < 0).length
+    );
+
+    // ==========================================================================
+    // SIMPLE UI COMPONENTS (no list iteration)
+    // ==========================================================================
+
+    // Preview UI for compact display (cards, etc.)
+    const previewUI = (
       <div
         style={{
           display: "flex",
           alignItems: "center",
           gap: "12px",
-          marginBottom: "8px",
+          padding: "8px 12px",
         }}
       >
-        <span style={{ fontSize: "32px" }}>*</span>
-        <span
+        <div
           style={{
-            fontWeight: "700",
-            fontSize: "20px",
-            color: "#b91c1c",
+            width: "36px",
+            height: "36px",
+            borderRadius: "8px",
+            backgroundColor: computed(() =>
+              overdueCount > 0 ? "#fee2e2" : "#eff6ff"
+            ),
+            border: computed(() =>
+              overdueCount > 0 ? "2px solid #ef4444" : "2px solid #3b82f6"
+            ),
+            color: computed(() => (overdueCount > 0 ? "#b91c1c" : "#1d4ed8")),
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontWeight: "bold",
+            fontSize: "16px",
           }}
         >
-          {computed(() => overdueCount)} Overdue Bill
-          {computed(() => (overdueCount !== 1 ? "s" : ""))}
-        </span>
+          {computed(() => unpaidBills?.length || 0)}
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: "600", fontSize: "14px" }}>
+            {shortName} Bills
+          </div>
+          <div style={{ fontSize: "12px", color: "#6b7280" }}>
+            {computed(() => formatCurrency(totalUnpaid))} due
+            <span
+              style={{
+                color: "#dc2626",
+                marginLeft: "4px",
+                display: computed(() => (overdueCount > 0 ? "inline" : "none")),
+              }}
+            >
+              ({computed(() => overdueCount)} overdue)
+            </span>
+          </div>
+          <ProcessingStatus
+            totalCount={extractor.emailCount}
+            pendingCount={extractor.pendingCount}
+            completedCount={extractor.completedCount}
+          />
+        </div>
       </div>
-      <div style={{ fontSize: "14px", color: "#b91c1c" }}>
-        Please pay immediately to avoid late fees.
-      </div>
-    </div>
-  );
+    );
 
-  // Website link UI
-  const websiteLinkUI = websiteUrl
-    ? (
-      <div style={{ marginTop: "16px", textAlign: "center" }}>
+    // Summary stats UI
+    const summaryStatsUI = (
+      <div
+        style={{
+          display: "flex",
+          gap: "16px",
+          padding: "16px",
+          backgroundColor: "#f3f4f6",
+          borderRadius: "8px",
+        }}
+      >
+        <div>
+          <div
+            style={{
+              fontSize: "28px",
+              fontWeight: "bold",
+              color: "#1d4ed8",
+            }}
+          >
+            {computed(() => formatCurrency(totalUnpaid))}
+          </div>
+          <div style={{ fontSize: "12px", color: "#666" }}>Total Unpaid</div>
+        </div>
+        <div
+          style={{
+            borderLeft: "1px solid #d1d5db",
+            paddingLeft: "16px",
+          }}
+        >
+          <div
+            style={{
+              fontSize: "28px",
+              fontWeight: "bold",
+              color: computed(() => (overdueCount > 0 ? "#dc2626" : "#059669")),
+            }}
+          >
+            {computed(() => unpaidBills?.length || 0)}
+          </div>
+          <div style={{ fontSize: "12px", color: "#666" }}>Unpaid Bills</div>
+        </div>
+        <div
+          style={{
+            borderLeft: "1px solid #d1d5db",
+            paddingLeft: "16px",
+            display: computed(() => (overdueCount > 0 ? "block" : "none")),
+          }}
+        >
+          <div
+            style={{
+              fontSize: "28px",
+              fontWeight: "bold",
+              color: "#dc2626",
+            }}
+          >
+            {computed(() => overdueCount)}
+          </div>
+          <div style={{ fontSize: "12px", color: "#666" }}>Overdue</div>
+        </div>
+      </div>
+    );
+
+    // Overdue alert UI
+    const overdueAlertUI = (
+      <div
+        style={{
+          padding: "16px",
+          backgroundColor: "#fee2e2",
+          borderRadius: "12px",
+          border: "2px solid #ef4444",
+          display: computed(() => (overdueCount > 0 ? "block" : "none")),
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "12px",
+            marginBottom: "8px",
+          }}
+        >
+          <span style={{ fontSize: "32px" }}>*</span>
+          <span
+            style={{
+              fontWeight: "700",
+              fontSize: "20px",
+              color: "#b91c1c",
+            }}
+          >
+            {computed(() => overdueCount)} Overdue Bill
+            {computed(() => (overdueCount !== 1 ? "s" : ""))}
+          </span>
+        </div>
+        <div style={{ fontSize: "14px", color: "#b91c1c" }}>
+          Please pay immediately to avoid late fees.
+        </div>
+      </div>
+    );
+
+    // Website link UI (hidden when no URL provided)
+    const websiteLinkUI = (
+      <div
+        style={{
+          marginTop: "16px",
+          textAlign: "center",
+          display: computed(() => websiteUrl ? "block" : "none"),
+        }}
+      >
         <a
           href={websiteUrl}
           target="_blank"
@@ -685,18 +701,22 @@ function BillExtractor(input: BillExtractorInput): BillExtractorOutput {
           Open {shortName} Website
         </a>
       </div>
-    )
-    : null;
+    );
 
-  // Manual tracking banner UI (shown when provider doesn't send payment confirmation emails)
-  const manualTrackingBannerUI = !resolvedSupportsAutoDetect
-    ? (
+    // Pre-compute the threshold days text outside JSX
+    const thresholdDaysText = Math.abs(LIKELY_PAID_THRESHOLD_DAYS);
+
+    // Manual tracking banner UI (hidden when supportsAutoDetect is true)
+    const manualTrackingBannerUI = (
       <div
         style={{
           padding: "12px 16px",
           backgroundColor: "#eff6ff",
           borderRadius: "8px",
           border: "1px solid #3b82f6",
+          display: computed(() =>
+            resolvedSupportsAutoDetect ? "none" : "block"
+          ),
         }}
       >
         <div
@@ -723,61 +743,60 @@ function BillExtractor(input: BillExtractorInput): BillExtractorOutput {
             >
               {shortName}{" "}
               doesn't send payment confirmation emails. Use "Mark Paid" to track
-              payments, or bills over {Math.abs(LIKELY_PAID_THRESHOLD_DAYS)}
-              {" "}
+              payments, or bills over {thresholdDaysText}{" "}
               days old will be assumed paid.
             </div>
           </div>
         </div>
       </div>
-    )
-    : null;
+    );
 
-  return {
-    // Pre-computed data (building-block scope)
-    bills,
-    unpaidBills,
-    paidBills,
-    likelyPaidBills,
-    totalUnpaid,
-    overdueCount,
+    return {
+      // Pre-computed data (building-block scope)
+      bills,
+      unpaidBills,
+      paidBills,
+      likelyPaidBills,
+      totalUnpaid,
+      overdueCount,
 
-    // Raw data for pattern-scope processing
-    rawAnalyses: extractor.rawAnalyses,
-    paymentConfirmations,
+      // Raw data for pattern-scope processing
+      rawAnalyses: extractor.rawAnalyses,
+      paymentConfirmations,
 
-    // Config
-    identifierType,
-    title,
-    shortName,
-    brandColor: resolvedBrandColor,
-    websiteUrl,
-    supportsAutoDetect: resolvedSupportsAutoDetect,
+      // Config
+      identifierType,
+      title,
+      shortName,
+      brandColor: resolvedBrandColor,
+      websiteUrl,
+      supportsAutoDetect: resolvedSupportsAutoDetect,
 
-    // Status
-    pendingCount: extractor.pendingCount,
-    completedCount: extractor.completedCount,
-    emailCount: extractor.emailCount,
-    isConnected: extractor.isConnected,
+      // Status
+      pendingCount: extractor.pendingCount,
+      completedCount: extractor.completedCount,
+      emailCount: extractor.emailCount,
+      isConnected: extractor.isConnected,
 
-    // Operations
-    refresh: extractor.refresh,
+      // Operations
+      refresh: extractor.refresh,
 
-    // UI (simple components only)
-    ui: {
-      authStatusUI: extractor.ui.authStatusUI,
-      connectionStatusUI: extractor.ui.connectionStatusUI,
-      analysisProgressUI: extractor.ui.analysisProgressUI,
-      previewUI,
-      summaryStatsUI,
-      overdueAlertUI,
-      websiteLinkUI,
-      manualTrackingBannerUI,
-    },
+      // UI (simple components only)
+      ui: {
+        authStatusUI: extractor.ui.authStatusUI,
+        connectionStatusUI: extractor.ui.connectionStatusUI,
+        analysisProgressUI: extractor.ui.analysisProgressUI,
+        previewUI,
+        summaryStatsUI,
+        overdueAlertUI,
+        websiteLinkUI,
+        manualTrackingBannerUI,
+      },
 
-    // Access to underlying extractor
-    gmailExtractor: extractor,
-  };
-}
+      // Access to underlying extractor
+      gmailExtractor: extractor,
+    };
+  },
+);
 
 export default BillExtractor;
