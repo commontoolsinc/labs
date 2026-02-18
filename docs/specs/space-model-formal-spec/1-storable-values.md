@@ -1323,7 +1323,7 @@ spec from being implementable.
 
 - **Type registry management**: How are serialization contexts configured? Static
   registration? Dynamic discovery? Who owns the registry? The isolation
-  strategy (see `coordination/docs/isolation-strategy.md`) proposes
+  strategy (see `coordination/docs/2026-02-09-isolation-strategy.md`) proposes
   per-`Runtime` configuration via `ExperimentalOptions`, which provides a
   natural place for registry configuration per runtime instance.
 
