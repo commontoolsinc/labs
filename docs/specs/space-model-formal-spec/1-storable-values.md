@@ -204,6 +204,24 @@ Each wrapper class:
   serialization context for tag resolution, following the pattern established
   by `UnknownStorable` and `ProblematicStorable`.
 
+#### Extra Enumerable Properties
+
+**`StorableError`** MAY carry extra enumerable properties beyond the standard
+fields (`name`, `message`, `stack`, `cause`). Custom properties on `Error`
+objects are common JavaScript practice (e.g., `error.code`, `error.statusCode`),
+so `StorableError` preserves them: `[DECONSTRUCT]` includes them in its output,
+and `[RECONSTRUCT]` restores them on the reconstructed `Error`.
+
+**`StorableMap`, `StorableSet`, `StorableDate`, `StorableUint8Array`** must NOT
+carry extra enumerable properties. Their `[DECONSTRUCT]` output contains only the
+essential native data (entries, items, timestamp, bytes respectively). Any extra
+enumerable properties on the source native object are **silently dropped** during
+conversion (Section 8.2) — the conversion layer does not copy them onto the
+wrapper. This matches the treatment of arrays, where extra non-index properties
+cause rejection (Section 1.5). The rationale is that unlike `Error`, the other
+native types have no established convention for custom properties, and preserving
+them would add complexity without clear use cases.
+
 #### 1.4.2 `StorableError`
 
 ```typescript
@@ -1623,11 +1641,11 @@ export function toDeepStorableValue(
 |------------|--------|
 | `null`, `boolean`, `number`, `string`, `undefined`, `bigint` | Returned as-is (primitives are `StorableValue` directly). `-0` is normalized to `0`. Non-finite numbers (`NaN`, `Infinity`) cause rejection. |
 | `StorableInstance` (including wrapper classes) | Returned as-is (already `StorableValue`). |
-| `Error` | Wrapped into `StorableError`. Before wrapping, `cause` and custom enumerable properties are recursively converted to `StorableValue` (deep variant) or left as-is (shallow variant). This ensures that by the time `StorableError.[DECONSTRUCT]` runs, all nested values are already valid `StorableValue`. |
-| `Map` | Wrapped into `StorableMap`. Keys and values are recursively converted (deep variant only). |
-| `Set` | Wrapped into `StorableSet`. Elements are recursively converted (deep variant only). |
-| `Date` | Wrapped into `StorableDate`. |
-| `Uint8Array` | Wrapped into `StorableUint8Array`. |
+| `Error` | Wrapped into `StorableError`. Before wrapping, `cause` and custom enumerable properties are recursively converted to `StorableValue` (deep variant) or left as-is (shallow variant). Extra enumerable properties are preserved (see Section 1.4.1). This ensures that by the time `StorableError.[DECONSTRUCT]` runs, all nested values are already valid `StorableValue`. |
+| `Map` | Wrapped into `StorableMap`. Keys and values are recursively converted (deep variant only). Extra enumerable properties on the `Map` object are silently dropped (see Section 1.4.1). |
+| `Set` | Wrapped into `StorableSet`. Elements are recursively converted (deep variant only). Extra enumerable properties on the `Set` object are silently dropped (see Section 1.4.1). |
+| `Date` | Wrapped into `StorableDate`. Extra enumerable properties on the `Date` object are silently dropped (see Section 1.4.1). |
+| `Uint8Array` | Wrapped into `StorableUint8Array`. Extra enumerable properties on the `Uint8Array` object are silently dropped (see Section 1.4.1). |
 | `StorableValue[]` | Shallow: returned as-is (frozen if `freeze` is true). Deep: elements recursively converted (frozen at each level if `freeze` is true). |
 | `{ [key: string]: StorableValue }` | Shallow: returned as-is (frozen if `freeze` is true). Deep: values recursively converted (frozen at each level if `freeze` is true). |
 
