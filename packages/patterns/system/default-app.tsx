@@ -22,6 +22,7 @@ const MAX_RECENT_CHARMS = 10;
 
 import BacklinksIndex, { type MentionablePiece } from "./backlinks-index.tsx";
 import OmniboxFAB from "./omnibox-fab.tsx";
+import DoList from "../do-list/do-list.tsx";
 import Notebook from "../notes/notebook.tsx";
 import NotesImportExport from "../notes/notes-import-export.tsx";
 
@@ -192,10 +193,18 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
     })
   );
 
-  const index = BacklinksIndex({});
+  const index = BacklinksIndex({ allPieces });
+  const doList = DoList({});
 
   const fab = OmniboxFAB({
     mentionable: index.mentionable,
+    doListTools: {
+      addItem: doList.addItem,
+      addItems: doList.addItems,
+      removeItemByTitle: doList.removeItemByTitle,
+      updateItemByTitle: doList.updateItemByTitle,
+      items: doList.items,
+    },
   });
 
   return {
@@ -295,6 +304,8 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
 
         <ct-vscroll flex showScrollbar>
           <ct-vstack gap="4" padding="6">
+            {doList.compactUI}
+
             <style>
               {`
                 .pattern-link {
