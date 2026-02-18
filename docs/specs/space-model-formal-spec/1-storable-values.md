@@ -658,7 +658,9 @@ aligns with the reactive system's assumption that values don't mutate in place.
 > underlying native objects stored inside wrappers (e.g., `StorableMap.map`)
 > are not directly exposed to consumers of `StorableValue` — callers who need
 > the native types use `nativeValueFromStorableValue()` (Section 8), which
-> explicitly produces mutable "JS wild west" output.
+> returns `FrozenMap` and `FrozenSet` (effectively-immutable wrappers) for
+> collection types, preserving the immutability guarantee even after
+> unwrapping.
 
 ---
 
@@ -1769,8 +1771,8 @@ etc.).
  * Wrapper classes are unwrapped to their native equivalents:
  *
  * - `StorableError`      -> `Error`
- * - `StorableMap`        -> `Map`
- * - `StorableSet`        -> `Set`
+ * - `StorableMap`        -> `FrozenMap`
+ * - `StorableSet`        -> `FrozenSet`
  * - `StorableDate`       -> `Date`
  * - `StorableUint8Array` -> `Uint8Array`
  *
@@ -1780,9 +1782,13 @@ etc.).
  * **Shallow:** Only unwraps the top-level value. Array elements and object
  * property values are not recursively unwrapped.
  *
- * **Output is NOT frozen.** The returned value is in the "JS wild west" —
- * native types like `Map` and `Error` are mutable. The immutability guarantee
- * applies only to the `StorableValue` layer.
+ * **Immutability is preserved for collections.** `StorableMap` and
+ * `StorableSet` unwrap to `FrozenMap` and `FrozenSet` respectively —
+ * effectively-immutable wrappers around `Map` and `Set` that expose
+ * read-only interfaces and throw on mutation attempts. This preserves
+ * the immutable-forward guarantee even in the "JS wild west" layer.
+ * Other native types (`Error`, `Date`, `Uint8Array`) are returned as
+ * their standard mutable forms.
  */
 export function nativeValueFromStorableValue(
   value: StorableValue,
@@ -1802,18 +1808,27 @@ export function deepNativeValueFromStorableValue(
 
 | Input | Output |
 |-------|--------|
-| `StorableError` | The underlying `Error` (`storableError.error`) |
-| `StorableMap` | The underlying `Map` (`storableMap.map`) |
-| `StorableSet` | The underlying `Set` (`storableSet.set`) |
-| `StorableDate` | The underlying `Date` (`storableDate.date`) |
-| `StorableUint8Array` | The underlying `Uint8Array` (`storableUint8Array.bytes`) |
+| `StorableError` | `Error` (mutable) |
+| `StorableMap` | `FrozenMap` (read-only `Map` wrapper; throws on mutation) |
+| `StorableSet` | `FrozenSet` (read-only `Set` wrapper; throws on mutation) |
+| `StorableDate` | `Date` (mutable) |
+| `StorableUint8Array` | `Uint8Array` (mutable) |
 | Other `StorableInstance` | Passed through unchanged |
 | Primitives | Passed through unchanged |
 | Arrays (deep variant) | Recursively unwrapped; output array is NOT frozen |
 | Plain objects (deep variant) | Recursively unwrapped; output object is NOT frozen |
 
 The output type is `StorableValue | StorableNativeObject`, reflecting that the
-result may contain raw native JS types at any depth.
+result may contain native JS types at any depth.
+
+> **Why `FrozenMap` / `FrozenSet`?** `Object.freeze()` does not prevent
+> mutation of `Map` and `Set` — their `set()`, `delete()`, `add()`, and
+> `clear()` methods remain callable on a frozen instance. `FrozenMap` and
+> `FrozenSet` are thin wrappers that expose the read-only subset of the
+> `Map`/`Set` API (`get`, `has`, `entries`, `forEach`, `size`, etc.) and throw
+> on any mutation attempt. This ensures that data round-tripped through the
+> storable layer remains effectively immutable even after unwrapping. The exact
+> API of `FrozenMap` and `FrozenSet` is an implementation decision.
 
 ### 8.6 Round-Trip Guarantees
 
@@ -1823,10 +1838,11 @@ For any supported value `v`:
 deepNativeValueFromStorableValue(toDeepStorableValue(v))
 ```
 
-produces a value that is structurally equivalent to `v` — the same types at the
-same positions, with the same data. The round-tripped value is not necessarily
-`===` to the original (wrapping and unwrapping creates new objects), but it is
-equivalent for all practical purposes.
+produces a value that is structurally equivalent to `v` — the same data at the
+same positions. The round-tripped value is not necessarily `===` to the original
+(wrapping and unwrapping creates new objects), and the **types may change** for
+collections: a mutable `Map` becomes a `FrozenMap`, and a mutable `Set` becomes
+a `FrozenSet`. The data content is preserved; the mutability is not.
 
 Similarly, for any `StorableValue` `sv`:
 
