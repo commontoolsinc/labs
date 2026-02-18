@@ -24,7 +24,12 @@ async function ensureSandbox(
     });
     if (!createRes.ok) {
       const text = await createRes.text();
-      throw new Error(`Failed to create sandbox: ${createRes.status} ${text}`);
+      // "already exists" means the sandbox is running — not an error
+      if (!text.includes("already exists")) {
+        throw new Error(
+          `Failed to create sandbox: ${createRes.status} ${text}`,
+        );
+      }
     }
     return;
   }
