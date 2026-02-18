@@ -1,10 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { DECONSTRUCT, isStorable, RECONSTRUCT } from "../storable-protocol.ts";
-import type {
-  ReconstructionContext,
-  StorableInstance,
-} from "../storable-protocol.ts";
+import type { ReconstructionContext } from "../storable-protocol.ts";
 import type { StorableValue } from "../interface.ts";
 import {
   deepNativeValueFromStorableValue,
@@ -14,6 +11,7 @@ import {
   StorableDate,
   StorableError,
   StorableMap,
+  StorableNativeWrapper,
   StorableSet,
   StorableUint8Array,
 } from "../storable-native-instances.ts";
@@ -51,12 +49,27 @@ describe("storable-native-instances", () => {
       expect(se.error).toBe(err);
     });
 
-    it("[DECONSTRUCT] returns name, message, stack", () => {
+    it("is instanceof StorableNativeWrapper", () => {
+      const se = new StorableError(new Error("test"));
+      expect(se instanceof StorableNativeWrapper).toBe(true);
+    });
+
+    it("[DECONSTRUCT] returns type, name, message, stack", () => {
       const se = new StorableError(new Error("hello"));
       const state = se[DECONSTRUCT]() as Record<string, StorableValue>;
+      expect(state.type).toBe("Error");
       expect(state.name).toBe("Error");
       expect(state.message).toBe("hello");
       expect(typeof state.stack).toBe("string");
+    });
+
+    it("[DECONSTRUCT] type reflects constructor, name reflects .name", () => {
+      const err = new TypeError("bad");
+      err.name = "CustomName";
+      const se = new StorableError(err);
+      const state = se[DECONSTRUCT]() as Record<string, StorableValue>;
+      expect(state.type).toBe("TypeError");
+      expect(state.name).toBe("CustomName");
     });
 
     it("[DECONSTRUCT] includes cause when present", () => {
@@ -78,6 +91,30 @@ describe("storable-native-instances", () => {
       expect(state.detail).toBe("more info");
     });
 
+    it("[DECONSTRUCT] does not copy __proto__ or constructor keys", () => {
+      const err = new Error("test");
+      Object.defineProperty(err, "__proto__", {
+        value: "bad",
+        enumerable: true,
+      });
+      const se = new StorableError(err);
+      const state = se[DECONSTRUCT]() as Record<string, StorableValue>;
+      expect("__proto__" in state).toBe(false);
+    });
+
+    it("[DECONSTRUCT] custom props do not override built-in fields", () => {
+      const err = new Error("original");
+      // Manually set an enumerable "message" property -- should not override
+      Object.defineProperty(err, "message", {
+        value: "original",
+        enumerable: true,
+      });
+      (err as unknown as Record<string, unknown>).name = "Error";
+      const se = new StorableError(err);
+      const state = se[DECONSTRUCT]() as Record<string, StorableValue>;
+      expect(state.message).toBe("original");
+    });
+
     it("[DECONSTRUCT] omits stack when undefined", () => {
       const err = new Error("no stack");
       err.stack = undefined;
@@ -88,6 +125,7 @@ describe("storable-native-instances", () => {
 
     it("[RECONSTRUCT] creates StorableError from state", () => {
       const state = {
+        type: "Error",
         name: "Error",
         message: "hello",
       } as StorableValue;
@@ -98,7 +136,7 @@ describe("storable-native-instances", () => {
       expect(result.error.message).toBe("hello");
     });
 
-    it("[RECONSTRUCT] creates correct Error subclass", () => {
+    it("[RECONSTRUCT] creates correct Error subclass from type", () => {
       const cases: [string, ErrorConstructor][] = [
         ["TypeError", TypeError],
         ["RangeError", RangeError],
@@ -107,16 +145,37 @@ describe("storable-native-instances", () => {
         ["URIError", URIError],
         ["EvalError", EvalError],
       ];
-      for (const [name, cls] of cases) {
-        const state = { name, message: "test" } as StorableValue;
+      for (const [type, cls] of cases) {
+        const state = { type, name: type, message: "test" } as StorableValue;
         const result = StorableError[RECONSTRUCT](state, dummyContext);
         expect(result.error).toBeInstanceOf(cls);
-        expect(result.error.name).toBe(name);
+        expect(result.error.name).toBe(type);
       }
+    });
+
+    it("[RECONSTRUCT] handles type != name (e.g. TypeError with custom name)", () => {
+      const state = {
+        type: "TypeError",
+        name: "CustomTypeName",
+        message: "mismatch",
+      } as StorableValue;
+      const result = StorableError[RECONSTRUCT](state, dummyContext);
+      expect(result.error).toBeInstanceOf(TypeError);
+      expect(result.error.name).toBe("CustomTypeName");
+    });
+
+    it("[RECONSTRUCT] falls back to name when type is absent (back-compat)", () => {
+      const state = {
+        name: "TypeError",
+        message: "old format",
+      } as StorableValue;
+      const result = StorableError[RECONSTRUCT](state, dummyContext);
+      expect(result.error).toBeInstanceOf(TypeError);
     });
 
     it("[RECONSTRUCT] handles custom name", () => {
       const state = {
+        type: "Error",
         name: "MyCustomError",
         message: "custom",
       } as StorableValue;
@@ -126,6 +185,7 @@ describe("storable-native-instances", () => {
 
     it("[RECONSTRUCT] restores cause and custom properties", () => {
       const state = {
+        type: "Error",
         name: "Error",
         message: "with extras",
         cause: "something went wrong",
@@ -153,6 +213,30 @@ describe("storable-native-instances", () => {
         (restored.error as unknown as Record<string, unknown>).code,
       ).toBe(42);
     });
+
+    it("round-trips TypeError with overridden name", () => {
+      const original = new TypeError("bad value");
+      original.name = "SpecialType";
+      const se = new StorableError(original);
+
+      const state = se[DECONSTRUCT]() as Record<string, StorableValue>;
+      expect(state.type).toBe("TypeError");
+      expect(state.name).toBe("SpecialType");
+
+      const restored = StorableError[RECONSTRUCT](
+        state as StorableValue,
+        dummyContext,
+      );
+      expect(restored.error).toBeInstanceOf(TypeError);
+      expect(restored.error.name).toBe("SpecialType");
+    });
+
+    it("toNativeValue returns the wrapped error", () => {
+      const err = new Error("native");
+      const se = new StorableError(err);
+      expect(se.toNativeValue(true)).toBe(err);
+      expect(se.toNativeValue(false)).toBe(err);
+    });
   });
 
   // --------------------------------------------------------------------------
@@ -166,6 +250,11 @@ describe("storable-native-instances", () => {
       expect(sm.typeTag).toBe("Map@1");
     });
 
+    it("StorableMap is instanceof StorableNativeWrapper", () => {
+      const sm = new StorableMap(new Map());
+      expect(sm instanceof StorableNativeWrapper).toBe(true);
+    });
+
     it("StorableMap [DECONSTRUCT] throws (stub)", () => {
       const sm = new StorableMap(new Map());
       expect(() => sm[DECONSTRUCT]()).toThrow("not yet implemented");
@@ -175,6 +264,24 @@ describe("storable-native-instances", () => {
       expect(() => StorableMap[RECONSTRUCT](null, dummyContext)).toThrow(
         "not yet implemented",
       );
+    });
+
+    it("StorableMap.toNativeValue(true) returns FrozenMap", () => {
+      const map = new Map<StorableValue, StorableValue>([["a", 1]]);
+      const sm = new StorableMap(map);
+      const result = sm.toNativeValue(true);
+      expect(result).toBeInstanceOf(FrozenMap);
+      expect((result as FrozenMap<string, number>).get("a")).toBe(1);
+    });
+
+    it("StorableMap.toNativeValue(false) returns mutable Map", () => {
+      const map = new Map<StorableValue, StorableValue>([["a", 1]]);
+      const sm = new StorableMap(map);
+      const result = sm.toNativeValue(false);
+      expect(result).toBeInstanceOf(Map);
+      expect(result).not.toBeInstanceOf(FrozenMap);
+      (result as Map<string, number>).set("b", 2);
+      expect((result as Map<string, number>).get("b")).toBe(2);
     });
 
     it("StorableSet implements StorableInstance", () => {
@@ -188,6 +295,24 @@ describe("storable-native-instances", () => {
       expect(() => ss[DECONSTRUCT]()).toThrow("not yet implemented");
     });
 
+    it("StorableSet.toNativeValue(true) returns FrozenSet", () => {
+      const set = new Set<StorableValue>([1, 2]);
+      const ss = new StorableSet(set);
+      const result = ss.toNativeValue(true);
+      expect(result).toBeInstanceOf(FrozenSet);
+      expect((result as FrozenSet<number>).has(1)).toBe(true);
+    });
+
+    it("StorableSet.toNativeValue(false) returns mutable Set", () => {
+      const set = new Set<StorableValue>([1, 2]);
+      const ss = new StorableSet(set);
+      const result = ss.toNativeValue(false);
+      expect(result).toBeInstanceOf(Set);
+      expect(result).not.toBeInstanceOf(FrozenSet);
+      (result as Set<number>).add(3);
+      expect((result as Set<number>).has(3)).toBe(true);
+    });
+
     it("StorableDate implements StorableInstance", () => {
       const sd = new StorableDate(new Date());
       expect(isStorable(sd)).toBe(true);
@@ -197,6 +322,12 @@ describe("storable-native-instances", () => {
     it("StorableDate [DECONSTRUCT] throws (stub)", () => {
       const sd = new StorableDate(new Date());
       expect(() => sd[DECONSTRUCT]()).toThrow("not yet implemented");
+    });
+
+    it("StorableDate.toNativeValue returns the Date", () => {
+      const date = new Date("2024-01-01");
+      const sd = new StorableDate(date);
+      expect(sd.toNativeValue(true)).toBe(date);
     });
 
     it("StorableUint8Array implements StorableInstance", () => {
@@ -209,6 +340,12 @@ describe("storable-native-instances", () => {
       const su = new StorableUint8Array(new Uint8Array());
       expect(() => su[DECONSTRUCT]()).toThrow("not yet implemented");
     });
+
+    it("StorableUint8Array.toNativeValue returns the Uint8Array", () => {
+      const bytes = new Uint8Array([1, 2, 3]);
+      const su = new StorableUint8Array(bytes);
+      expect(su.toNativeValue(true)).toBe(bytes);
+    });
   });
 
   // --------------------------------------------------------------------------
@@ -219,6 +356,11 @@ describe("storable-native-instances", () => {
     it("is instanceof Map", () => {
       const fm = new FrozenMap([["a", 1]]);
       expect(fm instanceof Map).toBe(true);
+    });
+
+    it("is Object.isFrozen", () => {
+      const fm = new FrozenMap([["a", 1]]);
+      expect(Object.isFrozen(fm)).toBe(true);
     });
 
     it("supports read operations", () => {
@@ -273,6 +415,11 @@ describe("storable-native-instances", () => {
       expect(fs instanceof Set).toBe(true);
     });
 
+    it("is Object.isFrozen", () => {
+      const fs = new FrozenSet([1, 2, 3]);
+      expect(Object.isFrozen(fs)).toBe(true);
+    });
+
     it("supports read operations", () => {
       const fs = new FrozenSet<number>([1, 2, 3]);
       expect(fs.size).toBe(3);
@@ -321,47 +468,53 @@ describe("storable-native-instances", () => {
     it("unwraps StorableError to Error", () => {
       const err = new TypeError("test");
       const se = new StorableError(err);
-      const result = nativeValueFromStorableValue(
-        se as unknown as StorableValue,
-      );
+      const result = nativeValueFromStorableValue(se as StorableValue);
       expect(result).toBe(err);
     });
 
-    it("unwraps StorableMap to FrozenMap", () => {
+    it("unwraps StorableMap to FrozenMap (default frozen)", () => {
       const map = new Map<StorableValue, StorableValue>([["a", 1]]);
       const sm = new StorableMap(map);
-      const result = nativeValueFromStorableValue(
-        sm as unknown as StorableValue,
-      );
+      const result = nativeValueFromStorableValue(sm as StorableValue);
       expect(result).toBeInstanceOf(FrozenMap);
       expect((result as FrozenMap<string, number>).get("a")).toBe(1);
     });
 
-    it("unwraps StorableSet to FrozenSet", () => {
+    it("unwraps StorableMap to mutable Map when frozen=false", () => {
+      const map = new Map<StorableValue, StorableValue>([["a", 1]]);
+      const sm = new StorableMap(map);
+      const result = nativeValueFromStorableValue(sm as StorableValue, false);
+      expect(result).toBeInstanceOf(Map);
+      expect(result).not.toBeInstanceOf(FrozenMap);
+    });
+
+    it("unwraps StorableSet to FrozenSet (default frozen)", () => {
       const set = new Set<StorableValue>([1, 2, 3]);
       const ss = new StorableSet(set);
-      const result = nativeValueFromStorableValue(
-        ss as unknown as StorableValue,
-      );
+      const result = nativeValueFromStorableValue(ss as StorableValue);
       expect(result).toBeInstanceOf(FrozenSet);
       expect((result as FrozenSet<number>).has(1)).toBe(true);
+    });
+
+    it("unwraps StorableSet to mutable Set when frozen=false", () => {
+      const set = new Set<StorableValue>([1, 2, 3]);
+      const ss = new StorableSet(set);
+      const result = nativeValueFromStorableValue(ss as StorableValue, false);
+      expect(result).toBeInstanceOf(Set);
+      expect(result).not.toBeInstanceOf(FrozenSet);
     });
 
     it("unwraps StorableDate to Date", () => {
       const date = new Date("2024-01-01");
       const sd = new StorableDate(date);
-      const result = nativeValueFromStorableValue(
-        sd as unknown as StorableValue,
-      );
+      const result = nativeValueFromStorableValue(sd as StorableValue);
       expect(result).toBe(date);
     });
 
     it("unwraps StorableUint8Array to Uint8Array", () => {
       const bytes = new Uint8Array([1, 2, 3]);
       const su = new StorableUint8Array(bytes);
-      const result = nativeValueFromStorableValue(
-        su as unknown as StorableValue,
-      );
+      const result = nativeValueFromStorableValue(su as StorableValue);
       expect(result).toBe(bytes);
     });
 
@@ -390,7 +543,7 @@ describe("storable-native-instances", () => {
   describe("deepNativeValueFromStorableValue", () => {
     it("unwraps StorableError in nested object", () => {
       const se = new StorableError(new Error("deep"));
-      const obj = { error: se } as unknown as StorableValue;
+      const obj = { error: se } as StorableValue;
       const result = deepNativeValueFromStorableValue(obj) as Record<
         string,
         unknown
@@ -403,9 +556,19 @@ describe("storable-native-instances", () => {
       const sm = new StorableMap(
         new Map<StorableValue, StorableValue>([["k", "v"]]),
       );
-      const arr = [sm] as unknown as StorableValue;
+      const arr = [sm] as StorableValue;
       const result = deepNativeValueFromStorableValue(arr) as unknown[];
       expect(result[0]).toBeInstanceOf(FrozenMap);
+    });
+
+    it("unwraps StorableMap to mutable Map when frozen=false", () => {
+      const sm = new StorableMap(
+        new Map<StorableValue, StorableValue>([["k", "v"]]),
+      );
+      const arr = [sm] as StorableValue;
+      const result = deepNativeValueFromStorableValue(arr, false) as unknown[];
+      expect(result[0]).toBeInstanceOf(Map);
+      expect(result[0]).not.toBeInstanceOf(FrozenMap);
     });
 
     it("passes through primitives at all levels", () => {
@@ -423,7 +586,7 @@ describe("storable-native-instances", () => {
         outer: {
           inner: se,
         },
-      } as unknown as StorableValue;
+      } as StorableValue;
       const result = deepNativeValueFromStorableValue(obj) as {
         outer: { inner: Error };
       };

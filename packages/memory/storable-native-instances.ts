@@ -7,6 +7,75 @@ import {
   type StorableInstance,
 } from "./storable-protocol.ts";
 
+// ---------------------------------------------------------------------------
+// Utility: safe property copy
+// ---------------------------------------------------------------------------
+
+/** Keys that must never be copied to prevent prototype pollution. */
+const UNSAFE_KEYS = new Set(["__proto__", "constructor"]);
+
+/**
+ * Copy own enumerable properties from `source` to `target`, skipping
+ * prototype-sensitive keys (`__proto__`, `constructor`). When `noOverride`
+ * is `true`, keys already present on `target` are also skipped.
+ */
+function copyOwnSafeProperties(
+  source: object,
+  target: Record<string, unknown>,
+  noOverride = false,
+): void {
+  for (const key of Object.keys(source)) {
+    if (UNSAFE_KEYS.has(key)) continue;
+    if (noOverride && key in target) continue;
+    target[key] = (source as Record<string, unknown>)[key];
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Utility: Error class lookup
+// ---------------------------------------------------------------------------
+
+/** Map from Error subclass name to its constructor. */
+const ERROR_CLASS_BY_TYPE: ReadonlyMap<string, ErrorConstructor> = new Map([
+  ["TypeError", TypeError],
+  ["RangeError", RangeError],
+  ["SyntaxError", SyntaxError],
+  ["ReferenceError", ReferenceError],
+  ["URIError", URIError],
+  ["EvalError", EvalError],
+]);
+
+/**
+ * Return the `Error` constructor for the given type string (e.g. `"TypeError"`).
+ * Falls back to the base `Error` constructor for unknown types.
+ */
+function errorClassFromType(type: string): ErrorConstructor {
+  return ERROR_CLASS_BY_TYPE.get(type) ?? Error;
+}
+
+// ---------------------------------------------------------------------------
+// Abstract base class for native-object wrappers
+// ---------------------------------------------------------------------------
+
+/**
+ * Abstract base class for `StorableInstance` wrappers that bridge native JS
+ * objects (Error, Map, Set, Date, Uint8Array) into the `StorableValue` layer.
+ * Provides a common `toNativeValue()` method used by both the shallow and
+ * deep unwrap functions, replacing their `instanceof` cascades with a single
+ * `instanceof StorableNativeWrapper` check.
+ */
+export abstract class StorableNativeWrapper implements StorableInstance {
+  abstract readonly typeTag: string;
+  abstract [DECONSTRUCT](): StorableValue;
+
+  /** Return the underlying native value, optionally frozen. */
+  abstract toNativeValue(frozen: boolean): unknown;
+}
+
+// ---------------------------------------------------------------------------
+// StorableError
+// ---------------------------------------------------------------------------
+
 /**
  * Wrapper for `Error` instances in the storable type system. Bridges native
  * `Error` (JS wild west) into the strongly-typed `StorableValue` layer by
@@ -14,22 +83,28 @@ import {
  * `StorableError` via the generic `StorableInstanceHandler` path.
  * See Section 1.4.1 of the formal spec.
  */
-export class StorableError implements StorableInstance {
+export class StorableError extends StorableNativeWrapper {
   /** The type tag used in the wire format. */
   readonly typeTag = "Error@1";
 
   constructor(
     /** The wrapped native `Error`. */
     readonly error: Error,
-  ) {}
+  ) {
+    super();
+  }
 
   /**
-   * Deconstruct into essential state for serialization. Returns name, message,
-   * stack, cause, and custom enumerable properties. Does NOT recurse into
-   * nested values -- the serialization system handles that.
+   * Deconstruct into essential state for serialization. Returns type, name,
+   * message, stack, cause, and custom enumerable properties. Does NOT recurse
+   * into nested values -- the serialization system handles that.
+   *
+   * `type` is the constructor name (e.g. "TypeError") used for reconstruction.
+   * `name` is the potentially-overridden `.name` property on the instance.
    */
   [DECONSTRUCT](): StorableValue {
     const state: Record<string, StorableValue> = {
+      type: this.error.constructor.name,
       name: this.error.name,
       message: this.error.message,
     };
@@ -39,17 +114,16 @@ export class StorableError implements StorableInstance {
     if (this.error.cause !== undefined) {
       state.cause = this.error.cause as StorableValue;
     }
-    // Copy custom enumerable properties, skipping prototype-sensitive keys.
-    for (const key of Object.keys(this.error)) {
-      if (
-        !(key in state) && key !== "__proto__" && key !== "constructor"
-      ) {
-        state[key] = (this.error as unknown as Record<string, unknown>)[
-          key
-        ] as StorableValue;
-      }
-    }
+    copyOwnSafeProperties(
+      this.error,
+      state as Record<string, unknown>,
+      true,
+    );
     return state as StorableValue;
+  }
+
+  toNativeValue(_frozen: boolean): Error {
+    return this.error;
   }
 
   /**
@@ -63,36 +137,15 @@ export class StorableError implements StorableInstance {
     _context: ReconstructionContext,
   ): StorableError {
     const s = state as Record<string, StorableValue>;
+    const type = (s.type as string) ?? (s.name as string) ?? "Error";
     const name = (s.name as string) ?? "Error";
     const message = (s.message as string) ?? "";
 
-    // Construct the appropriate Error subclass based on name.
-    let error: Error;
-    switch (name) {
-      case "TypeError":
-        error = new TypeError(message);
-        break;
-      case "RangeError":
-        error = new RangeError(message);
-        break;
-      case "SyntaxError":
-        error = new SyntaxError(message);
-        break;
-      case "ReferenceError":
-        error = new ReferenceError(message);
-        break;
-      case "URIError":
-        error = new URIError(message);
-        break;
-      case "EvalError":
-        error = new EvalError(message);
-        break;
-      default:
-        error = new Error(message);
-        break;
-    }
+    const ErrorClass = errorClassFromType(type);
+    const error = new ErrorClass(message);
 
-    // Set name explicitly (covers custom names like "MyError").
+    // Set name explicitly (covers custom names like "MyError", and the case
+    // where type and name differ).
     if (error.name !== name) {
       error.name = name;
     }
@@ -104,12 +157,10 @@ export class StorableError implements StorableInstance {
       error.cause = s.cause;
     }
 
-    // Copy custom enumerable properties, skipping prototype-sensitive keys.
+    // Copy custom properties from state onto the error.
+    const skip = new Set(["type", "name", "message", "stack", "cause"]);
     for (const key of Object.keys(s)) {
-      if (
-        key !== "name" && key !== "message" && key !== "stack" &&
-        key !== "cause" && key !== "__proto__" && key !== "constructor"
-      ) {
+      if (!skip.has(key) && !UNSAFE_KEYS.has(key)) {
         (error as unknown as Record<string, unknown>)[key] = s[key];
       }
     }
@@ -118,16 +169,27 @@ export class StorableError implements StorableInstance {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Stub native wrappers: Map, Set, Date, Uint8Array
+// ---------------------------------------------------------------------------
+
 /**
  * Wrapper for `Map` instances. Stub -- `[DECONSTRUCT]` and `[RECONSTRUCT]`
- * throw until Map support is fully implemented.
+ * throw until Map support is fully implemented. Extra properties beyond the
+ * wrapped collection are not supported on non-Error wrappers.
  */
-export class StorableMap implements StorableInstance {
+export class StorableMap extends StorableNativeWrapper {
   readonly typeTag = "Map@1";
-  constructor(readonly map: Map<StorableValue, StorableValue>) {}
+  constructor(readonly map: Map<StorableValue, StorableValue>) {
+    super();
+  }
 
   [DECONSTRUCT](): StorableValue {
     throw new Error("StorableMap: not yet implemented");
+  }
+
+  toNativeValue(frozen: boolean): Map<StorableValue, StorableValue> {
+    return frozen ? new FrozenMap(this.map) : new Map(this.map);
   }
 
   static [RECONSTRUCT](
@@ -140,14 +202,21 @@ export class StorableMap implements StorableInstance {
 
 /**
  * Wrapper for `Set` instances. Stub -- `[DECONSTRUCT]` and `[RECONSTRUCT]`
- * throw until Set support is fully implemented.
+ * throw until Set support is fully implemented. Extra properties beyond the
+ * wrapped collection are not supported on non-Error wrappers.
  */
-export class StorableSet implements StorableInstance {
+export class StorableSet extends StorableNativeWrapper {
   readonly typeTag = "Set@1";
-  constructor(readonly set: Set<StorableValue>) {}
+  constructor(readonly set: Set<StorableValue>) {
+    super();
+  }
 
   [DECONSTRUCT](): StorableValue {
     throw new Error("StorableSet: not yet implemented");
+  }
+
+  toNativeValue(frozen: boolean): Set<StorableValue> {
+    return frozen ? new FrozenSet(this.set) : new Set(this.set);
   }
 
   static [RECONSTRUCT](
@@ -160,14 +229,21 @@ export class StorableSet implements StorableInstance {
 
 /**
  * Wrapper for `Date` instances. Stub -- `[DECONSTRUCT]` and `[RECONSTRUCT]`
- * throw until Date support is fully implemented.
+ * throw until Date support is fully implemented. Extra properties beyond the
+ * wrapped value are not supported on non-Error wrappers.
  */
-export class StorableDate implements StorableInstance {
+export class StorableDate extends StorableNativeWrapper {
   readonly typeTag = "Date@1";
-  constructor(readonly date: Date) {}
+  constructor(readonly date: Date) {
+    super();
+  }
 
   [DECONSTRUCT](): StorableValue {
     throw new Error("StorableDate: not yet implemented");
+  }
+
+  toNativeValue(_frozen: boolean): Date {
+    return this.date;
   }
 
   static [RECONSTRUCT](
@@ -181,13 +257,21 @@ export class StorableDate implements StorableInstance {
 /**
  * Wrapper for `Uint8Array` instances. Stub -- `[DECONSTRUCT]` and
  * `[RECONSTRUCT]` throw until Uint8Array support is fully implemented.
+ * Extra properties beyond the wrapped value are not supported on non-Error
+ * wrappers.
  */
-export class StorableUint8Array implements StorableInstance {
+export class StorableUint8Array extends StorableNativeWrapper {
   readonly typeTag = "Bytes@1";
-  constructor(readonly bytes: Uint8Array) {}
+  constructor(readonly bytes: Uint8Array) {
+    super();
+  }
 
   [DECONSTRUCT](): StorableValue {
     throw new Error("StorableUint8Array: not yet implemented");
+  }
+
+  toNativeValue(_frozen: boolean): Uint8Array {
+    return this.bytes;
   }
 
   static [RECONSTRUCT](
@@ -208,36 +292,34 @@ export class StorableUint8Array implements StorableInstance {
  * `nativeValueFromStorableValue()` for `StorableMap` to preserve the
  * immutability guarantee across the StorableValue -> native round-trip.
  *
+ * Uses `Object.freeze(this)` after population; mutation overrides check
+ * `Object.isFrozen(this)`.
+ *
  * See Section 2.9 of the formal spec (frozen built-in types).
  */
 export class FrozenMap<K, V> extends Map<K, V> {
-  #frozen: boolean;
-
   constructor(entries?: Iterable<readonly [K, V]> | null) {
-    // Call super() with no arguments to avoid Map constructor calling
-    // this.set() before the #frozen field is initialized.
     super();
-    this.#frozen = false;
     if (entries) {
       for (const [k, v] of entries) {
         super.set(k, v);
       }
     }
-    this.#frozen = true;
+    Object.freeze(this);
   }
 
   override set(key: K, value: V): this {
-    if (this.#frozen) throw new TypeError("Cannot mutate a FrozenMap");
+    if (Object.isFrozen(this)) throw new TypeError("Cannot mutate a FrozenMap");
     return super.set(key, value);
   }
 
   override delete(key: K): boolean {
-    if (this.#frozen) throw new TypeError("Cannot mutate a FrozenMap");
+    if (Object.isFrozen(this)) throw new TypeError("Cannot mutate a FrozenMap");
     return super.delete(key);
   }
 
   override clear(): void {
-    if (this.#frozen) throw new TypeError("Cannot mutate a FrozenMap");
+    if (Object.isFrozen(this)) throw new TypeError("Cannot mutate a FrozenMap");
     super.clear();
   }
 }
@@ -248,36 +330,36 @@ export class FrozenMap<K, V> extends Map<K, V> {
  * `nativeValueFromStorableValue()` for `StorableSet` to preserve the
  * immutability guarantee across the StorableValue -> native round-trip.
  *
+ * Uses `Object.freeze(this)` after population; mutation overrides check
+ * `Object.isFrozen(this)`.
+ *
  * See Section 2.9 of the formal spec (frozen built-in types).
  */
 export class FrozenSet<T> extends Set<T> {
-  #frozen: boolean;
-
   constructor(values?: Iterable<T> | null) {
-    // Call super() with no arguments to avoid Set constructor calling
-    // this.add() before the #frozen field is initialized.
     super();
-    this.#frozen = false;
     if (values) {
       for (const v of values) {
         super.add(v);
       }
     }
-    this.#frozen = true;
+    Object.freeze(this);
   }
 
   override add(value: T): this {
-    if (this.#frozen) throw new TypeError("Cannot mutate a FrozenSet");
+    if (Object.isFrozen(this)) throw new TypeError("Cannot mutate a FrozenSet");
     return super.add(value);
   }
 
   override delete(value: T): boolean {
-    if (this.#frozen) throw new TypeError("Cannot mutate a FrozenSet");
+    if (Object.isFrozen(this)) {
+      throw new TypeError("Cannot mutate a FrozenSet");
+    }
     return super.delete(value);
   }
 
   override clear(): void {
-    if (this.#frozen) throw new TypeError("Cannot mutate a FrozenSet");
+    if (Object.isFrozen(this)) throw new TypeError("Cannot mutate a FrozenSet");
     super.clear();
   }
 }
@@ -310,51 +392,41 @@ export type StorableNativeObject =
 // ---------------------------------------------------------------------------
 
 /**
- * Shallow unwrap: if the top-level value is a native-wrapping
- * `StorableInstance` (StorableError, StorableMap, etc.), return the
- * underlying native type. Other values (primitives, arrays, objects,
+ * Shallow unwrap: if the top-level value is a `StorableNativeWrapper`, call
+ * its `toNativeValue()` method. Other values (primitives, arrays, objects,
  * non-native `StorableInstance` values) pass through as-is.
  *
- * `StorableMap` -> `FrozenMap`, `StorableSet` -> `FrozenSet` to preserve
- * immutability across the boundary. Error, Date, and Uint8Array are
- * returned as-is (they don't have the same mutation concerns as
- * collections).
+ * When `frozen` is true (the default), collections are returned as FrozenMap /
+ * FrozenSet. When false, mutable copies are returned instead.
  */
 export function nativeValueFromStorableValue(
   value: StorableValue,
+  frozen = true,
 ): unknown {
-  if (value instanceof StorableError) return value.error;
-  if (value instanceof StorableMap) {
-    return new FrozenMap(value.map);
+  if (value instanceof StorableNativeWrapper) {
+    return value.toNativeValue(frozen);
   }
-  if (value instanceof StorableSet) {
-    return new FrozenSet(value.set);
-  }
-  if (value instanceof StorableDate) return value.date;
-  if (value instanceof StorableUint8Array) return value.bytes;
-
   return value;
 }
 
 /**
  * Deep unwrap: recursively walk a `StorableValue` tree, unwrapping any
- * native-wrapping `StorableInstance` values (StorableError, StorableMap,
- * etc.) to their underlying native types. Arrays and objects are copied
- * (not frozen). Non-native `StorableInstance` values (Cell, Stream,
- * UnknownStorable, etc.) pass through as-is.
+ * `StorableNativeWrapper` values to their underlying native types via
+ * `toNativeValue()`. Arrays and objects are copied (not frozen). Non-native
+ * `StorableInstance` values (Cell, Stream, UnknownStorable, etc.) pass
+ * through as-is.
  *
- * `StorableMap` -> `FrozenMap`, `StorableSet` -> `FrozenSet` to preserve
- * immutability across the boundary.
+ * When `frozen` is true (the default), collections are returned as FrozenMap /
+ * FrozenSet. When false, mutable copies are returned instead.
  */
 export function deepNativeValueFromStorableValue(
   value: StorableValue,
+  frozen = true,
 ): unknown {
   // Native wrappers -> native types.
-  if (value instanceof StorableError) return value.error;
-  if (value instanceof StorableMap) return new FrozenMap(value.map);
-  if (value instanceof StorableSet) return new FrozenSet(value.set);
-  if (value instanceof StorableDate) return value.date;
-  if (value instanceof StorableUint8Array) return value.bytes;
+  if (value instanceof StorableNativeWrapper) {
+    return value.toNativeValue(frozen);
+  }
 
   // Other StorableInstance (Cell, Stream, UnknownStorable, etc.) -- pass through.
   if (isStorable(value)) return value;
@@ -364,7 +436,7 @@ export function deepNativeValueFromStorableValue(
     return value;
   }
 
-  // Arrays -- recursively unwrap elements. Output is not frozen.
+  // Arrays -- recursively unwrap elements.
   if (Array.isArray(value)) {
     const result: unknown[] = [];
     for (let i = 0; i < value.length; i++) {
@@ -374,18 +446,22 @@ export function deepNativeValueFromStorableValue(
       } else {
         result[i] = deepNativeValueFromStorableValue(
           value[i] as StorableValue,
+          frozen,
         );
       }
     }
     return result;
   }
 
-  // Objects -- recursively unwrap values. Output is not frozen.
+  // Objects -- recursively unwrap values.
   // Skip prototype-sensitive keys to prevent prototype pollution.
   const result: Record<string, unknown> = {};
   for (const [key, val] of Object.entries(value)) {
-    if (key !== "__proto__" && key !== "constructor") {
-      result[key] = deepNativeValueFromStorableValue(val as StorableValue);
+    if (!UNSAFE_KEYS.has(key)) {
+      result[key] = deepNativeValueFromStorableValue(
+        val as StorableValue,
+        frozen,
+      );
     }
   }
   return result;
