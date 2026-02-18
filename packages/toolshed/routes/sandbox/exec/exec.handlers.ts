@@ -121,7 +121,10 @@ export const sandboxExec: AppRouteHandler<SandboxExecRoute> = async (c) => {
       return c.json(result, 200);
     } catch (err: unknown) {
       // On exec 404 (sandbox was reaped), recreate and retry once
-      if (err && typeof err === "object" && "status" in err && (err as { status: number }).status === 404) {
+      if (
+        err && typeof err === "object" && "status" in err &&
+        (err as { status: number }).status === 404
+      ) {
         logger.warn({ sandboxId }, "Sandbox was reaped, recreating");
         await ensureSandbox(sandboxId, controller.signal);
         const result = await execInSandbox(
