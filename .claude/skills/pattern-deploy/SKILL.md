@@ -42,7 +42,12 @@ deno task ct piece setsrc packages/patterns/[name]/main.tsx
 **Test handler via CLI:**
 ```bash
 deno task ct piece call handlerName --piece PIECE_ID
+deno task ct piece step --piece PIECE_ID    # Required! Triggers recomputation
+deno task ct piece inspect --piece PIECE_ID  # Now shows updated state
 ```
+
+**Important:** Always run `piece step` after `piece call` or `piece set`.
+Without it, computed values remain stale and `inspect`/`get` return old data.
 
 ## Get Help
 ```bash

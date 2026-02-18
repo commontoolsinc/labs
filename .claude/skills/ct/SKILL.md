@@ -48,6 +48,30 @@ export CT_IDENTITY=./claude.key
 | List pieces | `deno task ct piece ls -i key -a url -s space` |
 | Visualize | `deno task ct piece map ...` |
 
+## Check Command Flags
+
+`deno task ct check` compiles and evaluates patterns. Key flags:
+
+| Flag | Purpose |
+|------|---------|
+| `--no-run` | Type check only, don't execute |
+| `--no-check` | Execute without type checking |
+| `--show-transformed` | Show transformed TS source (how the compiler rewrites reactive constructs) |
+| `--verbose-errors` | Show original TS errors alongside simplified hints |
+| `--pattern-json` | Print the evaluated pattern export as JSON |
+| `--output <path>` | Store compiled JS to a file |
+| `--main-export <name>` | Select non-default export (default: `"default"`) |
+| `--filename <name>` | Override filename for source maps |
+
+Common usage:
+```bash
+deno task ct check pattern.tsx              # Compile + execute (quiet on success)
+deno task ct check pattern.tsx --no-run     # Type check only (fast)
+deno task ct check pattern.tsx --no-check   # Skip types, just execute
+deno task ct check pattern.tsx --show-transformed  # Debug compiler transforms
+deno task ct check pattern.tsx --verbose-errors     # Detailed error context
+```
+
 ## Core Workflow: setsrc vs new
 
 **Critical pattern:** After initial deployment, use `setsrc` to iterate:
@@ -78,17 +102,38 @@ echo '42' | deno task ct piece set ... count
 echo '{"name": "John"}' | deno task ct piece set ... user
 ```
 
-## Gotcha: Stale Computed Values
+## Gotcha: Always `step` After `set` or `call`
 
-`piece set` does NOT trigger recompute. Run `piece step` after:
+Neither `piece set` nor `piece call` triggers recomputation automatically.
+You **must** run `piece step` after either one to get fresh computed values.
 
 ```bash
+# After setting data:
 echo '[...]' | deno task ct piece set --piece ID expenses ...
 deno task ct piece step --piece ID ...  # Required!
 deno task ct piece get --piece ID totalSpent ...
+
+# After calling a handler:
+deno task ct piece call --piece ID addItem '{"title": "Test"}'
+deno task ct piece step --piece ID ...  # Required!
+deno task ct piece inspect --piece ID ...
 ```
 
-See `docs/development/debugging/cli-debugging.md` for debugging patterns.
+**Handler testing workflow** (deploy → call → step → inspect):
+```bash
+# 1. Deploy
+deno task ct piece new pattern.tsx -i key -a url -s space
+# 2. Call a handler
+deno task ct piece call --piece ID handlerName '{"arg": "value"}' ...
+# 3. Step to process
+deno task ct piece step --piece ID ...
+# 4. Inspect result
+deno task ct piece inspect --piece ID ...
+# 5. Repeat 2-4 for each handler
+```
+
+See `docs/common/workflows/handlers-cli-testing.md` for the full workflow
+and `docs/development/debugging/cli-debugging.md` for debugging.
 
 ## Troubleshooting
 
