@@ -1,11 +1,14 @@
 /// <cts-enable />
 import {
+  type BuiltInLLMMessage,
   computed,
   type Default,
-  generateObject,
+  handler,
   ifElse,
+  llmDialog,
   pattern,
   patternTool,
+  type Stream,
   toSchema,
   UI,
   type VNode,
@@ -14,6 +17,16 @@ import {
   Writable,
 } from "commontools";
 import { fetchAndRunPattern, listPatternIndex } from "./common-tools.tsx";
+
+const triggerGeneration = handler<
+  unknown,
+  { addMessage: Stream<BuiltInLLMMessage>; situation: string }
+>((_, { addMessage, situation }) => {
+  addMessage.send({
+    role: "user",
+    content: [{ type: "text" as const, text: situation }],
+  });
+});
 
 export default pattern<
   {
@@ -49,24 +62,26 @@ export default pattern<
 
   const systemPrompt = computed(() => {
     const profileCtx = profileContext;
-    return `Find a useful pattern, run it, pass link to final result.${profileCtx}
+    return `Find a useful pattern, run it, then call presentResult with the cell link.${profileCtx}
 
 Use the user context above to personalize your suggestions when relevant.`;
   });
 
-  const suggestion = generateObject({
+  const messages = Writable.of<BuiltInLLMMessage[]>([]);
+
+  const { addMessage, pending, result: suggestionResult } = llmDialog({
     system: systemPrompt,
-    prompt: situation,
-    context,
+    messages,
     tools: {
       fetchAndRunPattern: patternTool(fetchAndRunPattern),
       listPatternIndex: patternTool(listPatternIndex),
     },
     model: "anthropic:claude-haiku-4-5",
-    schema: toSchema<{ cell: Writable<any> }>(),
+    context,
+    resultSchema: toSchema<{ cell: Writable<any> }>(),
   });
 
-  const llmResult = computed(() => suggestion.result?.cell);
+  const llmResult = computed(() => suggestionResult?.cell);
 
   // Reactively select between picker and LLM result. This must be a named
   // computed variable — the CTS transformer leaves named Cells as-is in the
@@ -80,9 +95,24 @@ Use the user context above to personalize your suggestions when relevant.`;
   // re-evaluations (creating VNodes inside a computed causes the
   // reconciler to re-mount the DOM, losing inner subscriptions).
   const freeformUI = (
-    <ct-cell-context $cell={llmResult}>
-      {computed(() => llmResult ?? "Searching...")}
-    </ct-cell-context>
+    <div style="display:contents">
+      <ct-cell-context $cell={llmResult}>
+        {ifElse(
+          computed(() => !!llmResult),
+          computed(() => llmResult),
+          ifElse(
+            computed(() => !!pending),
+            <span>Searching...</span>,
+            <ct-button
+              variant="primary"
+              onClick={triggerGeneration({ addMessage, situation })}
+            >
+              Generate Suggestion
+            </ct-button>,
+          ),
+        )}
+      </ct-cell-context>
+    </div>
   );
 
   const pickerUI = (

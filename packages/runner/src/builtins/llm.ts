@@ -870,12 +870,12 @@ export function generateObject<T extends Record<string, unknown>>(
             toolsCell,
           );
 
-          // Add finalResult builtin tool
+          // Add presentResult builtin tool
           const toolCatalog = {
             ...baseCatalog,
             llmTools: {
               ...baseCatalog.llmTools,
-              [llmToolExecutionHelpers.FINAL_RESULT_TOOL_NAME]: {
+              [llmToolExecutionHelpers.PRESENT_RESULT_TOOL_NAME]: {
                 description:
                   "Call this tool with the final structured result matching the required schema. This should be your last action.",
                 inputSchema: JSON.parse(JSON.stringify(schema)),
@@ -883,10 +883,10 @@ export function generateObject<T extends Record<string, unknown>>(
             },
           };
 
-          // Execute with tools - capture finalResult when called
+          // Execute with tools - capture presentResult when called
           let finalResult: T | undefined;
 
-          // Custom execution loop for generateObject with finalResult extraction
+          // Custom execution loop for generateObject with presentResult extraction
           const executeRecursive = async (
             currentMessages: readonly BuiltInLLMMessage[],
           ): Promise<void> => {
@@ -925,15 +925,16 @@ export function generateObject<T extends Record<string, unknown>>(
                   toolCallParts,
                 );
 
-              // Check if finalResult was called and grab the result.
+              // Check if presentResult was called and grab the result.
               // It's post de-serialization so might contain cells
               // (unlike the input to the tool)
-              const finalResultCall = toolResults.find(
+              const presentResultCall = toolResults.find(
                 (p) =>
-                  p.toolName === llmToolExecutionHelpers.FINAL_RESULT_TOOL_NAME,
+                  p.toolName ===
+                    llmToolExecutionHelpers.PRESENT_RESULT_TOOL_NAME,
               );
-              if (finalResultCall) {
-                finalResult = finalResultCall.result as T;
+              if (presentResultCall) {
+                finalResult = presentResultCall.result as T;
               }
 
               const toolResultMessages = llmToolExecutionHelpers
@@ -945,13 +946,13 @@ export function generateObject<T extends Record<string, unknown>>(
                 ...toolResultMessages,
               ];
 
-              // Continue if finalResult wasn't called yet
-              if (!finalResultCall) {
+              // Continue if presentResult wasn't called yet
+              if (!presentResultCall) {
                 await executeRecursive(updatedMessages);
               }
             } else {
               throw new Error(
-                "LLM did not call finalResult tool with structured data",
+                "LLM did not call presentResult tool with structured data",
               );
             }
           };
@@ -959,7 +960,7 @@ export function generateObject<T extends Record<string, unknown>>(
           await executeRecursive(requestMessages);
 
           if (finalResult === undefined) {
-            throw new Error("finalResult was never called");
+            throw new Error("presentResult was never called");
           }
 
           return finalResult;
