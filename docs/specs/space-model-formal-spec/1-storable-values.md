@@ -22,9 +22,43 @@ The key design principle is **late serialization**: rich types flow through the
 runtime as themselves; serialization to wire/storage formats happens only at
 boundary crossings (persistence, IPC, network).
 
+#### Three-Layer Architecture
+
+The data model is organized into three explicit layers:
+
+```
+JavaScript "wild west" (unknown/any) <-> Strongly typed (StorableValue) <-> Serialized (Uint8Array)
+```
+
+- **Left layer — JS wild west.** Arbitrary JavaScript values (`unknown`/`any`),
+  including native objects like `Error`, `Map`, `Set`, `Date`, and `Uint8Array`.
+  Code in this layer has no type guarantees about what it is handling.
+
+- **Middle layer — `StorableValue`.** The strongly typed core of the data model.
+  Contains only primitives, `StorableInstance` implementations (including wrapper
+  classes for native JS types), and recursive containers. No raw native JS
+  objects appear at this layer — they are wrapped into `StorableInstance`
+  implementations by the conversion functions (Section 8).
+
+- **Right layer — Serialized form.** The wire/storage representation
+  (`Uint8Array` for binary formats, JSON-compatible trees for the JSON context).
+  Serialization operates exclusively on `StorableValue` input; it never sees raw
+  native JS objects.
+
+Conversion functions bridge the left and middle layers:
+`toStorableValue()` / `toDeepStorableValue()` convert from JS values to
+`StorableValue`, wrapping native objects into `StorableInstance` wrappers and
+freezing the result. `nativeValueFromStorableValue()` converts back, unwrapping
+`StorableInstance` wrappers to their native JS equivalents. See Section 8 for
+the full specification of these functions.
+
 ### 1.2 Type Universe
 
-A `StorableValue` is defined as the following union:
+A `StorableValue` is defined as the following union. This is the **middle
+layer** — the strongly typed core. Raw native JS objects (`Error`, `Map`, `Set`,
+`Date`, `Uint8Array`) do not appear here; they are handled by the conversion
+layer (Section 8) and represented in `StorableValue` trees as `StorableInstance`
+wrapper classes (Section 1.4).
 
 > **Package note:** The TypeScript stubs in this spec use `packages/common/` as
 > a placeholder package path. A more specific name (e.g., `packages/data-model`
@@ -38,7 +72,9 @@ A `StorableValue` is defined as the following union:
 
 /**
  * The complete set of values that can flow through the runtime, be stored
- * persistently, or be transmitted across boundaries.
+ * persistently, or be transmitted across boundaries. This is the "middle
+ * layer" of the three-layer architecture — no raw native JS objects appear
+ * here.
  */
 type StorableValue =
   // (a) Primitives
@@ -47,24 +83,51 @@ type StorableValue =
   | number    // finite only; `NaN` and `Infinity` rejected
   | string
   | undefined // first-class storable; requires tagged representation in formats lacking native `undefined`
-  | bigint    // large integers
+  | bigint    // large integers; rides through without wrapping (like `undefined`)
 
-  // (b) Built-in JS types with derived StorableInstance form (Section 1.4)
-  | Error
-  | Map<StorableValue, StorableValue>
-  | Set<StorableValue>
-
-  // (c) Built-in JS types (require explicit serialization handling)
-  | Uint8Array
-  | Date
-
-  // (d) Branded storables (custom types implementing the storable protocol)
+  // (b) Branded storables (custom types implementing the storable protocol)
+  //     This arm covers:
+  //       - Native object wrappers: `StorableError`, `StorableMap`,
+  //         `StorableSet`, `StorableDate`, `StorableUint8Array` (Section 1.4)
+  //       - User-defined types: `Cell`, `Stream`, etc.
+  //       - System types: `UnknownStorable`, `ProblematicStorable`
   | StorableInstance
 
-  // (e) Recursive containers
+  // (c) Recursive containers
   | StorableValue[]
   | { [key: string]: StorableValue };
 ```
+
+#### `StorableNativeObject`
+
+A separate type — **outside** the `StorableValue` hierarchy — defines the raw
+native JS object types that the conversion layer can handle:
+
+```typescript
+// file: packages/common/storable-value.ts
+
+/**
+ * Union of raw native JS object types that the conversion layer can translate
+ * to and from `StorableValue`. These types sit outside the `StorableValue`
+ * hierarchy and only appear at conversion function boundaries (Section 8).
+ *
+ * Primitives like `bigint` and `undefined` are NOT included — they are
+ * directly part of `StorableValue`. The wrapper classes (`StorableError`,
+ * `StorableMap`, etc.) are also NOT this type — they are `StorableInstance`
+ * implementations that live inside `StorableValue`.
+ */
+type StorableNativeObject =
+  | Error
+  | Map<StorableValue | StorableNativeObject, StorableValue | StorableNativeObject>
+  | Set<StorableValue | StorableNativeObject>
+  | Date
+  | Uint8Array;
+```
+
+The `StorableNativeObject` type exists solely at function parameter/return
+boundaries — for example, `toStorableValue()` accepts
+`StorableValue | StorableNativeObject` as input (Section 8). It is never a
+member of `StorableValue` or `StorableDatum`.
 
 ### 1.3 Primitive Types
 
@@ -101,57 +164,232 @@ type StorableValue =
 > with full fidelity via dedicated type tags, without ambiguity. This option is
 > preserved by the architecture but not currently needed.
 
-### 1.4 Built-in JS Types
+### 1.4 Native Object Wrapper Classes
 
-Certain built-in JS types cannot have `Symbol`-keyed methods added via
-prototype patching in a reliable, cross-realm way. The serialization system
-therefore handles them with hardcoded logic. However, for the purposes of
-serialization and hashing, `Error`, `Map`, and `Set` are treated _as if_ they
-implement the storable protocol — the spec defines a derived `StorableInstance`
-form for each, and the system processes them through the same conceptual path as
-user-defined `StorableInstance` types.
+Certain built-in JS types (`Error`, `Map`, `Set`, `Date`, `Uint8Array`) cannot
+have `Symbol`-keyed methods added via prototype patching in a reliable,
+cross-realm way. Rather than handling them with special-case logic in the
+serializer, the system defines **wrapper classes** — one per native type — that
+implement `StorableInstance`. The conversion layer (Section 8) wraps raw native
+objects into these classes when bridging from the JS wild west to `StorableValue`,
+and unwraps them when bridging back.
 
-#### 1.4.1 Types with Derived `StorableInstance` Form
+Because each wrapper genuinely implements `StorableInstance` (with real
+`[DECONSTRUCT]` and `[RECONSTRUCT]` methods), the serialization system
+processes them through the same uniform `StorableInstance` path — no special
+cases needed in the serializer. The hashing system also uses the standard
+`TAG_STORABLE` path for most wrappers, but optimizes `StorableDate` and
+`StorableUint8Array` with dedicated `TAG_DATE` and `TAG_BYTES` tags for
+content-level identity (see Section 6.3).
 
-`Error`, `Map`, and `Set` have derived `StorableInstance` forms. The serializer
-decomposes them into essential state as defined below, then processes the result
-exactly as it would for any `StorableInstance` (tagging, recursive descent,
-hashing via `TAG_STORABLE`). The implementation uses hardcoded branches (since
-these types cannot carry `[DECONSTRUCT]` methods), but the behavior is
-equivalent to what the storable protocol would produce.
+#### 1.4.1 Wrapper Class Summary
 
-| Type | Type Tag | Deconstructed State | Notes |
-|------|----------|---------------------|-------|
-| `Error` | `Error@1` | `{ name, message, stack?, cause?, ...custom }` | Captures `name`, `message`, `stack` (if present), `cause` (if present), and custom enumerable properties. Nested values (including `cause`) are recursively processed — see Section 4.4. |
-| `Map` | `Map@1` | `[[key, value], ...]` | Entry pairs as an array of two-element arrays. Insertion order is preserved in both serialized form and canonical hashing. Keys and values are recursively processed. |
-| `Set` | `Set@1` | `[value, ...]` | Elements as an array. Iteration order is preserved in both serialized form and canonical hashing. Values are recursively processed. |
+| Wrapper Class | Wraps | Type Tag | Deconstructed State | Notes |
+|---------------|-------|----------|---------------------|-------|
+| `StorableError` | `Error` | `Error@1` | `{ name, message, stack?, cause?, ...custom }` | Captures `name`, `message`, `stack` (if present), `cause` (if present), and custom enumerable properties. The conversion layer (Section 8.2) recursively converts nested values (including `cause` and custom properties) before wrapping, ensuring all values are `StorableValue` when `[DECONSTRUCT]` runs. |
+| `StorableMap` | `Map` | `Map@1` | `[[key, value], ...]` | Entry pairs as an array of two-element arrays. Insertion order is preserved. Keys and values are recursively processed. |
+| `StorableSet` | `Set` | `Set@1` | `[value, ...]` | Elements as an array. Iteration order is preserved. Values are recursively processed. |
+| `StorableDate` | `Date` | `Date@1` | `string` (ISO 8601 UTC) | Deconstructed state is a string — the serializer recurses into it and finds a primitive. |
+| `StorableUint8Array` | `Uint8Array` | `Bytes@1` | `string` (base64-encoded) | Deconstructed state is a string. |
 
-Reconstruction for these types is also defined:
+Each wrapper class:
 
-- **`Error`**: Construct a new `Error` (or subclass based on `name`), setting
-  `message`, `stack`, `cause`, and any custom enumerable properties from the
-  deconstructed state.
-- **`Map`**: Construct a new `Map` from the entry pairs.
-- **`Set`**: Construct a new `Set` from the element array.
+- **Implements `StorableInstance`** with a `[DECONSTRUCT]` method that extracts
+  essential state from the wrapped native object.
+- **Has a static `[RECONSTRUCT]` method** (following the `StorableClass<T>`
+  pattern) that returns an instance of the wrapper class — **not** the raw
+  native type. Callers who need the underlying native object use
+  `nativeValueFromStorableValue()` (Section 8) to unwrap it.
+- **Carries a `typeTag` property** (e.g., `"Error@1"`) used by the
+  serialization context for tag resolution, following the pattern established
+  by `UnknownStorable` and `ProblematicStorable`.
 
-> **Why derived `StorableInstance` form?** Treating `Error`, `Map`, and `Set` as
-> having a `StorableInstance` form — rather than as base types of the storage
-> system — means the serialization and hashing systems have fewer special cases.
-> The type tag + deconstructed state model is the same one used for user-defined
-> types, `UnknownStorable`, and `ProblematicStorable`. The only difference is
-> that the decomposition is implemented by the serializer rather than by a
-> `[DECONSTRUCT]` method on the instance.
+#### 1.4.2 `StorableError`
 
-#### 1.4.2 Other Built-in Types
+```typescript
+// file: packages/common/storable-native-wrappers.ts
 
-`Uint8Array` and `Date` remain as true built-in types whose serialized
-representations do not follow the deconstructed-state model (their payloads are
-opaque encodings rather than recursively-processable `StorableValue`s).
+import {
+  DECONSTRUCT, RECONSTRUCT,
+  type StorableInstance, type ReconstructionContext,
+} from './storable-protocol';
 
-| Type | Serialization Strategy | Notes |
-|------|------------------------|-------|
-| `Uint8Array` | Base64-encoded binary data | See Section 5.3 for JSON encoding. |
-| `Date` | ISO 8601 UTC string | See Section 5.3 for JSON encoding. |
+/**
+ * Wrapper for native `Error` values. Implements `StorableInstance` so that
+ * errors participate in the standard serialization and hashing paths.
+ */
+export class StorableError implements StorableInstance {
+  readonly typeTag = 'Error@1';
+
+  constructor(readonly error: Error) {}
+
+  [DECONSTRUCT](): StorableValue {
+    // IMPORTANT: By the time [DECONSTRUCT] is called, all nested values
+    // must already be StorableValue. The conversion layer (Section 8.2)
+    // is responsible for recursively converting Error internals (cause,
+    // custom properties) BEFORE wrapping into StorableError. This method
+    // simply extracts the already-converted state.
+    const state: Record<string, StorableValue> = {
+      name:    this.error.name,
+      message: this.error.message,
+    };
+    if (this.error.stack !== undefined) {
+      state.stack = this.error.stack;
+    }
+    if (this.error.cause !== undefined) {
+      state.cause = this.error.cause as StorableValue;
+    }
+    for (const key of Object.keys(this.error)) {
+      if (!(key in state) && key !== '__proto__' && key !== 'constructor') {
+        state[key] = (this.error as Record<string, unknown>)[key] as StorableValue;
+      }
+    }
+    return state as StorableValue;
+  }
+
+  static [RECONSTRUCT](
+    state: StorableValue,
+    _context: ReconstructionContext,
+  ): StorableError {
+    const s = state as Record<string, StorableValue>;
+    const name = (s.name as string) ?? 'Error';
+    const message = (s.message as string) ?? '';
+    let error: Error;
+    switch (name) {
+      case 'TypeError':      error = new TypeError(message);      break;
+      case 'RangeError':     error = new RangeError(message);     break;
+      case 'SyntaxError':    error = new SyntaxError(message);    break;
+      case 'ReferenceError': error = new ReferenceError(message); break;
+      case 'URIError':       error = new URIError(message);       break;
+      case 'EvalError':      error = new EvalError(message);      break;
+      default:               error = new Error(message);          break;
+    }
+    if (error.name !== name) error.name = name;
+    if (s.stack !== undefined) error.stack = s.stack as string;
+    if (s.cause !== undefined) error.cause = s.cause;
+    for (const key of Object.keys(s)) {
+      if (!['name', 'message', 'stack', 'cause', '__proto__', 'constructor'].includes(key)) {
+        (error as Record<string, unknown>)[key] = s[key];
+      }
+    }
+    return new StorableError(error);
+  }
+}
+```
+
+#### 1.4.3 `StorableMap`
+
+```typescript
+export class StorableMap implements StorableInstance {
+  readonly typeTag = 'Map@1';
+
+  constructor(readonly map: Map<StorableValue, StorableValue>) {}
+
+  [DECONSTRUCT](): StorableValue {
+    return [...this.map.entries()] as StorableValue;
+  }
+
+  static [RECONSTRUCT](
+    state: StorableValue,
+    _context: ReconstructionContext,
+  ): StorableMap {
+    const entries = state as [StorableValue, StorableValue][];
+    return new StorableMap(new Map(entries));
+  }
+}
+```
+
+#### 1.4.4 `StorableSet`
+
+```typescript
+export class StorableSet implements StorableInstance {
+  readonly typeTag = 'Set@1';
+
+  constructor(readonly set: Set<StorableValue>) {}
+
+  [DECONSTRUCT](): StorableValue {
+    return [...this.set] as StorableValue;
+  }
+
+  static [RECONSTRUCT](
+    state: StorableValue,
+    _context: ReconstructionContext,
+  ): StorableSet {
+    const elements = state as StorableValue[];
+    return new StorableSet(new Set(elements));
+  }
+}
+```
+
+#### 1.4.5 `StorableDate`
+
+```typescript
+export class StorableDate implements StorableInstance {
+  readonly typeTag = 'Date@1';
+
+  constructor(readonly date: Date) {}
+
+  [DECONSTRUCT](): StorableValue {
+    return this.date.toISOString();
+  }
+
+  static [RECONSTRUCT](
+    state: StorableValue,
+    _context: ReconstructionContext,
+  ): StorableDate {
+    return new StorableDate(new Date(state as string));
+  }
+}
+```
+
+#### 1.4.6 `StorableUint8Array`
+
+```typescript
+export class StorableUint8Array implements StorableInstance {
+  readonly typeTag = 'Bytes@1';
+
+  constructor(readonly bytes: Uint8Array) {}
+
+  [DECONSTRUCT](): StorableValue {
+    return base64Encode(this.bytes);
+  }
+
+  static [RECONSTRUCT](
+    state: StorableValue,
+    _context: ReconstructionContext,
+  ): StorableUint8Array {
+    return new StorableUint8Array(base64Decode(state as string));
+  }
+}
+```
+
+#### 1.4.7 `bigint` — Not Wrapped
+
+`bigint` is a JavaScript primitive (`typeof x === 'bigint'`), not an object. It
+rides through the `StorableValue` layer directly, like `undefined`. No
+`StorableBigInt` wrapper class is needed. The serialization layer handles
+`bigint` with a dedicated handler (analogous to `UndefinedHandler`); see
+Section 4.5.
+
+#### 1.4.8 Design Notes
+
+> **Why wrapper classes instead of inline serializer branches?** Each wrapper
+> genuinely implements `StorableInstance`, so `isStorableInstance()` returns `true` for
+> them. The serialization system dispatches all `StorableInstance` values through
+> a single `StorableInstanceHandler` path — no per-type branches. This gives the
+> serialization layer a uniform, simpler structure: it handles
+> `StorableInstance`, `undefined`, `bigint`, and the structural types
+> (arrays, objects, primitives), with no knowledge of specific native JS types.
+>
+> **Reconstruction returns the wrapper.** `StorableError[RECONSTRUCT]` returns
+> a `StorableError`, not a raw `Error`. This is consistent with the three-layer
+> separation: the middle layer (`StorableValue`) contains wrappers, not raw
+> native objects. Code that needs the underlying native type uses
+> `nativeValueFromStorableValue()` (Section 8) as a separate step.
+>
+> **File organization.** All five wrapper classes are expected to live in a
+> single file (e.g., `storable-native-wrappers.ts`), since each is small
+> (~30 lines) and they share the same imports.
 
 ### 1.5 Recursive Containers
 
@@ -253,13 +491,17 @@ export const RECONSTRUCT = Symbol.for('common.reconstruct');
  * A value that knows how to deconstruct itself into essential state
  * for serialization. The presence of `[DECONSTRUCT]` serves as the brand --
  * no separate marker is needed.
+ *
+ * The native object wrapper classes (`StorableError`, `StorableMap`,
+ * `StorableSet`, `StorableDate`, `StorableUint8Array`) implement this
+ * interface, as do user-defined types (`Cell`, `Stream`) and system
+ * types (`UnknownStorable`, `ProblematicStorable`).
  */
 export interface StorableInstance {
   /**
    * Returns the essential state of this instance as a `StorableValue`. The
    * returned value may contain any `StorableValue`, including other
-   * `StorableInstance`s, built-in JS types, primitives, and plain
-   * objects/arrays.
+   * `StorableInstance`s, primitives, and plain objects/arrays.
    *
    * The implementation must NOT recursively deconstruct nested values --
    * the serialization system handles that.
@@ -340,7 +582,7 @@ export interface ReconstructionContext {
  * Type guard: checks whether a value implements the storable protocol.
  * The presence of `[DECONSTRUCT]` is the brand.
  */
-export function isStorable(value: unknown): value is StorableInstance {
+export function isStorableInstance(value: unknown): value is StorableInstance {
   return value != null
     && typeof value === 'object'
     && DECONSTRUCT in value;
@@ -382,9 +624,9 @@ class Cell<T> implements StorableInstance {
 
 ### 2.8 Deconstructed State and Recursion
 
-The value returned by `[DECONSTRUCT]()` can contain any value that is itself
-storable — including other `StorableInstance`s, built-in types like `Error` or
-`Map`, primitives, and plain objects/arrays.
+The value returned by `[DECONSTRUCT]()` can contain any value that is itself a
+`StorableValue` — including other `StorableInstance`s (such as native object
+wrappers), primitives, and plain objects/arrays.
 
 **The serialization system handles recursion, not the individual deconstructor
 methods.** A `[DECONSTRUCT]` implementation returns its essential state without
@@ -393,7 +635,11 @@ to the serialization machinery — by design, as it would be a layering
 violation.
 
 Similarly, `[RECONSTRUCT]` receives state where nested values have already been
-reconstructed by the serialization system.
+reconstructed by the serialization system. Importantly, `[RECONSTRUCT]` returns
+the **wrapper type**, not the raw native type. For example,
+`StorableError[RECONSTRUCT]` returns a `StorableError` instance (which wraps an
+`Error`), not a raw `Error`. Unwrapping to native types is a separate step via
+`nativeValueFromStorableValue()` (Section 8).
 
 ### 2.9 Reconstruction Guarantees
 
@@ -411,15 +657,18 @@ The system follows an **immutable-forward** design:
 This immutability guarantee enables safe sharing of reconstructed values and
 aligns with the reactive system's assumption that values don't mutate in place.
 
-> **Frozen built-in types.** `Object.freeze()` does not enforce immutability on
-> `Map`, `Set`, `Date`, or `Uint8Array` — their mutation methods remain
-> callable on a frozen instance. To uphold the immutable-forward guarantee for
-> these types, the implementation should provide frozen-wrapper types (e.g.,
-> `FrozenMap`, `FrozenSet`) that expose read-only interfaces and throw on
-> mutation attempts. The reconstructed value for a `Map` would be a `FrozenMap`
-> instance (which extends or wraps `Map`), and similarly for other mutable
-> built-in types. The exact API for these wrappers is an implementation
-> decision.
+> **Immutability of native object wrappers.** Under the three-layer
+> architecture, deserialization produces `StorableInstance` wrappers
+> (`StorableMap`, `StorableSet`, etc.), not raw native types. Because the
+> system controls the shape of these wrapper classes, they can be properly
+> frozen with `Object.freeze()` — unlike the native types they wrap (e.g.,
+> `Object.freeze()` on a `Map` does not prevent mutation via `set()`/`delete()`).
+> The underlying native objects stored inside wrappers (e.g.,
+> `StorableMap.map`) are not directly exposed to consumers of `StorableValue`
+> — callers who need the native types use `nativeValueFromStorableValue()`
+> (Section 8), which returns `FrozenMap` and `FrozenSet`
+> (effectively-immutable wrappers) for collection types, preserving the
+> immutability guarantee even after unwrapping.
 
 ---
 
@@ -552,13 +801,13 @@ its wire format. For the JSON context, this is:
 // file: packages/common/serialization-context.ts
 
 /** JSON-compatible wire format value. */
-type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
+type JsonWireValue = null | boolean | number | string | JsonWireValue[] | { [key: string]: JsonWireValue };
 
 /**
  * The wire format for the JSON serialization context. Other contexts (e.g.,
  * CBOR) would define their own `SerializedForm`.
  */
-type SerializedForm = JsonValue;
+type SerializedForm = JsonWireValue;
 ```
 
 ### 4.3 Interface
@@ -606,74 +855,38 @@ functions, not by the context or by individual types. See Section 4.5.
 ```typescript
 // file: packages/common/serialization.ts
 
-import { DECONSTRUCT, RECONSTRUCT, isStorable } from './storable-protocol';
+import { DECONSTRUCT, RECONSTRUCT, isStorableInstance } from './storable-protocol';
 import type { SerializationContext, SerializedForm } from './serialization-context';
 import { UnknownStorable } from './unknown-storable';
 
 /**
  * Serialize a storable value for boundary crossing. Recursively processes
  * nested values.
+ *
+ * The input is `StorableValue`, which belongs to the middle layer of the
+ * three-layer architecture. Raw native JS objects (`Error`, `Map`, etc.)
+ * never reach this function — they are wrapped into `StorableInstance`
+ * wrappers by the conversion layer (Section 8) before serialization.
  */
 export function serialize(
   value: StorableValue,
   context: SerializationContext,
 ): SerializedForm {
   // --- StorableInstance ---
-  if (isStorable(value)) {
+  // This arm handles ALL storable instances uniformly: user-defined types
+  // (Cell, Stream), system types (UnknownStorable, ProblematicStorable),
+  // AND native object wrappers (StorableError, StorableMap, StorableSet,
+  // StorableDate, StorableUint8Array). No per-type branches needed.
+  if (isStorableInstance(value)) {
     const state = value[DECONSTRUCT]();
     const tag = context.getTagFor(value);
     const serializedState = serialize(state, context); // recursive
     return context.encode(tag, serializedState);
   }
 
-  // --- Built-in JS types with derived StorableInstance form (Section 1.4.1) ---
-  // `Error`, `Map`, and `Set` cannot carry `[DECONSTRUCT]` methods, so the
-  // serializer derives their deconstructed state inline. The result is tagged
-  // and recursively processed exactly as for any `StorableInstance`.
-
-  if (value instanceof Error) {
-    const state: Record<string, SerializedForm> = {
-      name:    serialize(value.name, context),
-      message: serialize(value.message, context),
-    };
-    if (value.stack !== undefined) {
-      state.stack = serialize(value.stack, context);
-    }
-    if (value.cause !== undefined) {
-      state.cause = serialize(value.cause as StorableValue, context);
-    }
-    // Copy custom enumerable properties.
-    for (const key of Object.keys(value)) {
-      if (!(key in state)) {
-        state[key] = serialize((value as Record<string, unknown>)[key] as StorableValue, context);
-      }
-    }
-    return context.encode('Error@1', state);
-  }
-
-  if (value instanceof Map) {
-    const entries = [...value.entries()].map(
-      ([k, v]) => [serialize(k, context), serialize(v, context)] as SerializedForm,
-    );
-    return context.encode('Map@1', entries);
-  }
-
-  if (value instanceof Set) {
-    const elements = [...value].map((v) => serialize(v, context));
-    return context.encode('Set@1', elements);
-  }
-
-  // --- Other built-in types (Section 1.4.2) ---
-
-  if (value instanceof Uint8Array) {
-    // Base64 encoding produces a string; no recursion needed.
-    return context.encode('Bytes@1', base64Encode(value));
-  }
-
-  if (value instanceof Date) {
-    return context.encode('Date@1', value.toISOString());
-  }
-
+  // --- `bigint` ---
+  // A primitive that rides through `StorableValue` without wrapping (like
+  // `undefined`). Needs a dedicated handler since JSON has no native bigint.
   if (typeof value === 'bigint') {
     return context.encode('BigInt@1', value.toString());
   }
@@ -740,6 +953,12 @@ export function serialize(
  * Deserialize a wire-format value back into rich runtime types. Requires
  * a `ReconstructionContext` for reconstituting types that need runtime
  * context (e.g., `Cell` interning).
+ *
+ * The output is `StorableValue`. Native object types (Error, Map, etc.)
+ * are reconstructed as their wrapper classes (`StorableError`, `StorableMap`,
+ * etc.) via the standard `StorableInstance` class registry path. Callers who
+ * need the underlying native objects use `nativeValueFromStorableValue()`
+ * (Section 8) as a separate step.
  */
 export function deserialize(
   data: SerializedForm,
@@ -861,12 +1080,14 @@ function deepFreeze(value: StorableValue): StorableValue {
 }
 ```
 
-> **Implementation guidance: caching `instanceof` checks.** The `serialize()`
-> function uses a cascade of `instanceof` checks to identify built-in types.
-> If this cascade proves too slow in practice, a `WeakMap<object, string>` can
-> cache the result of the type detection for each object, so the cascade runs
-> at most once per object. This assumes (and the system may eventually enforce)
-> that the prototype chain of storable objects is not altered after creation.
+> **Implementation guidance: serialization context class registry.** The
+> serialization context must register the native object wrapper classes so
+> that `getClassFor('Error@1')` returns `StorableError`,
+> `getClassFor('Map@1')` returns `StorableMap`, and so on. For tag resolution
+> (`getTagFor`), the context can check for a `typeTag` property on the
+> instance — the same pattern used by `UnknownStorable` and
+> `ProblematicStorable`. This avoids `instanceof` cascades and scales cleanly
+> as new wrapper types are added.
 
 ### 4.6 Separation of Concerns
 
@@ -1105,7 +1326,7 @@ tree construction.
 - Traverse the natural data structure directly (no intermediate tree
   construction).
 - Sort plain-object keys lexicographically; preserve array element order and
-  `Map`/`Set` insertion order.
+  `StorableMap`/`StorableSet` insertion order.
 - Hash type tags + content in a single pass.
 - No intermediate allocations beyond the hash state.
 - The hash reflects the logical content, not any particular encoding or
@@ -1162,8 +1383,10 @@ export function canonicalHash(
   // - `string`:            hash(TAG_STRING, utf16CodeUnits)
   // - `bigint`:            hash(TAG_BIGINT, signedTwosComplementBytes)
   // - `undefined`:         hash(TAG_UNDEFINED)
-  // - `Uint8Array`:        hash(TAG_BYTES, rawBytes)
-  // - `Date`:              hash(TAG_DATE, int64MillisSinceEpoch)
+  // - `StorableUint8Array`: hash(TAG_BYTES, rawBytes)
+  //                        (hashes the underlying byte content)
+  // - `StorableDate`:      hash(TAG_DATE, int64MillisSinceEpoch)
+  //                        (hashes the underlying timestamp)
   // - array:               hash(TAG_ARRAY, length, ...elementHash)
   //                        where `length` is the logical array length
   //                        (uint32 big-endian) and elements are hashed
@@ -1198,13 +1421,25 @@ export function canonicalHash(
   //                        (keys sorted lexicographically by UTF-8)
   // - `StorableInstance`:  hash(TAG_STORABLE, typeTag, canonicalHash(deconstructedState))
   //
-  // `Error`, `Map`, and `Set` are hashed via TAG_STORABLE using their derived
-  // `StorableInstance` form (Section 1.4.1). For example:
-  // - `Error`:  hash(TAG_STORABLE, "Error@1", canonicalHash(errorState))
-  // - `Map`:    hash(TAG_STORABLE, "Map@1", canonicalHash(entries))
-  //             where entries are hashed in insertion order
-  // - `Set`:    hash(TAG_STORABLE, "Set@1", canonicalHash(elements))
-  //             where elements are hashed in insertion order
+  // The native object wrappers are hashed as follows:
+  //
+  // - `StorableError`, `StorableMap`, `StorableSet`, and other
+  //   `StorableInstance`s with recursively-processable deconstructed state
+  //   are hashed via TAG_STORABLE:
+  //     hash(TAG_STORABLE, typeTag, canonicalHash(deconstructedState))
+  //
+  // - `StorableDate` and `StorableUint8Array` are special-cased: they use
+  //   TAG_DATE and TAG_BYTES respectively, matching their logical content
+  //   type rather than going through TAG_STORABLE with a string payload.
+  //
+  // Examples:
+  // - `StorableError`:      hash(TAG_STORABLE, "Error@1", canonicalHash(errorState))
+  // - `StorableMap`:        hash(TAG_STORABLE, "Map@1", canonicalHash(entries))
+  //                         where entries are hashed in insertion order
+  // - `StorableSet`:        hash(TAG_STORABLE, "Set@1", canonicalHash(elements))
+  //                         where elements are hashed in insertion order
+  // - `StorableDate`:       hash(TAG_DATE, int64MillisSinceEpoch)
+  // - `StorableUint8Array`: hash(TAG_BYTES, rawBytes)
   //
   // Each type is tagged to prevent collisions between types with
   // identical content representations. In particular, holes (TAG_HOLE),
@@ -1228,19 +1463,19 @@ export function canonicalHash(
 > UTF-16 proves significant for non-BMP-heavy workloads.
 
 > **Map/Set ordering in hashing.** Canonical hashing preserves insertion order
-> for `Map` entries and `Set` elements, matching the serialized form. This means
-> two `Map`s or `Set`s with the same elements in different insertion order will
-> hash differently. This is intentional: insertion order is part of the
-> observable semantics of these types in JavaScript, so values that behave
-> differently should not hash the same. (By contrast, plain objects are hashed
-> with sorted keys, matching the existing convention that plain-object key order
-> is not semantically significant.)
+> for `StorableMap` entries and `StorableSet` elements, matching the serialized
+> form. This means two `StorableMap`s or `StorableSet`s with the same elements
+> in different insertion order will hash differently. This is intentional:
+> insertion order is part of the observable semantics of `Map`/`Set` in
+> JavaScript, so values that behave differently should not hash the same. (By
+> contrast, plain objects are hashed with sorted keys, matching the existing
+> convention that plain-object key order is not semantically significant.)
 
 ### 6.4 Relationship to Late Serialization
 
-Canonical hashing operates on rich types directly, using deconstructed state
-for `StorableInstance`s (including the derived forms for `Error`, `Map`, and
-`Set`) and type-specific handling for other built-in types. This makes identity
+Canonical hashing operates on `StorableValue` directly, using deconstructed
+state for `StorableInstance`s (including the native object wrappers) and
+type-specific handling for primitives and containers. This makes identity
 hashing independent of any particular wire encoding — the same hash whether
 later serialized to JSON, CBOR, or Automerge.
 
@@ -1262,21 +1497,32 @@ most current version of the data. Hashes are not used as entity addresses.
 ### 7.1 Adopting Late Serialization
 
 Migration to the spec involves replacing early JSON-form conversion with
-boundary-only serialization:
+boundary-only serialization and the three-layer architecture:
 
-1. Expand `StorableValue` to include rich types (Section 1.2).
-2. Remove early conversion points (e.g., `convertCellsToLinks()`,
+1. Update `StorableValue` to exclude raw native JS types, include
+   `StorableInstance` (Section 1.2).
+2. Introduce the native object wrapper classes (`StorableError`, etc.) that
+   implement `StorableInstance` (Section 1.4).
+3. Rework `toStorableValue()` / `toDeepStorableValue()` to wrap native types
+   into `StorableInstance` wrappers and return frozen results (Section 8).
+4. Add `nativeValueFromStorableValue()` for unwrapping back to native types
+   (Section 8).
+5. Remove early conversion points (e.g., `convertCellsToLinks()`,
    `toStorableValue()` wrapping `Error` as `{ "@Error": ... }`).
-3. Introduce `SerializationContext` at each boundary (Section 4.7).
-4. Update internal code to work with rich types rather than JSON shapes.
+6. Introduce `SerializationContext` at each boundary (Section 4.7).
+7. Update internal code to work with `StorableValue` types rather than JSON
+   shapes or raw native objects.
 
-> **`toJSON()` migration:** Types that currently use `toJSON()` for
-> serialization will need to implement the storable protocol
-> (`[DECONSTRUCT]`/`[RECONSTRUCT]`) instead. The `toJSON()` approach eagerly
-> converts to JSON-compatible shapes, which is incompatible with late
-> serialization. Implementors should replace `toJSON()` methods with
-> `[DECONSTRUCT]` (returning essential state as rich types) and add a static
-> `[RECONSTRUCT]` method on the class.
+> **`toJSON()` compatibility and migration.** `toStorableValue()` and its
+> variants currently honor `toJSON()` methods on objects that have them — if an
+> object has a `toJSON()` method and does not implement `StorableInstance`, the
+> conversion functions call `toJSON()` and process the result. This preserves
+> backward compatibility with existing code. However, `toJSON()` support is
+> **marked for removal**: it eagerly converts to JSON-compatible shapes, which
+> is incompatible with late serialization. Implementors should migrate to the
+> storable protocol (`[DECONSTRUCT]`/`[RECONSTRUCT]`) instead. Once all callers
+> have migrated, `toJSON()` support will be removed from the conversion
+> functions.
 
 ### 7.2 Unifying JSON Encoding
 
@@ -1306,6 +1552,316 @@ The canonical hashing approach (Section 6) replaces `merkle-reference` /
 CID-based hashing. Since the system does not participate in the IPFS network,
 CID formatting adds overhead without interoperability benefit. The canonical
 hash operates on the logical data structure directly.
+
+---
+
+## 8. Conversion Functions
+
+### 8.1 Overview
+
+The conversion functions bridge the left layer (JS wild west) and the middle
+layer (`StorableValue`). They form the boundary between arbitrary JavaScript
+values and the strongly typed data model.
+
+There are two directions:
+
+- **JS wild west -> `StorableValue`:** `toStorableValue()`,
+  `toDeepStorableValue()`, and `toStorableValueOrThrow()`.
+- **`StorableValue` -> JS wild west:** `nativeValueFromStorableValue()` and
+  `deepNativeValueFromStorableValue()`.
+
+### 8.2 `toStorableValue()` and `toDeepStorableValue()`
+
+```typescript
+// file: packages/common/storable-value.ts
+
+/**
+ * Convert a value to `StorableValue`. Wraps native JS types (`Error`, `Map`,
+ * etc.) into their `StorableInstance` wrapper classes. If the value is already
+ * a valid `StorableValue`, returns it as-is.
+ *
+ * The input type is `StorableValue | StorableNativeObject` — the function
+ * accepts values that are already storable (pass-through) or raw native JS
+ * objects that need wrapping. Passing an unsupported type is a type error.
+ *
+ * **Freeze semantics (shallow):** By default, the returned value is frozen
+ * at the top level via `Object.freeze()`. Nested values are NOT recursively
+ * frozen. If the input is already a frozen `StorableValue`, returns the same
+ * object. Pass `freeze: false` to skip freezing (see below).
+ */
+export function toStorableValue(
+  value: StorableValue | StorableNativeObject,
+  freeze?: boolean, // default: true
+): StorableValue;
+
+/**
+ * Convert a value to `StorableValue`, recursively processing nested values.
+ * Like `toStorableValue()` but:
+ *
+ * - Recursively descends into arrays and plain objects.
+ * - Wraps native JS objects at any depth.
+ * - **Single-pass design:** Validation, wrapping, and freezing are performed
+ *   together in one recursive descent — there are no separate passes. Each
+ *   node is checked, wrapped if needed, and frozen before the function
+ *   returns from that level.
+ * - If the input is already a deeply-frozen `StorableValue`, returns the
+ *   same object (no copying).
+ * - Detects circular references and throws.
+ *
+ * Pass `freeze: false` to perform wrapping and validation without freezing
+ * (see "Freeze Semantics" below).
+ */
+export function toDeepStorableValue(
+  value: StorableValue | StorableNativeObject,
+  freeze?: boolean, // default: true
+): StorableValue;
+```
+
+#### Conversion Rules
+
+| Input Type | Output |
+|------------|--------|
+| `null`, `boolean`, `number`, `string`, `undefined`, `bigint` | Returned as-is (primitives are `StorableValue` directly). `-0` is normalized to `0`. Non-finite numbers (`NaN`, `Infinity`) cause rejection. |
+| `StorableInstance` (including wrapper classes) | Returned as-is (already `StorableValue`). |
+| `Error` | Wrapped into `StorableError`. Before wrapping, `cause` and custom enumerable properties are recursively converted to `StorableValue` (deep variant) or left as-is (shallow variant). This ensures that by the time `StorableError.[DECONSTRUCT]` runs, all nested values are already valid `StorableValue`. |
+| `Map` | Wrapped into `StorableMap`. Keys and values are recursively converted (deep variant only). |
+| `Set` | Wrapped into `StorableSet`. Elements are recursively converted (deep variant only). |
+| `Date` | Wrapped into `StorableDate`. |
+| `Uint8Array` | Wrapped into `StorableUint8Array`. |
+| `StorableValue[]` | Shallow: returned as-is (frozen if `freeze` is true). Deep: elements recursively converted (frozen at each level if `freeze` is true). |
+| `{ [key: string]: StorableValue }` | Shallow: returned as-is (frozen if `freeze` is true). Deep: values recursively converted (frozen at each level if `freeze` is true). |
+
+#### Freeze Semantics
+
+The immutable-forward design requires that `StorableValue` trees produced by
+conversion are frozen **by default**:
+
+- **`toStorableValue()` (shallow):** `Object.freeze()` on the top-level result.
+- **`toDeepStorableValue()` (deep):** `Object.freeze()` at every level of
+  nesting, performed in the **same recursive pass** as validation and wrapping.
+  There are no separate passes — each node is checked, wrapped, and frozen
+  before the recursion returns from that level.
+
+If the input is already frozen (or deep-frozen for the deep variant), the same
+object is returned — no defensive copying. This avoids unnecessary allocation
+in the common case where values are already immutable.
+
+The freeze check starts with a naive recursive `Object.isFrozen()` walk. This
+is sufficient for correctness; optimization (e.g., a `WeakSet<object>` of known
+deep-frozen objects) can be added later if profiling shows a need.
+
+#### Optional `freeze` Parameter
+
+All conversion functions accept an optional `freeze` parameter (default:
+`true`). When `freeze` is `false`, the function performs validation and wrapping
+but skips freezing:
+
+```typescript
+// Frozen (default) -- immutable result, safe for sharing.
+const frozen = toDeepStorableValue(input);
+
+// Unfrozen -- mutable result, caller can modify before freezing later.
+const mutable = toDeepStorableValue(input, false);
+```
+
+This exists because JavaScript makes it difficult to update frozen values —
+there is no "thaw" operation. Callers that need to build up a `StorableValue`
+tree incrementally (e.g., merging data from multiple sources) can use
+`freeze: false` to get a mutable tree, then freeze it when construction is
+complete. The `freeze` parameter does not affect validation or wrapping — the
+returned value is always a valid `StorableValue` regardless of its frozen state.
+
+### 8.3 `toStorableValueOrThrow()`
+
+```typescript
+// file: packages/common/storable-value.ts
+
+/**
+ * Convert an arbitrary JavaScript value to `StorableValue`, throwing on
+ * unsupported types. This is the boundary function for code that receives
+ * `unknown` values from external sources.
+ *
+ * Behaves identically to `toStorableValue()` for supported types. For
+ * unsupported types (e.g., `WeakMap`, `Promise`, DOM nodes), throws a
+ * descriptive error.
+ *
+ * The `OrThrow` name follows the codebase convention of signaling "this
+ * function may throw for type reasons" in the function name, making the
+ * failure mode visible at call sites.
+ *
+ * The optional `freeze` parameter works the same as in `toStorableValue()`
+ * (default: `true`; pass `false` to skip freezing).
+ */
+export function toStorableValueOrThrow(
+  value: unknown,
+  freeze?: boolean, // default: true
+): StorableValue;
+
+/**
+ * Deep variant of `toStorableValueOrThrow()`. Recursively converts and
+ * deep-freezes (single pass). Throws on unsupported types at any depth.
+ *
+ * Pass `freeze: false` to skip freezing.
+ */
+export function toDeepStorableValueOrThrow(
+  value: unknown,
+  freeze?: boolean, // default: true
+): StorableValue;
+```
+
+The distinction between `toStorableValue()` and `toStorableValueOrThrow()`:
+
+- **`toStorableValue()`** accepts `StorableValue | StorableNativeObject` —
+  the caller has already ensured the value is a supported type. The function
+  handles wrapping and freezing but does not need to validate type membership.
+
+- **`toStorableValueOrThrow()`** accepts `unknown` — the caller is at a system
+  boundary and cannot guarantee the type. The function validates and throws on
+  unsupported types.
+
+Both produce the same output for supported types. The split exists so that
+internal code (which knows its types) gets cleaner signatures, while boundary
+code (which doesn't) gets explicit error handling.
+
+### 8.4 `canBeStored()`
+
+```typescript
+// file: packages/common/storable-value.ts
+
+/**
+ * Type guard: returns `true` if `toDeepStorableValue()` would succeed on
+ * the given value — i.e., the value is a `StorableValue`, a
+ * `StorableNativeObject`, or a tree of these types.
+ *
+ * This is a check-without-conversion function for system boundaries where
+ * code receives `unknown` and needs to determine convertibility without
+ * actually performing the conversion (and its associated wrapping, freezing,
+ * and allocation).
+ *
+ * Relationship to other functions:
+ * - `isStorableValue(x)`: "Is `x` already a `StorableValue`?" Does NOT
+ *   return `true` for raw native types like `Error` or `Map`.
+ * - `canBeStored(x)`: "Could `x` be converted to a `StorableValue` via
+ *   `toDeepStorableValue()`?" Returns `true` for both `StorableValue`
+ *   values AND `StorableNativeObject` values (and deep trees thereof).
+ * - `toDeepStorableValueOrThrow(x)`: Actually performs the conversion,
+ *   throwing on unsupported types.
+ */
+export function canBeStored(value: unknown): boolean;
+```
+
+The function recursively checks the value tree. It returns `true` if and only
+if the value is:
+
+- A primitive (`null`, `boolean`, `number` (finite), `string`, `undefined`,
+  `bigint`)
+- A `StorableInstance` (including the native object wrapper classes)
+- A `StorableNativeObject` (`Error`, `Map`, `Set`, `Date`, `Uint8Array`)
+- An array where every present element satisfies `canBeStored()`
+- A plain object where every value satisfies `canBeStored()`
+
+It returns `false` for unsupported types (`WeakMap`, `Promise`, DOM nodes,
+class instances that don't implement `StorableInstance`, non-finite numbers,
+etc.).
+
+> **Performance note.** `canBeStored()` walks the value tree without
+> allocating wrappers or frozen copies. For large trees, this is cheaper than
+> calling `toDeepStorableValueOrThrow()` inside a try/catch, since it avoids
+> the wrapping and freezing work that would be discarded on failure. However,
+> if the caller intends to convert on success, calling
+> `toDeepStorableValueOrThrow()` directly (and catching the error) avoids
+> walking the tree twice.
+
+### 8.5 `nativeValueFromStorableValue()`
+
+```typescript
+// file: packages/common/storable-value.ts
+
+/**
+ * Convert a `StorableValue` back to a value tree containing native JS types.
+ * Wrapper classes are unwrapped to their native equivalents:
+ *
+ * - `StorableError`      -> `Error`
+ * - `StorableMap`        -> `FrozenMap`
+ * - `StorableSet`        -> `FrozenSet`
+ * - `StorableDate`       -> `Date`
+ * - `StorableUint8Array` -> `Uint8Array`
+ *
+ * Non-wrapper `StorableInstance` values (`Cell`, `Stream`, `UnknownStorable`,
+ * `ProblematicStorable`, etc.) pass through unchanged.
+ *
+ * **Shallow:** Only unwraps the top-level value. Array elements and object
+ * property values are not recursively unwrapped.
+ *
+ * **Immutability is preserved for collections.** `StorableMap` and
+ * `StorableSet` unwrap to `FrozenMap` and `FrozenSet` respectively —
+ * effectively-immutable wrappers around `Map` and `Set` that expose
+ * read-only interfaces and throw on mutation attempts. This preserves
+ * the immutable-forward guarantee even in the "JS wild west" layer.
+ * Other native types (`Error`, `Date`, `Uint8Array`) are returned as
+ * their standard mutable forms.
+ */
+export function nativeValueFromStorableValue(
+  value: StorableValue,
+): StorableValue | StorableNativeObject;
+
+/**
+ * Deep variant: recursively unwraps wrapper classes throughout the value tree.
+ * Arrays and plain objects in the output are NOT frozen (they may contain
+ * native types that the caller expects to use normally).
+ */
+export function deepNativeValueFromStorableValue(
+  value: StorableValue,
+): StorableValue | StorableNativeObject;
+```
+
+#### Unwrapping Rules
+
+| Input | Output |
+|-------|--------|
+| `StorableError` | `Error` (mutable) |
+| `StorableMap` | `FrozenMap` (read-only `Map` wrapper; throws on mutation) |
+| `StorableSet` | `FrozenSet` (read-only `Set` wrapper; throws on mutation) |
+| `StorableDate` | `Date` (mutable) |
+| `StorableUint8Array` | `Uint8Array` (mutable) |
+| Other `StorableInstance` | Passed through unchanged |
+| Primitives | Passed through unchanged |
+| Arrays (deep variant) | Recursively unwrapped; output array is NOT frozen |
+| Plain objects (deep variant) | Recursively unwrapped; output object is NOT frozen |
+
+The output type is `StorableValue | StorableNativeObject`, reflecting that the
+result may contain native JS types at any depth.
+
+> **Why `FrozenMap` / `FrozenSet`?** `Object.freeze()` does not prevent
+> mutation of `Map` and `Set` — their `set()`, `delete()`, `add()`, and
+> `clear()` methods remain callable on a frozen instance. `FrozenMap` and
+> `FrozenSet` are thin wrappers that expose the read-only subset of the
+> `Map`/`Set` API (`get`, `has`, `entries`, `forEach`, `size`, etc.) and throw
+> on any mutation attempt. This ensures that data round-tripped through the
+> storable layer remains effectively immutable even after unwrapping. The exact
+> API of `FrozenMap` and `FrozenSet` is an implementation decision.
+
+### 8.6 Round-Trip Guarantees
+
+For any supported value `v`:
+
+```
+deepNativeValueFromStorableValue(toDeepStorableValue(v))
+```
+
+produces a value that is structurally equivalent to `v` — the same data at the
+same positions. The round-tripped value is not necessarily `===` to the original
+(wrapping and unwrapping creates new objects), and the **types may change** for
+collections: a mutable `Map` becomes a `FrozenMap`, and a mutable `Set` becomes
+a `FrozenSet`. The data content is preserved; the mutability is not.
+
+Similarly, for any `StorableValue` `sv`:
+
+```
+toDeepStorableValue(deepNativeValueFromStorableValue(sv))
+```
+
+produces a `StorableValue` that is structurally equivalent to `sv`.
 
 ---
 
