@@ -367,7 +367,7 @@ Section 4.5.
 #### 1.4.8 Design Notes
 
 > **Why wrapper classes instead of inline serializer branches?** Each wrapper
-> genuinely implements `StorableInstance`, so `isStorable()` returns `true` for
+> genuinely implements `StorableInstance`, so `isStorableInstance()` returns `true` for
 > them. The serialization system dispatches all `StorableInstance` values through
 > a single `StorableInstanceHandler` path — no per-type branches. This gives the
 > serialization layer a uniform, simpler structure: it handles
@@ -575,7 +575,7 @@ export interface ReconstructionContext {
  * Type guard: checks whether a value implements the storable protocol.
  * The presence of `[DECONSTRUCT]` is the brand.
  */
-export function isStorable(value: unknown): value is StorableInstance {
+export function isStorableInstance(value: unknown): value is StorableInstance {
   return value != null
     && typeof value === 'object'
     && DECONSTRUCT in value;
@@ -847,7 +847,7 @@ functions, not by the context or by individual types. See Section 4.5.
 ```typescript
 // file: packages/common/serialization.ts
 
-import { DECONSTRUCT, RECONSTRUCT, isStorable } from './storable-protocol';
+import { DECONSTRUCT, RECONSTRUCT, isStorableInstance } from './storable-protocol';
 import type { SerializationContext, SerializedForm } from './serialization-context';
 import { UnknownStorable } from './unknown-storable';
 
@@ -869,7 +869,7 @@ export function serialize(
   // (Cell, Stream), system types (UnknownStorable, ProblematicStorable),
   // AND native object wrappers (StorableError, StorableMap, StorableSet,
   // StorableDate, StorableUint8Array). No per-type branches needed.
-  if (isStorable(value)) {
+  if (isStorableInstance(value)) {
     const state = value[DECONSTRUCT]();
     const tag = context.getTagFor(value);
     const serializedState = serialize(state, context); // recursive
