@@ -794,13 +794,13 @@ its wire format. For the JSON context, this is:
 // file: packages/common/serialization-context.ts
 
 /** JSON-compatible wire format value. */
-type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
+type JsonWireValue = null | boolean | number | string | JsonWireValue[] | { [key: string]: JsonWireValue };
 
 /**
  * The wire format for the JSON serialization context. Other contexts (e.g.,
  * CBOR) would define their own `SerializedForm`.
  */
-type SerializedForm = JsonValue;
+type SerializedForm = JsonWireValue;
 ```
 
 ### 4.3 Interface
