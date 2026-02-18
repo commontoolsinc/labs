@@ -293,7 +293,8 @@ export const GoogleAuthManager = pattern<
 
     // isReady computed directly from booleans (matches minimal version pattern)
     const isReady = computed(() => {
-      const value = hasToken && !isTokenExpired && hasRequiredScopes;
+      const value = hasToken && hasEmail && !isTokenExpired &&
+        hasRequiredScopes;
       debugLog(debugMode as boolean, "isReady:", value);
       return value;
     });
