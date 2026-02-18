@@ -1,7 +1,7 @@
 import type { StorableClass, StorableInstance } from "./storable-protocol.ts";
 import type { SerializationContext } from "./serialization-context.ts";
 import type {
-  JsonValue,
+  JsonWireValue,
   SerializedForm,
 } from "./json-serialization-context.ts";
 import { ErrorConverter } from "./type-handlers.ts";
@@ -14,7 +14,7 @@ import { ProblematicStorable } from "./problematic-storable.ts";
  * types in scope and handles encoding/decoding of tagged values.
  * See Section 5.2 of the formal spec.
  */
-export class JsonEncodingContext implements SerializationContext<JsonValue> {
+export class JsonEncodingContext implements SerializationContext<JsonWireValue> {
   /** Tag -> class registry for known types. */
   private readonly registry = new Map<
     string,

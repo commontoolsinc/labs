@@ -5,26 +5,26 @@ import type { SerializationContext } from "./serialization-context.ts";
  * `@commontools/api` -- this type represents the wire format for the new
  * `/<Type>@<Version>` encoding. See Section 4.2 of the formal spec.
  */
-export type JsonValue =
+export type JsonWireValue =
   | null
   | boolean
   | number
   | string
-  | JsonValue[]
-  | { [key: string]: JsonValue };
+  | JsonWireValue[]
+  | { [key: string]: JsonWireValue };
 
 /**
- * The wire format for the JSON serialization context. Alias for `JsonValue`,
+ * The wire format for the JSON serialization context. Alias for `JsonWireValue`,
  * used throughout the serialization system to make the wire format explicit.
  */
-export type SerializedForm = JsonValue;
+export type SerializedForm = JsonWireValue;
 
 /**
  * JSON-specific serialization context. Implements the `/<Type>@<Version>` wire
- * format, parameterized as `SerializationContext<JsonValue>`.
+ * format, parameterized as `SerializationContext<JsonWireValue>`.
  * See Section 4.3 of the formal spec.
  */
-export type JsonSerializationContext = SerializationContext<JsonValue>;
+export type JsonSerializationContext = SerializationContext<JsonWireValue>;
 
 /**
  * Re-export `SerializationContext` so existing consumers of this module can
@@ -34,7 +34,7 @@ export type { SerializationContext } from "./serialization-context.ts";
 
 /**
  * Convenience type guard: checks if a `SerializationContext` is a JSON context
- * (i.e., its serialized form is `JsonValue`). Useful for code that needs to
+ * (i.e., its serialized form is `JsonWireValue`). Useful for code that needs to
  * distinguish JSON contexts from potential future binary contexts.
  */
 export function isJsonContext(
