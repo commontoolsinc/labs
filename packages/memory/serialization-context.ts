@@ -3,7 +3,7 @@ import type { StorableClass, StorableInstance } from "./storable-protocol.ts";
 /**
  * Maps between runtime types and wire format representations. Parameterized
  * on `WireFormat` -- the type of the intermediate serialized representation.
- * JSON contexts use `JsonValue` (an intermediate tree that `JSON.stringify`
+ * JSON contexts use `JsonWireValue` (an intermediate tree that `JSON.stringify`
  * converts to bytes); future binary contexts would use `Uint8Array`.
  * See Section 4.3 of the formal spec.
  */
