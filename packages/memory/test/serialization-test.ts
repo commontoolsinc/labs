@@ -956,9 +956,11 @@ describe("serialization", () => {
       expect(ctx.getTagFor(ps)).toBe("Bad@1");
     });
 
-    it("getClassFor returns Error@1 reconstructor", () => {
+    it("getClassFor returns undefined for Error@1 (handled by TypeHandler)", () => {
       const ctx = new JsonEncodingContext();
-      expect(ctx.getClassFor("Error@1")).toBeDefined();
+      // Error@1 is handled by ErrorHandler in the TypeHandlerRegistry,
+      // not the context's class registry.
+      expect(ctx.getClassFor("Error@1")).toBeUndefined();
     });
 
     it("getClassFor returns undefined for unknown tags", () => {
