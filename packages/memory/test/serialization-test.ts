@@ -1,6 +1,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { deserialize, serialize } from "../serialization.ts";
+import {
+  deserialize,
+  deserializeFromBytes,
+  serialize,
+  serializeToBytes,
+} from "../serialization.ts";
 import { JsonEncodingContext } from "../json-encoding.ts";
 import type { ReconstructionContext } from "../storable-protocol.ts";
 import { DECONSTRUCT, isStorable, RECONSTRUCT } from "../storable-protocol.ts";
@@ -33,6 +38,94 @@ function roundTrip(value: StorableValue): StorableValue {
 // ============================================================================
 
 describe("serialization", () => {
+  // --------------------------------------------------------------------------
+  // Public API: Uint8Array boundary
+  // --------------------------------------------------------------------------
+
+  describe("Uint8Array public API", () => {
+    it("serializeToBytes returns Uint8Array", () => {
+      const { context } = makeTestContext();
+      const result = serializeToBytes(42, context);
+      expect(result).toBeInstanceOf(Uint8Array);
+    });
+
+    it("serializeToBytes produces valid JSON bytes", () => {
+      const { context } = makeTestContext();
+      const bytes = serializeToBytes(
+        { a: 1 } as unknown as StorableValue,
+        context,
+      );
+      const json = new TextDecoder().decode(bytes);
+      expect(JSON.parse(json)).toEqual({ a: 1 });
+    });
+
+    it("deserializeFromBytes accepts Uint8Array", () => {
+      const { context, runtime } = makeTestContext();
+      const bytes = new TextEncoder().encode(JSON.stringify({ a: 1 }));
+      const result = deserializeFromBytes(
+        bytes,
+        context,
+        runtime,
+      ) as Record<string, StorableValue>;
+      expect(result.a).toBe(1);
+    });
+
+    it("round-trips through Uint8Array", () => {
+      const { context, runtime } = makeTestContext();
+      const value = {
+        name: "test",
+        count: 42,
+      } as unknown as StorableValue;
+      const bytes = serializeToBytes(value, context);
+      const result = deserializeFromBytes(
+        bytes,
+        context,
+        runtime,
+      ) as Record<string, StorableValue>;
+      expect(result.name).toBe("test");
+      expect(result.count).toBe(42);
+    });
+
+    it("round-trips Error through Uint8Array", () => {
+      const { context, runtime } = makeTestContext();
+      const err = new TypeError("oops");
+      const bytes = serializeToBytes(err, context);
+      const result = deserializeFromBytes(
+        bytes,
+        context,
+        runtime,
+      ) as Error;
+      expect(result).toBeInstanceOf(TypeError);
+      expect(result.message).toBe("oops");
+    });
+
+    it("round-trips undefined through Uint8Array", () => {
+      const { context, runtime } = makeTestContext();
+      const bytes = serializeToBytes(undefined, context);
+      const result = deserializeFromBytes(bytes, context, runtime);
+      expect(result).toBe(undefined);
+    });
+
+    it("round-trips complex structure through Uint8Array", () => {
+      const { context, runtime } = makeTestContext();
+      const value = {
+        users: [{ name: "Alice" }, { name: "Bob" }],
+        error: new Error("fail"),
+        nothing: undefined,
+      } as unknown as StorableValue;
+      const bytes = serializeToBytes(value, context);
+      const result = deserializeFromBytes(
+        bytes,
+        context,
+        runtime,
+      ) as Record<string, StorableValue>;
+      const users = result.users as StorableValue[];
+      expect((users[0] as Record<string, StorableValue>).name).toBe("Alice");
+      expect(result.error).toBeInstanceOf(Error);
+      expect(result.nothing).toBe(undefined);
+    });
+  });
+
   // --------------------------------------------------------------------------
   // Round-trip tests for primitives
   // --------------------------------------------------------------------------
@@ -871,6 +964,32 @@ describe("serialization", () => {
     it("getClassFor returns undefined for unknown tags", () => {
       const ctx = new JsonEncodingContext();
       expect(ctx.getClassFor("Unknown@1")).toBeUndefined();
+    });
+
+    it("finalize produces valid JSON Uint8Array", () => {
+      const ctx = new JsonEncodingContext();
+      const bytes = ctx.finalize({ a: 1 } as SerializedForm);
+      expect(bytes).toBeInstanceOf(Uint8Array);
+      expect(JSON.parse(new TextDecoder().decode(bytes))).toEqual({
+        a: 1,
+      });
+    });
+
+    it("parse decodes Uint8Array to JsonWireValue", () => {
+      const ctx = new JsonEncodingContext();
+      const bytes = new TextEncoder().encode('{"a":1}');
+      const result = ctx.parse(bytes);
+      expect(result).toEqual({ a: 1 });
+    });
+
+    it("finalize/parse round-trip", () => {
+      const ctx = new JsonEncodingContext();
+      const data = {
+        "/Error@1": { name: "Error", message: "test" },
+      } as SerializedForm;
+      const bytes = ctx.finalize(data);
+      const parsed = ctx.parse(bytes);
+      expect(parsed).toEqual(data);
     });
   });
 
