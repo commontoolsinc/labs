@@ -19,33 +19,6 @@ import {
 } from "commontools";
 import { fetchAndRunPattern, listPatternIndex } from "./common-tools.tsx";
 
-// Sanitize generateObject's accumulated messages for use in llmDialog.
-// After cell serialization round-trip, tool-result messages have an internal
-// output format ({ type: "json", value: ... }) that the Vercel AI SDK rejects.
-// FIXME(ben): Find a way to include tool-call context (pattern URLs, @link refs) so
-// the dialog model knows what was previously launched. Current approach strips
-// too much context — the model can't effectively refine the result without
-// knowing which pattern was used or the result cell link.
-function sanitizeMessagesForDialog(msgs: any[]): BuiltInLLMMessage[] {
-  const result: BuiltInLLMMessage[] = [];
-  for (const msg of msgs) {
-    if (msg.role === "tool") continue; // Drop tool-result messages entirely
-    if (msg.role === "assistant" && Array.isArray(msg.content)) {
-      // Keep only text parts from assistant messages (strip tool-call parts)
-      const textParts = msg.content.filter(
-        (p: any) => p.type === "text" && p.text?.trim(),
-      );
-      if (textParts.length > 0) {
-        result.push({ role: "assistant", content: textParts });
-      }
-      continue;
-    }
-    // Pass user/system messages through as-is
-    result.push(msg);
-  }
-  return result;
-}
-
 // --- Module-level handlers ---
 const sendFollowUp = handler<
   { detail: { message: string } },
@@ -55,13 +28,15 @@ const sendFollowUp = handler<
     addMessage: Stream<BuiltInLLMMessage>;
   }
 >((event, { dialogMessages, suggestionMessages, addMessage }) => {
-  // Seed dialog with generateObject's conversation on first follow-up
+  // Seed dialog with generateObject's conversation on first follow-up.
+  // Pass messages through raw — llmDialog's own tool-result messages use the
+  // same format, so the server/AI SDK should accept them.
   // Note: suggestionMessages is a computed, CTS auto-unwraps it to a plain
   // value in handler state bindings — do NOT call .get() on it.
   if (dialogMessages.get().length === 0) {
     const msgs = suggestionMessages;
     if (msgs && msgs.length > 0) {
-      dialogMessages.set(sanitizeMessagesForDialog(msgs));
+      dialogMessages.set(msgs);
     }
   }
   addMessage.send({
@@ -70,19 +45,27 @@ const sendFollowUp = handler<
   });
 });
 
-// Pattern-based tools for llmDialog. handler() state bindings don't work when
-// invoked via llmDialog's tool system (it calls .send(input) without state).
-// These patterns receive a Writable via extraParams to write results into.
-const presentResultFn = pattern<{
-  cell: Writable<any>;
-  target: Writable<Writable<any> | undefined>;
-}>(({ cell, target }) => {
-  // Guard: .set() fails during ct check (no space context).
-  // At runtime, extraParams provides a real Writable with a space.
-  try {
-    target.set(cell);
-  } catch { /* ct check only */ }
-  return { cell };
+// Dialog-specific fetchAndRunPattern that auto-presents its result.
+// Wraps the shared fetchAndRunPattern and writes the result cell to
+// activeResult via extraParams, so the UI updates without needing the LLM
+// to call a separate presentResult tool.
+const dialogFetchAndRun = pattern<{
+  url: string;
+  args: Writable<any>;
+  target: Writable<{ active: Writable<any> | null }>;
+}>(({ url, args, target }) => {
+  const inner = fetchAndRunPattern({ url, args });
+  const cell = computed(() => inner?.cell);
+  // Auto-present: when the inner pattern resolves, write to activeResult
+  computed(() => {
+    const c = cell;
+    if (c) {
+      try {
+        target.set({ active: c });
+      } catch { /* ct check only */ }
+    }
+  });
+  return inner;
 });
 
 const askUserFn = pattern<{
@@ -108,11 +91,11 @@ const answerQuestion = handler<
   event,
   { pendingQuestion, dialogMessages, suggestionMessages, addMessage },
 ) => {
-  // Same as sendFollowUp — suggestionMessages is auto-unwrapped by CTS.
+  // Same as sendFollowUp — pass raw messages through.
   if (dialogMessages.get().length === 0) {
     const msgs = suggestionMessages;
     if (msgs && msgs.length > 0) {
-      dialogMessages.set(sanitizeMessagesForDialog(msgs));
+      dialogMessages.set(msgs);
     }
   }
   pendingQuestion.set(null);
@@ -174,7 +157,9 @@ Use the user context above to personalize your suggestions when relevant.`;
   });
 
   // --- Follow-up dialog state ---
-  const activeResult = Writable.of<Writable<any> | undefined>(undefined);
+  const activeResult = Writable.of<{ active: Writable<any> | null }>({
+    active: null,
+  });
   const dialogMessages = Writable.of<BuiltInLLMMessage[]>([]);
   const pendingQuestion = Writable.of<
     { question: string; options?: string[] } | null
@@ -184,52 +169,49 @@ Use the user context above to personalize your suggestions when relevant.`;
     const profileCtx = profileContext;
     return `You are helping the user refine a result. You previously found and launched a pattern for them.${profileCtx}
 
-Available tools:
-- fetchAndRunPattern: Fetch a pattern from a URL and run it with arguments
-- listPatternIndex: List all available patterns
-- presentResult: Call this with { cell: <link> } to update the displayed result
-- askUser: Ask the user a question. Pass { question, options? }. After calling this, STOP and wait. The user's answer will appear as your next message.
+Tools:
+- fetchAndRunPattern({ url, args }): Fetch a pattern from a URL and run it. The result is automatically displayed.
+- listPatternIndex(): List all available patterns with their URLs.
+- askUser({ question, options? }): Ask the user a clarifying question. STOP after calling this.
 
 When the user asks to change or improve the result:
-1. Use listPatternIndex if you need to find a different pattern
-2. Use fetchAndRunPattern to launch a new/modified pattern
-3. Call presentResult with the new cell to update what the user sees
-
-Always call presentResult when you have a new result to show.`;
+1. Call listPatternIndex() to find the right pattern URL
+2. Call fetchAndRunPattern({ url: "<pattern-url>", args: {} }) to launch it`;
   });
 
-  const dialog = llmDialog({
+  // NOTE: Intentionally NOT passing `context` here. The context cells contain
+  // complex running patterns ($UI, $mentionable, etc.) that cause circular
+  // reference errors when llmDialog tries to serialize them for the LLM.
+  // builtinTools: false prevents invoke/read/schema/pin from being exposed.
+  const dialogParams = {
     system: dialogSystemPrompt,
     messages: dialogMessages,
     tools: {
-      fetchAndRunPattern: patternTool(fetchAndRunPattern),
+      fetchAndRunPattern: patternTool(dialogFetchAndRun, {
+        target: activeResult,
+      }),
       listPatternIndex: patternTool(listPatternIndex),
-      presentResult: patternTool(presentResultFn, { target: activeResult }),
       askUser: patternTool(askUserFn, { target: pendingQuestion }),
     },
-    model: "anthropic:claude-haiku-4-5",
-    // NOTE: Intentionally NOT passing `context` here. The context cells contain
-    // complex running patterns ($UI, $mentionable, etc.) that cause circular
-    // reference errors when llmDialog tries to serialize them for the LLM.
-    // The dialog has fetchAndRunPattern/listPatternIndex tools which is sufficient.
-  });
+    model: "anthropic:claude-sonnet-4-5",
+    builtinTools: false,
+  };
+  const dialog = llmDialog(dialogParams);
 
   const suggestionMessages = computed(() => suggestion.messages);
 
-  // llmResult: prefer activeResult (set by presentResult tool via extraParams),
-  // fall back to initial generateObject result.
-  const llmResult = computed(() => {
-    const dialogResult = activeResult;
-    if (dialogResult !== undefined) return dialogResult;
-    return suggestion.result?.cell;
-  });
+  const suggestionCell = computed(() => suggestion.result?.cell);
+  const dialogCell = computed(() => activeResult.get()?.active);
 
   // Reactively select between picker and LLM result. This must be a named
   // computed variable — the CTS transformer leaves named Cells as-is in the
   // return object, which lets wish.ts read the result via .get().
   const result = computed(() => {
     if (initialResults.length > 0) return pickerResult;
-    return llmResult;
+    // Prefer dialog override, fall back to initial suggestion.
+    const d = dialogCell;
+    if (d !== null) return d;
+    return suggestionCell;
   });
 
   // Pre-create VNodes outside the computed so they're stable across
@@ -237,9 +219,18 @@ Always call presentResult when you have a new result to show.`;
   // reconciler to re-mount the DOM, losing inner subscriptions).
   const freeformUI = (
     <div>
-      <ct-cell-context $cell={llmResult}>
-        {computed(() => llmResult ?? "Searching...")}
+      <ct-cell-context $cell={suggestionCell}>
+        {computed(() => suggestionCell ?? "Searching...")}
       </ct-cell-context>
+      {ifElse(
+        computed(() => dialogCell !== null),
+        <div>
+          <ct-cell-context $cell={dialogCell}>
+            {computed(() => dialogCell)}
+          </ct-cell-context>
+        </div>,
+        <span></span>,
+      )}
       {ifElse(
         computed(() => pendingQuestion.get() !== null),
         <div>

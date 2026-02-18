@@ -815,6 +815,7 @@ function buildToolCatalog(
   toolsCell:
     | Cell<Record<string, Schema<typeof LLMToolSchema>>>
     | Cell<Record<string, BuiltInLLMTool> | undefined>,
+  includeBuiltinTools = true,
 ): ToolCatalog {
   const { legacy } = collectToolEntries(
     toolsCell.asSchema(
@@ -843,52 +844,78 @@ function buildToolCatalog(
       continue;
     }
     inputSchema = normalizeInputSchema(inputSchema);
+
+    // Strip extraParams keys from the schema so the LLM doesn't see them.
+    // extraParams are pre-filled by the caller (e.g. patternTool(fn, { target }))
+    // and merged at invocation time — the LLM should not provide them.
+    const extra = toolValue?.extraParams;
+    if (extra && typeof extra === "object" && !Array.isArray(extra)) {
+      const extraKeys = Object.keys(extra);
+      if (extraKeys.length > 0) {
+        const schema = inputSchema as Record<string, unknown>;
+        const props = schema.properties as Record<string, unknown> | undefined;
+        if (props) {
+          const filtered = { ...props };
+          for (const k of extraKeys) delete filtered[k];
+          inputSchema = { ...schema, properties: filtered };
+        }
+        const req = (schema as any).required as unknown[] | undefined;
+        if (Array.isArray(req)) {
+          (inputSchema as any).required = req.filter(
+            (k: unknown) => !extraKeys.includes(k as string),
+          );
+        }
+      }
+    }
+
     const description: string = toolValue.description ??
       (inputSchema as any)?.description ?? "";
     llmTools[entry.name] = { description, inputSchema };
     dynamicToolCells.set(entry.name, entry.cell);
   }
 
-  llmTools[READ_TOOL_NAME] = {
-    description:
-      'Read data from any cell. Input: { "@link": "/of:bafyabc123/path" }. ' +
-      "Returns the cell's data with nested cells as link objects. " +
-      "Compose with invoke(): invoke() returns a link, then read(link) gets the data. ",
-    inputSchema: READ_INPUT_SCHEMA,
-  };
-  llmTools[INVOKE_TOOL_NAME] = {
-    description:
-      'Invoke a handler or pattern. Input: { "@link": "/of:bafyabc123/doThing" }, plus optional args. ' +
-      'Returns { "@link": "/of:xyz/result" } pointing to the result cell. ',
-    inputSchema: INVOKE_INPUT_SCHEMA,
-  };
-  llmTools[PIN_TOOL_NAME] = {
-    description:
-      'Pin a cell for easy reference. Input: { "@link": "/of:bafyabc123" } and a name. ' +
-      "Pinned cells and their values appear in the system prompt. " +
-      "Use to track important cells you're working with.",
-    inputSchema: PIN_INPUT_SCHEMA,
-  };
-  llmTools[UNPIN_TOOL_NAME] = {
-    description: 'Unpin a cell. Input: { "@link": "/of:bafyabc123" }. ' +
-      "Use when you no longer need quick access to a cell.",
-    inputSchema: UNPIN_INPUT_SCHEMA,
-  };
-  llmTools[UPDATE_ARGUMENT_TOOL_NAME] = {
-    description:
-      'Update arguments of a running pattern instance. Input: { "@link": "/of:bafyabc123" } and updates object. ' +
-      "The pattern will automatically re-execute with the new arguments. " +
-      "Use after invoke() creates a pattern, or to modify attached pattern instances. " +
-      'Example: updateArgument({ "@link": "/of:xyz" }, { "query": "new search" })',
-    inputSchema: UPDATE_ARGUMENT_INPUT_SCHEMA,
-  };
-  llmTools[SCHEMA_TOOL_NAME] = {
-    description:
-      "Get the JSON schema for a cell to understand its structure, fields, and handlers. " +
-      'Input: { "@link": "/of:bafyabc123" }. ' +
-      "Returns schema showing what data can be read and what handlers can be invoked. ",
-    inputSchema: SCHEMA_INPUT_SCHEMA,
-  };
+  if (includeBuiltinTools) {
+    llmTools[READ_TOOL_NAME] = {
+      description:
+        'Read data from any cell. Input: { "@link": "/of:bafyabc123/path" }. ' +
+        "Returns the cell's data with nested cells as link objects. " +
+        "Compose with invoke(): invoke() returns a link, then read(link) gets the data. ",
+      inputSchema: READ_INPUT_SCHEMA,
+    };
+    llmTools[INVOKE_TOOL_NAME] = {
+      description:
+        'Invoke a handler or pattern. Input: { "@link": "/of:bafyabc123/doThing" }, plus optional args. ' +
+        'Returns { "@link": "/of:xyz/result" } pointing to the result cell. ',
+      inputSchema: INVOKE_INPUT_SCHEMA,
+    };
+    llmTools[PIN_TOOL_NAME] = {
+      description:
+        'Pin a cell for easy reference. Input: { "@link": "/of:bafyabc123" } and a name. ' +
+        "Pinned cells and their values appear in the system prompt. " +
+        "Use to track important cells you're working with.",
+      inputSchema: PIN_INPUT_SCHEMA,
+    };
+    llmTools[UNPIN_TOOL_NAME] = {
+      description: 'Unpin a cell. Input: { "@link": "/of:bafyabc123" }. ' +
+        "Use when you no longer need quick access to a cell.",
+      inputSchema: UNPIN_INPUT_SCHEMA,
+    };
+    llmTools[UPDATE_ARGUMENT_TOOL_NAME] = {
+      description:
+        'Update arguments of a running pattern instance. Input: { "@link": "/of:bafyabc123" } and updates object. ' +
+        "The pattern will automatically re-execute with the new arguments. " +
+        "Use after invoke() creates a pattern, or to modify attached pattern instances. " +
+        'Example: updateArgument({ "@link": "/of:xyz" }, { "query": "new search" })',
+      inputSchema: UPDATE_ARGUMENT_INPUT_SCHEMA,
+    };
+    llmTools[SCHEMA_TOOL_NAME] = {
+      description:
+        "Get the JSON schema for a cell to understand its structure, fields, and handlers. " +
+        'Input: { "@link": "/of:bafyabc123" }. ' +
+        "Returns schema showing what data can be read and what handlers can be invoked. ",
+      inputSchema: SCHEMA_INPUT_SCHEMA,
+    };
+  }
 
   return { llmTools, dynamicToolCells };
 }
@@ -2008,7 +2035,7 @@ async function startRequest(
     }
   }
 
-  const { system, maxTokens, model } = inputs.get();
+  const { system, maxTokens, model, builtinTools } = inputs.get();
 
   const messagesCell = inputs.key("messages");
   const toolsCell = inputs.key("tools") as Cell<
@@ -2039,7 +2066,7 @@ async function startRequest(
     result.withTx(tx).key("pinnedCells").set(mergedPinnedCells as any);
   });
 
-  const toolCatalog = buildToolCatalog(toolsCell);
+  const toolCatalog = buildToolCatalog(toolsCell, builtinTools !== false);
 
   // Build available cells documentation (both context and pinned cells)
   const context = inputs.key("context").get();
@@ -2099,9 +2126,16 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
   const augmentedSystem = (system ?? "") + linkModelDocs + cellsDocs +
     listRecentHint;
 
+  // Use JSON round-trip to resolve cell proxies and @link references to plain
+  // JSON before sending to the server. messagesCell.get() returns proxy objects
+  // that don't serialize correctly through client.sendRequest's JSON.stringify.
+  const resolvedMessages = JSON.parse(
+    JSON.stringify(messagesCell.get()),
+  ) as readonly BuiltInLLMMessage[];
+
   const llmParams: LLMRequest = {
     system: augmentedSystem,
-    messages: messagesCell.get() as readonly BuiltInLLMMessage[],
+    messages: resolvedMessages,
     maxTokens: maxTokens,
     stream: true,
     model: model ?? DEFAULT_MODEL_NAME,

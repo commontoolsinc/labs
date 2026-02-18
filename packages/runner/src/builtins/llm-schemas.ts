@@ -81,6 +81,7 @@ export const LLMParamsSchema = {
       additionalProperties: { asCell: true },
       default: {},
     },
+    builtinTools: { type: "boolean", default: true },
   },
   required: ["messages"],
 } as const satisfies JSONSchema;
