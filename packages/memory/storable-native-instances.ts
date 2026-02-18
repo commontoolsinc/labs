@@ -532,7 +532,9 @@ export function deepNativeValueFromStorableValue(
   // Other StorableInstance (Cell, Stream, UnknownStorable, etc.) -- pass through.
   if (isStorable(value)) return value;
 
-  // Primitives pass through.
+  // Storable primitives (null, undefined, boolean, number, string, bigint)
+  // pass through. Note: `symbol` and `function` are NOT storable and cannot
+  // reach here because the `StorableValue` type excludes them.
   if (value === null || value === undefined || typeof value !== "object") {
     return value;
   }
