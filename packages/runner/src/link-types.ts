@@ -206,11 +206,10 @@ export function areNormalizedLinksSame(
 /**
  * Serialize an address to a string key for use in Maps/Sets/memoization.
  * Includes space, id, type, and path — the same fields compared by
- * areNormalizedLinksSame. Uses null-byte separator since URIs/DIDs cannot
- * contain \0.
+ * areNormalizedLinksSame.
  */
 export function addressKey(addr: IMemorySpaceAddress): string {
-  return `${addr.space}\0${addr.id}\0${addr.type}\0${addr.path.join("\0")}`;
+  return JSON.stringify([addr.space, addr.id, addr.type, addr.path]);
 }
 
 /**
