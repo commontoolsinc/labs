@@ -59,7 +59,6 @@ const patternProgram: RuntimeProgram = {
         "",
         "// The pattern argument type is the value type",
         "export default pattern<{ data: { values: number[]; label: string } }>(",
-        "  'Sum and Label',",
         "  ({ data }) => {",
         "    const sum = computeSum(data);",
         "    const result = formatResult({ label: data.label, sum });",
