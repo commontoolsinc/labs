@@ -57,17 +57,12 @@ export async function tryClaimMutex<T extends Record<string, any>>(
   let inputHash = "";
   let inputs = {} as T;
 
-  const maxRetries = 5;
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    // Wait for all pending computeds to settle before reading inputs.
-    // Without this, computed inputs (e.g. options) may still be undefined
-    // on the first run because the scheduler hasn't evaluated them yet.
-    // Re-waiting on each retry ensures we see settled state after conflicts.
-    await runtime.idle();
+  // Wait for all pending computeds to settle before reading inputs.
+  // Without this, computed inputs (e.g. options) may still be undefined
+  // on the first run because the scheduler hasn't evaluated them yet.
+  await runtime.idle();
 
-    const tx = runtime.edit();
-    tx.tx.immediate = true;
-
+  await runtime.editWithRetry((tx) => {
     const currentInternal = internal.withTx(tx).get();
     const isPending = pending.withTx(tx).get();
     const now = Date.now();
@@ -95,11 +90,7 @@ export async function tryClaimMutex<T extends Record<string, any>>(
     } else {
       claimed = false;
     }
-
-    const { error } = await tx.commit();
-    if (!error) break;
-    if (attempt === maxRetries) break;
-  }
+  });
 
   return { claimed, inputs, inputHash };
 }
