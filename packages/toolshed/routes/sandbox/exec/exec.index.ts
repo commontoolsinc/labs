@@ -12,7 +12,6 @@ router.use(
     allowMethods: ["POST", "OPTIONS"],
     allowHeaders: ["Content-Type", "Authorization"],
     maxAge: 3600,
-    credentials: true,
   }),
 );
 

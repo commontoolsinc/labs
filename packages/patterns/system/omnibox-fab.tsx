@@ -117,7 +117,7 @@ Tool usage priority:
 - Attach relevant items to conversation after instantiation/retrieval if they support ongoing tasks
 - Remove attachments when no longer relevant
 - Search web only as last resort when nothing exists in the space
-- Use bash to run shell commands in a persistent Linux sandbox (Ubuntu). Installed packages and files persist across calls. Do not set sandboxId — it is provided automatically.
+- Use bash to run shell commands in a persistent Linux sandbox (Ubuntu). Installed packages and files persist across calls.
 
 Be matter-of-fact. Prefer action to explanation.`;
     });
