@@ -127,7 +127,18 @@ const Questions = pattern(({ items }) => {
   type: "object",
   properties: {
     questions: { type: "array", items: { type: "string" } },
-    results: { type: "array", items: { type: "string" } },
+    results: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          question: { type: "string" },
+          item: ItemSchema,
+        },
+        required: ["title", "question", "item"],
+      },
+    },
   },
 });
 
