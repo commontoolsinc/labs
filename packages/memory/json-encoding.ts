@@ -4,7 +4,6 @@ import type {
   JsonWireValue,
   SerializedForm,
 } from "./json-serialization-context.ts";
-import { ErrorConverter } from "./type-handlers.ts";
 import { UnknownStorable } from "./unknown-storable.ts";
 import { ProblematicStorable } from "./problematic-storable.ts";
 
@@ -29,17 +28,10 @@ export class JsonEncodingContext
   constructor(options?: { lenient?: boolean }) {
     this.lenient = options?.lenient ?? false;
 
-    // Register built-in types for this scope. ErrorConverter is compatible
-    // with StorableClass since RECONSTRUCT returns Error (which is acceptable
-    // per the widened StorableConverter interface, cast here for the registry).
-    // Note: Link@1, Stream@1, Map@1, Set@1, Bytes@1, Date@1, BigInt@1
-    // are NOT registered -- they belong to future rounds.
-    this.registry.set(
-      "Error@1",
-      ErrorConverter as unknown as StorableClass<StorableInstance>,
-    );
-    // Undefined@1 and `hole` are handled by type handlers, not the class
-    // registry.
+    // Error@1, Undefined@1, and `hole` are all handled by type handlers in
+    // the TypeHandlerRegistry, not the class registry here. Future rounds
+    // will register Link@1, Stream@1, Map@1, Set@1, Bytes@1, Date@1,
+    // BigInt@1 as appropriate.
   }
 
   /** Get the wire format tag for a storable instance's type. */
