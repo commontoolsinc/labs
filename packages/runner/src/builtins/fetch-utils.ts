@@ -46,10 +46,7 @@ export async function tryClaimMutex<T extends Record<string, any>>(
   _error: Cell<any>,
   internal: Cell<Schema<typeof internalSchema>>,
   requestId: string,
-  snapshotInputs: (
-    proxy: T,
-    tx: IExtendedStorageTransaction,
-  ) => T,
+  snapshotInputs: (cell: Cell<T>) => T,
   timeout: number = REQUEST_TIMEOUT,
 ): Promise<{
   claimed: boolean;
@@ -75,12 +72,11 @@ export async function tryClaimMutex<T extends Record<string, any>>(
     const isPending = pending.withTx(tx).get();
     const now = Date.now();
 
-    // Snapshot inputs as plain data while the transaction is active.
-    // The caller-provided snapshotInputs reads each field from the proxy
-    // (which resolves entity-decomposed nested properties through the tx)
-    // and returns a plain object safe to use after the transaction commits.
-    const proxy = inputsCell.getAsQueryResult([], tx);
-    inputs = snapshotInputs(proxy, tx);
+    // The caller-provided snapshotInputs receives the cell with the active
+    // transaction attached. It uses cell.asSchema(...).get() to materialize
+    // a plain snapshot via the schema system, then does any additional
+    // preprocessing (e.g. stringifying request bodies).
+    inputs = snapshotInputs(inputsCell.withTx(tx));
     inputHash = computeInputHash(tx, inputsCell);
 
     // Can claim if:

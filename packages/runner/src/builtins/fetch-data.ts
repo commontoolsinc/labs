@@ -3,13 +3,38 @@ import { type Action } from "../scheduler.ts";
 import type { Runtime } from "../runtime.ts";
 import { getPatternEnvironment } from "../builder/env.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import type { Schema } from "../builder/types.ts";
+import type { JSONSchema, Schema } from "../builder/types.ts";
 import {
   computeInputHash,
   internalSchema,
   tryClaimMutex,
   tryWriteResult,
 } from "./fetch-utils.ts";
+
+/**
+ * Schema for fetchData inputs. Fully specifying the structure (except body,
+ * which is `any`) lets cell.asSchema(schema).get() materialize nested
+ * properties like options.headers as plain objects instead of proxies.
+ */
+const fetchDataInputSchema = {
+  type: "object",
+  properties: {
+    url: { type: "string" },
+    mode: { type: "string" },
+    options: {
+      type: "object",
+      properties: {
+        body: {},
+        method: { type: "string" },
+        headers: {
+          type: "object",
+          additionalProperties: { type: "string" },
+        },
+      },
+    },
+    result: {},
+  },
+} as const satisfies JSONSchema;
 
 /**
  * Fetch data from a URL.
@@ -194,30 +219,29 @@ export function fetchData(
         error,
         internal,
         newRequestId,
-        // Snapshot inputs as plain data and preprocess body while the
-        // transaction is active. This ensures nested proxy values like
-        // options.headers are materialized before the tx commits, and
-        // consolidates body serialization in one place.
-        (proxy) => {
-          const { url, mode, options, result: _result } = proxy;
-          const snapshotOptions = options
-            ? {
-              ...options,
-              method: options.method as string | undefined,
-              headers: options.headers
-                ? { ...(options.headers as Record<string, string>) }
-                : undefined,
-              body: options.body !== undefined &&
-                  typeof options.body !== "string"
-                ? JSON.stringify(options.body)
-                : options.body as string | undefined,
-            }
-            : undefined;
-          return {
-            url: url as string,
-            mode: mode as "text" | "json" | undefined,
-            options: snapshotOptions,
-          } as typeof proxy;
+        // Materialize inputs via the schema system and preprocess body.
+        // asSchema().get() returns a plain snapshot with nested properties
+        // (like options.headers) fully resolved, safe to use after commit.
+        (cell) => {
+          const snapshot = cell.asSchema(fetchDataInputSchema).get() as {
+            url: string;
+            mode?: "text" | "json";
+            options?: {
+              body?: any;
+              method?: string;
+              headers?: Record<string, string>;
+            };
+          };
+          // Stringify non-string bodies so startFetch receives ready-to-send options
+          if (
+            snapshot.options?.body !== undefined &&
+            typeof snapshot.options.body !== "string"
+          ) {
+            (snapshot.options as any).body = JSON.stringify(
+              snapshot.options.body,
+            );
+          }
+          return snapshot as typeof cell extends Cell<infer U> ? U : never;
         },
       ).then(
         ({ claimed, inputs, inputHash }) => {
