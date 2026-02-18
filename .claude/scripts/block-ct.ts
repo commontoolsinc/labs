@@ -1,4 +1,4 @@
-#!/usr/bin/env -S deno run --allow-read
+#!/usr/bin/env -S deno run --allow-read --allow-env
 /**
  * .claude/scripts/block-ct.ts
  *
@@ -8,21 +8,23 @@
  * - Exits 2 so Claude blocks the tool call and shows the message.
  */
 
-const rawInput = await new Response(Deno.stdin.readable).text();
+import { guardProjectDir, isGitCommit, parseCommand } from "./common/guard.ts";
+guardProjectDir();
 
-let cmd = "";
-try {
-  const payload = JSON.parse(rawInput);
-  cmd = payload?.tool_input?.command ?? "";
-} catch {
-  // If the JSON is malformed we allow the call rather than choke the hook.
-}
+const cmd = await parseCommand();
+if (!cmd) Deno.exit(0);
+
+// Don't inspect git commit message content for command patterns
+if (isGitCommit(cmd)) Deno.exit(0);
 
 // Remove quoted strings and heredoc content before checking for ct commands
-// This prevents false positives from file paths or commit messages containing "ct"
+// This prevents false positives from file paths or heredocs containing "ct"
 let cmdWithoutQuotes = cmd.replace(/(['"`])[^'"`]*?\1/g, "");
 // Remove heredoc content: <<'EOF' ... EOF or <<EOF ... EOF
-cmdWithoutQuotes = cmdWithoutQuotes.replace(/<<'?(\w+)'?[\s\S]*?\1/g, "");
+cmdWithoutQuotes = cmdWithoutQuotes.replace(
+  /<<'?(\w+)'?[\s\S]*?\n\1/g,
+  "",
+);
 
 // Match `ct` as a standalone command (not `deno task ct` or part of another word)
 // Matches: ct, ./ct, /path/to/ct but not `deno task ct` or `select`
