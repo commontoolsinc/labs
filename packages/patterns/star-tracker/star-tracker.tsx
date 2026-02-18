@@ -39,6 +39,10 @@ type RepoInfo = {
   created_at: string;
 };
 
+type StarEvent = {
+  starred_at: string;
+};
+
 interface CurvePoint {
   date: number;
   stars: number;
@@ -96,20 +100,82 @@ function formatStars(n: number): string {
   return String(n);
 }
 
-/** Build an estimated star curve from creation date to now. */
-function estimateCurve(createdAt: string, totalStars: number): CurvePoint[] {
+function computeSamplePages(totalStars: number): number[] {
+  const MAX_PAGE = 400;
+  const totalPages = Math.min(Math.ceil(totalStars / 100), MAX_PAGE);
+  if (totalPages <= 0) return [];
+  if (totalPages <= 5) {
+    return Array.from({ length: totalPages }, (_, i) => i + 1);
+  }
+  return [
+    1,
+    Math.floor(totalPages / 4),
+    Math.floor(totalPages / 2),
+    Math.floor((3 * totalPages) / 4),
+    totalPages,
+  ];
+}
+
+function starPageUrl(
+  owner: string,
+  repo: string,
+  index: number,
+  totalStars: number,
+): string {
+  if (!owner || !repo || totalStars === 0) return "";
+  const pages = computeSamplePages(totalStars);
+  if (index >= pages.length) return "";
+  return `https://api.github.com/repos/${owner}/${repo}/stargazers?page=${
+    pages[index]
+  }&per_page=100`;
+}
+
+function buildCurve(
+  allEvents: StarEvent[][],
+  samplePages: number[],
+  totalStars: number,
+): CurvePoint[] {
+  const points: CurvePoint[] = [];
+  for (let i = 0; i < samplePages.length; i++) {
+    const events = allEvents[i];
+    if (!events || !Array.isArray(events) || events.length === 0) continue;
+    const pageNum = samplePages[i];
+    const baseIndex = (pageNum - 1) * 100;
+    const valid = events.filter(
+      (e: StarEvent | null) => e && e.starred_at,
+    ) as StarEvent[];
+    if (valid.length === 0) continue;
+    points.push({
+      date: new Date(valid[0].starred_at).getTime(),
+      stars: baseIndex + 1,
+    });
+    points.push({
+      date: new Date(valid[valid.length - 1].starred_at).getTime(),
+      stars: baseIndex + events.length,
+    });
+  }
+  points.sort((a, b) => a.date - b.date);
+  if (totalStars > 0) {
+    points.push({ date: Date.now(), stars: totalStars });
+  }
+  return points;
+}
+
+/** Estimate star growth curve from creation date + current stars (sqrt shape). */
+function estimateCurve(
+  createdAt: string,
+  totalStars: number,
+): CurvePoint[] {
+  if (!createdAt || totalStars <= 0) return [];
   const startMs = new Date(createdAt).getTime();
   const nowMs = Date.now();
-  if (startMs >= nowMs || totalStars <= 0) return [];
-  // Generate ~10 evenly-spaced points along a sqrt curve
-  // (most OSS repos grow fast early, then taper)
-  const N = 10;
+  const STEPS = 20;
   const points: CurvePoint[] = [];
-  for (let i = 0; i <= N; i++) {
-    const t = i / N; // 0..1
-    const date = startMs + t * (nowMs - startMs);
-    const stars = Math.round(totalStars * Math.sqrt(t));
-    points.push({ date, stars });
+  for (let i = 0; i <= STEPS; i++) {
+    const frac = i / STEPS;
+    const t = startMs + frac * (nowMs - startMs);
+    const stars = Math.round(totalStars * Math.sqrt(frac));
+    points.push({ date: t, stars });
   }
   return points;
 }
@@ -220,19 +286,72 @@ export const RepoCard = pattern<RepoCardInput>(
 
     const stars = computed(() => repoInfo.result?.stargazers_count ?? 0);
 
-    const createdAt = computed(
-      () => repoInfo.result?.created_at ?? "",
-    );
+    const pageUrl0 = computed(() => starPageUrl(owner, repo, 0, stars));
+    const pageUrl1 = computed(() => starPageUrl(owner, repo, 1, stars));
+    const pageUrl2 = computed(() => starPageUrl(owner, repo, 2, stars));
+    const pageUrl3 = computed(() => starPageUrl(owner, repo, 3, stars));
+    const pageUrl4 = computed(() => starPageUrl(owner, repo, 4, stars));
 
-    // Build a simple estimated curve from creation date to now.
-    // The GitHub stargazers timeline API requires a custom Accept header
-    // which doesn't propagate through the runtime's cell proxy, so we
-    // estimate the curve shape instead.
+    const starOpts = computed(() => {
+      const h: Record<string, string> = {
+        Accept: "application/vnd.github.v3.star+json",
+      };
+      if (githubToken) h["Authorization"] = `Bearer ${githubToken}`;
+      return { headers: h };
+    });
+
+    // Use mode:"text" + JSON.parse to avoid proxy entity decomposition of arrays
+    const page0 = fetchData<string>({
+      url: pageUrl0,
+      mode: "text",
+      options: starOpts,
+    });
+    const page1 = fetchData<string>({
+      url: pageUrl1,
+      mode: "text",
+      options: starOpts,
+    });
+    const page2 = fetchData<string>({
+      url: pageUrl2,
+      mode: "text",
+      options: starOpts,
+    });
+    const page3 = fetchData<string>({
+      url: pageUrl3,
+      mode: "text",
+      options: starOpts,
+    });
+    const page4 = fetchData<string>({
+      url: pageUrl4,
+      mode: "text",
+      options: starOpts,
+    });
+
+    const createdAt = computed(() => repoInfo.result?.created_at ?? "");
+
     const rawCurve = computed((): CurvePoint[] => {
+      const allPages = [
+        page0.result,
+        page1.result,
+        page2.result,
+        page3.result,
+        page4.result,
+      ].map((r) => {
+        if (!r || typeof r !== "string") return [];
+        try {
+          return JSON.parse(r) as StarEvent[];
+        } catch {
+          return [];
+        }
+      });
       const s = stars;
-      const created = createdAt;
-      if (s <= 0 || !created) return [];
-      return estimateCurve(created, s);
+      const pages = computeSamplePages(s);
+      if (pages.length === 0) return [];
+      const curve = buildCurve(allPages, pages, s);
+      // If real data has >1 point (not just the final now-point), use it
+      if (curve.length > 1) return curve;
+      // Fall back to estimated sqrt curve from creation date
+      return estimateCurve(createdAt, s);
     });
 
     const curvePoints = computed((): CurvePoint[] => {
@@ -450,7 +569,7 @@ export default pattern<StarTrackerInput, StarTrackerOutput>(
   ({ repos, githubToken }) => {
     const tokenWish = wish<{ token: string }>({
       query: "#githubToken",
-      scope: ["."],
+      scope: ["~", "."],
     });
 
     const effectiveToken = computed(() => {
@@ -463,9 +582,36 @@ export default pattern<StarTrackerInput, StarTrackerOutput>(
     const sortMode = Writable.of<SortMode>("stars");
     const PAGE_SIZE = 25;
     const visibleCount = Writable.of(PAGE_SIZE);
+    // Create sub-pattern instances via function-call form (gives access to output properties)
     const visibleRepos = computed(() =>
       sliceVisible(repos.get(), visibleCount.get())
     );
+
+    const repoCards = visibleRepos.map((entry) =>
+      RepoCard({
+        owner: entry.owner,
+        repo: entry.repo,
+        githubToken: effectiveToken,
+      })
+    );
+
+    // Sort cards by their output properties
+    const sortedCards = computed(() => {
+      const cards = repoCards;
+      if (!Array.isArray(cards) || cards.length === 0) return [];
+      const mode = sortMode.get();
+      const copy = [...cards].filter(Boolean);
+      if (mode === "stars") {
+        copy.sort((a, b) => (b.stars ?? 0) - (a.stars ?? 0));
+      } else if (mode === "growth") {
+        copy.sort((a, b) => (b.growthRate ?? 0) - (a.growthRate ?? 0));
+      } else if (mode === "name") {
+        copy.sort((a, b) =>
+          `${a.owner}/${a.repo}`.localeCompare(`${b.owner}/${b.repo}`)
+        );
+      }
+      return copy;
+    });
 
     const addRepos = action((inputText: string) => {
       const text = inputText || addText.get();
@@ -529,13 +675,7 @@ export default pattern<StarTrackerInput, StarTrackerOutput>(
 
           <ct-vscroll flex showScrollbar fadeEdges>
             <div>
-              {visibleRepos.map((entry) => (
-                <RepoCard
-                  owner={entry.owner}
-                  repo={entry.repo}
-                  githubToken={effectiveToken}
-                />
-              ))}
+              {sortedCards}
               {computed(() =>
                 hasMore
                   ? (
