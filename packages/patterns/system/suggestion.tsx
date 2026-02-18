@@ -20,12 +20,18 @@ import { fetchAndRunPattern, listPatternIndex } from "./common-tools.tsx";
 
 const triggerGeneration = handler<
   unknown,
-  { addMessage: Stream<BuiltInLLMMessage>; situation: string }
->((_, { addMessage, situation }) => {
-  addMessage.send({
-    role: "user",
-    content: [{ type: "text" as const, text: situation }],
-  });
+  {
+    addMessage: Stream<BuiltInLLMMessage>;
+    situation: string;
+    result: any | null;
+  }
+>((_, { addMessage, situation, result }) => {
+  if (!result) {
+    addMessage.send({
+      role: "user",
+      content: [{ type: "text" as const, text: situation }],
+    });
+  }
 });
 
 const sendMessage = handler<
@@ -79,7 +85,11 @@ Use the user context above to personalize your suggestions when relevant.`;
 
   const messages = Writable.of<BuiltInLLMMessage[]>([]);
 
-  const { addMessage, pending, result: suggestionResult } = llmDialog({
+  const {
+    addMessage,
+    pending,
+    result: suggestionResult,
+  } = llmDialog({
     system: systemPrompt,
     messages,
     tools: {
@@ -107,7 +117,11 @@ Use the user context above to personalize your suggestions when relevant.`;
   const freeformUI = (
     <div style="display:contents">
       <ct-autostart
-        onstart={triggerGeneration({ addMessage, situation })}
+        onstart={triggerGeneration({
+          addMessage,
+          situation,
+          result: llmResult,
+        })}
       />
       <ct-cell-context $cell={llmResult}>
         {ifElse(
