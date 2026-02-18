@@ -186,7 +186,7 @@ content-level identity (see Section 6.3).
 
 | Wrapper Class | Wraps | Type Tag | Deconstructed State | Notes |
 |---------------|-------|----------|---------------------|-------|
-| `StorableError` | `Error` | `Error@1` | `{ name, message, stack?, cause?, ...custom }` | Captures `name`, `message`, `stack` (if present), `cause` (if present), and custom enumerable properties. The conversion layer (Section 8.2) recursively converts nested values (including `cause` and custom properties) before wrapping, ensuring all values are `StorableValue` when `[DECONSTRUCT]` runs. |
+| `StorableError` | `Error` | `Error@1` | `{ type, name, message, stack?, cause?, ...custom }` | Captures `type` (constructor name, e.g. `"TypeError"`), `name` (`.name` property, which may differ from constructor name), `message`, `stack` (if present), `cause` (if present), and custom enumerable properties. The conversion layer (Section 8.2) recursively converts nested values (including `cause` and custom properties) before wrapping, ensuring all values are `StorableValue` when `[DECONSTRUCT]` runs. |
 | `StorableMap` | `Map` | `Map@1` | `[[key, value], ...]` | Entry pairs as an array of two-element arrays. Insertion order is preserved. Keys and values are recursively processed. |
 | `StorableSet` | `Set` | `Set@1` | `[value, ...]` | Elements as an array. Iteration order is preserved. Values are recursively processed. |
 | `StorableDate` | `Date` | `Date@1` | `string` (ISO 8601 UTC) | Deconstructed state is a string — the serializer recurses into it and finds a primitive. |
@@ -207,7 +207,7 @@ Each wrapper class:
 #### Extra Enumerable Properties
 
 **`StorableError`** MAY carry extra enumerable properties beyond the standard
-fields (`name`, `message`, `stack`, `cause`). Custom properties on `Error`
+fields (`type`, `name`, `message`, `stack`, `cause`). Custom properties on `Error`
 objects are common JavaScript practice (e.g., `error.code`, `error.statusCode`),
 so `StorableError` preserves them: `[DECONSTRUCT]` includes them in its output,
 and `[RECONSTRUCT]` restores them on the reconstructed `Error`.
@@ -247,7 +247,13 @@ export class StorableError implements StorableInstance {
     // is responsible for recursively converting Error internals (cause,
     // custom properties) BEFORE wrapping into StorableError. This method
     // simply extracts the already-converted state.
+    //
+    // `type` is the constructor name (e.g. "TypeError"), while `name` is
+    // the `.name` property (which may differ if overridden). Both are
+    // preserved so that `[RECONSTRUCT]` can pick the right constructor
+    // class AND restore `.name` faithfully.
     const state: Record<string, StorableValue> = {
+      type:    this.error.constructor.name,
       name:    this.error.name,
       message: this.error.message,
     };
@@ -270,10 +276,14 @@ export class StorableError implements StorableInstance {
     _context: ReconstructionContext,
   ): StorableError {
     const s = state as Record<string, StorableValue>;
-    const name = (s.name as string) ?? 'Error';
+    // Use `type` (constructor name) for class lookup. Fall back to `name`
+    // for backward compatibility with data serialized before `type` was
+    // added.
+    const type = (s.type as string) ?? (s.name as string) ?? 'Error';
+    const name = (s.name as string) ?? type;
     const message = (s.message as string) ?? '';
     let error: Error;
-    switch (name) {
+    switch (type) {
       case 'TypeError':      error = new TypeError(message);      break;
       case 'RangeError':     error = new RangeError(message);     break;
       case 'SyntaxError':    error = new SyntaxError(message);    break;
@@ -286,7 +296,7 @@ export class StorableError implements StorableInstance {
     if (s.stack !== undefined) error.stack = s.stack as string;
     if (s.cause !== undefined) error.cause = s.cause;
     for (const key of Object.keys(s)) {
-      if (!['name', 'message', 'stack', 'cause', '__proto__', 'constructor'].includes(key)) {
+      if (!['type', 'name', 'message', 'stack', 'cause', '__proto__', 'constructor'].includes(key)) {
         (error as Record<string, unknown>)[key] = s[key];
       }
     }
@@ -1183,7 +1193,7 @@ round-trip correctly.
 
 // Errors
 // Tag: "Error@1"
-// { "/Error@1": { name: string, message: string, stack?: string, cause?: ..., ... } }
+// { "/Error@1": { type: string, name: string, message: string, stack?: string, cause?: ..., ... } }
 
 // Undefined (stateless -- value is null)
 // Tag: "Undefined@1"
