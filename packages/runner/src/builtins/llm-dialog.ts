@@ -41,6 +41,7 @@ import {
   isCellResultForDereferencing,
 } from "../query-result-proxy.ts";
 import { ContextualFlowControl } from "../cfc.ts";
+import { resolveLink } from "../link-resolution.ts";
 
 // Avoid importing from @commontools/piece to prevent circular deps in tests
 
@@ -1636,14 +1637,22 @@ async function handleInvoke(
     if (pattern) {
       runtime.run(tx, pattern, { ...input, ...extraParams }, result);
     } else if (handler) {
-      handler.withTx(tx).send({
-        ...input,
-        result, // doesn't HAVE to be used, but can be
-      }, (completedTx: IExtendedStorageTransaction) => {
+      // Bypass handler.send() which calls convertCellsToLinks(), destroying
+      // live Cell references from traverseAndCellify. Instead, resolve the
+      // handler's stream link and queue the event directly on the scheduler.
+      const handlerLink = handler.getAsNormalizedFullLink();
+      const resolvedLink = resolveLink(runtime, tx, handlerLink);
+      const onCommit = (completedTx: IExtendedStorageTransaction) => {
         const summary = formatTransactionSummary(completedTx, space);
         const value = result.withTx(completedTx);
         resolve({ value, summary });
-      });
+      };
+      runtime.scheduler.queueEvent(
+        resolvedLink,
+        { ...input, result },
+        undefined,
+        onCommit,
+      );
     } else {
       throw new Error("Tool has neither pattern nor handler");
     }
@@ -1682,12 +1691,17 @@ async function handleInvoke(
 
   // Patterns always write to the result cell, so always return the link
   if (pattern) {
+    // TODO(CT-1205): result.get() returns infinitely-nested cell proxies
+    // (from ifElse/computed). traverseAndSerialize collapses these into a
+    // single @link, hiding inner properties like { cell, error } from the
+    // LLM. See CT-1205-INVESTIGATION.md for the research plan.
+    const resultValue = result.get();
     return {
       type: "json",
       value: {
         "@resultLocation": resultLink,
         result: traverseAndSerialize(
-          result.get(),
+          resultValue,
           resultSchema,
           new Set(),
           space,
