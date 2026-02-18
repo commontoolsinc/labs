@@ -1,4 +1,3 @@
-import type { StorableInstance } from "./storable-protocol.ts";
 import type { SerializationContext } from "./serialization-context.ts";
 
 /**
