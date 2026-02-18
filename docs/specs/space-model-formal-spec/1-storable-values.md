@@ -1571,12 +1571,14 @@ There are two directions:
  * accepts values that are already storable (pass-through) or raw native JS
  * objects that need wrapping. Passing an unsupported type is a type error.
  *
- * **Freeze semantics (shallow):** The returned value is frozen at the top
- * level via `Object.freeze()`. Nested values are NOT recursively frozen.
- * If the input is already a frozen `StorableValue`, returns the same object.
+ * **Freeze semantics (shallow):** By default, the returned value is frozen
+ * at the top level via `Object.freeze()`. Nested values are NOT recursively
+ * frozen. If the input is already a frozen `StorableValue`, returns the same
+ * object. Pass `freeze: false` to skip freezing (see below).
  */
 export function toStorableValue(
   value: StorableValue | StorableNativeObject,
+  freeze?: boolean, // default: true
 ): StorableValue;
 
 /**
@@ -1585,14 +1587,20 @@ export function toStorableValue(
  *
  * - Recursively descends into arrays and plain objects.
  * - Wraps native JS objects at any depth.
- * - **Deep-freeze semantics:** The returned value tree is deeply frozen —
- *   every object and array at every level is frozen.
+ * - **Single-pass design:** Validation, wrapping, and freezing are performed
+ *   together in one recursive descent — there are no separate passes. Each
+ *   node is checked, wrapped if needed, and frozen before the function
+ *   returns from that level.
  * - If the input is already a deeply-frozen `StorableValue`, returns the
  *   same object (no copying).
  * - Detects circular references and throws.
+ *
+ * Pass `freeze: false` to perform wrapping and validation without freezing
+ * (see "Freeze Semantics" below).
  */
 export function toDeepStorableValue(
   value: StorableValue | StorableNativeObject,
+  freeze?: boolean, // default: true
 ): StorableValue;
 ```
 
@@ -1607,17 +1615,19 @@ export function toDeepStorableValue(
 | `Set` | Wrapped into `StorableSet`. Elements are recursively converted (deep variant only). |
 | `Date` | Wrapped into `StorableDate`. |
 | `Uint8Array` | Wrapped into `StorableUint8Array`. |
-| `StorableValue[]` | Shallow: returned as-is (after freezing). Deep: elements recursively converted and the array deep-frozen. |
-| `{ [key: string]: StorableValue }` | Shallow: returned as-is (after freezing). Deep: values recursively converted and the object deep-frozen. |
+| `StorableValue[]` | Shallow: returned as-is (frozen if `freeze` is true). Deep: elements recursively converted (frozen at each level if `freeze` is true). |
+| `{ [key: string]: StorableValue }` | Shallow: returned as-is (frozen if `freeze` is true). Deep: values recursively converted (frozen at each level if `freeze` is true). |
 
 #### Freeze Semantics
 
 The immutable-forward design requires that `StorableValue` trees produced by
-conversion are frozen:
+conversion are frozen **by default**:
 
 - **`toStorableValue()` (shallow):** `Object.freeze()` on the top-level result.
 - **`toDeepStorableValue()` (deep):** `Object.freeze()` at every level of
-  nesting.
+  nesting, performed in the **same recursive pass** as validation and wrapping.
+  There are no separate passes — each node is checked, wrapped, and frozen
+  before the recursion returns from that level.
 
 If the input is already frozen (or deep-frozen for the deep variant), the same
 object is returned — no defensive copying. This avoids unnecessary allocation
@@ -1626,6 +1636,27 @@ in the common case where values are already immutable.
 The freeze check starts with a naive recursive `Object.isFrozen()` walk. This
 is sufficient for correctness; optimization (e.g., a `WeakSet<object>` of known
 deep-frozen objects) can be added later if profiling shows a need.
+
+#### Optional `freeze` Parameter
+
+All conversion functions accept an optional `freeze` parameter (default:
+`true`). When `freeze` is `false`, the function performs validation and wrapping
+but skips freezing:
+
+```typescript
+// Frozen (default) -- immutable result, safe for sharing.
+const frozen = toDeepStorableValue(input);
+
+// Unfrozen -- mutable result, caller can modify before freezing later.
+const mutable = toDeepStorableValue(input, false);
+```
+
+This exists because JavaScript makes it difficult to update frozen values —
+there is no "thaw" operation. Callers that need to build up a `StorableValue`
+tree incrementally (e.g., merging data from multiple sources) can use
+`freeze: false` to get a mutable tree, then freeze it when construction is
+complete. The `freeze` parameter does not affect validation or wrapping — the
+returned value is always a valid `StorableValue` regardless of its frozen state.
 
 ### 8.3 `toStorableValueOrThrow()`
 
@@ -1644,14 +1675,25 @@ deep-frozen objects) can be added later if profiling shows a need.
  * The `OrThrow` name follows the codebase convention of signaling "this
  * function may throw for type reasons" in the function name, making the
  * failure mode visible at call sites.
+ *
+ * The optional `freeze` parameter works the same as in `toStorableValue()`
+ * (default: `true`; pass `false` to skip freezing).
  */
-export function toStorableValueOrThrow(value: unknown): StorableValue;
+export function toStorableValueOrThrow(
+  value: unknown,
+  freeze?: boolean, // default: true
+): StorableValue;
 
 /**
  * Deep variant of `toStorableValueOrThrow()`. Recursively converts and
- * deep-freezes. Throws on unsupported types at any depth.
+ * deep-freezes (single pass). Throws on unsupported types at any depth.
+ *
+ * Pass `freeze: false` to skip freezing.
  */
-export function toDeepStorableValueOrThrow(value: unknown): StorableValue;
+export function toDeepStorableValueOrThrow(
+  value: unknown,
+  freeze?: boolean, // default: true
+): StorableValue;
 ```
 
 The distinction between `toStorableValue()` and `toStorableValueOrThrow()`:
