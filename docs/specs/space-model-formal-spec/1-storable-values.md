@@ -1668,7 +1668,56 @@ Both produce the same output for supported types. The split exists so that
 internal code (which knows its types) gets cleaner signatures, while boundary
 code (which doesn't) gets explicit error handling.
 
-### 8.4 `nativeValueFromStorableValue()`
+### 8.4 `canBeStored()`
+
+```typescript
+// file: packages/common/storable-value.ts
+
+/**
+ * Type guard: returns `true` if `toDeepStorableValue()` would succeed on
+ * the given value — i.e., the value is a `StorableValue`, a
+ * `StorableNativeObject`, or a tree of these types.
+ *
+ * This is a check-without-conversion function for system boundaries where
+ * code receives `unknown` and needs to determine convertibility without
+ * actually performing the conversion (and its associated wrapping, freezing,
+ * and allocation).
+ *
+ * Relationship to other functions:
+ * - `isStorableValue(x)`: "Is `x` already a `StorableValue`?" Does NOT
+ *   return `true` for raw native types like `Error` or `Map`.
+ * - `canBeStored(x)`: "Could `x` be converted to a `StorableValue` via
+ *   `toDeepStorableValue()`?" Returns `true` for both `StorableValue`
+ *   values AND `StorableNativeObject` values (and deep trees thereof).
+ * - `toDeepStorableValueOrThrow(x)`: Actually performs the conversion,
+ *   throwing on unsupported types.
+ */
+export function canBeStored(value: unknown): boolean;
+```
+
+The function recursively checks the value tree. It returns `true` if and only
+if the value is:
+
+- A primitive (`null`, `boolean`, `number` (finite), `string`, `undefined`,
+  `bigint`)
+- A `StorableInstance` (including the native object wrapper classes)
+- A `StorableNativeObject` (`Error`, `Map`, `Set`, `Date`, `Uint8Array`)
+- An array where every present element satisfies `canBeStored()`
+- A plain object where every value satisfies `canBeStored()`
+
+It returns `false` for unsupported types (`WeakMap`, `Promise`, DOM nodes,
+class instances that don't implement `StorableInstance`, non-finite numbers,
+etc.).
+
+> **Performance note.** `canBeStored()` walks the value tree without
+> allocating wrappers or frozen copies. For large trees, this is cheaper than
+> calling `toDeepStorableValueOrThrow()` inside a try/catch, since it avoids
+> the wrapping and freezing work that would be discarded on failure. However,
+> if the caller intends to convert on success, calling
+> `toDeepStorableValueOrThrow()` directly (and catching the error) avoids
+> walking the tree twice.
+
+### 8.5 `nativeValueFromStorableValue()`
 
 ```typescript
 // file: packages/common/storable-value.ts
@@ -1724,7 +1773,7 @@ export function deepNativeValueFromStorableValue(
 The output type is `StorableValue | StorableNativeObject`, reflecting that the
 result may contain raw native JS types at any depth.
 
-### 8.5 Round-Trip Guarantees
+### 8.6 Round-Trip Guarantees
 
 For any supported value `v`:
 
