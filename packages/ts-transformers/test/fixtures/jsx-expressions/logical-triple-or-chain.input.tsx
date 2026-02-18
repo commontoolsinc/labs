@@ -3,7 +3,7 @@ import { cell, pattern, UI } from "commontools";
 
 // Tests triple || chain: a || b || c
 // Should produce nested unless calls
-export default pattern("LogicalTripleOrChain", (_state) => {
+export default pattern((_state) => {
   const primary = cell("");
   const secondary = cell("");
   const items = cell<string[]>([]);

@@ -11,7 +11,7 @@ interface State {
   offset: number;
 }
 
-export default pattern<State>("IndexParam", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>

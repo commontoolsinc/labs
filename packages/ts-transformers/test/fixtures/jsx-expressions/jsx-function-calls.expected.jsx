@@ -9,66 +9,7 @@ interface State {
     name: string;
     float: string;
 }
-export default pattern({
-    type: "object",
-    properties: {
-        a: {
-            type: "number"
-        },
-        b: {
-            type: "number"
-        },
-        price: {
-            type: "number"
-        },
-        text: {
-            type: "string"
-        },
-        values: {
-            type: "array",
-            items: {
-                type: "number"
-            }
-        },
-        name: {
-            type: "string"
-        },
-        float: {
-            type: "string"
-        }
-    },
-    required: ["a", "b", "price", "text", "values", "name", "float"]
-} as const satisfies __ctHelpers.JSONSchema, {
-    type: "object",
-    properties: {
-        $UI: {
-            $ref: "#/$defs/JSXElement"
-        }
-    },
-    required: ["$UI"],
-    $defs: {
-        JSXElement: {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    type: "object",
-                    properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
-                }]
-        },
-        UIRenderable: {
-            type: "object",
-            properties: {
-                $UI: {
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }
-            },
-            required: ["$UI"]
-        }
-    }
-} as const satisfies __ctHelpers.JSONSchema, (state) => {
+export default pattern((state) => {
     return {
         [UI]: (<div>
         <h3>Math Functions</h3>
@@ -604,7 +545,66 @@ export default pattern({
             } }, ({ state }) => Math.max(state.a + 1, state.b * 2))}</p>
       </div>),
     };
-});
+}, {
+    type: "object",
+    properties: {
+        a: {
+            type: "number"
+        },
+        b: {
+            type: "number"
+        },
+        price: {
+            type: "number"
+        },
+        text: {
+            type: "string"
+        },
+        values: {
+            type: "array",
+            items: {
+                type: "number"
+            }
+        },
+        name: {
+            type: "string"
+        },
+        float: {
+            type: "string"
+        }
+    },
+    required: ["a", "b", "price", "text", "values", "name", "float"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        $UI: {
+            $ref: "#/$defs/JSXElement"
+        }
+    },
+    required: ["$UI"],
+    $defs: {
+        JSXElement: {
+            anyOf: [{
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    $ref: "#/$defs/UIRenderable",
+                    asOpaque: true
+                }]
+        },
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

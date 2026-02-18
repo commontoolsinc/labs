@@ -3,7 +3,7 @@ import { cell, pattern, UI } from "commontools";
 
 // Tests nullish coalescing (??) interaction with && and ||
 // ?? should NOT be transformed to when/unless (different semantics)
-export default pattern("LogicalNullishCoalescing", (_state) => {
+export default pattern((_state) => {
   const config = cell<{ timeout: number | null; retries: number | undefined }>({
     timeout: null,
     retries: undefined,

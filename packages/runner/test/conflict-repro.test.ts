@@ -84,7 +84,6 @@ describe("Conflict Reproduction", () => {
     });
 
     const conflictRepro = pattern<{ items: Item[] }>(
-      "Conflict Repro",
       ({ items }) => {
         const sequence = cell(0);
 
@@ -157,7 +156,6 @@ describe("Conflict Reproduction", () => {
     });
 
     const conflictReproNoLift = pattern<{ items: Item[] }>(
-      "Conflict Repro No Lift",
       ({ items }) => {
         const sequence = cell(0);
 

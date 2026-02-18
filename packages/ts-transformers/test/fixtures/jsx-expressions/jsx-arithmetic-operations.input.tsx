@@ -8,7 +8,7 @@ interface State {
   quantity: number;
 }
 
-export default pattern<State>("ArithmeticOperations", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>

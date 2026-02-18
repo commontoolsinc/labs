@@ -12,7 +12,83 @@ interface Message {
 interface State {
     messages: Message[];
 }
-export default pattern({
+export default pattern((state) => {
+    // This derive callback contains a nested map and returns string | null
+    // The callback becomes synthetic during transformation, which previously
+    // caused type inference to fail, resulting in a 'true' schema instead of
+    // the correct union type schema.
+    const latestMessage = derive({
+        type: "array",
+        items: {
+            $ref: "#/$defs/Message"
+        },
+        $defs: {
+            Message: {
+                type: "object",
+                properties: {
+                    role: {
+                        "enum": ["user", "assistant"]
+                    },
+                    content: {
+                        anyOf: [{
+                                type: "string"
+                            }, {
+                                type: "array",
+                                items: {
+                                    $ref: "#/$defs/ContentPart"
+                                }
+                            }]
+                    }
+                },
+                required: ["role", "content"]
+            },
+            ContentPart: {
+                type: "object",
+                properties: {
+                    type: {
+                        "enum": ["text", "image"]
+                    },
+                    text: {
+                        type: "string"
+                    },
+                    image: {
+                        type: "string"
+                    }
+                },
+                required: ["type"]
+            }
+        }
+    } as const satisfies __ctHelpers.JSONSchema, {
+        anyOf: [{
+                type: "string"
+            }, {
+                type: "null"
+            }]
+    } as const satisfies __ctHelpers.JSONSchema, state.messages, (messages) => {
+        if (!messages || messages.length === 0)
+            return null;
+        for (let i = messages.length - 1; i >= 0; i--) {
+            const msg = messages[i]!;
+            if (msg.role === "assistant") {
+                // This map call inside the derive callback was the key issue
+                const content = typeof msg.content === "string"
+                    ? msg.content
+                    : msg.content.map((part) => {
+                        if (part.type === "text")
+                            return part.text || "";
+                        return "";
+                    }).join("");
+                return content;
+            }
+        }
+        return null;
+    });
+    return {
+        [UI]: (<div>
+        <div>Latest: {latestMessage}</div>
+      </div>),
+    };
+}, {
     type: "object",
     properties: {
         messages: {
@@ -89,83 +165,7 @@ export default pattern({
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, (state) => {
-    // This derive callback contains a nested map and returns string | null
-    // The callback becomes synthetic during transformation, which previously
-    // caused type inference to fail, resulting in a 'true' schema instead of
-    // the correct union type schema.
-    const latestMessage = derive({
-        type: "array",
-        items: {
-            $ref: "#/$defs/Message"
-        },
-        $defs: {
-            Message: {
-                type: "object",
-                properties: {
-                    role: {
-                        "enum": ["user", "assistant"]
-                    },
-                    content: {
-                        anyOf: [{
-                                type: "string"
-                            }, {
-                                type: "array",
-                                items: {
-                                    $ref: "#/$defs/ContentPart"
-                                }
-                            }]
-                    }
-                },
-                required: ["role", "content"]
-            },
-            ContentPart: {
-                type: "object",
-                properties: {
-                    type: {
-                        "enum": ["text", "image"]
-                    },
-                    text: {
-                        type: "string"
-                    },
-                    image: {
-                        type: "string"
-                    }
-                },
-                required: ["type"]
-            }
-        }
-    } as const satisfies __ctHelpers.JSONSchema, {
-        anyOf: [{
-                type: "string"
-            }, {
-                type: "null"
-            }]
-    } as const satisfies __ctHelpers.JSONSchema, state.messages, (messages) => {
-        if (!messages || messages.length === 0)
-            return null;
-        for (let i = messages.length - 1; i >= 0; i--) {
-            const msg = messages[i]!;
-            if (msg.role === "assistant") {
-                // This map call inside the derive callback was the key issue
-                const content = typeof msg.content === "string"
-                    ? msg.content
-                    : msg.content.map((part) => {
-                        if (part.type === "text")
-                            return part.text || "";
-                        return "";
-                    }).join("");
-                return content;
-            }
-        }
-        return null;
-    });
-    return {
-        [UI]: (<div>
-        <div>Latest: {latestMessage}</div>
-      </div>),
-    };
-});
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

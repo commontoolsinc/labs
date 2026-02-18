@@ -65,7 +65,7 @@ const webresearch = lift((query: string) => {
   return call.result;
 });
 
-export default pattern("action", () => ${src});
+export default pattern(() => ${src});
 `;
 
 const systemPrompt = `

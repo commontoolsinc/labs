@@ -6,31 +6,7 @@ interface BaseState {
 }
 // Required<BaseState> should make 'a' required in the schema
 type ReqState = Required<BaseState>;
-export default pattern({
-    type: "object",
-    properties: {
-        a: {
-            type: "string",
-            asCell: true
-        },
-        b: {
-            type: "number",
-            asCell: true
-        }
-    },
-    required: ["a", "b"]
-} as const satisfies __ctHelpers.JSONSchema, {
-    type: "object",
-    properties: {
-        setA: {
-            asStream: true
-        },
-        setB: {
-            asStream: true
-        }
-    },
-    required: ["setA", "setB"]
-} as const satisfies __ctHelpers.JSONSchema, ({ a, b }) => {
+export default pattern(({ a, b }) => {
     return {
         setA: __ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
             type: "object",
@@ -57,7 +33,31 @@ export default pattern({
             b: b
         }),
     };
-});
+}, {
+    type: "object",
+    properties: {
+        a: {
+            type: "string",
+            asCell: true
+        },
+        b: {
+            type: "number",
+            asCell: true
+        }
+    },
+    required: ["a", "b"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        setA: {
+            asStream: true
+        },
+        setB: {
+            asStream: true
+        }
+    },
+    required: ["setA", "setB"]
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

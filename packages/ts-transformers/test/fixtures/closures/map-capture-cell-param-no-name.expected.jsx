@@ -37,7 +37,17 @@ const removeItem = handler(true as const satisfies __ctHelpers.JSONSchema, {
 } as const satisfies __ctHelpers.JSONSchema, (_, _2) => {
     // Not relevant for repro
 });
-export default pattern({
+export default pattern(({ items }: InputSchema) => {
+    return {
+        [UI]: (<ul>
+          {items.map((_, index) => (<li key={index}>
+              <ct-button onClick={removeItem({ items, index })}>
+                Remove
+              </ct-button>
+            </li>))}
+        </ul>),
+    };
+}, {
     type: "object",
     properties: {
         items: {
@@ -91,17 +101,7 @@ export default pattern({
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, ({ items }: InputSchema) => {
-    return {
-        [UI]: (<ul>
-          {items.map((_, index) => (<li key={index}>
-              <ct-button onClick={removeItem({ items, index })}>
-                Remove
-              </ct-button>
-            </li>))}
-        </ul>),
-    };
-});
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

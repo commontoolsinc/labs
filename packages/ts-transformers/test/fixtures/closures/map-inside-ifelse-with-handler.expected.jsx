@@ -43,7 +43,105 @@ const removeItem = handler(true as const satisfies __ctHelpers.JSONSchema, {
         items.set(currentItems.toSpliced(index, 1));
     }
 });
-export default pattern({
+export default pattern(({ items, hasItems }) => {
+    // CT-1035: Map inside ifElse branches should transform to mapWithPattern
+    // The handler closure should work correctly with the map iterator variable
+    return {
+        [UI]: (<div>
+          {ifElse({
+                type: "boolean",
+                asOpaque: true
+            } as const satisfies __ctHelpers.JSONSchema, {
+                anyOf: [{}, {
+                        type: "object",
+                        properties: {}
+                    }]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                anyOf: [{}, {
+                        type: "object",
+                        properties: {}
+                    }]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                $ref: "#/$defs/UIRenderable",
+                asOpaque: true,
+                $defs: {
+                    UIRenderable: {
+                        type: "object",
+                        properties: {
+                            $UI: {
+                                $ref: "https://commonfabric.org/schemas/vnode.json"
+                            }
+                        },
+                        required: ["$UI"]
+                    }
+                }
+            } as const satisfies __ctHelpers.JSONSchema, hasItems, <div>
+              {items.mapWithPattern(__ctHelpers.pattern(({ element: item, params: { items } }) => (<div>
+                  <span>{item.name}</span>
+                  <button type="button" onClick={removeItem({ items, item })}>Remove</button>
+                </div>), {
+                    type: "object",
+                    properties: {
+                        element: {
+                            $ref: "#/$defs/Item"
+                        },
+                        params: {
+                            type: "object",
+                            properties: {
+                                items: {
+                                    type: "array",
+                                    items: {
+                                        $ref: "#/$defs/Item"
+                                    },
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["items"]
+                        }
+                    },
+                    required: ["element", "params"],
+                    $defs: {
+                        Item: {
+                            type: "object",
+                            properties: {
+                                id: {
+                                    type: "number"
+                                },
+                                name: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["id", "name"]
+                        }
+                    }
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    anyOf: [{
+                            $ref: "https://commonfabric.org/schemas/vnode.json"
+                        }, {
+                            type: "object",
+                            properties: {}
+                        }, {
+                            $ref: "#/$defs/UIRenderable",
+                            asOpaque: true
+                        }],
+                    $defs: {
+                        UIRenderable: {
+                            type: "object",
+                            properties: {
+                                $UI: {
+                                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                                }
+                            },
+                            required: ["$UI"]
+                        }
+                    }
+                } as const satisfies __ctHelpers.JSONSchema), {
+                    items: items
+                })}
+            </div>, <div>No items</div>)}
+        </div>),
+    };
+}, {
     type: "object",
     properties: {
         items: {
@@ -101,105 +199,7 @@ export default pattern({
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, ({ items, hasItems }) => {
-    // CT-1035: Map inside ifElse branches should transform to mapWithPattern
-    // The handler closure should work correctly with the map iterator variable
-    return {
-        [UI]: (<div>
-          {ifElse({
-                type: "boolean",
-                asOpaque: true
-            } as const satisfies __ctHelpers.JSONSchema, {
-                anyOf: [{}, {
-                        type: "object",
-                        properties: {}
-                    }]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                anyOf: [{}, {
-                        type: "object",
-                        properties: {}
-                    }]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                $ref: "#/$defs/UIRenderable",
-                asOpaque: true,
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __ctHelpers.JSONSchema, hasItems, <div>
-              {items.mapWithPattern(__ctHelpers.pattern({
-                    type: "object",
-                    properties: {
-                        element: {
-                            $ref: "#/$defs/Item"
-                        },
-                        params: {
-                            type: "object",
-                            properties: {
-                                items: {
-                                    type: "array",
-                                    items: {
-                                        $ref: "#/$defs/Item"
-                                    },
-                                    asOpaque: true
-                                }
-                            },
-                            required: ["items"]
-                        }
-                    },
-                    required: ["element", "params"],
-                    $defs: {
-                        Item: {
-                            type: "object",
-                            properties: {
-                                id: {
-                                    type: "number"
-                                },
-                                name: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["id", "name"]
-                        }
-                    }
-                } as const satisfies __ctHelpers.JSONSchema, {
-                    anyOf: [{
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }, {
-                            type: "object",
-                            properties: {}
-                        }, {
-                            $ref: "#/$defs/UIRenderable",
-                            asOpaque: true
-                        }],
-                    $defs: {
-                        UIRenderable: {
-                            type: "object",
-                            properties: {
-                                $UI: {
-                                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                                }
-                            },
-                            required: ["$UI"]
-                        }
-                    }
-                } as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: { items } }) => (<div>
-                  <span>{item.name}</span>
-                  <button type="button" onClick={removeItem({ items, item })}>Remove</button>
-                </div>)), {
-                    items: items
-                })}
-            </div>, <div>No items</div>)}
-        </div>),
-    };
-});
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

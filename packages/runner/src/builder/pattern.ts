@@ -45,94 +45,62 @@ import {
 /** Declare a pattern
  *
  * @param fn A function that creates the pattern graph
- *
- * or
- *
- * @param description A human-readable description of the pattern
- * @param fn A function that creates the pattern graph
- *
- * or
- *
- * @param argumentSchema A JSONSchema for the pattern inputs
- * @param fn A function that creates the pattern graph
- *
- * or
- *
- * @param argumentSchema A JSONSchema for the pattern inputs
- * @param resultSchema A JSONSchema for the pattern outputs
- * @param fn A function that creates the pattern graph
+ * @param argumentSchema An optional JSONSchema for the pattern inputs
+ * @param resultSchema An optional JSONSchema for the pattern outputs
  *
  * @returns A pattern node factory that also serializes as pattern.
  */
 
-export function pattern<S extends JSONSchema>(
-  argumentSchema: S,
-  fn: (
-    input: OpaqueRef<Required<SchemaWithoutCell<S>>> & {
-      [SELF]: OpaqueRef<any>;
-    },
-  ) => any,
-): PatternFactory<SchemaWithoutCell<S>, ReturnType<typeof fn>>;
-export function pattern<S extends JSONSchema, R>(
-  argumentSchema: S,
-  fn: (
-    input: OpaqueRef<Required<SchemaWithoutCell<S>>> & { [SELF]: OpaqueRef<R> },
-  ) => Opaque<R>,
-): PatternFactory<SchemaWithoutCell<S>, R>;
-export function pattern<S extends JSONSchema, RS extends JSONSchema>(
-  argumentSchema: S,
-  resultSchema: RS,
-  fn: (
-    input: OpaqueRef<Required<SchemaWithoutCell<S>>> & {
-      [SELF]: OpaqueRef<SchemaWithoutCell<RS>>;
-    },
-  ) => Opaque<SchemaWithoutCell<RS>>,
-): PatternFactory<SchemaWithoutCell<S>, SchemaWithoutCell<RS>>;
-export function pattern<T>(
-  argumentSchema: string | JSONSchema,
-  fn: (input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<any> }) => any,
-): PatternFactory<T, ReturnType<typeof fn>>;
-export function pattern<T, R>(
-  argumentSchema: string | JSONSchema,
-  fn: (
-    input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<R> },
-  ) => Opaque<R>,
-): PatternFactory<T, R>;
-export function pattern<T, R>(
-  argumentSchema: string | JSONSchema,
-  resultSchema: JSONSchema,
-  fn: (
-    input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<R> },
-  ) => Opaque<R>,
-): PatternFactory<T, R>;
-// Function-only overloads - must come after schema-based overloads
+// Function-only overloads (most common)
 export function pattern<T>(
   fn: (input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<any> }) => any,
 ): PatternFactory<T, ReturnType<typeof fn>>;
 export function pattern<T, R>(
   fn: (input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<R> }) => Opaque<R>,
 ): PatternFactory<T, R>;
+// Function + schemas overloads
+export function pattern<S extends JSONSchema>(
+  fn: (
+    input: OpaqueRef<Required<SchemaWithoutCell<S>>> & {
+      [SELF]: OpaqueRef<any>;
+    },
+  ) => any,
+  argumentSchema: S,
+): PatternFactory<SchemaWithoutCell<S>, ReturnType<typeof fn>>;
+export function pattern<S extends JSONSchema, R>(
+  fn: (
+    input: OpaqueRef<Required<SchemaWithoutCell<S>>> & { [SELF]: OpaqueRef<R> },
+  ) => Opaque<R>,
+  argumentSchema: S,
+): PatternFactory<SchemaWithoutCell<S>, R>;
+export function pattern<S extends JSONSchema, RS extends JSONSchema>(
+  fn: (
+    input: OpaqueRef<Required<SchemaWithoutCell<S>>> & {
+      [SELF]: OpaqueRef<SchemaWithoutCell<RS>>;
+    },
+  ) => Opaque<SchemaWithoutCell<RS>>,
+  argumentSchema: S,
+  resultSchema: RS,
+): PatternFactory<SchemaWithoutCell<S>, SchemaWithoutCell<RS>>;
+// Explicit T with optional schemas (e.g. pattern<{ x: number }>(fn, schema))
+export function pattern<T>(
+  fn: (input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<any> }) => any,
+  argumentSchema: JSONSchema,
+  resultSchema?: JSONSchema,
+): PatternFactory<T, ReturnType<typeof fn>>;
 export function pattern<T, R>(
-  argumentSchema:
-    | string
-    | JSONSchema
-    | ((input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<R> }) => Opaque<R>),
-  resultSchema?:
-    | JSONSchema
-    | ((input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<R> }) => Opaque<R>),
-  fn?: (input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<R> }) => Opaque<R>,
+  fn: (
+    input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<R> },
+  ) => Opaque<R>,
+  argumentSchema: JSONSchema,
+  resultSchema?: JSONSchema,
+): PatternFactory<T, R>;
+// Implementation signature
+export function pattern<T, R>(
+  fn: (input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<R> }) => Opaque<R>,
+  argumentSchema?: JSONSchema,
+  resultSchema?: JSONSchema,
 ): PatternFactory<T, R> {
-  // Cover the overload that just provides a function
-  if (typeof argumentSchema === "function") {
-    fn = argumentSchema;
-    argumentSchema = undefined as any;
-    resultSchema = undefined;
-  } // Cover the overload that just provides input schema
-  else if (typeof resultSchema === "function") {
-    fn = resultSchema;
-    resultSchema = undefined;
-  }
-
   // The pattern graph is created by calling `fn` which populates for `inputs`
   // and `outputs` with Value<> (which containts OpaqueRef<>) and/or default
   // values.
@@ -140,9 +108,7 @@ export function pattern<T, R>(
 
   const inputs = opaqueRef(
     undefined,
-    typeof argumentSchema === "string"
-      ? undefined
-      : argumentSchema as JSONSchema | undefined,
+    argumentSchema as JSONSchema | undefined,
   );
 
   // Create self reference - will be mapped to resultRef path during serialization
@@ -161,8 +127,8 @@ export function pattern<T, R>(
     applyInputIfcToOutput(inputs, outputs);
 
     result = factoryFromPattern<T, R>(
-      argumentSchema as string | JSONSchema | undefined,
-      resultSchema as JSONSchema | undefined,
+      argumentSchema,
+      resultSchema,
       inputs,
       outputs,
     );
@@ -174,15 +140,13 @@ export function pattern<T, R>(
 
 // Same as above, but assumes the caller manages the frame
 export function patternFromFrame<T, R>(
-  argumentSchema: string | JSONSchema | undefined,
-  resultSchema: JSONSchema | undefined,
   fn: (input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<R> }) => Opaque<R>,
+  argumentSchema?: JSONSchema,
+  resultSchema?: JSONSchema,
 ): PatternFactory<T, R> {
   const inputs = opaqueRef(
     undefined,
-    typeof argumentSchema === "string"
-      ? undefined
-      : argumentSchema as JSONSchema | undefined,
+    argumentSchema as JSONSchema | undefined,
   );
 
   // Create self reference - will be mapped to resultRef path during serialization
@@ -201,7 +165,7 @@ export function patternFromFrame<T, R>(
 }
 
 function factoryFromPattern<T, R>(
-  argumentSchemaArg: string | JSONSchema | undefined,
+  argumentSchemaArg: JSONSchema | undefined,
   resultSchemaArg: JSONSchema | undefined,
   inputs: OpaqueRef<Required<T>>,
   outputs: Opaque<R>,
@@ -345,13 +309,7 @@ function factoryFromPattern<T, R>(
     if (value !== undefined) setValueAtPath(initial, cellPath, value);
   });
 
-  let argumentSchema: JSONSchema;
-
-  if (typeof argumentSchemaArg === "string") {
-    argumentSchema = { description: argumentSchemaArg };
-  } else {
-    argumentSchema = argumentSchemaArg ?? true;
-  }
+  const argumentSchema: JSONSchema = argumentSchemaArg ?? true;
 
   const resultSchema =
     applyArgumentIfcToResult(argumentSchema, resultSchemaArg) || {};

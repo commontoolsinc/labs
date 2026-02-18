@@ -17,7 +17,7 @@ interface State {
   prefix: string;
 }
 
-export default pattern<State>("NestedCallback", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>

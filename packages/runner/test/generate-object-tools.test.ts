@@ -58,7 +58,7 @@ describe("generateObject with tools", () => {
     const { commontools } = createBuilder();
     ({ pattern, generateObject, handler, Cell, patternTool, str } =
       commontools);
-    dummyPattern = pattern("Dummy Tool", () => ({}));
+    dummyPattern = pattern(() => ({}), { type: "object" });
   });
 
   afterEach(async () => {
@@ -107,7 +107,6 @@ describe("generateObject with tools", () => {
     );
 
     const testPattern = pattern<Record<string, never>>(
-      "Generate Object with finalResult",
       () => {
         const result = generateObject({
           prompt: testPrompt,
@@ -173,7 +172,6 @@ describe("generateObject with tools", () => {
     );
 
     const testPattern = pattern<Record<string, never>>(
-      "Generate Object without tools",
       () => {
         const result = generateObject({
           prompt: testPrompt,
@@ -236,7 +234,6 @@ describe("generateObject with tools", () => {
     );
 
     const testPattern = pattern<Record<string, never>>(
-      "Generate Object with error",
       () => {
         const result = generateObject({
           prompt: testPrompt,
@@ -317,7 +314,6 @@ describe("generateObject with tools", () => {
     );
 
     const testPattern = pattern<Record<string, never>>(
-      "Generate Object with schema validation",
       () => {
         const result = generateObject({
           prompt: testPrompt,
@@ -400,7 +396,6 @@ describe("generateObject with tools", () => {
     );
 
     const testPattern = pattern<Record<string, never>>(
-      "Generate Object with nested schema",
       () => {
         const result = generateObject({
           prompt: testPrompt,
@@ -489,7 +484,6 @@ describe("generateObject with tools", () => {
     );
 
     const testPattern = pattern<Record<string, never>>(
-      "Generate Object with messages",
       () => {
         const result = generateObject({
           messages,
@@ -662,7 +656,6 @@ describe("generateObject with tools", () => {
     );
 
     const testPattern = pattern<Record<string, never>>(
-      "Generate Object with multiple handler tools",
       () => {
         const dataSource = Cell.of({ ready: true });
         const counter = Cell.of({ value: 0 });
@@ -797,7 +790,6 @@ describe("generateObject with tools", () => {
     );
 
     const testPattern = pattern<Record<string, never>>(
-      "Generate Object with multiple pattern tools",
       () => {
         const itemsData = Cell.of([
           { label: "Item A", value: "a" },
@@ -810,7 +802,6 @@ describe("generateObject with tools", () => {
           { items: Array<{ label: string; value: string }> },
           { result: Array<{ label: string; value: string }> }
         >(
-          "List Items",
           ({ items }) => {
             const result = items.map((item) => ({
               label: item.label,
@@ -818,17 +809,18 @@ describe("generateObject with tools", () => {
             }));
             return { result };
           },
+          { type: "object", properties: { items: { type: "array" } } },
         );
 
         const countItems = pattern<
           { items: Array<any> },
           { count: number }
         >(
-          "Count Items",
           ({ items }) => {
             const count = items.length;
             return { count };
           },
+          { type: "object", properties: { items: { type: "array" } } },
         );
 
         const result = generateObject({
@@ -976,7 +968,10 @@ describe("generateObject with tools", () => {
     );
 
     // Pattern-based tool
-    const analyzeData = pattern({
+    const analyzeData = pattern(({ data }) => {
+      const analysis = str`Analyzed ${data.length} items`;
+      return { analysis };
+    }, {
       type: "object",
       properties: { data: { type: "array", items: { type: "number" } } },
       required: ["data"],
@@ -984,9 +979,6 @@ describe("generateObject with tools", () => {
       type: "object",
       properties: { analysis: { type: "string" } },
       required: ["analysis"],
-    }, ({ data }) => {
-      const analysis = str`Analyzed ${data.length} items`;
-      return { analysis };
     });
 
     const testPattern = pattern<Record<string, never>>(
@@ -1146,7 +1138,6 @@ describe("generateObject with tools", () => {
     );
 
     const testPattern = pattern<Record<string, never>>(
-      "Generate Object with parallel tools",
       () => {
         const result = generateObject({
           prompt: testPrompt,
@@ -1236,7 +1227,6 @@ describe("generateObject with tools", () => {
     );
 
     const testPattern = pattern<Record<string, never>>(
-      "Generate Object with link response",
       () => {
         const result = generateObject({
           prompt: testPrompt,

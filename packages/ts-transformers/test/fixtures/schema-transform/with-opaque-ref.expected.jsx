@@ -16,7 +16,20 @@ const model = {
         value: 0
     }
 } as const satisfies __ctHelpers.JSONSchema;
-export default pattern({
+export default pattern((cell) => {
+    const doubled = derive({
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema, {
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema, cell.value, (v: number) => v * 2);
+    return {
+        [UI]: (<div>
+        <p>Value: {cell.value}</p>
+        <p>Doubled: {doubled}</p>
+      </div>),
+        value: cell.value,
+    };
+}, {
     type: "object",
     properties: {
         value: {
@@ -34,20 +47,7 @@ export default pattern({
         }
     },
     required: ["value"]
-} as const satisfies __ctHelpers.JSONSchema, (cell) => {
-    const doubled = derive({
-        type: "number"
-    } as const satisfies __ctHelpers.JSONSchema, {
-        type: "number"
-    } as const satisfies __ctHelpers.JSONSchema, cell.value, (v: number) => v * 2);
-    return {
-        [UI]: (<div>
-        <p>Value: {cell.value}</p>
-        <p>Doubled: {doubled}</p>
-      </div>),
-        value: cell.value,
-    };
-});
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

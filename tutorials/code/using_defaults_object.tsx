@@ -32,7 +32,7 @@ const levelUp = handler<unknown, { stats: Cell<Player> }>(
   },
 );
 
-export default pattern<GameState>("Game Stats with Default", (state) => {
+export default pattern<GameState>((state) => {
   return {
     [UI]: (
       <div>

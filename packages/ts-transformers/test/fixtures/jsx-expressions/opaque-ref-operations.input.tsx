@@ -1,7 +1,7 @@
 /// <cts-enable />
 import { cell, pattern, UI } from "commontools";
 
-export default pattern("OpaqueRefOperations", (_state) => {
+export default pattern((_state) => {
   const count = cell(10);
   const price = cell(10);
 

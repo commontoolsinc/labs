@@ -1,7 +1,7 @@
 /// <cts-enable />
 import { cell, NAME, pattern, UI } from "commontools";
 
-export default pattern("Conditional Empty Check", () => {
+export default pattern(() => {
   const items = cell<string[]>([]);
   return {
     [NAME]: "Conditional empty check",

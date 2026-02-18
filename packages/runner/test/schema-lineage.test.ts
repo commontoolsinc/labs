@@ -284,29 +284,32 @@ describe("Schema propagation end-to-end example", () => {
 
   it("should propagate schema through a pattern", () => {
     // Create a pattern with schema
-    const testPattern = pattern({
-      type: "object",
-      properties: {
-        details: {
-          type: "object",
-          properties: {
-            name: {
-              type: "string",
-            },
-          },
-          additionalProperties: false,
-        },
-      },
+    const testPattern = pattern(
       // TODO(seefeld): Fix type inference and replace any
-    }, (input: any) => ({
-      [UI]: {
-        type: "element",
-        name: "input",
-        props: {
-          value: input.details,
+      (input: any) => ({
+        [UI]: {
+          type: "element",
+          name: "input",
+          props: {
+            value: input.details,
+          },
+        },
+      }),
+      {
+        type: "object",
+        properties: {
+          details: {
+            type: "object",
+            properties: {
+              name: {
+                type: "string",
+              },
+            },
+            additionalProperties: false,
+          },
         },
       },
-    }));
+    );
 
     const resultCell = runtime.getCell<any>(
       space,

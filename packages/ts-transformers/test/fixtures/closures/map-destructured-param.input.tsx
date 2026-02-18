@@ -11,7 +11,7 @@ interface State {
   scale: number;
 }
 
-export default pattern<State>("DestructuredParam", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>

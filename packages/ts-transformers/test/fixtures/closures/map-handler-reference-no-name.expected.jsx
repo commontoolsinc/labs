@@ -28,7 +28,16 @@ interface State {
     items: Item[];
     count: Cell<number>;
 }
-export default pattern({
+export default pattern((state: State) => {
+    return {
+        [UI]: (<div>
+        {/* Map callback references handler - should NOT capture it */}
+        {state.items.map((item) => (<ct-button onClick={handleClick({ count: state.count })}>
+            {item.name}
+          </ct-button>))}
+      </div>),
+    };
+}, {
     type: "object",
     properties: {
         items: {
@@ -87,16 +96,7 @@ export default pattern({
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, (state: State) => {
-    return {
-        [UI]: (<div>
-        {/* Map callback references handler - should NOT capture it */}
-        {state.items.map((item) => (<ct-button onClick={handleClick({ count: state.count })}>
-            {item.name}
-          </ct-button>))}
-      </div>),
-    };
-});
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

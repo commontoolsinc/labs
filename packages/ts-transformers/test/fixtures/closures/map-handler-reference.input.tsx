@@ -24,7 +24,7 @@ interface State {
   count: Cell<number>;
 }
 
-export default pattern<State>("HandlerReference", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>

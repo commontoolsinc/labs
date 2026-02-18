@@ -8,63 +8,13 @@ interface State {
     pizzas: PizzaEntry[];
     scale: number;
 }
-export default pattern({
-    type: "object",
-    properties: {
-        pizzas: {
-            type: "array",
-            items: {
-                $ref: "#/$defs/PizzaEntry"
-            }
-        },
-        scale: {
-            type: "number"
-        }
-    },
-    required: ["pizzas", "scale"],
-    $defs: {
-        PizzaEntry: {
-            type: "array",
-            items: {
-                type: "string"
-            }
-        }
-    }
-} as const satisfies __ctHelpers.JSONSchema, {
-    type: "object",
-    properties: {
-        $UI: {
-            $ref: "#/$defs/JSXElement"
-        }
-    },
-    required: ["$UI"],
-    $defs: {
-        JSXElement: {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    type: "object",
-                    properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
-                }]
-        },
-        UIRenderable: {
-            type: "object",
-            properties: {
-                $UI: {
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }
-            },
-            required: ["$UI"]
-        }
-    }
-} as const satisfies __ctHelpers.JSONSchema, (state) => {
+export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Map with array destructured parameter */}
-        {state.pizzas.mapWithPattern(__ctHelpers.pattern({
+        {state.pizzas.mapWithPattern(__ctHelpers.pattern(({ element: [date, pizza], params: {} }) => (<div>
+            {date}: {pizza}
+          </div>), {
                 type: "object",
                 properties: {
                     element: {
@@ -105,12 +55,12 @@ export default pattern({
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, ({ element: [date, pizza], params: {} }) => (<div>
-            {date}: {pizza}
-          </div>)), {})}
+            } as const satisfies __ctHelpers.JSONSchema), {})}
 
         {/* Map with array destructured parameter and capture */}
-        {state.pizzas.mapWithPattern(__ctHelpers.pattern({
+        {state.pizzas.mapWithPattern(__ctHelpers.pattern(({ element: [date, pizza], params: { state } }) => (<div>
+            {date}: {pizza} (scale: {state.scale})
+          </div>), {
                 type: "object",
                 properties: {
                     element: {
@@ -163,16 +113,66 @@ export default pattern({
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, ({ element: [date, pizza], params: { state } }) => (<div>
-            {date}: {pizza} (scale: {state.scale})
-          </div>)), {
+            } as const satisfies __ctHelpers.JSONSchema), {
                 state: {
                     scale: state.scale
                 }
             })}
       </div>),
     };
-});
+}, {
+    type: "object",
+    properties: {
+        pizzas: {
+            type: "array",
+            items: {
+                $ref: "#/$defs/PizzaEntry"
+            }
+        },
+        scale: {
+            type: "number"
+        }
+    },
+    required: ["pizzas", "scale"],
+    $defs: {
+        PizzaEntry: {
+            type: "array",
+            items: {
+                type: "string"
+            }
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        $UI: {
+            $ref: "#/$defs/JSXElement"
+        }
+    },
+    required: ["$UI"],
+    $defs: {
+        JSXElement: {
+            anyOf: [{
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    $ref: "#/$defs/UIRenderable",
+                    asOpaque: true
+                }]
+        },
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

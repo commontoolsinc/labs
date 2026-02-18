@@ -11,7 +11,7 @@ interface State {
   prefix: string;
 }
 
-export default pattern<State>("ElementComputed", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>

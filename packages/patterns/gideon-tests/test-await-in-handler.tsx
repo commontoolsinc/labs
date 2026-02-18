@@ -133,7 +133,7 @@ interface PatternState {
   counter: Default<number, 0>;
 }
 
-export default pattern<PatternState>("Await in Handlers Test", (state) => {
+export default pattern<PatternState>((state) => {
   // Build URL reactively from trigger - uses local /_health endpoint with delay
   const fetchUrl = derive(
     state.fetchTrigger,

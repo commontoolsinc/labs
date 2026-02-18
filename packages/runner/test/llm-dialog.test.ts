@@ -125,8 +125,6 @@ describe("llmDialog", () => {
     } as const satisfies JSONSchema;
 
     const testPattern = pattern(
-      false,
-      resultSchema,
       () => {
         const messages = Cell.of<BuiltInLLMMessage[]>([]);
         const dialog = llmDialog({
@@ -139,6 +137,8 @@ describe("llmDialog", () => {
           messages,
         };
       },
+      false,
+      resultSchema,
     );
 
     // We need to define the result schema for the pattern to include addMessage as a stream
@@ -256,6 +256,10 @@ describe("llmDialog", () => {
     } as const satisfies JSONSchema;
 
     const getWeatherTool = pattern(
+      ({ location: _location }: any) => {
+        toolCalled = true;
+        return toolResult;
+      },
       {
         description: "Get the weather for a location",
         type: "object",
@@ -265,15 +269,9 @@ describe("llmDialog", () => {
         required: ["location"],
       } as const satisfies JSONSchema,
       { type: "string" },
-      ({ location: _location }: any) => {
-        toolCalled = true;
-        return toolResult;
-      },
     );
 
     const testPattern = pattern(
-      false,
-      resultSchema,
       () => {
         const messages = Cell.of<BuiltInLLMMessage[]>([]);
         const dialog = llmDialog({
@@ -291,6 +289,8 @@ describe("llmDialog", () => {
           messages,
         };
       },
+      false,
+      resultSchema,
     );
 
     const resultCell = runtime.getCell(
@@ -410,8 +410,6 @@ describe("llmDialog", () => {
     } as const satisfies JSONSchema;
 
     const testPattern = pattern(
-      false,
-      resultSchema,
       () => {
         const messages = Cell.of<BuiltInLLMMessage[]>([]);
         const dialog = llmDialog({
@@ -424,6 +422,8 @@ describe("llmDialog", () => {
           messages,
         };
       },
+      false,
+      resultSchema,
     );
 
     const resultCell = runtime.getCell(
@@ -578,8 +578,6 @@ describe("llmDialog", () => {
     } as const satisfies JSONSchema;
 
     const testPattern = pattern(
-      false,
-      resultSchema,
       () => {
         const messages = Cell.of<BuiltInLLMMessage[]>([]);
         const dialog = llmDialog({
@@ -592,6 +590,8 @@ describe("llmDialog", () => {
           messages,
         };
       },
+      false,
+      resultSchema,
     );
 
     const resultCell = runtime.getCell(
@@ -678,8 +678,6 @@ describe("llmDialog", () => {
     } as const satisfies JSONSchema;
 
     const testPattern = pattern(
-      false,
-      resultSchema,
       () => {
         const messages = Cell.of<BuiltInLLMMessage[]>([]);
         // Create context cell inside pattern
@@ -697,6 +695,8 @@ describe("llmDialog", () => {
           messages,
         };
       },
+      false,
+      resultSchema,
     );
 
     const resultCell = runtime.getCell(
@@ -812,8 +812,6 @@ describe("llmDialog", () => {
     } as const satisfies JSONSchema;
 
     const testPattern = pattern(
-      false,
-      resultSchema,
       () => {
         const messages = Cell.of<BuiltInLLMMessage[]>([]);
         // Create context cell inside pattern
@@ -831,6 +829,8 @@ describe("llmDialog", () => {
           messages,
         };
       },
+      false,
+      resultSchema,
     );
 
     const resultCell = runtime.getCell(

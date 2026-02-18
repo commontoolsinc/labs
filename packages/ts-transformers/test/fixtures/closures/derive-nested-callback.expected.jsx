@@ -36,7 +36,7 @@ export default function TestDerive() {
     } as const satisfies __ctHelpers.JSONSchema, {
         numbers,
         multiplier: multiplier
-    }, ({ numbers: nums, multiplier }) => nums.mapWithPattern(__ctHelpers.pattern({
+    }, ({ numbers: nums, multiplier }) => nums.mapWithPattern(__ctHelpers.pattern(({ element: n, params: { multiplier } }) => n * multiplier.get(), {
         type: "object",
         properties: {
             element: {
@@ -56,7 +56,7 @@ export default function TestDerive() {
         required: ["element", "params"]
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema, ({ element: n, params: { multiplier } }) => n * multiplier.get()), {
+    } as const satisfies __ctHelpers.JSONSchema), {
         multiplier: multiplier
     }));
     return result;

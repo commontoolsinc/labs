@@ -17,7 +17,7 @@ const existing = handler((_event, { state }: { state: State }) => {
   console.log(state.count);
 });
 
-export default pattern<State>("Existing", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <ct-button onClick={existing({ state })}>

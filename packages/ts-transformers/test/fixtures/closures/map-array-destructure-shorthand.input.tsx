@@ -7,7 +7,7 @@ interface State {
   items: ItemTuple[];
 }
 
-export default pattern<State>("ArrayDestructureShorthand", ({ items }) => {
+export default pattern<State>(({ items }) => {
   return {
     [UI]: (
       <div>

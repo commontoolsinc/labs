@@ -52,7 +52,7 @@ export const createDataPiece = (
 
   const schema = ${schemaString};
 
-  export default pattern(schema, schema, (data) => ({
+  export default pattern((data) => ({
     [NAME]: "${name ?? "Data Import"}",
     [UI]: <div><h2>Your data has this schema</h2><pre>${
     schemaString.replaceAll("{", "&#123;")
@@ -60,7 +60,7 @@ export const createDataPiece = (
       .replaceAll("\n", "<br/>")
   }</pre></div>,
     ${result}
-  }));`;
+  }), schema, schema);`;
 
   return compileAndRunPattern(
     pieceManager,

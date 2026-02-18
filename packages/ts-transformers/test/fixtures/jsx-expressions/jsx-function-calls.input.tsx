@@ -11,7 +11,7 @@ interface State {
   float: string;
 }
 
-export default pattern<State>("FunctionCalls", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>

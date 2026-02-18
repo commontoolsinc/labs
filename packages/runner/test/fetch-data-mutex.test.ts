@@ -74,7 +74,6 @@ describe("fetch-data mutex mechanism", () => {
   it("should successfully fetch data", async () => {
     const fetchData = byRef("fetchData");
     const testPattern = pattern<{ url: string }>(
-      "Fetch Test",
       ({ url }) => fetchData({ url, mode: "json" }),
     );
 
@@ -114,7 +113,6 @@ describe("fetch-data mutex mechanism", () => {
   it("should handle concurrent requests with same inputs (mutex test)", async () => {
     const fetchData = byRef("fetchData");
     const testPattern = pattern<{ url: string }>(
-      "Concurrent Fetch",
       ({ url }) => fetchData({ url, mode: "json" }),
     );
 
@@ -158,7 +156,6 @@ describe("fetch-data mutex mechanism", () => {
 
     const fetchData = byRef("fetchData");
     const testPattern = pattern<{ url: string }>(
-      "URL Change Test",
       ({ url }) => fetchData({ url, mode: "json" }),
     );
 
@@ -201,7 +198,6 @@ describe("fetch-data mutex mechanism", () => {
 
     // First fetch as JSON
     const jsonPattern = pattern<{ url: string }>(
-      "JSON Fetch",
       ({ url }) => fetchData({ url, mode: "json" }),
     );
 
@@ -222,7 +218,6 @@ describe("fetch-data mutex mechanism", () => {
     // Now fetch same URL as text - should trigger new fetch due to different mode
     tx = runtime.edit();
     const textPattern = pattern<{ url: string }>(
-      "Text Fetch",
       ({ url }) => fetchData({ url, mode: "text" }),
     );
 
@@ -266,7 +261,6 @@ describe("fetch-data mutex mechanism", () => {
 
     const fetchData = byRef("fetchData");
     const testPattern = pattern<{ url: string }>(
-      "Pending Test",
       ({ url }) => fetchData({ url, mode: "json" }),
     );
 
@@ -310,7 +304,6 @@ describe("fetch-data mutex mechanism", () => {
 
     const fetchData = byRef("fetchData");
     const testPattern = pattern<{ url: string }>(
-      "Error Test",
       ({ url }) => fetchData({ url, mode: "json" }),
     );
 
@@ -348,7 +341,6 @@ describe("fetch-data mutex mechanism", () => {
   it("should abort and clear state if URL becomes empty while waiting for mutex", async () => {
     const fetchData = byRef("fetchData");
     const testPattern = pattern<{ url: string }>(
-      "Empty URL Test",
       ({ url }) => fetchData({ url, mode: "json" }),
     );
 

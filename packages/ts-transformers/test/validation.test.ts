@@ -112,7 +112,7 @@ Deno.test("Pattern Context Validation - Restricted Contexts", async (t) => {
 
       interface Item { name: string; price: number; }
 
-      export default pattern<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         return <div>{item.name}</div>;
       });
     `;
@@ -134,7 +134,7 @@ Deno.test("Pattern Context Validation - Restricted Contexts", async (t) => {
 
       function format(name: string): string { return name.toUpperCase(); }
 
-      export default pattern<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         const formatted = format(item.name);
         return <div>{formatted}</div>;
       });
@@ -159,7 +159,7 @@ Deno.test("Pattern Context Validation - Restricted Contexts", async (t) => {
 
       interface Item { name?: string; nested?: { value: number } }
 
-      export default pattern<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         return <div>{item?.name} - {item?.nested?.value}</div>;
       });
     `;
@@ -179,7 +179,7 @@ Deno.test("Pattern Context Validation - Restricted Contexts", async (t) => {
     const source = `/// <cts-enable />
       import { pattern, Cell, h } from "commontools";
 
-      export default pattern<{ count: Cell<number> }>("test", ({ count }) => {
+      export default pattern<{ count: Cell<number> }>(({ count }) => {
         return <div>Count: {count.get()}</div>;
       });
     `;
@@ -202,7 +202,7 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
 
       interface Item { name: string; price: number; }
 
-      export default pattern<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         const isExpensive = computed(() => item.price > 100);
         return <div>{isExpensive}</div>;
       });
@@ -224,7 +224,7 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
 
       interface Item { name: string; price: number; }
 
-      export default pattern<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         const logPrice = action(() => {
           console.log(item.price > 100 ? "expensive" : "cheap");
         });
@@ -248,7 +248,7 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
 
       interface Item { name: string; price: number; }
 
-      export default pattern<{ item: Item, discount: Cell<number> }>("test", ({ item, discount }) => {
+      export default pattern<{ item: Item, discount: Cell<number> }>(({ item, discount }) => {
         const finalPrice = derive(discount, (d) => item.price * (1 - d));
         return <div>{finalPrice}</div>;
       });
@@ -272,7 +272,7 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
 
       interface Item { name: string; price: number; }
 
-      export default pattern<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         // Standalone derive (nullary form) - should allow opaque access
         const isExpensive = derive(() => item.price > 100);
         const doubled = derive(() => item.price * 2);
@@ -299,7 +299,7 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
 
       interface Item { name: string; price: number; }
 
-      export default pattern<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         const doubled = lift(() => item.price * 2);
         return <div>{doubled}</div>;
       });
@@ -325,7 +325,7 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
 
       interface Item { name: string; price: number; }
 
-      export default pattern<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         const onClick = handler((e: MouseEvent) => {
           if (item.price > 100) {
             console.log("expensive!");
@@ -355,7 +355,7 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
 
       interface Item { name: string; price: number; }
 
-      export default pattern<{ item: Item, count: Cell<number> }>("test", ({ item, count }) => {
+      export default pattern<{ item: Item, count: Cell<number> }>(({ item, count }) => {
         return (
           <div>
             <button onClick={() => {
@@ -390,7 +390,7 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
 
       interface Item { name: string; price: number; }
 
-      export default pattern<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         // Helper function defined in pattern - now an error
         function isExpensive() {
           return item.price > 100;
@@ -421,7 +421,7 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
 
       interface Item { name: string; price: number; }
 
-      export default pattern<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         // Helper arrow function defined in pattern - now an error
         const isExpensive = () => item.price > 100;
 
@@ -475,7 +475,7 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
 
       interface Item { price: number; }
 
-      export default pattern<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         const helper = () => item.price * 2;
         return <div>{helper()}</div>;
       });
@@ -513,7 +513,7 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
 
       interface Item { price: number; }
 
-      export default pattern<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         function helper() { return item.price * 2; }
         return <div>{helper()}</div>;
       });
@@ -532,7 +532,7 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
 
       interface Item { price: number; }
 
-      export default pattern<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         const doubled = computed(() => {
           const multiply = (x: number) => x * 2;
           return multiply(item.price);
@@ -557,7 +557,7 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
 
       interface Item { price: number; }
 
-      export default pattern<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         const doSomething = action(() => {
           const helper = () => item.price * 2;
           console.log(helper());
@@ -582,7 +582,7 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
 
       interface Item { price: number; }
 
-      export default pattern<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         return <div onClick={() => console.log(item.price)}>Click</div>;
       });
     `;
@@ -603,7 +603,7 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
 
       interface Item { name: string; }
 
-      export default pattern<{ items: OpaqueRef<Item[]> }>("test", ({ items }) => {
+      export default pattern<{ items: OpaqueRef<Item[]> }>(({ items }) => {
         return <div>{items.map(item => <span>{item.name}</span>)}</div>;
       });
     `;
@@ -649,7 +649,7 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
 
       interface Item { price: number; }
 
-      export default pattern<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         const doubled = lift(() => item.price * 2);
         return <div>{doubled}</div>;
       });
@@ -670,7 +670,7 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
 
       interface Item { price: number; }
 
-      export default pattern<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         const doubled = lift(({ x }: { x: number }) => x * 2)({ x: item.price });
         return <div>{doubled}</div>;
       });
@@ -716,7 +716,7 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
 
       const doublePrice = lift((price: number) => price * 2);
 
-      export default pattern<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         const doubled = doublePrice(item.price);
         return <div>{doubled}</div>;
       });
@@ -736,7 +736,7 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
 
       const logPrice = handler((price: number) => console.log(price));
 
-      export default pattern<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         return <div onClick={() => logPrice(item.price)}>Click</div>;
       });
     `;
@@ -757,7 +757,7 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
 
       interface Item { price: number; }
 
-      export default pattern<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         const doubled = computed(() => item.price * 2);
         return <div>{doubled}</div>;
       });
@@ -779,7 +779,7 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
 
       interface Item { price: number; }
 
-      export default pattern<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         const log = action(() => console.log(item.price));
         return <div onClick={log}>Click</div>;
       });
@@ -797,7 +797,7 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
 
       interface Item { price: number; }
 
-      export default pattern<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         const doubled = derive(() => item.price * 2);
         return <div>{doubled}</div>;
       });

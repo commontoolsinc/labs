@@ -19,7 +19,36 @@ const handleClick = handler(true as const satisfies __ctHelpers.JSONSchema, {
 } as const satisfies __ctHelpers.JSONSchema, (_, { count }) => {
     count.set(count.get() + 1);
 });
-export default pattern({
+export default pattern(({ count }) => {
+    return {
+        [UI]: (<div>
+          {/* Regular JSX expression - should be wrapped in derive */}
+          <span>Count: {__ctHelpers.derive({
+            type: "object",
+            properties: {
+                count: {
+                    type: "number",
+                    asOpaque: true
+                }
+            },
+            required: ["count"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { count: count }, ({ count }) => count + 1)}</span>
+
+          {/* Event handler with OpaqueRef - should NOT be wrapped in derive */}
+          <ct-button onClick={handleClick({ count })}>
+            Click me
+          </ct-button>
+
+          {/* Event handler inside map - should NOT be wrapped in derive */}
+          {[1, 2, 3].map((n) => (<ct-button key={n} onClick={handleClick({ count })}>
+              Button {n}
+            </ct-button>))}
+        </div>),
+        count,
+    };
+}, {
     type: "object",
     properties: {
         count: {
@@ -62,36 +91,7 @@ export default pattern({
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, ({ count }) => {
-    return {
-        [UI]: (<div>
-          {/* Regular JSX expression - should be wrapped in derive */}
-          <span>Count: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                count: {
-                    type: "number",
-                    asOpaque: true
-                }
-            },
-            required: ["count"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { count: count }, ({ count }) => count + 1)}</span>
-
-          {/* Event handler with OpaqueRef - should NOT be wrapped in derive */}
-          <ct-button onClick={handleClick({ count })}>
-            Click me
-          </ct-button>
-
-          {/* Event handler inside map - should NOT be wrapped in derive */}
-          {[1, 2, 3].map((n) => (<ct-button key={n} onClick={handleClick({ count })}>
-              Button {n}
-            </ct-button>))}
-        </div>),
-        count,
-    };
-});
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

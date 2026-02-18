@@ -60,7 +60,12 @@ const increment = handler(false as const satisfies __ctHelpers.JSONSchema, {
     const counter = (branch.counter ?? 0) + 1;
     context.state.set({ nested: { branch: { counter } } });
 });
-export default pattern({
+export default pattern(({ state }) => {
+    return {
+        state,
+        increment: increment({ state }),
+    };
+}, {
     type: "object",
     properties: {
         state: {
@@ -139,12 +144,7 @@ export default pattern({
             }
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, ({ state }) => {
-    return {
-        state,
-        increment: increment({ state }),
-    };
-});
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

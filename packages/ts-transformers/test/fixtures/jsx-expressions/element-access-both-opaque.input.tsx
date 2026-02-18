@@ -1,7 +1,7 @@
 /// <cts-enable />
 import { cell, pattern, UI } from "commontools";
 
-export default pattern("ElementAccessBothOpaque", (_state) => {
+export default pattern((_state) => {
   const items = cell(["apple", "banana", "cherry"]);
   const index = cell(1);
 

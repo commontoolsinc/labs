@@ -3,7 +3,11 @@ import { pattern } from "commontools";
 interface MyInput {
     value: number;
 }
-export default pattern({
+export default pattern((input: MyInput) => {
+    return {
+        result: input.value * 2,
+    };
+}, {
     type: "object",
     properties: {
         value: {
@@ -19,11 +23,7 @@ export default pattern({
         }
     },
     required: ["result"]
-} as const satisfies __ctHelpers.JSONSchema, (input: MyInput) => {
-    return {
-        result: input.value * 2,
-    };
-});
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

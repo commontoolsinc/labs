@@ -13,7 +13,7 @@ import {
 } from "commontools";
 
 // the simple charm (to which we'll store references within a cell)
-const SimplePattern = pattern("Simple Pattern", () => ({
+const SimplePattern = pattern(() => ({
   [NAME]: "Some Simple Pattern",
   [UI]: <div>Some Simple Pattern</div>,
 }));
@@ -100,7 +100,7 @@ const goToCharm = handler<unknown, { charm: any }>(
 );
 
 // create the named cell inside the pattern body, so we do it just once
-export default pattern("Charms Launcher", () => {
+export default pattern(() => {
   // cell to store array of charms we created
   const { cellRef } = createCellRef({
     isInitialized: cell(false),

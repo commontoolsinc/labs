@@ -16,7 +16,7 @@ interface State {
   currentUser: User;
 }
 
-export default pattern<State>("NestedProperty", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>

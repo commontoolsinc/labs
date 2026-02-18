@@ -47,7 +47,7 @@ manually:
 **Using cell() (what we did before):**
 
 ```typescript
-export default pattern("Counter", () => {
+export default pattern(() => {
   const count = cell<number>(0); // Manual Cell creation
 
   return {
@@ -63,7 +63,7 @@ interface CounterState {
   count: Default<number, 100>;
 }
 
-export default pattern<CounterState>("Counter", (state) => {
+export default pattern<CounterState>((state) => {
   // state.count is already a Cell<number> initialized to 100
 
   return {
@@ -99,7 +99,7 @@ const increment = handler<unknown, { count: Cell<number> }>(
   },
 );
 
-export default pattern<CounterState>("Counter with Default", (state) => {
+export default pattern<CounterState>((state) => {
   return {
     [UI]: (
       <div>
@@ -228,7 +228,7 @@ const addItem = handler<
   },
 );
 
-export default pattern<TodoListState>("Todo List", (state) => {
+export default pattern<TodoListState>((state) => {
   return {
     [UI]: (
       <div>
@@ -381,7 +381,7 @@ const levelUp = handler<unknown, { stats: Cell<Player> }>(
   },
 );
 
-export default pattern<GameState>("Game Stats with Default", (state) => {
+export default pattern<GameState>((state) => {
   return {
     [UI]: (
       <div>

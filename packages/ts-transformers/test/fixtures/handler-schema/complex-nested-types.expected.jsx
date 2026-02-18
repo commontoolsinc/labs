@@ -118,7 +118,9 @@ const _updateTags = handler({
     state.tags.set(detail?.tags ?? []);
 });
 export { userHandler };
-export default pattern(false as const satisfies __ctHelpers.JSONSchema, {
+export default pattern(() => {
+    return { userHandler };
+}, false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         userHandler: {
@@ -126,9 +128,7 @@ export default pattern(false as const satisfies __ctHelpers.JSONSchema, {
         }
     },
     required: ["userHandler"]
-} as const satisfies __ctHelpers.JSONSchema, () => {
-    return { userHandler };
-});
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

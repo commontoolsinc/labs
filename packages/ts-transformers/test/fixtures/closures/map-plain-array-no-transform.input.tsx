@@ -5,7 +5,7 @@ interface State {
   multiplier: number;
 }
 
-export default pattern<State>("PlainArrayNoTransform", (state) => {
+export default pattern<State>((state) => {
   const plainArray = [1, 2, 3, 4, 5];
 
   return {

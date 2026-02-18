@@ -5,7 +5,7 @@ interface PatternState {
   value: Default<number, 0>;
 }
 
-export default pattern<PatternState>("Counter", (state) => {
+export default pattern<PatternState>((state) => {
   return {
     [NAME]: "test ternary with derive",
     [UI]: (

@@ -11,7 +11,7 @@ function nextKey(): string {
   return `key-${counter}`;
 }
 
-export default pattern<State>("Records", (state) => {
+export default pattern<State>((state) => {
   const recordMap = state.records;
   return {
     [UI]: (

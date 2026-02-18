@@ -1,7 +1,7 @@
 /// <cts-enable />
 import { pattern, UI } from "commontools";
 
-export default pattern<{ value: number }>("simple-pattern", (cell) => {
+export default pattern<{ value: number }>((cell) => {
   return {
     [UI]: (
       <div>

@@ -7,7 +7,7 @@ interface State {
   upsell: { discount: number };
 }
 
-export default pattern<State>("MultipleSimilarCaptures", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>

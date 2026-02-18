@@ -19,7 +19,7 @@ interface State {
   selectedScore: number;
 }
 
-export default pattern<State>("ElementAccessComplex", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>

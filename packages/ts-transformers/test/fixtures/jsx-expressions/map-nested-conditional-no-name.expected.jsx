@@ -1,36 +1,6 @@
 import * as __ctHelpers from "commontools";
 import { cell, pattern, UI } from "commontools";
-export default pattern(false as const satisfies __ctHelpers.JSONSchema, {
-    type: "object",
-    properties: {
-        $UI: {
-            $ref: "#/$defs/JSXElement"
-        }
-    },
-    required: ["$UI"],
-    $defs: {
-        JSXElement: {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    type: "object",
-                    properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
-                }]
-        },
-        UIRenderable: {
-            type: "object",
-            properties: {
-                $UI: {
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }
-            },
-            required: ["$UI"]
-        }
-    }
-} as const satisfies __ctHelpers.JSONSchema, (_state: any) => {
+export default pattern((_state: any) => {
     const items = cell([{ name: "apple" }, { name: "banana" }], {
         type: "array",
         items: {
@@ -62,7 +32,22 @@ export default pattern(false as const satisfies __ctHelpers.JSONSchema, {
                     properties: {}
                 }]
         } as const satisfies __ctHelpers.JSONSchema, showList, <div>
-            {items.mapWithPattern(__ctHelpers.pattern({
+            {items.mapWithPattern(__ctHelpers.pattern(({ element: item, params: {} }) => (<div>
+                {__ctHelpers.when({
+                type: "string",
+                asOpaque: true
+            } as const satisfies __ctHelpers.JSONSchema, {
+                anyOf: [{}, {
+                        type: "object",
+                        properties: {}
+                    }]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                anyOf: [{}, {
+                        type: "object",
+                        properties: {}
+                    }]
+            } as const satisfies __ctHelpers.JSONSchema, item.name, <span>{item.name}</span>)}
+              </div>), {
                 type: "object",
                 properties: {
                     element: {
@@ -101,26 +86,41 @@ export default pattern(false as const satisfies __ctHelpers.JSONSchema, {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: {} }) => (<div>
-                {__ctHelpers.when({
-                type: "string",
-                asOpaque: true
-            } as const satisfies __ctHelpers.JSONSchema, {
-                anyOf: [{}, {
-                        type: "object",
-                        properties: {}
-                    }]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                anyOf: [{}, {
-                        type: "object",
-                        properties: {}
-                    }]
-            } as const satisfies __ctHelpers.JSONSchema, item.name, <span>{item.name}</span>)}
-              </div>)), {})}
+            } as const satisfies __ctHelpers.JSONSchema), {})}
           </div>)}
       </div>),
     };
-});
+}, false as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        $UI: {
+            $ref: "#/$defs/JSXElement"
+        }
+    },
+    required: ["$UI"],
+    $defs: {
+        JSXElement: {
+            anyOf: [{
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    $ref: "#/$defs/UIRenderable",
+                    asOpaque: true
+                }]
+        },
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

@@ -46,7 +46,7 @@ describe("pattern", () => {
   });
 
   it("creates a pattern", () => {
-    const doublePattern = pattern<{ x: number }>("Double a number", ({ x }) => {
+    const doublePattern = pattern<{ x: number }>(({ x }) => {
       const double = lift(({ x }) => x * 2);
       return { double: double({ x }) };
     });
@@ -54,7 +54,7 @@ describe("pattern", () => {
   });
 
   it("creates a pattern, with simple function", () => {
-    const doublePattern = pattern<{ x: number }>("Double a number", ({ x }) => {
+    const doublePattern = pattern<{ x: number }>(({ x }) => {
       const double = lift<number>((x) => x * 2);
       return { double: double(x) };
     });
@@ -63,7 +63,7 @@ describe("pattern", () => {
 
   it("creates a pattern, with an inner opaque ref", () => {
     const double = lift(({ x }) => x * 2);
-    const doublePattern = pattern<{ x: number }>("Double a number", () => {
+    const doublePattern = pattern<{ x: number }>(() => {
       const x = opaqueRef<number>(1);
       x.for("x");
       return { double: double({ x }) };
@@ -76,16 +76,14 @@ describe("pattern", () => {
   });
 
   it("complex pattern has correct schema and nodes", () => {
-    const doublePattern = pattern<{ x: number }>("Double a number", ({ x }) => {
+    const doublePattern = pattern<{ x: number }>(({ x }) => {
       const double = lift<number>((x) => x * 2);
       return { double: double(double(x)) };
     });
     const { argumentSchema, result, nodes } = doublePattern;
 
     expect(isPattern(doublePattern)).toBe(true);
-    expect(argumentSchema).toMatchObject({
-      description: "Double a number",
-    });
+    expect(argumentSchema).toBe(true);
     expect(result).toEqual({
       double: { $alias: { path: ["internal", "double"] } },
     });
@@ -115,7 +113,7 @@ describe("pattern", () => {
       description: "A number",
     } as const satisfies JSONSchema;
 
-    const testPattern = pattern<{ x: number }>(schema, ({ x }) => ({ x }));
+    const testPattern = pattern<{ x: number }>(({ x }) => ({ x }), schema);
     expect(isPattern(testPattern)).toBe(true);
     expect(testPattern.argumentSchema).toMatchObject({
       description: "A number",
@@ -150,9 +148,9 @@ describe("pattern", () => {
       },
     } as const satisfies JSONSchema;
 
-    const testPattern = pattern<{ x: number }>(patternInputSchema, ({ x }) => ({
+    const testPattern = pattern<{ x: number }>(({ x }) => ({
       doubled: double(x),
-    }));
+    }), patternInputSchema);
 
     const module = testPattern.nodes[0].module as Module;
     expect(module.argumentSchema).toMatchObject({
@@ -166,7 +164,7 @@ describe("pattern", () => {
   });
 
   it("complex pattern with path aliases has correct schema, nodes, and serialization", () => {
-    const doublePattern = pattern<{ x: number }>("Double a number", ({ x }) => {
+    const doublePattern = pattern<{ x: number }>(({ x }) => {
       const double = lift<{ x: number }>(({ x }) => ({ doubled: x * 2 }));
       const result = double({ x });
       const result2 = double({ x: result.doubled });
@@ -175,9 +173,7 @@ describe("pattern", () => {
     const { argumentSchema, result, nodes } = doublePattern;
 
     expect(isPattern(doublePattern)).toBe(true);
-    expect(argumentSchema).toMatchObject({
-      description: "Double a number",
-    });
+    expect(argumentSchema).toBe(true);
     expect(result).toEqual({
       double: { $alias: { path: ["internal", "__#1", "doubled"] } },
     });
@@ -207,7 +203,6 @@ describe("pattern", () => {
 
   it("pattern with map node serializes correctly", () => {
     const doubleArray = pattern<{ values: { x: number }[] }>(
-      "Double numbers",
       ({ values }) => {
         const doubled = values.map(({ x }) => {
           const double = lift<number>((x) => x * 2);
@@ -269,13 +264,13 @@ describe("pattern", () => {
     );
 
     const doublePattern = pattern<{ x: number }, { double: number }>(
-      ArgumentSchema,
-      ResultSchema,
       ({ x }) => {
         const result = double({ x });
         const result2 = double({ x: result.double });
         return { double: result2.double };
       },
+      ArgumentSchema,
+      ResultSchema,
     );
     const { result, nodes, argumentSchema } = doublePattern;
 
@@ -387,12 +382,12 @@ describe("pattern", () => {
       { ssn: string },
       { capitalized: string }
     >(
-      UserSchema,
-      ResultSchema,
       ({ ssn }) => {
         const result = capitalize({ ssn });
         return { capitalized: result.capitalized };
       },
+      UserSchema,
+      ResultSchema,
     );
 
     const { result, nodes, argumentSchema, resultSchema } =
@@ -446,8 +441,12 @@ describe("pattern", () => {
   });
 
   it("supports never schemas", () => {
-    const neverPattern = pattern(false, false, () => {
-    });
+    const neverPattern = pattern(
+      () => {
+      },
+      false,
+      false,
+    );
     expect(isPattern(neverPattern)).toBe(true);
   });
 });

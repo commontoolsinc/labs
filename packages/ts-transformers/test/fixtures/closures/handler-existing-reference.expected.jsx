@@ -34,7 +34,13 @@ const existing = handler(false as const satisfies __ctHelpers.JSONSchema, {
 }) => {
     console.log(state.count);
 });
-export default pattern({
+export default pattern((state) => {
+    return {
+        [UI]: (<ct-button onClick={existing({ state })}>
+        Existing
+      </ct-button>),
+    };
+}, {
     type: "object",
     properties: {
         count: {
@@ -72,13 +78,7 @@ export default pattern({
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, (state) => {
-    return {
-        [UI]: (<ct-button onClick={existing({ state })}>
-        Existing
-      </ct-button>),
-    };
-});
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

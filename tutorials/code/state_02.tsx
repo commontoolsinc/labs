@@ -13,7 +13,7 @@ const updateName = handler<
   },
 );
 
-export default pattern("state test", () => {
+export default pattern(() => {
   const characterName = cell<string>("");
   characterName.set("Lady Ellyxir");
   const dex = cell<number>(16);

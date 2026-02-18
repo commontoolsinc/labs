@@ -10,7 +10,7 @@ interface State {
   isPremium: boolean;
 }
 
-export default pattern<State>("ConditionalRendering", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>

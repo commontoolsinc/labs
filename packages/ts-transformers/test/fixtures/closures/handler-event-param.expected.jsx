@@ -6,50 +6,7 @@ interface State {
 }
 // Test typed event handler: ct-select has onct-change?: EventHandler<{ items: ...; value: ... }>
 // The handler receives { detail: { items: [...], value: ... } }
-export default pattern({
-    type: "object",
-    properties: {
-        selectedValue: {
-            type: "string",
-            asCell: true
-        },
-        changeCount: {
-            type: "number",
-            asCell: true
-        }
-    },
-    required: ["selectedValue", "changeCount"]
-} as const satisfies __ctHelpers.JSONSchema, {
-    type: "object",
-    properties: {
-        $UI: {
-            $ref: "#/$defs/JSXElement"
-        }
-    },
-    required: ["$UI"],
-    $defs: {
-        JSXElement: {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    type: "object",
-                    properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
-                }]
-        },
-        UIRenderable: {
-            type: "object",
-            properties: {
-                $UI: {
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }
-            },
-            required: ["$UI"]
-        }
-    }
-} as const satisfies __ctHelpers.JSONSchema, (state) => {
+export default pattern((state) => {
     return {
         [UI]: (<ct-select $value={state.selectedValue} items={[
                 { label: "Option A", value: "a" },
@@ -108,7 +65,50 @@ export default pattern({
             }
         })}/>),
     };
-});
+}, {
+    type: "object",
+    properties: {
+        selectedValue: {
+            type: "string",
+            asCell: true
+        },
+        changeCount: {
+            type: "number",
+            asCell: true
+        }
+    },
+    required: ["selectedValue", "changeCount"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        $UI: {
+            $ref: "#/$defs/JSXElement"
+        }
+    },
+    required: ["$UI"],
+    $defs: {
+        JSXElement: {
+            anyOf: [{
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    $ref: "#/$defs/UIRenderable",
+                    asOpaque: true
+                }]
+        },
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

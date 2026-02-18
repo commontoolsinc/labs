@@ -5,7 +5,7 @@ interface State {
   entries: Array<{ 0: number }>;
 }
 
-export default pattern<State>("MapDestructuredNumericAlias", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>

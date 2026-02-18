@@ -17,7 +17,64 @@ const adder = handler(false as const satisfies __ctHelpers.JSONSchema, {
 }) => {
     state.values.push(Math.random().toString(36).substring(2, 15));
 });
-export default pattern({
+export default pattern(({ values }) => {
+    derive({
+        type: "array",
+        items: {
+            type: "string"
+        }
+    } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, values, (values) => {
+        console.log("values#", values?.length);
+    });
+    return {
+        [NAME]: str `Simple Value: ${values.length || 0}`,
+        [UI]: (<div>
+          <button type="button" onClick={adder({ values })}>Add Value</button>
+          <div>
+            {values.mapWithPattern(__ctHelpers.pattern(({ element: value, index, params: {} }) => (<div>
+                {index}: {value}
+              </div>), {
+                type: "object",
+                properties: {
+                    element: {
+                        type: "string"
+                    },
+                    index: {
+                        type: "number"
+                    },
+                    params: {
+                        type: "object",
+                        properties: {}
+                    }
+                },
+                required: ["element", "params"]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                anyOf: [{
+                        $ref: "https://commonfabric.org/schemas/vnode.json"
+                    }, {
+                        type: "object",
+                        properties: {}
+                    }, {
+                        $ref: "#/$defs/UIRenderable",
+                        asOpaque: true
+                    }],
+                $defs: {
+                    UIRenderable: {
+                        type: "object",
+                        properties: {
+                            $UI: {
+                                $ref: "https://commonfabric.org/schemas/vnode.json"
+                            }
+                        },
+                        required: ["$UI"]
+                    }
+                }
+            } as const satisfies __ctHelpers.JSONSchema), {})}
+          </div>
+        </div>),
+        values,
+    };
+}, {
     type: "object",
     properties: {
         values: {
@@ -69,64 +126,7 @@ export default pattern({
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, ({ values }) => {
-    derive({
-        type: "array",
-        items: {
-            type: "string"
-        }
-    } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, values, (values) => {
-        console.log("values#", values?.length);
-    });
-    return {
-        [NAME]: str `Simple Value: ${values.length || 0}`,
-        [UI]: (<div>
-          <button type="button" onClick={adder({ values })}>Add Value</button>
-          <div>
-            {values.mapWithPattern(__ctHelpers.pattern({
-                type: "object",
-                properties: {
-                    element: {
-                        type: "string"
-                    },
-                    index: {
-                        type: "number"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {}
-                    }
-                },
-                required: ["element", "params"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __ctHelpers.JSONSchema, ({ element: value, index, params: {} }) => (<div>
-                {index}: {value}
-              </div>)), {})}
-          </div>
-        </div>),
-        values,
-    };
-});
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

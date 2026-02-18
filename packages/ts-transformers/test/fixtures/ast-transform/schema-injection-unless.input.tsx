@@ -6,7 +6,7 @@ interface State {
   defaultValue: string;
 }
 
-export default pattern<State>("Unless Schema Injection", ({ value, defaultValue }) => {
+export default pattern<State>(({ value, defaultValue }) => {
   // unless(condition, fallback) - returns condition if truthy, else fallback
   const result = unless(value, defaultValue);
 

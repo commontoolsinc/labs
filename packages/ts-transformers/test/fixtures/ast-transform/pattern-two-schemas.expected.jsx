@@ -8,7 +8,11 @@ interface Input {
 interface Result {
     doubled: number;
 }
-export default pattern({
+export default pattern(({ count }) => {
+    return {
+        doubled: count * 2
+    };
+}, {
     type: "object",
     properties: {
         count: {
@@ -24,11 +28,7 @@ export default pattern({
         }
     },
     required: ["doubled"]
-} as const satisfies __ctHelpers.JSONSchema, ({ count }) => {
-    return {
-        doubled: count * 2
-    };
-});
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

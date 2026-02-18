@@ -14,7 +14,7 @@ interface State {
 
 const shippingCost = 5.99;
 
-export default pattern<State>("MultipleCaptures", (state) => {
+export default pattern<State>((state) => {
   const multiplier = 2;
 
   return {

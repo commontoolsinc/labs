@@ -70,7 +70,6 @@ describe("Pattern Runner", () => {
 
   it("should run a simple pattern", async () => {
     const simplePattern = pattern<{ value: number }>(
-      "Simple Pattern",
       ({ value }) => {
         const doubled = lift((x: number) => x * 2)(value);
         return { result: doubled };
@@ -93,7 +92,7 @@ describe("Pattern Runner", () => {
   });
 
   it("should handle nested patterns", async () => {
-    const innerPattern = pattern<{ x: number }>("Inner Pattern", ({ x }) => {
+    const innerPattern = pattern<{ x: number }>(({ x }) => {
       const squared = lift((n: number) => {
         return n * n;
       })(x);
@@ -101,7 +100,6 @@ describe("Pattern Runner", () => {
     });
 
     const outerPattern = pattern<{ value: number }>(
-      "Outer Pattern",
       ({ value }) => {
         const { squared } = innerPattern({ x: value });
         const result = lift((n: number) => {
@@ -128,6 +126,10 @@ describe("Pattern Runner", () => {
 
   it("should handle patterns with default values", async () => {
     const patternWithDefaults = pattern(
+      ({ a, b }) => {
+        const { sum } = lift(({ x, y }) => ({ sum: x + y }))({ x: a, y: b });
+        return { sum };
+      },
       {
         type: "object",
         properties: {
@@ -136,10 +138,6 @@ describe("Pattern Runner", () => {
         },
       },
       { type: "object", properties: { sum: { type: "number" } } },
-      ({ a, b }) => {
-        const { sum } = lift(({ x, y }) => ({ sum: x + y }))({ x: a, y: b });
-        return { sum };
-      },
     );
 
     const resultCell1 = runtime.getCell<{ sum: number }>(
@@ -181,7 +179,6 @@ describe("Pattern Runner", () => {
     );
 
     const multipliedArray = pattern<{ values: { x: number }[] }>(
-      "Multiply numbers",
       ({ values }) => {
         const multiplied = values.map(({ x }, index, array) => {
           return { multiplied: multiply({ x, index, array }) };
@@ -222,7 +219,6 @@ describe("Pattern Runner", () => {
     const double = lift((x: number) => x * 2);
 
     const doubleArray = pattern<{ values?: number[] }>(
-      "Double numbers maybe undefined",
       ({ values }) => {
         const doubled = values.map((x) => double(x));
         return { doubled };
@@ -259,7 +255,6 @@ describe("Pattern Runner", () => {
     );
 
     const incPattern = pattern<{ counter: { value: number } }>(
-      "Increment counter",
       ({ counter }) => {
         return { counter, stream: incHandler({ counter }) };
       },
@@ -299,7 +294,6 @@ describe("Pattern Runner", () => {
     );
 
     const incPattern = pattern<{ counter: { value: number } }>(
-      "Handler source location test",
       ({ counter }) => {
         return { counter, stream: incHandler({ counter }) };
       },
@@ -373,7 +367,7 @@ describe("Pattern Runner", () => {
     const incPattern = pattern<{
       counter: { value: number };
       nested: { a: { b: { c: number } } };
-    }>("event handler that returns a graph", ({ counter, nested }) => {
+    }>(({ counter, nested }) => {
       const stream = incHandler({ counter, nested });
       return { stream };
     });
@@ -477,7 +471,6 @@ describe("Pattern Runner", () => {
     );
 
     const multiplyPattern = pattern<{ x: number; y: number }>(
-      "multiply",
       (args) => {
         return {
           result1: multiplyGenerator(args),
@@ -545,7 +538,6 @@ describe("Pattern Runner", () => {
     const double = byRef("double");
 
     const simplePattern = pattern<{ value: number }>(
-      "Simple Pattern",
       ({ value }) => {
         const doubled = double(value);
         return { result: doubled };
@@ -586,7 +578,7 @@ describe("Pattern Runner", () => {
     const multiplyPattern = pattern<{
       settings: { value: number };
       multiplier: number;
-    }>("Multiply with Settings", ({ settings, multiplier }) => {
+    }>(({ settings, multiplier }) => {
       const result = lift(
         schema,
         { type: "number" },
@@ -656,7 +648,6 @@ describe("Pattern Runner", () => {
     } as const satisfies JSONSchema;
 
     const sumPattern = pattern<{ data: { items: Array<{ value: number }> } }>(
-      "Sum Items",
       ({ data }) => {
         const result = lift(
           schema,
@@ -717,7 +708,6 @@ describe("Pattern Runner", () => {
     const dynamicPattern = pattern<
       { context: Record<PropertyKey, number> }
     >(
-      "Dynamic Context",
       ({ context }) => {
         const result = lift(
           schema,
@@ -783,7 +773,6 @@ describe("Pattern Runner", () => {
     );
 
     const incPattern = pattern<{ counter: number }>(
-      "Increment counter",
       ({ counter }) => {
         return { counter, stream: incHandler({ counter }) };
       },
@@ -834,7 +823,6 @@ describe("Pattern Runner", () => {
     );
 
     const divPattern = pattern<{ result: number }>(
-      "Divide numbers",
       ({ result }) => {
         return { updater: divHandler({ result }), result };
       },
@@ -906,7 +894,6 @@ describe("Pattern Runner", () => {
     );
 
     const divPattern = pattern<{ divisor: number; dividend: number }>(
-      "Divide numbers",
       ({ divisor, dividend }) => {
         return { result: divider({ divisor, dividend }) };
       },
@@ -986,7 +973,6 @@ describe("Pattern Runner", () => {
     });
 
     const slowPattern = pattern<{ x: number }>(
-      "Slow Pattern",
       ({ x }) => {
         return { result: slowLift({ x }) };
       },
@@ -1036,7 +1022,6 @@ describe("Pattern Runner", () => {
     );
 
     const slowHandlerPattern = pattern<{ result: number }>(
-      "Slow Handler Pattern",
       ({ result }) => {
         return { result, updater: slowHandler({ result }) };
       },
@@ -1093,7 +1078,6 @@ describe("Pattern Runner", () => {
     );
 
     const slowHandlerPattern = pattern<{ result: number }>(
-      "Slow Handler Pattern",
       ({ result }) => {
         return { result, updater: slowHandler({ result }) };
       },
@@ -1127,7 +1111,6 @@ describe("Pattern Runner", () => {
 
   it("should create and use a named cell inside a lift", async () => {
     const wrapperPattern = pattern<{ value: number }>(
-      "Wrapper with Named Cell",
       ({ value }) => {
         // Create a named cell to store the counter
         const wrapper = lift((v: number) => {
@@ -1241,7 +1224,6 @@ describe("Pattern Runner", () => {
     const itemsPattern = pattern<
       { items: Array<{ title: string; items: any[] }> }
     >(
-      "Items with self-reference",
       ({ items }) => {
         return { items, stream: addItemHandler({ items }) };
       },
@@ -1314,7 +1296,6 @@ describe("Pattern Runner", () => {
     );
 
     const listPattern = pattern<{ list: any[] }>(
-      "List Pattern",
       ({ list }) => {
         return { list, stream: addToList({ list }) };
       },
@@ -1376,7 +1357,6 @@ describe("Pattern Runner", () => {
     );
 
     const ifElsePattern = pattern<{ expandChat: boolean }>(
-      "ifElse Pattern",
       ({ expandChat }) => {
         const optionA = derive(expandChat, (t) => t ? "A" : "a");
         const optionB = derive(expandChat, (t) => t ? "B" : "b");
@@ -1433,7 +1413,6 @@ describe("Pattern Runner", () => {
     const ifElsePattern = pattern<
       { condition: boolean; trueValue: string; falseValue: string }
     >(
-      "ifElse selection test",
       ({ condition, trueValue, falseValue }) => {
         // Use separate inputs for each branch to make dependencies clearer
         return {
@@ -1543,11 +1522,11 @@ describe("Pattern Runner", () => {
     );
 
     const innerPattern = pattern(
-      InnerSchema,
-      InnerSchema,
       ({ text }) => {
         return { text };
       },
+      InnerSchema,
+      InnerSchema,
     );
 
     const add = handler(
@@ -1560,11 +1539,11 @@ describe("Pattern Runner", () => {
     );
 
     const outerPattern = pattern(
-      OuterSchema,
-      OutputWithHandler,
       ({ list }) => {
         return { list, add: add({ list }) };
       },
+      OuterSchema,
+      OutputWithHandler,
     );
 
     runtime.run(tx, outerPattern, {}, pieceCell);
@@ -1644,7 +1623,6 @@ describe("Pattern Runner", () => {
     );
 
     const testPattern = pattern(
-      "Handler dependency pulling test",
       () => {
         // Create handler B's stream (receives cell references, logs values)
         const streamB = handlerB({});
@@ -1716,7 +1694,6 @@ describe("Pattern Runner", () => {
     );
 
     const sampleP = pattern<{ first: number; second: number }>(
-      "Sample Pattern",
       ({ first, second }) => {
         return { result: computeWithSample({ first, second }) };
       },
@@ -1799,7 +1776,6 @@ describe("Pattern Runner", () => {
     let lift2Runs = 0;
 
     const pattern1 = pattern<{ value: number }>(
-      "Pattern 1 with lift",
       ({ value }) => {
         const doubled = lift(
           { type: "number" } as const satisfies JSONSchema,
@@ -1814,7 +1790,6 @@ describe("Pattern Runner", () => {
     );
 
     const pattern2 = pattern<{ value: number }>(
-      "Pattern 2 with lift",
       ({ value }) => {
         const tripled = lift(
           { type: "number" } as const satisfies JSONSchema,
@@ -1892,8 +1867,6 @@ describe("Pattern Runner", () => {
 
     // Create a pattern that uses SELF
     const treeNodePattern = pattern(
-      InputSchema,
-      OutputSchema,
       (input: any) => {
         const label = input.label;
         const self = input[SELF];
@@ -1907,6 +1880,8 @@ describe("Pattern Runner", () => {
           hasSelf: self !== undefined,
         };
       },
+      InputSchema,
+      OutputSchema,
     );
 
     const resultCell = runtime.getCell<{
@@ -1954,8 +1929,6 @@ describe("Pattern Runner", () => {
 
     // Pattern that exposes self in output
     const selfRefPattern = pattern(
-      InputSchema,
-      OutputSchema,
       (input: any) => {
         const self = input[SELF];
         return {
@@ -1963,6 +1936,8 @@ describe("Pattern Runner", () => {
           self, // Expose the self reference
         };
       },
+      InputSchema,
+      OutputSchema,
     );
 
     // Check the serialized pattern structure
@@ -1990,8 +1965,6 @@ describe("Pattern Runner", () => {
 
     // Pattern (not pattern) that uses SELF
     const selfPattern = pattern(
-      InputSchema,
-      OutputSchema,
       (input: any) => {
         const self = input[SELF];
         return {
@@ -1999,6 +1972,8 @@ describe("Pattern Runner", () => {
           selfAvailable: self !== undefined,
         };
       },
+      InputSchema,
+      OutputSchema,
     );
 
     const resultCell = runtime.getCell<{
@@ -2070,6 +2045,19 @@ describe("Pattern Runner", () => {
 
     // Inner pattern that computes itemCount from a values array
     const itemCountPattern = pattern(
+      ({ values }) => {
+        // Compute item count from values
+        const itemCount = lift(
+          {
+            type: "array",
+            items: { type: "number" },
+          } as const satisfies JSONSchema,
+          { type: "number" } as const satisfies JSONSchema,
+          (arr: number[]) => (Array.isArray(arr) ? arr.length : 0),
+        )(values);
+
+        return { values, itemCount };
+      },
       // Input schema
       {
         type: "object",
@@ -2090,19 +2078,6 @@ describe("Pattern Runner", () => {
           itemCount: { type: "number" },
         },
       } as const satisfies JSONSchema,
-      ({ values }) => {
-        // Compute item count from values
-        const itemCount = lift(
-          {
-            type: "array",
-            items: { type: "number" },
-          } as const satisfies JSONSchema,
-          { type: "number" } as const satisfies JSONSchema,
-          (arr: number[]) => (Array.isArray(arr) ? arr.length : 0),
-        )(values);
-
-        return { values, itemCount };
-      },
     );
 
     // Lift that dynamically instantiates itemCountPattern for each group
@@ -2175,6 +2150,11 @@ describe("Pattern Runner", () => {
 
     // Outer pattern that uses instantiateGroups and computeTotalItems
     const outerPattern = pattern(
+      ({ groups: groupSeeds }) => {
+        const groups = instantiateGroups({ groups: groupSeeds });
+        const totalItems = computeTotalItems(groups);
+        return { groups, totalItems };
+      },
       {
         type: "object",
         properties: {
@@ -2208,11 +2188,6 @@ describe("Pattern Runner", () => {
           totalItems: { type: "number" },
         },
       } as const satisfies JSONSchema,
-      ({ groups: groupSeeds }) => {
-        const groups = instantiateGroups({ groups: groupSeeds });
-        const totalItems = computeTotalItems(groups);
-        return { groups, totalItems };
-      },
     );
 
     const resultCell = runtime.getCell<{
@@ -2255,7 +2230,6 @@ describe("Pattern Runner", () => {
     const testPattern = pattern<
       { items: Array<{ name: string; visible: boolean }> }
     >(
-      "CT-1158 Map Truncation Test",
       ({ items }) => {
         // Map over items, returning item name if visible, null otherwise
         const mapped = items.map((item) =>

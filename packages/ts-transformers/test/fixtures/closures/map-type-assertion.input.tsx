@@ -11,7 +11,7 @@ interface State {
   prefix: string;
 }
 
-export default pattern<State>("TypeAssertion", (state) => {
+export default pattern<State>((state) => {
   // Type assertion to OpaqueRef<Item[]>
   const typedItems = state.items as OpaqueRef<Item[]>;
 

@@ -17,7 +17,49 @@ interface Item {
     id: number;
     value: string;
 }
-export default pattern({
+export default pattern(({ items }) => {
+    // items.map() will be transformed to items.mapWithPattern()
+    // derive has NO captures, so it won't be transformed by ClosureTransformer
+    // The callback param has NO explicit type annotation
+    const count = derive({
+        type: "array",
+        items: {
+            type: "string"
+        }
+    } as const satisfies __ctHelpers.JSONSchema, {
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema, items.mapWithPattern(__ctHelpers.pattern(({ element: item, params: {} }) => item.value, {
+        type: "object",
+        properties: {
+            element: {
+                $ref: "#/$defs/Item"
+            },
+            params: {
+                type: "object",
+                properties: {}
+            }
+        },
+        required: ["element", "params"],
+        $defs: {
+            Item: {
+                type: "object",
+                properties: {
+                    id: {
+                        type: "number"
+                    },
+                    value: {
+                        type: "string"
+                    }
+                },
+                required: ["id", "value"]
+            }
+        }
+    } as const satisfies __ctHelpers.JSONSchema, {
+        type: "string",
+        asOpaque: true
+    } as const satisfies __ctHelpers.JSONSchema), {}), (arr) => arr.length);
+    return { count };
+}, {
     type: "object",
     properties: {
         items: {
@@ -52,49 +94,7 @@ export default pattern({
         }
     },
     required: ["count"]
-} as const satisfies __ctHelpers.JSONSchema, ({ items }) => {
-    // items.map() will be transformed to items.mapWithPattern()
-    // derive has NO captures, so it won't be transformed by ClosureTransformer
-    // The callback param has NO explicit type annotation
-    const count = derive({
-        type: "array",
-        items: {
-            type: "string"
-        }
-    } as const satisfies __ctHelpers.JSONSchema, {
-        type: "number"
-    } as const satisfies __ctHelpers.JSONSchema, items.mapWithPattern(__ctHelpers.pattern({
-        type: "object",
-        properties: {
-            element: {
-                $ref: "#/$defs/Item"
-            },
-            params: {
-                type: "object",
-                properties: {}
-            }
-        },
-        required: ["element", "params"],
-        $defs: {
-            Item: {
-                type: "object",
-                properties: {
-                    id: {
-                        type: "number"
-                    },
-                    value: {
-                        type: "string"
-                    }
-                },
-                required: ["id", "value"]
-            }
-        }
-    } as const satisfies __ctHelpers.JSONSchema, {
-        type: "string",
-        asOpaque: true
-    } as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: {} }) => item.value), {}), (arr) => arr.length);
-    return { count };
-});
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

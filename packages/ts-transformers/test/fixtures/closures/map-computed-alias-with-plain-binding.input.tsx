@@ -14,7 +14,7 @@ interface State {
   items: Item[];
 }
 
-export default pattern<State>("MapComputedAliasWithPlainBinding", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>

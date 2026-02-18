@@ -1,17 +1,6 @@
 import * as __ctHelpers from "commontools";
 import { cell, computed, pattern } from "commontools";
-export default pattern({
-    type: "object",
-    properties: {
-        multiplier: {
-            type: "number"
-        }
-    },
-    required: ["multiplier"]
-} as const satisfies __ctHelpers.JSONSchema, {
-    type: "number",
-    asOpaque: true
-} as const satisfies __ctHelpers.JSONSchema, (config: {
+export default pattern((config: {
     multiplier: number;
 }) => {
     const value = cell(10, {
@@ -44,7 +33,18 @@ export default pattern({
         }
     }, ({ value, config }) => value.get() * config.multiplier);
     return result;
-});
+}, {
+    type: "object",
+    properties: {
+        multiplier: {
+            type: "number"
+        }
+    },
+    required: ["multiplier"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "number",
+    asOpaque: true
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

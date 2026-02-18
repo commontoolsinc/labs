@@ -12,7 +12,7 @@ interface State {
   suffix: string;
 }
 
-export default pattern<State>("TemplateLiteral", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>

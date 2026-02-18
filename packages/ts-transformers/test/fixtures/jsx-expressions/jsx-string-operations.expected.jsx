@@ -7,57 +7,7 @@ interface State {
     message: string;
     count: number;
 }
-export default pattern({
-    type: "object",
-    properties: {
-        firstName: {
-            type: "string"
-        },
-        lastName: {
-            type: "string"
-        },
-        title: {
-            type: "string"
-        },
-        message: {
-            type: "string"
-        },
-        count: {
-            type: "number"
-        }
-    },
-    required: ["firstName", "lastName", "title", "message", "count"]
-} as const satisfies __ctHelpers.JSONSchema, {
-    type: "object",
-    properties: {
-        $UI: {
-            $ref: "#/$defs/JSXElement"
-        }
-    },
-    required: ["$UI"],
-    $defs: {
-        JSXElement: {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    type: "object",
-                    properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
-                }]
-        },
-        UIRenderable: {
-            type: "object",
-            properties: {
-                $UI: {
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }
-            },
-            required: ["$UI"]
-        }
-    }
-} as const satisfies __ctHelpers.JSONSchema, (state) => {
+export default pattern((state) => {
     return {
         [UI]: (<div>
         <h3>String Concatenation</h3>
@@ -350,7 +300,57 @@ export default pattern({
             } }, ({ state }) => "Count: " + state.count)}</p>
       </div>),
     };
-});
+}, {
+    type: "object",
+    properties: {
+        firstName: {
+            type: "string"
+        },
+        lastName: {
+            type: "string"
+        },
+        title: {
+            type: "string"
+        },
+        message: {
+            type: "string"
+        },
+        count: {
+            type: "number"
+        }
+    },
+    required: ["firstName", "lastName", "title", "message", "count"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        $UI: {
+            $ref: "#/$defs/JSXElement"
+        }
+    },
+    required: ["$UI"],
+    $defs: {
+        JSXElement: {
+            anyOf: [{
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    $ref: "#/$defs/UIRenderable",
+                    asOpaque: true
+                }]
+        },
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

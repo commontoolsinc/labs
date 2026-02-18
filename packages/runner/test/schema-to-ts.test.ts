@@ -775,8 +775,6 @@ describe("Schema-to-TS Type Conversion", () => {
 
     // Create a pattern using JSON schemas
     const processPattern = pattern(
-      inputSchema,
-      outputSchema,
       (input) => {
         // These lines verify that input has the correct type according to inputSchema
         const name = input.name;
@@ -792,6 +790,8 @@ describe("Schema-to-TS Type Conversion", () => {
           },
         };
       },
+      inputSchema,
+      outputSchema,
     );
 
     // Verify types statically

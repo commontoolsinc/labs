@@ -6,7 +6,7 @@ interface State {
   multiplier: number;
 }
 
-export default pattern<State>("CellMapCaptures", (state) => {
+export default pattern<State>((state) => {
   // Explicitly type as Cell to ensure closure transformation
   const typedValues: Cell<number[]> = cell(state.values);
 

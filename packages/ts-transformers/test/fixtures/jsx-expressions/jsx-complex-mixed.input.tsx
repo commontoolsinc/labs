@@ -15,7 +15,7 @@ interface State {
   taxRate: number;
 }
 
-export default pattern<State>("ComplexMixed", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>

@@ -41,7 +41,7 @@ describe("generateText", () => {
 
     const { commontools } = createBuilder();
     ({ pattern, generateText } = commontools);
-    dummyPattern = pattern("Dummy Tool", () => ({}));
+    dummyPattern = pattern(() => ({}), { type: "object" });
   });
 
   afterEach(async () => {
@@ -67,7 +67,7 @@ describe("generateText", () => {
       },
     );
 
-    const testPattern = pattern("Generate Text Simple", () => {
+    const testPattern = pattern(() => {
       return generateText({
         prompt: testPrompt,
       });
@@ -110,7 +110,7 @@ describe("generateText", () => {
       },
     );
 
-    const testPattern = pattern("Generate Text Messages", () => {
+    const testPattern = pattern(() => {
       return generateText({
         messages,
       });
@@ -151,7 +151,7 @@ describe("generateText", () => {
       },
     );
 
-    const testPattern = pattern("Generate Text System", () => {
+    const testPattern = pattern(() => {
       return generateText({
         prompt: testPrompt,
         system: systemPrompt,
@@ -216,7 +216,7 @@ describe("generateText", () => {
       },
     );
 
-    const testPattern = pattern("Generate Text Tools", () => {
+    const testPattern = pattern(() => {
       return generateText({
         prompt: testPrompt,
         tools: {

@@ -7,66 +7,7 @@ interface State {
     row: number;
     col: number;
 }
-export default pattern({
-    type: "object",
-    properties: {
-        items: {
-            type: "array",
-            items: {
-                type: "string"
-            }
-        },
-        index: {
-            type: "number"
-        },
-        matrix: {
-            type: "array",
-            items: {
-                type: "array",
-                items: {
-                    type: "number"
-                }
-            }
-        },
-        row: {
-            type: "number"
-        },
-        col: {
-            type: "number"
-        }
-    },
-    required: ["items", "index", "matrix", "row", "col"]
-} as const satisfies __ctHelpers.JSONSchema, {
-    type: "object",
-    properties: {
-        $UI: {
-            $ref: "#/$defs/JSXElement"
-        }
-    },
-    required: ["$UI"],
-    $defs: {
-        JSXElement: {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    type: "object",
-                    properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
-                }]
-        },
-        UIRenderable: {
-            type: "object",
-            properties: {
-                $UI: {
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }
-            },
-            required: ["$UI"]
-        }
-    }
-} as const satisfies __ctHelpers.JSONSchema, (state) => {
+export default pattern((state) => {
     return {
         [UI]: (<div>
         <h3>Dynamic Element Access</h3>
@@ -167,7 +108,66 @@ export default pattern({
             } }, ({ state }) => state.matrix[state.row]![state.col])}</p>
       </div>),
     };
-});
+}, {
+    type: "object",
+    properties: {
+        items: {
+            type: "array",
+            items: {
+                type: "string"
+            }
+        },
+        index: {
+            type: "number"
+        },
+        matrix: {
+            type: "array",
+            items: {
+                type: "array",
+                items: {
+                    type: "number"
+                }
+            }
+        },
+        row: {
+            type: "number"
+        },
+        col: {
+            type: "number"
+        }
+    },
+    required: ["items", "index", "matrix", "row", "col"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        $UI: {
+            $ref: "#/$defs/JSXElement"
+        }
+    },
+    required: ["$UI"],
+    $defs: {
+        JSXElement: {
+            anyOf: [{
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    $ref: "#/$defs/UIRenderable",
+                    asOpaque: true
+                }]
+        },
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

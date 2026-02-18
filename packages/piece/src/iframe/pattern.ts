@@ -36,13 +36,13 @@ export const buildFullPattern = (iframe: IFramePattern) => {
   } /* IFRAME-V0 */
 
   const runIframePattern = ({ argumentSchema, resultSchema, src, name }: IFramePattern) =>
-  pattern(argumentSchema, resultSchema, (data) => ({
+  pattern((data) => ({
     [NAME]: name,
     [UI]: (
       <ct-iframe src={src} $context={data}></ct-iframe>
     ),
 ${result}
-  }));
+  }), argumentSchema, resultSchema);
 
   export default runIframePattern(inst);
   `;

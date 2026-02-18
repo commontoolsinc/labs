@@ -20,7 +20,7 @@ interface State {
   separator: string;
 }
 
-export default pattern<State>("MethodChains", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>

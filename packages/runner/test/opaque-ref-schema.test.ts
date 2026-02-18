@@ -261,16 +261,16 @@ describe("OpaqueRef Schema Support", () => {
     it("should initialize opaque refs with schema from argument schema", () => {
       // Create a pattern with schema
       const testPattern = pattern(
+        (input) => {
+          // Directly return the input
+          return input;
+        },
         {
           type: "object",
           properties: {
             name: { type: "string" },
             age: { type: "number" },
           },
-        },
-        (input) => {
-          // Directly return the input
-          return input;
         },
       );
 
@@ -287,6 +287,16 @@ describe("OpaqueRef Schema Support", () => {
     it("should track schema through pattern bindings", () => {
       // Create a pattern that uses child properties
       const testPattern = pattern(
+        (input) => {
+          // Get a nested property
+          // TODO(seefeld): Fix type inference
+          const age = (input as any).user.details.age;
+
+          // Export both the original ref and nested property
+          return {
+            age,
+          };
+        },
         {
           type: "object",
           properties: {
@@ -304,16 +314,6 @@ describe("OpaqueRef Schema Support", () => {
             },
           },
         } as const satisfies JSONSchema,
-        (input) => {
-          // Get a nested property
-          // TODO(seefeld): Fix type inference
-          const age = (input as any).user.details.age;
-
-          // Export both the original ref and nested property
-          return {
-            age,
-          };
-        },
       );
 
       expect((testPattern.result as any).age?.$alias).toBeDefined();

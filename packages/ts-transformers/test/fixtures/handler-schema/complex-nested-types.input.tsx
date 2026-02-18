@@ -47,6 +47,6 @@ const _updateTags = handler<
 
 export { userHandler };
 
-export default pattern("complex-nested-types test", () => {
+export default pattern(() => {
   return { userHandler };
 });

@@ -5,7 +5,7 @@ interface State {
   counter: Cell<number>;
 }
 
-export default pattern<State>("LogButton", (_state) => {
+export default pattern<State>((_state) => {
   return {
     [UI]: (
       <button type="button" onClick={() => console.log("hi")}>

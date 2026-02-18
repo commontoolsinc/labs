@@ -10,7 +10,7 @@ interface State {
   items: Array<Record<string, number>>;
 }
 
-export default pattern<State>("ComputedAliasSideEffect", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>

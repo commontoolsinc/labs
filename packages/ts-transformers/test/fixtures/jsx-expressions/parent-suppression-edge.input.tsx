@@ -77,7 +77,7 @@ interface State {
   };
 }
 
-export default pattern<State>("ParentSuppressionEdge", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>

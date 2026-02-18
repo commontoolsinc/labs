@@ -41,7 +41,6 @@ describe("when and unless built-in functions", () => {
   describe("when function (&& semantics)", () => {
     it("returns value when condition is truthy (true)", async () => {
       const testPattern = pattern<{ condition: boolean }>(
-        "when truthy test",
         ({ condition }) => {
           const result = when(condition, "success");
           return { result };
@@ -68,7 +67,6 @@ describe("when and unless built-in functions", () => {
 
     it("returns falsy condition when condition is false", async () => {
       const testPattern = pattern<{ condition: boolean }>(
-        "when falsy false test",
         ({ condition }) => {
           const result = when(condition, "success");
           return { result };
@@ -95,7 +93,6 @@ describe("when and unless built-in functions", () => {
 
     it("returns value when condition is truthy number (1)", async () => {
       const testPattern = pattern<{ condition: number }>(
-        "when truthy number test",
         ({ condition }) => {
           const result = when(condition, "has value");
           return { result };
@@ -122,7 +119,6 @@ describe("when and unless built-in functions", () => {
 
     it("returns 0 when condition is 0 (falsy)", async () => {
       const testPattern = pattern<{ condition: number }>(
-        "when falsy zero test",
         ({ condition }) => {
           const result = when(condition, "has value");
           return { result };
@@ -144,7 +140,6 @@ describe("when and unless built-in functions", () => {
 
     it("returns empty string when condition is empty string (falsy)", async () => {
       const testPattern = pattern<{ condition: string }>(
-        "when falsy empty string test",
         ({ condition }) => {
           const result = when(condition, "fallback");
           return { result };
@@ -171,7 +166,6 @@ describe("when and unless built-in functions", () => {
 
     it("returns value when condition is non-empty string (truthy)", async () => {
       const testPattern = pattern<{ condition: string }>(
-        "when truthy string test",
         ({ condition }) => {
           const result = when(condition, "found");
           return { result };
@@ -198,7 +192,6 @@ describe("when and unless built-in functions", () => {
 
     it("works with derived condition", async () => {
       const testPattern = pattern<{ count: number }>(
-        "when derived condition test",
         ({ count }) => {
           const isPositive = lift((n: number) => n > 0)(count);
           const result = when(isPositive, "positive");
@@ -221,7 +214,6 @@ describe("when and unless built-in functions", () => {
 
     it("works with derived condition returning false", async () => {
       const testPattern = pattern<{ count: number }>(
-        "when derived false condition test",
         ({ count }) => {
           const isPositive = lift((n: number) => n > 0)(count);
           const result = when(isPositive, "positive");
@@ -246,7 +238,6 @@ describe("when and unless built-in functions", () => {
   describe("unless function (|| semantics)", () => {
     it("returns truthy condition as-is when condition is true", async () => {
       const testPattern = pattern<{ condition: boolean }>(
-        "unless truthy test",
         ({ condition }) => {
           const result = unless(condition, "fallback");
           return { result };
@@ -273,7 +264,6 @@ describe("when and unless built-in functions", () => {
 
     it("returns fallback value when condition is false", async () => {
       const testPattern = pattern<{ condition: boolean }>(
-        "unless falsy false test",
         ({ condition }) => {
           const result = unless(condition, "fallback");
           return { result };
@@ -300,7 +290,6 @@ describe("when and unless built-in functions", () => {
 
     it("returns truthy number as-is", async () => {
       const testPattern = pattern<{ condition: number }>(
-        "unless truthy number test",
         ({ condition }) => {
           const result = unless(condition, 999);
           return { result };
@@ -327,7 +316,6 @@ describe("when and unless built-in functions", () => {
 
     it("returns fallback when condition is 0 (falsy)", async () => {
       const testPattern = pattern<{ condition: number }>(
-        "unless falsy zero test",
         ({ condition }) => {
           const result = unless(condition, 999);
           return { result };
@@ -349,7 +337,6 @@ describe("when and unless built-in functions", () => {
 
     it("returns truthy string as-is", async () => {
       const testPattern = pattern<{ condition: string }>(
-        "unless truthy string test",
         ({ condition }) => {
           const result = unless(condition, "default");
           return { result };
@@ -376,7 +363,6 @@ describe("when and unless built-in functions", () => {
 
     it("returns fallback when condition is empty string (falsy)", async () => {
       const testPattern = pattern<{ condition: string }>(
-        "unless falsy empty string test",
         ({ condition }) => {
           const result = unless(condition, "default");
           return { result };
@@ -403,7 +389,6 @@ describe("when and unless built-in functions", () => {
 
     it("works with derived condition", async () => {
       const testPattern = pattern<{ name: string }>(
-        "unless derived condition test",
         ({ name }) => {
           const displayName = lift((n: string) => n || "")(name);
           const result = unless(displayName, "Anonymous");
@@ -431,7 +416,6 @@ describe("when and unless built-in functions", () => {
 
     it("works with derived condition returning empty", async () => {
       const testPattern = pattern<{ name: string }>(
-        "unless derived empty condition test",
         ({ name }) => {
           const displayName = lift((n: string) => n || "")(name);
           const result = unless(displayName, "Anonymous");
@@ -456,7 +440,6 @@ describe("when and unless built-in functions", () => {
   describe("when and unless combined patterns", () => {
     it("chain when followed by unless (a && b || c pattern)", async () => {
       const testPattern = pattern<{ hasData: boolean; data: string }>(
-        "when unless chain test",
         ({ hasData, data }) => {
           // Equivalent to: hasData && data || "no data"
           const dataIfAvailable = when(hasData, data);
@@ -486,7 +469,6 @@ describe("when and unless built-in functions", () => {
 
     it("chain when followed by unless returns fallback when first is false", async () => {
       const testPattern = pattern<{ hasData: boolean; data: string }>(
-        "when unless chain fallback test",
         ({ hasData, data }) => {
           const dataIfAvailable = when(hasData, data);
           const result = unless(dataIfAvailable, "no data");
@@ -514,7 +496,6 @@ describe("when and unless built-in functions", () => {
 
     it("multiple when clauses (a && b && c pattern)", async () => {
       const testPattern = pattern<{ a: boolean; b: boolean }>(
-        "multiple when test",
         ({ a, b }) => {
           // Equivalent to: a && b && "all true"
           const aAndB = when(a, b);
@@ -544,7 +525,6 @@ describe("when and unless built-in functions", () => {
 
     it("multiple when returns false when first condition is false", async () => {
       const testPattern = pattern<{ a: boolean; b: boolean }>(
-        "multiple when first false test",
         ({ a, b }) => {
           const aAndB = when(a, b);
           const result = when(aAndB, "all true");
@@ -572,7 +552,6 @@ describe("when and unless built-in functions", () => {
 
     it("multiple unless clauses (a || b || c pattern)", async () => {
       const testPattern = pattern<{ a: string; b: string }>(
-        "multiple unless test",
         ({ a, b }) => {
           // Equivalent to: a || b || "default"
           const aOrB = unless(a, b);
@@ -602,7 +581,6 @@ describe("when and unless built-in functions", () => {
 
     it("multiple unless falls through to second when first is falsy", async () => {
       const testPattern = pattern<{ a: string; b: string }>(
-        "multiple unless second test",
         ({ a, b }) => {
           const aOrB = unless(a, b);
           const result = unless(aOrB, "default");
@@ -630,7 +608,6 @@ describe("when and unless built-in functions", () => {
 
     it("multiple unless falls through to default when all are falsy", async () => {
       const testPattern = pattern<{ a: string; b: string }>(
-        "multiple unless default test",
         ({ a, b }) => {
           const aOrB = unless(a, b);
           const result = unless(aOrB, "default");

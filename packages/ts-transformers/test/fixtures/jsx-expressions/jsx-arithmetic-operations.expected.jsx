@@ -6,54 +6,7 @@ interface State {
     discount: number;
     quantity: number;
 }
-export default pattern({
-    type: "object",
-    properties: {
-        count: {
-            type: "number"
-        },
-        price: {
-            type: "number"
-        },
-        discount: {
-            type: "number"
-        },
-        quantity: {
-            type: "number"
-        }
-    },
-    required: ["count", "price", "discount", "quantity"]
-} as const satisfies __ctHelpers.JSONSchema, {
-    type: "object",
-    properties: {
-        $UI: {
-            $ref: "#/$defs/JSXElement"
-        }
-    },
-    required: ["$UI"],
-    $defs: {
-        JSXElement: {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    type: "object",
-                    properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
-                }]
-        },
-        UIRenderable: {
-            type: "object",
-            properties: {
-                $UI: {
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }
-            },
-            required: ["$UI"]
-        }
-    }
-} as const satisfies __ctHelpers.JSONSchema, (state) => {
+export default pattern((state) => {
     return {
         [UI]: (<div>
         <h3>Basic Arithmetic</h3>
@@ -335,7 +288,54 @@ export default pattern({
             } }, ({ state }) => state.price + 10)}</p>
       </div>),
     };
-});
+}, {
+    type: "object",
+    properties: {
+        count: {
+            type: "number"
+        },
+        price: {
+            type: "number"
+        },
+        discount: {
+            type: "number"
+        },
+        quantity: {
+            type: "number"
+        }
+    },
+    required: ["count", "price", "discount", "quantity"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        $UI: {
+            $ref: "#/$defs/JSXElement"
+        }
+    },
+    required: ["$UI"],
+    $defs: {
+        JSXElement: {
+            anyOf: [{
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    $ref: "#/$defs/UIRenderable",
+                    asOpaque: true
+                }]
+        },
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

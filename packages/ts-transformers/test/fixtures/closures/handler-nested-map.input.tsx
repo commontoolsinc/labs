@@ -6,7 +6,7 @@ interface State {
   multiplier: number;
 }
 
-export default pattern<State>("NestedMap", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <button

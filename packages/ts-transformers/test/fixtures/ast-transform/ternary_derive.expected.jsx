@@ -3,49 +3,7 @@ import { Default, NAME, pattern, UI } from "commontools";
 interface PatternState {
     value: Default<number, 0>;
 }
-export default pattern({
-    type: "object",
-    properties: {
-        value: {
-            type: "number",
-            "default": 0
-        }
-    },
-    required: ["value"]
-} as const satisfies __ctHelpers.JSONSchema, {
-    type: "object",
-    properties: {
-        $NAME: {
-            type: "string"
-        },
-        $UI: {
-            $ref: "#/$defs/JSXElement"
-        }
-    },
-    required: ["$NAME", "$UI"],
-    $defs: {
-        JSXElement: {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    type: "object",
-                    properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
-                }]
-        },
-        UIRenderable: {
-            type: "object",
-            properties: {
-                $UI: {
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }
-            },
-            required: ["$UI"]
-        }
-    }
-} as const satisfies __ctHelpers.JSONSchema, (state) => {
+export default pattern((state) => {
     return {
         [NAME]: "test ternary with derive",
         [UI]: (<div>
@@ -102,7 +60,49 @@ export default pattern({
             } }, ({ state }) => state.value + 2), "undefined")}
       </div>),
     };
-});
+}, {
+    type: "object",
+    properties: {
+        value: {
+            type: "number",
+            "default": 0
+        }
+    },
+    required: ["value"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        $NAME: {
+            type: "string"
+        },
+        $UI: {
+            $ref: "#/$defs/JSXElement"
+        }
+    },
+    required: ["$NAME", "$UI"],
+    $defs: {
+        JSXElement: {
+            anyOf: [{
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    $ref: "#/$defs/UIRenderable",
+                    asOpaque: true
+                }]
+        },
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

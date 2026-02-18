@@ -28,15 +28,15 @@ class TestClass {
     }
 }
 // 5. Inside pattern
-const testPattern = pattern(false as const satisfies __ctHelpers.JSONSchema, {
-    type: "number",
-    asCell: true
-} as const satisfies __ctHelpers.JSONSchema, () => {
+const testPattern = pattern(() => {
     const _inPattern = cell(50, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema);
     return _inPattern;
-});
+}, false as const satisfies __ctHelpers.JSONSchema, {
+    type: "number",
+    asCell: true
+} as const satisfies __ctHelpers.JSONSchema);
 // 6. Inside handler
 const testHandler = handler(false as const satisfies __ctHelpers.JSONSchema, false as const satisfies __ctHelpers.JSONSchema, () => {
     const _inHandler = cell(60, {

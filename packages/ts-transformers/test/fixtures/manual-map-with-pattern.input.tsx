@@ -10,12 +10,12 @@ interface State {
   discount: number;
 }
 
-export default pattern<State>("ManualMapTest", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>
         {state.items.mapWithPattern(
-          pattern<{ element: Item; params: { discount: number } }>("MapItemPattern", ({ element, params }) => (
+          pattern<{ element: Item; params: { discount: number } }>(({ element, params }) => (
             <span>{element.price * params.discount}</span>
           )),
           { discount: state.discount }

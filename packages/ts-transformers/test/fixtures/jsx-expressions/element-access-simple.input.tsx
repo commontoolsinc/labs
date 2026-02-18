@@ -9,7 +9,7 @@ interface State {
   col: number;
 }
 
-export default pattern<State>("ElementAccessSimple", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>

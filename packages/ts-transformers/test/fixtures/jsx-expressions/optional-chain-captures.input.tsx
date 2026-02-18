@@ -10,7 +10,7 @@ interface State {
   items: Item[];
 }
 
-export default pattern<State>("OptionalChainCaptures", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>

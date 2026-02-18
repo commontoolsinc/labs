@@ -16,7 +16,7 @@ interface State {
   messages: Message[];
 }
 
-export default pattern<State>("DeriveMapUnionReturn", (state) => {
+export default pattern<State>((state) => {
   // This derive callback contains a nested map and returns string | null
   // The callback becomes synthetic during transformation, which previously
   // caused type inference to fail, resulting in a 'true' schema instead of

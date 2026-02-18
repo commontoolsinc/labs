@@ -12,7 +12,7 @@ interface State {
   threshold: number;
 }
 
-export default pattern<State>("ConditionalExpression", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>

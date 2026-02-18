@@ -57,7 +57,7 @@ function previous(value: number) {
   return value - 1;
 }
 
-export default pattern<PatternState, PatternOutput>("Counter", (state) => {
+export default pattern<PatternState, PatternOutput>((state) => {
   const array = derive(state.value, (value: number) => {
     // Clamp to prevent negative array length
     const length = Math.max(0, value);

@@ -6,7 +6,7 @@ interface State {
   discount: number;
 }
 
-export default pattern<State>("MapDestructuredAlias", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>

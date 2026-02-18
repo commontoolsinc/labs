@@ -14,7 +14,7 @@ interface FriendListState {
   >;
 }
 
-export default pattern<FriendListState>("making lists - simple", (state) => {
+export default pattern<FriendListState>((state) => {
   return {
     [UI]: (
       <div>

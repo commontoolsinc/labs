@@ -18,7 +18,7 @@ interface State {
   items: Item[];
 }
 
-export default pattern<State>("ModuleScopedReference", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>

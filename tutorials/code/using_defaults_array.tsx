@@ -18,7 +18,7 @@ const addItem = handler<
   },
 );
 
-export default pattern<TodoListState>("Todo List with Default", (state) => {
+export default pattern<TodoListState>((state) => {
   return {
     [UI]: (
       <div>

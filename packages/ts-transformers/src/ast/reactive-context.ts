@@ -311,12 +311,12 @@ export function isInsideRestrictedContext(
  *
  * @example
  * // Returns true (restricted - opaque reading not allowed):
- * pattern("test", ({ item }) => {
+ * pattern(({ item }) => {
  *   const x = item.price > 100; // <-- here
  * });
  *
  * // Returns false (safe wrapper - opaque reading allowed):
- * pattern("test", ({ item }) => {
+ * pattern(({ item }) => {
  *   const x = computed(() => item.price > 100); // <-- here (inside computed)
  * });
  */

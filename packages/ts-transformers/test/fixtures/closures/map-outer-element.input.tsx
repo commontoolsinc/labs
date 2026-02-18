@@ -6,7 +6,7 @@ interface State {
   highlight: string;
 }
 
-export default pattern<State>("MapOuterElement", (state) => {
+export default pattern<State>((state) => {
   const element = state.highlight;
   return {
     [UI]: (

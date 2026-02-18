@@ -13,7 +13,7 @@ const decrement = handler((_e, state: { value: Cell<number> }) => {
   state.value.set(state.value.get() - 1);
 });
 
-export default pattern<PatternState>("Counter", (state) => {
+export default pattern<PatternState>((state) => {
   // These should NOT be transformed (statement context)
   const next = state.value + 1;
   const previous = state.value - 1;

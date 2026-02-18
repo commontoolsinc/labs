@@ -3,7 +3,7 @@ import { cell, pattern, UI } from "commontools";
 
 // Tests mixed && and || operators: (a && b) || c
 // The && should use when, the || should use unless
-export default pattern("LogicalMixedAndOr", (_state) => {
+export default pattern((_state) => {
   const user = cell<{ name: string; age: number }>({ name: "", age: 0 });
   const defaultMessage = cell("Guest");
 

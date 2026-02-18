@@ -6,7 +6,7 @@ interface TodoItem {
   done: boolean;
 }
 
-export default pattern<{ items: TodoItem[] }>("Test Map", ({ items }) => {
+export default pattern<{ items: TodoItem[] }>(({ items }) => {
   // Map on opaque ref arrays should be transformed to mapWithPattern
   const mapped = items.map((item) => item.title);
 

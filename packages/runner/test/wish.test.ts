@@ -58,7 +58,7 @@ describe("wish built-in", () => {
     await runtime.idle();
     tx = runtime.edit();
 
-    const wishPattern = pattern("wish resolves all pieces", () => {
+    const wishPattern = pattern(() => {
       const allPieces = wish<Array<Record<string, unknown>>>({
         query: "/allPieces",
       });
@@ -124,7 +124,7 @@ describe("wish built-in", () => {
     await runtime.idle();
     tx = runtime.edit();
 
-    const wishPattern = pattern("wish semantic target", () => {
+    const wishPattern = pattern(() => {
       return {
         semanticAllPieces: wish({ query: "#allPieces" }),
         semanticFirstTitle: wish({ query: "#allPieces/0/title" }),
@@ -167,7 +167,7 @@ describe("wish built-in", () => {
     await runtime.idle();
     tx = runtime.edit();
 
-    const wishPattern = pattern("wish default pattern", () => {
+    const wishPattern = pattern(() => {
       return {
         defaultTitle: wish({ query: "#default/title" }),
         defaultGreeting: wish({ query: "#default/argument/greeting" }),
@@ -210,7 +210,7 @@ describe("wish built-in", () => {
     await runtime.idle();
     tx = runtime.edit();
 
-    const wishPattern = pattern("wish mentionable", () => {
+    const wishPattern = pattern(() => {
       return {
         mentionable: wish({ query: "#mentionable" }),
         firstMentionable: wish({ query: "#mentionable/0/name" }),
@@ -259,7 +259,7 @@ describe("wish built-in", () => {
     await runtime.idle();
     tx = runtime.edit();
 
-    const wishPattern = pattern("wish recent pieces", () => {
+    const wishPattern = pattern(() => {
       return {
         recent: wish({ query: "#recent" }),
         recentFirst: wish({ query: "#recent/0/name" }),
@@ -286,7 +286,7 @@ describe("wish built-in", () => {
   });
 
   it("returns current timestamp via #now", async () => {
-    const wishPattern = pattern("wish now", () => {
+    const wishPattern = pattern(() => {
       return { nowValue: wish({ query: "#now" }) };
     });
 
@@ -321,7 +321,7 @@ describe("wish built-in", () => {
     };
     spaceCell.withTx(tx).set(spaceData);
 
-    const wishPattern = pattern("wish space cell", () => {
+    const wishPattern = pattern(() => {
       const spaceResult = wish({ query: "/" });
       return { spaceResult };
     });
@@ -355,7 +355,7 @@ describe("wish built-in", () => {
       nested: { deep: { data: ["Alpha"] } },
     });
 
-    const wishPattern = pattern("wish space subpaths", () => {
+    const wishPattern = pattern(() => {
       return {
         configLink: wish({ query: "/config" }),
         dataLink: wish({ query: "/nested/deep/data" }),
@@ -387,7 +387,7 @@ describe("wish built-in", () => {
   });
 
   it("returns error for unknown wishes", async () => {
-    const wishPattern = pattern("wish unknown target", () => {
+    const wishPattern = pattern(() => {
       const missing = wish({ query: "" });
       return { missing };
     });
@@ -435,7 +435,7 @@ describe("wish built-in", () => {
       await runtime.idle();
       tx = runtime.edit();
 
-      const wishPattern = pattern("wish object syntax allPieces", () => {
+      const wishPattern = pattern(() => {
         const allPieces = wish<unknown[]>({ query: "#allPieces" });
         return { allPieces };
       });
@@ -485,7 +485,7 @@ describe("wish built-in", () => {
       await runtime.idle();
       tx = runtime.edit();
 
-      const wishPattern = pattern("wish object syntax with path", () => {
+      const wishPattern = pattern(() => {
         const firstTitle = wish<string>({
           query: "#allPieces",
           path: ["0", "title"],
@@ -538,7 +538,7 @@ describe("wish built-in", () => {
       await runtime.idle();
       tx = runtime.edit();
 
-      const wishPattern = pattern("wish object syntax slashed query", () => {
+      const wishPattern = pattern(() => {
         const firstTitle = wish<string>({
           query: "#allPieces/0/title",
         });
@@ -571,7 +571,7 @@ describe("wish built-in", () => {
       await runtime.idle();
       tx = runtime.edit();
 
-      const wishPattern = pattern("wish object syntax space", () => {
+      const wishPattern = pattern(() => {
         const spaceResult = wish({ query: "/" });
         return { spaceResult };
       });
@@ -604,7 +604,7 @@ describe("wish built-in", () => {
       await runtime.idle();
       tx = runtime.edit();
 
-      const wishPattern = pattern("wish object syntax space subpaths", () => {
+      const wishPattern = pattern(() => {
         return {
           configLink: wish({ query: "/", path: ["config"] }),
           dataLink: wish({ query: "/", path: ["nested", "deep", "data"] }),
@@ -633,7 +633,7 @@ describe("wish built-in", () => {
     });
 
     it("returns current timestamp via #now tag", async () => {
-      const wishPattern = pattern("wish object syntax now", () => {
+      const wishPattern = pattern(() => {
         return { nowValue: wish({ query: "#now" }) };
       });
 
@@ -660,7 +660,7 @@ describe("wish built-in", () => {
     });
 
     it("returns error for unknown tag", async () => {
-      const wishPattern = pattern("wish object syntax unknown", () => {
+      const wishPattern = pattern(() => {
         const missing = wish({ query: "#unknownTag" });
         return { missing };
       });
@@ -685,7 +685,7 @@ describe("wish built-in", () => {
     });
 
     it("returns error when tag is missing", async () => {
-      const wishPattern = pattern("wish object syntax no tag", () => {
+      const wishPattern = pattern(() => {
         const missing = wish({ query: "", path: ["some", "path"] });
         return { missing };
       });
@@ -717,7 +717,7 @@ describe("wish built-in", () => {
       await runtime.idle();
       tx = runtime.edit();
 
-      const wishPattern = pattern("wish object syntax UI success", () => {
+      const wishPattern = pattern(() => {
         const spaceResult = wish({ query: "/" });
         return { spaceResult };
       });
@@ -758,7 +758,7 @@ describe("wish built-in", () => {
       };
 
       try {
-        const wishPattern = pattern("wish object syntax UI error", () => {
+        const wishPattern = pattern(() => {
           const missing = wish({ query: "#unknownTag" });
           return { missing };
         });
@@ -809,7 +809,7 @@ describe("wish built-in", () => {
       await runtime.idle();
       tx = runtime.edit();
 
-      const wishPattern = pattern("wish unified shape candidates", () => {
+      const wishPattern = pattern(() => {
         const spaceResult = wish({ query: "/" });
         return { spaceResult };
       });
@@ -935,7 +935,7 @@ describe("wish built-in", () => {
       tx = runtime.edit();
 
       // Execute: Search with scope: ["."] should find only mentionable
-      const wishPattern = pattern("scope mentionable only", () => {
+      const wishPattern = pattern(() => {
         return { result: wish({ query: "#test-tag", scope: ["."] }) };
       });
 
@@ -1027,7 +1027,7 @@ describe("wish built-in", () => {
       tx = runtime.edit();
 
       // Execute: Search with scope: ["~"] should find only favorite
-      const wishPattern = pattern("scope favorites only", () => {
+      const wishPattern = pattern(() => {
         return { result: wish({ query: "#test-tag", scope: ["~"] }) };
       });
 
@@ -1119,7 +1119,7 @@ describe("wish built-in", () => {
       tx = runtime.edit();
 
       // Execute: Search with scope: ["~", "."] should find favorite
-      const wishPattern1 = pattern("scope both find favorite", () => {
+      const wishPattern1 = pattern(() => {
         return { result: wish({ query: "#fav-tag", scope: ["~", "."] }) };
       });
 
@@ -1144,7 +1144,7 @@ describe("wish built-in", () => {
       expect(favoriteData.type).toBe("favorite");
 
       // Execute: Search with scope: ["~", "."] should find mentionable
-      const wishPattern2 = pattern("scope both find mentionable", () => {
+      const wishPattern2 = pattern(() => {
         return { result: wish({ query: "#ment-tag", scope: ["~", "."] }) };
       });
 
@@ -1233,7 +1233,7 @@ describe("wish built-in", () => {
       tx = runtime.edit();
 
       // Execute: Search without scope parameter should default to favorites only
-      const wishPattern = pattern("default scope", () => {
+      const wishPattern = pattern(() => {
         return { result: wish({ query: "#test-tag" }) };
       });
 
@@ -1296,7 +1296,7 @@ describe("wish built-in", () => {
       tx = runtime.edit();
 
       // Execute: Search with mentionable scope only should give mentionable-specific error
-      const wishPattern = pattern("scope error test", () => {
+      const wishPattern = pattern(() => {
         return { result: wish({ query: "#nonexistent", scope: ["."] }) };
       });
 
@@ -1366,7 +1366,7 @@ describe("wish built-in", () => {
       tx = runtime.edit();
 
       // Execute: Search with mentionable scope only should fail (even though favorites has it)
-      const wishPattern = pattern("no mentionable match", () => {
+      const wishPattern = pattern(() => {
         return { result: wish({ query: "#test-tag", scope: ["."] }) };
       });
 
@@ -1433,7 +1433,7 @@ describe("wish built-in", () => {
       tx = runtime.edit();
 
       // Execute: #default with scope: ["~"] should resolve from home space
-      const wishPattern = pattern("default with tilde scope", () => {
+      const wishPattern = pattern(() => {
         return {
           result: wish({
             query: "#default",
@@ -1512,7 +1512,7 @@ describe("wish built-in", () => {
         tx = runtime.edit();
 
         // Execute: Search with scope containing the arbitrary DID
-        const wishPattern = pattern("scope arbitrary did", () => {
+        const wishPattern = pattern(() => {
           return {
             result: wish({
               query: "#arb-tag",
@@ -1624,7 +1624,7 @@ describe("wish built-in", () => {
         tx = runtime.edit();
 
         // Execute: Search with scope: [".", otherSpace.did()]
-        const wishPattern = pattern("scope dot and did", () => {
+        const wishPattern = pattern(() => {
           return {
             result: wish({
               query: "#multi-tag",
@@ -1723,7 +1723,7 @@ describe("wish built-in", () => {
         tx = runtime.edit();
 
         // Execute: Search with scope: ["~", otherSpace.did()]
-        const wishPattern = pattern("scope tilde and did", () => {
+        const wishPattern = pattern(() => {
           return {
             result: wish({
               query: "#combo-tag",
@@ -1802,7 +1802,7 @@ describe("wish built-in", () => {
         tx = runtime.edit();
 
         // Execute: #default with scope: [otherSpace.did()]
-        const wishPattern = pattern("default with did scope", () => {
+        const wishPattern = pattern(() => {
           return {
             result: wish({
               query: "#default",
@@ -1866,7 +1866,7 @@ describe("wish built-in", () => {
         tx = runtime.edit();
 
         // Execute: #allPieces with scope: [otherSpace.did()]
-        const wishPattern = pattern("allPieces with did scope", () => {
+        const wishPattern = pattern(() => {
           return {
             result: wish({
               query: "#allPieces",
@@ -1922,7 +1922,7 @@ describe("wish built-in", () => {
         tx = runtime.edit();
 
         // Execute: Search with only an arbitrary DID scope, no matches
-        const wishPattern = pattern("arb did error message", () => {
+        const wishPattern = pattern(() => {
           return {
             result: wish({
               query: "#nonexistent",
@@ -2015,7 +2015,7 @@ describe("wish built-in", () => {
       tx = runtime.edit();
 
       // Execute: Search both with scope: ["~", "."]
-      const wishPattern = pattern("scope dedup test", () => {
+      const wishPattern = pattern(() => {
         return { result: wish({ query: "#shared-tag", scope: ["~", "."] }) };
       });
 
@@ -2059,7 +2059,7 @@ describe("wish built-in", () => {
             name: "/main.tsx",
             contents: [
               "import { pattern, wish } from 'commontools';",
-              "export default pattern<{}>('Compiled Wish Test', () => {",
+              "export default pattern<{}>(() => {",
               "  const spaceResult = wish({ query: '/' });",
               "  return { spaceResult };",
               "});",
@@ -2114,7 +2114,7 @@ describe("wish built-in", () => {
             name: "/main.tsx",
             contents: [
               "import { pattern, wish } from 'commontools';",
-              "export default pattern<{}>('Compiled Wish Path Test', () => {",
+              "export default pattern<{}>(() => {",
               "  const deepValue = wish({ query: '/', path: ['nested', 'deep', 'value'] });",
               "  return { deepValue };",
               "});",
@@ -2210,7 +2210,7 @@ describe("wish built-in", () => {
       tx = runtime.edit();
 
       // Execute: Run pattern in different space (patternSpace)
-      const wishPattern = pattern("wish favorites cross-space", () => {
+      const wishPattern = pattern(() => {
         return { favorites: wish({ query: "#favorites" }) };
       });
 
@@ -2269,7 +2269,7 @@ describe("wish built-in", () => {
       tx = runtime.edit();
 
       // Execute: Run pattern in pattern space that wishes for #default
-      const wishPattern = pattern("wish default cross-space", () => {
+      const wishPattern = pattern(() => {
         return { defaultData: wish({ query: "#default" }) };
       });
 
@@ -2331,7 +2331,7 @@ describe("wish built-in", () => {
       tx = runtime.edit();
 
       // Execute: Single pattern wishes for both
-      const wishPattern = pattern("wish mixed tags", () => {
+      const wishPattern = pattern(() => {
         return {
           favorites: wish({ query: "#favorites" }),
           patternData: wish({ query: "/", path: ["data"] }),
@@ -2399,7 +2399,7 @@ describe("wish built-in", () => {
       tx = runtime.edit();
 
       // Execute: Pattern uses computed() for the query - just like GoogleAuthManager
-      const wishPattern = pattern("wish computed query", () => {
+      const wishPattern = pattern(() => {
         const tag = computed(() => "#googleAuth");
         const authResult = wish({ query: tag });
         return { authResult };
@@ -2464,7 +2464,7 @@ describe("wish built-in", () => {
       tx = runtime.edit();
 
       // Execute: Pattern in different space wishes for #myTag
-      const wishPattern = pattern("wish hashtag search", () => {
+      const wishPattern = pattern(() => {
         return { taggedItem: wish({ query: "#myTag" }) };
       });
 
@@ -2489,7 +2489,7 @@ describe("wish built-in", () => {
 
     it("starts piece automatically when accessed via cross-space wish", async () => {
       // Setup 1: Create a simple counter pattern/piece
-      const counterPattern = pattern<{ count: number }>("counter piece", () => {
+      const counterPattern = pattern<{ count: number }>(() => {
         const count = 0;
         return {
           count,
@@ -2528,7 +2528,7 @@ describe("wish built-in", () => {
       tx = runtime.edit();
 
       // Execute: Pattern in different space wishes for the piece via hashtag
-      const wishingPattern = pattern("wish for piece", () => {
+      const wishingPattern = pattern(() => {
         return { pieceData: wish({ query: "#counterPiece" }) };
       });
 

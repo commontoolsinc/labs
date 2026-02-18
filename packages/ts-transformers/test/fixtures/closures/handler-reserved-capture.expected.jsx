@@ -3,7 +3,25 @@ import { pattern, UI } from "commontools";
 interface State {
     label: string;
 }
-export default pattern({
+export default pattern((state) => {
+    const __ct_handler_event = state.label;
+    return {
+        [UI]: (<button type="button" onClick={__ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
+            type: "object",
+            properties: {
+                __ct_handler_event: {
+                    type: "string",
+                    asOpaque: true
+                }
+            },
+            required: ["__ct_handler_event"]
+        } as const satisfies __ctHelpers.JSONSchema, (__ct_handler_event_1, { __ct_handler_event }) => __ct_handler_event)({
+            __ct_handler_event: __ct_handler_event
+        })}>
+        Echo
+      </button>),
+    };
+}, {
     type: "object",
     properties: {
         label: {
@@ -41,25 +59,7 @@ export default pattern({
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, (state) => {
-    const __ct_handler_event = state.label;
-    return {
-        [UI]: (<button type="button" onClick={__ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
-            type: "object",
-            properties: {
-                __ct_handler_event: {
-                    type: "string",
-                    asOpaque: true
-                }
-            },
-            required: ["__ct_handler_event"]
-        } as const satisfies __ctHelpers.JSONSchema, (__ct_handler_event_1, { __ct_handler_event }) => __ct_handler_event)({
-            __ct_handler_event: __ct_handler_event
-        })}>
-        Echo
-      </button>),
-    };
-});
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

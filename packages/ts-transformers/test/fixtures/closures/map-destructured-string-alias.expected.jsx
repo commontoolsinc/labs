@@ -5,7 +5,52 @@ interface State {
         couponCode: string;
     }>;
 }
-export default pattern({
+export default pattern((state) => {
+    return {
+        [UI]: (<div>
+        {state.items.mapWithPattern(__ctHelpers.pattern(({ element: { couponCode: code }, params: {} }) => (<span>{code}</span>), {
+                type: "object",
+                properties: {
+                    element: {
+                        type: "object",
+                        properties: {
+                            couponCode: {
+                                type: "string"
+                            }
+                        },
+                        required: ["couponCode"]
+                    },
+                    params: {
+                        type: "object",
+                        properties: {}
+                    }
+                },
+                required: ["element", "params"]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                anyOf: [{
+                        $ref: "https://commonfabric.org/schemas/vnode.json"
+                    }, {
+                        type: "object",
+                        properties: {}
+                    }, {
+                        $ref: "#/$defs/UIRenderable",
+                        asOpaque: true
+                    }],
+                $defs: {
+                    UIRenderable: {
+                        type: "object",
+                        properties: {
+                            $UI: {
+                                $ref: "https://commonfabric.org/schemas/vnode.json"
+                            }
+                        },
+                        required: ["$UI"]
+                    }
+                }
+            } as const satisfies __ctHelpers.JSONSchema), {})}
+      </div>),
+    };
+}, {
     type: "object",
     properties: {
         items: {
@@ -52,52 +97,7 @@ export default pattern({
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, (state) => {
-    return {
-        [UI]: (<div>
-        {state.items.mapWithPattern(__ctHelpers.pattern({
-                type: "object",
-                properties: {
-                    element: {
-                        type: "object",
-                        properties: {
-                            couponCode: {
-                                type: "string"
-                            }
-                        },
-                        required: ["couponCode"]
-                    },
-                    params: {
-                        type: "object",
-                        properties: {}
-                    }
-                },
-                required: ["element", "params"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __ctHelpers.JSONSchema, ({ element: { couponCode: code }, params: {} }) => (<span>{code}</span>)), {})}
-      </div>),
-    };
-});
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

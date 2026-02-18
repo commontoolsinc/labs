@@ -20,123 +20,7 @@ interface State {
     selectedUser: number;
     selectedScore: number;
 }
-export default pattern({
-    type: "object",
-    properties: {
-        matrix: {
-            type: "array",
-            items: {
-                type: "array",
-                items: {
-                    type: "number"
-                }
-            }
-        },
-        row: {
-            type: "number"
-        },
-        col: {
-            type: "number"
-        },
-        items: {
-            type: "array",
-            items: {
-                type: "string"
-            }
-        },
-        arr: {
-            type: "array",
-            items: {
-                type: "number"
-            }
-        },
-        a: {
-            type: "number"
-        },
-        b: {
-            type: "number"
-        },
-        indices: {
-            type: "array",
-            items: {
-                type: "number"
-            }
-        },
-        nested: {
-            type: "object",
-            properties: {
-                arrays: {
-                    type: "array",
-                    items: {
-                        type: "array",
-                        items: {
-                            type: "string"
-                        }
-                    }
-                },
-                index: {
-                    type: "number"
-                }
-            },
-            required: ["arrays", "index"]
-        },
-        users: {
-            type: "array",
-            items: {
-                type: "object",
-                properties: {
-                    name: {
-                        type: "string"
-                    },
-                    scores: {
-                        type: "array",
-                        items: {
-                            type: "number"
-                        }
-                    }
-                },
-                required: ["name", "scores"]
-            }
-        },
-        selectedUser: {
-            type: "number"
-        },
-        selectedScore: {
-            type: "number"
-        }
-    },
-    required: ["matrix", "row", "col", "items", "arr", "a", "b", "indices", "nested", "users", "selectedUser", "selectedScore"]
-} as const satisfies __ctHelpers.JSONSchema, {
-    type: "object",
-    properties: {
-        $UI: {
-            $ref: "#/$defs/JSXElement"
-        }
-    },
-    required: ["$UI"],
-    $defs: {
-        JSXElement: {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    type: "object",
-                    properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
-                }]
-        },
-        UIRenderable: {
-            type: "object",
-            properties: {
-                $UI: {
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }
-            },
-            required: ["$UI"]
-        }
-    }
-} as const satisfies __ctHelpers.JSONSchema, (state) => {
+export default pattern((state) => {
     return {
         [UI]: (<div>
         <h3>Nested Element Access</h3>
@@ -793,7 +677,123 @@ export default pattern({
             } }, ({ state }) => state.arr[0]! + state.arr[1]! + state.arr[2]!)}</p>
       </div>),
     };
-});
+}, {
+    type: "object",
+    properties: {
+        matrix: {
+            type: "array",
+            items: {
+                type: "array",
+                items: {
+                    type: "number"
+                }
+            }
+        },
+        row: {
+            type: "number"
+        },
+        col: {
+            type: "number"
+        },
+        items: {
+            type: "array",
+            items: {
+                type: "string"
+            }
+        },
+        arr: {
+            type: "array",
+            items: {
+                type: "number"
+            }
+        },
+        a: {
+            type: "number"
+        },
+        b: {
+            type: "number"
+        },
+        indices: {
+            type: "array",
+            items: {
+                type: "number"
+            }
+        },
+        nested: {
+            type: "object",
+            properties: {
+                arrays: {
+                    type: "array",
+                    items: {
+                        type: "array",
+                        items: {
+                            type: "string"
+                        }
+                    }
+                },
+                index: {
+                    type: "number"
+                }
+            },
+            required: ["arrays", "index"]
+        },
+        users: {
+            type: "array",
+            items: {
+                type: "object",
+                properties: {
+                    name: {
+                        type: "string"
+                    },
+                    scores: {
+                        type: "array",
+                        items: {
+                            type: "number"
+                        }
+                    }
+                },
+                required: ["name", "scores"]
+            }
+        },
+        selectedUser: {
+            type: "number"
+        },
+        selectedScore: {
+            type: "number"
+        }
+    },
+    required: ["matrix", "row", "col", "items", "arr", "a", "b", "indices", "nested", "users", "selectedUser", "selectedScore"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        $UI: {
+            $ref: "#/$defs/JSXElement"
+        }
+    },
+    required: ["$UI"],
+    $defs: {
+        JSXElement: {
+            anyOf: [{
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    $ref: "#/$defs/UIRenderable",
+                    asOpaque: true
+                }]
+        },
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

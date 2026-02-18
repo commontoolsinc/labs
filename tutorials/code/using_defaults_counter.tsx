@@ -11,7 +11,7 @@ const increment = handler<unknown, { count: Cell<number> }>(
   },
 );
 
-export default pattern<CounterState>("Counter with Default", (state) => {
+export default pattern<CounterState>((state) => {
   return {
     [UI]: (
       <div>

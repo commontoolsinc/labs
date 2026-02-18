@@ -55,7 +55,7 @@ interface PatternState {
   label: Default<string, "">;
 }
 
-export default pattern<PatternState>("ConditionalPattern", (state) => {
+export default pattern<PatternState>((state) => {
   return {
     [NAME]: state.label,
     [UI]: (

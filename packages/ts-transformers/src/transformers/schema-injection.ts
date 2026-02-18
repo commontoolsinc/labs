@@ -406,7 +406,7 @@ function detectSchemaArguments(
 
 /**
  * Handler for pattern schema injection.
- * Argument order is schemas-first: [inputSchema, resultSchema, function]
+ * Argument order is function-first: [function, inputSchema, resultSchema]
  *
  * @returns The transformed node, or undefined if no transformation was performed
  */
@@ -426,15 +426,15 @@ function handleBuilderSchemaInjection(
     return undefined; // No function found - skip transformation
   }
 
-  // Helper to build final call with schemas-first argument order
+  // Helper to build final call with function-first argument order
   const buildCallExpression = (
     inputSchema: ts.Expression,
     resultSchema: ts.Expression,
   ): ts.CallExpression => {
     return factory.createCallExpression(node.expression, undefined, [
+      builderFunction,
       inputSchema,
       resultSchema,
-      builderFunction,
     ]);
   };
 

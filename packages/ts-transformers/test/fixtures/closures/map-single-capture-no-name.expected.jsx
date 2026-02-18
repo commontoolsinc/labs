@@ -6,7 +6,45 @@ interface State {
     }>;
     discount: number;
 }
-export default pattern({
+export default pattern((state: State) => {
+    return {
+        [UI]: (<div>
+        {state.items.map((item) => (<span>{__ctHelpers.derive({
+                type: "object",
+                properties: {
+                    item: {
+                        type: "object",
+                        properties: {
+                            price: {
+                                type: "number"
+                            }
+                        },
+                        required: ["price"]
+                    },
+                    state: {
+                        type: "object",
+                        properties: {
+                            discount: {
+                                type: "number"
+                            }
+                        },
+                        required: ["discount"]
+                    }
+                },
+                required: ["item", "state"]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "number"
+            } as const satisfies __ctHelpers.JSONSchema, {
+                item: {
+                    price: item.price
+                },
+                state: {
+                    discount: state.discount
+                }
+            }, ({ item, state }) => item.price * state.discount)}</span>))}
+      </div>),
+    };
+}, {
     type: "object",
     properties: {
         items: {
@@ -56,45 +94,7 @@ export default pattern({
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, (state: State) => {
-    return {
-        [UI]: (<div>
-        {state.items.map((item) => (<span>{__ctHelpers.derive({
-                type: "object",
-                properties: {
-                    item: {
-                        type: "object",
-                        properties: {
-                            price: {
-                                type: "number"
-                            }
-                        },
-                        required: ["price"]
-                    },
-                    state: {
-                        type: "object",
-                        properties: {
-                            discount: {
-                                type: "number"
-                            }
-                        },
-                        required: ["discount"]
-                    }
-                },
-                required: ["item", "state"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "number"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                item: {
-                    price: item.price
-                },
-                state: {
-                    discount: state.discount
-                }
-            }, ({ item, state }) => item.price * state.discount)}</span>))}
-      </div>),
-    };
-});
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

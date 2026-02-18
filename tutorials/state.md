@@ -22,7 +22,7 @@ Creating a cell is quite easy! Let's create the beginnings of a
 character sheet, one we might use playing a table top role playing game. Don't worry if you don't get the reference, it should be easy to follow.
 
 ```{code-block} typescript
-export default pattern("state test", () => {
+export default pattern(() => {
   const characterName = cell<string>("");
 }
 ```
@@ -32,7 +32,7 @@ and its initial value is the empty string.
 Let's now set `characterName` to something a bit more interesting.
 
 ```{code-block} typescript
-export default pattern("state test", () => {
+export default pattern(() => {
   const characterName = cell<string>("");
   characterName.set("Lady Ellyxir");
 }
@@ -47,7 +47,7 @@ import {
   UI,
 } from "commontools";
 
-export default pattern("state test", () => {
+export default pattern(() => {
   const characterName = cell<string>("");
   characterName.set("Lady Ellyxir");
   return {
@@ -187,7 +187,7 @@ import {
   derive,
 } from "commontools";
 
-export default pattern("state test", () => {
+export default pattern(() => {
   const characterName = cell<string>("");
   characterName.set("Lady Ellyxir");
   const dex = cell<number>(16);

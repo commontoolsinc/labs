@@ -1325,8 +1325,6 @@ export class Runner {
               frame.opaqueRefs.size > 0
             ) {
               const resultPattern = patternFromFrame(
-                "event handler result",
-                undefined,
                 () => result,
               );
 
@@ -1548,8 +1546,6 @@ export class Runner {
               frame.opaqueRefs.size > 0
             ) {
               const resultPattern = patternFromFrame(
-                "action result",
-                undefined,
                 () => result,
               );
               const resultCell = previousResultCell ??

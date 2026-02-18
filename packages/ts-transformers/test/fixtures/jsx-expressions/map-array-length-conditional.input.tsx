@@ -1,7 +1,7 @@
 /// <cts-enable />
 import { cell, pattern, UI } from "commontools";
 
-export default pattern("MapArrayLengthConditional", (_state) => {
+export default pattern((_state) => {
   const list = cell(["apple", "banana", "cherry"]);
 
   return {

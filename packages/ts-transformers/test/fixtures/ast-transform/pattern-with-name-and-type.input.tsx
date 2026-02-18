@@ -5,7 +5,7 @@ interface MyInput {
   value: number;
 }
 
-export default pattern("MyPattern", (input: MyInput) => {
+export default pattern((input: MyInput) => {
   return {
     result: input.value * 2,
   };

@@ -31,137 +31,7 @@ interface State {
     index: number;
     numbers: number[];
 }
-export default pattern({
-    type: "object",
-    properties: {
-        user: {
-            $ref: "#/$defs/User"
-        },
-        config: {
-            $ref: "#/$defs/Config"
-        },
-        items: {
-            type: "array",
-            items: {
-                type: "string"
-            }
-        },
-        index: {
-            type: "number"
-        },
-        numbers: {
-            type: "array",
-            items: {
-                type: "number"
-            }
-        }
-    },
-    required: ["user", "config", "items", "index", "numbers"],
-    $defs: {
-        Config: {
-            type: "object",
-            properties: {
-                theme: {
-                    type: "object",
-                    properties: {
-                        primaryColor: {
-                            type: "string"
-                        },
-                        secondaryColor: {
-                            type: "string"
-                        },
-                        fontSize: {
-                            type: "number"
-                        }
-                    },
-                    required: ["primaryColor", "secondaryColor", "fontSize"]
-                },
-                features: {
-                    type: "object",
-                    properties: {
-                        darkMode: {
-                            type: "boolean"
-                        },
-                        beta: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["darkMode", "beta"]
-                }
-            },
-            required: ["theme", "features"]
-        },
-        User: {
-            type: "object",
-            properties: {
-                name: {
-                    type: "string"
-                },
-                age: {
-                    type: "number"
-                },
-                active: {
-                    type: "boolean"
-                },
-                profile: {
-                    type: "object",
-                    properties: {
-                        bio: {
-                            type: "string"
-                        },
-                        location: {
-                            type: "string"
-                        },
-                        settings: {
-                            type: "object",
-                            properties: {
-                                theme: {
-                                    type: "string"
-                                },
-                                notifications: {
-                                    type: "boolean"
-                                }
-                            },
-                            required: ["theme", "notifications"]
-                        }
-                    },
-                    required: ["bio", "location", "settings"]
-                }
-            },
-            required: ["name", "age", "active", "profile"]
-        }
-    }
-} as const satisfies __ctHelpers.JSONSchema, {
-    type: "object",
-    properties: {
-        $UI: {
-            $ref: "#/$defs/JSXElement"
-        }
-    },
-    required: ["$UI"],
-    $defs: {
-        JSXElement: {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    type: "object",
-                    properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
-                }]
-        },
-        UIRenderable: {
-            type: "object",
-            properties: {
-                $UI: {
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }
-            },
-            required: ["$UI"]
-        }
-    }
-} as const satisfies __ctHelpers.JSONSchema, (state) => {
+export default pattern((state) => {
     return {
         [UI]: (<div>
         <h3>Basic Property Access</h3>
@@ -579,7 +449,137 @@ export default pattern({
         </p>
       </div>),
     };
-});
+}, {
+    type: "object",
+    properties: {
+        user: {
+            $ref: "#/$defs/User"
+        },
+        config: {
+            $ref: "#/$defs/Config"
+        },
+        items: {
+            type: "array",
+            items: {
+                type: "string"
+            }
+        },
+        index: {
+            type: "number"
+        },
+        numbers: {
+            type: "array",
+            items: {
+                type: "number"
+            }
+        }
+    },
+    required: ["user", "config", "items", "index", "numbers"],
+    $defs: {
+        Config: {
+            type: "object",
+            properties: {
+                theme: {
+                    type: "object",
+                    properties: {
+                        primaryColor: {
+                            type: "string"
+                        },
+                        secondaryColor: {
+                            type: "string"
+                        },
+                        fontSize: {
+                            type: "number"
+                        }
+                    },
+                    required: ["primaryColor", "secondaryColor", "fontSize"]
+                },
+                features: {
+                    type: "object",
+                    properties: {
+                        darkMode: {
+                            type: "boolean"
+                        },
+                        beta: {
+                            type: "boolean"
+                        }
+                    },
+                    required: ["darkMode", "beta"]
+                }
+            },
+            required: ["theme", "features"]
+        },
+        User: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                },
+                age: {
+                    type: "number"
+                },
+                active: {
+                    type: "boolean"
+                },
+                profile: {
+                    type: "object",
+                    properties: {
+                        bio: {
+                            type: "string"
+                        },
+                        location: {
+                            type: "string"
+                        },
+                        settings: {
+                            type: "object",
+                            properties: {
+                                theme: {
+                                    type: "string"
+                                },
+                                notifications: {
+                                    type: "boolean"
+                                }
+                            },
+                            required: ["theme", "notifications"]
+                        }
+                    },
+                    required: ["bio", "location", "settings"]
+                }
+            },
+            required: ["name", "age", "active", "profile"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        $UI: {
+            $ref: "#/$defs/JSXElement"
+        }
+    },
+    required: ["$UI"],
+    $defs: {
+        JSXElement: {
+            anyOf: [{
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    $ref: "#/$defs/UIRenderable",
+                    asOpaque: true
+                }]
+        },
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

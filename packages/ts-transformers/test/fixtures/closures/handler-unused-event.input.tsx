@@ -5,7 +5,7 @@ interface State {
   counter: Cell<number>;
 }
 
-export default pattern<State>("UnusedEvent", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <button type="button" onClick={(_) => state.counter.set(state.counter.get() + 1)}>

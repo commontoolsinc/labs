@@ -5,7 +5,7 @@ interface State {
   items: Array<{ couponCode: string }>;
 }
 
-export default pattern<State>("MapDestructuredStringAlias", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>

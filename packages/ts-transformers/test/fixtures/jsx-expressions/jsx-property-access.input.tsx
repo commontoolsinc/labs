@@ -35,7 +35,7 @@ interface State {
   numbers: number[];
 }
 
-export default pattern<State>("PropertyAccess", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>

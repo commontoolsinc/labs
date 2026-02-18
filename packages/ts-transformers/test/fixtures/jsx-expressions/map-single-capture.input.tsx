@@ -1,7 +1,7 @@
 /// <cts-enable />
 import { cell, pattern, UI } from "commontools";
 
-export default pattern("MapSingleCapture", (_state) => {
+export default pattern((_state) => {
   const people = cell([
     { id: "1", name: "Alice" },
     { id: "2", name: "Bob" },

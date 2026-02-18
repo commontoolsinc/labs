@@ -47,7 +47,7 @@ Normally, the pattern function takes in extra arguments, but for now, we'll leav
 :emphasize-lines: 1
 :caption: Skeleton Pattern function
 
-export default pattern("LLM Test", () => {
+export default pattern(() => {
   return {
     [NAME]: "MyLLM Test",
     [UI]: (
@@ -83,7 +83,7 @@ Here's our updated Pattern:
 :linenos: true
 :emphasize-lines: 2, 11, 15
 :caption: Adding the Input JSX Component
-export default pattern("LLM Test", () => {
+export default pattern(() => {
   const userMessage = cell<string>(undefined);
 
   return {
@@ -149,7 +149,7 @@ The next step is the real pay-off. We'll finally call the LLM. We'll add the bui
 :linenos: true
 :emphasize-lines:
 :caption: Adding the LLM built-in call
-export default pattern("LLM Test", () => {
+export default pattern(() => {
   const userMessage = cell<string>(undefined);
 
   const llmResponse = llm({
@@ -269,7 +269,7 @@ const textInputHandler = handler<
   userMessage.set(message);
 });
 
-export default pattern("LLM Test", () => {
+export default pattern(() => {
   const userMessage = cell<string>(undefined);
 
   const llmResponse = llm({

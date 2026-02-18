@@ -6,7 +6,7 @@ interface State {
   tagCounts: Record<string, number>;
 }
 
-export default pattern<State>("MapElementAccessOpaque", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>

@@ -14,41 +14,7 @@ interface Charm {
     id: string;
     name: string;
 }
-export default pattern(false as const satisfies __ctHelpers.JSONSchema, {
-    type: "object",
-    properties: {
-        $NAME: {
-            type: "string",
-            asOpaque: true
-        },
-        $UI: {
-            $ref: "#/$defs/JSXElement"
-        }
-    },
-    required: ["$NAME", "$UI"],
-    $defs: {
-        JSXElement: {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    type: "object",
-                    properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
-                }]
-        },
-        UIRenderable: {
-            type: "object",
-            properties: {
-                $UI: {
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }
-            },
-            required: ["$UI"]
-        }
-    }
-} as const satisfies __ctHelpers.JSONSchema, () => {
+export default pattern(() => {
     const { allCharms } = wish<{
         allCharms: Charm[];
     }>({ query: "/" }, {
@@ -118,7 +84,7 @@ export default pattern(false as const satisfies __ctHelpers.JSONSchema, {
                 length: allCharms.length
             } }, ({ allCharms }) => allCharms.length)}</span>
         <ul>
-          {allCharms.mapWithPattern(__ctHelpers.pattern({
+          {allCharms.mapWithPattern(__ctHelpers.pattern(({ element: charm, params: {} }) => (<li>{charm.name}</li>), {
                 type: "object",
                 properties: {
                     element: {
@@ -165,11 +131,45 @@ export default pattern(false as const satisfies __ctHelpers.JSONSchema, {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, ({ element: charm, params: {} }) => (<li>{charm.name}</li>)), {})}
+            } as const satisfies __ctHelpers.JSONSchema), {})}
         </ul>
       </div>),
     };
-});
+}, false as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        $NAME: {
+            type: "string",
+            asOpaque: true
+        },
+        $UI: {
+            $ref: "#/$defs/JSXElement"
+        }
+    },
+    required: ["$NAME", "$UI"],
+    $defs: {
+        JSXElement: {
+            anyOf: [{
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    $ref: "#/$defs/UIRenderable",
+                    asOpaque: true
+                }]
+        },
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

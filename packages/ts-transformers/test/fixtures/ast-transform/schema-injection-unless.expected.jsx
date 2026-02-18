@@ -4,7 +4,31 @@ interface State {
     value: string | null;
     defaultValue: string;
 }
-export default pattern({
+export default pattern(({ value, defaultValue }) => {
+    // unless(condition, fallback) - returns condition if truthy, else fallback
+    const result = unless({
+        anyOf: [{
+                type: "string"
+            }, {
+                type: "null"
+            }],
+        asOpaque: true
+    } as const satisfies __ctHelpers.JSONSchema, {
+        type: "string",
+        asOpaque: true
+    } as const satisfies __ctHelpers.JSONSchema, {
+        anyOf: [{
+                type: "string"
+            }, {
+                type: "null"
+            }],
+        asOpaque: true
+    } as const satisfies __ctHelpers.JSONSchema, value, defaultValue);
+    return {
+        [NAME]: "unless schema test",
+        [UI]: <div>{result}</div>,
+    };
+}, {
     type: "object",
     properties: {
         value: {
@@ -52,31 +76,7 @@ export default pattern({
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, ({ value, defaultValue }) => {
-    // unless(condition, fallback) - returns condition if truthy, else fallback
-    const result = unless({
-        anyOf: [{
-                type: "string"
-            }, {
-                type: "null"
-            }],
-        asOpaque: true
-    } as const satisfies __ctHelpers.JSONSchema, {
-        type: "string",
-        asOpaque: true
-    } as const satisfies __ctHelpers.JSONSchema, {
-        anyOf: [{
-                type: "string"
-            }, {
-                type: "null"
-            }],
-        asOpaque: true
-    } as const satisfies __ctHelpers.JSONSchema, value, defaultValue);
-    return {
-        [NAME]: "unless schema test",
-        [UI]: <div>{result}</div>,
-    };
-});
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

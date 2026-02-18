@@ -9,7 +9,7 @@ interface State {
   count: number;
 }
 
-export default pattern<State>("StringOperations", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>

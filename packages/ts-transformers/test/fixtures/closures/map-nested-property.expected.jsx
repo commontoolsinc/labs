@@ -12,7 +12,91 @@ interface State {
     items: Item[];
     currentUser: User;
 }
-export default pattern({
+export default pattern((state) => {
+    return {
+        [UI]: (<div>
+        {state.items.mapWithPattern(__ctHelpers.pattern(({ element: item, params: { state } }) => (<div>
+            {item.name} - edited by {state.currentUser.firstName} {state.currentUser.lastName}
+          </div>), {
+                type: "object",
+                properties: {
+                    element: {
+                        $ref: "#/$defs/Item"
+                    },
+                    params: {
+                        type: "object",
+                        properties: {
+                            state: {
+                                type: "object",
+                                properties: {
+                                    currentUser: {
+                                        type: "object",
+                                        properties: {
+                                            firstName: {
+                                                type: "string",
+                                                asOpaque: true
+                                            },
+                                            lastName: {
+                                                type: "string",
+                                                asOpaque: true
+                                            }
+                                        },
+                                        required: ["firstName", "lastName"]
+                                    }
+                                },
+                                required: ["currentUser"]
+                            }
+                        },
+                        required: ["state"]
+                    }
+                },
+                required: ["element", "params"],
+                $defs: {
+                    Item: {
+                        type: "object",
+                        properties: {
+                            id: {
+                                type: "number"
+                            },
+                            name: {
+                                type: "string"
+                            }
+                        },
+                        required: ["id", "name"]
+                    }
+                }
+            } as const satisfies __ctHelpers.JSONSchema, {
+                anyOf: [{
+                        $ref: "https://commonfabric.org/schemas/vnode.json"
+                    }, {
+                        type: "object",
+                        properties: {}
+                    }, {
+                        $ref: "#/$defs/UIRenderable",
+                        asOpaque: true
+                    }],
+                $defs: {
+                    UIRenderable: {
+                        type: "object",
+                        properties: {
+                            $UI: {
+                                $ref: "https://commonfabric.org/schemas/vnode.json"
+                            }
+                        },
+                        required: ["$UI"]
+                    }
+                }
+            } as const satisfies __ctHelpers.JSONSchema), {
+                state: {
+                    currentUser: {
+                        firstName: state.currentUser.firstName,
+                        lastName: state.currentUser.lastName
+                    }
+                }
+            })}
+      </div>),
+    };
+}, {
     type: "object",
     properties: {
         items: {
@@ -82,91 +166,7 @@ export default pattern({
             required: ["$UI"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, (state) => {
-    return {
-        [UI]: (<div>
-        {state.items.mapWithPattern(__ctHelpers.pattern({
-                type: "object",
-                properties: {
-                    element: {
-                        $ref: "#/$defs/Item"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {
-                            state: {
-                                type: "object",
-                                properties: {
-                                    currentUser: {
-                                        type: "object",
-                                        properties: {
-                                            firstName: {
-                                                type: "string",
-                                                asOpaque: true
-                                            },
-                                            lastName: {
-                                                type: "string",
-                                                asOpaque: true
-                                            }
-                                        },
-                                        required: ["firstName", "lastName"]
-                                    }
-                                },
-                                required: ["currentUser"]
-                            }
-                        },
-                        required: ["state"]
-                    }
-                },
-                required: ["element", "params"],
-                $defs: {
-                    Item: {
-                        type: "object",
-                        properties: {
-                            id: {
-                                type: "number"
-                            },
-                            name: {
-                                type: "string"
-                            }
-                        },
-                        required: ["id", "name"]
-                    }
-                }
-            } as const satisfies __ctHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: { state } }) => (<div>
-            {item.name} - edited by {state.currentUser.firstName} {state.currentUser.lastName}
-          </div>)), {
-                state: {
-                    currentUser: {
-                        firstName: state.currentUser.firstName,
-                        lastName: state.currentUser.lastName
-                    }
-                }
-            })}
-      </div>),
-    };
-});
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

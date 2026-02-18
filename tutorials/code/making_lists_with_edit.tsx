@@ -24,7 +24,7 @@ const editItem = handler<any, { names: Cell<string[]>; index: number }>(
   },
 );
 
-export default pattern<FriendListState>("making lists - with edit", (state) => {
+export default pattern<FriendListState>((state) => {
   return {
     [UI]: (
       <div>

@@ -6,7 +6,31 @@ interface MyEvent {
 interface State {
     value: Cell<string>;
 }
-export default pattern({
+export default pattern(({ value }) => {
+    return {
+        // Test action<MyEvent>((e) => ...) variant (type parameter instead of inline annotation)
+        update: __ctHelpers.handler({
+            type: "object",
+            properties: {
+                data: {
+                    type: "string"
+                }
+            },
+            required: ["data"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "object",
+            properties: {
+                value: {
+                    type: "string",
+                    asCell: true
+                }
+            },
+            required: ["value"]
+        } as const satisfies __ctHelpers.JSONSchema, (e, { value }) => value.set(e.data))({
+            value: value
+        }),
+    };
+}, {
     type: "object",
     properties: {
         value: {
@@ -35,31 +59,7 @@ export default pattern({
             required: ["data"]
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, ({ value }) => {
-    return {
-        // Test action<MyEvent>((e) => ...) variant (type parameter instead of inline annotation)
-        update: __ctHelpers.handler({
-            type: "object",
-            properties: {
-                data: {
-                    type: "string"
-                }
-            },
-            required: ["data"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "object",
-            properties: {
-                value: {
-                    type: "string",
-                    asCell: true
-                }
-            },
-            required: ["value"]
-        } as const satisfies __ctHelpers.JSONSchema, (e, { value }) => value.set(e.data))({
-            value: value
-        }),
-    };
-});
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

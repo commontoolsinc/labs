@@ -6,7 +6,7 @@ interface State {
   message: string;
 }
 
-export default pattern<State>("When Schema Injection", ({ enabled, message }) => {
+export default pattern<State>(({ enabled, message }) => {
   // when(condition, value) - returns value if condition is truthy, else condition
   const result = when(enabled, message);
 

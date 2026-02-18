@@ -20,7 +20,7 @@ interface State {
   defaultName: string;
 }
 
-export default pattern<State>("CharmList", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <section>
@@ -45,10 +45,10 @@ describe("OpaqueRef map callbacks", () => {
       types: { "commontools.d.ts": commontools },
     });
 
-    // Map callback should be transformed to pattern with schema for captured defaultName
+    // Map callback should be transformed to pattern with function-first, then schema for captured defaultName
     assertStringIncludes(
       output,
-      "__ctHelpers.pattern({",
+      "__ctHelpers.pattern(",
     );
     // Check for correct parameter destructuring
     assertStringIncludes(

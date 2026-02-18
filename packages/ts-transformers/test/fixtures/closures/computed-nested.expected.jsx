@@ -1,9 +1,6 @@
 import * as __ctHelpers from "commontools";
 import { cell, computed, pattern } from "commontools";
-export default pattern(false as const satisfies __ctHelpers.JSONSchema, {
-    type: "number",
-    asOpaque: true
-} as const satisfies __ctHelpers.JSONSchema, () => {
+export default pattern(() => {
     const a = cell(10, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema);
@@ -42,7 +39,10 @@ export default pattern(false as const satisfies __ctHelpers.JSONSchema, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema, { sum: sum }, ({ sum }) => sum * 2);
     return doubled;
-});
+}, false as const satisfies __ctHelpers.JSONSchema, {
+    type: "number",
+    asOpaque: true
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

@@ -75,276 +75,7 @@ interface State {
         }>;
     };
 }
-export default pattern({
-    type: "object",
-    properties: {
-        user: {
-            type: "object",
-            properties: {
-                name: {
-                    type: "string"
-                },
-                age: {
-                    type: "number"
-                },
-                email: {
-                    type: "string"
-                },
-                profile: {
-                    type: "object",
-                    properties: {
-                        bio: {
-                            type: "string"
-                        },
-                        location: {
-                            type: "string"
-                        },
-                        website: {
-                            type: "string"
-                        }
-                    },
-                    required: ["bio", "location", "website"]
-                },
-                settings: {
-                    type: "object",
-                    properties: {
-                        theme: {
-                            type: "string"
-                        },
-                        notifications: {
-                            type: "boolean"
-                        },
-                        privacy: {
-                            type: "string"
-                        }
-                    },
-                    required: ["theme", "notifications", "privacy"]
-                }
-            },
-            required: ["name", "age", "email", "profile", "settings"]
-        },
-        config: {
-            type: "object",
-            properties: {
-                theme: {
-                    type: "object",
-                    properties: {
-                        colors: {
-                            type: "object",
-                            properties: {
-                                primary: {
-                                    type: "string"
-                                },
-                                secondary: {
-                                    type: "string"
-                                },
-                                background: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["primary", "secondary", "background"]
-                        },
-                        fonts: {
-                            type: "object",
-                            properties: {
-                                heading: {
-                                    type: "string"
-                                },
-                                body: {
-                                    type: "string"
-                                },
-                                mono: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["heading", "body", "mono"]
-                        },
-                        spacing: {
-                            type: "object",
-                            properties: {
-                                small: {
-                                    type: "number"
-                                },
-                                medium: {
-                                    type: "number"
-                                },
-                                large: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["small", "medium", "large"]
-                        }
-                    },
-                    required: ["colors", "fonts", "spacing"]
-                },
-                features: {
-                    type: "object",
-                    properties: {
-                        darkMode: {
-                            type: "boolean"
-                        },
-                        animations: {
-                            type: "boolean"
-                        },
-                        betaFeatures: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["darkMode", "animations", "betaFeatures"]
-                }
-            },
-            required: ["theme", "features"]
-        },
-        data: {
-            type: "object",
-            properties: {
-                items: {
-                    type: "array",
-                    items: {
-                        type: "object",
-                        properties: {
-                            id: {
-                                type: "number"
-                            },
-                            name: {
-                                type: "string"
-                            },
-                            value: {
-                                type: "number"
-                            }
-                        },
-                        required: ["id", "name", "value"]
-                    }
-                },
-                totals: {
-                    type: "object",
-                    properties: {
-                        count: {
-                            type: "number"
-                        },
-                        sum: {
-                            type: "number"
-                        },
-                        average: {
-                            type: "number"
-                        }
-                    },
-                    required: ["count", "sum", "average"]
-                }
-            },
-            required: ["items", "totals"]
-        },
-        deeply: {
-            type: "object",
-            properties: {
-                nested: {
-                    type: "object",
-                    properties: {
-                        structure: {
-                            type: "object",
-                            properties: {
-                                "with": {
-                                    type: "object",
-                                    properties: {
-                                        many: {
-                                            type: "object",
-                                            properties: {
-                                                levels: {
-                                                    type: "object",
-                                                    properties: {
-                                                        value: {
-                                                            type: "string"
-                                                        },
-                                                        count: {
-                                                            type: "number"
-                                                        }
-                                                    },
-                                                    required: ["value", "count"]
-                                                }
-                                            },
-                                            required: ["levels"]
-                                        }
-                                    },
-                                    required: ["many"]
-                                }
-                            },
-                            required: ["with"]
-                        }
-                    },
-                    required: ["structure"]
-                }
-            },
-            required: ["nested"]
-        },
-        arrays: {
-            type: "object",
-            properties: {
-                first: {
-                    type: "array",
-                    items: {
-                        type: "string"
-                    }
-                },
-                second: {
-                    type: "array",
-                    items: {
-                        type: "number"
-                    }
-                },
-                nested: {
-                    type: "array",
-                    items: {
-                        type: "object",
-                        properties: {
-                            items: {
-                                type: "array",
-                                items: {
-                                    type: "string"
-                                }
-                            },
-                            count: {
-                                type: "number"
-                            }
-                        },
-                        required: ["items", "count"]
-                    }
-                }
-            },
-            required: ["first", "second", "nested"]
-        }
-    },
-    required: ["user", "config", "data", "deeply", "arrays"]
-} as const satisfies __ctHelpers.JSONSchema, {
-    type: "object",
-    properties: {
-        $UI: {
-            $ref: "#/$defs/JSXElement"
-        }
-    },
-    required: ["$UI"],
-    $defs: {
-        JSXElement: {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    type: "object",
-                    properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
-                }]
-        },
-        UIRenderable: {
-            type: "object",
-            properties: {
-                $UI: {
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }
-            },
-            required: ["$UI"]
-        }
-    }
-} as const satisfies __ctHelpers.JSONSchema, (state) => {
+export default pattern((state) => {
     return {
         [UI]: (<div>
         <h3>Same Base, Different Properties</h3>
@@ -928,7 +659,276 @@ export default pattern({
         </p>
       </div>),
     };
-});
+}, {
+    type: "object",
+    properties: {
+        user: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                },
+                age: {
+                    type: "number"
+                },
+                email: {
+                    type: "string"
+                },
+                profile: {
+                    type: "object",
+                    properties: {
+                        bio: {
+                            type: "string"
+                        },
+                        location: {
+                            type: "string"
+                        },
+                        website: {
+                            type: "string"
+                        }
+                    },
+                    required: ["bio", "location", "website"]
+                },
+                settings: {
+                    type: "object",
+                    properties: {
+                        theme: {
+                            type: "string"
+                        },
+                        notifications: {
+                            type: "boolean"
+                        },
+                        privacy: {
+                            type: "string"
+                        }
+                    },
+                    required: ["theme", "notifications", "privacy"]
+                }
+            },
+            required: ["name", "age", "email", "profile", "settings"]
+        },
+        config: {
+            type: "object",
+            properties: {
+                theme: {
+                    type: "object",
+                    properties: {
+                        colors: {
+                            type: "object",
+                            properties: {
+                                primary: {
+                                    type: "string"
+                                },
+                                secondary: {
+                                    type: "string"
+                                },
+                                background: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["primary", "secondary", "background"]
+                        },
+                        fonts: {
+                            type: "object",
+                            properties: {
+                                heading: {
+                                    type: "string"
+                                },
+                                body: {
+                                    type: "string"
+                                },
+                                mono: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["heading", "body", "mono"]
+                        },
+                        spacing: {
+                            type: "object",
+                            properties: {
+                                small: {
+                                    type: "number"
+                                },
+                                medium: {
+                                    type: "number"
+                                },
+                                large: {
+                                    type: "number"
+                                }
+                            },
+                            required: ["small", "medium", "large"]
+                        }
+                    },
+                    required: ["colors", "fonts", "spacing"]
+                },
+                features: {
+                    type: "object",
+                    properties: {
+                        darkMode: {
+                            type: "boolean"
+                        },
+                        animations: {
+                            type: "boolean"
+                        },
+                        betaFeatures: {
+                            type: "boolean"
+                        }
+                    },
+                    required: ["darkMode", "animations", "betaFeatures"]
+                }
+            },
+            required: ["theme", "features"]
+        },
+        data: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "object",
+                        properties: {
+                            id: {
+                                type: "number"
+                            },
+                            name: {
+                                type: "string"
+                            },
+                            value: {
+                                type: "number"
+                            }
+                        },
+                        required: ["id", "name", "value"]
+                    }
+                },
+                totals: {
+                    type: "object",
+                    properties: {
+                        count: {
+                            type: "number"
+                        },
+                        sum: {
+                            type: "number"
+                        },
+                        average: {
+                            type: "number"
+                        }
+                    },
+                    required: ["count", "sum", "average"]
+                }
+            },
+            required: ["items", "totals"]
+        },
+        deeply: {
+            type: "object",
+            properties: {
+                nested: {
+                    type: "object",
+                    properties: {
+                        structure: {
+                            type: "object",
+                            properties: {
+                                "with": {
+                                    type: "object",
+                                    properties: {
+                                        many: {
+                                            type: "object",
+                                            properties: {
+                                                levels: {
+                                                    type: "object",
+                                                    properties: {
+                                                        value: {
+                                                            type: "string"
+                                                        },
+                                                        count: {
+                                                            type: "number"
+                                                        }
+                                                    },
+                                                    required: ["value", "count"]
+                                                }
+                                            },
+                                            required: ["levels"]
+                                        }
+                                    },
+                                    required: ["many"]
+                                }
+                            },
+                            required: ["with"]
+                        }
+                    },
+                    required: ["structure"]
+                }
+            },
+            required: ["nested"]
+        },
+        arrays: {
+            type: "object",
+            properties: {
+                first: {
+                    type: "array",
+                    items: {
+                        type: "string"
+                    }
+                },
+                second: {
+                    type: "array",
+                    items: {
+                        type: "number"
+                    }
+                },
+                nested: {
+                    type: "array",
+                    items: {
+                        type: "object",
+                        properties: {
+                            items: {
+                                type: "array",
+                                items: {
+                                    type: "string"
+                                }
+                            },
+                            count: {
+                                type: "number"
+                            }
+                        },
+                        required: ["items", "count"]
+                    }
+                }
+            },
+            required: ["first", "second", "nested"]
+        }
+    },
+    required: ["user", "config", "data", "deeply", "arrays"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        $UI: {
+            $ref: "#/$defs/JSXElement"
+        }
+    },
+    required: ["$UI"],
+    $defs: {
+        JSXElement: {
+            anyOf: [{
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    $ref: "#/$defs/UIRenderable",
+                    asOpaque: true
+                }]
+        },
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

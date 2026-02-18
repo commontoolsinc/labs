@@ -5,7 +5,7 @@ interface State {
   label: string;
 }
 
-export default pattern<State>("Reserved", (state) => {
+export default pattern<State>((state) => {
   const __ct_handler_event = state.label;
   return {
     [UI]: (

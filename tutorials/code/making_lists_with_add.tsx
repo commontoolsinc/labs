@@ -70,7 +70,7 @@ const addFriend = handler<any, { names: Cell<string[]> }>(
   },
 );
 
-export default pattern<FriendListState>("making lists - with add", (state) => {
+export default pattern<FriendListState>((state) => {
   return {
     [UI]: (
       <div>

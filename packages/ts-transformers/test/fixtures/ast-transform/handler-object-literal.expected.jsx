@@ -21,7 +21,16 @@ const myHandler = handler(false as const satisfies __ctHelpers.JSONSchema, {
 } as const satisfies __ctHelpers.JSONSchema, (_, state: State) => {
     state.value.set(state.value.get() + 1);
 });
-export default pattern({
+export default pattern((state) => {
+    return {
+        // Test case 1: Object literal with all properties from state
+        onClick1: myHandler({ value: state.value, name: state.name }),
+        // Test case 2: Object literal with all properties (explicitly listed)
+        onClick2: myHandler({ value: state.value, name: state.name }),
+        // Test case 3: Direct state passing (what we want to transform to)
+        onClick3: myHandler(state),
+    };
+}, {
     type: "object",
     properties: {
         value: {
@@ -48,16 +57,7 @@ export default pattern({
         }
     },
     required: ["onClick1", "onClick2", "onClick3"]
-} as const satisfies __ctHelpers.JSONSchema, (state) => {
-    return {
-        // Test case 1: Object literal with all properties from state
-        onClick1: myHandler({ value: state.value, name: state.name }),
-        // Test case 2: Object literal with all properties (explicitly listed)
-        onClick2: myHandler({ value: state.value, name: state.name }),
-        // Test case 3: Direct state passing (what we want to transform to)
-        onClick3: myHandler(state),
-    };
-});
+} as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals

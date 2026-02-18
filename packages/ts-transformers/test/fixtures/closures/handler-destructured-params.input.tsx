@@ -7,7 +7,7 @@ interface State {
 }
 
 // Test destructured event handler params with typed ct-select onct-change
-export default pattern<State>("Destructure", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <ct-select
