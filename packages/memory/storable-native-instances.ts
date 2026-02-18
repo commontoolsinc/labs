@@ -283,7 +283,7 @@ export class StorableUint8Array extends StorableNativeWrapper {
    * the `Uint8Array` directly.
    */
   toNativeValue(frozen: boolean): Blob | Uint8Array {
-    if (frozen) return new Blob([this.bytes]);
+    if (frozen) return new Blob([this.bytes as BlobPart]);
     return this.bytes;
   }
 
@@ -473,6 +473,10 @@ export class FrozenDate extends Date {
  * `StorableInstance` wrappers (StorableError, StorableMap, etc.) that live
  * inside `StorableValue` via the `StorableInstance` arm of `StorableDatum`.
  *
+ * `Blob` is included because `StorableUint8Array.toNativeValue(true)` returns
+ * a `Blob` (immutable by nature) instead of a `Uint8Array`. The synchronous
+ * serialization path throws on `Blob` since its data access methods are async.
+ *
  * Note: `bigint` is NOT included here -- it is a primitive (like `undefined`)
  * and belongs directly in `StorableDatum` without wrapping.
  */
@@ -481,7 +485,8 @@ export type StorableNativeObject =
   | Map<unknown, unknown>
   | Set<unknown>
   | Date
-  | Uint8Array;
+  | Uint8Array
+  | Blob;
 
 // ---------------------------------------------------------------------------
 // Unwrapping: StorableValue -> native JS types
