@@ -1659,6 +1659,7 @@ export function toDeepStorableValue(
 | `Set` | Wrapped into `StorableSet`. Elements are recursively converted (deep variant only). Extra enumerable properties on the `Set` object are silently dropped (see Section 1.4.1). |
 | `Date` | Wrapped into `StorableDate`. Extra enumerable properties on the `Date` object are silently dropped (see Section 1.4.1). |
 | `Uint8Array` | Wrapped into `StorableUint8Array`. Extra enumerable properties on the `Uint8Array` object are silently dropped (see Section 1.4.1). |
+| `Blob` | **Throws.** `Blob` content is only accessible via asynchronous methods (`arrayBuffer()`, `stream()`), so the synchronous conversion path cannot extract its bytes. Callers must convert a `Blob` to `Uint8Array` before passing it to `toStorableValue()`. A future async conversion path may accept `Blob` directly. |
 | `StorableValue[]` | Shallow: returned as-is (frozen if `freeze` is true). Deep: elements recursively converted (frozen at each level if `freeze` is true). |
 | `{ [key: string]: StorableValue }` | Shallow: returned as-is (frozen if `freeze` is true). Deep: values recursively converted (frozen at each level if `freeze` is true). |
 
@@ -1891,6 +1892,13 @@ result may contain native JS types at any depth.
 > Callers who need byte-level access can use `await blob.arrayBuffer()` or
 > `blob.stream()` to read the data. When `freeze` is `false`, a regular
 > mutable `Uint8Array` is returned instead.
+>
+> **Asymmetry note:** `Blob` is an output type only — `nativeValueFromStorableValue()`
+> may return a `Blob`, but `toStorableValue()` does not accept `Blob` as input
+> because `Blob` content is only accessible asynchronously. Callers converting
+> a `Blob` back to `StorableValue` must first extract its bytes (e.g.,
+> `new Uint8Array(await blob.arrayBuffer())`) and pass the `Uint8Array`. A
+> future async conversion path may accept `Blob` directly.
 
 ### 8.6 Round-Trip Guarantees
 
