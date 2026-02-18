@@ -511,10 +511,13 @@ export abstract class BaseObjectTraverser {
     // a full re-traversal. Caching collapses this to one visit per cell.
     // itemLink must be part of the key because the same data reached through
     // different links produces different query result proxies / cell identities.
+    // Capture the original itemLink for memo keys since the array branch mutates
+    // the parameter variable during iteration.
     // Skip when defaultValue is provided since it can alter the result.
+    const originalItemLink = itemLink;
     if (defaultValue === undefined) {
-      const memoKey = itemLink
-        ? addressKey(doc.address) + "|" + addressKey(itemLink)
+      const memoKey = originalItemLink
+        ? addressKey(doc.address) + "|" + addressKey(originalItemLink)
         : addressKey(doc.address);
       const cached = this.dagMemo.get(memoKey);
       if (cached !== undefined) {
@@ -590,8 +593,8 @@ export abstract class BaseObjectTraverser {
       const newLink = getNormalizedLink(doc.address, true);
       const arrayResult = this.objectCreator.createObject(newLink, newValue);
       if (defaultValue === undefined) {
-        const memoKey = itemLink
-          ? addressKey(doc.address) + "|" + addressKey(itemLink)
+        const memoKey = originalItemLink
+          ? addressKey(doc.address) + "|" + addressKey(originalItemLink)
           : addressKey(doc.address);
         this.dagMemo.set(memoKey, arrayResult);
       }
@@ -676,8 +679,8 @@ export abstract class BaseObjectTraverser {
         const newLink = itemLink ?? getNormalizedLink(doc.address, true);
         const recordResult = this.objectCreator.createObject(newLink, newValue);
         if (defaultValue === undefined) {
-          const memoKey = itemLink
-            ? addressKey(doc.address) + "|" + addressKey(itemLink)
+          const memoKey = originalItemLink
+            ? addressKey(doc.address) + "|" + addressKey(originalItemLink)
             : addressKey(doc.address);
           this.dagMemo.set(memoKey, recordResult);
         }
