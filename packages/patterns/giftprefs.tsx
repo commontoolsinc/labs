@@ -115,7 +115,6 @@ export const GiftPrefsModule = pattern<
   GiftPrefsModuleInput,
   GiftPrefsModuleInput
 >(
-  "GiftPrefsModule",
   ({ giftTier, favorites, avoid }) => {
     const favoriteInput = Writable.of<string>("");
     const avoidInput = Writable.of<string>("");

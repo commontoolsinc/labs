@@ -22,7 +22,6 @@ const clampValue = handler(
 );
 
 export const boundedCounter = pattern<BoundedCounterArgs>(
-  "Bounded Counter",
   ({ value, min, max }) => {
     const label = str`Value ${value} (min ${min}, max ${max})`;
 

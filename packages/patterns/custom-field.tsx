@@ -118,7 +118,7 @@ const toggleBoolean = handler<
 export const CustomFieldModule = pattern<
   CustomFieldModuleInput,
   CustomFieldModuleOutput
->("CustomFieldModule", ({ name, value, valueType }) => {
+>(({ name, value, valueType }) => {
   // Format display value based on type
   const displayValue = computed(() => {
     const v = String(value || "");

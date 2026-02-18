@@ -109,7 +109,6 @@ const liftStackLength = lift((entries: number[]) => entries.length);
 const liftStackNotEmpty = lift((entries: number[]) => entries.length > 0);
 
 export const counterRedoStack = pattern<CounterRedoStackArgs>(
-  "Counter Redo Stack",
   ({ value, undoStack, redoStack }) => {
     const currentValue = liftSanitizeNumber(value);
 

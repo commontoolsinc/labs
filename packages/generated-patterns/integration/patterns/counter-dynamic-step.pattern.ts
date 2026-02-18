@@ -28,7 +28,6 @@ const updateStep = handler(
 );
 
 export const counterWithDynamicStep = pattern<DynamicStepArgs>(
-  "Counter With Dynamic Step",
   ({ value, step }) => {
     return {
       value,

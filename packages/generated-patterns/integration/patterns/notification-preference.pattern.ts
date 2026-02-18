@@ -208,7 +208,6 @@ const liftActiveCount = lift((entries: readonly ChannelPreference[]) =>
 );
 
 export const notificationPreferences = pattern<NotificationPreferenceArgs>(
-  "Notification Preferences",
   ({ channels }) => {
     const lastChange = cell("Preferences loaded");
     const history = cell<string[]>(["Preferences loaded"]);

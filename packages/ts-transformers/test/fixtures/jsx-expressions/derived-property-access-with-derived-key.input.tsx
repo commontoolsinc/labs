@@ -15,7 +15,6 @@ interface Assignment {
 // This pattern groups items by a property, then maps over the group keys
 // and accesses the grouped object with each key.
 export default pattern<{ items: Item[] }>(
-  "Derived Property Access",
   ({ items }) => {
     // Create assignments with aisle data
     const itemsWithAisles = derive({ items }, ({ items }) =>

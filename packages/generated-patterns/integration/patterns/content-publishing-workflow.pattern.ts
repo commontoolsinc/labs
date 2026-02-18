@@ -523,7 +523,6 @@ const advanceStage = handler(
 );
 
 export const contentPublishingWorkflow = pattern<ContentPublishingWorkflowArgs>(
-  "Content Publishing Workflow",
   ({ drafts }) => {
     const sequence = cell(0);
     const activityLog = cell<string[]>(["Workflow initialized"]);

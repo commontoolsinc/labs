@@ -155,7 +155,6 @@ const liftSequenceView = lift((count: number | undefined) =>
 );
 
 export const counterWithDynamicHandlerList = pattern<DynamicHandlerArgs>(
-  "Counter With Dynamic Handler List",
   ({ values }) => {
     const lastAdjustment = cell<AdjustmentRecord>({
       index: -1,

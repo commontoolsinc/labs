@@ -140,7 +140,6 @@ const liftActiveThreadSummary = lift(
 );
 
 export const emailInboxThreading = pattern<EmailInboxArgs>(
-  "Email Inbox Threading",
   ({ messages, activeThreadId }) => {
     const threadActivity = cell<string[]>([]);
 

@@ -13,7 +13,6 @@ const toggleState = handler(
 );
 
 export const toggleWithLabel = pattern<ToggleArgs>(
-  "Toggle With Derive Label",
   ({ active }) => {
     const status = derive(
       active,

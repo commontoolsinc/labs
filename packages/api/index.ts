@@ -1402,27 +1402,20 @@ export interface PatternFunction {
     fn: (input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<any> }) => any,
   ): PatternFactory<StripCell<T>, StripCell<ReturnType<typeof fn>>>;
 
-  // Schema + function overload: T explicit, R inferred
+  // Function + schema overload: T explicit, R inferred
   <T>(
-    argumentSchema: string | JSONSchema,
     fn: (input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<any> }) => any,
+    argumentSchema: JSONSchema,
+    resultSchema?: JSONSchema,
   ): PatternFactory<StripCell<T>, StripCell<ReturnType<typeof fn>>>;
 
-  // Schema + function overload: T and R explicit
+  // Function + schema overload: T and R explicit
   <T, R>(
-    argumentSchema: string | JSONSchema,
     fn: (
       input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<R> },
     ) => Opaque<R>,
-  ): PatternFactory<StripCell<T>, StripCell<R>>;
-
-  // Schema + schema + function overload
-  <T, R>(
-    argumentSchema: string | JSONSchema,
-    resultSchema: JSONSchema,
-    fn: (
-      input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<R> },
-    ) => Opaque<R>,
+    argumentSchema: JSONSchema,
+    resultSchema?: JSONSchema,
   ): PatternFactory<StripCell<T>, StripCell<R>>;
 }
 

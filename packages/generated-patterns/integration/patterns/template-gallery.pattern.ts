@@ -344,7 +344,6 @@ const liftSelectionTrail = lift((entries: string[] | undefined) => {
 });
 
 export const templateGallery = pattern<TemplateGalleryArgs>(
-  "Template Gallery",
   ({ templates, category }) => {
     const selectionSequence = cell(0);
     const selectionLabel = cell("initial load");

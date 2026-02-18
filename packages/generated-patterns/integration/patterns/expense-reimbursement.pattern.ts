@@ -302,7 +302,6 @@ const liftPendingPayment = lift((data: ExpenseTotals) => data.pendingPayment);
 const liftSummaryLabel = lift(buildSummaryLabel);
 
 export const expenseReimbursement = pattern<ExpenseReimbursementArgs>(
-  "Expense Reimbursement Tracker",
   ({ claims }) => {
     const history = cell<string[]>(["Reimbursement tracker initialized"]);
     const latestAction = cell("Reimbursement tracker initialized");

@@ -401,7 +401,6 @@ const liftLineLabels = lift((entries: InvoiceLineSummary[] | undefined) => {
 });
 
 export const invoiceGeneratorPattern = pattern<InvoiceGeneratorArgs>(
-  "Invoice Generator Pattern",
   ({ items, taxRate, invoiceDiscountRate }) => {
     const normalizedItems = liftNormalizedItems(items);
 

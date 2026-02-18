@@ -183,7 +183,7 @@ const handleGroupChange = handler<
 export const AgeCategoryModule = pattern<
   AgeCategoryModuleInput,
   AgeCategoryModuleInput
->("AgeCategoryModule", ({ ageCategory }) => {
+>(({ ageCategory }) => {
   // Compute whether current category is in Adult group
   const currentIsAdult = computed(() => isAdultCategory(ageCategory));
 

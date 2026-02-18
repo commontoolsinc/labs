@@ -167,7 +167,6 @@ const css = `
 `;
 
 export default pattern<InputSchema, ResultSchema>(
-  "BG Admin",
   ({ charms }) => {
     derive(charms, (charms) => {
       console.log("bg charm list:", charms);

@@ -159,7 +159,6 @@ const applyIncrement = handler(
 export const counterPersistenceViaInitialArguments = pattern<
   PersistenceInitialArgs
 >(
-  "Counter Persistence Via Initial Arguments",
   ({ state, metadata }) => {
     const lastChange = cell<PersistedChange>({
       reason: "initial",

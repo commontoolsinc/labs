@@ -317,7 +317,6 @@ const liftBlockedTasks = lift((info: ReleaseChecklistStats) => info.blocked);
 const liftDescribeGating = lift(describeGating);
 
 export const releaseChecklist = pattern<ReleaseChecklistArgs>(
-  "Release Checklist",
   ({ tasks }) => {
     const sanitizedTasks = liftSanitizeTaskList(tasks);
     const stats = liftAnalyzeTasks(sanitizedTasks);

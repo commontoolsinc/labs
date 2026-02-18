@@ -45,7 +45,6 @@ const feedUpdater = handler<never, {
 export default pattern<
   { settings: Settings }
 >(
-  "rss importer",
   ({ settings }) => {
     const items = cell<FeedItem[]>([]);
 

@@ -61,7 +61,6 @@ const removeTag = handler<
 
 // ===== The Pattern =====
 export const TagsModule = pattern<TagsModuleInput, TagsModuleInput>(
-  "TagsModule",
   ({ tags }) => {
     const tagInput = Writable.of<string>("");
     const displayText = computed(() => {

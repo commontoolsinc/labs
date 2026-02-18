@@ -117,7 +117,7 @@ const clearFile = handler<
 export const TextImportModule = pattern<
   TextImportModuleInput,
   TextImportModuleOutput
->("TextImportModule", ({ content, filename }) => {
+>(({ content, filename }) => {
   // Check if we have content
   const hasContent = computed(() => !!content && content.length > 0);
 

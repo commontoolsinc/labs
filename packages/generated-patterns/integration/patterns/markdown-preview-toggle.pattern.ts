@@ -79,7 +79,6 @@ const liftActiveView = lift(
 );
 
 export const markdownPreviewToggle = pattern<MarkdownPreviewArgs>(
-  "Markdown Preview Toggle",
   ({ initialContent, preview }) => {
     const content = liftSanitizeContent(initialContent);
     const previewEnabled = liftSanitizePreview(preview);

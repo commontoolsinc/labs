@@ -37,7 +37,6 @@ const liftTotal = lift((values: { left: number; right: number }) =>
 );
 
 export const nestedCounters = pattern<NestedCounterArgs>(
-  "Nested Counters",
   ({ counters }) => {
     const left = counters.key("left");
     const right = counters.key("right");

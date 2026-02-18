@@ -40,7 +40,6 @@ const adjustValue = handler(
 );
 
 export const counterWithConditionalBranch = pattern<ConditionalBranchArgs>(
-  "Counter With Conditional Branch",
   ({ value, enabled }) => {
     const safeValue = computed(() => sanitizeCount(value));
     const active = computed(() => sanitizeEnabled(enabled.get()));

@@ -552,7 +552,6 @@ const adjustVendorResponse = handler(
 );
 
 export const vendorRiskAssessment = pattern<VendorRiskAssessmentArgs>(
-  "Vendor Risk Assessment",
   ({ vendors }) => {
     const auditLog = cell<string[]>([]);
 

@@ -316,7 +316,6 @@ const clearMeal = handler(
 );
 
 export const menuPlanner = pattern<MenuPlannerArgs>(
-  "Menu Planner",
   ({ days, recipes, plan }) => {
     const sequence = cell(0);
     const lastAction = cell("initialized");

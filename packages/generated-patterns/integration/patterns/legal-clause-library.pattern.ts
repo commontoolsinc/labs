@@ -584,7 +584,6 @@ const liftSelectedRegion = lift((value: RegionCode | null) => value ?? "all");
 const liftSummaryLine = lift(buildSummaryLine);
 
 export const legalClauseLibrary = pattern<LegalClauseLibraryArgs>(
-  "Legal Clause Library",
   ({ clauses }) => {
     const topicFilter = cell<string | null>(null);
     const regionFilter = cell<RegionCode | null>(null);

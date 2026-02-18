@@ -106,7 +106,6 @@ const goToStoredPiece = handler<unknown, { cellRef: Writable<{ piece: any }> }>(
 );
 
 export default pattern<PatternInOutput, PatternInOutput>(
-  "Launcher",
   ({ cellRef }) => {
     return {
       [NAME]: "Launcher",

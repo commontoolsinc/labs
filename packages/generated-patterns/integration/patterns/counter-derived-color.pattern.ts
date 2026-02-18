@@ -24,7 +24,6 @@ function getColor(count: number): string {
 }
 
 export const counterWithDerivedColor = pattern<DerivedColorArgs>(
-  "Counter With Derived Color",
   ({ value }) => {
     const color = derive(value, (current) => getColor(current ?? 0));
 

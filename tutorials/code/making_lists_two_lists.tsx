@@ -163,7 +163,6 @@ const moveToList = handler<
 );
 
 export default pattern<FriendListsState>(
-  "making lists - two lists",
   (state) => {
     const moveUpHandler = moveItem({
       personalFriends: state.personalFriends,

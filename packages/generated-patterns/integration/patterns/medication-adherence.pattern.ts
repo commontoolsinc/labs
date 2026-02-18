@@ -263,7 +263,6 @@ const liftUpcomingDoses = lift((input: {
 }) => computeUpcoming(input));
 
 export const medicationAdherencePattern = pattern<MedicationAdherenceArgs>(
-  "Medication Adherence Pattern",
   ({ doses }) => {
     const schedule = liftSanitizeSchedule(doses);
     const takenRecords = cell<DoseRecord[]>([]);

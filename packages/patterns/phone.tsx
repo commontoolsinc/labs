@@ -41,7 +41,6 @@ export interface PhoneModuleInput {
 
 // ===== The Pattern =====
 export const PhoneModule = pattern<PhoneModuleInput, PhoneModuleInput>(
-  "PhoneModule",
   ({ label, number }) => {
     // Build display text
     const displayText = computed(() => {

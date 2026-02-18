@@ -28,7 +28,6 @@ const resetCounter = handler(
 );
 
 export const counterWithReset = pattern<ResetCounterArgs>(
-  "Counter With Reset",
   ({ value, baseline }) => {
     return {
       value,

@@ -126,7 +126,6 @@ export const UserSession = pattern<
   UserSessionInput,
   UserSessionResult
 >(
-  "Canvas",
   ({ messages, user }) => {
     return {
       [NAME]: str`Canvas v19-random` as any,
@@ -222,7 +221,6 @@ const createUserSession = handler<
 });
 
 export default pattern<MainPatternInput>(
-  "Canvas",
   ({ messages }) => {
     return {
       [NAME]: "Canvas",

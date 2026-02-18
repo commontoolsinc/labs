@@ -812,7 +812,6 @@ export default pattern<{
   settings: Settings;
   auth: Auth;
 }>(
-  "gmail-importer",
   ({ settings, auth }) => {
     const emails = cell<Confidential<Email[]>>([]);
 

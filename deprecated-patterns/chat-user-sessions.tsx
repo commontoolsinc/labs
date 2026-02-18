@@ -97,7 +97,6 @@ export const UserSession = pattern<
   UserSessionInput,
   UserSessionResult
 >(
-  "User Chat Session",
   ({ messages, user }) => {
     return {
       [NAME]: str`Chat Session` as any,
@@ -179,7 +178,6 @@ const createUserSession = handler<
 // Main chat pattern: a state container with a button to spawn per-user sessions.
 // All sessions get the same `messages` reference so changes are shared.
 export default pattern<MainPatternInput>(
-  "Main Chat State Container",
   ({ messages }) => {
     return {
       [NAME]: "Chat State Container",

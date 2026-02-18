@@ -409,7 +409,6 @@ const liftSnapshot = lift(
 );
 
 export const researchCitationManager = pattern<CitationArgs>(
-  "Research Citation Manager",
   ({ citations, style }) => {
     const activeStyle = liftActiveStyle(style);
 

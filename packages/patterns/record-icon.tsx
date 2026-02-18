@@ -34,7 +34,7 @@ export interface RecordIconModuleInput {
 export const RecordIconModule = pattern<
   RecordIconModuleInput,
   RecordIconModuleInput
->("RecordIconModule", ({ icon }) => {
+>(({ icon }) => {
   // Compose the emoji picker pattern
   const picker = EmojiPicker({ selectedEmoji: icon });
 

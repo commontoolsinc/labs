@@ -77,7 +77,6 @@ const liftTotal = lift((items: unknown) => {
 });
 
 export const counterReplicator = pattern<ReplicatorArgs>(
-  "Counter Replicator",
   ({ seeds }) => {
     const replicas = buildReplicas({ seeds });
 

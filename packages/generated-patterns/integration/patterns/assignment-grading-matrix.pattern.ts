@@ -562,7 +562,6 @@ const liftAssignmentCountText = lift((matrix: GradeMatrixView) =>
 );
 
 export const assignmentGradingMatrix = pattern<AssignmentGradingMatrixArgs>(
-  "Assignment Grading Matrix",
   ({ students, assignments, grades }) => {
     const sanitizedStudents = liftSanitizeStudents(students);
     const sanitizedAssignments = liftSanitizeAssignments(assignments);

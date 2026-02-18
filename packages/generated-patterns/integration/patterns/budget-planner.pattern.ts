@@ -494,7 +494,6 @@ const liftHistoryView = lift((entries: string[] | undefined) =>
 );
 
 export const budgetPlanner = pattern<BudgetPlannerArgs>(
-  "Budget Planner",
   ({ total, categories }) => {
     const sanitizedTotal = liftSanitizedTotal(total);
 

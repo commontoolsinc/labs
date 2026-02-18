@@ -520,7 +520,6 @@ const liftSanitizeSlots = lift(sanitizeSlots);
 const liftSanitizeAgents = lift(sanitizeAgents);
 
 export const callCenterSchedulePattern = pattern<CallCenterScheduleArgs>(
-  "Call Center Schedule",
   ({ slots, agents, assignments }) => {
     const slotsList = liftSanitizeSlots(slots);
     const agentsList = liftSanitizeAgents(agents);

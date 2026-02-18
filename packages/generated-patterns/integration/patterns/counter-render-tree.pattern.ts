@@ -38,7 +38,6 @@ const liftSafeValue = lift((raw: number | undefined) =>
 );
 
 export const counterWithRenderTree = pattern<RenderTreeArgs>(
-  "Counter With Render Tree",
   ({ value, step }) => {
     const safeStep = liftSafeStep(step);
     const safeValue = liftSafeValue(value);

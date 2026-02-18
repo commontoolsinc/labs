@@ -318,7 +318,6 @@ const liftOrderText = lift((ids: string[]) =>
 const liftCycleStatus = lift((flag: boolean) => flag ? "cycle" : "valid");
 
 export const issueDependencyGraph = pattern<IssueDependencyArgs>(
-  "Issue Dependency Graph",
   ({ issues }) => {
     const rejectedEdges = cell<RejectedEdge[]>([]);
 

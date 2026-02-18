@@ -50,7 +50,6 @@ export interface AddressModuleInput {
 
 // ===== The Pattern =====
 export const AddressModule = pattern<AddressModuleInput, AddressModuleInput>(
-  "AddressModule",
   ({ label, street, city, state, zip }) => {
     // Build display text from non-empty fields
     const displayText = computed(() => {

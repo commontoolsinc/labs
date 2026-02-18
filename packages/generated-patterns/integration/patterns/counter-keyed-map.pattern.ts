@@ -27,7 +27,6 @@ const liftCount = lift((map: Record<string, number>) =>
 );
 
 export const counterMapByKey = pattern<KeyedMapArgs>(
-  "Counter Map By Key",
   ({ counters }) => {
     const keys = liftKeys(counters);
     const total = liftTotal(counters);

@@ -19,7 +19,6 @@ const addOne = handler(
 const liftFormatted = lift((count: number) => `Value: ${count.toFixed(2)}`);
 
 export const counterWithLiftFormatting = pattern<LiftFormattingArgs>(
-  "Counter With Lift Formatting",
   ({ value }) => {
     const formatted = liftFormatted(value);
 

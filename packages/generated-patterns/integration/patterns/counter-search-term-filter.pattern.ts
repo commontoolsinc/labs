@@ -132,7 +132,6 @@ const updateCounterValue = handler(
 );
 
 export const counterWithSearchTermFilter = pattern<SearchFilterArgs>(
-  "Counter With Search Term Filter",
   ({ counters, search }) => {
     const sanitizedCounters = liftSanitizeCounterList(counters);
     const searchTerm = liftSanitizeSearchTerm(search);

@@ -221,7 +221,6 @@ const attemptStageTransition = handler(
 );
 
 export const workflowStateMachine = pattern<WorkflowArgs>(
-  "Workflow State Machine",
   ({ stage }) => {
     const transitions = cell<TransitionRecord[]>([]);
     const sequence = cell(0);

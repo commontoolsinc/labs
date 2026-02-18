@@ -19,7 +19,6 @@ const removeItem = handler<
 });
 
 export default pattern<{ items: Item[]; hasItems: boolean }>(
-  "CT-1035: Map with handler inside ifElse",
   ({ items, hasItems }) => {
     // CT-1035: Map inside ifElse branches should transform to mapWithPattern
     // The handler closure should work correctly with the map iterator variable

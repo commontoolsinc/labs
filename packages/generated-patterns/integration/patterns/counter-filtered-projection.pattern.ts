@@ -93,7 +93,6 @@ const liftExcluded = lift(
 const liftJoinedValues = lift((values: number[]) => values.join(", "));
 
 export const counterWithFilteredProjection = pattern<FilteredProjectionArgs>(
-  "Counter With Filtered Projection",
   ({ counters, threshold }) => {
     const sanitizedCounters = liftSanitizedCounters(counters);
 

@@ -25,7 +25,6 @@ const liftTotal = lift((values: number[]) =>
 const liftCount = lift((values: number[]) => values.length);
 
 export const counterAggregator = pattern<AggregatorArgs>(
-  "Counter Aggregator",
   ({ counters }) => {
     const total = liftTotal(counters);
     const count = liftCount(counters);

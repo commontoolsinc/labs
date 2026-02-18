@@ -278,7 +278,7 @@ const handleDeleteOccurrence = handler<
 export const OccurrenceTrackerModule = pattern<
   OccurrenceTrackerInput,
   OccurrenceTrackerInput
->("OccurrenceTrackerModule", ({ label, occurrences }) => {
+>(({ label, occurrences }) => {
   // Computed: total count
   const totalCount = computed(() => (occurrences.get() || []).length);
 

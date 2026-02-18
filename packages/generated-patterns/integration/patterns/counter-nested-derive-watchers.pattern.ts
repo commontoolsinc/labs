@@ -60,7 +60,6 @@ const liftParityCode = lift((label: "steady" | "swing") =>
 );
 
 export const counterWithNestedDeriveWatchers = pattern<NestedDeriveArgs>(
-  "Counter With Nested Derive Watchers",
   ({ value }) => {
     const current = liftCurrent(value);
 

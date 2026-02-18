@@ -8,7 +8,7 @@ export default pattern<{
   showHistory: boolean;
   messageCount: number;
   dismissedIndex: Cell<number>;
-}>("Cell .get() in ifElse predicate", ({ showHistory, messageCount, dismissedIndex }) => {
+}>(({ showHistory, messageCount, dismissedIndex }) => {
   return {
     [UI]: (
       <div>

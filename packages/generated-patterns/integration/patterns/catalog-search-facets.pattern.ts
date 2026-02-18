@@ -353,7 +353,6 @@ const liftComputePriceRange = lift(computePriceRange);
 const liftFilterItems = lift(filterItems);
 
 export const catalogSearchFacets = pattern<CatalogSearchArgs>(
-  "Catalog Search Facets",
   ({ catalog }) => {
     const sanitizedCatalog = liftSanitizeCatalog(catalog);
 

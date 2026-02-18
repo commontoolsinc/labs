@@ -99,7 +99,6 @@ const liftToInteger = lift((input: number | undefined) => toInteger(input));
 const liftSanitizeHistory = lift(sanitizeHistory);
 
 export const counterWithDerivedMinMax = pattern<DerivedMinMaxArgs>(
-  "Counter With Derived Min Max",
   ({ value, history }) => {
     const currentValue = liftToInteger(value);
     const historyValues = liftSanitizeHistory(history);

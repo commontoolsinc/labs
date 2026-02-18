@@ -447,7 +447,6 @@ const liftLastChange = lift((entries: string[] | undefined) => {
 });
 
 export const userPermissionMatrix = pattern<UserPermissionMatrixArgs>(
-  "User Permission Matrix",
   ({ permissions, roles }) => {
     const permissionsList = liftSanitizePermissionList(permissions);
     const baseRoles = liftBaseRoles({

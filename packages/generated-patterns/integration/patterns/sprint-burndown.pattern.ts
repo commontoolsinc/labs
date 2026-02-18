@@ -333,7 +333,6 @@ const liftActivityLogView = lift((entries: string[] | undefined) =>
 );
 
 export const sprintBurndown = pattern<SprintBurndownArgs>(
-  "Sprint Burndown Tracker",
   ({ totalScope, sprintLength, snapshots }) => {
     const activityLog = cell<string[]>([]);
 

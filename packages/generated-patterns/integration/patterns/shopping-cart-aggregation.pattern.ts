@@ -422,7 +422,6 @@ const liftLastEvent = lift((input: { log: string[]; lines: LineTotal[] }) => {
 });
 
 export const shoppingCartAggregation = pattern<ShoppingCartArgs>(
-  "Shopping Cart Aggregation",
   ({ items, discounts }) => {
     const cartItems = liftSanitizeCartItems(items);
     const discountRules = liftSanitizeDiscountRules(discounts);

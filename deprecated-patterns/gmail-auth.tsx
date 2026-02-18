@@ -36,7 +36,6 @@ interface Output {
 }
 
 export default pattern<Input, Output>(
-  "Gmail Auth",
   ({ auth }) => {
     return {
       [NAME]: "Gmail Auth",

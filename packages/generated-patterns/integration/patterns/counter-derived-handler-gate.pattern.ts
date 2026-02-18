@@ -87,7 +87,6 @@ const liftSafeCount = lift((count: number | undefined) =>
 );
 
 export const counterWithDerivedHandlerGate = pattern<DerivedHandlerGateArgs>(
-  "Counter With Derived Handler Gate",
   ({ value, gateMode }) => {
     const attemptLog = cell<string[]>([]);
     const blockedCount = cell<number>(0);

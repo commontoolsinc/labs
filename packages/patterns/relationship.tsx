@@ -101,7 +101,6 @@ export const RelationshipModule = pattern<
   RelationshipModuleInput,
   RelationshipModuleInput
 >(
-  "RelationshipModule",
   ({ relationTypes, closeness, howWeMet, innerCircle }) => {
     const displayText = computed(() => {
       const types = relationTypes || [];

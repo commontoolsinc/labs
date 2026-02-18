@@ -2686,7 +2686,6 @@ const clearSelection = handler<unknown, { selectedEmoji: Writable<string> }>(
 
 // ===== The Pattern =====
 export const EmojiPicker = pattern<EmojiPickerInput, EmojiPickerInput>(
-  "EmojiPicker",
   ({ selectedEmoji }) => {
     const displayText = computed(() =>
       selectedEmoji ? `Selected: ${selectedEmoji}` : "None"

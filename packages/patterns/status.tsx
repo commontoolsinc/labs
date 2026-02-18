@@ -45,7 +45,6 @@ const STATUS_OPTIONS = [
 
 // ===== The Pattern =====
 export const StatusModule = pattern<StatusModuleInput, StatusModuleInput>(
-  "StatusModule",
   ({ status }) => {
     const displayText = computed(() => {
       const opt = STATUS_OPTIONS.find((o) => o.value === status);

@@ -35,7 +35,6 @@ const updateError = handler<
 export default pattern<
   { error: Cell<Default<string, "">>; counter: Cell<Default<number, 0>> }
 >(
-  "bgCounter",
   ({ counter, error }) => {
     derive(counter, (counter) => {
       console.log("counter#", counter);

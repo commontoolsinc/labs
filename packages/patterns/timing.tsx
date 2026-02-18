@@ -44,7 +44,6 @@ function formatTime(minutes: number | null): string {
 
 // ===== The Pattern =====
 export const TimingModule = pattern<TimingModuleInput, TimingModuleInput>(
-  "TimingModule",
   ({ prepTime, cookTime, restTime }) => {
     // Compute total time
     const totalTime = computed(() => {

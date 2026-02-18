@@ -83,7 +83,6 @@ const liftSize = lift((values: number[] | undefined) =>
 );
 
 export const counterWithReorderableList = pattern<ReorderableListArgs>(
-  "Counter With Reorderable List",
   ({ items }) => {
     const positions = derive(
       items,

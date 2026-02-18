@@ -35,7 +35,6 @@ const removeItem = handler<unknown, ListState & { index: number }>(
 );
 
 export default pattern<InputSchema>(
-  "Simple List with Remove",
   ({ title, items }) => {
     return {
       [NAME]: title,

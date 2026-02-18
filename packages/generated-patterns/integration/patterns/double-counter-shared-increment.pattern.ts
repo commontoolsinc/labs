@@ -24,7 +24,6 @@ const liftTotal = lift((values: { left: number; right: number }) =>
 );
 
 export const doubleCounterWithSharedIncrement = pattern<DoubleCounterArgs>(
-  "Double Counter With Shared Increment",
   ({ left, right }) => {
     const status = str`left ${left} • right ${right}`;
     const total = liftTotal({ left, right });

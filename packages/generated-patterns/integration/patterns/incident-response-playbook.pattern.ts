@@ -463,7 +463,6 @@ const liftClockMinutes = lift((value: number | undefined) =>
 );
 
 export const incidentResponsePlaybook = pattern<IncidentResponsePlaybookArgs>(
-  "Incident Response Playbook",
   ({ steps }) => {
     const history = cell<string[]>([]);
     const activeStep = cell<string | null>(null);

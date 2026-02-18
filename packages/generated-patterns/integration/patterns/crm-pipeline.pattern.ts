@@ -474,7 +474,6 @@ const liftFormatCurrency = lift(formatCurrency);
 const liftFormatStageCount = lift(formatStageCount);
 
 export const crmPipeline = pattern<PipelineArgs>(
-  "CRM Pipeline",
   ({ deals, stages, defaultAmount }) => {
     const lastAction = cell("none");
     const idSeed = cell(0);

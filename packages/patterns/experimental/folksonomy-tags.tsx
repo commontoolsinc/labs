@@ -281,7 +281,6 @@ export const FolksonomyTags = pattern<
   FolksonomyTagsInput,
   FolksonomyTagsOutput
 >(
-  "FolksonomyTags",
   ({ scope, tags, aggregator: injectedAggregator }) => {
     // Use injected aggregator if provided, otherwise discover via wish()
     // Search both favorites (~) and current space mentionables (.)

@@ -293,7 +293,6 @@ const liftChainSummaries = lift((chains: Record<string, string[]>) =>
 );
 
 export const orgChartHierarchy = pattern<OrgChartArgs>(
-  "Org Chart Hierarchy",
   ({ members }) => {
     const history = cell<string[]>([]);
 

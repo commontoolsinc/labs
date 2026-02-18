@@ -558,7 +558,6 @@ const liftLatestSlotUpdateView = lift(
  * surfaces consensus snapshots for offline planning.
  */
 export const meetingSchedulerPattern = pattern<MeetingSchedulerArgs>(
-  "Meeting Scheduler Pattern",
   ({ participants, slots }) => {
     const votes = cell<VoteRecord>({});
     const history = cell<string[]>([]);

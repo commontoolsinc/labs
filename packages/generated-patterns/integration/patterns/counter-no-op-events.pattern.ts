@@ -62,7 +62,6 @@ const liftLastEventView = lift((label: string | undefined) =>
 );
 
 export const counterNoOpEvents = pattern<NoOpCounterArgs>(
-  "Counter No-Op Events",
   ({ value }) => {
     const updates = cell(0);
     const lastEvent = cell("none");

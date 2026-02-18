@@ -49,7 +49,6 @@ const liftHistoryView = lift((entries: number[] | undefined) =>
 );
 
 export const counterWithRollingAverage = pattern<RollingAverageArgs>(
-  "Counter With Rolling Average",
   ({ value, history, window }) => {
     const average = liftAverage(history);
     const currentValue = liftCurrentValue(value);

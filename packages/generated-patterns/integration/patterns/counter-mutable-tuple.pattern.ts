@@ -48,7 +48,6 @@ const liftRight = lift((values: [number, number]) => values[1]);
 const liftSum = lift((values: [number, number]) => values[0] + values[1]);
 
 export const counterWithMutableTuple = pattern<MutableTupleArgs>(
-  "Counter With Mutable Tuple",
   ({ pair }) => {
     const tuple = liftTuple(pair);
     const left = liftLeft(tuple);

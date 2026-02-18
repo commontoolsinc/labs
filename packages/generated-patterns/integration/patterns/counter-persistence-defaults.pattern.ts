@@ -24,7 +24,6 @@ const liftSafeStep = lift((input: number | undefined) =>
 );
 
 export const counterWithPersistenceDefaults = pattern<PersistenceDefaultsArgs>(
-  "Counter With Persistence Defaults",
   ({ value, step }) => {
     const safeStep = liftSafeStep(step);
 

@@ -584,7 +584,6 @@ const liftHistoryView = lift((entries: string[] | undefined) =>
 );
 
 export const leadScoring = pattern<LeadScoringArgs>(
-  "Lead Scoring",
   ({ leads, signalWeights, defaultWeight }) => {
     const history = cell<string[]>([]);
     const lastMutation = cell("none");

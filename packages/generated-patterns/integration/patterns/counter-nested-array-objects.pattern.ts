@@ -145,7 +145,6 @@ const liftAllNotes = lift((items: { notes: string[] }[] | undefined) => {
 });
 
 export const counterWithNestedArrayObjects = pattern<NestedArrayArgs>(
-  "Counter With Nested Array Objects",
   ({ groups }) => {
     const totals = derive(groups, countTotals);
     const summaries = derive(groups, summarizeGroups);

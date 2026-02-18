@@ -248,7 +248,6 @@ const liftPriceLabel = lift((detail: PlanDefinition) =>
 const liftCycleLabel = lift((cycle: number) => `${cycle} days`);
 
 export const subscriptionBilling = pattern<SubscriptionBillingArgs>(
-  "Subscription Billing",
   ({ plan, lastInvoiceDate }) => {
     const cycleOverride = cell<number | null>(null);
     const history = cell<string[]>([]);

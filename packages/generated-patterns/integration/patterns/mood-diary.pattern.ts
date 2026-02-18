@@ -338,7 +338,6 @@ const liftLatestEntry = lift((items: readonly MoodEntry[]) =>
 );
 
 export const moodDiaryPattern = pattern<MoodDiaryArgs>(
-  "Mood Diary Pattern",
   ({ entries }) => {
     const runtimeSeed = cell(0);
 

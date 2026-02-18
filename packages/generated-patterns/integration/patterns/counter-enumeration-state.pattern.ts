@@ -194,7 +194,6 @@ const liftCanRetreat = lift((index: number) => index > 0);
 const liftIsRunning = lift((current: CounterState) => current === "running");
 
 export const counterWithEnumerationState = pattern<EnumerationArgs>(
-  "Counter With Enumeration State",
   ({ state, value }) => {
     const transitions = cell<TransitionRecord[]>([]);
     const transitionSequence = cell(0);

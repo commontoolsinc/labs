@@ -1995,7 +1995,6 @@ const _enableNoteEditing = handler<
 });
 
 export default pattern<Input, Output>(
-  "calendar",
   (
     {
       entries,

@@ -17,7 +17,6 @@ const nestedIncrement = handler(
 );
 
 export const counterWithNestedStream = pattern<NestedStreamArgs>(
-  "Counter With Nested Stream",
   ({ value }) => {
     return {
       value,

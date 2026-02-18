@@ -32,7 +32,6 @@ type Output = {
 };
 
 const VoiceNoteSimple = pattern<Input, Output>(
-  "Voice Note Simple",
   ({ title }) => {
     const transcription = Writable.of<TranscriptionData | null>(null);
     const hasTranscription = computed(() => transcription.get() !== null);

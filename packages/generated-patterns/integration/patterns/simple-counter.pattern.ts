@@ -17,7 +17,6 @@ const increment = handler(
 );
 
 export const simpleCounter = pattern<CounterState>(
-  "Simple Counter",
   ({ value }) => {
     return {
       label: str`Counter value: ${value}`,

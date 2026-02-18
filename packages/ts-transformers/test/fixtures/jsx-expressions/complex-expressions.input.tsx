@@ -8,7 +8,6 @@ interface Problem {
 }
 
 export default pattern<Problem>(
-  "ComplexExpressions",
   ({ price, discount, tax }) => {
     return {
       [UI]: (

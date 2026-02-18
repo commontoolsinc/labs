@@ -273,7 +273,6 @@ const liftHighlightedGroup = lift(
 export const counterWithNestedComputedPercentages = pattern<
   NestedComputedPercentagesArgs
 >(
-  "Counter With Nested Computed Percentages",
   ({ groups }) => {
     const sanitizedGroups = liftSanitizeGroups(groups);
 

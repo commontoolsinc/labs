@@ -113,7 +113,6 @@ const applyOverride = handler(
 export const counterWithReferenceEqualityAssertions = pattern<
   ReferenceEqualityArgs
 >(
-  "Counter With Reference Equality Assertions",
   ({ value }) => {
     const currentValue = liftCurrentValue(value);
 

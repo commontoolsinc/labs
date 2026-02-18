@@ -104,7 +104,6 @@ const liftResolvedLabel = lift(
 );
 
 const subtotalGroup = pattern<SubtotalGroupArgs>(
-  "Nested Totals Subgroup",
   ({ label, values, index }) => {
     const normalizedIndex = liftNormalizedIndex(index);
 
@@ -259,7 +258,6 @@ const liftTotalItems = lift((entries: { itemCount: number }[]) => {
 export const counterWithNestedComputedTotals = pattern<
   NestedComputedTotalsArgs
 >(
-  "Counter With Nested Computed Totals",
   ({ groups: groupSeeds }) => {
     const groups = instantiateGroups({ groups: groupSeeds });
 

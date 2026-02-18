@@ -202,7 +202,6 @@ const liftSummary = lift((input: {
 }) => `${input.name}: ${input.servings} servings (${input.multiplier})`);
 
 export const recipeIngredientScaler = pattern<RecipeIngredientScalerArgs>(
-  "Recipe Ingredient Scaler",
   ({ name, baseServings, desiredServings, ingredients }) => {
     const history = cell<string[]>([]);
 

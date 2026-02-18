@@ -116,7 +116,6 @@ const clearNestedState = handler(
 );
 
 export const counterWithNestedOptionalCells = pattern<NestedOptionalArgs>(
-  "Counter With Nested Optional Cells",
   ({ state }) => {
     const current = computed(() => {
       const counter = state.nested?.branch?.counter;

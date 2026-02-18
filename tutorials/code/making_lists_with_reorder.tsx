@@ -59,7 +59,6 @@ const moveItem = handler<
 });
 
 export default pattern<FriendListState>(
-  "making lists - with reorder",
   (state) => {
     return {
       [UI]: (

@@ -408,7 +408,6 @@ const updateJourney = handler(
 );
 
 export const userJourneyMap = pattern<JourneyMapArgs>(
-  "User Journey Map",
   ({ milestones, anchorDay }) => {
     const changeLog = cell<string[]>([]);
     const sequence = cell<number>(0);

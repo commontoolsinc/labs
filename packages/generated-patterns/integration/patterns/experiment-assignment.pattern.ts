@@ -286,7 +286,6 @@ const liftBuildSummaryText = lift(
 );
 
 export const experimentAssignmentPattern = pattern<ExperimentAssignmentArgs>(
-  "Experiment Assignment Pattern",
   ({ variants, assignments }) => {
     const assignmentHistory = cell<string[]>([]);
 

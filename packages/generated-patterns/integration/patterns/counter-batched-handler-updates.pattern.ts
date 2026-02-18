@@ -96,7 +96,6 @@ const liftNoteView = lift((input: string | undefined) =>
 );
 
 export const counterWithBatchedHandlerUpdates = pattern<BatchedCounterArgs>(
-  "Counter With Batched Handler Updates",
   ({ value }) => {
     const processedIncrements = cell(0);
     const batchCount = cell(0);

@@ -169,7 +169,6 @@ const applyArgumentOverrides = handler(
 export const counterWithScenarioArgumentOverrides = pattern<
   ScenarioArgumentOverrideArgs
 >(
-  "Counter With Scenario Driven Argument Overrides",
   ({ value, step }) => {
     const sanitizedArguments = liftSanitizedArguments({ value, step });
 

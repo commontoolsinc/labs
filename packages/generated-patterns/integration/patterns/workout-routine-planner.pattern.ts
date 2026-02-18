@@ -439,7 +439,6 @@ const removeWorkout = handler(
 );
 
 export const workoutRoutinePlanner = pattern<WorkoutRoutinePlannerArgs>(
-  "Workout Routine Planner",
   ({ days, catalog, plan }) => {
     const lastAction = cell("initialized");
 

@@ -1648,7 +1648,6 @@ export const ExtractorModule = pattern<
   ExtractorModuleInput,
   ExtractorModuleOutput
 >(
-  "ExtractorModule",
   (
     {
       parentSubPieces,

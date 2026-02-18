@@ -186,7 +186,6 @@ const reorderModules = handler(
 );
 
 export const educationCoursePlanner = pattern<EducationCoursePlannerArgs>(
-  "Education Course Planner",
   ({ modules, startWeek }) => {
     const reorderCount = cell(0);
     const lastAction = cell("initialized");

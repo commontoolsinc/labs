@@ -180,7 +180,6 @@ const liftAlertMessage = lift((skus: string[]) => {
 });
 
 export const inventoryReorderThreshold = pattern<InventoryReorderArgs>(
-  "Inventory Reorder Threshold",
   ({ inventory }) => {
     const inventoryView = liftInventoryView(inventory);
     const lowStockEntries = liftLowStockEntries(inventoryView);

@@ -120,7 +120,6 @@ const togglePipeline = handler(
 );
 
 export const counterWithToggledDerivePipelines = pattern<TogglePipelineArgs>(
-  "Counter With Toggled Derive Pipelines",
   ({ count, mode }) => {
     const switchCount = cell(0);
     const pipelineHistory = cell<PipelineMode[]>([]);

@@ -41,7 +41,6 @@ const removeItem = handler<
 );
 
 export default pattern<FriendListState>(
-  "making lists - with remove",
   (state) => {
     return {
       [UI]: (

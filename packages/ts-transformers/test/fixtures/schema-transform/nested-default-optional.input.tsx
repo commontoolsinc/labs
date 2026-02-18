@@ -29,7 +29,6 @@ const increment = handler(
 );
 
 export default pattern<NestedOptionalArgs>(
-  "Nested Optional Default",
   ({ state }) => {
     return {
       state,

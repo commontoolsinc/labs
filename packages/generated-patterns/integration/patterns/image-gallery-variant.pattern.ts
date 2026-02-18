@@ -195,7 +195,6 @@ const liftHistoryView = lift((value: string[] | undefined) =>
 );
 
 export const imageGalleryVariant = pattern<ImageGalleryVariantArgs>(
-  "Image Gallery Variant",
   ({ modes, variants, activeMode }) => {
     const selectionHistory = cell<string[]>([]);
 

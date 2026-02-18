@@ -85,7 +85,6 @@ const liftNormalizeSettings = lift(normalizeSettings);
 export const counterWithHierarchicalDefaults = pattern<
   HierarchicalDefaultsArgs
 >(
-  "Counter With Hierarchical Defaults",
   ({ value, settings }) => {
     const resolvedSettings = liftNormalizeSettings(settings);
     const labelCell = resolvedSettings.key("label");

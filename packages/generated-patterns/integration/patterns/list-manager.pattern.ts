@@ -47,7 +47,6 @@ const incrementItem = handler(
 );
 
 export const listManager = pattern<ListManagerArgs>(
-  "List Manager",
   ({ items }) => {
     const size = liftSize(items);
     const names = derive(

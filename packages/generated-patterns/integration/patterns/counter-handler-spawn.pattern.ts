@@ -22,7 +22,6 @@ const childIncrement = handler(
 );
 
 const spawnedChild = pattern<{ value: Default<number, 0> }, SpawnedChildState>(
-  "Spawned Child Counter",
   ({ value }) => {
     return {
       value,
@@ -75,7 +74,6 @@ const spawnChild = handler(
 );
 
 export const counterWithHandlerSpawn = pattern<HandlerSpawnArgs>(
-  "Counter With Handler Spawn",
   ({ children }) => {
     return {
       children,

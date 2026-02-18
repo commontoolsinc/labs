@@ -120,7 +120,6 @@ const setGender = handler<
 
 // ===== The Pattern =====
 export const GenderModule = pattern<GenderModuleInput, GenderModuleInput>(
-  "GenderModule",
   ({ gender }) => {
     const displayText = computed(() => {
       const currentGender = gender.get();

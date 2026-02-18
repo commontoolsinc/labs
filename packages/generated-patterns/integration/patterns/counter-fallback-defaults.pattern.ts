@@ -111,7 +111,6 @@ const liftDensePreview = lift((entries: number[] | undefined) => {
 });
 
 export const counterWithFallbackDefaults = pattern<FallbackDefaultsArgs>(
-  "Counter With Fallback Defaults",
   ({ slots, fallback, expectedLength }) => {
     const normalizedFallback = liftNormalizedFallback(fallback);
     const normalizedExpected = liftNormalizedExpected(expectedLength);

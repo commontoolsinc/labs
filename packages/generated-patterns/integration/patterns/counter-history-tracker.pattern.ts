@@ -19,7 +19,6 @@ const trackIncrement = handler(
 );
 
 export const counterWithHistory = pattern<HistoryCounterArgs>(
-  "Counter History Tracker",
   ({ value, history }) => {
     const label = str`History size: ${history}`;
 

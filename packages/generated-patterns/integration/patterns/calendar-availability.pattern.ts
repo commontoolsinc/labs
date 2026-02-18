@@ -298,7 +298,6 @@ const modifySharedAvailability = handler(
  * reacting to block edits in real time for offline scheduling flows.
  */
 export const calendarAvailabilityPattern = pattern<CalendarAvailabilityArgs>(
-  "Calendar Availability Pattern",
   ({ participants, blocked }) => {
     const history = cell<string[]>([]);
     const latestChange = cell<AvailabilityChange | null>(null);

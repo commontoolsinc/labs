@@ -74,7 +74,6 @@ const PLATFORM_OPTIONS = [
 
 // ===== The Pattern =====
 export const SocialModule = pattern<SocialModuleInput, SocialModuleInput>(
-  "SocialModule",
   ({ platform, handle, profileUrl }) => {
     const displayText = computed(() => {
       const opt = PLATFORM_OPTIONS.find((o) => o.value === platform);

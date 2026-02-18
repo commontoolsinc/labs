@@ -111,7 +111,6 @@ const liftAudit = lift((record: DedupAudit | undefined) =>
 
 /** Pattern maintaining counter with deduplicated history and sorted view. */
 export const counterWithDeduplicatedList = pattern<DeduplicatedListArgs>(
-  "Counter With Deduplicated List",
   ({ value, uniqueValues }) => {
     const additions = cell(0);
     const duplicates = cell(0);

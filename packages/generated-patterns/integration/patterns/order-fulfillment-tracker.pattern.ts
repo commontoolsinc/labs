@@ -388,7 +388,6 @@ const liftTransitionMessages = lift((entries: StatusChangeEntry[]) =>
 );
 
 export const orderFulfillmentTracker = pattern<OrderFulfillmentTrackerArgs>(
-  "Order Fulfillment Tracker",
   ({ orders }) => {
     const transitionLog = cell<StatusChangeEntry[]>([]);
 

@@ -19,7 +19,6 @@ const mirrorRight = handler(
 );
 
 const childCounter = pattern<{ value: Default<number, 0> }>(
-  "Child Counter",
   ({ value }) => {
     return {
       label: str`Value ${value}`,
@@ -39,7 +38,6 @@ const liftTotal = lift((values: { left: number; right: number }) =>
 );
 
 export const composedCounters = pattern<ComposedCounterArgs>(
-  "Composed Counters",
   ({ left, right }) => {
     const leftCounter = childCounter({ value: left });
     const rightCounter = childCounter({ value: right });

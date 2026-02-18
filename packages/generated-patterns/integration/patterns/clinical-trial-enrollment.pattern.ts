@@ -452,7 +452,6 @@ const liftSanitizeCandidates = lift(sanitizeCandidates);
 const liftSanitizeCriteria = lift(sanitizeCriteria);
 
 export const clinicalTrialEnrollment = pattern<ClinicalTrialEnrollmentArgs>(
-  "Clinical Trial Enrollment",
   ({ participants, criteria }) => {
     const candidateView = liftSanitizeCandidates(participants);
     const criteriaView = liftSanitizeCriteria(criteria);

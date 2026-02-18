@@ -41,7 +41,6 @@ export interface TimelineModuleInput {
 
 // ===== The Pattern =====
 export const TimelineModule = pattern<TimelineModuleInput, TimelineModuleInput>(
-  "TimelineModule",
   ({ startDate, targetDate, completedDate }) => {
     // Build display text based on what's set
     const displayText = computed(() => {

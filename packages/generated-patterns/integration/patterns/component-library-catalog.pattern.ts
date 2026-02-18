@@ -622,7 +622,6 @@ const registerRecipe = handler(
 );
 
 export const componentLibraryCatalog = pattern<ComponentLibraryCatalogArgs>(
-  "Component Library Catalog",
   ({ components }) => {
     const registrations = cell<RecipeRegistrationEntry[]>([]);
     const registrationLog = cell<string[]>([]);

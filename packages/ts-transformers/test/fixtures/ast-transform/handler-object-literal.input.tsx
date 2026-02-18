@@ -11,14 +11,7 @@ const myHandler = handler((_, state: State) => {
   state.value.set(state.value.get() + 1);
 });
 
-export default pattern<State>({
-  type: "object",
-  properties: {
-    value: { type: "number", asCell: true },
-    name: { type: "string", asCell: true },
-  },
-  required: ["value"],
-}, (state) => {
+export default pattern<State>((state) => {
   return {
     // Test case 1: Object literal with all properties from state
     onClick1: myHandler({ value: state.value, name: state.name }),
@@ -29,4 +22,11 @@ export default pattern<State>({
     // Test case 3: Direct state passing (what we want to transform to)
     onClick3: myHandler(state),
   };
+}, {
+  type: "object",
+  properties: {
+    value: { type: "number", asCell: true },
+    name: { type: "string", asCell: true },
+  },
+  required: ["value"],
 });

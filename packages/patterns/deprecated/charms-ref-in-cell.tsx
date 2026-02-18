@@ -87,7 +87,6 @@ type PatternInOutput = {
 
 // Main pattern that manages an array of piece references
 export default pattern<PatternInOutput, PatternInOutput>(
-  "Pieces Launcher",
   ({ cellRef }) => {
     return {
       [NAME]: "Pieces Launcher",

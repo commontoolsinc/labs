@@ -201,7 +201,6 @@ const liftInteractionCount = lift((count: number | undefined) =>
 const liftSanitizeSnapshots = lift(sanitizeSnapshots);
 
 export const counterRangeSliderSimulation = pattern<RangeSliderArgs>(
-  "Counter Range Slider Simulation",
   ({ min, max, value, step }) => {
     const interactions = cell(0);
     const history = cell<SliderSnapshot[]>([]);

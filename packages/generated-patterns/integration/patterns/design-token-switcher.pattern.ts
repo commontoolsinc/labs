@@ -174,7 +174,6 @@ const liftLastApplied = lift((value: string[]) => {
 });
 
 export const designTokenSwitcher = pattern<DesignTokenSwitcherArgs>(
-  "Design Token Switcher",
   ({ tokens, activeToken }) => {
     const appliedHistory = cell<string[]>([]);
 

@@ -74,7 +74,6 @@ const liftLimit = lift((raw: number | undefined) =>
 );
 
 export const counterWithRingBufferHistory = pattern<RingBufferCounterArgs>(
-  "Counter With Ring Buffer History",
   ({ value, history, capacity }) => {
     const currentValue = liftCurrentValue(value);
 

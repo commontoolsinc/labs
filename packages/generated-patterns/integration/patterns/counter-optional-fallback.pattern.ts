@@ -34,7 +34,6 @@ const liftSafeValue = lift((inputs: { value?: number; fallback?: number }) => {
 });
 
 export const counterWithOptionalFallback = pattern<OptionalFallbackArgs>(
-  "Counter With Optional Fallback",
   ({ value, defaultValue }) => {
     const safeDefault = liftSafeDefault(defaultValue);
     const safeValue = liftSafeValue({ value, fallback: defaultValue });

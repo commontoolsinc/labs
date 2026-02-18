@@ -43,7 +43,7 @@ const addItem = handler // <
   },
 );
 
-export default pattern<InputSchemaInterface, OutputSchemaInterface>(inputSchema, outputSchema, ({ title, items }) => {
+export default pattern<InputSchemaInterface, OutputSchemaInterface>(({ title, items }) => {
   const items_count = items.length;
 
   return {
@@ -70,4 +70,4 @@ export default pattern<InputSchemaInterface, OutputSchemaInterface>(inputSchema,
     items,
     items_count,
   };
-});
+}, inputSchema, outputSchema);

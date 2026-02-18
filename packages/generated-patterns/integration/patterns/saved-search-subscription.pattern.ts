@@ -356,7 +356,6 @@ const liftLatestTrigger = lift((entries: string[]) => {
 });
 
 export const savedSearchSubscription = pattern<SavedSearchArgs>(
-  "Saved Search Subscription",
   ({ savedSubscriptions }) => {
     const savedLog = cell<string[]>([]);
     const triggerLog = cell<string[]>([]);

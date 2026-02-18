@@ -283,7 +283,6 @@ const recordFeatureUsage = handler(
 );
 
 export const featureUsageAnalytics = pattern<FeatureUsageArgs>(
-  "Feature Usage Analytics",
   ({ events, defaultDelta }) => {
     const lastEvent = cell("none");
 

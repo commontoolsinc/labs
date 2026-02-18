@@ -1399,7 +1399,7 @@ const hasImpliedItems = lift<ImpliedItemsArray, boolean>(
 export const DietaryRestrictionsModule = pattern<
   DietaryRestrictionsInput,
   DietaryRestrictionsInput
->("DietaryRestrictionsModule", ({ restrictions }) => {
+>(({ restrictions }) => {
   const selectedLevel = Writable.of<RestrictionLevel>("prefer");
 
   // Normalize raw restrictions to RestrictionEntry[] format

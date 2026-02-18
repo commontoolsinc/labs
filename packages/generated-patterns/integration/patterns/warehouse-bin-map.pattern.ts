@@ -224,7 +224,6 @@ const relocateInventory = handler(
 );
 
 export const warehouseBinMap = pattern<WarehouseBinMapArgs>(
-  "Warehouse Bin Map",
   ({ bins, items }) => {
     const binsList = liftSanitizeBins(bins);
     const rawItems = liftRawItems(items);

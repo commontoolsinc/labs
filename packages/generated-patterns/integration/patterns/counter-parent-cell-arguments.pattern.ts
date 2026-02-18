@@ -76,7 +76,6 @@ const liftAlignment = lift(
 );
 
 const childLinkedCounter = pattern<LinkedChildArgs>(
-  "Child Counter Referencing Parent Cells",
   ({ sharedValue, sharedStep }) => {
     const current = liftSanitizeCount(sharedValue);
     const step = liftSanitizeStep(sharedStep);
@@ -105,7 +104,6 @@ interface ParentCellArgumentArgs {
 }
 
 export const counterWithParentCellArguments = pattern<ParentCellArgumentArgs>(
-  "Counter With Parent Cell Arguments",
   ({ value, step }) => {
     const current = liftSanitizeCount(value);
     const stepSize = liftSanitizeStep(step);

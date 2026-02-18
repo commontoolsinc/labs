@@ -204,7 +204,6 @@ const liftCurrencyCount = lift((codes: string[]) => codes.length);
 const liftAmountLabel = lift((value: number) => value.toFixed(2));
 
 export const currencyConversionPattern = pattern<CurrencyConversionArgs>(
-  "Currency Conversion Pattern",
   ({ amount, baseCurrency, rates, targets }) => {
     const baseCode = liftSanitizeCode(baseCurrency);
 

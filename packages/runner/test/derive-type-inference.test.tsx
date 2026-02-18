@@ -254,7 +254,6 @@ describe("derive type inference", () => {
 
       // Create a pattern that returns an object with an array property
       const Chatbot = pattern<ChatbotInput, ChatbotOutput>(
-        "TestChatbot",
         () => {
           const messagesRef = Cell.of<BuiltInLLMMessage[]>()
             .getAsOpaqueRefProxy();
@@ -284,7 +283,6 @@ describe("derive type inference", () => {
         Record<string, never>,
         { messages: BuiltInLLMMessage[] }
       >(
-        "ChatbotWithMessages",
         () => {
           const messagesRef = Cell.of<BuiltInLLMMessage[]>()
             .getAsOpaqueRefProxy();

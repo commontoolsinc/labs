@@ -21,7 +21,6 @@ const adjustWithStep = handler(
 );
 
 export const counterWithRichLabel = pattern<RichLabelArgs>(
-  "Counter With Rich Label",
   ({ value, prefix, step, unit }) => {
     const detail = str`step ${step} ${unit}`;
     const label = str`${prefix}: ${value} (${detail})`;

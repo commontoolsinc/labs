@@ -568,7 +568,6 @@ const liftLatestActivity = lift((log: readonly string[]) =>
 );
 
 export const editorialCalendar = pattern<EditorialCalendarArgs>(
-  "Editorial Calendar Pattern",
   ({ entries, channels }) => {
     const history = cell<string[]>(["Calendar initialized"]);
 

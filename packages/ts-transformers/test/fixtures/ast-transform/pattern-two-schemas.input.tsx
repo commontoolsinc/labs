@@ -7,6 +7,11 @@ interface Input { count: number }
 interface Result { doubled: number }
 
 export default pattern<Input, Result>(
+  ({ count }) => {
+    return {
+      doubled: count * 2
+    };
+  },
   {
     type: "object",
     properties: {
@@ -21,9 +26,4 @@ export default pattern<Input, Result>(
     },
     required: ["doubled"]
   } as const satisfies JSONSchema,
-  ({ count }) => {
-    return {
-      doubled: count * 2
-    };
-  }
 );

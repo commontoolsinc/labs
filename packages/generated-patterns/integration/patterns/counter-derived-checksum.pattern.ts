@@ -113,7 +113,6 @@ const liftPrefixLabel = lift((text: string | undefined) =>
 
 /** Pattern computing checksum of recorded counter values via derive. */
 export const counterWithDerivedChecksum = pattern<CounterChecksumArgs>(
-  "Counter With Derived Checksum",
   ({ value, values, prefix }) => {
     const updateCount = cell(0);
 

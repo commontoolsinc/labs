@@ -163,7 +163,6 @@ const liftDifferenceSummary = lift(
 );
 
 export const counterWithDerivedDifference = pattern<DerivedDifferenceArgs>(
-  "Counter With Derived Difference",
   ({ primary, secondary, primaryStep, secondaryStep }) => {
     const sequence = cell(0);
     const differenceHistory = cell<number[]>([], { type: "array" });

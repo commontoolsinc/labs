@@ -29,7 +29,6 @@ export interface NicknameModuleInput {
 
 // ===== The Pattern =====
 export const NicknameModule = pattern<NicknameModuleInput, NicknameModuleInput>(
-  "NicknameModule",
   ({ nickname }) => {
     // Build display text
     const displayText = computed(() => {

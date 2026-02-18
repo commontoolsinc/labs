@@ -16,7 +16,6 @@ const handleClick = handler<unknown, { count: Cell<number> }>(
 );
 
 export default pattern<{ count: Default<number, 0> }>(
-  "Event Handler Test",
   ({ count }) => {
     return {
       [UI]: (

@@ -239,7 +239,6 @@ const liftColumnSummary = lift((columns: number[]) =>
 );
 
 export const counterWithMatrixState = pattern<CounterMatrixStateArgs>(
-  "Counter With Matrix State",
   ({ matrix }) => {
     const matrixView = derive(matrix, sanitizeMatrix);
     const rowTotals = derive(matrix, computeRowTotals);

@@ -257,7 +257,6 @@ const liftInteractionCount = lift((items: HeatmapBucket[]) => {
 const liftPeakSummary = lift(describePeaks);
 
 export const heatmapAggregation = pattern<HeatmapAggregationArgs>(
-  "Heatmap Aggregation",
   ({ width, height, interactions }) => {
     const sanitizedWidth = liftSanitizeWidth(width);
     const sanitizedHeight = liftSanitizeHeight(height);

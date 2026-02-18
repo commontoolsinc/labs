@@ -33,7 +33,6 @@ export interface LocationModuleInput {
 
 // ===== The Pattern =====
 export const LocationModule = pattern<LocationModuleInput, LocationModuleInput>(
-  "LocationModule",
   ({ locationName, locationAddress, coordinates }) => {
     const displayText = computed(() =>
       locationName || locationAddress || "Not set"

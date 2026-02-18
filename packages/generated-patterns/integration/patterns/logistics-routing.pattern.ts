@@ -390,7 +390,6 @@ const reassignShipment = handler(
 );
 
 export const logisticsRouting = pattern<LogisticsRoutingArgs>(
-  "Logistics Routing",
   ({ routes, shipments }) => {
     const routesList = liftSanitizeRoutes(routes);
     const baseShipments = liftBaseShipments({

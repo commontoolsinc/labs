@@ -398,7 +398,6 @@ const liftSyncOptions = lift((raw: QuoteOptionInput[] | undefined) => {
 });
 
 export const quoteConfiguration = pattern<QuoteConfigurationArgs>(
-  "Quote Configuration Pattern",
   ({ basePrice, discountRate, options }) => {
     const initialOptions = sanitizeOptionList(undefined);
     const optionState = cell<QuoteOption[]>(initialOptions);

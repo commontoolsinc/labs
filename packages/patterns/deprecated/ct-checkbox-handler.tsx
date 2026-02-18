@@ -8,7 +8,6 @@ interface CheckboxSimpleInput {
 interface CheckboxSimpleOutput extends CheckboxSimpleInput {}
 
 export default pattern<CheckboxSimpleInput, CheckboxSimpleOutput>(
-  "ct-checkbox simple demo",
   ({ enabled }) => {
     return {
       [NAME]: "Checkbox Demo",

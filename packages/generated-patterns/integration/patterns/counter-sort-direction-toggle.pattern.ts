@@ -91,7 +91,6 @@ const toggleSortDirection = handler(
 );
 
 export const counterWithSortDirectionToggle = pattern<SortDirectionToggleArgs>(
-  "Counter With Sort Direction Toggle",
   ({ count, entries, direction }) => {
     const directionHistory = cell<SortDirection[]>([]);
 

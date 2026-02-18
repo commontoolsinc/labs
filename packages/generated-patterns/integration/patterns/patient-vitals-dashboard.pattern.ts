@@ -408,7 +408,6 @@ const liftAlertSummaryText = lift((count: number) =>
 
 /** Pattern tracking patient vitals with derived alert summaries. */
 export const patientVitalsDashboardPattern = pattern<PatientVitalsArgs>(
-  "Patient Vitals Dashboard",
   ({ patientName, initialReadings, thresholds }) => {
     const readableName = liftReadableName(patientName);
 

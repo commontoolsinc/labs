@@ -290,7 +290,6 @@ const liftTotalReactions = lift((entries: ReactionTotalEntry[]) =>
 const liftSanitizeReactionCatalog = lift(sanitizeReactionCatalog);
 
 export const chatReactionTracker = pattern<ChatReactionTrackerArgs>(
-  "Chat Reaction Tracker",
   ({ messages, reactionCatalog }) => {
     const catalogView = liftSanitizeReactionCatalog(reactionCatalog);
 

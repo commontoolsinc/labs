@@ -52,7 +52,6 @@ const setRating = handler<
 
 // ===== The Pattern =====
 export const RatingModule = pattern<RatingModuleInput, RatingModuleInput>(
-  "RatingModule",
   ({ rating }) => {
     const displayText = computed(() =>
       rating.get() ? `${rating.get()}/5` : "Not rated"

@@ -246,7 +246,6 @@ const liftSanitizeString = lift((value: string | undefined) =>
 
 /** Pattern computing canonical view of nested counters for stable assertions. */
 export const counterWithDerivedCanonicalForm = pattern<CanonicalFormArgs>(
-  "Counter With Derived Canonical Form",
   ({ groups }) => {
     const history = cell<string[]>([]);
     const lastMutation = cell("none");

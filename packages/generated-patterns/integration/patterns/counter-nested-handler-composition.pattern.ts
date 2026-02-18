@@ -150,7 +150,6 @@ const liftLastPreparedView = lift(
 
 /** Pattern composing nested handlers to simulate staged pipelines. */
 export const counterWithNestedHandlerComposition = pattern<NestedHandlerArgs>(
-  "Counter With Nested Handler Composition",
   ({ value, history }) => {
     const stage = cell<StageEntry | null>(null);
     const preparedCount = cell(0);

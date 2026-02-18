@@ -165,7 +165,6 @@ const completeSequence = handler(
 );
 
 export const counterWithScenarioDrivenSteps = pattern<MultiStepArgs>(
-  "Counter With Scenario Driven Multi Step Events",
   ({ value, phase }) => {
     const stepIndex = cell(0);
     const stepLog = cell<StepEntry[]>([]);

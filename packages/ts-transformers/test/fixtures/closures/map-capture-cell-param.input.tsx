@@ -16,7 +16,6 @@ const removeItem = handler<unknown, { items: Cell<Item[]>; index: number }>(
 );
 
 export default pattern<InputSchema>(
-  "Simple List with Remove",
   ({ items }) => {
     return {
       [UI]: (

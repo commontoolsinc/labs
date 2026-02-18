@@ -124,7 +124,6 @@ const liftLabels = lift((entries: AggregatedCounter[]) =>
 );
 
 export const counterAggregator = pattern<CounterAggregatorArgs>(
-  "Counter Aggregator",
   ({ counters }) => {
     const sanitizedCounters = liftSanitizedCounters(counters);
 

@@ -220,7 +220,6 @@ const liftTotalMinutes = lift(
 
 /** Pattern orchestrating podcast episode segments into a timed outline. */
 export const podcastEpisodePlanner = pattern<PodcastEpisodePlannerArgs>(
-  "Podcast Episode Planner",
   ({ segments }) => {
     const segmentsView = liftSanitizeSegments(segments);
 

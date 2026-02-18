@@ -279,7 +279,6 @@ const liftHistoryView = lift((entries: string[] | undefined) =>
 );
 
 export const supportTicketTriagePattern = pattern<SupportTicketArgs>(
-  "Support Ticket Triage",
   ({ tickets }) => {
     const sanitizedTickets = liftSanitizeTickets(tickets);
 

@@ -17,7 +17,6 @@ type Result = {
 };
 
 export default pattern<Input, Result>(
-  "ct-picker demo",
   (_) => {
     // Create counter instances - these are OpaqueRefs to pattern results
     const counterA = Counter({ value: 10 });

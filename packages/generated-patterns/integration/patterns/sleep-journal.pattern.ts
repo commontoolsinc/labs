@@ -263,7 +263,6 @@ const liftLatestView = lift((entries: readonly SleepSessionEntry[]) =>
 );
 
 export const sleepJournalPattern = pattern<SleepJournalArgs>(
-  "Sleep Journal Pattern",
   ({ sessions }) => {
     const idSeed = cell(0);
 

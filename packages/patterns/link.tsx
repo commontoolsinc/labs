@@ -33,7 +33,6 @@ export interface LinkModuleInput {
 
 // ===== The Pattern =====
 export const LinkModule = pattern<LinkModuleInput, LinkModuleInput>(
-  "LinkModule",
   ({ url, linkTitle, description }) => {
     const displayText = computed(() => linkTitle || url || "Not set");
 

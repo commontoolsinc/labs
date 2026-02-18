@@ -313,7 +313,6 @@ const liftScoreSummary = lift((input: {
 }) => `${input.title} leads at ${input.score} with ${input.weights}`);
 
 export const searchRelevanceTuning = pattern<SearchRelevanceArgs>(
-  "Search Relevance Tuning Pattern",
   ({ results, weights }) => {
     const sanitizedResults = liftSanitizeResults(results);
     const sanitizedWeights = liftSanitizeWeights(weights);

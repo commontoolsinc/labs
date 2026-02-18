@@ -571,7 +571,6 @@ const liftLastChangeLabel = lift((change: CirculationChange | null) => {
 });
 
 export const libraryCheckoutSystem = pattern<LibraryCheckoutArgs>(
-  "Library Checkout System",
   ({ catalog }) => {
     const eventSequence = cell(1);
     const lastChange = cell<CirculationChange | null>(null);

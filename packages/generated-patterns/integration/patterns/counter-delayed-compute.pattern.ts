@@ -18,7 +18,6 @@ const scheduleIncrement = handler(
 );
 
 export const counterWithDelayedIncrement = pattern<DelayedCounterArgs>(
-  "Counter With Delayed Increment",
   ({ value, pending }) => {
     const drainPending = derive(
       { pending, value },

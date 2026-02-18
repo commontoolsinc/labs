@@ -245,7 +245,6 @@ const liftSanitizeHistory = lift(sanitizeHistory);
 const liftSanitizeChange = lift(sanitizeChange);
 
 export const counterWithTypedHandlerRecord = pattern<TypedHandlerRecordArgs>(
-  "Counter With Typed Handler Record",
   ({ value, step }) => {
     const history = cell<CounterChange[]>([]);
     const lastChange = cell<CounterChange>({

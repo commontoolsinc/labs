@@ -339,7 +339,6 @@ const liftHistoryView = lift((entries: MoveRecord[] | undefined) =>
 );
 
 export const kanbanBoardGrouping = pattern<KanbanBoardArgs>(
-  "Kanban Board Grouping",
   ({ tasks, wipLimits }) => {
     const moveHistory = cell<MoveRecord[]>([]);
     const normalizedTasks = liftSanitizeTaskList(tasks);

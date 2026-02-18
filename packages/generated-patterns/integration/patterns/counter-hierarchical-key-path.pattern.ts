@@ -151,7 +151,6 @@ const liftPathLogView = lift(clampPathLog);
 
 /** Pattern updating nested counters by traversing key paths. */
 export const counterWithHierarchicalKeyPath = pattern<HierarchyArgs>(
-  "Counter With Hierarchical Key Path",
   ({ hierarchy }) => {
     const updateCount = cell(0);
     const lastPath = cell(DEFAULT_PATH_STRING);

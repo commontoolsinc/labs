@@ -387,7 +387,6 @@ const liftSessionWord = lift((count: number) =>
 export const studentAttendanceTrackerPattern = pattern<
   StudentAttendanceTrackerArgs
 >(
-  "Student Attendance Tracker",
   ({ roster }) => {
     const runtimeSeed = cell(0);
 

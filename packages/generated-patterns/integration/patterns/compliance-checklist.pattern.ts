@@ -598,7 +598,6 @@ const liftComputeInsights = lift(computeInsights);
 const liftCloneTasks = lift(cloneTasks);
 
 export const complianceChecklist = pattern<ComplianceChecklistArgs>(
-  "Compliance Checklist",
   ({ tasks }) => {
     const canonicalDefaults = liftSanitizeTaskList(tasks);
     const overrideStore = cell<TaskOverrideMap>({});

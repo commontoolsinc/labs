@@ -6,7 +6,6 @@ const adder = handler((_, state: { values: Cell<string[]> }) => {
 });
 
 export default pattern<{ values: string[] }>(
-  "Simple Value",
   ({ values }) => {
     derive(values, (values) => {
       console.log("values#", values?.length);

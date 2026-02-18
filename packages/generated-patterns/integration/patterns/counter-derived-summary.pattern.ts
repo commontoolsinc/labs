@@ -213,7 +213,6 @@ const liftSummary = lift(
 );
 
 export const counterWithDerivedSummary = pattern<SummaryArgs>(
-  "Counter With Derived Summary",
   ({ value, step, history }) => {
     const sequence = cell(0);
     const adjustments = cell<AdjustmentRecord[]>([]);

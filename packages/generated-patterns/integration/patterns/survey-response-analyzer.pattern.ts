@@ -433,7 +433,6 @@ const liftResponsesView = lift((entries: SurveyResponse[]) =>
 );
 
 export const surveyResponseAnalyzer = pattern<SurveyResponseArgs>(
-  "Survey Response Analyzer",
   ({ responses, questions }) => {
     const sanitizedArgumentResponses = liftSanitizeResponses(responses);
     const sanitizedQuestionList = liftSanitizeQuestionList(questions);

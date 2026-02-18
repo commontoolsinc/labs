@@ -230,7 +230,6 @@ const liftMilestoneList = lift((inputs: {
 const liftFormattedPercent = lift((value: number) => value.toFixed(1));
 
 export const goalProgressTracker = pattern<GoalProgressArgs>(
-  "Goal Progress Tracker",
   ({ milestones }) => {
     const sanitized = liftSanitizeMilestoneMap(milestones);
     const totals = liftTotals(sanitized);

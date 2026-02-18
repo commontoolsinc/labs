@@ -403,7 +403,6 @@ const liftBusiestStage = lift((buckets: LifecycleBucket[]) => {
 });
 
 export const assetLifecycleTracker = pattern<AssetLifecycleTrackerArgs>(
-  "Asset Lifecycle Tracker",
   ({ assets }) => {
     const transitionLog = cell<TransitionEntry[]>([]);
 

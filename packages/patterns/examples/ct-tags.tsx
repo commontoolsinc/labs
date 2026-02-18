@@ -24,7 +24,6 @@ const updateTags = handler<
 });
 
 export default pattern<Input, Result>(
-  "ct-tags demo",
   ({ tags }) => {
     return {
       [NAME]: "ct-tags demo",

@@ -351,7 +351,6 @@ const liftComputeChannelAverages = lift((
 ) => computeChannelAverages(entries));
 
 export const customerSatisfactionTracker = pattern<CustomerSatisfactionArgs>(
-  "Customer Satisfaction Tracker",
   ({ responses }) => {
     const runtimeSeed = cell(0);
 

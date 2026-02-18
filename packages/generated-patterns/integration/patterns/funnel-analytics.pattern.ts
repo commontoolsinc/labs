@@ -334,7 +334,6 @@ const loadStageSnapshot = handler(
 );
 
 export const funnelAnalytics = pattern<FunnelAnalyticsArgs>(
-  "Funnel Analytics",
   ({ stages }) => {
     const updateHistory = cell<StageUpdateEntry[]>([]);
 

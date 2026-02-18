@@ -10,7 +10,7 @@ const incCounter = handler<undefined, { counter: Cell<number> }>(
 
 export default pattern<{
   counter: Default<number, 0>;
-}>("IfElseTest", ({ counter }) => {
+}>(({ counter }) => {
   console.log("counter", counter);
 
   return {

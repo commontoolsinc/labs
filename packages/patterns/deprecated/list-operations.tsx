@@ -89,7 +89,6 @@ const show = lift((items: Item[]) => {
 });
 
 export default pattern<ListInput, ListOutput>(
-  "list operations",
   ({ items }) => {
     const lowerCase = computed(
       () => items.map((item) => item.title.toLowerCase()),

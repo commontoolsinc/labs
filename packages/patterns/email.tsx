@@ -41,7 +41,6 @@ export interface EmailModuleInput {
 
 // ===== The Pattern =====
 export const EmailModule = pattern<EmailModuleInput, EmailModuleInput>(
-  "EmailModule",
   ({ label, address }) => {
     // Build display text
     const displayText = computed(() => {

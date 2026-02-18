@@ -74,7 +74,6 @@ const _conditionalChild = pattern<
   { value: Default<number, 0> },
   ChildCounterState
 >(
-  "Conditional Child Counter",
   ({ value }) => {
     const current = computed(() => sanitizeCount(value));
     const label = str`Child value ${current}`;
@@ -95,7 +94,6 @@ interface ConditionalChildArgs {
 export const counterWithConditionalChildInstantiation = pattern<
   ConditionalChildArgs
 >(
-  "Counter With Conditional Child Instantiation",
   ({ value, enabled }) => {
     const safeValue = computed(() => sanitizeCount(value));
     const isActive = computed(() => normalizeEnabled(enabled));

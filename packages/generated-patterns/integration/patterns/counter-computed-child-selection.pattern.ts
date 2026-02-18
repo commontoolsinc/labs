@@ -87,7 +87,6 @@ const fallbackSelection: ChildView = {
 export const counterComputedChildSelection = pattern<
   ComputedChildSelectionArgs
 >(
-  "Counter With Computed Child Selection",
   ({ counts }) => {
     const normalizedCounts = computed(() => sanitizeCounts(counts));
     const children = computed(() => buildChildViews(normalizedCounts));

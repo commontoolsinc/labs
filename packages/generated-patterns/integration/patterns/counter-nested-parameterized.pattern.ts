@@ -113,7 +113,6 @@ const liftSanitizedPrefix = lift((input: string | undefined) =>
 );
 
 export const parameterizedChildCounter = pattern<ParameterizedChildArgs>(
-  "Parameterized Child Counter",
   ({ identity, value, step, labelPrefix }) => {
     const safeIdentity = liftSafeIdentity(identity);
 
@@ -187,7 +186,6 @@ const liftChildren = lift((entries: ChildConfig[]) => {
 });
 
 export const counterNestedParameterized = pattern<NestedParameterizedArgs>(
-  "Counter With Nested Parameterized Patterns",
   ({ configs }) => {
     const configurationVersion = cell(0);
 

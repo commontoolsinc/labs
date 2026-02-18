@@ -58,7 +58,6 @@ const adjustValue = handler(
 );
 
 export const counterWithConditionalUiBranch = pattern<ConditionalIfElseArgs>(
-  "Counter With Conditional UI Branch",
   ({ value, visible }) => {
     const safeValue = computed(() => sanitizeValue(value));
     const isVisible = computed(() => normalizeVisible(visible));

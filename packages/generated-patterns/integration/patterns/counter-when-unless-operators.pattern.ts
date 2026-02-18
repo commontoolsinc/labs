@@ -102,7 +102,6 @@ const incrementCount = handler(
 );
 
 export const counterWithWhenUnlessOperators = pattern<WhenUnlessArgs>(
-  "Counter With When Unless Operators",
   ({ items, showPanel, userName, count }) => {
     // Test 1: && with complex expression (items.length > 0)
     // This should transform to: when(derive(...items.length > 0...), "has items")

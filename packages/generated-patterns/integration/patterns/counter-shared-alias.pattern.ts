@@ -21,7 +21,6 @@ const sharedIncrement = handler(
 );
 
 export const counterWithSharedAlias = pattern<SharedAliasArgs>(
-  "Counter With Shared Alias",
   ({ value }) => {
     const safeValue = liftSafeValue(value);
     const label = str`Value ${safeValue}`;

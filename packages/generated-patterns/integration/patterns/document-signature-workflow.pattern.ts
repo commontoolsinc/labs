@@ -460,7 +460,6 @@ const liftActivityLog = lift((input: {
 });
 
 export const documentSignatureWorkflow = pattern<DocumentSignatureWorkflowArgs>(
-  "Document Signature Workflow",
   ({ documentTitle, signers }) => {
     const logEntries = cell<string[]>([]);
 

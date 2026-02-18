@@ -57,7 +57,6 @@ const liftSafeHistory = lift((records: BubbleRecord[] | undefined) =>
 );
 
 const childCounter = pattern<{ value: Default<number, 0> }>(
-  "Bubbled Child Counter",
   ({ value }) => {
     const safeValue = liftSafeCount(value);
     return {
@@ -111,7 +110,6 @@ const parentIncrement = handler(
 
 /** Pattern simulating parent handler bubbling events into a child stream. */
 export const counterWithParentChildBubbling = pattern<ParentChildBubbleArgs>(
-  "Counter With Parent-Child Event Bubbling",
   ({ parent, child }) => {
     const parentView = liftSafeCount(parent);
 
