@@ -88,7 +88,7 @@ export const sandboxExec: AppRouteHandler<SandboxExecRoute> = async (c) => {
     sandboxId,
     command,
     workingDirectory,
-    timeout = 60000,
+    timeout = 300000,
     environment,
   } = payload;
 
