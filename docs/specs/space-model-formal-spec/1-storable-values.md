@@ -1815,7 +1815,7 @@ etc.).
  * - `StorableError`      -> `Error`
  * - `StorableMap`        -> `FrozenMap` (when frozen) or `Map` (when not)
  * - `StorableSet`        -> `FrozenSet` (when frozen) or `Set` (when not)
- * - `StorableDate`       -> `Date`
+ * - `StorableDate`       -> `FrozenDate` (when frozen) or `Date` (when not)
  * - `StorableUint8Array` -> `Blob` (when frozen) or `Uint8Array` (when not)
  *
  * Non-wrapper `StorableInstance` values (`Cell`, `Stream`, `UnknownStorable`,
@@ -1824,13 +1824,14 @@ etc.).
  * **Shallow:** Only unwraps the top-level value. Array elements and object
  * property values are not recursively unwrapped.
  *
- * **Immutability is preserved for collections and binary data.** When
- * `freeze` is `true` (the default), `StorableMap` and `StorableSet` unwrap
- * to `FrozenMap` and `FrozenSet` respectively — effectively-immutable
- * wrappers around `Map` and `Set` that expose read-only interfaces and
- * throw on mutation attempts. `StorableUint8Array` unwraps to `Blob`,
- * which is inherently immutable (see rationale below). This preserves the
- * immutable-forward guarantee even in the "JS wild west" layer. When
+ * **Immutability is preserved for collections, dates, and binary data.**
+ * When `freeze` is `true` (the default), `StorableMap` and `StorableSet`
+ * unwrap to `FrozenMap` and `FrozenSet` respectively — effectively-immutable
+ * wrappers that expose read-only interfaces and throw on mutation attempts.
+ * `StorableDate` unwraps to `FrozenDate` — a `Date` subclass that overrides
+ * all `set*()` methods to throw `TypeError`. `StorableUint8Array` unwraps to
+ * `Blob`, which is inherently immutable (see rationale below). This preserves
+ * the immutable-forward guarantee even in the "JS wild west" layer. When
  * `freeze` is `false`, mutable native types are returned instead.
  */
 export function nativeValueFromStorableValue(
@@ -1856,7 +1857,7 @@ export function deepNativeValueFromStorableValue(
 | `StorableError` | `Error` | `Error` |
 | `StorableMap` | `FrozenMap` (read-only; throws on mutation) | `Map` (mutable) |
 | `StorableSet` | `FrozenSet` (read-only; throws on mutation) | `Set` (mutable) |
-| `StorableDate` | `Date` | `Date` |
+| `StorableDate` | `FrozenDate` (`Date` subclass; throws on mutation) | `Date` (mutable) |
 | `StorableUint8Array` | `Blob` (inherently immutable) | `Uint8Array` (mutable) |
 | Other `StorableInstance` | Passed through unchanged | Passed through unchanged |
 | Primitives | Passed through unchanged | Passed through unchanged |
@@ -1874,6 +1875,14 @@ result may contain native JS types at any depth.
 > on any mutation attempt. This ensures that data round-tripped through the
 > storable layer remains effectively immutable even after unwrapping. The exact
 > API of `FrozenMap` and `FrozenSet` is an implementation decision.
+
+> **Why `FrozenDate`?** `Object.freeze()` does not prevent mutation of `Date`
+> via its internal-slot methods — `setTime()`, `setFullYear()`, `setMonth()`,
+> etc. remain callable on a frozen instance. `FrozenDate` extends `Date` and
+> overrides all `set*()` methods to throw `TypeError`, making mutation
+> impossible while preserving the full read-only `Date` API (`getTime()`,
+> `toISOString()`, etc.). When `freeze` is `false`, a regular mutable `Date`
+> is returned instead.
 
 > **Why `Blob` for frozen `Uint8Array`?** `Object.freeze()` does not prevent
 > mutation of typed array contents — the indexed elements of a `Uint8Array`
@@ -1895,8 +1904,8 @@ produces a value that is structurally equivalent to `v` — the same data at the
 same positions. The round-tripped value is not necessarily `===` to the original
 (wrapping and unwrapping creates new objects), and the **types may change** when
 frozen: a mutable `Map` becomes a `FrozenMap`, a mutable `Set` becomes a
-`FrozenSet`, and a `Uint8Array` becomes a `Blob`. The data content is preserved;
-the mutability is not.
+`FrozenSet`, a `Date` becomes a `FrozenDate`, and a `Uint8Array` becomes a
+`Blob`. The data content is preserved; the mutability is not.
 
 Similarly, for any `StorableValue` `sv`:
 
