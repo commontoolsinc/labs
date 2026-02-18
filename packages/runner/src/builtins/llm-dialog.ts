@@ -1382,6 +1382,7 @@ export const llmToolExecutionHelpers = {
   createToolResultMessages,
   hasValidContent,
   buildAvailableCellsDocumentation,
+  traverseAndCellify,
 };
 
 /**
@@ -1734,8 +1735,14 @@ async function invokeToolCall(
   }
 
   if (resolved.type === "presentResult") {
-    // Return the structured result directly
-    return traverseAndCellify(runtime, space, resolved.result);
+    // Cellify to get live references, then serialize back to @link for the
+    // conversation message. The caller (startRequest) cellifies separately
+    // from the raw tool call input to store on the dialog's result cell.
+    const cellified = traverseAndCellify(runtime, space, resolved.result);
+    return {
+      type: "json",
+      value: traverseAndSerialize(cellified, undefined, new Set(), space),
+    };
   }
 
   // Handle run-type tools (external, run with pattern/handler)
@@ -2196,15 +2203,21 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
             pinnedCells,
           );
 
-          // If presentResult was called, store the result on the dialog's result cell
+          // If presentResult was called, cellify the raw input and store on
+          // the dialog's result cell. We cellify from the raw tool call input
+          // (not the serialized tool result) to get live Cell references.
           if (userResultSchema) {
-            const presentResultCall = toolResults.find(
+            const presentResultPart = toolCallParts.find(
               (p) => p.toolName === PRESENT_RESULT_TOOL_NAME,
             );
-            if (presentResultCall?.result !== undefined) {
-              // result is already cellified by invokeToolCall (traverseAndCellify was called)
+            if (presentResultPart) {
+              const cellified = traverseAndCellify(
+                runtime,
+                space,
+                presentResultPart.input,
+              );
               await runtime.editWithRetry((tx) => {
-                result.withTx(tx).key("result").set(presentResultCall.result);
+                result.withTx(tx).key("result").set(cellified);
               });
             }
           }

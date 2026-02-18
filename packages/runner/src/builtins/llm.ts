@@ -925,16 +925,20 @@ export function generateObject<T extends Record<string, unknown>>(
                   toolCallParts,
                 );
 
-              // Check if presentResult was called and grab the result.
-              // It's post de-serialization so might contain cells
-              // (unlike the input to the tool)
-              const presentResultCall = toolResults.find(
+              // Check if presentResult was called. Cellify from the raw
+              // tool call input to get live Cell references (the tool result
+              // itself is serialized with @link for the conversation).
+              const presentResultPart = toolCallParts.find(
                 (p) =>
                   p.toolName ===
                     llmToolExecutionHelpers.PRESENT_RESULT_TOOL_NAME,
               );
-              if (presentResultCall) {
-                finalResult = presentResultCall.result as T;
+              if (presentResultPart) {
+                finalResult = llmToolExecutionHelpers.traverseAndCellify(
+                  runtime,
+                  parentCell.space,
+                  presentResultPart.input,
+                ) as T;
               }
 
               const toolResultMessages = llmToolExecutionHelpers
@@ -947,7 +951,7 @@ export function generateObject<T extends Record<string, unknown>>(
               ];
 
               // Continue if presentResult wasn't called yet
-              if (!presentResultCall) {
+              if (!presentResultPart) {
                 await executeRecursive(updatedMessages);
               }
             } else {
