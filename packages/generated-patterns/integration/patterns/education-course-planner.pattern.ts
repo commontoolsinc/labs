@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -185,8 +185,7 @@ const reorderModules = handler(
   },
 );
 
-export const educationCoursePlanner = recipe<EducationCoursePlannerArgs>(
-  "Education Course Planner",
+export const educationCoursePlanner = pattern<EducationCoursePlannerArgs>(
   ({ modules, startWeek }) => {
     const reorderCount = cell(0);
     const lastAction = cell("initialized");

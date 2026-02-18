@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -387,8 +387,7 @@ const liftTransitionMessages = lift((entries: StatusChangeEntry[]) =>
   entries.map((entry) => entry.message)
 );
 
-export const orderFulfillmentTracker = recipe<OrderFulfillmentTrackerArgs>(
-  "Order Fulfillment Tracker",
+export const orderFulfillmentTracker = pattern<OrderFulfillmentTrackerArgs>(
   ({ orders }) => {
     const transitionLog = cell<StatusChangeEntry[]>([]);
 

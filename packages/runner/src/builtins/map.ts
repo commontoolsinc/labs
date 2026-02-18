@@ -1,4 +1,4 @@
-import { type JSONSchema, type Recipe } from "../builder/types.ts";
+import { type JSONSchema, type Pattern } from "../builder/types.ts";
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import { type AddCancel } from "../cancel.ts";
@@ -10,8 +10,8 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
  * called once at setup and thus sets up its own actions for the scheduler.
  *
  * This supports both legacy map calls and closure-transformed map calls:
- * - Legacy mode (params === undefined): Passes { element, index, array } to recipe
- * - Closure mode (params !== undefined): Passes { element, index, array, params } to recipe
+ * - Legacy mode (params === undefined): Passes { element, index, array } to pattern
+ * - Closure mode (params !== undefined): Passes { element, index, array, params } to pattern
  *
  * The goal is to keep the output array current without recomputing too much.
  *
@@ -28,14 +28,14 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
  * and/or change the comparision here.
  *
  * @param list - A doc containing an array of values to map over.
- * @param op - A recipe to apply to each value.
+ * @param op - A pattern to apply to each value.
  * @param params - Optional object containing captured variables from outer scope (closure mode).
  * @returns A doc containing the mapped values.
  */
 export function map(
   inputsCell: Cell<{
     list: any[];
-    op: Recipe;
+    op: Pattern;
     params?: Record<string, any>;
   }>,
   sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
@@ -46,7 +46,7 @@ export function map(
 ): Action {
   // Tracks up to where in the source array we've handled entries. Right now we
   // start at zero, even though in principle the result doc above could have
-  // been pre-initalized from storage, so that we `run` each recipe. Once that
+  // been pre-initalized from storage, so that we `run` each pattern. Once that
   // is automated on rehyrdation, we can change this to measure the difference
   // between the source list and the result list.
   let initializedUpTo = 0;
@@ -83,9 +83,9 @@ export function map(
       } as const satisfies JSONSchema,
     ).withTx(tx).get();
 
-    // .getRaw() because we want the recipe itself and avoid following the
-    // aliases in the recipe
-    const opRecipe = op.getRaw();
+    // .getRaw() because we want the pattern itself and avoid following the
+    // aliases in the pattern
+    const opPattern = op.getRaw();
 
     // If the result's value is undefined, set it to the empty array.
     if (resultWithLog.get() === undefined) {
@@ -121,7 +121,7 @@ export function map(
         tx,
       );
       // Determine which mode we're in based on presence of params
-      const recipeInputs = params !== undefined
+      const patternInputs = params !== undefined
         ? {
           // Closure mode: include params
           element: inputsCell.key("list").key(initializedUpTo),
@@ -138,8 +138,8 @@ export function map(
 
       runtime.runner.run(
         tx,
-        opRecipe,
-        recipeInputs,
+        opPattern,
+        patternInputs,
         resultCell,
         { doNotUpdateOnPatternChange: true },
       );

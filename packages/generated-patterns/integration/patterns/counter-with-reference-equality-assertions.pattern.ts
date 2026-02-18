@@ -6,7 +6,7 @@ import {
   derive,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -110,10 +110,9 @@ const applyOverride = handler(
  * Counter that keeps a derived summary stable when sanitized value does not
  * change between updates.
  */
-export const counterWithReferenceEqualityAssertions = recipe<
+export const counterWithReferenceEqualityAssertions = pattern<
   ReferenceEqualityArgs
 >(
-  "Counter With Reference Equality Assertions",
   ({ value }) => {
     const currentValue = liftCurrentValue(value);
 

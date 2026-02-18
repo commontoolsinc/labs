@@ -10,31 +10,31 @@ import {
   type Frame,
   isModule,
   isOpaqueRef,
-  isRecipe,
+  isPattern,
   isStreamValue,
   type JSONSchema,
   type Module,
   NAME,
   type NodeFactory,
-  type Recipe,
+  type Pattern,
   TYPE,
   UI,
   unsafe_materializeFactory,
-  unsafe_originalRecipe,
+  unsafe_originalPattern,
 } from "./builder/types.ts";
 import {
+  patternFromFrame,
   popFrame,
   pushFrameFromCause,
-  recipeFromFrame,
-} from "./builder/recipe.ts";
+} from "./builder/pattern.ts";
 import { type Cell, isCell } from "./cell.ts";
 import { type Action } from "./scheduler.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import {
   findAllWriteRedirectCells,
-  unsafe_noteParentOnRecipes,
+  unsafe_noteParentOnPatterns,
   unwrapOneLevelAndBindtoDoc,
-} from "./recipe-binding.ts";
+} from "./pattern-binding.ts";
 import { resolveLink } from "./link-resolution.ts";
 import {
   createSigilLinkFromParsedLink,
@@ -45,7 +45,7 @@ import {
   parseLink,
 } from "./link-utils.ts";
 import { deepEqual } from "@commontools/utils/deep-equal";
-import { sendValueToBinding } from "./recipe-binding.ts";
+import { sendValueToBinding } from "./pattern-binding.ts";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
 import { LINK_V1_TAG, SigilLink } from "./sigil-types.ts";
 import type { Runtime } from "./runtime.ts";
@@ -71,8 +71,8 @@ export class Runner {
   private allCancels = new Set<Cancel>();
   private functionCache = new FunctionCache();
   // Map whose key is the result cell's full key, and whose values are the
-  // recipes as strings
-  private resultRecipeCache = new Map<`${MemorySpace}/${URI}`, string>();
+  // patterns as strings
+  private resultPatternCache = new Map<`${MemorySpace}/${URI}`, string>();
 
   constructor(readonly runtime: Runtime) {
     this.runtime.storageManager.subscribe(this.createStorageSubscription());
@@ -81,8 +81,8 @@ export class Runner {
   /**
    * Creates and returns a new storage subscription.
    *
-   * This will be used to remove the cached recipe information when the result
-   * cell changes. As a result, if we are scheduled, we will run that recipe
+   * This will be used to remove the cached pattern information when the result
+   * cell changes. As a result, if we are scheduled, we will run that pattern
    * and regenerate the result.
    *
    * @returns A new IStorageSubscription instance
@@ -94,14 +94,14 @@ export class Runner {
         if ("changes" in notification) {
           for (const change of notification.changes) {
             if (change.address.type === "application/json") {
-              this.resultRecipeCache.delete(`${space}/${change.address.id}`);
+              this.resultPatternCache.delete(`${space}/${change.address.id}`);
             }
           }
         } else if (notification.type === "reset") {
           // copy keys, since we'll mutate the collection while iterating
-          const cacheKeys = [...this.resultRecipeCache.keys()];
+          const cacheKeys = [...this.resultPatternCache.keys()];
           cacheKeys.filter((key) => key.startsWith(`${notification.space}/`))
-            .forEach((key) => this.resultRecipeCache.delete(key));
+            .forEach((key) => this.resultPatternCache.delete(key));
         }
         return { done: false };
       },
@@ -110,39 +110,39 @@ export class Runner {
 
   /**
    * Prepare a piece for running by creating/updating its process and result
-   * cells, registering the recipe, and applying defaults/arguments.
+   * cells, registering the pattern, and applying defaults/arguments.
    * This does not schedule any nodes. Use start() to schedule execution.
-   * If the piece is already running and the recipe changes, it will stop the
+   * If the piece is already running and the pattern changes, it will stop the
    * piece.
    */
   setup<T, R>(
     tx: IExtendedStorageTransaction | undefined,
-    recipeFactory: NodeFactory<T, R>,
+    patternFactory: NodeFactory<T, R>,
     argument: T,
     resultCell: Cell<R>,
   ): Promise<Cell<R>>;
   setup<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
-    recipe: Recipe | Module | undefined,
+    pattern: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
   ): Promise<Cell<R>>;
   setup<T, R = any>(
     providedTx: IExtendedStorageTransaction | undefined,
-    recipeOrModule: Recipe | Module | undefined,
+    patternOrModule: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
   ): Promise<Cell<R>> {
     if (providedTx) {
-      this.setupInternal(providedTx, recipeOrModule, argument, resultCell);
+      this.setupInternal(providedTx, patternOrModule, argument, resultCell);
       return Promise.resolve(resultCell);
     } else {
       // Ignore errors after retrying for now, as outside the tx, we'll see the
       // latest true value, it just lost the ract against someone else changing
-      // the recipe or argument. Correct action is anyhow similar to what would
+      // the pattern or argument. Correct action is anyhow similar to what would
       // have happened if the write succeeded and was immediately overwritten.
       return this.runtime.editWithRetry((tx) => {
-        this.setupInternal(tx, recipeOrModule, argument, resultCell);
+        this.setupInternal(tx, patternOrModule, argument, resultCell);
       }).then(() => resultCell);
     }
   }
@@ -152,12 +152,12 @@ export class Runner {
    */
   private setupInternal<T, R = any>(
     providedTx: IExtendedStorageTransaction | undefined,
-    recipeOrModule: Recipe | Module | undefined,
+    patternOrModule: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
   ): {
     resultCell: Cell<R>;
-    recipe?: Recipe;
+    pattern?: Pattern;
     processCell?: Cell<any>;
     needsStart: boolean;
   } {
@@ -193,32 +193,32 @@ export class Runner {
       }`,
     ]);
 
-    let recipeId: string | undefined;
+    let patternId: string | undefined;
 
-    const previousRecipeId = processCell.withTx(tx).key(TYPE).getRaw({
+    const previousPatternId = processCell.withTx(tx).key(TYPE).getRaw({
       meta: ignoreReadForScheduling,
     });
 
-    if (!recipeOrModule && previousRecipeId) {
-      recipeId = previousRecipeId;
-      recipeOrModule = this.runtime.recipeManager.recipeById(recipeId!);
-      if (!recipeOrModule) throw new Error(`Unknown recipe: ${recipeId}`);
-    } else if (!recipeOrModule) {
+    if (!patternOrModule && previousPatternId) {
+      patternId = previousPatternId;
+      patternOrModule = this.runtime.patternManager.patternById(patternId!);
+      if (!patternOrModule) throw new Error(`Unknown pattern: ${patternId}`);
+    } else if (!patternOrModule) {
       console.warn(
-        "No recipe provided and no recipe found in process doc. Not running.",
+        "No pattern provided and no pattern found in process doc. Not running.",
       );
       return { resultCell, needsStart: false };
     }
 
-    let recipe: Recipe;
+    let pattern: Pattern;
 
-    // If this is a module, not a recipe, wrap it in a recipe that just runs,
+    // If this is a module, not a pattern, wrap it in a pattern that just runs,
     // passing arguments in unmodified and passing all results through as is
-    if (isModule(recipeOrModule)) {
-      const module = recipeOrModule as Module;
-      recipeId ??= this.runtime.recipeManager.registerRecipe(module);
+    if (isModule(patternOrModule)) {
+      const module = patternOrModule as Module;
+      patternId ??= this.runtime.patternManager.registerPattern(module);
 
-      recipe = {
+      pattern = {
         argumentSchema: module.argumentSchema ?? {},
         resultSchema: module.resultSchema ?? {},
         result: { $alias: { path: ["internal"] } },
@@ -229,14 +229,14 @@ export class Runner {
             outputs: { $alias: { path: ["internal"] } },
           },
         ],
-      } satisfies Recipe;
+      } satisfies Pattern;
     } else {
-      recipe = recipeOrModule as Recipe;
+      pattern = patternOrModule as Pattern;
     }
 
-    recipeId ??= this.runtime.recipeManager.registerRecipe(recipe);
-    this.runtime.recipeManager.saveRecipe({
-      recipeId,
+    patternId ??= this.runtime.patternManager.registerPattern(pattern);
+    this.runtime.patternManager.savePattern({
+      patternId,
       space: resultCell.space,
     }, tx);
 
@@ -252,14 +252,14 @@ export class Runner {
     const alreadyRunning = this.cancels.has(key);
 
     if (alreadyRunning) {
-      // If it's already running and no new recipe or argument are given,
+      // If it's already running and no new pattern or argument are given,
       // we are just returning the result doc
-      if (argument === undefined && recipeId === previousRecipeId) {
+      if (argument === undefined && patternId === previousPatternId) {
         return { resultCell, needsStart: false };
       }
 
-      if (previousRecipeId === recipeId) {
-        // If the recipe is the same, but argument is different, just update the
+      if (previousPatternId === patternId) {
+        // If the pattern is the same, but argument is different, just update the
         // argument without stopping
         diffAndUpdate(
           this.runtime,
@@ -271,12 +271,12 @@ export class Runner {
         return { resultCell, needsStart: false };
       }
 
-      // Recipe changed - let the $TYPE sink detect the change and handle
+      // Pattern changed - let the $TYPE sink detect the change and handle
       // stop() + start(). Don't call stop() here as it would cancel the sink.
     }
 
-    // Walk the recipe's schema and extract all default values
-    const defaults = extractDefaultValues(recipe.argumentSchema) as Partial<T>;
+    // Walk the pattern's schema and extract all default values
+    const defaults = extractDefaultValues(pattern.argumentSchema) as Partial<T>;
 
     // Important to use DeepCopy here, as the resulting object will be modified!
     const previousInternal = processCell.key("internal").getRaw({
@@ -288,8 +288,8 @@ export class Runner {
         (defaults as unknown as { internal: StorableDatum })?.internal,
       ),
       cellAwareDeepCopy(
-        isRecord(recipe.initial) && isRecord(recipe.initial.internal)
-          ? recipe.initial.internal
+        isRecord(pattern.initial) && isRecord(pattern.initial.internal)
+          ? pattern.initial.internal
           : {},
       ),
       isRecord(previousInternal) ? previousInternal : {},
@@ -305,9 +305,9 @@ export class Runner {
 
     processCell.withTx(tx).setRaw({
       ...processCell.getRaw({ meta: ignoreReadForScheduling }),
-      [TYPE]: recipeId || "unknown",
-      resultRef: (recipe.resultSchema !== undefined
-        ? resultCell.asSchema(recipe.resultSchema).getAsLink({
+      [TYPE]: patternId || "unknown",
+      resultRef: (pattern.resultSchema !== undefined
+        ? resultCell.asSchema(pattern.resultSchema).getAsLink({
           base: processCell,
           includeSchema: true,
           keepStreams: true,
@@ -317,7 +317,7 @@ export class Runner {
           base: processCell,
         })),
       internal,
-      ...(recipeId !== undefined) ? { spell: getSpellLink(recipeId) } : {},
+      ...(patternId !== undefined) ? { spell: getSpellLink(patternId) } : {},
     });
     if (argument) {
       diffAndUpdate(
@@ -330,9 +330,9 @@ export class Runner {
     }
 
     // Send "query" to results to the result doc only on initial run or if
-    // recipe changed. This preserves user modifications like renamed pieces.
+    // pattern changed. This preserves user modifications like renamed pieces.
     let result = unwrapOneLevelAndBindtoDoc<R, any>(
-      recipe.result as R,
+      pattern.result as R,
       processCell,
     );
     const previousResult = resultCell.withTx(tx).getRaw({
@@ -345,17 +345,17 @@ export class Runner {
       resultCell.withTx(tx).setRaw(result);
     }
 
-    // [unsafe closures:] For recipes from closures, add a materialize factory
-    if (recipe[unsafe_originalRecipe]) {
-      recipe[unsafe_materializeFactory] =
+    // [unsafe closures:] For patterns from closures, add a materialize factory
+    if (pattern[unsafe_originalPattern]) {
+      pattern[unsafe_materializeFactory] =
         (tx: any) => (path: readonly PropertyKey[]) =>
           processCell.getAsQueryResult(path as PropertyKey[], tx);
     }
 
-    // Discover and cache all JavaScript functions in the recipe before start
-    this.discoverAndCacheFunctions(recipe, new Set());
+    // Discover and cache all JavaScript functions in the pattern before start
+    this.discoverAndCacheFunctions(pattern, new Set());
 
-    return { resultCell, recipe, processCell, needsStart: true };
+    return { resultCell, pattern, processCell, needsStart: true };
   }
 
   /**
@@ -369,8 +369,8 @@ export class Runner {
     return this.doStart(resultCell);
   }
 
-  /** Convert a module to recipe format */
-  private moduleToRecipe(module: Module): Recipe {
+  /** Convert a module to pattern format */
+  private moduleToPattern(module: Module): Pattern {
     return {
       argumentSchema: module.argumentSchema ?? {},
       resultSchema: module.resultSchema ?? {},
@@ -382,25 +382,25 @@ export class Runner {
           outputs: { $alias: { path: ["internal"] } },
         },
       ],
-    } satisfies Recipe;
+    } satisfies Pattern;
   }
 
-  /** Resolve a Recipe or Module to a Recipe */
-  private resolveToRecipe(recipeOrModule: Recipe | Module): Recipe {
-    return isModule(recipeOrModule)
-      ? this.moduleToRecipe(recipeOrModule as Module)
-      : (recipeOrModule as Recipe);
+  /** Resolve a Pattern or Module to a Pattern */
+  private resolveToPattern(patternOrModule: Pattern | Module): Pattern {
+    return isModule(patternOrModule)
+      ? this.moduleToPattern(patternOrModule as Module)
+      : (patternOrModule as Pattern);
   }
 
   /**
    * Core start implementation. Sets up cancel groups, instantiates nodes,
-   * and watches for recipe changes.
+   * and watches for pattern changes.
    *
    * @param resultCell - The result cell to start
-   * @param processCell - The process cell containing recipe state
+   * @param processCell - The process cell containing pattern state
    * @param options.tx - Transaction to use for initial setup (optional)
-   * @param options.givenRecipe - Recipe to use instead of looking up by ID
-   * @param options.allowAsyncLoad - Whether to allow async recipe loading
+   * @param options.givenPattern - Pattern to use instead of looking up by ID
+   * @param options.allowAsyncLoad - Whether to allow async pattern loading
    * @returns Promise for async mode, void for sync mode
    */
   private startCore<T = any>(
@@ -408,11 +408,11 @@ export class Runner {
     processCell: Cell<any>,
     options: {
       tx?: IExtendedStorageTransaction;
-      givenRecipe?: Recipe;
+      givenPattern?: Pattern;
       doNotUpdateOnPatternChange?: boolean;
     } = {},
   ): void {
-    const { tx, givenRecipe, doNotUpdateOnPatternChange } = options;
+    const { tx, givenPattern, doNotUpdateOnPatternChange } = options;
     const key = this.getDocKey(resultCell);
 
     // Create cancel group early - before the $TYPE sink
@@ -427,13 +427,13 @@ export class Runner {
       cancel();
     };
 
-    // Track recipe ID and node cancellation
-    let currentRecipeId: string | undefined;
+    // Track pattern ID and node cancellation
+    let currentPatternId: string | undefined;
     let cancelNodes: Cancel | undefined;
 
-    // Helper to instantiate nodes for a recipe
-    const instantiateRecipe = (
-      recipe: Recipe,
+    // Helper to instantiate nodes for a pattern
+    const instantiatePattern = (
+      pattern: Pattern,
       useTx?: IExtendedStorageTransaction,
     ) => {
       // Create new cancel group for nodes
@@ -442,11 +442,11 @@ export class Runner {
       addCancel(nodeCancel);
 
       // Instantiate nodes
-      this.discoverAndCacheFunctions(recipe, new Set());
+      this.discoverAndCacheFunctions(pattern, new Set());
       const actualTx = useTx ?? this.runtime.edit();
       const shouldCommit = !useTx;
       try {
-        for (const node of recipe.nodes) {
+        for (const node of pattern.nodes) {
           this.instantiateNode(
             actualTx,
             node.module,
@@ -454,7 +454,7 @@ export class Runner {
             node.outputs,
             processCell.withTx(actualTx),
             addNodeCancel,
-            recipe,
+            pattern,
           );
         }
       } finally {
@@ -466,75 +466,77 @@ export class Runner {
     const setupTypeWatcher = () => {
       const typeCell = processCell.key(TYPE).asSchema({ type: "string" });
       addCancel(
-        typeCell.sink((newRecipeId) => {
-          if (!newRecipeId) return;
-          if (newRecipeId === currentRecipeId) return; // No change
+        typeCell.sink((newPatternId) => {
+          if (!newPatternId) return;
+          if (newPatternId === currentPatternId) return; // No change
 
-          // Recipe changed
-          const previousRecipeId = currentRecipeId;
-          currentRecipeId = newRecipeId;
+          // Pattern changed
+          const previousPatternId = currentPatternId;
+          currentPatternId = newPatternId;
 
-          const resolved = this.runtime.recipeManager.recipeById(newRecipeId);
+          const resolved = this.runtime.patternManager.patternById(
+            newPatternId,
+          );
           if (!resolved) {
-            // Async load for recipe change after initial start.
+            // Async load for pattern change after initial start.
             // Errors are logged here since there's no caller to propagate to.
-            this.runtime.recipeManager
-              .loadRecipe(newRecipeId, resultCell.space)
+            this.runtime.patternManager
+              .loadPattern(newPatternId, resultCell.space)
               .then((loaded) => {
-                if (currentRecipeId !== newRecipeId) return;
+                if (currentPatternId !== newPatternId) return;
 
-                logger.info("recipe changed", {
+                logger.info("pattern changed", {
                   from: {
-                    id: previousRecipeId,
-                    recipe: this.runtime.recipeManager.recipeById(
-                      previousRecipeId!,
+                    id: previousPatternId,
+                    pattern: this.runtime.patternManager.patternById(
+                      previousPatternId!,
                     ),
                   },
-                  to: { id: newRecipeId, recipe: loaded },
+                  to: { id: newPatternId, pattern: loaded },
                 });
 
                 // Cancel previous nodes (after we're sure it's a valid one)
                 cancelNodes?.();
 
-                instantiateRecipe(loaded);
+                instantiatePattern(loaded);
               })
               .catch((err) => {
                 logger.error(
-                  "recipe-load-error",
-                  `Failed to load recipe ${newRecipeId}`,
+                  "pattern-load-error",
+                  `Failed to load pattern ${newPatternId}`,
                   err,
                 );
               });
           } else {
             cancelNodes?.();
-            instantiateRecipe(resolved);
+            instantiatePattern(resolved);
           }
         }),
       );
     };
 
-    // Get initial recipe ID
+    // Get initial pattern ID
     const processCellForRead = tx ? processCell.withTx(tx) : processCell;
-    const initialRecipeId = processCellForRead.key(TYPE).getRaw({
+    const initialPatternId = processCellForRead.key(TYPE).getRaw({
       meta: ignoreReadForScheduling,
     }) as string | undefined;
 
-    if (!initialRecipeId) {
+    if (!initialPatternId) {
       cleanup();
-      throw new Error("Cannot start: no recipe ID ($TYPE)");
+      throw new Error("Cannot start: no pattern ID ($TYPE)");
     }
 
-    // Determine initial recipe
-    if (givenRecipe) {
-      currentRecipeId = initialRecipeId;
+    // Determine initial pattern
+    if (givenPattern) {
+      currentPatternId = initialPatternId;
       if (
-        this.runtime.recipeManager.registerRecipe(givenRecipe) !==
-          currentRecipeId
+        this.runtime.patternManager.registerPattern(givenPattern) !==
+          currentPatternId
       ) {
         cleanup();
-        throw new Error("Recipe ID mismatch");
+        throw new Error("Pattern ID mismatch");
       }
-      instantiateRecipe(givenRecipe, tx);
+      instantiatePattern(givenPattern, tx);
       if (!doNotUpdateOnPatternChange) {
         setupTypeWatcher();
       }
@@ -542,17 +544,17 @@ export class Runner {
     }
 
     // Try sync lookup
-    const initialResolved = this.runtime.recipeManager.recipeById(
-      initialRecipeId,
+    const initialResolved = this.runtime.patternManager.patternById(
+      initialPatternId,
     );
     if (!initialResolved) {
       cleanup();
-      throw new Error(`Unknown recipe: ${initialRecipeId}`);
+      throw new Error(`Unknown pattern: ${initialPatternId}`);
     }
 
     // Sync path - instantiate immediately
-    currentRecipeId = initialRecipeId;
-    instantiateRecipe(this.resolveToRecipe(initialResolved), tx);
+    currentPatternId = initialPatternId;
+    instantiatePattern(this.resolveToPattern(initialResolved), tx);
     if (!doNotUpdateOnPatternChange) {
       setupTypeWatcher();
     }
@@ -614,28 +616,31 @@ export class Runner {
       }
     }
 
-    // Step 5: Check whether the recipe is available, otherwise load it
-    const recipeId = processCell.key(TYPE).getRaw() as string | undefined;
-    if (!recipeId) {
+    // Step 5: Check whether the pattern is available, otherwise load it
+    const patternId = processCell.key(TYPE).getRaw() as string | undefined;
+    if (!patternId) {
       return Promise.reject(
-        new Error(`Cannot start: no recipe ID ($TYPE)`),
+        new Error(`Cannot start: no pattern ID ($TYPE)`),
       );
     }
-    const recipe = this.runtime.recipeManager.recipeById(recipeId);
-    if (!recipe) {
-      return this.runtime.recipeManager.loadRecipe(recipeId, resultCell.space)
+    const pattern = this.runtime.patternManager.patternById(patternId);
+    if (!pattern) {
+      return this.runtime.patternManager.loadPattern(
+        patternId,
+        resultCell.space,
+      )
         .then((loaded) => {
           if (loaded) {
             return this.doStart(rootCell, seenCells);
           } else {
             return Promise.reject(
-              new Error(`Could not load recipe ${recipeId}`),
+              new Error(`Could not load pattern ${patternId}`),
             );
           }
         });
     }
 
-    // Step 6: Start the recipe
+    // Step 6: Start the pattern
     try {
       this.startCore(rootCell, processCell);
     } catch (err) {
@@ -649,7 +654,7 @@ export class Runner {
   private startWithTx<T = any>(
     tx: IExtendedStorageTransaction,
     resultCell: Cell<T>,
-    givenRecipe?: Recipe,
+    givenPattern?: Pattern,
     options: { doNotUpdateOnPatternChange?: boolean } = {},
   ): void {
     const key = this.getDocKey(resultCell);
@@ -662,67 +667,67 @@ export class Runner {
 
     this.startCore(resultCell, processCell, {
       tx,
-      givenRecipe,
+      givenPattern,
       doNotUpdateOnPatternChange: options.doNotUpdateOnPatternChange,
     });
   }
 
   /**
-   * Run a recipe.
+   * Run a pattern.
    *
    * resultCell is required and should have an id. processCell is created if not
    * already set.
    *
-   * If no recipe is provided, the previous one is used, and the recipe is
+   * If no pattern is provided, the previous one is used, and the pattern is
    * started if it isn't already started.
    *
-   * If no argument is provided, the previous one is used, and the recipe is
+   * If no argument is provided, the previous one is used, and the pattern is
    * started if it isn't already running.
    *
-   * If a new recipe or any argument value is provided, a currently running
-   * recipe is stopped, the recipe and argument replaced and the recipe
+   * If a new pattern or any argument value is provided, a currently running
+   * pattern is stopped, the pattern and argument replaced and the pattern
    * restarted.
    *
-   * @param recipeFactory - Function that takes the argument and returns a
-   * recipe.
-   * @param argument - The argument to pass to the recipe. Can be static data
+   * @param patternFactory - Function that takes the argument and returns a
+   * pattern.
+   * @param argument - The argument to pass to the pattern. Can be static data
    * and/or cell references, including cell value proxies, docs and regular
    * cells.
-   * @param resultCell - Cell to run the recipe off.
+   * @param resultCell - Cell to run the pattern off.
    * @returns The result cell.
    */
   run<T, R>(
     tx: IExtendedStorageTransaction | undefined,
-    recipeFactory: NodeFactory<T, R>,
+    patternFactory: NodeFactory<T, R>,
     argument: T,
     resultCell: Cell<R>,
     options?: { doNotUpdateOnPatternChange?: boolean },
   ): Cell<R>;
   run<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
-    recipe: Recipe | Module | undefined,
+    pattern: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
     options?: { doNotUpdateOnPatternChange?: boolean },
   ): Cell<R>;
   run<T, R = any>(
     providedTx: IExtendedStorageTransaction,
-    recipeOrModule: Recipe | Module | undefined,
+    patternOrModule: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
     options: { doNotUpdateOnPatternChange?: boolean } = {},
   ): Cell<R> {
     const tx = providedTx ?? this.runtime.edit();
 
-    const { needsStart, recipe } = this.setupInternal(
+    const { needsStart, pattern } = this.setupInternal(
       tx,
-      recipeOrModule,
+      patternOrModule,
       argument,
       resultCell,
     );
 
     if (needsStart) {
-      this.startWithTx(tx, resultCell, recipe, options);
+      this.startWithTx(tx, resultCell, pattern, options);
     }
 
     if (!providedTx) tx.commit();
@@ -732,18 +737,18 @@ export class Runner {
 
   async runSynced(
     resultCell: Cell<any>,
-    recipe: Recipe | Module,
+    pattern: Pattern | Module,
     inputs?: any,
   ) {
     await resultCell.sync();
 
-    const synced = await this.syncCellsForRunningRecipe(
+    const synced = await this.syncCellsForRunningPattern(
       resultCell,
-      recipe,
+      pattern,
       inputs,
     );
 
-    // Run the recipe.
+    // Run the pattern.
     //
     // If the result cell has a transaction attached, and it is still open,
     // we'll use it for all reads and writes as it might be a pending read.
@@ -758,7 +763,7 @@ export class Runner {
       // caller manages retries
       setupRes = this.setupInternal(
         givenTx,
-        recipe,
+        pattern,
         inputs,
         resultCell.withTx(givenTx),
       );
@@ -766,25 +771,25 @@ export class Runner {
       const { error } = await this.runtime.editWithRetry((tx) => {
         setupRes = this.setupInternal(
           tx,
-          recipe,
+          pattern,
           inputs,
           resultCell.withTx(tx),
         );
       });
       if (error) {
-        logger.error("recipe-setup-error", "Error setting up recipe", error);
+        logger.error("pattern-setup-error", "Error setting up pattern", error);
         setupRes = undefined;
       }
     }
 
-    // If a new recipe was specified, make sure to sync any new cells
-    if (recipe || !synced) {
-      await this.syncCellsForRunningRecipe(resultCell, recipe);
+    // If a new pattern was specified, make sure to sync any new cells
+    if (pattern || !synced) {
+      await this.syncCellsForRunningPattern(resultCell, pattern);
     }
 
     if (setupRes?.needsStart) {
       const tx = givenTx || this.runtime.edit();
-      this.startWithTx(tx, resultCell.withTx(tx), setupRes.recipe);
+      this.startWithTx(tx, resultCell.withTx(tx), setupRes.pattern);
       if (!givenTx) {
         // Should be unnecessary as the start itself is read-only
         // TODO(seefeld): Enforce this by adding a read-only flag for tx
@@ -811,8 +816,8 @@ export class Runner {
       }
     }
 
-    return recipe?.resultSchema
-      ? resultCell.asSchema(recipe.resultSchema)
+    return pattern?.resultSchema
+      ? resultCell.asSchema(pattern.resultSchema)
       : resultCell;
   }
 
@@ -821,9 +826,9 @@ export class Runner {
     return `${space}/${id}`;
   }
 
-  private async syncCellsForRunningRecipe(
+  private async syncCellsForRunningPattern(
     resultCell: Cell<any>,
-    recipe: Module | Recipe,
+    pattern: Module | Pattern,
     inputs?: any,
   ): Promise<boolean> {
     const seen = new Set<Cell<any>>();
@@ -851,17 +856,17 @@ export class Runner {
       type: "object",
       properties: {
         [TYPE]: { type: "string" },
-        argument: recipe.argumentSchema ?? true,
+        argument: pattern.argumentSchema ?? true,
       },
       required: [TYPE],
     };
 
     if (
       isRecord(processCellSchema) && "properties" in processCellSchema &&
-      isObject(recipe.argumentSchema)
+      isObject(pattern.argumentSchema)
     ) {
       // extract $defs and definitions and remove them from argumentSchema
-      const { $defs, definitions, ...rest } = recipe.argumentSchema;
+      const { $defs, definitions, ...rest } = pattern.argumentSchema;
       (processCellSchema as any).properties.argument = rest ?? true;
       if (isRecord($defs)) {
         processCellSchema.$defs = { ...$defs };
@@ -878,12 +883,12 @@ export class Runner {
 
     // We could support this by replicating what happens in runner, but since
     // we're calling this again when returning false, this is good enough for now.
-    if (isModule(recipe)) return false;
+    if (isModule(pattern)) return false;
 
     const cells: Cell<any>[] = [];
 
-    // Sync all the inputs and outputs of the recipe nodes.
-    for (const node of recipe.nodes) {
+    // Sync all the inputs and outputs of the pattern nodes.
+    for (const node of pattern.nodes) {
       const inputs = findAllWriteRedirectCells(node.inputs, sourceCell);
       const outputs = findAllWriteRedirectCells(node.outputs, sourceCell);
 
@@ -895,8 +900,8 @@ export class Runner {
     }
 
     // Sync all the previously computed results.
-    if (recipe.resultSchema !== undefined) {
-      cells.push(resultCell.asSchema(recipe.resultSchema));
+    if (pattern.resultSchema !== undefined) {
+      cells.push(resultCell.asSchema(pattern.resultSchema));
     }
 
     // If the result has a UI and it wasn't already included in the result
@@ -904,10 +909,10 @@ export class Runner {
     // first locally computed, then conflicts on write and only then properly
     // received from the server.
     if (
-      isRecord(recipe.result) &&
-      recipe.result[UI] &&
-      (!isRecord(recipe.resultSchema) ||
-        !recipe.resultSchema.properties?.[UI])
+      isRecord(pattern.result) &&
+      pattern.result[UI] &&
+      (!isRecord(pattern.resultSchema) ||
+        !pattern.resultSchema.properties?.[UI])
     ) {
       cells.push(resultCell.key(UI).asSchema(rendererVDOMSchema));
     }
@@ -918,7 +923,7 @@ export class Runner {
   }
 
   /**
-   * Stop a recipe. This will cancel the recipe and all its children.
+   * Stop a pattern. This will cancel the pattern and all its children.
    *
    * TODO: This isn't a good strategy, as other instances might depend on behavior
    * provided here, even if the user might no longer care about e.g. the UI here.
@@ -943,29 +948,29 @@ export class Runner {
       }
     }
     this.allCancels.clear();
-    // Clear the result recipe cache as well, since the actions have been
+    // Clear the result pattern cache as well, since the actions have been
     // canceled
-    this.resultRecipeCache.clear();
+    this.resultPatternCache.clear();
   }
 
   /**
-   * Discover and cache JavaScript functions from a recipe.
-   * This recursively traverses the recipe structure to find all JavaScript modules
+   * Discover and cache JavaScript functions from a pattern.
+   * This recursively traverses the pattern structure to find all JavaScript modules
    * with string implementations and evaluates them for caching.
    *
-   * @param recipe The recipe to discover functions from
+   * @param pattern The pattern to discover functions from
    */
   private discoverAndCacheFunctions(
-    recipe: Recipe,
+    pattern: Pattern,
     seen: Set<object>,
   ): void {
-    if (seen.has(recipe)) return;
-    seen.add(recipe);
+    if (seen.has(pattern)) return;
+    seen.add(pattern);
 
-    for (const node of recipe.nodes) {
+    for (const node of pattern.nodes) {
       this.discoverAndCacheFunctionsFromModule(node.module, seen);
 
-      // Also check inputs for nested recipes (e.g., in map operations)
+      // Also check inputs for nested patterns (e.g., in map operations)
       this.discoverAndCacheFunctionsFromValue(node.inputs, seen);
     }
   }
@@ -995,9 +1000,9 @@ export class Runner {
         }
         break;
 
-      case "recipe":
-        // Recursively discover functions in nested recipes
-        if (isRecipe(module.implementation)) {
+      case "pattern":
+        // Recursively discover functions in nested patterns
+        if (isPattern(module.implementation)) {
           this.discoverAndCacheFunctions(module.implementation, seen);
         }
         break;
@@ -1020,16 +1025,16 @@ export class Runner {
   }
 
   /**
-   * Discover and cache functions from a value that might contain recipes.
-   * This handles cases where recipes are passed as inputs (e.g., to map operations).
+   * Discover and cache functions from a value that might contain patterns.
+   * This handles cases where patterns are passed as inputs (e.g., to map operations).
    *
-   * @param value The value to search for recipes
+   * @param value The value to search for patterns
    */
   private discoverAndCacheFunctionsFromValue(
     value: StorableValue,
     seen: Set<object>,
   ): void {
-    if (isRecipe(value)) {
+    if (isPattern(value)) {
       this.discoverAndCacheFunctions(value, seen);
       return;
     }
@@ -1071,7 +1076,7 @@ export class Runner {
     outputBindings: StorableValue,
     processCell: Cell<any>,
     addCancel: AddCancel,
-    recipe: Recipe,
+    pattern: Pattern,
   ) {
     if (isModule(module)) {
       switch (module.type) {
@@ -1085,7 +1090,7 @@ export class Runner {
             outputBindings,
             processCell,
             addCancel,
-            recipe,
+            pattern,
           );
           break;
         case "javascript":
@@ -1096,7 +1101,7 @@ export class Runner {
             outputBindings,
             processCell,
             addCancel,
-            recipe,
+            pattern,
           );
           break;
         case "raw":
@@ -1107,7 +1112,7 @@ export class Runner {
             outputBindings,
             processCell,
             addCancel,
-            recipe,
+            pattern,
           );
           break;
         case "passthrough":
@@ -1118,18 +1123,18 @@ export class Runner {
             outputBindings,
             processCell,
             addCancel,
-            recipe,
+            pattern,
           );
           break;
-        case "recipe":
-          this.instantiateRecipeNode(
+        case "pattern":
+          this.instantiatePatternNode(
             tx,
             module,
             inputBindings,
             outputBindings,
             processCell,
             addCancel,
-            recipe,
+            pattern,
           );
           break;
         default:
@@ -1149,7 +1154,7 @@ export class Runner {
     outputBindings: StorableValue,
     processCell: Cell<any>,
     addCancel: AddCancel,
-    recipe: Recipe,
+    pattern: Pattern,
   ) {
     const inputs = unwrapOneLevelAndBindtoDoc(
       inputBindings,
@@ -1224,7 +1229,7 @@ export class Runner {
           cause,
           {
             unsafe_binding: {
-              recipe,
+              pattern,
               materialize: (path: readonly PropertyKey[]) =>
                 processCell.getAsQueryResult(path, tx),
               space: processCell.space,
@@ -1319,15 +1324,13 @@ export class Runner {
               validateAndCheckOpaqueRefs(result, name) ||
               frame.opaqueRefs.size > 0
             ) {
-              const resultRecipe = recipeFromFrame(
-                "event handler result",
-                undefined,
+              const resultPattern = patternFromFrame(
                 () => result,
               );
 
               const resultCell = this.run(
                 tx,
-                resultRecipe,
+                resultPattern,
                 undefined,
                 this.runtime.getCell(
                   processCell.space,
@@ -1396,7 +1399,7 @@ export class Runner {
         reads,
         writes,
         module,
-        recipe,
+        pattern,
       });
 
       // Create callback to populate dependencies for pull mode scheduling.
@@ -1454,7 +1457,7 @@ export class Runner {
           { inputs, outputs, fn: fn.toString() },
           {
             unsafe_binding: {
-              recipe,
+              pattern,
               materialize: (path: readonly PropertyKey[]) =>
                 processCell.getAsQueryResult(path, tx),
               space: processCell.space,
@@ -1542,9 +1545,7 @@ export class Runner {
               validateAndCheckOpaqueRefs(result, name) ||
               frame.opaqueRefs.size > 0
             ) {
-              const resultRecipe = recipeFromFrame(
-                "action result",
-                undefined,
+              const resultPattern = patternFromFrame(
                 () => result,
               );
               const resultCell = previousResultCell ??
@@ -1555,25 +1556,25 @@ export class Runner {
                   tx,
                 );
 
-              // If nothing changed, don't rerun the recipe, but still ensure
+              // If nothing changed, don't rerun the pattern, but still ensure
               // the output binding points to the result cell (it may have been
               // overwritten by a plain value in a previous run)
-              const resultRecipeAsString = JSON.stringify(resultRecipe);
-              const previousResultRecipeAsString = this.resultRecipeCache.get(
+              const resultPatternAsString = JSON.stringify(resultPattern);
+              const previousResultPatternAsString = this.resultPatternCache.get(
                 `${resultCell.space}/${resultCell.sourceURI}`,
               );
-              const recipeUnchanged =
-                previousResultRecipeAsString === resultRecipeAsString;
+              const patternUnchanged =
+                previousResultPatternAsString === resultPatternAsString;
 
-              if (!recipeUnchanged) {
-                this.resultRecipeCache.set(
+              if (!patternUnchanged) {
+                this.resultPatternCache.set(
                   `${resultCell.space}/${resultCell.sourceURI}`,
-                  resultRecipeAsString,
+                  resultPatternAsString,
                 );
 
                 this.run(
                   tx,
-                  resultRecipe,
+                  resultPattern,
                   undefined,
                   resultCell,
                 );
@@ -1627,7 +1628,7 @@ export class Runner {
         reads,
         writes,
         module,
-        recipe,
+        pattern,
       });
 
       // Create populateDependencies callback to discover what cells the action reads
@@ -1676,7 +1677,7 @@ export class Runner {
     outputBindings: StorableValue,
     processCell: Cell<any>,
     addCancel: AddCancel,
-    recipe: Recipe,
+    pattern: Pattern,
   ) {
     if (typeof module.implementation !== "function") {
       throw new Error(
@@ -1684,14 +1685,14 @@ export class Runner {
       );
     }
 
-    // CT-1230: Pass bindRecipes: false to prevent premature alias binding in recipe
+    // CT-1230: Pass bindPatterns: false to prevent premature alias binding in pattern
     // arguments. When a subpattern is passed to map(), its aliases should not be
-    // bound to the current doc yet - they need to remain unbound until the recipe
+    // bound to the current doc yet - they need to remain unbound until the pattern
     // is actually instantiated for each mapped item.
     const mappedInputBindings = unwrapOneLevelAndBindtoDoc(
       inputBindings,
       processCell,
-      { bindRecipes: false },
+      { bindPatterns: false },
     );
     const mappedOutputBindings = unwrapOneLevelAndBindtoDoc(
       outputBindings,
@@ -1699,8 +1700,8 @@ export class Runner {
     );
 
     // For `map` and future other node types that take closures, we need to
-    // note the parent recipe on the closure recipes.
-    unsafe_noteParentOnRecipes(recipe, mappedInputBindings);
+    // note the parent pattern on the closure patterns.
+    unsafe_noteParentOnPatterns(pattern, mappedInputBindings);
 
     const inputCells = findAllWriteRedirectCells(
       mappedInputBindings,
@@ -1804,24 +1805,24 @@ export class Runner {
     outputBindings: StorableValue,
     processCell: Cell<any>,
     _addCancel: AddCancel,
-    _recipe: Recipe,
+    _pattern: Pattern,
   ) {
     const inputs = unwrapOneLevelAndBindtoDoc(inputBindings, processCell);
 
     sendValueToBinding(tx, processCell, outputBindings, inputs);
   }
 
-  private instantiateRecipeNode(
+  private instantiatePatternNode(
     tx: IExtendedStorageTransaction,
     module: Module,
     inputBindings: StorableValue,
     outputBindings: StorableValue,
     processCell: Cell<any>,
     addCancel: AddCancel,
-    _recipe: Recipe,
+    _pattern: Pattern,
   ) {
-    if (!isRecipe(module.implementation)) throw new Error(`Invalid recipe`);
-    const recipeImpl = unwrapOneLevelAndBindtoDoc(
+    if (!isPattern(module.implementation)) throw new Error(`Invalid pattern`);
+    const patternImpl = unwrapOneLevelAndBindtoDoc(
       module.implementation,
       processCell,
     );
@@ -1834,7 +1835,7 @@ export class Runner {
     if (isSigilLink(outputBindings) && !isWriteRedirectLink(outputBindings)) {
       resultCell = this.runtime.getCellFromLink(
         parseLink(outputBindings, processCell),
-        recipeImpl.resultSchema,
+        patternImpl.resultSchema,
         tx,
       );
       sendToBindings = false;
@@ -1842,20 +1843,20 @@ export class Runner {
       resultCell = this.runtime.getCell(
         processCell.space,
         {
-          recipe: module.implementation,
+          pattern: module.implementation,
           parent: processCell.entityId,
           inputBindings,
           outputBindings,
         },
-        recipeImpl.resultSchema,
+        patternImpl.resultSchema,
         tx,
       );
       sendToBindings = true;
     }
 
-    // Run the nested recipe without the $TYPE watcher to prevent infinite loops.
-    // Nested recipes don't need to watch for recipe changes - their parent manages lifecycle.
-    this.run(tx, recipeImpl, inputs, resultCell, {
+    // Run the nested pattern without the $TYPE watcher to prevent infinite loops.
+    // Nested patterns don't need to watch for pattern changes - their parent manages lifecycle.
+    this.run(tx, patternImpl, inputs, resultCell, {
       doNotUpdateOnPatternChange: true,
     });
 
@@ -1868,16 +1869,16 @@ export class Runner {
       );
     }
 
-    // TODO(seefeld): Make sure to not cancel after a recipe is elevated to a
+    // TODO(seefeld): Make sure to not cancel after a pattern is elevated to a
     // piece, e.g. via navigateTo. Nothing is cancelling right now, so leaving
     // this as TODO.
     addCancel(() => this.stop(resultCell));
   }
 }
 
-// This takes a recipe id and returns a sigil link with the corresponding entity.
-function getSpellLink(recipeId: string): SigilLink {
-  const id = refer({ causal: { recipeId, type: "recipe" } }).toJSON()["/"];
+// This takes a pattern id and returns a sigil link with the corresponding entity.
+function getSpellLink(patternId: string): SigilLink {
+  const id = refer({ causal: { patternId, type: "pattern" } }).toJSON()["/"];
   return { "/": { [LINK_V1_TAG]: { id: `of:${id}` } } };
 }
 

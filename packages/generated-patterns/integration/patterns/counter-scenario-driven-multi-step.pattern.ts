@@ -6,7 +6,7 @@ import {
   derive,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -164,8 +164,7 @@ const completeSequence = handler(
   },
 );
 
-export const counterWithScenarioDrivenSteps = recipe<MultiStepArgs>(
-  "Counter With Scenario Driven Multi Step Events",
+export const counterWithScenarioDrivenSteps = pattern<MultiStepArgs>(
   ({ value, phase }) => {
     const stepIndex = cell(0);
     const stepLog = cell<StepEntry[]>([]);

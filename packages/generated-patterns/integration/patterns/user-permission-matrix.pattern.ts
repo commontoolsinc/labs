@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -446,8 +446,7 @@ const liftLastChange = lift((entries: string[] | undefined) => {
   return "No changes yet";
 });
 
-export const userPermissionMatrix = recipe<UserPermissionMatrixArgs>(
-  "User Permission Matrix",
+export const userPermissionMatrix = pattern<UserPermissionMatrixArgs>(
   ({ permissions, roles }) => {
     const permissionsList = liftSanitizePermissionList(permissions);
     const baseRoles = liftBaseRoles({

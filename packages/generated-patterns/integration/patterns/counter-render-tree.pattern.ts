@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, cell, Default, handler, lift, recipe, str } from "commontools";
+import { Cell, cell, Default, handler, lift, pattern, str } from "commontools";
 
 interface RenderTreeArgs {
   value: Default<number, 0>;
@@ -37,8 +37,7 @@ const liftSafeValue = lift((raw: number | undefined) =>
   normalizeNumber(raw, 0)
 );
 
-export const counterWithRenderTree = recipe<RenderTreeArgs>(
-  "Counter With Render Tree",
+export const counterWithRenderTree = pattern<RenderTreeArgs>(
   ({ value, step }) => {
     const safeStep = liftSafeStep(step);
     const safeValue = liftSafeValue(value);

@@ -6,7 +6,7 @@ import {
   derive,
   handler,
   lift,
-  recipe,
+  pattern,
 } from "commontools";
 
 type WorkflowStage =
@@ -220,8 +220,7 @@ const attemptStageTransition = handler(
   },
 );
 
-export const workflowStateMachine = recipe<WorkflowArgs>(
-  "Workflow State Machine",
+export const workflowStateMachine = pattern<WorkflowArgs>(
   ({ stage }) => {
     const transitions = cell<TransitionRecord[]>([]);
     const sequence = cell(0);
@@ -281,7 +280,5 @@ export const workflowStateMachine = recipe<WorkflowArgs>(
     };
   },
 );
-
-export const pattern = workflowStateMachine;
 
 export default workflowStateMachine;

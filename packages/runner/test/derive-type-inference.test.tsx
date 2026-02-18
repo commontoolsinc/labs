@@ -5,7 +5,7 @@ import {
   Cell,
   derive,
   OpaqueRef,
-  recipe,
+  pattern,
 } from "commontools";
 
 describe("derive type inference", () => {
@@ -186,7 +186,7 @@ describe("derive type inference", () => {
       expect(latestAssistantMessage).toBeDefined();
     });
 
-    it("should handle the exact type structure from recipe return values", () => {
+    it("should handle the exact type structure from pattern return values", () => {
       // This tests chatbot.messages where chatbot is OpaqueRef<ChatOutput>
       // and messages is accessed as a property
       type Message = {
@@ -199,7 +199,7 @@ describe("derive type inference", () => {
         pending: boolean;
       };
 
-      // Simulate what happens when you call a recipe
+      // Simulate what happens when you call a pattern
       const chatbot = Cell.of<ChatOutput>().getAsOpaqueRefProxy();
 
       // Access messages property - this has type OpaqueCell<Message[]> & Array<OpaqueRef<Message>>
@@ -242,7 +242,7 @@ describe("derive type inference", () => {
       expect(count).toBeDefined();
     });
 
-    it("should handle recipe return values with array properties (actual omnibot.messages case)", () => {
+    it("should handle pattern return values with array properties (actual omnibot.messages case)", () => {
       // This reproduces the ACTUAL bug from omnibox-fab.tsx
       interface ChatbotInput {
         initialMessage?: string;
@@ -252,17 +252,19 @@ describe("derive type inference", () => {
         messages: BuiltInLLMMessage[];
       }
 
-      // Create a recipe that returns an object with an array property
-      const Chatbot = recipe<ChatbotInput, ChatbotOutput>("TestChatbot", () => {
-        const messagesRef = Cell.of<BuiltInLLMMessage[]>()
-          .getAsOpaqueRefProxy();
+      // Create a pattern that returns an object with an array property
+      const Chatbot = pattern<ChatbotInput, ChatbotOutput>(
+        () => {
+          const messagesRef = Cell.of<BuiltInLLMMessage[]>()
+            .getAsOpaqueRefProxy();
 
-        return {
-          messages: messagesRef,
-        };
-      });
+          return {
+            messages: messagesRef,
+          };
+        },
+      );
 
-      // Call the recipe - this is like `const omnibot = Chatbot(...)`
+      // Call the pattern - this is like `const omnibot = Chatbot(...)`
       const omnibot = Chatbot({});
 
       // Access the messages property - this is like `omnibot.messages`
@@ -277,11 +279,10 @@ describe("derive type inference", () => {
     });
 
     it("should support destructuring derive inputs for nested properties", () => {
-      const Chatbot = recipe<
+      const Chatbot = pattern<
         Record<string, never>,
         { messages: BuiltInLLMMessage[] }
       >(
-        "ChatbotWithMessages",
         () => {
           const messagesRef = Cell.of<BuiltInLLMMessage[]>()
             .getAsOpaqueRefProxy();

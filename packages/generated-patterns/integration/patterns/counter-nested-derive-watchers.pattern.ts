@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { type Cell, Default, handler, lift, recipe, str } from "commontools";
+import { type Cell, Default, handler, lift, pattern, str } from "commontools";
 
 interface NestedDeriveArgs {
   value: Default<number, 0>;
@@ -59,8 +59,7 @@ const liftParityCode = lift((label: "steady" | "swing") =>
   label === "steady" ? 0 : 1
 );
 
-export const counterWithNestedDeriveWatchers = recipe<NestedDeriveArgs>(
-  "Counter With Nested Derive Watchers",
+export const counterWithNestedDeriveWatchers = pattern<NestedDeriveArgs>(
   ({ value }) => {
     const current = liftCurrent(value);
 

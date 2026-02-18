@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Default, handler, NAME, recipe, UI, Writable } from "commontools";
+import { Default, handler, NAME, pattern, UI, Writable } from "commontools";
 
 interface Item {
   text: Default<string, "">;
@@ -26,7 +26,7 @@ const addItem = handler<InputEventType, ListState>(
   },
 );
 
-export default recipe<InputSchema>(({ title, items }) => {
+export default pattern<InputSchema>(({ title, items }) => {
   return {
     [NAME]: title,
     [UI]: (

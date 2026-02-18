@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, handler, recipe, UI } from "commontools";
+import { Cell, Default, handler, pattern, UI } from "commontools";
 
 interface Item {
   text: Default<string, "">;
@@ -15,8 +15,7 @@ const removeItem = handler<unknown, { items: Cell<Item[]>; index: number }>(
   },
 );
 
-export default recipe<InputSchema>(
-  "Simple List with Remove",
+export default pattern<InputSchema>(
   ({ items }) => {
     return {
       [UI]: (

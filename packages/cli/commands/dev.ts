@@ -68,7 +68,7 @@ async function devAction(
           : exports;
         try {
           // Stringify before rendering, as the exported
-          // recipe is a function with extra properties via Object.assign
+          // pattern is a function with extra properties via Object.assign
           render(JSON.stringify(mainExport, null, 2));
         } catch (_) {
           if (
@@ -124,19 +124,19 @@ function createDevCommand(cmdName: string): Command<any> {
     .option("--no-check", "Do not type check input.")
     .option(
       "--output <value:string>",
-      "Store the compiled recipe at $output.",
+      "Store the compiled pattern at $output.",
     )
     .option(
       "--filename <value:string>",
-      "The filename used when compiling the recipe, used in source maps.",
+      "The filename used when compiling the pattern, used in source maps.",
     )
     .option(
       "--show-transformed",
-      "Show only the transformed TypeScript source code without executing the recipe.",
+      "Show only the transformed TypeScript source code without executing the pattern.",
     )
     .option(
       "--main-export <export:string>",
-      'Named export from entry for recipe definition. Defaults to "default".',
+      'Named export from entry for pattern definition. Defaults to "default".',
     )
     .option(
       "--verbose-errors",

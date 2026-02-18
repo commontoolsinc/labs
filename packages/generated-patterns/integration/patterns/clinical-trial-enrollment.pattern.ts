@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { type Cell, Default, handler, lift, recipe, str } from "commontools";
+import { type Cell, Default, handler, lift, pattern, str } from "commontools";
 
 const toTitleCase = (value: string): string => {
   return value
@@ -451,8 +451,7 @@ const liftSiteSummary = lift((report: ScreeningResult[]) =>
 const liftSanitizeCandidates = lift(sanitizeCandidates);
 const liftSanitizeCriteria = lift(sanitizeCriteria);
 
-export const clinicalTrialEnrollment = recipe<ClinicalTrialEnrollmentArgs>(
-  "Clinical Trial Enrollment",
+export const clinicalTrialEnrollment = pattern<ClinicalTrialEnrollmentArgs>(
   ({ participants, criteria }) => {
     const candidateView = liftSanitizeCandidates(participants);
     const criteriaView = liftSanitizeCriteria(criteria);

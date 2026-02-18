@@ -1,12 +1,12 @@
 /// <cts-enable />
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 
 interface State {
   items: Array<{ value: number }>;
   multiplier: number;
 }
 
-export default recipe<State>("NestedMap", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <button

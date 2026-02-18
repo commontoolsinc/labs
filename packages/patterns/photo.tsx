@@ -13,7 +13,7 @@ import {
   ifElse,
   ImageData,
   NAME,
-  recipe,
+  pattern,
   str,
   UI,
   Writable,
@@ -63,8 +63,7 @@ const clearPhoto = handler<
 });
 
 // ===== The Pattern =====
-export const PhotoModule = recipe<PhotoModuleInput, PhotoModuleOutput>(
-  "PhotoModule",
+export const PhotoModule = pattern<PhotoModuleInput, PhotoModuleOutput>(
   ({ image: inputImage, label }) => {
     // We use an array internally for ct-image-input compatibility
     // but the module only supports a single image

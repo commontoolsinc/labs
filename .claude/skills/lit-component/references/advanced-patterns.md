@@ -28,7 +28,7 @@ export class CTThemeProvider extends BaseElement {
   _computedTheme: CTTheme = defaultTheme;
 
   private _recomputeAndApply() {
-    // Merge partial theme with defaults (recipe-style support)
+    // Merge partial theme with defaults (pattern-style support)
     this._computedTheme = mergeWithDefaultTheme(this.theme);
     // Apply to self for CSS variable cascade
     applyThemeToElement(this, this._computedTheme);
@@ -55,7 +55,7 @@ export class CTThemeProvider extends BaseElement {
 
 **Pattern Lessons:**
 1. **Context providers are invisible:** Use `display: contents` to not affect layout
-2. **Merge partial with defaults:** Support both full and recipe-style partial themes
+2. **Merge partial with defaults:** Support both full and pattern-style partial themes
 3. **Subscribe to Cell properties:** Theme values can be reactive Cells
 4. **Apply to self:** Set CSS variables on the provider element so they cascade
 5. **Clean up subscriptions:** Always unsubscribe in `disconnectedCallback()`

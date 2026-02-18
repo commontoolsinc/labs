@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { type Cell, Default, handler, recipe, UI } from "commontools";
+import { type Cell, Default, handler, pattern, UI } from "commontools";
 
 interface FriendListState {
   names: Default<string[], ["Alice", "Bob", "Charlie", "Diana", "Evan"]>;
@@ -70,7 +70,7 @@ const addFriend = handler<any, { names: Cell<string[]> }>(
   },
 );
 
-export default recipe<FriendListState>("making lists - with add", (state) => {
+export default pattern<FriendListState>((state) => {
   return {
     [UI]: (
       <div>

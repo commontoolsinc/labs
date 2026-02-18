@@ -15,14 +15,14 @@ abstract: |
 We'll be learning how to handle state within the Common Tools runtime.
 The most direct way to store state is via `Cells`.
 Cells store and access data. We can set data in a cell via the set() function. We can also retrieve data via the get() function, we'll demonstrate that in a later section.
-There are many ways to create cells and we'll get to all of them, but for now, we'll start with the `cell<T>()` function available in Recipes.
+There are many ways to create cells and we'll get to all of them, but for now, we'll start with the `cell<T>()` function available in Patterns.
 We've already used this in {ref}`calling_llm`
 
 Creating a cell is quite easy! Let's create the beginnings of a
 character sheet, one we might use playing a table top role playing game. Don't worry if you don't get the reference, it should be easy to follow.
 
 ```{code-block} typescript
-export default recipe("state test", () => {
+export default pattern(() => {
   const characterName = cell<string>("");
 }
 ```
@@ -32,22 +32,22 @@ and its initial value is the empty string.
 Let's now set `characterName` to something a bit more interesting.
 
 ```{code-block} typescript
-export default recipe("state test", () => {
+export default pattern(() => {
   const characterName = cell<string>("");
   characterName.set("Lady Ellyxir");
 }
 ```
-We can now display the cell within the `[UI]` section of the recipe:
+We can now display the cell within the `[UI]` section of the pattern:
 ```{code-block} typescript
 /// <cts-enable />
 import {
   cell,
   h,
-  recipe,
+  pattern,
   UI,
 } from "commontools";
 
-export default recipe("state test", () => {
+export default pattern(() => {
   const characterName = cell<string>("");
   characterName.set("Lady Ellyxir");
   return {
@@ -134,7 +134,7 @@ calculate armor class:
 
 We can't just pass our `dex` variable into this function since `dex` isn't a regular `number` (it's a `Cell`). This is the magic of `lift`. It takes in the regular function and returns a new function that can take in matching reactive components as parameters.
 
-We create the lifted function with the following code in the recipe body:
+We create the lifted function with the following code in the pattern body:
 ```{code-block} typescript
 :label: state_ac_lift
 :linenos: false
@@ -171,7 +171,7 @@ Here, we add it to the `[UI]` on line 5:
 
 Note: we must import `lift` and `derive`. We'll need `derive` because of some behind-the-scenes code transformation, but we will not be using it directly in this section. (See {doc}`cts` for more information).
 
-Here's what the full Recipe looks like:
+Here's what the full Pattern looks like:
 ```{code-block} typescript
 :label: state_code_full
 :linenos: true
@@ -181,13 +181,13 @@ Here's what the full Recipe looks like:
 import {
   cell,
   h,
-  recipe,
+  pattern,
   UI,
   lift,
   derive,
 } from "commontools";
 
-export default recipe("state test", () => {
+export default pattern(() => {
   const characterName = cell<string>("");
   characterName.set("Lady Ellyxir");
   const dex = cell<number>(16);

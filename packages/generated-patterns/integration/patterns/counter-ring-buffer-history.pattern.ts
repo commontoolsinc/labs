@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, handler, lift, recipe, str } from "commontools";
+import { Cell, Default, handler, lift, pattern, str } from "commontools";
 
 interface RingBufferCounterArgs {
   value: Default<number, 0>;
@@ -73,8 +73,7 @@ const liftLimit = lift((raw: number | undefined) =>
   normalizeCapacityValue(raw)
 );
 
-export const counterWithRingBufferHistory = recipe<RingBufferCounterArgs>(
-  "Counter With Ring Buffer History",
+export const counterWithRingBufferHistory = pattern<RingBufferCounterArgs>(
   ({ value, history, capacity }) => {
     const currentValue = liftCurrentValue(value);
 

@@ -6,7 +6,7 @@ import {
   derive,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -583,8 +583,7 @@ const liftHistoryView = lift((entries: string[] | undefined) =>
   Array.isArray(entries) ? [...entries] : []
 );
 
-export const leadScoring = recipe<LeadScoringArgs>(
-  "Lead Scoring",
+export const leadScoring = pattern<LeadScoringArgs>(
   ({ leads, signalWeights, defaultWeight }) => {
     const history = cell<string[]>([]);
     const lastMutation = cell("none");

@@ -24,7 +24,7 @@ import { getLogger } from "@commontools/utils/logger";
 import { isBoolean, isObject } from "@commontools/utils/types";
 import type { Cell, MemorySpace, Stream } from "../cell.ts";
 import { isCell, isStream } from "../cell.ts";
-import { ID, NAME, type Recipe } from "../builder/types.ts";
+import { ID, NAME, type Pattern } from "../builder/types.ts";
 import type { Action } from "../scheduler.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
@@ -98,7 +98,7 @@ function normalizeInputSchema(schemaLike: unknown): JSONSchema {
 
 /**
  * Resolve a piece's result schema similarly to PieceManager.#getResultSchema:
- * - Prefer a non-empty recipe.resultSchema if recipe is loaded
+ * - Prefer a non-empty pattern.resultSchema if pattern is loaded
  * - Otherwise derive a simple object schema from the current value
  */
 function getCellSchema(
@@ -1059,7 +1059,7 @@ type ResolvedToolCall =
     type: "invoke";
     call: LLMToolCall;
     // Implementation details for how to invoke the target
-    pattern?: Readonly<Recipe>;
+    pattern?: Readonly<Pattern>;
     handler?: Stream<any>;
     extraParams?: Record<string, unknown>;
     piece?: Cell<any>;
@@ -1204,7 +1204,7 @@ function resolveToolCall(
     }
 
     const pattern = cellRef.key("pattern")
-      .getRaw() as unknown as Readonly<Recipe> | undefined;
+      .getRaw() as unknown as Readonly<Pattern> | undefined;
     if (pattern) {
       return {
         type: "invoke",
@@ -1574,13 +1574,13 @@ async function handleInvoke(
   const toolCall = resolved.call;
 
   // Extract pattern/handler/params based on the resolved type
-  let pattern: Readonly<Recipe> | undefined;
+  let pattern: Readonly<Pattern> | undefined;
   let extraParams: Record<string, unknown> = {};
   let handler: any;
 
   if (resolved.type === "external") {
     pattern = resolved.toolDef.key("pattern").getRaw() as unknown as
-      | Readonly<Recipe>
+      | Readonly<Pattern>
       | undefined;
     extraParams = resolved.toolDef.key("extraParams").get() ?? {};
     handler = resolved.toolDef.key("handler");
@@ -1786,10 +1786,10 @@ export function llmDialog(
   let requestId: string | undefined = undefined;
   let abortController: AbortController | undefined = undefined;
 
-  // This is called when the recipe containing this node is being stopped.
+  // This is called when the pattern containing this node is being stopped.
   addCancel(() => {
     // Abort the request if it's still pending.
-    abortController?.abort("Recipe stopped");
+    abortController?.abort("Pattern stopped");
 
     const tx = runtime.edit();
 

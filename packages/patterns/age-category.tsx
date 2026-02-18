@@ -13,7 +13,7 @@ import {
   type Default,
   handler,
   NAME,
-  recipe,
+  pattern,
   UI,
   Writable,
 } from "commontools";
@@ -180,10 +180,10 @@ const handleGroupChange = handler<
 });
 
 // ===== The Pattern =====
-export const AgeCategoryModule = recipe<
+export const AgeCategoryModule = pattern<
   AgeCategoryModuleInput,
   AgeCategoryModuleInput
->("AgeCategoryModule", ({ ageCategory }) => {
+>(({ ageCategory }) => {
   // Compute whether current category is in Adult group
   const currentIsAdult = computed(() => isAdultCategory(ageCategory));
 

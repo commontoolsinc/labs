@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 
 interface State {
   a: number;
@@ -11,7 +11,7 @@ interface State {
   float: string;
 }
 
-export default recipe<State>("FunctionCalls", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>

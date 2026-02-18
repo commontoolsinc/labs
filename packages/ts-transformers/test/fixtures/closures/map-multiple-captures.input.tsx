@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 
 interface Item {
   price: number;
@@ -14,7 +14,7 @@ interface State {
 
 const shippingCost = 5.99;
 
-export default recipe<State>("MultipleCaptures", (state) => {
+export default pattern<State>((state) => {
   const multiplier = 2;
 
   return {

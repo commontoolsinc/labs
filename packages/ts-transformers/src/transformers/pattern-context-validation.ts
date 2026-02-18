@@ -1,12 +1,12 @@
 /**
  * Pattern Context Validation Transformer
  *
- * Validates code within pattern contexts (recipe, pattern, .map on cells/opaques)
+ * Validates code within pattern contexts (pattern, .map on cells/opaques)
  * to catch common reactive programming mistakes.
  *
  * Rules:
  * - Reading from opaques is NOT allowed in:
- *   - recipe/pattern body (top-level reactive context)
+ *   - pattern body (top-level reactive context)
  *   - map functions bound to opaques/cells (mapWithPattern)
  *
  * - Reading from opaques IS allowed in:
@@ -88,7 +88,7 @@ export class PatternContextValidationTransformer extends Transformer {
         this.validateBuilderPlacement(node, context, checker);
 
         // Check for .map() on fallback expressions (x ?? [] or x || [])
-        // Only in restricted context (pattern/recipe body) where this pattern causes runtime failures.
+        // Only in restricted context (pattern body) where this pattern causes runtime failures.
         // Note: We use isInsideRestrictedContext, not isInRestrictedReactiveContext, because
         // the map-on-fallback pattern fails even inside JSX expressions (which are "safe" for
         // other validations but still need this check).
@@ -250,7 +250,7 @@ export class PatternContextValidationTransformer extends Transformer {
     // e.g., computed(() => ...), action(() => ...), derive(() => ...)
     if (this.isSafeWrapperCallback(node, checker)) return;
 
-    // Only error if inside restricted context (recipe/pattern/render)
+    // Only error if inside restricted context (pattern/render)
     if (!isInsideRestrictedContext(node, checker)) return;
 
     context.reportDiagnostic({
@@ -354,7 +354,7 @@ export class PatternContextValidationTransformer extends Transformer {
         type: "pattern-context:builder-placement",
         message:
           `${builderName}() should be defined at module scope, not inside a pattern. ` +
-          `Move this ${builderName}() call outside the pattern/recipe and add explicit type parameters. ` +
+          `Move this ${builderName}() call outside the pattern and add explicit type parameters. ` +
           `Note: computed(), action(), and .map() callbacks are allowed inside patterns.`,
         node,
       });

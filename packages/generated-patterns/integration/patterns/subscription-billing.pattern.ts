@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -247,8 +247,7 @@ const liftPriceLabel = lift((detail: PlanDefinition) =>
 );
 const liftCycleLabel = lift((cycle: number) => `${cycle} days`);
 
-export const subscriptionBilling = recipe<SubscriptionBillingArgs>(
-  "Subscription Billing",
+export const subscriptionBilling = pattern<SubscriptionBillingArgs>(
   ({ plan, lastInvoiceDate }) => {
     const cycleOverride = cell<number | null>(null);
     const history = cell<string[]>([]);

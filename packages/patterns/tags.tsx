@@ -10,7 +10,7 @@ import {
   type Default,
   handler,
   NAME,
-  recipe,
+  pattern,
   UI,
   Writable,
 } from "commontools";
@@ -60,8 +60,7 @@ const removeTag = handler<
 });
 
 // ===== The Pattern =====
-export const TagsModule = recipe<TagsModuleInput, TagsModuleInput>(
-  "TagsModule",
+export const TagsModule = pattern<TagsModuleInput, TagsModuleInput>(
   ({ tags }) => {
     const tagInput = Writable.of<string>("");
     const displayText = computed(() => {

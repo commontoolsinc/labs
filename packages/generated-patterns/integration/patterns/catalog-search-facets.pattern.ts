@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -352,8 +352,7 @@ const liftComputeAvailableBrands = lift(computeAvailableBrands);
 const liftComputePriceRange = lift(computePriceRange);
 const liftFilterItems = lift(filterItems);
 
-export const catalogSearchFacets = recipe<CatalogSearchArgs>(
-  "Catalog Search Facets",
+export const catalogSearchFacets = pattern<CatalogSearchArgs>(
   ({ catalog }) => {
     const sanitizedCatalog = liftSanitizeCatalog(catalog);
 

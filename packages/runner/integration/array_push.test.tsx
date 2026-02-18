@@ -5,7 +5,7 @@ import {
   handler,
   JSONSchema,
   NAME,
-  recipe,
+  pattern,
   UI,
 } from "commontools";
 
@@ -89,14 +89,12 @@ const pushObjectsHandler = handler(
   },
 );
 
-export default recipe(
-  InputSchema,
-  OutputSchema,
+export default pattern(
   () => {
     const my_numbers_array = cell<number[]>([]);
     const my_objects_array = cell<{ count: number }[]>([]);
 
-    // Return the recipe
+    // Return the pattern
     return {
       [NAME]: "array push test",
       [UI]: (
@@ -125,4 +123,6 @@ export default recipe(
       pushObjectsHandler: pushObjectsHandler({ array: my_objects_array }),
     };
   },
+  InputSchema,
+  OutputSchema,
 );

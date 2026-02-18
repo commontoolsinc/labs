@@ -12,7 +12,7 @@ import {
   handler,
   ifElse,
   NAME,
-  recipe,
+  pattern,
   str,
   UI,
   Writable,
@@ -114,10 +114,10 @@ const clearFile = handler<
 });
 
 // ===== The Pattern =====
-export const TextImportModule = recipe<
+export const TextImportModule = pattern<
   TextImportModuleInput,
   TextImportModuleOutput
->("TextImportModule", ({ content, filename }) => {
+>(({ content, filename }) => {
   // Check if we have content
   const hasContent = computed(() => !!content && content.length > 0);
 

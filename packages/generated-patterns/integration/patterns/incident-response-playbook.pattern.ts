@@ -6,7 +6,7 @@ import {
   derive,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -462,8 +462,7 @@ const liftClockMinutes = lift((value: number | undefined) =>
   typeof value === "number" && Number.isFinite(value) ? value : 0
 );
 
-export const incidentResponsePlaybook = recipe<IncidentResponsePlaybookArgs>(
-  "Incident Response Playbook",
+export const incidentResponsePlaybook = pattern<IncidentResponsePlaybookArgs>(
   ({ steps }) => {
     const history = cell<string[]>([]);
     const activeStep = cell<string | null>(null);

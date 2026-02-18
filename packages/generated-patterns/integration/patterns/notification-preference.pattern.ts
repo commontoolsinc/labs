@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -207,8 +207,7 @@ const liftActiveCount = lift((entries: readonly ChannelPreference[]) =>
   entries.filter((entry) => entry.enabled).length
 );
 
-export const notificationPreferences = recipe<NotificationPreferenceArgs>(
-  "Notification Preferences",
+export const notificationPreferences = pattern<NotificationPreferenceArgs>(
   ({ channels }) => {
     const lastChange = cell("Preferences loaded");
     const history = cell<string[]>(["Preferences loaded"]);

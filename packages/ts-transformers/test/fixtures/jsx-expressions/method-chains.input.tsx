@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 
 interface State {
   text: string;
@@ -20,7 +20,7 @@ interface State {
   separator: string;
 }
 
-export default recipe<State>("MethodChains", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>

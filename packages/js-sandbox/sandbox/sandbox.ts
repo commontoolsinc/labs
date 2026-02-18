@@ -128,7 +128,7 @@ export class Sandbox {
     return this.invoke(fn, self, args);
   }
 
-  // Load a raw (non-compiled recipe) script.
+  // Load a raw (non-compiled pattern) script.
   // Returns an owned reference to the return value.
   loadRaw(script: string | { js: string; filename?: string }): QuickJSHandle {
     if (this.#disposed) {

@@ -31,7 +31,11 @@ export const menuPlannerScenario: PatternIntegrationScenario<
       events: [
         {
           stream: "assignMeal",
-          payload: { day: "Monday", meal: "breakfast", recipe: "Oatmeal Bowl" },
+          payload: {
+            day: "Monday",
+            meal: "breakfast",
+            pattern: "Oatmeal Bowl",
+          },
         },
       ],
       expect: [
@@ -62,7 +66,7 @@ export const menuPlannerScenario: PatternIntegrationScenario<
       events: [
         {
           stream: "assignMeal",
-          payload: { day: "Monday", meal: "dinner", recipe: "Veggie Curry" },
+          payload: { day: "Monday", meal: "dinner", pattern: "Veggie Curry" },
         },
       ],
       expect: [
@@ -92,7 +96,7 @@ export const menuPlannerScenario: PatternIntegrationScenario<
       events: [
         {
           stream: "assignMeal",
-          payload: { day: "Tuesday", meal: "lunch", recipe: "Quinoa Salad" },
+          payload: { day: "Tuesday", meal: "lunch", pattern: "Quinoa Salad" },
         },
       ],
       expect: [
@@ -125,7 +129,7 @@ export const menuPlannerScenario: PatternIntegrationScenario<
       events: [
         {
           stream: "assignMeal",
-          payload: { day: "Monday", meal: "dinner", recipe: "Quinoa Salad" },
+          payload: { day: "Monday", meal: "dinner", pattern: "Quinoa Salad" },
         },
       ],
       expect: [

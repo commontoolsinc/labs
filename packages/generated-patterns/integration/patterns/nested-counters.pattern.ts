@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, handler, lift, recipe, str } from "commontools";
+import { Cell, Default, handler, lift, pattern, str } from "commontools";
 
 interface NestedCounterArgs {
   counters: Default<
@@ -36,8 +36,7 @@ const liftTotal = lift((values: { left: number; right: number }) =>
   values.left + values.right
 );
 
-export const nestedCounters = recipe<NestedCounterArgs>(
-  "Nested Counters",
+export const nestedCounters = pattern<NestedCounterArgs>(
   ({ counters }) => {
     const left = counters.key("left");
     const right = counters.key("right");

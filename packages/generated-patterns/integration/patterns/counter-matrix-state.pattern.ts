@@ -5,7 +5,7 @@ import {
   derive,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -238,8 +238,7 @@ const liftColumnSummary = lift((columns: number[]) =>
   columns.map((value, index) => `c${index}=${value}`).join(" | ")
 );
 
-export const counterWithMatrixState = recipe<CounterMatrixStateArgs>(
-  "Counter With Matrix State",
+export const counterWithMatrixState = pattern<CounterMatrixStateArgs>(
   ({ matrix }) => {
     const matrixView = derive(matrix, sanitizeMatrix);
     const rowTotals = derive(matrix, computeRowTotals);

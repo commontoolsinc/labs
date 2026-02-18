@@ -6,7 +6,7 @@ import {
   derive,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -112,8 +112,7 @@ const liftSanitizedPrefix = lift((input: string | undefined) =>
   sanitizeLabelPrefix(input, "Child")
 );
 
-export const parameterizedChildCounter = recipe<ParameterizedChildArgs>(
-  "Parameterized Child Counter",
+export const parameterizedChildCounter = pattern<ParameterizedChildArgs>(
   ({ identity, value, step, labelPrefix }) => {
     const safeIdentity = liftSafeIdentity(identity);
 
@@ -186,8 +185,7 @@ const liftChildren = lift((entries: ChildConfig[]) => {
   );
 });
 
-export const counterNestedParameterized = recipe<NestedParameterizedArgs>(
-  "Counter With Nested Parameterized Patterns",
+export const counterNestedParameterized = pattern<NestedParameterizedArgs>(
   ({ configs }) => {
     const configurationVersion = cell(0);
 

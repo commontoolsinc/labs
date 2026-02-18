@@ -1,4 +1,4 @@
-import { Module, NAME, Recipe } from "@commontools/runner";
+import { Module, NAME, Pattern } from "@commontools/runner";
 import { nameSchema } from "@commontools/runner/schemas";
 import { PieceManager } from "./manager.ts";
 import { Cell } from "@commontools/runner";
@@ -41,7 +41,7 @@ export async function formatPromptWithMentions(
     text: string;
     sources: Record<
       string,
-      { name: string; cell: Cell<unknown>; recipe?: Recipe | Module }
+      { name: string; cell: Cell<unknown>; pattern?: Pattern | Module }
     >;
   }
 > {
@@ -53,7 +53,7 @@ export async function formatPromptWithMentions(
   // Create a mapping of IDs to source objects
   const sourcesMap: Record<
     string,
-    { name: string; cell: Cell<unknown>; recipe?: Recipe | Module }
+    { name: string; cell: Cell<unknown>; pattern?: Pattern | Module }
   > = {};
 
   // Process the text to inject IDs where mentions are
@@ -116,7 +116,7 @@ async function processNode(
       [id: string]: {
         name: string;
         cell: Cell<unknown>;
-        recipe?: Recipe | Module;
+        pattern?: Pattern | Module;
       };
     };
     mentionIndices: Record<string, number>;
@@ -238,7 +238,7 @@ export async function parseComposerDocument(
     [id: string]: {
       name: string;
       cell: Cell<unknown>;
-      recipe?: Recipe | Module;
+      pattern?: Pattern | Module;
     };
   };
 }> {
@@ -270,7 +270,7 @@ export async function parseComposerDocument(
         [id: string]: {
           name: string;
           cell: Cell<unknown>;
-          recipe?: Recipe | Module;
+          pattern?: Pattern | Module;
         };
       },
       mentionIndices: {} as Record<string, number>,

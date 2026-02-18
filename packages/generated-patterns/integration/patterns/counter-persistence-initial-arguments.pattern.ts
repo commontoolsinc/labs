@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, cell, Default, handler, lift, recipe, str } from "commontools";
+import { Cell, cell, Default, handler, lift, pattern, str } from "commontools";
 
 interface PersistedState {
   value?: number;
@@ -156,10 +156,9 @@ const applyIncrement = handler(
   },
 );
 
-export const counterPersistenceViaInitialArguments = recipe<
+export const counterPersistenceViaInitialArguments = pattern<
   PersistenceInitialArgs
 >(
-  "Counter Persistence Via Initial Arguments",
   ({ state, metadata }) => {
     const lastChange = cell<PersistedChange>({
       reason: "initial",

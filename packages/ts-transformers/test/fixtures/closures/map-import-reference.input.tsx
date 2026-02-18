@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 
 // Module-level constant - should NOT be captured
 const TAX_RATE = 0.08;
@@ -18,7 +18,7 @@ interface State {
   items: Item[];
 }
 
-export default recipe<State>("ModuleScopedReference", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>

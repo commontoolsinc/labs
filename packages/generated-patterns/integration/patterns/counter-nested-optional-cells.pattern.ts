@@ -4,7 +4,7 @@ import {
   computed,
   Default,
   handler,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -115,8 +115,7 @@ const clearNestedState = handler(
   },
 );
 
-export const counterWithNestedOptionalCells = recipe<NestedOptionalArgs>(
-  "Counter With Nested Optional Cells",
+export const counterWithNestedOptionalCells = pattern<NestedOptionalArgs>(
   ({ state }) => {
     const current = computed(() => {
       const counter = state.nested?.branch?.counter;

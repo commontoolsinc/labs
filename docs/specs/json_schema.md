@@ -10,7 +10,7 @@ need all reachable cells, schemas serve as filters to limit what data is
 returned.
 
 We also automatically convert TypeScript types to JSON Schema as part of our
-recipe compilation workflow.
+pattern compilation workflow.
 
 Due to its specialized role in our system, we handle these schemas differently
 from standard implementations in several ways.

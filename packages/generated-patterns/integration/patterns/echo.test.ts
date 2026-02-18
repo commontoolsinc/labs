@@ -9,7 +9,7 @@ interface EchoArgs {
 export const echoScenario: PatternIntegrationScenario<EchoArgs> = {
   name: "echo returns provided argument",
   module: new URL("./echo.pattern.ts", import.meta.url),
-  exportName: "echoRecipe",
+  exportName: "echoPattern",
   argument: { message: "hello" },
   steps: [{ expect: [{ path: "message", value: "hello" }] }],
 };

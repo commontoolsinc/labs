@@ -15,9 +15,9 @@
  * const emails = await client.searchEmails("from:amazon.com", 20);
  * ```
  */
-import { getRecipeEnvironment, Writable } from "commontools";
+import { getPatternEnvironment, Writable } from "commontools";
 
-const env = getRecipeEnvironment();
+const env = getPatternEnvironment();
 
 // Re-export the Auth type for convenience
 export type { Auth } from "../gmail-importer.tsx";

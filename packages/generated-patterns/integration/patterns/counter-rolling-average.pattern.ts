@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, handler, lift, recipe, str } from "commontools";
+import { Cell, Default, handler, lift, pattern, str } from "commontools";
 
 interface RollingAverageArgs {
   value: Default<number, 0>;
@@ -48,8 +48,7 @@ const liftHistoryView = lift((entries: number[] | undefined) =>
   Array.isArray(entries) ? entries : []
 );
 
-export const counterWithRollingAverage = recipe<RollingAverageArgs>(
-  "Counter With Rolling Average",
+export const counterWithRollingAverage = pattern<RollingAverageArgs>(
   ({ value, history, window }) => {
     const average = liftAverage(history);
     const currentValue = liftCurrentValue(value);

@@ -3,7 +3,7 @@ import {
   computed,
   Default,
   derive,
-  getRecipeEnvironment,
+  getPatternEnvironment,
   handler,
   ifElse,
   NAME,
@@ -37,7 +37,7 @@ export type Auth = {
   }, { email: ""; name: ""; picture: "" }>;
 };
 
-const env = getRecipeEnvironment();
+const env = getPatternEnvironment();
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 

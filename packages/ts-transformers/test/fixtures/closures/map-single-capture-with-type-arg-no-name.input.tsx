@@ -1,12 +1,12 @@
 /// <cts-enable />
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 
 interface State {
   items: Array<{ price: number }>;
   discount: number;
 }
 
-export default recipe<State>((state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>

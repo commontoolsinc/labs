@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -350,8 +350,7 @@ const liftComputeChannelAverages = lift((
   entries: readonly SatisfactionEntry[],
 ) => computeChannelAverages(entries));
 
-export const customerSatisfactionTracker = recipe<CustomerSatisfactionArgs>(
-  "Customer Satisfaction Tracker",
+export const customerSatisfactionTracker = pattern<CustomerSatisfactionArgs>(
   ({ responses }) => {
     const runtimeSeed = cell(0);
 

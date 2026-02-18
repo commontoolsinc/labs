@@ -19,7 +19,7 @@ export function checkStderr(stderr: string[]) {
 }
 
 // Executes the `ct` command via CLI
-// `const { stdout, stderr, code } = ct("dev --no-run ./recipe.tsx")`
+// `const { stdout, stderr, code } = ct("dev --no-run ./pattern.tsx")`
 export async function ct(
   command: string,
 ): Promise<{ code: number; stdout: string[]; stderr: string[] }> {

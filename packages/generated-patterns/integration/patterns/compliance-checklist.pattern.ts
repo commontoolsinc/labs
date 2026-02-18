@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -597,8 +597,7 @@ const liftSanitizeTaskList = lift(sanitizeTaskList);
 const liftComputeInsights = lift(computeInsights);
 const liftCloneTasks = lift(cloneTasks);
 
-export const complianceChecklist = recipe<ComplianceChecklistArgs>(
-  "Compliance Checklist",
+export const complianceChecklist = pattern<ComplianceChecklistArgs>(
   ({ tasks }) => {
     const canonicalDefaults = liftSanitizeTaskList(tasks);
     const overrideStore = cell<TaskOverrideMap>({});

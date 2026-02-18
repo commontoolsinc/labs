@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, recipe, UI } from "commontools";
+import { Cell, pattern, UI } from "commontools";
 
 interface State {
   records: Record<string, Cell<number>>;
@@ -11,7 +11,7 @@ function nextKey(): string {
   return `key-${counter}`;
 }
 
-export default recipe<State>("Records", (state) => {
+export default pattern<State>((state) => {
   const recordMap = state.records;
   return {
     [UI]: (

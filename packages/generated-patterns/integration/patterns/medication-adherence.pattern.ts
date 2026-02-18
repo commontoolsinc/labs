@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -262,8 +262,7 @@ const liftUpcomingDoses = lift((input: {
   records: DoseRecord[];
 }) => computeUpcoming(input));
 
-export const medicationAdherencePattern = recipe<MedicationAdherenceArgs>(
-  "Medication Adherence Pattern",
+export const medicationAdherencePattern = pattern<MedicationAdherenceArgs>(
   ({ doses }) => {
     const schedule = liftSanitizeSchedule(doses);
     const takenRecords = cell<DoseRecord[]>([]);

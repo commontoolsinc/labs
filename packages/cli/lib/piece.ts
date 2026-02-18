@@ -112,7 +112,7 @@ async function getProgramFromFile(
 export async function listPieces(
   config: SpaceConfig,
 ): Promise<
-  { id: string; name?: string; recipeName?: string; error?: string }[]
+  { id: string; name?: string; patternName?: string; error?: string }[]
 > {
   const manager = await loadManager(config);
   const pieces = new PiecesController(manager);
@@ -123,7 +123,7 @@ export async function listPieces(
         return {
           id: piece.id,
           name: piece.name(),
-          recipeName: (await piece.getRecipeMeta()).recipeName,
+          patternName: (await piece.getPatternMeta()).patternName,
         };
       } catch (err) {
         return {
@@ -168,7 +168,7 @@ export async function newPiece(
   return piece.id;
 }
 
-export async function setPieceRecipe(
+export async function setPiecePattern(
   config: PieceConfig,
   entry: EntryConfig,
 ): Promise<void> {
@@ -176,13 +176,13 @@ export async function setPieceRecipe(
   const pieces = new PiecesController(manager);
   const piece = await pieces.get(config.piece, false);
   if (entry.mainPath.endsWith(".iframe.js")) {
-    await piece.setIframeRecipe(entry.mainPath);
+    await piece.setIframePattern(entry.mainPath);
   } else {
-    await piece.setRecipe(await getProgramFromFile(manager, entry));
+    await piece.setPattern(await getProgramFromFile(manager, entry));
   }
 }
 
-export async function savePieceRecipe(
+export async function savePiecePattern(
   config: PieceConfig,
   outPath: string,
 ): Promise<void> {
@@ -190,13 +190,15 @@ export async function savePieceRecipe(
   const manager = await loadManager(config);
   const pieces = new PiecesController(manager);
   const piece = await pieces.get(config.piece, false);
-  const meta = await piece.getRecipeMeta();
-  const iframeRecipe = await piece.getIframeRecipe();
+  const meta = await piece.getPatternMeta();
+  const iframePattern = piece.getIframePattern();
 
-  if (iframeRecipe) {
-    const userCode = extractUserCode(iframeRecipe.src);
+  if (iframePattern) {
+    const userCode = extractUserCode(iframePattern.src);
     if (!userCode) {
-      throw new Error(`No user code found in iframe recipe "${config.piece}".`);
+      throw new Error(
+        `No user code found in iframe pattern "${config.piece}".`,
+      );
     }
     await Deno.writeTextFile(
       join(outPath, "main.iframe.js"),
@@ -208,7 +210,7 @@ export async function savePieceRecipe(
   } else if (meta.program) {
     for (const { name, contents } of meta.program.files) {
       if (name[0] !== "/") {
-        throw new Error("Ungrounded file in recipe.");
+        throw new Error("Ungrounded file in pattern.");
       }
       const outFilePath = join(outPath, name.substring(1));
       await Deno.mkdir(dirname(outFilePath), { recursive: true });
@@ -216,7 +218,7 @@ export async function savePieceRecipe(
     }
   } else {
     throw new Error(
-      `Piece "${config.piece}" does not contain a recipe source.`,
+      `Piece "${config.piece}" does not contain a pattern source.`,
     );
   }
 }
@@ -426,7 +428,7 @@ export async function inspectPiece(
 ): Promise<{
   id: string;
   name?: string;
-  recipeName?: string;
+  patternName?: string;
   source: Readonly<unknown>;
   result: Readonly<unknown>;
   readingFrom: Array<{ id: string; name?: string }>;
@@ -438,7 +440,7 @@ export async function inspectPiece(
 
   const id = piece.id;
   const name = piece.name();
-  const recipeName = (await piece.getRecipeMeta()).recipeName;
+  const patternName = (await piece.getPatternMeta()).patternName;
   const source = await piece.input.get() as Readonly<unknown>;
   const result = await piece.result.get() as Readonly<unknown>;
   const readingFrom = (await piece.readingFrom()).map((piece) => ({
@@ -453,7 +455,7 @@ export async function inspectPiece(
   return {
     id,
     name,
-    recipeName,
+    patternName,
     source,
     result,
     readingFrom,

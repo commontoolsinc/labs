@@ -21,10 +21,9 @@ import type {
   ModuleFactory,
   Opaque,
   OpaqueRef,
-  RecipeFactory,
+  PatternFactory,
   SELF,
   Stream,
-  StripCell,
 } from "commontools";
 
 // ===== Helper Types =====
@@ -324,49 +323,24 @@ export type SchemaWithoutCell<
 // ===== Module Augmentation for Schema-based Overloads =====
 
 declare module "commontools" {
-  // Augment PatternFunction with schema-based overload
+  // Augment PatternFunction with schema-based overloads
   interface PatternFunction {
+    // Function + two schemas: infer types from JSONSchema literals
     <IS extends JSONSchema = JSONSchema, OS extends JSONSchema = JSONSchema>(
       fn: (
-        input: OpaqueRef<Schema<IS>> & {
-          [SELF]: OpaqueRef<Schema<OS>>;
-        },
+        input: OpaqueRef<Schema<IS>> & { [SELF]: OpaqueRef<Schema<OS>> },
       ) => Opaque<Schema<OS>>,
       argumentSchema: IS,
       resultSchema: OS,
-    ): RecipeFactory<SchemaWithoutCell<IS>, SchemaWithoutCell<OS>>;
-  }
+    ): PatternFactory<SchemaWithoutCell<IS>, SchemaWithoutCell<OS>>;
 
-  // Augment RecipeFunction with schema-based overloads
-  /** @deprecated Use pattern() instead */
-  interface RecipeFunction {
-    <S extends JSONSchema>(
-      argumentSchema: S,
+    // Function + one schema: infer input type from JSONSchema literal
+    <IS extends JSONSchema = JSONSchema>(
       fn: (
-        input: OpaqueRef<SchemaWithoutCell<S>> & {
-          [SELF]: OpaqueRef<any>;
-        },
+        input: OpaqueRef<Schema<IS>> & { [SELF]: OpaqueRef<any> },
       ) => any,
-    ): RecipeFactory<SchemaWithoutCell<S>, StripCell<ReturnType<typeof fn>>>;
-
-    <S extends JSONSchema, R>(
-      argumentSchema: S,
-      fn: (
-        input: OpaqueRef<SchemaWithoutCell<S>> & {
-          [SELF]: OpaqueRef<R>;
-        },
-      ) => Opaque<R>,
-    ): RecipeFactory<SchemaWithoutCell<S>, StripCell<R>>;
-
-    <S extends JSONSchema, RS extends JSONSchema>(
-      argumentSchema: S,
-      resultSchema: RS,
-      fn: (
-        input: OpaqueRef<SchemaWithoutCell<S>> & {
-          [SELF]: OpaqueRef<SchemaWithoutCell<RS>>;
-        },
-      ) => Opaque<SchemaWithoutCell<RS>>,
-    ): RecipeFactory<SchemaWithoutCell<S>, SchemaWithoutCell<RS>>;
+      argumentSchema: IS,
+    ): PatternFactory<SchemaWithoutCell<IS>, any>;
   }
 
   // Augment LiftFunction with schema-based overload

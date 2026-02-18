@@ -149,6 +149,11 @@ async function loadAllFixturesInDirectory(
 // 5. Individual tests retrieve their precomputed diagnostics from the Map
 //
 // To skip input validation temporarily, run with SKIP_INPUT_CHECK=1.
+//
+// NOTE: Expected (.expected.tsx) files are NOT type-checked because the transformer
+// output intentionally strips type arguments and uses __ctHelpers patterns that
+// don't carry full type information. This is by design — the transformer converts
+// TypeScript type information into runtime schema objects.
 const batchedDiagnosticsByConfig = new Map<
   string,
   Map<string, ts.Diagnostic[]>
@@ -216,8 +221,14 @@ for (const config of configs) {
   const suiteConfig = {
     suiteName: config.describe,
     rootDir: `${FIXTURES_ROOT}/${config.directory}`,
-    expectedPath: ({ stem, extension }: { stem: string; extension: string }) =>
-      `${stem}.expected${extension}`,
+    expectedPath: (
+      { stem, extension }: { stem: string; extension: string },
+    ) => {
+      // Expected files use JS extensions since they are post-transform output
+      // (type arguments stripped, __ctHelpers patterns) — not valid TypeScript.
+      const jsExtension = extension === ".tsx" ? ".jsx" : ".js";
+      return `${stem}.expected${jsExtension}`;
+    },
     skip: (fixture: { baseName: string }) => {
       if (fixtureFilter && fixture.baseName !== fixtureFilter) {
         return true;

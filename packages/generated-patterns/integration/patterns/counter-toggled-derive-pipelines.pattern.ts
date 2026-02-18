@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { cell, Default, handler, lift, recipe, str } from "commontools";
+import { cell, Default, handler, lift, pattern, str } from "commontools";
 import type { Cell } from "commontools";
 
 type PipelineMode = "double" | "mirror";
@@ -119,8 +119,7 @@ const togglePipeline = handler(
   },
 );
 
-export const counterWithToggledDerivePipelines = recipe<TogglePipelineArgs>(
-  "Counter With Toggled Derive Pipelines",
+export const counterWithToggledDerivePipelines = pattern<TogglePipelineArgs>(
   ({ count, mode }) => {
     const switchCount = cell(0);
     const pipelineHistory = cell<PipelineMode[]>([]);

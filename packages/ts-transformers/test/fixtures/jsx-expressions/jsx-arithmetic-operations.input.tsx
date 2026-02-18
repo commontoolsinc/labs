@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 
 interface State {
   count: number;
@@ -8,7 +8,7 @@ interface State {
   quantity: number;
 }
 
-export default recipe<State>("ArithmeticOperations", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>

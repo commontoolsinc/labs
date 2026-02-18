@@ -108,11 +108,11 @@ Deno.test("Pattern Context Validation - Restricted Contexts", async (t) => {
     "allows property access in JSX (transformer handles it)",
     async () => {
       const source = `/// <cts-enable />
-      import { recipe, h } from "commontools";
+      import { pattern, h } from "commontools";
 
       interface Item { name: string; price: number; }
 
-      export default recipe<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         return <div>{item.name}</div>;
       });
     `;
@@ -128,13 +128,13 @@ Deno.test("Pattern Context Validation - Restricted Contexts", async (t) => {
     "allows passing property to function (pass-through)",
     async () => {
       const source = `/// <cts-enable />
-      import { recipe, h } from "commontools";
+      import { pattern, h } from "commontools";
 
       interface Item { name: string; }
 
       function format(name: string): string { return name.toUpperCase(); }
 
-      export default recipe<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         const formatted = format(item.name);
         return <div>{formatted}</div>;
       });
@@ -155,11 +155,11 @@ Deno.test("Pattern Context Validation - Restricted Contexts", async (t) => {
     "allows optional chaining inside JSX expressions",
     async () => {
       const source = `/// <cts-enable />
-      import { recipe, h } from "commontools";
+      import { pattern, h } from "commontools";
 
       interface Item { name?: string; nested?: { value: number } }
 
-      export default recipe<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         return <div>{item?.name} - {item?.nested?.value}</div>;
       });
     `;
@@ -177,9 +177,9 @@ Deno.test("Pattern Context Validation - Restricted Contexts", async (t) => {
 
   await t.step("allows .get() calls inside JSX expressions", async () => {
     const source = `/// <cts-enable />
-      import { recipe, Cell, h } from "commontools";
+      import { pattern, Cell, h } from "commontools";
 
-      export default recipe<{ count: Cell<number> }>("test", ({ count }) => {
+      export default pattern<{ count: Cell<number> }>(({ count }) => {
         return <div>Count: {count.get()}</div>;
       });
     `;
@@ -198,11 +198,11 @@ Deno.test("Pattern Context Validation - Restricted Contexts", async (t) => {
 Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
   await t.step("allows reading opaques inside computed()", async () => {
     const source = `/// <cts-enable />
-      import { recipe, computed, h } from "commontools";
+      import { pattern, computed, h } from "commontools";
 
       interface Item { name: string; price: number; }
 
-      export default recipe<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         const isExpensive = computed(() => item.price > 100);
         return <div>{isExpensive}</div>;
       });
@@ -220,11 +220,11 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
 
   await t.step("allows reading opaques inside action()", async () => {
     const source = `/// <cts-enable />
-      import { recipe, action, h } from "commontools";
+      import { pattern, action, h } from "commontools";
 
       interface Item { name: string; price: number; }
 
-      export default recipe<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         const logPrice = action(() => {
           console.log(item.price > 100 ? "expensive" : "cheap");
         });
@@ -244,11 +244,11 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
 
   await t.step("allows reading opaques inside derive()", async () => {
     const source = `/// <cts-enable />
-      import { recipe, derive, Cell, h } from "commontools";
+      import { pattern, derive, Cell, h } from "commontools";
 
       interface Item { name: string; price: number; }
 
-      export default recipe<{ item: Item, discount: Cell<number> }>("test", ({ item, discount }) => {
+      export default pattern<{ item: Item, discount: Cell<number> }>(({ item, discount }) => {
         const finalPrice = derive(discount, (d) => item.price * (1 - d));
         return <div>{finalPrice}</div>;
       });
@@ -268,11 +268,11 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
     "allows reading opaques inside standalone derive()",
     async () => {
       const source = `/// <cts-enable />
-      import { recipe, derive, h } from "commontools";
+      import { pattern, derive, h } from "commontools";
 
       interface Item { name: string; price: number; }
 
-      export default recipe<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         // Standalone derive (nullary form) - should allow opaque access
         const isExpensive = derive(() => item.price > 100);
         const doubled = derive(() => item.price * 2);
@@ -295,11 +295,11 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
     "errors on lift() inside pattern (must be at module scope)",
     async () => {
       const source = `/// <cts-enable />
-      import { recipe, lift, h } from "commontools";
+      import { pattern, lift, h } from "commontools";
 
       interface Item { name: string; price: number; }
 
-      export default recipe<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         const doubled = lift(() => item.price * 2);
         return <div>{doubled}</div>;
       });
@@ -321,11 +321,11 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
     "errors on handler() inside pattern (must be at module scope)",
     async () => {
       const source = `/// <cts-enable />
-      import { recipe, handler, h } from "commontools";
+      import { pattern, handler, h } from "commontools";
 
       interface Item { name: string; price: number; }
 
-      export default recipe<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         const onClick = handler((e: MouseEvent) => {
           if (item.price > 100) {
             console.log("expensive!");
@@ -351,11 +351,11 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
     "allows reading opaques inside inline JSX event handlers",
     async () => {
       const source = `/// <cts-enable />
-      import { recipe, Cell, h } from "commontools";
+      import { pattern, Cell, h } from "commontools";
 
       interface Item { name: string; price: number; }
 
-      export default recipe<{ item: Item, count: Cell<number> }>("test", ({ item, count }) => {
+      export default pattern<{ item: Item, count: Cell<number> }>(({ item, count }) => {
         return (
           <div>
             <button onClick={() => {
@@ -386,11 +386,11 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
     "errors on standalone function declarations in pattern (must be at module scope)",
     async () => {
       const source = `/// <cts-enable />
-      import { recipe, computed, h } from "commontools";
+      import { pattern, computed, h } from "commontools";
 
       interface Item { name: string; price: number; }
 
-      export default recipe<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         // Helper function defined in pattern - now an error
         function isExpensive() {
           return item.price > 100;
@@ -417,11 +417,11 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
     "errors on standalone arrow functions in pattern (must be at module scope)",
     async () => {
       const source = `/// <cts-enable />
-      import { recipe, computed, h } from "commontools";
+      import { pattern, computed, h } from "commontools";
 
       interface Item { name: string; price: number; }
 
-      export default recipe<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         // Helper arrow function defined in pattern - now an error
         const isExpensive = () => item.price > 100;
 
@@ -469,13 +469,13 @@ Deno.test("Diagnostic output format", async (t) => {
 });
 
 Deno.test("Pattern Context Validation - Function Creation", async (t) => {
-  await t.step("errors on arrow function in recipe body", async () => {
+  await t.step("errors on arrow function in pattern body", async () => {
     const source = `/// <cts-enable />
-      import { recipe, h } from "commontools";
+      import { pattern, h } from "commontools";
 
       interface Item { price: number; }
 
-      export default recipe<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         const helper = () => item.price * 2;
         return <div>{helper()}</div>;
       });
@@ -507,13 +507,13 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
     assertEquals(errors[0]!.type, "pattern-context:function-creation");
   });
 
-  await t.step("errors on function declaration in recipe body", async () => {
+  await t.step("errors on function declaration in pattern body", async () => {
     const source = `/// <cts-enable />
-      import { recipe, h } from "commontools";
+      import { pattern, h } from "commontools";
 
       interface Item { price: number; }
 
-      export default recipe<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         function helper() { return item.price * 2; }
         return <div>{helper()}</div>;
       });
@@ -528,11 +528,11 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
 
   await t.step("allows arrow function inside computed()", async () => {
     const source = `/// <cts-enable />
-      import { recipe, computed, h } from "commontools";
+      import { pattern, computed, h } from "commontools";
 
       interface Item { price: number; }
 
-      export default recipe<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         const doubled = computed(() => {
           const multiply = (x: number) => x * 2;
           return multiply(item.price);
@@ -553,11 +553,11 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
 
   await t.step("allows arrow function inside action()", async () => {
     const source = `/// <cts-enable />
-      import { recipe, action, h } from "commontools";
+      import { pattern, action, h } from "commontools";
 
       interface Item { price: number; }
 
-      export default recipe<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         const doSomething = action(() => {
           const helper = () => item.price * 2;
           console.log(helper());
@@ -578,11 +578,11 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
 
   await t.step("allows inline JSX event handler", async () => {
     const source = `/// <cts-enable />
-      import { recipe, h } from "commontools";
+      import { pattern, h } from "commontools";
 
       interface Item { price: number; }
 
-      export default recipe<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         return <div onClick={() => console.log(item.price)}>Click</div>;
       });
     `;
@@ -599,11 +599,11 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
 
   await t.step("allows map callback inside JSX", async () => {
     const source = `/// <cts-enable />
-      import { recipe, h, OpaqueRef } from "commontools";
+      import { pattern, h, OpaqueRef } from "commontools";
 
       interface Item { name: string; }
 
-      export default recipe<{ items: OpaqueRef<Item[]> }>("test", ({ items }) => {
+      export default pattern<{ items: OpaqueRef<Item[]> }>(({ items }) => {
         return <div>{items.map(item => <span>{item.name}</span>)}</div>;
       });
     `;
@@ -643,13 +643,13 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
 });
 
 Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
-  await t.step("errors on lift() inside recipe body", async () => {
+  await t.step("errors on lift() inside pattern body", async () => {
     const source = `/// <cts-enable />
-      import { recipe, lift, h } from "commontools";
+      import { pattern, lift, h } from "commontools";
 
       interface Item { price: number; }
 
-      export default recipe<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         const doubled = lift(() => item.price * 2);
         return <div>{doubled}</div>;
       });
@@ -666,11 +666,11 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
     "errors on lift() immediately invoked with computed suggestion",
     async () => {
       const source = `/// <cts-enable />
-      import { recipe, lift, h } from "commontools";
+      import { pattern, lift, h } from "commontools";
 
       interface Item { price: number; }
 
-      export default recipe<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         const doubled = lift(({ x }: { x: number }) => x * 2)({ x: item.price });
         return <div>{doubled}</div>;
       });
@@ -710,13 +710,13 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
 
   await t.step("allows lift() at module scope", async () => {
     const source = `/// <cts-enable />
-      import { recipe, lift, h } from "commontools";
+      import { pattern, lift, h } from "commontools";
 
       interface Item { price: number; }
 
       const doublePrice = lift((price: number) => price * 2);
 
-      export default recipe<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         const doubled = doublePrice(item.price);
         return <div>{doubled}</div>;
       });
@@ -730,13 +730,13 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
 
   await t.step("allows handler() at module scope", async () => {
     const source = `/// <cts-enable />
-      import { recipe, handler, h } from "commontools";
+      import { pattern, handler, h } from "commontools";
 
       interface Item { price: number; }
 
       const logPrice = handler((price: number) => console.log(price));
 
-      export default recipe<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         return <div onClick={() => logPrice(item.price)}>Click</div>;
       });
     `;
@@ -753,11 +753,11 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
 
   await t.step("allows computed() inside pattern", async () => {
     const source = `/// <cts-enable />
-      import { recipe, computed, h } from "commontools";
+      import { pattern, computed, h } from "commontools";
 
       interface Item { price: number; }
 
-      export default recipe<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         const doubled = computed(() => item.price * 2);
         return <div>{doubled}</div>;
       });
@@ -775,11 +775,11 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
 
   await t.step("allows action() inside pattern", async () => {
     const source = `/// <cts-enable />
-      import { recipe, action, h } from "commontools";
+      import { pattern, action, h } from "commontools";
 
       interface Item { price: number; }
 
-      export default recipe<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         const log = action(() => console.log(item.price));
         return <div onClick={log}>Click</div>;
       });
@@ -793,11 +793,11 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
 
   await t.step("allows derive() inside pattern", async () => {
     const source = `/// <cts-enable />
-      import { recipe, derive, h } from "commontools";
+      import { pattern, derive, h } from "commontools";
 
       interface Item { price: number; }
 
-      export default recipe<{ item: Item }>("test", ({ item }) => {
+      export default pattern<{ item: Item }>(({ item }) => {
         const doubled = derive(() => item.price * 2);
         return <div>{doubled}</div>;
       });

@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -166,10 +166,9 @@ const applyArgumentOverrides = handler(
   },
 );
 
-export const counterWithScenarioArgumentOverrides = recipe<
+export const counterWithScenarioArgumentOverrides = pattern<
   ScenarioArgumentOverrideArgs
 >(
-  "Counter With Scenario Driven Argument Overrides",
   ({ value, step }) => {
     const sanitizedArguments = liftSanitizedArguments({ value, step });
 

@@ -1,4 +1,4 @@
-import { type Recipe } from "../builder/types.ts";
+import { type Pattern } from "../builder/types.ts";
 import type { Program, ProgramResolver } from "@commontools/js-compiler";
 
 export type HarnessedFunction = (input: any) => void;
@@ -12,7 +12,7 @@ export type RuntimeProgram = Program & {
 export interface TypeScriptHarnessProcessOptions {
   // Disables typechecking of the program.
   noCheck?: boolean;
-  // Does not evaluate the recipe.
+  // Does not evaluate the pattern.
   noRun?: boolean;
   // An identifer to use to uniquely identify the compiled
   // code when applying source maps.
@@ -33,7 +33,7 @@ export interface Harness extends EventTarget {
   run(
     source: RuntimeProgram,
     options?: TypeScriptHarnessProcessOptions,
-  ): Promise<Recipe>;
+  ): Promise<Pattern>;
 
   // Resolves a `ProgramResolver` into a `Program` using the engine's
   // configuration.

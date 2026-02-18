@@ -27,7 +27,7 @@
 
 import { Identity } from "@commontools/identity";
 import { Engine, Runtime } from "@commontools/runner";
-import type { Cell, Recipe, Stream } from "@commontools/runner";
+import type { Cell, Pattern, Stream } from "@commontools/runner";
 import type { OpaqueRef } from "@commontools/api";
 import { FileSystemProgramResolver } from "@commontools/js-compiler";
 import { basename } from "@std/path";
@@ -130,7 +130,7 @@ export async function runTestPattern(
       );
     }
 
-    const testPatternFactory = main.default as Recipe;
+    const testPatternFactory = main.default as Pattern;
 
     if (typeof testPatternFactory !== "function") {
       throw new Error(

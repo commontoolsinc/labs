@@ -1,7 +1,7 @@
 /// <cts-enable />
-import { cell, NAME, recipe, UI } from "commontools";
+import { cell, NAME, pattern, UI } from "commontools";
 
-export default recipe("Optional Element Access", () => {
+export default pattern(() => {
   const list = cell<string[] | undefined>(undefined);
   return {
     [NAME]: "Optional element access",

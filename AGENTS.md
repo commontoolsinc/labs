@@ -53,7 +53,8 @@ If you are developing patterns, use Claude Skills (pattern-dev) to do the work.
 - `packages/patterns/index.md` - Catalog of all pattern examples with summaries,
   data types, and keywords
 
-**Important:** Ignore the top level `recipes` folder - it is defunct.
+**Important:** Ignore the top level `deprecated-patterns` folder - it is
+defunct.
 
 ## Runtime Development
 

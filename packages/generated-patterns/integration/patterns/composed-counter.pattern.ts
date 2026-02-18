@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, handler, lift, recipe, str } from "commontools";
+import { Cell, Default, handler, lift, pattern, str } from "commontools";
 
 const bump = handler(
   (
@@ -18,8 +18,7 @@ const mirrorRight = handler(
   },
 );
 
-const childCounter = recipe<{ value: Default<number, 0> }>(
-  "Child Counter",
+const childCounter = pattern<{ value: Default<number, 0> }>(
   ({ value }) => {
     return {
       label: str`Value ${value}`,
@@ -38,8 +37,7 @@ const liftTotal = lift((values: { left: number; right: number }) =>
   values.left + values.right
 );
 
-export const composedCounters = recipe<ComposedCounterArgs>(
-  "Composed Counters",
+export const composedCounters = pattern<ComposedCounterArgs>(
   ({ left, right }) => {
     const leftCounter = childCounter({ value: left });
     const rightCounter = childCounter({ value: right });

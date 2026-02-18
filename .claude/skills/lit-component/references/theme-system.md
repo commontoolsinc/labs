@@ -10,7 +10,7 @@ This document covers the philosophy and implementation of the Common UI theme sy
 1. **Default works:** Components should work without explicit theme
 2. **Composition over specification:** Nest theme providers for progressive refinement
 3. **Reactive:** Theme values can be Cells that update live
-4. **Recipe-friendly:** Support partial themes with recipe-style properties (`accentColor`, `fontFace`)
+4. **Pattern-friendly:** Support partial themes with pattern-style properties (`accentColor`, `fontFace`)
 5. **CSS-native:** Emit CSS variables for performance and browser devtools visibility
 
 ## The `ct-theme` Provider Component
@@ -19,7 +19,7 @@ The `<ct-theme>` component wraps children and provides theme context using `@lit
 
 **Key characteristics:**
 - Uses `display: contents` to be invisible in layout
-- Merges partial themes with defaults (supports recipe-style)
+- Merges partial themes with defaults (supports pattern-style)
 - Subscribes to Cell properties for reactive updates
 - Applies CSS variables to itself for cascade to children
 
@@ -236,4 +236,4 @@ Creates a theme override with granular control.
 
 ### mergeWithDefaultTheme(partialTheme: any, baseTheme?: CTTheme): CTTheme
 
-Merges partial theme with default, supporting recipe-style properties like `accentColor`, `fontFace`, and `borderRadius`.
+Merges partial theme with default, supporting pattern-style properties like `accentColor`, `fontFace`, and `borderRadius`.

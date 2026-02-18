@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { type Cell, cell, Default, handler, lift, recipe } from "commontools";
+import { type Cell, cell, Default, handler, lift, pattern } from "commontools";
 
 type ClauseStatus = "approved" | "draft" | "deprecated";
 
@@ -583,8 +583,7 @@ const liftSelectedRegion = lift((value: RegionCode | null) => value ?? "all");
 
 const liftSummaryLine = lift(buildSummaryLine);
 
-export const legalClauseLibrary = recipe<LegalClauseLibraryArgs>(
-  "Legal Clause Library",
+export const legalClauseLibrary = pattern<LegalClauseLibraryArgs>(
   ({ clauses }) => {
     const topicFilter = cell<string | null>(null);
     const regionFilter = cell<RegionCode | null>(null);

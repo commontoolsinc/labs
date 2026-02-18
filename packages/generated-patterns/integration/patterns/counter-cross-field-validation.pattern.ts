@@ -6,7 +6,7 @@ import {
   Default,
   derive,
   handler,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -138,8 +138,9 @@ const liftBuildValidationSnapshot = (input: {
   };
 };
 
-export const counterWithCrossFieldValidation = recipe<CrossFieldValidationArgs>(
-  "Counter With Cross Field Validation",
+export const counterWithCrossFieldValidation = pattern<
+  CrossFieldValidationArgs
+>(
   ({ value, limit, step }) => {
     const auditTrail = cell<ValidationEntry[]>([], { type: "array" });
     const sanitizedValue = computed(() => liftToIntegerZero(value));

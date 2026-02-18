@@ -1,0 +1,167 @@
+import * as __ctHelpers from "commontools";
+import { Cell, Default, handler, pattern, UI } from "commontools";
+interface Item {
+    text: Default<string, "">;
+}
+interface InputSchema {
+    items: Default<Item[], [
+    ]>;
+}
+const removeItem = handler(true as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        items: {
+            type: "array",
+            items: {
+                $ref: "#/$defs/Item"
+            },
+            asCell: true
+        },
+        index: {
+            type: "number"
+        }
+    },
+    required: ["items", "index"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                text: {
+                    type: "string",
+                    "default": ""
+                }
+            },
+            required: ["text"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, (_, _2) => {
+    // Not relevant for repro
+});
+export default pattern(({ items }) => {
+    return {
+        [UI]: (<ul>
+          {items.mapWithPattern(__ctHelpers.pattern(({ element: _, index, params: { items } }) => (<li key={index}>
+              <ct-button onClick={removeItem({ items, index })}>
+                Remove
+              </ct-button>
+            </li>), {
+                type: "object",
+                properties: {
+                    element: {
+                        $ref: "#/$defs/Item"
+                    },
+                    index: {
+                        type: "number"
+                    },
+                    params: {
+                        type: "object",
+                        properties: {
+                            items: {
+                                type: "array",
+                                items: {
+                                    $ref: "#/$defs/Item"
+                                },
+                                asOpaque: true
+                            }
+                        },
+                        required: ["items"]
+                    }
+                },
+                required: ["element", "params"],
+                $defs: {
+                    Item: {
+                        type: "object",
+                        properties: {
+                            text: {
+                                type: "string",
+                                "default": ""
+                            }
+                        },
+                        required: ["text"]
+                    }
+                }
+            } as const satisfies __ctHelpers.JSONSchema, {
+                anyOf: [{
+                        $ref: "https://commonfabric.org/schemas/vnode.json"
+                    }, {
+                        type: "object",
+                        properties: {}
+                    }, {
+                        $ref: "#/$defs/UIRenderable",
+                        asOpaque: true
+                    }],
+                $defs: {
+                    UIRenderable: {
+                        type: "object",
+                        properties: {
+                            $UI: {
+                                $ref: "https://commonfabric.org/schemas/vnode.json"
+                            }
+                        },
+                        required: ["$UI"]
+                    }
+                }
+            } as const satisfies __ctHelpers.JSONSchema), {
+                items: items
+            })}
+        </ul>),
+    };
+}, {
+    type: "object",
+    properties: {
+        items: {
+            type: "array",
+            items: {
+                $ref: "#/$defs/Item"
+            },
+            "default": []
+        }
+    },
+    required: ["items"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                text: {
+                    type: "string",
+                    "default": ""
+                }
+            },
+            required: ["text"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        $UI: {
+            $ref: "#/$defs/JSXElement"
+        }
+    },
+    required: ["$UI"],
+    $defs: {
+        JSXElement: {
+            anyOf: [{
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    $ref: "#/$defs/UIRenderable",
+                    asOpaque: true
+                }]
+        },
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema);
+// @ts-ignore: Internals
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+// @ts-ignore: Internals
+h.fragment = __ctHelpers.h.fragment;

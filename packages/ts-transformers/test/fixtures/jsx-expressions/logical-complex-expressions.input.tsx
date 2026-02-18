@@ -1,7 +1,7 @@
 /// <cts-enable />
-import { cell, recipe, UI } from "commontools";
+import { cell, pattern, UI } from "commontools";
 
-export default recipe("LogicalComplexExpressions", (_state) => {
+export default pattern((_state) => {
   const items = cell<string[]>([]);
   const isEnabled = cell(false);
   const count = cell(0);

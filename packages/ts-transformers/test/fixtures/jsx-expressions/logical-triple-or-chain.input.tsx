@@ -1,9 +1,9 @@
 /// <cts-enable />
-import { cell, recipe, UI } from "commontools";
+import { cell, pattern, UI } from "commontools";
 
 // Tests triple || chain: a || b || c
 // Should produce nested unless calls
-export default recipe("LogicalTripleOrChain", (_state) => {
+export default pattern((_state) => {
   const primary = cell("");
   const secondary = cell("");
   const items = cell<string[]>([]);

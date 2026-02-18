@@ -1,11 +1,11 @@
 /// <cts-enable />
-import { Cell, recipe, UI } from "commontools";
+import { Cell, pattern, UI } from "commontools";
 
 interface State {
   counter: Cell<number>;
 }
 
-export default recipe<State>("UnusedEvent", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <button type="button" onClick={(_) => state.counter.set(state.counter.get() + 1)}>

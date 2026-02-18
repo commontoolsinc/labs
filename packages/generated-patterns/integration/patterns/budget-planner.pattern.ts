@@ -6,7 +6,7 @@ import {
   derive,
   handler,
   lift,
-  recipe,
+  pattern,
   toSchema,
 } from "commontools";
 
@@ -493,8 +493,7 @@ const liftHistoryView = lift((entries: string[] | undefined) =>
   Array.isArray(entries) ? entries.slice() : []
 );
 
-export const budgetPlanner = recipe<BudgetPlannerArgs>(
-  "Budget Planner",
+export const budgetPlanner = pattern<BudgetPlannerArgs>(
   ({ total, categories }) => {
     const sanitizedTotal = liftSanitizedTotal(total);
 

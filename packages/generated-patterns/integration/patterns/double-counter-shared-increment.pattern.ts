@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, handler, lift, recipe, str } from "commontools";
+import { Cell, Default, handler, lift, pattern, str } from "commontools";
 
 interface DoubleCounterArgs {
   left: Default<number, 0>;
@@ -23,8 +23,7 @@ const liftTotal = lift((values: { left: number; right: number }) =>
   values.left + values.right
 );
 
-export const doubleCounterWithSharedIncrement = recipe<DoubleCounterArgs>(
-  "Double Counter With Shared Increment",
+export const doubleCounterWithSharedIncrement = pattern<DoubleCounterArgs>(
   ({ left, right }) => {
     const status = str`left ${left} • right ${right}`;
     const total = liftTotal({ left, right });

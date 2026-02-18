@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, handler, lift, recipe, str } from "commontools";
+import { Cell, Default, handler, lift, pattern, str } from "commontools";
 
 interface FallbackDefaultsArgs {
   slots: Default<(number | null)[], []>;
@@ -110,8 +110,7 @@ const liftDensePreview = lift((entries: number[] | undefined) => {
   return entries.join(", ");
 });
 
-export const counterWithFallbackDefaults = recipe<FallbackDefaultsArgs>(
-  "Counter With Fallback Defaults",
+export const counterWithFallbackDefaults = pattern<FallbackDefaultsArgs>(
   ({ slots, fallback, expectedLength }) => {
     const normalizedFallback = liftNormalizedFallback(fallback);
     const normalizedExpected = liftNormalizedExpected(expectedLength);

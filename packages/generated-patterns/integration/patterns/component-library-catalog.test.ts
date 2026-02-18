@@ -214,7 +214,7 @@ export const componentLibraryCatalogScenario: PatternIntegrationScenario<
         stream: "controls.register",
         payload: {
           component: "Primary Button",
-          recipe: "Hero CTA",
+          pattern: "Hero CTA",
           props: ["Label", "Variant", "Disabled"],
         },
       }],
@@ -355,7 +355,7 @@ export const componentLibraryCatalogScenario: PatternIntegrationScenario<
           value: [
             {
               componentId: "primary-button",
-              recipe: "Hero Cta",
+              pattern: "Hero Cta",
               props: ["disabled", "label", "variant"],
             },
           ],
@@ -389,7 +389,7 @@ export const componentLibraryCatalogScenario: PatternIntegrationScenario<
         stream: "controls.register",
         payload: {
           component: "secondary-button",
-          recipe: "Secondary QA",
+          pattern: "Secondary QA",
           props: ["label", "variant", "disabled"],
         },
       }],
@@ -539,12 +539,12 @@ export const componentLibraryCatalogScenario: PatternIntegrationScenario<
           value: [
             {
               componentId: "primary-button",
-              recipe: "Hero Cta",
+              pattern: "Hero Cta",
               props: ["disabled", "label", "variant"],
             },
             {
               componentId: "secondary-button",
-              recipe: "Secondary Qa",
+              pattern: "Secondary Qa",
               props: ["disabled", "label", "variant"],
             },
           ],
@@ -579,7 +579,7 @@ export const componentLibraryCatalogScenario: PatternIntegrationScenario<
         stream: "controls.register",
         payload: {
           component: "Input Field",
-          recipe: "Form Baseline",
+          pattern: "Form Baseline",
           props: ["Label", "Placeholder", "Helper Text"],
         },
       }],
@@ -724,17 +724,17 @@ export const componentLibraryCatalogScenario: PatternIntegrationScenario<
           value: [
             {
               componentId: "input-field",
-              recipe: "Form Baseline",
+              pattern: "Form Baseline",
               props: ["helper-text", "label", "placeholder"],
             },
             {
               componentId: "primary-button",
-              recipe: "Hero Cta",
+              pattern: "Hero Cta",
               props: ["disabled", "label", "variant"],
             },
             {
               componentId: "secondary-button",
-              recipe: "Secondary Qa",
+              pattern: "Secondary Qa",
               props: ["disabled", "label", "variant"],
             },
           ],

@@ -12,7 +12,7 @@ const signer = await Identity.fromPassphrase("test operator");
 describe("OpaqueRef Schema Support", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
-  let recipe: ReturnType<typeof createBuilder>["commontools"]["recipe"];
+  let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
   let cell: ReturnType<typeof createBuilder>["commontools"]["cell"];
 
   beforeEach(() => {
@@ -24,7 +24,7 @@ describe("OpaqueRef Schema Support", () => {
       storageManager,
     });
     const { commontools } = createBuilder();
-    ({ recipe, cell } = commontools);
+    ({ pattern, cell } = commontools);
   });
 
   afterEach(async () => {
@@ -257,10 +257,14 @@ describe("OpaqueRef Schema Support", () => {
     });
   });
 
-  describe("Schema in Recipe Context", () => {
+  describe("Schema in Pattern Context", () => {
     it("should initialize opaque refs with schema from argument schema", () => {
-      // Create a recipe with schema
-      const testRecipe = recipe(
+      // Create a pattern with schema
+      const testPattern = pattern(
+        (input) => {
+          // Directly return the input
+          return input;
+        },
         {
           type: "object",
           properties: {
@@ -268,14 +272,10 @@ describe("OpaqueRef Schema Support", () => {
             age: { type: "number" },
           },
         },
-        (input) => {
-          // Directly return the input
-          return input;
-        },
       );
 
-      expect((testRecipe.result as any).$alias).toBeDefined();
-      const alias = (testRecipe.result as any).$alias;
+      expect((testPattern.result as any).$alias).toBeDefined();
+      const alias = (testPattern.result as any).$alias;
 
       // Check that schema was set
       expect(alias.schema).toBeDefined();
@@ -284,9 +284,19 @@ describe("OpaqueRef Schema Support", () => {
       expect(alias.schema.properties?.age).toEqual({ type: "number" });
     });
 
-    it("should track schema through recipe bindings", () => {
-      // Create a recipe that uses child properties
-      const testRecipe = recipe(
+    it("should track schema through pattern bindings", () => {
+      // Create a pattern that uses child properties
+      const testPattern = pattern(
+        (input) => {
+          // Get a nested property
+          // TODO(seefeld): Fix type inference
+          const age = (input as any).user.details.age;
+
+          // Export both the original ref and nested property
+          return {
+            age,
+          };
+        },
         {
           type: "object",
           properties: {
@@ -304,20 +314,10 @@ describe("OpaqueRef Schema Support", () => {
             },
           },
         } as const satisfies JSONSchema,
-        (input) => {
-          // Get a nested property
-          // TODO(seefeld): Fix type inference
-          const age = (input as any).user.details.age;
-
-          // Export both the original ref and nested property
-          return {
-            age,
-          };
-        },
       );
 
-      expect((testRecipe.result as any).age?.$alias).toBeDefined();
-      const alias = (testRecipe.result as any).age.$alias;
+      expect((testPattern.result as any).age?.$alias).toBeDefined();
+      const alias = (testPattern.result as any).age.$alias;
 
       // Check the age property schema
       expect(alias.schema).toBeDefined();

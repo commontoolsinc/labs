@@ -116,8 +116,7 @@ deterministic way, using dependency graphs of reactive cells.
 ## Pattern
 
 A function that defines a reactive graph. Can produce UI, derived data, or
-streams. Used like components in other reactive frameworks. (Previously called
-"recipe" in older documentation.)
+streams. Used like components in other reactive frameworks.
 
 ## CTS (Common TypeScript)
 

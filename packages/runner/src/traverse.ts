@@ -1069,7 +1069,7 @@ function trackVisitedDoc(
   if (selector !== undefined) {
     schemaTracker.add(getTrackerKey(target), selector);
   }
-  // Load the sources/recipes recursively unless we're a retracted fact.
+  // Load the sources/patterns recursively unless we're a retracted fact.
   if (includeSource) {
     // Loading source requires the full doc. This could be narrowed, but it
     // happens in a non-reactive context.
@@ -1089,14 +1089,14 @@ function trackVisitedDoc(
 }
 
 // Recursively load the source from the doc ()
-// This will also load any recipes linked by the doc.
+// This will also load any patterns linked by the doc.
 export function loadSource(
   tx: IExtendedStorageTransaction,
   valueEntry: IMemorySpaceAttestation,
   cycleCheck: Set<string> = new Set<string>(),
   schemaTracker: MapSet<string, SchemaPathSelector>,
 ) {
-  loadLinkedRecipe(tx, valueEntry, schemaTracker);
+  loadLinkedPattern(tx, valueEntry, schemaTracker);
   if (!isObject(valueEntry.value)) {
     return;
   }
@@ -1370,9 +1370,9 @@ export function combineSchema(
   return linkSchema;
 }
 
-// Load the linked recipe from the doc ()
-// We don't recurse, since that's not required for recipe links
-function loadLinkedRecipe(
+// Load the linked pattern from the doc ()
+// We don't recurse, since that's not required for pattern links
+function loadLinkedPattern(
   tx: IExtendedStorageTransaction,
   valueEntry: IMemorySpaceAttestation,
   schemaTracker: MapSet<string, SchemaPathSelector>,
@@ -1391,7 +1391,7 @@ function loadLinkedRecipe(
   }
   let address: IMemorySpaceAddress | undefined;
   // Check for a spell link first, since this is more efficient
-  // Older recipes will only have a $TYPE
+  // Older patterns will only have a $TYPE
   if ("spell" in value && isPrimitiveCellLink(value["spell"])) {
     const link = parseLink(value["spell"], valueEntry.address)!;
     address = {
@@ -1401,8 +1401,8 @@ function loadLinkedRecipe(
       path: [],
     };
   } else if ("$TYPE" in value && isString(value["$TYPE"])) {
-    const recipeId = value["$TYPE"];
-    const entityId = refer({ causal: { recipeId, type: "recipe" } });
+    const patternId = value["$TYPE"];
+    const entityId = refer({ causal: { patternId, type: "pattern" } });
     const shortId = entityId.toJSON()["/"];
     address = {
       space: valueEntry.address.space,
@@ -1414,9 +1414,32 @@ function loadLinkedRecipe(
   if (address === undefined) {
     return;
   }
-  const { ok: entry, error } = tx.read(address);
-  if (error) {
+  const result = tx.read(address);
+  if (result.error) {
     return;
+  }
+  let entry = result.ok;
+  // Fall back to legacy {recipeId, type: "recipe"} cause for backwards compat
+  if (
+    (entry === null || entry.value === undefined) &&
+    "$TYPE" in value && isString(value["$TYPE"])
+  ) {
+    const patternId = value["$TYPE"];
+    const legacyEntityId = refer({
+      causal: { recipeId: patternId, type: "recipe" },
+    });
+    const legacyShortId = legacyEntityId.toJSON()["/"];
+    const legacyAddress: IMemorySpaceAddress = {
+      space: address.space,
+      id: `of:${legacyShortId}` as IMemorySpaceAddress["id"],
+      type: "application/json" as MIME,
+      path: [],
+    };
+    const legacyResult = tx.read(legacyAddress);
+    if (!legacyResult.error) {
+      entry = legacyResult.ok;
+      address = legacyAddress;
+    }
   }
   if (entry === null || entry.value === undefined) {
     return;

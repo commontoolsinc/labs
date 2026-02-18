@@ -407,7 +407,7 @@ function loadFactsForDoc(
       // object in our manager, so load it directly.
       manager.load(fact.address);
     }
-    // Also load any source links and recipes
+    // Also load any source links and patterns
     const fullAddress = { ...fact.address, space: space };
     loadSource(
       tx,

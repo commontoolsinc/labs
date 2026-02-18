@@ -6,7 +6,7 @@ import {
   generateText,
   handler,
   NAME,
-  recipe,
+  pattern,
   UI,
   Writable,
 } from "commontools";
@@ -30,7 +30,7 @@ const askQuestion = handler<
   }
 });
 
-export default recipe<LLMTestInput>(({ title }) => {
+export default pattern<LLMTestInput>(({ title }) => {
   const question = Writable.of("");
 
   const llmResponse = generateText({

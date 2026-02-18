@@ -1,11 +1,11 @@
 /// <cts-enable />
-import { Cell, recipe, UI } from "commontools";
+import { Cell, pattern, UI } from "commontools";
 
 interface State {
   counter: Cell<number>;
 }
 
-export default recipe<State>("LogButton", (_state) => {
+export default pattern<State>((_state) => {
   return {
     [UI]: (
       <button type="button" onClick={() => console.log("hi")}>

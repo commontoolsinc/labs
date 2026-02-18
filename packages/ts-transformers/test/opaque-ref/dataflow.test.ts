@@ -42,8 +42,8 @@ describe("data flow analyzer", () => {
 
   it("recognises builders when called via alias", () => {
     const { analysis } = analyzeExpression(
-      "aliasRecipe(() => state.count)",
-      { prelude: "declare const aliasRecipe: typeof recipe;" },
+      "aliasPattern(() => state.count)",
+      { prelude: "declare const aliasPattern: typeof pattern;" },
     );
 
     assert(

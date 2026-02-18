@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 
 interface Item {
   id: number;
@@ -11,7 +11,7 @@ interface State {
   offset: number;
 }
 
-export default recipe<State>("IndexParam", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>

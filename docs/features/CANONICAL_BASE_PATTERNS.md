@@ -812,7 +812,7 @@ The architect clarified Tony's actual pattern needs:
 | Import contacts from Google | Add GoogleContacts as subList, don't flatten |
 | Mentionable items | `mentionable` = all items from items + subLists |
 
-**Implementation recipe:**
+**Implementation pattern:**
 1. Define TypeScript type for minimal interface: `{ done: boolean, title: string }`
 2. Provide base patterns: `task.tsx`, `contact.tsx`, `event.tsx`
 3. Container helps users fork base patterns to create new types

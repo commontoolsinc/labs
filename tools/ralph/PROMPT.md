@@ -37,7 +37,7 @@ Steps:
      upon the existing functionality by adding new features to the same files.
    - If this is a top-level task, create new `*.pattern.ts` + `*.ts` scenario
      files matching our existing conventions in `./tools/ralph/patterns/`.
-   - Use CTS APIs (`handler`, `recipe`, `lift`, `str`, `cell`, `createCell`) to
+   - Use CTS APIs (`handler`, `pattern`, `lift`, `str`, `cell`, `createCell`) to
      realize the described structure. You can use `derive` as well, it is just a
      convenience wrapper around lift: `derive(x, x => x+1)` is the same as
      `lift(x => x+1)(x)`.
@@ -71,7 +71,7 @@ Steps:
    `deno test --allow-env --allow-read --allow-write --allow-ffi ./tools/ralph/patterns/pattern-harness.test.ts`
    and ensure it passes.
 
-5. If the task involved the recipe's [UI] section, use Playwright MCP to test
+5. If the task involved the pattern's [UI] section, use Playwright MCP to test
    it:
    - Deploy locally according to `./tools/ralph/DEPLOY.md`
    - Test the UI interactions work as expected

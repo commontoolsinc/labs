@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   ifElse,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -57,8 +57,7 @@ const adjustValue = handler(
   },
 );
 
-export const counterWithConditionalUiBranch = recipe<ConditionalIfElseArgs>(
-  "Counter With Conditional UI Branch",
+export const counterWithConditionalUiBranch = pattern<ConditionalIfElseArgs>(
   ({ value, visible }) => {
     const safeValue = computed(() => sanitizeValue(value));
     const isVisible = computed(() => normalizeVisible(visible));

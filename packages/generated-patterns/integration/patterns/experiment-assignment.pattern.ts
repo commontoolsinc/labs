@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -285,8 +285,7 @@ const liftBuildSummaryText = lift(
     buildSummaryText(input.entries, input.total),
 );
 
-export const experimentAssignmentPattern = recipe<ExperimentAssignmentArgs>(
-  "Experiment Assignment Pattern",
+export const experimentAssignmentPattern = pattern<ExperimentAssignmentArgs>(
   ({ variants, assignments }) => {
     const assignmentHistory = cell<string[]>([]);
 

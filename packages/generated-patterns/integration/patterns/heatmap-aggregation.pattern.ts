@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { type Cell, Default, handler, lift, recipe, str } from "commontools";
+import { type Cell, Default, handler, lift, pattern, str } from "commontools";
 
 interface HeatmapAggregationArgs {
   width: Default<number, 4>;
@@ -256,8 +256,7 @@ const liftInteractionCount = lift((items: HeatmapBucket[]) => {
 
 const liftPeakSummary = lift(describePeaks);
 
-export const heatmapAggregation = recipe<HeatmapAggregationArgs>(
-  "Heatmap Aggregation",
+export const heatmapAggregation = pattern<HeatmapAggregationArgs>(
   ({ width, height, interactions }) => {
     const sanitizedWidth = liftSanitizeWidth(width);
     const sanitizedHeight = liftSanitizeHeight(height);

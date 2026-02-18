@@ -5,7 +5,7 @@
  * A composable pattern that can be used standalone or embedded in containers
  * like Record. Stores one phone number with a label (Mobile, Home, Work, etc.)
  */
-import { computed, type Default, NAME, recipe, UI } from "commontools";
+import { computed, type Default, NAME, pattern, UI } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
 // ===== Standard Labels =====
@@ -40,8 +40,7 @@ export interface PhoneModuleInput {
 }
 
 // ===== The Pattern =====
-export const PhoneModule = recipe<PhoneModuleInput, PhoneModuleInput>(
-  "PhoneModule",
+export const PhoneModule = pattern<PhoneModuleInput, PhoneModuleInput>(
   ({ label, number }) => {
     // Build display text
     const displayText = computed(() => {

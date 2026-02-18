@@ -1,11 +1,11 @@
 /// <cts-enable />
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 
 interface State {
   entries: Array<{ 0: number }>;
 }
 
-export default recipe<State>("MapDestructuredNumericAlias", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>

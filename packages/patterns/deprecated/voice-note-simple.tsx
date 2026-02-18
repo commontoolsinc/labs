@@ -3,7 +3,7 @@ import {
   computed,
   type Default,
   NAME,
-  recipe,
+  pattern,
   UI,
   Writable,
 } from "commontools";
@@ -31,8 +31,7 @@ type Output = {
   transcription: Default<TranscriptionData | null, null>;
 };
 
-const VoiceNoteSimple = recipe<Input, Output>(
-  "Voice Note Simple",
+const VoiceNoteSimple = pattern<Input, Output>(
   ({ title }) => {
     const transcription = Writable.of<TranscriptionData | null>(null);
     const hasTranscription = computed(() => transcription.get() !== null);

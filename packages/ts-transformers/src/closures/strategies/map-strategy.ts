@@ -23,7 +23,7 @@ import {
 import { analyzeElementBinding, rewriteCallbackBody } from "./map-utils.ts";
 import type { ComputedAliasInfo } from "./map-utils.ts";
 import { CaptureCollector } from "../capture-collector.ts";
-import { RecipeBuilder } from "../utils/recipe-builder.ts";
+import { PatternBuilder } from "../utils/pattern-builder.ts";
 import { SchemaFactory } from "../utils/schema-factory.ts";
 
 export class MapStrategy implements ClosureTransformationStrategy {
@@ -144,12 +144,12 @@ function shouldTransformMap(
 }
 
 /**
- * Create the final recipe call with params object.
+ * Create the final pattern call with params object.
  */
 /**
- * Create the final recipe call with params object.
+ * Create the final pattern call with params object.
  */
-function createRecipeCallWithParams(
+function createPatternCallWithParams(
   mapCall: ts.CallExpression,
   callback: ts.ArrowFunction | ts.FunctionExpression,
   transformedBody: ts.ConciseBody,
@@ -186,8 +186,8 @@ function createRecipeCallWithParams(
     ),
   );
 
-  // Initialize RecipeBuilder
-  const builder = new RecipeBuilder(context);
+  // Initialize PatternBuilder
+  const builder = new PatternBuilder(context);
   builder.registerUsedNames(usedBindingNames);
   builder.setCaptureTree(filteredCaptureTree);
 
@@ -294,15 +294,15 @@ function createRecipeCallWithParams(
     }
   }
 
-  // Create recipe call
-  const recipeExpr = context.ctHelpers.getHelperExpr("recipe");
+  // Create pattern call
+  const patternExpr = context.ctHelpers.getHelperExpr("pattern");
   const typeArgs = [callbackParamTypeNode];
   if (resultTypeNode) {
     typeArgs.push(resultTypeNode);
   }
 
-  const recipeCall = factory.createCallExpression(
-    recipeExpr,
+  const patternCall = factory.createCallExpression(
+    patternExpr,
     typeArgs,
     [newCallback],
   );
@@ -335,7 +335,7 @@ function createRecipeCallWithParams(
     factory.createIdentifier("mapWithPattern"),
   );
 
-  const args: ts.Expression[] = [recipeCall, paramsObject];
+  const args: ts.Expression[] = [patternCall, paramsObject];
   if (mapCall.arguments.length > 1) {
     const thisArg = ts.visitNode(
       mapCall.arguments[1],
@@ -366,7 +366,7 @@ function createRecipeCallWithParams(
 
 /**
  * Transform a map callback for OpaqueRef arrays.
- * Always transforms to use recipe + mapWithPattern, even with no captures,
+ * Always transforms to use pattern + mapWithPattern, even with no captures,
  * to ensure callback parameters become opaque.
  */
 export function transformMapCallback(
@@ -395,8 +395,8 @@ export function transformMapCallback(
     visitor,
   ) as ts.ConciseBody;
 
-  // Create the final recipe call with params
-  return createRecipeCallWithParams(
+  // Create the final pattern call with params
+  return createPatternCallWithParams(
     mapCall,
     callback,
     transformedBody,

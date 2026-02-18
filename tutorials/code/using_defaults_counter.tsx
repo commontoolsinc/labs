@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { type Cell, Default, handler, recipe, UI } from "commontools";
+import { type Cell, Default, handler, pattern, UI } from "commontools";
 
 interface CounterState {
   count: Default<number, 100>;
@@ -11,7 +11,7 @@ const increment = handler<unknown, { count: Cell<number> }>(
   },
 );
 
-export default recipe<CounterState>("Counter with Default", (state) => {
+export default pattern<CounterState>((state) => {
   return {
     [UI]: (
       <div>

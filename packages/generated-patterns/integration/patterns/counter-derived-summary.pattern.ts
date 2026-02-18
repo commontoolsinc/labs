@@ -6,7 +6,7 @@ import {
   derive,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
   toSchema,
 } from "commontools";
@@ -212,8 +212,7 @@ const liftSummary = lift(
   },
 );
 
-export const counterWithDerivedSummary = recipe<SummaryArgs>(
-  "Counter With Derived Summary",
+export const counterWithDerivedSummary = pattern<SummaryArgs>(
   ({ value, step, history }) => {
     const sequence = cell(0);
     const adjustments = cell<AdjustmentRecord[]>([]);

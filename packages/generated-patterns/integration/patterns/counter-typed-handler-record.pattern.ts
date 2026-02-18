@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
   toSchema,
 } from "commontools";
@@ -244,8 +244,7 @@ const liftSanitizeCounts = lift(sanitizeCounts);
 const liftSanitizeHistory = lift(sanitizeHistory);
 const liftSanitizeChange = lift(sanitizeChange);
 
-export const counterWithTypedHandlerRecord = recipe<TypedHandlerRecordArgs>(
-  "Counter With Typed Handler Record",
+export const counterWithTypedHandlerRecord = pattern<TypedHandlerRecordArgs>(
   ({ value, step }) => {
     const history = cell<CounterChange[]>([]);
     const lastChange = cell<CounterChange>({

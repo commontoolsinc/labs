@@ -5,7 +5,7 @@ import {
   derive,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -60,8 +60,7 @@ const clampToNumberArray = (entries: number[] | undefined) => {
 
 const liftClampToNumberArray = lift(clampToNumberArray);
 
-export const counterWithOpaqueRefMap = recipe<OpaqueMapArgs>(
-  "Counter With OpaqueRef Map",
+export const counterWithOpaqueRefMap = pattern<OpaqueMapArgs>(
   ({ value, history, labelPrefix }) => {
     const safeHistory = liftClampToNumberArray(history);
     const labels = safeHistory.map((entry, index) => str`#${index}: ${entry}`);

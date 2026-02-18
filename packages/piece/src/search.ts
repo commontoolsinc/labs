@@ -26,12 +26,12 @@ export async function searchPieces(
           const data = piece.asSchema(nameSchema).get();
           const title = data?.[NAME] ?? "Untitled";
 
-          const recipe = await pieceManager.syncRecipe(piece);
+          const pattern = await pieceManager.syncPattern(piece);
 
           return {
             title: title + ` (#${pieceId(piece)!.slice(-4)})`,
-            description: isObject(recipe.argumentSchema)
-              ? recipe.argumentSchema.description
+            description: isObject(pattern.argumentSchema)
+              ? pattern.argumentSchema.description
               : undefined,
             id: pieceId(piece)!,
             value: piece.entityId!,

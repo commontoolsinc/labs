@@ -13,11 +13,11 @@ import { sleep } from "@commontools/utils/sleep";
 
 let FRAME_IDS = 0;
 
-// Currently, recipes are expected to handle heavy processing,
+// Currently, patterns are expected to handle heavy processing,
 // and backgrounding the tab affects the timers. In the future,
 // we could handle this more dynamically.
 // As this will need to be influenced by heuristics, and currently,
-// usually wanting to wait for a recipe to finish processing,
+// usually wanting to wait for a pattern to finish processing,
 // we will not "crash tabs" yet until things settle.
 const HEALTH_CHECKING_ENABLED = false;
 

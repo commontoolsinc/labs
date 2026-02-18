@@ -10,7 +10,7 @@ import {
   type Default,
   handler,
   NAME,
-  recipe,
+  pattern,
   UI,
   Writable,
 } from "commontools";
@@ -111,11 +111,10 @@ const removeAvoid = handler<
 });
 
 // ===== The Pattern =====
-export const GiftPrefsModule = recipe<
+export const GiftPrefsModule = pattern<
   GiftPrefsModuleInput,
   GiftPrefsModuleInput
 >(
-  "GiftPrefsModule",
   ({ giftTier, favorites, avoid }) => {
     const favoriteInput = Writable.of<string>("");
     const avoidInput = Writable.of<string>("");

@@ -23,12 +23,12 @@ describe("generateText", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
-  let recipe: ReturnType<typeof createBuilder>["commontools"]["recipe"];
+  let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
   let generateText: ReturnType<
     typeof createBuilder
   >["commontools"]["generateText"];
 
-  let dummyRecipe: any;
+  let dummyPattern: any;
 
   beforeEach(() => {
     clearMockResponses();
@@ -40,8 +40,8 @@ describe("generateText", () => {
     tx = runtime.edit();
 
     const { commontools } = createBuilder();
-    ({ recipe, generateText } = commontools);
-    dummyRecipe = recipe("Dummy Tool", () => ({}));
+    ({ pattern, generateText } = commontools);
+    dummyPattern = pattern(() => ({}), { type: "object" });
   });
 
   afterEach(async () => {
@@ -67,7 +67,7 @@ describe("generateText", () => {
       },
     );
 
-    const testRecipe = recipe("Generate Text Simple", () => {
+    const testPattern = pattern(() => {
       return generateText({
         prompt: testPrompt,
       });
@@ -76,11 +76,11 @@ describe("generateText", () => {
     const resultCell = runtime.getCell(
       space,
       "generateText-simple-test",
-      testRecipe.resultSchema,
+      testPattern.resultSchema,
       tx,
     );
 
-    const result = runtime.run(tx, testRecipe, {}, resultCell);
+    const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
     await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();
@@ -110,7 +110,7 @@ describe("generateText", () => {
       },
     );
 
-    const testRecipe = recipe("Generate Text Messages", () => {
+    const testPattern = pattern(() => {
       return generateText({
         messages,
       });
@@ -119,11 +119,11 @@ describe("generateText", () => {
     const resultCell = runtime.getCell(
       space,
       "generateText-messages-test",
-      testRecipe.resultSchema,
+      testPattern.resultSchema,
       tx,
     );
 
-    const result = runtime.run(tx, testRecipe, {}, resultCell);
+    const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
     await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();
@@ -151,7 +151,7 @@ describe("generateText", () => {
       },
     );
 
-    const testRecipe = recipe("Generate Text System", () => {
+    const testPattern = pattern(() => {
       return generateText({
         prompt: testPrompt,
         system: systemPrompt,
@@ -161,11 +161,11 @@ describe("generateText", () => {
     const resultCell = runtime.getCell(
       space,
       "generateText-system-test",
-      testRecipe.resultSchema,
+      testPattern.resultSchema,
       tx,
     );
 
-    const result = runtime.run(tx, testRecipe, {}, resultCell);
+    const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
     await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();
@@ -216,13 +216,13 @@ describe("generateText", () => {
       },
     );
 
-    const testRecipe = recipe("Generate Text Tools", () => {
+    const testPattern = pattern(() => {
       return generateText({
         prompt: testPrompt,
         tools: {
           getWeather: {
             description: "Get the weather",
-            pattern: dummyRecipe,
+            pattern: dummyPattern,
           },
         },
       });
@@ -231,11 +231,11 @@ describe("generateText", () => {
     const resultCell = runtime.getCell(
       space,
       "generateText-tools-test",
-      testRecipe.resultSchema,
+      testPattern.resultSchema,
       tx,
     );
 
-    const result = runtime.run(tx, testRecipe, {}, resultCell);
+    const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
     await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();

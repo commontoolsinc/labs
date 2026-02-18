@@ -48,14 +48,14 @@ export default pattern((_) => {
 });`;
 
 const TEMP_PATTERN = `/// <cts-enable />
-import { Default, NAME, recipe, UI } from "commontools";
+import { Default, NAME, pattern, UI } from "commontools";
 
-interface RecipeState {
+interface PatternState {
   count: Default<number, 0>;
   label: Default<string, "">;
 }
 
-export default recipe<RecipeState>("ConditionalRecipe", (state) => {
+export default pattern<PatternState>((state) => {
   return {
     [NAME]: state.label,
     [UI]: (

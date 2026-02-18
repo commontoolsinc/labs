@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { type Cell, Default, handler, recipe } from "commontools";
+import { type Cell, Default, handler, pattern } from "commontools";
 
 interface OptionalBranch {
   counter?: number;
@@ -28,8 +28,7 @@ const increment = handler(
   },
 );
 
-export default recipe<NestedOptionalArgs>(
-  "Nested Optional Default",
+export default pattern<NestedOptionalArgs>(
   ({ state }) => {
     return {
       state,

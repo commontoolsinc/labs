@@ -2,11 +2,11 @@
 import { Default, NAME, pattern, Stream, UI } from "commontools";
 import { getValue, roll } from "./dice-handlers.ts";
 
-interface RecipeState {
+interface PatternState {
   value: Default<number, 1>;
 }
 
-interface RecipeOutput {
+interface PatternOutput {
   value: number;
   something: {
     nested: string;
@@ -14,7 +14,7 @@ interface RecipeOutput {
   roll: Stream<{ sides?: number }>;
 }
 
-export default pattern<RecipeState, RecipeOutput>((state) => {
+export default pattern<PatternState, PatternOutput>((state) => {
   return {
     [NAME]: `Dice Roller`,
     [UI]: (

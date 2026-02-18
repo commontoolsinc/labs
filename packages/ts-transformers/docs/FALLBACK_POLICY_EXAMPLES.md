@@ -3,47 +3,47 @@
 This document shows concrete examples of how each function behaves when type
 information is missing.
 
-## Recipe: STRICTEST - Requires Explicit Types
+## Pattern: STRICTEST - Requires Explicit Types
 
-### ✅ Recipe with explicit types (TRANSFORMS)
+### ✅ Pattern with explicit types (TRANSFORMS)
 
 ```typescript
 // Explicit type argument
-recipe<{ count: number }>((input) => {
+pattern<{ count: number }>((input) => {
   return { doubled: input.count * 2 };
 });
 
 // Transforms to:
-recipe(toSchema<{ count: number }>(), (input) => {
+pattern(toSchema<{ count: number }>(), (input) => {
   return { doubled: input.count * 2 };
 });
 ```
 
 ```typescript
 // Explicit parameter annotation
-recipe((input: { count: number }) => {
+pattern((input: { count: number }) => {
   return { doubled: input.count * 2 };
 });
 
 // Transforms to:
-recipe(toSchema<{ count: number }>(), (input) => {
+pattern(toSchema<{ count: number }>(), (input) => {
   return { doubled: input.count * 2 };
 });
 ```
 
-### ❌ Recipe without types (NO TRANSFORMATION)
+### ❌ Pattern without types (NO TRANSFORMATION)
 
 ```typescript
 // No type arguments, no parameter annotation
-recipe((input) => {
+pattern((input) => {
   return { doubled: input.count * 2 };
 });
 
 // Does NOT transform - stays as-is
-// Recipe requires explicit types, won't infer or use unknown
+// Pattern requires explicit types, won't infer or use unknown
 ```
 
-**Philosophy**: Recipes are top-level, reusable definitions. They should be
+**Philosophy**: Patterns are top-level, reusable definitions. They should be
 explicitly typed.
 
 ---
@@ -359,17 +359,17 @@ accepts `unknown` to enable wrapping any function.
 
 ## Summary Table
 
-| Function    | Explicit Types | Partial Types                  | No Types                       | Philosophy                      |
-| ----------- | -------------- | ------------------------------ | ------------------------------ | ------------------------------- |
-| **Recipe**  | ✅ Transforms  | ✅ Transforms                  | ❌ No transform                | Strict: recipes should be typed |
-| **Handler** | ✅ Transforms  | ✅ Transforms (uses `unknown`) | ✅ Transforms (uses `unknown`) | Lenient: events are dynamic     |
-| **Pattern** | ✅ Transforms  | ✅ Transforms                  | ✅ Minimal transform           | Flexible: inference optional    |
-| **Derive**  | ✅ Transforms  | ✅ Transforms (uses `unknown`) | ✅ Transforms (uses `unknown`) | Moderate: tries to infer        |
-| **Lift**    | ✅ Transforms  | ✅ Transforms (uses `unknown`) | ✅ Transforms (uses `unknown`) | Moderate: wraps any function    |
+| Function    | Explicit Types | Partial Types                  | No Types                       | Philosophy                       |
+| ----------- | -------------- | ------------------------------ | ------------------------------ | -------------------------------- |
+| **Pattern** | ✅ Transforms  | ✅ Transforms                  | ❌ No transform                | Strict: patterns should be typed |
+| **Handler** | ✅ Transforms  | ✅ Transforms (uses `unknown`) | ✅ Transforms (uses `unknown`) | Lenient: events are dynamic      |
+| **Pattern** | ✅ Transforms  | ✅ Transforms                  | ✅ Minimal transform           | Flexible: inference optional     |
+| **Derive**  | ✅ Transforms  | ✅ Transforms (uses `unknown`) | ✅ Transforms (uses `unknown`) | Moderate: tries to infer         |
+| **Lift**    | ✅ Transforms  | ✅ Transforms (uses `unknown`) | ✅ Transforms (uses `unknown`) | Moderate: wraps any function     |
 
 ## Key Questions for Phase 3
 
-1. **Is Recipe's strictness intentional?**
+1. **Is Pattern's strictness intentional?**
    - Pro: Enforces good practices for reusable components
    - Con: Less flexible than other functions
 

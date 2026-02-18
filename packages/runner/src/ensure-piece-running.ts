@@ -71,12 +71,12 @@ export async function ensurePieceRunning(
         return false;
       }
 
-      const recipeId = (processData as Record<string, unknown>)[TYPE];
+      const patternId = (processData as Record<string, unknown>)[TYPE];
       const resultRef = (processData as Record<string, unknown>).resultRef;
 
-      if (!recipeId) {
+      if (!patternId) {
         logger.debug("ensure-piece", () => [
-          `No recipe ID (TYPE) found in process cell`,
+          `No pattern ID (TYPE) found in process cell`,
         ]);
         return false;
       }
@@ -103,25 +103,25 @@ export async function ensurePieceRunning(
       // Commit the read transaction before starting the piece
       await tx.commit();
 
-      // Load the recipe
-      const recipe = await runtime.recipeManager.loadRecipe(
-        recipeId as string,
+      // Load the pattern
+      const pattern = await runtime.patternManager.loadPattern(
+        patternId as string,
         cellLink.space,
       );
 
-      if (!recipe) {
+      if (!pattern) {
         logger.debug("ensure-piece", () => [
-          `Failed to load recipe: ${recipeId}`,
+          `Failed to load pattern: ${patternId}`,
         ]);
         return false;
       }
 
       logger.debug("ensure-piece", () => [
-        `Starting piece with recipe ${recipeId} for result cell ${resultCell.getAsNormalizedFullLink().id}`,
+        `Starting piece with pattern ${patternId} for result cell ${resultCell.getAsNormalizedFullLink().id}`,
       ]);
 
       // Start the piece - this will register event handlers
-      await runtime.runSynced(resultCell, recipe);
+      await runtime.runSynced(resultCell, pattern);
 
       logger.debug("ensure-piece", () => [
         `Piece started successfully`,

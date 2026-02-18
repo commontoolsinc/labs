@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, handler, recipe, UI } from "commontools";
+import { Cell, handler, pattern, UI } from "commontools";
 
 type TodoState = {
   items: Cell<string[]>;
@@ -13,7 +13,7 @@ const addTodo = handler<TodoEvent, { items: Cell<string[]> }>((event, state) => 
   state.items.push(event.add);
 });
 
-export default recipe<TodoState>((state) => {
+export default pattern<TodoState>((state) => {
   return {
     [UI]: (
       <div>

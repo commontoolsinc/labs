@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { type Cell, Default, handler, lift, recipe, str } from "commontools";
+import { type Cell, Default, handler, lift, pattern, str } from "commontools";
 
 interface MarkdownPreviewArgs {
   initialContent: Default<string, "# Welcome">;
@@ -78,8 +78,7 @@ const liftActiveView = lift(
   }) => (enabled ? formatted : raw),
 );
 
-export const markdownPreviewToggle = recipe<MarkdownPreviewArgs>(
-  "Markdown Preview Toggle",
+export const markdownPreviewToggle = pattern<MarkdownPreviewArgs>(
   ({ initialContent, preview }) => {
     const content = liftSanitizeContent(initialContent);
     const previewEnabled = liftSanitizePreview(preview);

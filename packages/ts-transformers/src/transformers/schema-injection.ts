@@ -23,7 +23,7 @@ import {
  * Schema Injection Transformer - TypeRegistry Integration
  *
  * This transformer injects JSON schemas for CommonTools core functions (pattern, derive,
- * recipe, handler, lift) by analyzing TypeScript types and converting them to runtime schemas.
+ * pattern, handler, lift) by analyzing TypeScript types and converting them to runtime schemas.
  *
  * ## TypeRegistry Integration (Unified Approach)
  *
@@ -49,7 +49,7 @@ import {
  * - **Handler**: Checks TypeRegistry for type arguments, uses `unknown` fallback
  * - **Derive**: Checks TypeRegistry for type arguments, preserves shorthand property types
  * - **Pattern**: Checks TypeRegistry before inferring, registers inferred types
- * - **Recipe**: Checks TypeRegistry for type arguments
+ * - **Pattern**: Checks TypeRegistry for type arguments
  * - **Lift**: Checks TypeRegistry for type arguments and inferred types
  *
  * ## Why This Matters
@@ -364,7 +364,7 @@ function prependSchemaArguments(
 }
 
 /**
- * Helper to find the function argument in a builder call (recipe/pattern).
+ * Helper to find the function argument in a builder call (pattern).
  * Searches from the end of the arguments array for the first function-like expression.
  */
 function findFunctionArgument(
@@ -405,25 +405,13 @@ function detectSchemaArguments(
 }
 
 /**
- * Argument ordering for builder schema injection.
- * - "schemas-first": [inputSchema, resultSchema, function] (used by recipe)
- * - "function-first": [function, inputSchema, resultSchema] (used by pattern)
- */
-type BuilderArgumentOrder = "schemas-first" | "function-first";
-
-interface BuilderSchemaInjectionConfig {
-  readonly argumentOrder: BuilderArgumentOrder;
-}
-
-/**
- * Shared handler for recipe and pattern schema injection.
- * Both builders have nearly identical logic - the only difference is argument ordering.
+ * Handler for pattern schema injection.
+ * Argument order is function-first: [function, inputSchema, resultSchema]
  *
  * @returns The transformed node, or undefined if no transformation was performed
  */
 function handleBuilderSchemaInjection(
   node: ts.CallExpression,
-  config: BuilderSchemaInjectionConfig,
   context: TransformationContext,
   typeRegistry: TypeRegistry | undefined,
   visit: (node: ts.Node) => ts.Node,
@@ -438,16 +426,16 @@ function handleBuilderSchemaInjection(
     return undefined; // No function found - skip transformation
   }
 
-  // Helper to build final call with correct argument order
+  // Helper to build final call with function-first argument order
   const buildCallExpression = (
     inputSchema: ts.Expression,
     resultSchema: ts.Expression,
   ): ts.CallExpression => {
-    const args = config.argumentOrder === "schemas-first"
-      ? [inputSchema, resultSchema, builderFunction]
-      : [builderFunction, inputSchema, resultSchema];
-
-    return factory.createCallExpression(node.expression, undefined, args);
+    return factory.createCallExpression(node.expression, undefined, [
+      builderFunction,
+      inputSchema,
+      resultSchema,
+    ]);
   };
 
   // Determine input and result schema TypeNodes based on type arguments
@@ -586,22 +574,9 @@ export class SchemaInjectionTransformer extends Transformer {
 
       const callKind = detectCallKind(node, checker);
 
-      if (callKind?.kind === "builder" && callKind.builderName === "recipe") {
-        const result = handleBuilderSchemaInjection(
-          node,
-          { argumentOrder: "schemas-first" },
-          context,
-          typeRegistry,
-          visit,
-        );
-        if (result) return result;
-        return ts.visitEachChild(node, visit, transformation);
-      }
-
       if (callKind?.kind === "builder" && callKind.builderName === "pattern") {
         const result = handleBuilderSchemaInjection(
           node,
-          { argumentOrder: "function-first" },
           context,
           typeRegistry,
           visit,
@@ -714,7 +689,7 @@ export class SchemaInjectionTransformer extends Transformer {
             typeRegistry,
             checker,
           );
-          // Visit children to catch any recipe calls created by ClosureTransformer
+          // Visit children to catch any pattern calls created by ClosureTransformer
           // inside the derive callback (e.g., from map transformations)
           return ts.visitEachChild(updated, visit, transformation);
         };
@@ -832,7 +807,7 @@ export class SchemaInjectionTransformer extends Transformer {
             typeRegistry,
             checker,
           );
-          // Visit children to catch any recipe calls created by ClosureTransformer
+          // Visit children to catch any pattern calls created by ClosureTransformer
           // inside the derive callback (e.g., from map transformations)
           return ts.visitEachChild(updated, visit, transformation);
         };

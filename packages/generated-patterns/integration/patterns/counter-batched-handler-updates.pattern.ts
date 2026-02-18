@@ -6,7 +6,7 @@ import {
   derive,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -95,8 +95,7 @@ const liftNoteView = lift((input: string | undefined) =>
   typeof input === "string" && input.length > 0 ? input : "idle"
 );
 
-export const counterWithBatchedHandlerUpdates = recipe<BatchedCounterArgs>(
-  "Counter With Batched Handler Updates",
+export const counterWithBatchedHandlerUpdates = pattern<BatchedCounterArgs>(
   ({ value }) => {
     const processedIncrements = cell(0);
     const batchCount = cell(0);

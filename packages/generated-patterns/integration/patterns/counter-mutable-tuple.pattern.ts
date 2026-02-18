@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, handler, lift, recipe, str } from "commontools";
+import { Cell, Default, handler, lift, pattern, str } from "commontools";
 
 interface MutableTupleArgs {
   pair: Default<[number, number], [0, 0]>;
@@ -47,8 +47,7 @@ const liftRight = lift((values: [number, number]) => values[1]);
 
 const liftSum = lift((values: [number, number]) => values[0] + values[1]);
 
-export const counterWithMutableTuple = recipe<MutableTupleArgs>(
-  "Counter With Mutable Tuple",
+export const counterWithMutableTuple = pattern<MutableTupleArgs>(
   ({ pair }) => {
     const tuple = liftTuple(pair);
     const left = liftLeft(tuple);

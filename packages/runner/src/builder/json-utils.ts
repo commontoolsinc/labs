@@ -1,7 +1,7 @@
 import { isRecord } from "@commontools/utils/types";
 import { type LegacyAlias } from "../sigil-types.ts";
 import {
-  isRecipe,
+  isPattern,
   type JSONSchema,
   type JSONSchemaMutable,
   type JSONSchemaTypes,
@@ -9,11 +9,11 @@ import {
   type Module,
   type Opaque,
   type OpaqueRef,
-  type Recipe,
+  type Pattern,
   type toJSON,
-  unsafe_originalRecipe,
+  unsafe_originalPattern,
 } from "./types.ts";
-import { getTopFrame } from "./recipe.ts";
+import { getTopFrame } from "./pattern.ts";
 import { deepEqual } from "@commontools/utils/deep-equal";
 import { Runtime } from "../runtime.ts";
 import {
@@ -68,10 +68,10 @@ export function toJSONWithLegacyAliases(
     } else throw new Error(`Cell not found in paths`);
   }
 
-  // If we encounter a link, it's from a nested recipe.
+  // If we encounter a link, it's from a nested pattern.
   if (isLegacyAlias(value)) {
     const alias = (value as LegacyAlias).$alias;
-    // If this was a shadow ref, i.e. a nested recipe, see whether we're now at
+    // If this was a shadow ref, i.e. a nested pattern, see whether we're now at
     // the level that it should be resolved to the actual cell.
     if (!("cell" in alias) || typeof alias.cell === "number") {
       // If we encounter an existing alias and it isn't an absolute reference
@@ -95,11 +95,11 @@ export function toJSONWithLegacyAliases(
     );
   }
 
-  // If this is an object or a recipe, process each key recursively.
-  if (isRecord(value) || isRecipe(value)) {
-    // If this is a recipe, call its toJSON method to get the properly
+  // If this is an object or a pattern, process each key recursively.
+  if (isRecord(value) || isPattern(value)) {
+    // If this is a pattern, call its toJSON method to get the properly
     // serialized version.
-    const valueToProcess = (isRecipe(value) &&
+    const valueToProcess = (isPattern(value) &&
         typeof (value as unknown as toJSON).toJSON === "function")
       ? (value as unknown as toJSON).toJSON() as Record<string, any>
       : (value as Record<string, any>);
@@ -117,8 +117,8 @@ export function toJSONWithLegacyAliases(
       }
     }
 
-    // Retain the original recipe reference for downstream processing.
-    if (isRecipe(value)) result[unsafe_originalRecipe] = value;
+    // Retain the original pattern reference for downstream processing.
+    if (isPattern(value)) result[unsafe_originalPattern] = value;
 
     return result;
   }
@@ -215,27 +215,29 @@ export function moduleToJSON(module: Module) {
   const { toJSON: _, ...rest } = module as Module & { toJSON: () => any };
   let implementation = module.implementation;
 
-  // CT-1230 WORKAROUND: Preserve recipe structure when serializing recipe modules.
+  // CT-1230 WORKAROUND: Preserve pattern structure when serializing pattern modules.
   //
-  // Problem: When a subpattern is passed to .map(), the recipe's implementation
+  // Problem: When a subpattern is passed to .map(), the pattern's implementation
   // was being stringified (e.g., "(inputs2) => { ... }") instead of preserving
-  // the actual recipe structure. This caused "Invalid recipe" errors at runtime
-  // because isRecipe() check failed on the string.
+  // the actual pattern structure. This caused "Invalid pattern" errors at runtime
+  // because isPattern() check failed on the string.
   //
   // Why this helps: Using toJSONWithLegacyAliases ensures nested $alias bindings
   // get their nesting level incremented properly. Without this, aliases could be
   // bound to a specific doc too early, causing handlers to point at stale docs
-  // when the recipe is later executed in a different context.
+  // when the pattern is later executed in a different context.
   //
-  // We don't fully understand why the original code stringified recipe functions,
-  // but this defensive change ensures recipes passed as values (like to map())
+  // We don't fully understand why the original code stringified pattern functions,
+  // but this defensive change ensures patterns passed as values (like to map())
   // retain their structure and alias metadata.
-  if (module.type === "recipe" && implementation && isRecipe(implementation)) {
+  if (
+    module.type === "pattern" && implementation && isPattern(implementation)
+  ) {
     implementation = toJSONWithLegacyAliases(
       implementation as unknown as Opaque<any>,
       new Map(),
       false,
-    ) as unknown as Recipe;
+    ) as unknown as Pattern;
   } else if (typeof implementation === "function") {
     implementation = implementation.toString();
   }
@@ -246,13 +248,13 @@ export function moduleToJSON(module: Module) {
   };
 }
 
-export function recipeToJSON(recipe: Recipe) {
+export function patternToJSON(pattern: Pattern) {
   return {
-    argumentSchema: recipe.argumentSchema,
-    resultSchema: recipe.resultSchema,
-    ...(recipe.initial ? { initial: recipe.initial } : {}),
-    result: recipe.result,
-    nodes: recipe.nodes,
-    program: recipe.program,
+    argumentSchema: pattern.argumentSchema,
+    resultSchema: pattern.resultSchema,
+    ...(pattern.initial ? { initial: pattern.initial } : {}),
+    result: pattern.result,
+    nodes: pattern.nodes,
+    program: pattern.program,
   };
 }

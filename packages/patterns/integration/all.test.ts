@@ -8,7 +8,7 @@ import { FileSystemProgramResolver } from "@commontools/js-compiler";
 
 const { API_URL, SPACE_NAME } = env;
 
-describe("Compile all recipes", () => {
+describe("Compile all patterns", () => {
   const skippedPatterns = [
     "system/link-tool.tsx", // Utility handlers, not a standalone pattern
   ];
@@ -24,7 +24,7 @@ describe("Compile all recipes", () => {
       const heapBefore = Deno.memoryUsage().heapUsed;
 
       // Create a fresh PiecesController per test to prevent memory accumulation
-      // The RecipeManager caches compiled recipes indefinitely, so we need a
+      // The PatternManager caches compiled patterns indefinitely, so we need a
       // fresh Runtime (via PiecesController) each time to avoid OOM in CI
       const identity = await Identity.generate();
       const cc = await PiecesController.initialize({
@@ -42,7 +42,7 @@ describe("Compile all recipes", () => {
         const piece = await cc!.create(program, { start: false });
         assert(piece.id, `Received piece ID ${piece.id} for ${name}.`);
       } finally {
-        // Dispose the entire controller to free all memory including recipe cache
+        // Dispose the entire controller to free all memory including pattern cache
         await cc.dispose();
 
         // Log heap usage for analysis

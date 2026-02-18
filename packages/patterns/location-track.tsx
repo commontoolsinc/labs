@@ -21,7 +21,7 @@ import {
   handler,
   ifElse,
   NAME,
-  recipe,
+  pattern,
   UI,
   Writable,
 } from "commontools";
@@ -166,10 +166,10 @@ function formatAccuracy(accuracy: number): string {
 }
 
 // ===== The Pattern =====
-export const LocationTrackModule = recipe<
+export const LocationTrackModule = pattern<
   LocationTrackModuleInput,
   LocationTrackModuleInput
->("LocationTrackModule", ({ locations, label }) => {
+>(({ locations, label }) => {
   // Local writable cell for ct-location binding (not stored)
   const currentCapture = Writable.of<LocationPoint | null>(null);
 

@@ -5,7 +5,7 @@ import {
   derive,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -289,8 +289,7 @@ const liftTotalReactions = lift((entries: ReactionTotalEntry[]) =>
 
 const liftSanitizeReactionCatalog = lift(sanitizeReactionCatalog);
 
-export const chatReactionTracker = recipe<ChatReactionTrackerArgs>(
-  "Chat Reaction Tracker",
+export const chatReactionTracker = pattern<ChatReactionTrackerArgs>(
   ({ messages, reactionCatalog }) => {
     const catalogView = liftSanitizeReactionCatalog(reactionCatalog);
 

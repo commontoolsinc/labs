@@ -10,7 +10,7 @@ import {
   type Default,
   handler,
   NAME,
-  recipe,
+  pattern,
   UI,
   Writable,
 } from "commontools";
@@ -51,8 +51,7 @@ const setRating = handler<
 });
 
 // ===== The Pattern =====
-export const RatingModule = recipe<RatingModuleInput, RatingModuleInput>(
-  "RatingModule",
+export const RatingModule = pattern<RatingModuleInput, RatingModuleInput>(
   ({ rating }) => {
     const displayText = computed(() =>
       rating.get() ? `${rating.get()}/5` : "Not rated"

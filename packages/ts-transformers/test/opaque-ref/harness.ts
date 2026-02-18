@@ -57,7 +57,7 @@ declare const state: {
 };
 
 declare function ifElse<T>(predicate: boolean, whenTrue: T, whenFalse: T): T;
-declare function recipe<T>(body: () => T): T;
+declare function pattern<T>(body: () => T): T;
 
 ${options.prelude ?? ""}
 

@@ -8,19 +8,19 @@ import type { Program } from "@commontools/js-compiler";
 import { CompilerError } from "@commontools/js-compiler/typescript";
 
 /**
- * Compile a recipe/module and run it.
+ * Compile a pattern/module and run it.
  *
  * @param files - Map of `{ filename: string }` to source code.
- * @param main - The name of the main recipe to run.
- * @param input - Inputs passed to the recipe once compiled.
+ * @param main - The name of the main pattern to run.
+ * @param input - Inputs passed to the pattern once compiled.
  *
  * @returns { result?: any, error?: string, errors?: Array<{line: number, column: number, message: string, type: string, file?: string}>, pending: boolean }
- *   - `result` is the result of the recipe, or undefined.
+ *   - `result` is the result of the pattern, or undefined.
  *   - `error` error string that occurred during compilation or execution, or
  *     undefined.
  *   - `errors` structured error array with line/column/file information for
  *     compilation errors.
- *   - `pending` is true if the recipe is still being compiled.
+ *   - `pending` is true if the pattern is still being compiled.
  *
  * Note that if an error occurs during execution, both `result` and `error` can
  * be defined. (Note: Runtime errors are not currently handled).
@@ -53,10 +53,10 @@ export function compileAndRun(
     | undefined
   >;
 
-  // This is called when the recipe containing this node is being stopped.
+  // This is called when the pattern containing this node is being stopped.
   addCancel(() => {
     // Abort any in-flight compilation if it's still pending.
-    abortController?.abort("Recipe stopped");
+    abortController?.abort("Pattern stopped");
   });
 
   return (tx: IExtendedStorageTransaction) => {
@@ -191,7 +191,7 @@ export function compileAndRun(
     // Capture requestId for this compilation run
     const thisRequestId = requestId;
 
-    const compilePromise = runtime.recipeManager.compileOrGetRecipe(program)
+    const compilePromise = runtime.patternManager.compileOrGetPattern(program)
       .catch(
         (err) => {
           // Only process this error if the request hasn't been superseded
@@ -226,17 +226,17 @@ export function compileAndRun(
         });
       });
 
-    compilePromise.then((recipe) => {
+    compilePromise.then((pattern) => {
       // Only run the result if this is still the current request
       if (requestId !== thisRequestId) return;
       if (abortController?.signal.aborted) return;
 
-      if (recipe) {
+      if (pattern) {
         // TODO(ja): to support editting of existing pieces / running with
         // inputs from other pieces, we will need to think more about
         // how we pass input into the builtin.
 
-        runtime.runSynced(result, recipe, input.get());
+        runtime.runSynced(result, pattern, input.get());
       }
       // TODO(seefeld): Add capturing runtime errors.
     });

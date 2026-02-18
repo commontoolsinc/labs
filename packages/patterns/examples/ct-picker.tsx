@@ -1,6 +1,6 @@
 /// <cts-enable />
 
-import { computed, NAME, recipe, UI, Writable } from "commontools";
+import { computed, NAME, pattern, UI, Writable } from "commontools";
 import Counter from "../counter/counter.tsx";
 import Note from "../notes/note.tsx";
 
@@ -16,10 +16,9 @@ type Result = {
   counterCValue: number;
 };
 
-export default recipe<Input, Result>(
-  "ct-picker demo",
+export default pattern<Input, Result>(
   (_) => {
-    // Create counter instances - these are OpaqueRefs to recipe results
+    // Create counter instances - these are OpaqueRefs to pattern results
     const counterA = Counter({ value: 10 });
     const counterB = Note({
       content: "This is item B (a Note)",

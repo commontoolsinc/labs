@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { type Cell, cell, Default, handler, lift, recipe } from "commontools";
+import { type Cell, cell, Default, handler, lift, pattern } from "commontools";
 
 interface Item {
   id?: string;
@@ -16,7 +16,7 @@ const action = handler(
 // Module-scope lift definition
 const liftMapItems = lift((item: Item[]) => item.map((_) => ({})));
 
-export const conflictRepro = recipe<{ items: Default<Item[], []> }>(
+export const conflictRepro = pattern<{ items: Default<Item[], []> }>(
   ({ items }) => {
     const sequence = cell(0);
 

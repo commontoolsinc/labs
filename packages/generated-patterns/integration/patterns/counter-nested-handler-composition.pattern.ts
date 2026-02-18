@@ -6,7 +6,7 @@ import {
   derive,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -149,8 +149,7 @@ const liftLastPreparedView = lift(
 );
 
 /** Pattern composing nested handlers to simulate staged pipelines. */
-export const counterWithNestedHandlerComposition = recipe<NestedHandlerArgs>(
-  "Counter With Nested Handler Composition",
+export const counterWithNestedHandlerComposition = pattern<NestedHandlerArgs>(
   ({ value, history }) => {
     const stage = cell<StageEntry | null>(null);
     const preparedCount = cell(0);

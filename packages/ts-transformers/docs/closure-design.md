@@ -13,7 +13,7 @@ state.items.map((item) => item.price * state.discount);
 
 // Output
 state.items.mapWithPattern(
-  recipe(({ element, params: { discount } }) => element.price * discount),
+  pattern(({ element, params: { discount } }) => element.price * discount),
   { discount: state.discount },
 );
 ```
@@ -43,9 +43,9 @@ identity (`===`) works for scope detection.
 
 **Two Methods, One Builtin**:
 
-- `map(fn)` - Legacy mode: wraps function in recipe, passes
+- `map(fn)` - Legacy mode: wraps function in pattern, passes
   `{ element, index, array }`
-- `mapWithPattern(recipe, params)` - Closure mode: pre-wrapped recipe, passes
+- `mapWithPattern(pattern, params)` - Closure mode: pre-wrapped pattern, passes
   `{ element, index, array, params }`
 
 Both call the same `map` builtin which uses conditional logic based on `params`

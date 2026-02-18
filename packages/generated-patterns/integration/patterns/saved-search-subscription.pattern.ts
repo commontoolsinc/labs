@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -355,8 +355,7 @@ const liftLatestTrigger = lift((entries: string[]) => {
   return entries[entries.length - 1];
 });
 
-export const savedSearchSubscription = recipe<SavedSearchArgs>(
-  "Saved Search Subscription",
+export const savedSearchSubscription = pattern<SavedSearchArgs>(
   ({ savedSubscriptions }) => {
     const savedLog = cell<string[]>([]);
     const triggerLog = cell<string[]>([]);

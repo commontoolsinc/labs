@@ -69,7 +69,7 @@ export function captureSnapshot(cell: Cell<unknown>): JournalSnapshot {
  */
 function extractTags(schemaTag: string): string[] {
   const tags: string[] = [];
-  // Extract hashtags from schema (e.g., "#person", "#recipe")
+  // Extract hashtags from schema (e.g., "#person", "#pattern")
   const hashtagMatches = schemaTag.match(/#([a-z0-9-]+)/gi);
   if (hashtagMatches) {
     tags.push(...hashtagMatches.map((t) => t.toLowerCase()));

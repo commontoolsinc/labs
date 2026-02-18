@@ -238,7 +238,7 @@ on TypeScript's understanding, even when that might not match user expectations.
 **Context Variations:**
 
 - ✅ `context-variations.input.tsx` - Tests cell() in 6 scopes (top-level,
-  function, arrow function, class method, recipe, handler)
+  function, arrow function, class method, pattern, handler)
 
 **Cell-like Classes:**
 
@@ -279,7 +279,8 @@ on TypeScript's understanding, even when that might not match user expectations.
 
 **Priority 3: Additional Runtime Functions**
 
-- [ ] `recipe-variations` - Comprehensive recipe() testing (with/without schema)
+- [ ] `pattern-variations` - Comprehensive pattern() testing (with/without
+      schema)
 - [ ] `handler-variations` - Comprehensive handler() testing (with/without
       schema)
 - [ ] `wish-function` - Test wish() schema injection

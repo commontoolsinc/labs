@@ -24,7 +24,7 @@ import {
   ifElse,
   type ImageData,
   NAME,
-  recipe,
+  pattern,
   UI,
   Writable,
 } from "commontools";
@@ -1644,11 +1644,10 @@ const applySelected = handler<
 
 // ===== The Pattern =====
 
-export const ExtractorModule = recipe<
+export const ExtractorModule = pattern<
   ExtractorModuleInput,
   ExtractorModuleOutput
 >(
-  "ExtractorModule",
   (
     {
       parentSubPieces,

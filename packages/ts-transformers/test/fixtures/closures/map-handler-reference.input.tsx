@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { recipe, UI, handler, Cell } from "commontools";
+import { pattern, UI, handler, Cell } from "commontools";
 
 declare global {
   namespace JSX {
@@ -24,7 +24,7 @@ interface State {
   count: Cell<number>;
 }
 
-export default recipe<State>("HandlerReference", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>

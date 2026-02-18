@@ -6,7 +6,7 @@ import {
   derive,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -33,13 +33,13 @@ interface ComponentDefinition {
 
 interface RecipeRegistrationEntry {
   componentId: string;
-  recipe: string;
+  pattern: string;
   props: string[];
 }
 
 interface RecipeRegistrationEvent {
   component?: string;
-  recipe?: string;
+  pattern?: string;
   props?: unknown;
 }
 
@@ -255,18 +255,18 @@ function rebuildRegistrationMap(
     if (!componentId) continue;
     const component = componentMap.get(componentId);
     if (!component) continue;
-    const recipe = sanitizeRecipeLabel(
-      (raw as { recipe?: unknown }).recipe,
+    const pattern = sanitizeRecipeLabel(
+      (raw as { pattern?: unknown }).pattern,
       component,
       component.name,
     );
     const allowed = new Set(component.props);
     const props = sanitizeProps((raw as { props?: unknown }).props)
       .filter((prop) => allowed.has(prop));
-    const key = `${component.id}#${recipe}`;
+    const key = `${component.id}#${pattern}`;
     map.set(key, {
       componentId: component.id,
-      recipe,
+      pattern,
       props,
     });
   }
@@ -310,13 +310,13 @@ function computeComponentCoverage(
     if (list) {
       list.push({
         componentId: entry.componentId,
-        recipe: entry.recipe,
+        pattern: entry.pattern,
         props: [...entry.props],
       });
     } else {
       grouped.set(entry.componentId, [{
         componentId: entry.componentId,
-        recipe: entry.recipe,
+        pattern: entry.pattern,
         props: [...entry.props],
       }]);
     }
@@ -331,7 +331,7 @@ function computeComponentCoverage(
       for (const prop of entry.props) {
         if (allowed.has(prop)) covered.add(prop);
       }
-      recipeSet.add(entry.recipe);
+      recipeSet.add(entry.pattern);
     }
     const coveredProps = Array.from(covered).sort((left, right) =>
       left.localeCompare(right)
@@ -394,7 +394,7 @@ function computePropCoverage(
       if (!entry) continue;
       const record = entry.covered.get(component.id);
       if (!record) continue;
-      record.add(registration.recipe);
+      record.add(registration.pattern);
     }
   }
   const coverage: PropCoverageView[] = [];
@@ -409,7 +409,7 @@ function computePropCoverage(
       coveredComponents.push(
         componentMap.get(componentId)?.name ?? componentId,
       );
-      recipeSet.forEach((recipe) => recipes.add(recipe));
+      recipeSet.forEach((pattern) => recipes.add(pattern));
     }
     coveredComponents.sort((left, right) => left.localeCompare(right));
     const declared = declaredComponents.length;
@@ -479,13 +479,13 @@ function summarizeCoverage(
 
 function formatRegistrationMessage(
   component: ComponentDefinition,
-  recipe: string,
+  pattern: string,
   props: readonly string[],
 ): string {
   const propLabel = props.length === component.props.length
     ? "all props"
     : `${props.length} props`;
-  return `${component.name}: ${recipe} (${propLabel})`;
+  return `${component.name}: ${pattern} (${propLabel})`;
 }
 
 function readSequence(value: unknown): number {
@@ -576,7 +576,7 @@ const registerRecipe = handler(
     const sequenceValue = readSequence(context.sequence.get());
     const fallbackRecipe = `${component.name} Recipe ${sequenceValue + 1}`;
     const recipeLabel = sanitizeRecipeLabel(
-      event?.recipe,
+      event?.pattern,
       component,
       fallbackRecipe,
     );
@@ -588,21 +588,21 @@ const registerRecipe = handler(
     );
     existing.set(`${component.id}#${recipeLabel}`, {
       componentId: component.id,
-      recipe: recipeLabel,
+      pattern: recipeLabel,
       props: normalizedProps,
     });
 
     const nextEntries = Array.from(existing.values());
     nextEntries.sort((left, right) => {
       if (left.componentId === right.componentId) {
-        return left.recipe.localeCompare(right.recipe);
+        return left.pattern.localeCompare(right.pattern);
       }
       return left.componentId.localeCompare(right.componentId);
     });
 
     context.registrations.set(nextEntries.map((entry) => ({
       componentId: entry.componentId,
-      recipe: entry.recipe,
+      pattern: entry.pattern,
       props: [...entry.props],
     })));
 
@@ -621,8 +621,7 @@ const registerRecipe = handler(
   },
 );
 
-export const componentLibraryCatalog = recipe<ComponentLibraryCatalogArgs>(
-  "Component Library Catalog",
+export const componentLibraryCatalog = pattern<ComponentLibraryCatalogArgs>(
   ({ components }) => {
     const registrations = cell<RecipeRegistrationEntry[]>([]);
     const registrationLog = cell<string[]>([]);
@@ -718,22 +717,26 @@ function sanitizeRegistrationEntries(
     if (!entry || typeof entry !== "object") continue;
     const component = componentMap.get(entry.componentId);
     if (!component) continue;
-    const recipe = sanitizeRecipeLabel(entry.recipe, component, component.name);
+    const pattern = sanitizeRecipeLabel(
+      entry.pattern,
+      component,
+      component.name,
+    );
     const allowed = new Set(component.props);
     const props = entry.props
       .filter((prop: string) => allowed.has(prop))
       .sort((left: string, right: string) => left.localeCompare(right));
-    const key = `${component.id}#${recipe}`;
+    const key = `${component.id}#${pattern}`;
     map.set(key, {
       componentId: component.id,
-      recipe,
+      pattern,
       props,
     });
   }
   const list = Array.from(map.values());
   list.sort((left, right) => {
     if (left.componentId === right.componentId) {
-      return left.recipe.localeCompare(right.recipe);
+      return left.pattern.localeCompare(right.pattern);
     }
     return left.componentId.localeCompare(right.componentId);
   });

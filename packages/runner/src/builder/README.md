@@ -1,13 +1,13 @@
-# Recipe DX
+# Pattern DX
 
-When creating recipes all cells are really proxies for future cells. They can be
-nested and assigned to each other.
+When creating patterns all cells are really proxies for future cells. They can
+be nested and assigned to each other.
 
 ## Internal structure
 
-`recipe` creates an internal representation, which is effectively:
+`pattern` creates an internal representation, which is effectively:
 
-- the default value for the cell representing the recipe
+- the default value for the cell representing the pattern
 - initial values, usually constants or bound data structures like the UI
 - nodes, which are defined by
   - module
@@ -15,41 +15,41 @@ nested and assigned to each other.
   - output cell expressed as bound data structure, if any
 
 Bound data structures, which are also used for UI, are static data, where some
-fields can be cell proxies. For the recipe, it is both inputs and outputs and
+fields can be cell proxies. For the pattern, it is both inputs and outputs and
 aliasing within the cell is allowed (loops are not, of course). For module
-inputs, the idea is that when the recipe is run, the data is collected from
+inputs, the idea is that when the pattern is run, the data is collected from
 those cells. For module outputs, the result is effectively destructured into the
 corresponding cells.
 
-When invoking a recipe from another recipe, the graphs can be combined: The
-recipe cell is being created, with the default values optionally overriden by
+When invoking a pattern from another pattern, the graphs can be combined: The
+pattern cell is being created, with the default values optionally overriden by
 cell aliasing to the caller cells.
 
 ## Aliasing cells
 
 ```ts
-const { foo, bar } = recipeCell;
+const { foo, bar } = patternCell;
 const { baz } = example({ bar });
 foo.set(baz);
 ```
 
 Means that the key 'baz' on the output of `example` should be assigned to
-`recipeCell.foo`. We can do this in a few ways:
+`patternCell.foo`. We can do this in a few ways:
 
-- Create another subpath on `recipeCell` for the output of `example` and do an
+- Create another subpath on `patternCell` for the output of `example` and do an
   internal path alias.
 - On the `example` node, add an annotation of where data should flow, i.e. the
-  reverse binding above, here `{ baz: recipeCell.foo }`.
+  reverse binding above, here `{ baz: patternCell.foo }`.
 
 For now, we just assign a default cell and reference "forward". Later we could
 do a pass to optimize these away somewhat.
 
 ---
 
-When invoking a recipe, the following steps happen:
+When invoking a pattern, the following steps happen:
 
-- The recipe is invoked with the cell it should populate (almost always that's a
-  new cell, prefilled with references to inputs)
+- The pattern is invoked with the cell it should populate (almost always that's
+  a new cell, prefilled with references to inputs)
 - Default values are populated, unless there is already something there
 - Initial values are populated, overwriting what is there already
 - Nodes are registered with inputs as assumed dependencies
@@ -62,7 +62,7 @@ When invoking a recipe, the following steps happen:
   - Repeat until no cells are dirty or a fixed number of maximum iterations have
     been completed.
 
-Note: Since the graph is flatted after resolving all recipes, etc., only UI
+Note: Since the graph is flatted after resolving all patterns, etc., only UI
 rendering will cause computation. We will need some other way to trigger
 computation for slow jobs / imports / etc.
 
@@ -70,11 +70,11 @@ computation for slow jobs / imports / etc.
 
 There are two levels of indirections for cells:
 
-- The aliasing at recipe level, which is as static as the recipe (i.e. an inner
-  module can't rewire the aliases)
+- The aliasing at pattern level, which is as static as the pattern (i.e. an
+  inner module can't rewire the aliases)
 - The cell references in the data itself, which can be overriden.
 
-As an example: Say a recipe is invoked, and a cell bound to `a.b` in its
+As an example: Say a pattern is invoked, and a cell bound to `a.b` in its
 namespace. A module write into `a` will also write into that bound cell (the
 value of `a.b` or `undefined` otherwise). The value of `a.b` can be a cell
 reference itself, but then that reference is written into the bound cell.
@@ -85,7 +85,7 @@ when aliasing. Usuall it is either top-level or one level deeper for an open
 ended set to not pollute the top namespace (e.g. `template` at the top level and
 then `vars.foo` and `vars.bar` for the template veriables). A module could in
 principle modify individual `vars` and some of those might be local to the
-recipe, but a module can't change `vars` itself to point somewhere else.
+pattern, but a module can't change `vars` itself to point somewhere else.
 
 IOW, all properties up-path from aliases are readonly to modules. They can
 however be cell references themselves, just created by the runtime, and
@@ -104,16 +104,16 @@ reads `{ foo: { bar: ... } }` and writes a different cell reference for `foo`.
 In principle, if `bar` has never been read, we wouldn't listen to changes just
 on `bar` (assuming the reference `foo` remains the same). But by definition none
 of the other values could depend on that `bar`, so this should be fine: At this
-level, i.e. beyond what the recipe marks read-only, modules can change cell
+level, i.e. beyond what the pattern marks read-only, modules can change cell
 references.
 
 To summarize the implications for the implementation:
 
 - Write cell references into the data, and resolve them lazily
-- For recipe-level aliases mark those and all the paths ahead as read-only
+- For pattern-level aliases mark those and all the paths ahead as read-only
 - When writing a cell reference to such a cell reference, make it two levels
-  deep, otherwise overwrite. In fact this go several levels deep, as a recipe
-  can call another recipe pointing to a cell reference. So this just reflects
+  deep, otherwise overwrite. In fact this go several levels deep, as a pattern
+  can call another pattern pointing to a cell reference. So this just reflects
   layers of aliasing. Though all but the last are static!
 
 ### Streams

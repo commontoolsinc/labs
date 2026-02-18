@@ -12,7 +12,7 @@ describe("cli dev", () => {
     expect(code).toBe(0);
   });
 
-  it("Runs a recipe with commontools+3P modules", async () => {
+  it("Runs a pattern with commontools+3P modules", async () => {
     const { code, stdout, stderr } = await ct(
       "dev fixtures/3p-modules.tsx --pattern-json",
     );
@@ -24,7 +24,7 @@ describe("cli dev", () => {
   it("Generates output file with correct filename", async () => {
     const temp = await Deno.makeTempFile();
     const { code, stdout, stderr } = await ct(
-      `dev fixtures/recipe.tsx --no-run --filename test-file.js --output ${temp}`,
+      `dev fixtures/pattern.tsx --no-run --filename test-file.js --output ${temp}`,
     );
     checkStderr(stderr);
     expect(stdout.length).toBe(0);
@@ -45,14 +45,14 @@ describe("cli dev", () => {
 
   it("Uses specified named export with --main-export", async () => {
     const { code, stdout, stderr } = await ct(
-      "dev fixtures/named-export.tsx --main-export myNamedRecipe --pattern-json",
+      "dev fixtures/named-export.tsx --main-export myNamedPattern --pattern-json",
     );
     checkStderr(stderr);
     const output = JSON.parse(stdout.join("\n"));
     // Named export uses cell reference, so check the argument schema
     expect(output.argumentSchema.default.message).toBe("from named export");
     // Also verify mainExport was set correctly in program
-    expect(output.program.mainExport).toBe("myNamedRecipe");
+    expect(output.program.mainExport).toBe("myNamedPattern");
     expect(code).toBe(0);
   });
 

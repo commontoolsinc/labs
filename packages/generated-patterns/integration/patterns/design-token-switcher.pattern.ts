@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -173,8 +173,7 @@ const liftLastApplied = lift((value: string[]) => {
   return value[value.length - 1];
 });
 
-export const designTokenSwitcher = recipe<DesignTokenSwitcherArgs>(
-  "Design Token Switcher",
+export const designTokenSwitcher = pattern<DesignTokenSwitcherArgs>(
   ({ tokens, activeToken }) => {
     const appliedHistory = cell<string[]>([]);
 

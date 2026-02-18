@@ -1,8 +1,8 @@
 import {
   Cell,
   NAME,
-  Recipe,
-  RecipeMeta,
+  Pattern,
+  PatternMeta,
   RuntimeProgram,
   TYPE,
 } from "@commontools/runner";
@@ -11,10 +11,10 @@ import { nameSchema, processSchema } from "@commontools/runner/schemas";
 import { CellPath, compileProgram, resolveCellPath } from "./utils.ts";
 import { injectUserCode } from "../iframe/static.ts";
 import {
-  buildFullRecipe,
-  getIframeRecipe,
-  IFrameRecipe,
-} from "../iframe/recipe.ts";
+  buildFullPattern,
+  getIframePattern,
+  IFramePattern,
+} from "../iframe/pattern.ts";
 
 interface PieceCellIo {
   get(path?: CellPath): Promise<unknown>;
@@ -100,53 +100,56 @@ export class PieceController<T = unknown> {
   }
 
   async setInput(input: object): Promise<void> {
-    const recipe = await this.getRecipe();
+    const pattern = await this.getPattern();
     // Use setup/start so we can update inputs without forcing reschedule
-    await execute(this.#manager, this.id, recipe, input, { start: true });
+    await execute(this.#manager, this.id, pattern, input, { start: true });
   }
 
-  async getRecipe(): Promise<Recipe> {
-    const recipeId = getRecipeIdFromPiece(this.#cell);
+  async getPattern(): Promise<Pattern> {
+    const patternId = getPatternIdFromPiece(this.#cell);
     const runtime = this.#manager.runtime;
-    const recipe = await runtime.recipeManager.loadRecipe(
-      recipeId,
+    const pattern = await runtime.patternManager.loadPattern(
+      patternId,
       this.#manager.getSpace(),
     );
-    return recipe;
+    return pattern;
   }
 
-  async getRecipeMeta(): Promise<RecipeMeta> {
-    const recipeId = getRecipeIdFromPiece(this.#cell);
+  async getPatternMeta(): Promise<PatternMeta> {
+    const patternId = getPatternIdFromPiece(this.#cell);
     const space = this.#manager.getSpace();
-    // Ensure the recipe is loaded first - this populates the metadata
-    await this.#manager.runtime.recipeManager.loadRecipe(recipeId, space);
-    return this.#manager.runtime.recipeManager.loadRecipeMeta(recipeId, space);
-  }
-
-  // Returns an `IFrameRecipe` for the piece, or `undefined`
-  // if not an iframe recipe.
-  getIframeRecipe(): IFrameRecipe | undefined {
-    return getIframeRecipe(this.#cell, this.#manager.runtime).iframe;
-  }
-
-  async setRecipe(program: RuntimeProgram): Promise<void> {
-    const recipe = await compileProgram(this.#manager, program);
-    await execute(this.#manager, this.id, recipe);
-  }
-
-  // Update piece's recipe with usercode for an iframe recipe.
-  // Throws if recipe is not an iframe recipe.
-  async setIframeRecipe(src: string): Promise<void> {
-    const iframeRecipe = getIframeRecipe(this.#cell, this.#manager.runtime);
-    if (!iframeRecipe.iframe) {
-      throw new Error(`Expected piece "${this.id}" to be an iframe recipe.`);
-    }
-    iframeRecipe.iframe.src = injectUserCode(src);
-    const recipe = await compileProgram(
-      this.#manager,
-      buildFullRecipe(iframeRecipe.iframe),
+    // Ensure the pattern is loaded first - this populates the metadata
+    await this.#manager.runtime.patternManager.loadPattern(patternId, space);
+    return this.#manager.runtime.patternManager.loadPatternMeta(
+      patternId,
+      space,
     );
-    await execute(this.#manager, this.id, recipe);
+  }
+
+  // Returns an `IFramePattern` for the piece, or `undefined`
+  // if not an iframe pattern.
+  getIframePattern(): IFramePattern | undefined {
+    return getIframePattern(this.#cell, this.#manager.runtime).iframe;
+  }
+
+  async setPattern(program: RuntimeProgram): Promise<void> {
+    const pattern = await compileProgram(this.#manager, program);
+    await execute(this.#manager, this.id, pattern);
+  }
+
+  // Update piece's pattern with usercode for an iframe pattern.
+  // Throws if pattern is not an iframe pattern.
+  async setIframePattern(src: string): Promise<void> {
+    const iframePattern = getIframePattern(this.#cell, this.#manager.runtime);
+    if (!iframePattern.iframe) {
+      throw new Error(`Expected piece "${this.id}" to be an iframe pattern.`);
+    }
+    iframePattern.iframe.src = injectUserCode(src);
+    const pattern = await compileProgram(
+      this.#manager,
+      buildFullPattern(iframePattern.iframe),
+    );
+    await execute(this.#manager, this.id, pattern);
   }
 
   async readingFrom(): Promise<PieceController[]> {
@@ -167,16 +170,16 @@ export class PieceController<T = unknown> {
 async function execute(
   manager: PieceManager,
   pieceId: string,
-  recipe: Recipe,
+  pattern: Pattern,
   input?: object,
   options?: { start?: boolean },
 ): Promise<void> {
-  await manager.runWithRecipe(recipe, pieceId, input, options);
+  await manager.runWithPattern(pattern, pieceId, input, options);
   await manager.runtime.idle();
   await manager.synced();
 }
 
-export const getRecipeIdFromPiece = (piece: Cell<unknown>): string => {
+export const getPatternIdFromPiece = (piece: Cell<unknown>): string => {
   const sourceCell = piece.getSourceCell(processSchema);
   if (!sourceCell) throw new Error("piece missing source cell");
   return sourceCell.get()?.[TYPE];

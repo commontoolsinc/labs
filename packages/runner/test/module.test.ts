@@ -19,7 +19,7 @@ import {
   parseStackFrame,
 } from "../src/builder/module.ts";
 import { opaqueRef } from "../src/builder/opaque-ref.ts";
-import { popFrame, pushFrame } from "../src/builder/recipe.ts";
+import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 

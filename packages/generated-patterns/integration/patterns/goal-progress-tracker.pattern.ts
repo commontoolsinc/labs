@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { type Cell, Default, handler, lift, recipe, str } from "commontools";
+import { type Cell, Default, handler, lift, pattern, str } from "commontools";
 
 interface MilestoneInput {
   label?: string;
@@ -229,8 +229,7 @@ const liftMilestoneList = lift((inputs: {
 
 const liftFormattedPercent = lift((value: number) => value.toFixed(1));
 
-export const goalProgressTracker = recipe<GoalProgressArgs>(
-  "Goal Progress Tracker",
+export const goalProgressTracker = pattern<GoalProgressArgs>(
   ({ milestones }) => {
     const sanitized = liftSanitizeMilestoneMap(milestones);
     const totals = liftTotals(sanitized);

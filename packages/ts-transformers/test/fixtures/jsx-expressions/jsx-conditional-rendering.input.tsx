@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { ifElse, recipe, UI } from "commontools";
+import { ifElse, pattern, UI } from "commontools";
 
 interface State {
   isActive: boolean;
@@ -10,7 +10,7 @@ interface State {
   isPremium: boolean;
 }
 
-export default recipe<State>("ConditionalRendering", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>

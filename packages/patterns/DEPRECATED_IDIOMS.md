@@ -385,7 +385,7 @@ Update utility components and less frequently used patterns.
 - [ ] Replace `derive()` with `computed()`
 - [ ] Replace `lift()` with `computed()` or refactor
 - [ ] Convert simple `handler()` calls to inline handlers
-- [ ] Update recipe input types to use `Writable<T>` for cells used in inline
+- [ ] Update pattern input types to use `Writable<T>` for cells used in inline
       handlers
 - [ ] Replace `.equals()` with `Writable.equals(a, b)`
 - [ ] Review `[ID]` usage - remove if only doing finding/removing (use
@@ -396,7 +396,7 @@ Update utility components and less frequently used patterns.
 
 ## Notes
 
-- When converting to inline handlers, remember to update the recipe input
+- When converting to inline handlers, remember to update the pattern input
   interface to declare cells as `Writable<T>`
 - For complex handlers with multiple operations or reusable logic, keep using
   `handler()` function

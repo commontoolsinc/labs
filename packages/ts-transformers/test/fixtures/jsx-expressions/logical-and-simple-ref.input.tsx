@@ -1,7 +1,7 @@
 /// <cts-enable />
-import { cell, recipe, UI } from "commontools";
+import { cell, pattern, UI } from "commontools";
 
-export default recipe("LogicalAndSimpleRef", (_state) => {
+export default pattern((_state) => {
   const showPanel = cell(true);
   const userName = cell("Alice");
 

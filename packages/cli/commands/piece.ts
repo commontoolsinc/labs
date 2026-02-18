@@ -15,9 +15,9 @@ import {
   newPiece,
   PieceConfig,
   removePiece,
-  savePieceRecipe,
+  savePiecePattern,
   setCellValue,
-  setPieceRecipe,
+  setPiecePattern,
   SpaceConfig,
 } from "../lib/piece.ts";
 import { PiecesController } from "@commontools/piece/ops";
@@ -121,12 +121,12 @@ export const piece = new Command()
   .action(async (options) => {
     const pieces = await listPieces(parseSpaceOptions(options));
     const piecesData = [
-      ["ID", "NAME", "RECIPE"],
+      ["ID", "NAME", "PATTERN"],
       ...(pieces.map(
         (data) => [
           data.id,
           data.error ? `<error: ${data.error}>` : (data.name ?? "<unnamed>"),
-          data.error ? "" : (data.recipeName ?? "<unnamed>"),
+          data.error ? "" : (data.patternName ?? "<unnamed>"),
         ],
       )),
     ];
@@ -139,7 +139,7 @@ export const piece = new Command()
     );
   })
   /* piece new */
-  .command("new", "Create a new piece with a recipe.")
+  .command("new", "Create a new piece with a pattern.")
   .usage(spaceUsage)
   .example(
     `ct piece new ${EX_ID} ${EX_COMP} ./main.tsx`,
@@ -157,7 +157,7 @@ export const piece = new Command()
   .option("--no-start", "Only set up the piece without starting it")
   .option(
     "--main-export <export:string>",
-    'Named export from entry for recipe definition. Defaults to "default".',
+    'Named export from entry for pattern definition. Defaults to "default".',
   )
   .option(
     "--root <path:string>",
@@ -217,7 +217,7 @@ export const piece = new Command()
     applyPieceInput(parsePieceOptions(options), await drainStdin())
   )
   /* piece getsrc */
-  .command("getsrc", "Retrieve the recipe source for the given piece.")
+  .command("getsrc", "Retrieve the pattern source for the given piece.")
   .usage(pieceUsage)
   .example(
     `ct piece getsrc ${EX_ID} ${EX_COMP_PIECE} ./out`,
@@ -230,10 +230,10 @@ export const piece = new Command()
   .option("-c,--piece <piece:string>", "The target piece ID.")
   .arguments("<outpath:string>")
   .action((options, outPath) =>
-    savePieceRecipe(parsePieceOptions(options), absPath(outPath))
+    savePiecePattern(parsePieceOptions(options), absPath(outPath))
   )
   /* piece setsrc */
-  .command("setsrc", "Update the recipe source for the given piece.")
+  .command("setsrc", "Update the pattern source for the given piece.")
   .usage(pieceUsage)
   .example(
     `ct piece setsrc ${EX_ID} ${EX_COMP_PIECE} ./main.tsx`,
@@ -246,7 +246,7 @@ export const piece = new Command()
   .option("-c,--piece <piece:string>", "The target piece ID.")
   .option(
     "--main-export <export:string>",
-    'Named export from entry for recipe definition. Defaults to "default".',
+    'Named export from entry for pattern definition. Defaults to "default".',
   )
   .option(
     "--root <path:string>",
@@ -256,7 +256,7 @@ export const piece = new Command()
   .action(async (options, mainPath) => {
     setQuietMode(!!options.quiet);
     const pieceConfig = parsePieceOptions(options);
-    await setPieceRecipe(pieceConfig, {
+    await setPiecePattern(pieceConfig, {
       mainPath: absPath(mainPath),
       mainExport: options.mainExport,
       rootPath: options.root ? absPath(options.root) : undefined,
@@ -295,7 +295,7 @@ export const piece = new Command()
     let output = `
 === Piece: ${pieceData.id} ===
 Name: ${pieceData.name || "<no name>"}
-Recipe: ${pieceData.recipeName || "<no recipe name>"}
+Pattern: ${pieceData.patternName || "<no pattern name>"}
 
 --- Source (Inputs) ---`;
 

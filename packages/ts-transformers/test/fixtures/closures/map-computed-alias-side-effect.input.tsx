@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 
 let keyCounter = 0;
 function nextKey() {
@@ -10,7 +10,7 @@ interface State {
   items: Array<Record<string, number>>;
 }
 
-export default recipe<State>("ComputedAliasSideEffect", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>

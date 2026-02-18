@@ -6,7 +6,7 @@ import {
   ID,
   lift,
   NAME,
-  recipe,
+  pattern,
   UI,
   Writable,
 } from "commontools";
@@ -88,8 +88,7 @@ const show = lift((items: Item[]) => {
   } (${items.length})`;
 });
 
-export default recipe<ListInput, ListOutput>(
-  "list operations",
+export default pattern<ListInput, ListOutput>(
   ({ items }) => {
     const lowerCase = computed(
       () => items.map((item) => item.title.toLowerCase()),
@@ -99,7 +98,7 @@ export default recipe<ListInput, ListOutput>(
     // We do not just have top-level support on Writable<T[]> for the major array operations.
     // However, performing them on a ProxyObject (such as within a derive, or calling .get() on a Cell in a handler) will work as expected.
     // caveat: behaviour is only guaranteed to be correct for all operations IF the items include an [ID] property.
-    // excluding the [ID] in this recipe leads to item alignment bugs when insertig or removing from items at the FRONT of an array
+    // excluding the [ID] in this pattern leads to item alignment bugs when insertig or removing from items at the FRONT of an array
     const itemsLessThanB = computed(
       () => items.get().filter((item) => item.title < "B"),
     );

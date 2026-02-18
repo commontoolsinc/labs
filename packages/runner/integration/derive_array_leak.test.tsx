@@ -5,7 +5,7 @@ import {
   derive,
   handler,
   NAME,
-  recipe,
+  pattern,
   str,
   Stream,
   UI,
@@ -14,11 +14,11 @@ import {
 // How many times to increment per click
 const INCREMENTS_PER_CLICK = 50;
 
-interface RecipeState {
+interface PatternState {
   value: Default<number, 0>;
 }
 
-interface RecipeOutput {
+interface PatternOutput {
   value: Default<number, 0>;
   increment: Stream<void>;
   decrement: Stream<void>;
@@ -57,7 +57,7 @@ function previous(value: number) {
   return value - 1;
 }
 
-export default recipe<RecipeState, RecipeOutput>("Counter", (state) => {
+export default pattern<PatternState, PatternOutput>((state) => {
   const array = derive(state.value, (value: number) => {
     // Clamp to prevent negative array length
     const length = Math.max(0, value);

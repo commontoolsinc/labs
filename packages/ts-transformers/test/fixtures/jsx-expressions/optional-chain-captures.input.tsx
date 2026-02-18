@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 
 interface Item {
   maybe?: { value: number };
@@ -10,7 +10,7 @@ interface State {
   items: Item[];
 }
 
-export default recipe<State>("OptionalChainCaptures", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>

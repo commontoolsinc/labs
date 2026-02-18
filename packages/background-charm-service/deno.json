@@ -3,7 +3,7 @@
   "tasks": {
     "start": "deno run -A --unstable-worker-options src/main.ts",
     "help": "deno run -A src/main.ts --help",
-    "add-admin-charm": "deno run -A cast-admin.ts --recipePath=bgAdmin.tsx",
+    "add-admin-charm": "deno run -A cast-admin.ts --patternPath=bgAdmin.tsx",
     "test": "deno test test/*.test.ts",
     "check": "deno check src/**/*.ts",
     "lint": "deno lint",

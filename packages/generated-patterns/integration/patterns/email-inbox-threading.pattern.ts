@@ -6,7 +6,7 @@ import {
   derive,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -139,8 +139,7 @@ const liftActiveThreadSummary = lift(
   },
 );
 
-export const emailInboxThreading = recipe<EmailInboxArgs>(
-  "Email Inbox Threading",
+export const emailInboxThreading = pattern<EmailInboxArgs>(
   ({ messages, activeThreadId }) => {
     const threadActivity = cell<string[]>([]);
 

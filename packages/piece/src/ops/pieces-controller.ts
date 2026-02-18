@@ -38,9 +38,9 @@ export class PiecesController<T = unknown> {
     cause: string | undefined = undefined,
   ): Promise<PieceController<U>> {
     this.disposeCheck();
-    const recipe = await compileProgram(this.#manager, program);
+    const pattern = await compileProgram(this.#manager, program);
     const piece = await this.#manager.runPersistent<U>(
-      recipe,
+      pattern,
       options.input,
       cause,
       undefined,
@@ -185,7 +185,7 @@ export class PiecesController<T = unknown> {
     const program = await this.#manager.runtime.harness.resolve(
       new HttpProgramResolver(patternUrl.href),
     );
-    const recipe = await this.#manager.runtime.recipeManager.compileRecipe(
+    const pattern = await this.#manager.runtime.patternManager.compilePattern(
       program,
     );
 
@@ -202,7 +202,7 @@ export class PiecesController<T = unknown> {
       );
 
       // Run pattern setup within same transaction
-      this.#manager.runtime.run(tx, recipe, {}, pieceCell);
+      this.#manager.runtime.run(tx, pattern, {}, pieceCell);
 
       // Link as default pattern within same transaction
       const spaceCellWithTx = this.#manager.getSpaceCellContents().withTx(tx);
@@ -270,7 +270,7 @@ export class PiecesController<T = unknown> {
     const program = await this.#manager.runtime.harness.resolve(
       new HttpProgramResolver(patternUrl.href),
     );
-    const recipe = await this.#manager.runtime.recipeManager.compileRecipe(
+    const pattern = await this.#manager.runtime.patternManager.compilePattern(
       program,
     );
 
@@ -303,7 +303,7 @@ export class PiecesController<T = unknown> {
       );
 
       // Run pattern setup within same transaction
-      this.#manager.runtime.run(tx, recipe, {}, pieceCell);
+      this.#manager.runtime.run(tx, pattern, {}, pieceCell);
 
       // Link as default pattern within same transaction
       defaultPatternCell.set(pieceCell.withTx(tx));

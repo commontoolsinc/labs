@@ -17,7 +17,7 @@ describe("wish built-in", () => {
   let runtime: Runtime;
   let tx: ReturnType<Runtime["edit"]>;
   let wish: ReturnType<typeof createBuilder>["commontools"]["wish"];
-  let recipe: ReturnType<typeof createBuilder>["commontools"]["recipe"];
+  let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -29,7 +29,7 @@ describe("wish built-in", () => {
     tx = runtime.edit();
 
     const { commontools } = createBuilder();
-    ({ wish, recipe } = commontools);
+    ({ wish, pattern } = commontools);
   });
 
   afterEach(async () => {
@@ -58,7 +58,7 @@ describe("wish built-in", () => {
     await runtime.idle();
     tx = runtime.edit();
 
-    const wishRecipe = recipe("wish resolves all pieces", () => {
+    const wishPattern = pattern(() => {
       const allPieces = wish<Array<Record<string, unknown>>>({
         query: "/allPieces",
       });
@@ -75,7 +75,7 @@ describe("wish built-in", () => {
       undefined,
       tx,
     );
-    const result = runtime.run(tx, wishRecipe, {}, resultCell);
+    const result = runtime.run(tx, wishPattern, {}, resultCell);
     await tx.commit();
     tx = runtime.edit();
 
@@ -124,7 +124,7 @@ describe("wish built-in", () => {
     await runtime.idle();
     tx = runtime.edit();
 
-    const wishRecipe = recipe("wish semantic target", () => {
+    const wishPattern = pattern(() => {
       return {
         semanticAllPieces: wish({ query: "#allPieces" }),
         semanticFirstTitle: wish({ query: "#allPieces/0/title" }),
@@ -140,7 +140,7 @@ describe("wish built-in", () => {
       undefined,
       tx,
     );
-    const result = runtime.run(tx, wishRecipe, {}, resultCell);
+    const result = runtime.run(tx, wishPattern, {}, resultCell);
     await tx.commit();
     tx = runtime.edit();
 
@@ -167,7 +167,7 @@ describe("wish built-in", () => {
     await runtime.idle();
     tx = runtime.edit();
 
-    const wishRecipe = recipe("wish default pattern", () => {
+    const wishPattern = pattern(() => {
       return {
         defaultTitle: wish({ query: "#default/title" }),
         defaultGreeting: wish({ query: "#default/argument/greeting" }),
@@ -183,7 +183,7 @@ describe("wish built-in", () => {
       undefined,
       tx,
     );
-    const result = runtime.run(tx, wishRecipe, {}, resultCell);
+    const result = runtime.run(tx, wishPattern, {}, resultCell);
     await tx.commit();
     tx = runtime.edit();
 
@@ -210,7 +210,7 @@ describe("wish built-in", () => {
     await runtime.idle();
     tx = runtime.edit();
 
-    const wishRecipe = recipe("wish mentionable", () => {
+    const wishPattern = pattern(() => {
       return {
         mentionable: wish({ query: "#mentionable" }),
         firstMentionable: wish({ query: "#mentionable/0/name" }),
@@ -226,7 +226,7 @@ describe("wish built-in", () => {
       undefined,
       tx,
     );
-    const result = runtime.run(tx, wishRecipe, {}, resultCell);
+    const result = runtime.run(tx, wishPattern, {}, resultCell);
     await tx.commit();
     tx = runtime.edit();
 
@@ -259,7 +259,7 @@ describe("wish built-in", () => {
     await runtime.idle();
     tx = runtime.edit();
 
-    const wishRecipe = recipe("wish recent pieces", () => {
+    const wishPattern = pattern(() => {
       return {
         recent: wish({ query: "#recent" }),
         recentFirst: wish({ query: "#recent/0/name" }),
@@ -275,7 +275,7 @@ describe("wish built-in", () => {
       undefined,
       tx,
     );
-    const result = runtime.run(tx, wishRecipe, {}, resultCell);
+    const result = runtime.run(tx, wishPattern, {}, resultCell);
     await tx.commit();
     tx = runtime.edit();
 
@@ -286,7 +286,7 @@ describe("wish built-in", () => {
   });
 
   it("returns current timestamp via #now", async () => {
-    const wishRecipe = recipe("wish now", () => {
+    const wishPattern = pattern(() => {
       return { nowValue: wish({ query: "#now" }) };
     });
 
@@ -297,7 +297,7 @@ describe("wish built-in", () => {
       tx,
     );
     const before = Date.now();
-    const result = runtime.run(tx, wishRecipe, {}, resultCell);
+    const result = runtime.run(tx, wishPattern, {}, resultCell);
     await tx.commit();
     tx = runtime.edit();
 
@@ -321,7 +321,7 @@ describe("wish built-in", () => {
     };
     spaceCell.withTx(tx).set(spaceData);
 
-    const wishRecipe = recipe("wish space cell", () => {
+    const wishPattern = pattern(() => {
       const spaceResult = wish({ query: "/" });
       return { spaceResult };
     });
@@ -332,7 +332,7 @@ describe("wish built-in", () => {
       undefined,
       tx,
     );
-    const result = runtime.run(tx, wishRecipe, {}, resultCell);
+    const result = runtime.run(tx, wishPattern, {}, resultCell);
     await tx.commit();
     tx = runtime.edit();
 
@@ -355,7 +355,7 @@ describe("wish built-in", () => {
       nested: { deep: { data: ["Alpha"] } },
     });
 
-    const wishRecipe = recipe("wish space subpaths", () => {
+    const wishPattern = pattern(() => {
       return {
         configLink: wish({ query: "/config" }),
         dataLink: wish({ query: "/nested/deep/data" }),
@@ -371,7 +371,7 @@ describe("wish built-in", () => {
       undefined,
       tx,
     );
-    const result = runtime.run(tx, wishRecipe, {}, resultCell);
+    const result = runtime.run(tx, wishPattern, {}, resultCell);
     await tx.commit();
     tx = runtime.edit();
 
@@ -387,7 +387,7 @@ describe("wish built-in", () => {
   });
 
   it("returns error for unknown wishes", async () => {
-    const wishRecipe = recipe("wish unknown target", () => {
+    const wishPattern = pattern(() => {
       const missing = wish({ query: "" });
       return { missing };
     });
@@ -398,7 +398,7 @@ describe("wish built-in", () => {
       undefined,
       tx,
     );
-    const result = runtime.run(tx, wishRecipe, {}, resultCell);
+    const result = runtime.run(tx, wishPattern, {}, resultCell);
     await tx.commit();
     tx = runtime.edit();
 
@@ -435,7 +435,7 @@ describe("wish built-in", () => {
       await runtime.idle();
       tx = runtime.edit();
 
-      const wishRecipe = recipe("wish object syntax allPieces", () => {
+      const wishPattern = pattern(() => {
         const allPieces = wish<unknown[]>({ query: "#allPieces" });
         return { allPieces };
       });
@@ -448,7 +448,7 @@ describe("wish built-in", () => {
         undefined,
         tx,
       );
-      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
       await tx.commit();
       tx = runtime.edit();
 
@@ -485,7 +485,7 @@ describe("wish built-in", () => {
       await runtime.idle();
       tx = runtime.edit();
 
-      const wishRecipe = recipe("wish object syntax with path", () => {
+      const wishPattern = pattern(() => {
         const firstTitle = wish<string>({
           query: "#allPieces",
           path: ["0", "title"],
@@ -501,7 +501,7 @@ describe("wish built-in", () => {
         undefined,
         tx,
       );
-      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
       await tx.commit();
       tx = runtime.edit();
 
@@ -538,7 +538,7 @@ describe("wish built-in", () => {
       await runtime.idle();
       tx = runtime.edit();
 
-      const wishRecipe = recipe("wish object syntax slashed query", () => {
+      const wishPattern = pattern(() => {
         const firstTitle = wish<string>({
           query: "#allPieces/0/title",
         });
@@ -553,7 +553,7 @@ describe("wish built-in", () => {
         undefined,
         tx,
       );
-      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
       await tx.commit();
       tx = runtime.edit();
 
@@ -571,7 +571,7 @@ describe("wish built-in", () => {
       await runtime.idle();
       tx = runtime.edit();
 
-      const wishRecipe = recipe("wish object syntax space", () => {
+      const wishPattern = pattern(() => {
         const spaceResult = wish({ query: "/" });
         return { spaceResult };
       });
@@ -584,7 +584,7 @@ describe("wish built-in", () => {
         undefined,
         tx,
       );
-      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
       await tx.commit();
       tx = runtime.edit();
 
@@ -604,7 +604,7 @@ describe("wish built-in", () => {
       await runtime.idle();
       tx = runtime.edit();
 
-      const wishRecipe = recipe("wish object syntax space subpaths", () => {
+      const wishPattern = pattern(() => {
         return {
           configLink: wish({ query: "/", path: ["config"] }),
           dataLink: wish({ query: "/", path: ["nested", "deep", "data"] }),
@@ -620,7 +620,7 @@ describe("wish built-in", () => {
         undefined,
         tx,
       );
-      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
       await tx.commit();
       tx = runtime.edit();
 
@@ -633,7 +633,7 @@ describe("wish built-in", () => {
     });
 
     it("returns current timestamp via #now tag", async () => {
-      const wishRecipe = recipe("wish object syntax now", () => {
+      const wishPattern = pattern(() => {
         return { nowValue: wish({ query: "#now" }) };
       });
 
@@ -646,7 +646,7 @@ describe("wish built-in", () => {
         tx,
       );
       const before = Date.now();
-      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
       await tx.commit();
       tx = runtime.edit();
 
@@ -660,7 +660,7 @@ describe("wish built-in", () => {
     });
 
     it("returns error for unknown tag", async () => {
-      const wishRecipe = recipe("wish object syntax unknown", () => {
+      const wishPattern = pattern(() => {
         const missing = wish({ query: "#unknownTag" });
         return { missing };
       });
@@ -673,7 +673,7 @@ describe("wish built-in", () => {
         undefined,
         tx,
       );
-      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
       await tx.commit();
       tx = runtime.edit();
 
@@ -685,7 +685,7 @@ describe("wish built-in", () => {
     });
 
     it("returns error when tag is missing", async () => {
-      const wishRecipe = recipe("wish object syntax no tag", () => {
+      const wishPattern = pattern(() => {
         const missing = wish({ query: "", path: ["some", "path"] });
         return { missing };
       });
@@ -698,7 +698,7 @@ describe("wish built-in", () => {
         undefined,
         tx,
       );
-      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
       await tx.commit();
       tx = runtime.edit();
 
@@ -717,7 +717,7 @@ describe("wish built-in", () => {
       await runtime.idle();
       tx = runtime.edit();
 
-      const wishRecipe = recipe("wish object syntax UI success", () => {
+      const wishPattern = pattern(() => {
         const spaceResult = wish({ query: "/" });
         return { spaceResult };
       });
@@ -730,7 +730,7 @@ describe("wish built-in", () => {
         undefined,
         tx,
       );
-      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
       await tx.commit();
       tx = runtime.edit();
 
@@ -758,7 +758,7 @@ describe("wish built-in", () => {
       };
 
       try {
-        const wishRecipe = recipe("wish object syntax UI error", () => {
+        const wishPattern = pattern(() => {
           const missing = wish({ query: "#unknownTag" });
           return { missing };
         });
@@ -771,7 +771,7 @@ describe("wish built-in", () => {
           undefined,
           tx,
         );
-        const result = runtime.run(tx, wishRecipe, {}, resultCell);
+        const result = runtime.run(tx, wishPattern, {}, resultCell);
         await tx.commit();
         tx = runtime.edit();
 
@@ -809,7 +809,7 @@ describe("wish built-in", () => {
       await runtime.idle();
       tx = runtime.edit();
 
-      const wishRecipe = recipe("wish unified shape candidates", () => {
+      const wishPattern = pattern(() => {
         const spaceResult = wish({ query: "/" });
         return { spaceResult };
       });
@@ -822,7 +822,7 @@ describe("wish built-in", () => {
         undefined,
         tx,
       );
-      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
       await tx.commit();
       tx = runtime.edit();
 
@@ -848,7 +848,7 @@ describe("wish built-in", () => {
     let runtime: Runtime;
     let tx: ReturnType<Runtime["edit"]>;
     let wish: ReturnType<typeof createBuilder>["commontools"]["wish"];
-    let recipe: ReturnType<typeof createBuilder>["commontools"]["recipe"];
+    let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
 
     beforeEach(async () => {
       userIdentity = await Identity.fromPassphrase("scope-test-user");
@@ -861,7 +861,7 @@ describe("wish built-in", () => {
       tx = runtime.edit();
 
       const { commontools } = createBuilder();
-      ({ wish, recipe } = commontools);
+      ({ wish, pattern } = commontools);
     });
 
     afterEach(async () => {
@@ -935,7 +935,7 @@ describe("wish built-in", () => {
       tx = runtime.edit();
 
       // Execute: Search with scope: ["."] should find only mentionable
-      const wishRecipe = recipe("scope mentionable only", () => {
+      const wishPattern = pattern(() => {
         return { result: wish({ query: "#test-tag", scope: ["."] }) };
       });
 
@@ -947,7 +947,7 @@ describe("wish built-in", () => {
         undefined,
         tx,
       );
-      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
       await tx.commit();
       tx = runtime.edit();
 
@@ -1027,7 +1027,7 @@ describe("wish built-in", () => {
       tx = runtime.edit();
 
       // Execute: Search with scope: ["~"] should find only favorite
-      const wishRecipe = recipe("scope favorites only", () => {
+      const wishPattern = pattern(() => {
         return { result: wish({ query: "#test-tag", scope: ["~"] }) };
       });
 
@@ -1039,7 +1039,7 @@ describe("wish built-in", () => {
         undefined,
         tx,
       );
-      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
       await tx.commit();
       tx = runtime.edit();
 
@@ -1119,7 +1119,7 @@ describe("wish built-in", () => {
       tx = runtime.edit();
 
       // Execute: Search with scope: ["~", "."] should find favorite
-      const wishRecipe1 = recipe("scope both find favorite", () => {
+      const wishPattern1 = pattern(() => {
         return { result: wish({ query: "#fav-tag", scope: ["~", "."] }) };
       });
 
@@ -1131,7 +1131,7 @@ describe("wish built-in", () => {
         undefined,
         tx,
       );
-      const result1 = runtime.run(tx, wishRecipe1, {}, resultCell1);
+      const result1 = runtime.run(tx, wishPattern1, {}, resultCell1);
       await tx.commit();
       tx = runtime.edit();
 
@@ -1144,7 +1144,7 @@ describe("wish built-in", () => {
       expect(favoriteData.type).toBe("favorite");
 
       // Execute: Search with scope: ["~", "."] should find mentionable
-      const wishRecipe2 = recipe("scope both find mentionable", () => {
+      const wishPattern2 = pattern(() => {
         return { result: wish({ query: "#ment-tag", scope: ["~", "."] }) };
       });
 
@@ -1156,7 +1156,7 @@ describe("wish built-in", () => {
         undefined,
         tx,
       );
-      const result2 = runtime.run(tx, wishRecipe2, {}, resultCell2);
+      const result2 = runtime.run(tx, wishPattern2, {}, resultCell2);
       await tx.commit();
       tx = runtime.edit();
 
@@ -1233,7 +1233,7 @@ describe("wish built-in", () => {
       tx = runtime.edit();
 
       // Execute: Search without scope parameter should default to favorites only
-      const wishRecipe = recipe("default scope", () => {
+      const wishPattern = pattern(() => {
         return { result: wish({ query: "#test-tag" }) };
       });
 
@@ -1245,7 +1245,7 @@ describe("wish built-in", () => {
         undefined,
         tx,
       );
-      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
       await tx.commit();
       tx = runtime.edit();
 
@@ -1296,7 +1296,7 @@ describe("wish built-in", () => {
       tx = runtime.edit();
 
       // Execute: Search with mentionable scope only should give mentionable-specific error
-      const wishRecipe = recipe("scope error test", () => {
+      const wishPattern = pattern(() => {
         return { result: wish({ query: "#nonexistent", scope: ["."] }) };
       });
 
@@ -1308,7 +1308,7 @@ describe("wish built-in", () => {
         undefined,
         tx,
       );
-      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
       await tx.commit();
       tx = runtime.edit();
 
@@ -1366,7 +1366,7 @@ describe("wish built-in", () => {
       tx = runtime.edit();
 
       // Execute: Search with mentionable scope only should fail (even though favorites has it)
-      const wishRecipe = recipe("no mentionable match", () => {
+      const wishPattern = pattern(() => {
         return { result: wish({ query: "#test-tag", scope: ["."] }) };
       });
 
@@ -1378,7 +1378,7 @@ describe("wish built-in", () => {
         undefined,
         tx,
       );
-      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
       await tx.commit();
       tx = runtime.edit();
 
@@ -1433,7 +1433,7 @@ describe("wish built-in", () => {
       tx = runtime.edit();
 
       // Execute: #default with scope: ["~"] should resolve from home space
-      const wishRecipe = recipe("default with tilde scope", () => {
+      const wishPattern = pattern(() => {
         return {
           result: wish({
             query: "#default",
@@ -1450,7 +1450,7 @@ describe("wish built-in", () => {
         undefined,
         tx,
       );
-      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
       await tx.commit();
       tx = runtime.edit();
 
@@ -1512,7 +1512,7 @@ describe("wish built-in", () => {
         tx = runtime.edit();
 
         // Execute: Search with scope containing the arbitrary DID
-        const wishRecipe = recipe("scope arbitrary did", () => {
+        const wishPattern = pattern(() => {
           return {
             result: wish({
               query: "#arb-tag",
@@ -1529,7 +1529,7 @@ describe("wish built-in", () => {
           undefined,
           tx,
         );
-        const result = runtime.run(tx, wishRecipe, {}, resultCell);
+        const result = runtime.run(tx, wishPattern, {}, resultCell);
         await tx.commit();
         tx = runtime.edit();
 
@@ -1624,7 +1624,7 @@ describe("wish built-in", () => {
         tx = runtime.edit();
 
         // Execute: Search with scope: [".", otherSpace.did()]
-        const wishRecipe = recipe("scope dot and did", () => {
+        const wishPattern = pattern(() => {
           return {
             result: wish({
               query: "#multi-tag",
@@ -1641,7 +1641,7 @@ describe("wish built-in", () => {
           undefined,
           tx,
         );
-        const result = runtime.run(tx, wishRecipe, {}, resultCell);
+        const result = runtime.run(tx, wishPattern, {}, resultCell);
         await tx.commit();
         tx = runtime.edit();
 
@@ -1723,7 +1723,7 @@ describe("wish built-in", () => {
         tx = runtime.edit();
 
         // Execute: Search with scope: ["~", otherSpace.did()]
-        const wishRecipe = recipe("scope tilde and did", () => {
+        const wishPattern = pattern(() => {
           return {
             result: wish({
               query: "#combo-tag",
@@ -1740,7 +1740,7 @@ describe("wish built-in", () => {
           undefined,
           tx,
         );
-        const result = runtime.run(tx, wishRecipe, {}, resultCell);
+        const result = runtime.run(tx, wishPattern, {}, resultCell);
         await tx.commit();
         tx = runtime.edit();
 
@@ -1802,7 +1802,7 @@ describe("wish built-in", () => {
         tx = runtime.edit();
 
         // Execute: #default with scope: [otherSpace.did()]
-        const wishRecipe = recipe("default with did scope", () => {
+        const wishPattern = pattern(() => {
           return {
             result: wish({
               query: "#default",
@@ -1819,7 +1819,7 @@ describe("wish built-in", () => {
           undefined,
           tx,
         );
-        const result = runtime.run(tx, wishRecipe, {}, resultCell);
+        const result = runtime.run(tx, wishPattern, {}, resultCell);
         await tx.commit();
         tx = runtime.edit();
 
@@ -1866,7 +1866,7 @@ describe("wish built-in", () => {
         tx = runtime.edit();
 
         // Execute: #allPieces with scope: [otherSpace.did()]
-        const wishRecipe = recipe("allPieces with did scope", () => {
+        const wishPattern = pattern(() => {
           return {
             result: wish({
               query: "#allPieces",
@@ -1883,7 +1883,7 @@ describe("wish built-in", () => {
           undefined,
           tx,
         );
-        const result = runtime.run(tx, wishRecipe, {}, resultCell);
+        const result = runtime.run(tx, wishPattern, {}, resultCell);
         await tx.commit();
         tx = runtime.edit();
 
@@ -1922,7 +1922,7 @@ describe("wish built-in", () => {
         tx = runtime.edit();
 
         // Execute: Search with only an arbitrary DID scope, no matches
-        const wishRecipe = recipe("arb did error message", () => {
+        const wishPattern = pattern(() => {
           return {
             result: wish({
               query: "#nonexistent",
@@ -1939,7 +1939,7 @@ describe("wish built-in", () => {
           undefined,
           tx,
         );
-        const result = runtime.run(tx, wishRecipe, {}, resultCell);
+        const result = runtime.run(tx, wishPattern, {}, resultCell);
         await tx.commit();
         tx = runtime.edit();
 
@@ -2015,7 +2015,7 @@ describe("wish built-in", () => {
       tx = runtime.edit();
 
       // Execute: Search both with scope: ["~", "."]
-      const wishRecipe = recipe("scope dedup test", () => {
+      const wishPattern = pattern(() => {
         return { result: wish({ query: "#shared-tag", scope: ["~", "."] }) };
       });
 
@@ -2027,7 +2027,7 @@ describe("wish built-in", () => {
         undefined,
         tx,
       );
-      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
       await tx.commit();
       tx = runtime.edit();
 
@@ -2058,8 +2058,8 @@ describe("wish built-in", () => {
           {
             name: "/main.tsx",
             contents: [
-              "import { recipe, wish } from 'commontools';",
-              "export default recipe<{}>('Compiled Wish Test', () => {",
+              "import { pattern, wish } from 'commontools';",
+              "export default pattern<{}>(() => {",
               "  const spaceResult = wish({ query: '/' });",
               "  return { spaceResult };",
               "});",
@@ -2068,10 +2068,13 @@ describe("wish built-in", () => {
         ],
       };
 
-      const compiled = await runtime.recipeManager.compileRecipe(program);
-      const recipeId = runtime.recipeManager.registerRecipe(compiled, program);
-      const loadedRecipe = await runtime.recipeManager.loadRecipe(
-        recipeId,
+      const compiled = await runtime.patternManager.compilePattern(program);
+      const patternId = runtime.patternManager.registerPattern(
+        compiled,
+        program,
+      );
+      const loadedPattern = await runtime.patternManager.loadPattern(
+        patternId,
         space,
         tx,
       );
@@ -2084,7 +2087,7 @@ describe("wish built-in", () => {
         undefined,
         tx,
       );
-      const result = runtime.run(tx, loadedRecipe, {}, resultCell);
+      const result = runtime.run(tx, loadedPattern, {}, resultCell);
       await tx.commit();
       tx = runtime.edit();
 
@@ -2110,8 +2113,8 @@ describe("wish built-in", () => {
           {
             name: "/main.tsx",
             contents: [
-              "import { recipe, wish } from 'commontools';",
-              "export default recipe<{}>('Compiled Wish Path Test', () => {",
+              "import { pattern, wish } from 'commontools';",
+              "export default pattern<{}>(() => {",
               "  const deepValue = wish({ query: '/', path: ['nested', 'deep', 'value'] });",
               "  return { deepValue };",
               "});",
@@ -2120,10 +2123,13 @@ describe("wish built-in", () => {
         ],
       };
 
-      const compiled = await runtime.recipeManager.compileRecipe(program);
-      const recipeId = runtime.recipeManager.registerRecipe(compiled, program);
-      const loadedRecipe = await runtime.recipeManager.loadRecipe(
-        recipeId,
+      const compiled = await runtime.patternManager.compilePattern(program);
+      const patternId = runtime.patternManager.registerPattern(
+        compiled,
+        program,
+      );
+      const loadedPattern = await runtime.patternManager.loadPattern(
+        patternId,
         space,
         tx,
       );
@@ -2136,7 +2142,7 @@ describe("wish built-in", () => {
         undefined,
         tx,
       );
-      const result = runtime.run(tx, loadedRecipe, {}, resultCell);
+      const result = runtime.run(tx, loadedPattern, {}, resultCell);
       await tx.commit();
       tx = runtime.edit();
 
@@ -2153,7 +2159,7 @@ describe("wish built-in", () => {
     let runtime: Runtime;
     let tx: ReturnType<Runtime["edit"]>;
     let wish: ReturnType<typeof createBuilder>["commontools"]["wish"];
-    let recipe: ReturnType<typeof createBuilder>["commontools"]["recipe"];
+    let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
 
     beforeEach(async () => {
       userIdentity = await Identity.fromPassphrase("user-home-space");
@@ -2168,7 +2174,7 @@ describe("wish built-in", () => {
       tx = runtime.edit();
 
       const { commontools } = createBuilder();
-      ({ wish, recipe } = commontools);
+      ({ wish, pattern } = commontools);
     });
 
     afterEach(async () => {
@@ -2204,7 +2210,7 @@ describe("wish built-in", () => {
       tx = runtime.edit();
 
       // Execute: Run pattern in different space (patternSpace)
-      const wishRecipe = recipe("wish favorites cross-space", () => {
+      const wishPattern = pattern(() => {
         return { favorites: wish({ query: "#favorites" }) };
       });
 
@@ -2216,7 +2222,7 @@ describe("wish built-in", () => {
         undefined,
         tx,
       );
-      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
       await tx.commit();
       tx = runtime.edit();
 
@@ -2263,7 +2269,7 @@ describe("wish built-in", () => {
       tx = runtime.edit();
 
       // Execute: Run pattern in pattern space that wishes for #default
-      const wishRecipe = recipe("wish default cross-space", () => {
+      const wishPattern = pattern(() => {
         return { defaultData: wish({ query: "#default" }) };
       });
 
@@ -2275,7 +2281,7 @@ describe("wish built-in", () => {
         undefined,
         tx,
       );
-      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
       await tx.commit();
       tx = runtime.edit();
 
@@ -2325,7 +2331,7 @@ describe("wish built-in", () => {
       tx = runtime.edit();
 
       // Execute: Single pattern wishes for both
-      const wishRecipe = recipe("wish mixed tags", () => {
+      const wishPattern = pattern(() => {
         return {
           favorites: wish({ query: "#favorites" }),
           patternData: wish({ query: "/", path: ["data"] }),
@@ -2341,7 +2347,7 @@ describe("wish built-in", () => {
         undefined,
         tx,
       );
-      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
       await tx.commit();
       tx = runtime.edit();
 
@@ -2393,7 +2399,7 @@ describe("wish built-in", () => {
       tx = runtime.edit();
 
       // Execute: Pattern uses computed() for the query - just like GoogleAuthManager
-      const wishRecipe = recipe("wish computed query", () => {
+      const wishPattern = pattern(() => {
         const tag = computed(() => "#googleAuth");
         const authResult = wish({ query: tag });
         return { authResult };
@@ -2407,7 +2413,7 @@ describe("wish built-in", () => {
         undefined,
         tx,
       );
-      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
       await tx.commit();
       tx = runtime.edit();
 
@@ -2458,7 +2464,7 @@ describe("wish built-in", () => {
       tx = runtime.edit();
 
       // Execute: Pattern in different space wishes for #myTag
-      const wishRecipe = recipe("wish hashtag search", () => {
+      const wishPattern = pattern(() => {
         return { taggedItem: wish({ query: "#myTag" }) };
       });
 
@@ -2470,7 +2476,7 @@ describe("wish built-in", () => {
         undefined,
         tx,
       );
-      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
       await tx.commit();
       tx = runtime.edit();
 
@@ -2482,8 +2488,8 @@ describe("wish built-in", () => {
     });
 
     it("starts piece automatically when accessed via cross-space wish", async () => {
-      // Setup 1: Create a simple counter recipe/piece
-      const counterRecipe = recipe<{ count: number }>("counter piece", () => {
+      // Setup 1: Create a simple counter pattern/piece
+      const counterPattern = pattern<{ count: number }>(() => {
         const count = 0;
         return {
           count,
@@ -2501,7 +2507,7 @@ describe("wish built-in", () => {
         tx,
       );
       // Setup the piece (but don't start it yet)
-      runtime.setup(tx, counterRecipe, {}, pieceCell);
+      runtime.setup(tx, counterPattern, {}, pieceCell);
 
       // Setup 3: Add piece to favorites through defaultPattern
       const homeSpaceCell = runtime.getHomeSpaceCell(tx);
@@ -2522,7 +2528,7 @@ describe("wish built-in", () => {
       tx = runtime.edit();
 
       // Execute: Pattern in different space wishes for the piece via hashtag
-      const wishingRecipe = recipe("wish for piece", () => {
+      const wishingPattern = pattern(() => {
         return { pieceData: wish({ query: "#counterPiece" }) };
       });
 
@@ -2534,7 +2540,7 @@ describe("wish built-in", () => {
         undefined,
         tx,
       );
-      const result = runtime.run(tx, wishingRecipe, {}, resultCell);
+      const result = runtime.run(tx, wishingPattern, {}, resultCell);
       await tx.commit();
       tx = runtime.edit();
 
@@ -2632,7 +2638,7 @@ describe("tagMatchesHashtag", () => {
   });
 
   it("matches hashtag at start of string", () => {
-    expect(tagMatchesHashtag("#recipe for dinner", "recipe")).toBe(true);
+    expect(tagMatchesHashtag("#pattern for dinner", "pattern")).toBe(true);
   });
 
   it("matches hashtag portion before special characters", () => {

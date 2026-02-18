@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { ifElse, recipe, UI } from "commontools";
+import { ifElse, pattern, UI } from "commontools";
 
 interface State {
   matrix: number[][];
@@ -19,7 +19,7 @@ interface State {
   selectedScore: number;
 }
 
-export default recipe<State>("ElementAccessComplex", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>

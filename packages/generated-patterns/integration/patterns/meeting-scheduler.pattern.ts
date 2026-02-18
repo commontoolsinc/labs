@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -557,8 +557,7 @@ const liftLatestSlotUpdateView = lift(
  * Meeting scheduler that tracks proposed slots, records participant votes, and
  * surfaces consensus snapshots for offline planning.
  */
-export const meetingSchedulerPattern = recipe<MeetingSchedulerArgs>(
-  "Meeting Scheduler Pattern",
+export const meetingSchedulerPattern = pattern<MeetingSchedulerArgs>(
   ({ participants, slots }) => {
     const votes = cell<VoteRecord>({});
     const history = cell<string[]>([]);

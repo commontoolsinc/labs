@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -421,8 +421,7 @@ const liftLastEvent = lift((input: { log: string[]; lines: LineTotal[] }) => {
   return input.log[input.log.length - 1];
 });
 
-export const shoppingCartAggregation = recipe<ShoppingCartArgs>(
-  "Shopping Cart Aggregation",
+export const shoppingCartAggregation = pattern<ShoppingCartArgs>(
   ({ items, discounts }) => {
     const cartItems = liftSanitizeCartItems(items);
     const discountRules = liftSanitizeDiscountRules(discounts);

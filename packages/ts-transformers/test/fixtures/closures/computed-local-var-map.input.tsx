@@ -6,14 +6,14 @@
  * Inside a derive callback, OpaqueRef values are unwrapped to plain JS,
  * so `localVar` is a plain array and .mapWithPattern() doesn't exist on it.
  */
-import { computed, recipe, UI } from "commontools";
+import { computed, pattern, UI } from "commontools";
 
 interface Item {
   name: string;
   price: number;
 }
 
-export default recipe<{ items: Item[] }>("ComputedLocalVarMap", ({ items }) => {
+export default pattern<{ items: Item[] }>(({ items }) => {
   const filtered = computed(() => items.filter((i) => i.price > 100));
 
   return {

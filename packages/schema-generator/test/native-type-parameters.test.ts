@@ -46,12 +46,12 @@ interface DataContainer {
 
   it("treats JSONSchemaObj and JSONSchema as native types", async () => {
     const code = `
-interface Recipe {
+interface PatternConfig {
   argumentSchema: JSONSchema;
   testSchema: JSONSchemaObj;
 }
 `;
-    const { type, checker } = await getTypeFromCode(code, "Recipe");
+    const { type, checker } = await getTypeFromCode(code, "PatternConfig");
     const generator = new SchemaGenerator();
     const schema = asObjectSchema(generator.generateSchema(type, checker));
     const props = schema.properties as Record<string, unknown> | undefined;
@@ -96,12 +96,12 @@ interface ClientView {
 
   it("treats JSONSchema as a native type when nested in Array", async () => {
     const code = `
-interface Recipe {
+interface PatternConfig {
   argumentSchemas: Array<JSONSchema>;
   testSchemas: JSONSchema[];
 }
 `;
-    const { type, checker } = await getTypeFromCode(code, "Recipe");
+    const { type, checker } = await getTypeFromCode(code, "PatternConfig");
     const generator = new SchemaGenerator();
     const schema = asObjectSchema(generator.generateSchema(type, checker));
     const props = schema.properties as Record<string, unknown> | undefined;

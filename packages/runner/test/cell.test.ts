@@ -9,8 +9,8 @@ import { isCell } from "../src/cell.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { isCellResult } from "../src/query-result-proxy.ts";
 import { toCell } from "../src/back-to-cell.ts";
-import { ID, JSONSchema, type Recipe } from "../src/builder/types.ts";
-import { popFrame, pushFrame } from "../src/builder/recipe.ts";
+import { ID, JSONSchema, type Pattern } from "../src/builder/types.ts";
+import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { Runtime } from "../src/runtime.ts";
 import { txToReactivityLog } from "../src/scheduler.ts";
 import { addCommonIDfromObjectID } from "../src/data-updating.ts";
@@ -383,9 +383,9 @@ describe("Cell", () => {
     expect(retrievedSource?.get()).toEqual({ foo: 456 });
   });
 
-  it("should update recipe output when argument is changed via getArgumentCell", async () => {
-    // Create a simple doubling recipe
-    const doubleRecipe: Recipe = {
+  it("should update pattern output when argument is changed via getArgumentCell", async () => {
+    // Create a simple doubling pattern
+    const doublePattern: Pattern = {
       argumentSchema: {
         type: "object",
         properties: { input: { type: "number" } },
@@ -408,9 +408,9 @@ describe("Cell", () => {
       ],
     };
 
-    // Instantiate the recipe with initial argument
-    const resultCell = runtime.getCell(space, "doubling recipe instance");
-    runtime.setup(undefined, doubleRecipe, { input: 5 }, resultCell);
+    // Instantiate the pattern with initial argument
+    const resultCell = runtime.getCell(space, "doubling pattern instance");
+    runtime.setup(undefined, doublePattern, { input: 5 }, resultCell);
     runtime.start(resultCell);
 
     // Verify initial output (use pull to trigger computation)
@@ -3115,11 +3115,11 @@ describe("toCell and toOpaqueRef hooks", () => {
     });
   });
 
-  describe("Recipe integration", () => {
-    it("should pass query results for recipes without argumentSchema", () => {
+  describe("Pattern integration", () => {
+    it("should pass query results for patterns without argumentSchema", () => {
       const inputCell = runtime.getCell<{ value: number }>(
         space,
-        "hook-recipe-no-schema",
+        "hook-pattern-no-schema",
         undefined,
         tx,
       );
@@ -3134,7 +3134,7 @@ describe("toCell and toOpaqueRef hooks", () => {
       expect(argument.value).toBe(42);
     });
 
-    it("should pass objects with hooks for recipes with argumentSchema", () => {
+    it("should pass objects with hooks for patterns with argumentSchema", () => {
       const schema = {
         type: "object",
         properties: {
@@ -3144,7 +3144,7 @@ describe("toCell and toOpaqueRef hooks", () => {
 
       const inputCell = runtime.getCell<{ value: number }>(
         space,
-        "hook-recipe-with-schema",
+        "hook-pattern-with-schema",
         schema,
         tx,
       );
@@ -3158,7 +3158,7 @@ describe("toCell and toOpaqueRef hooks", () => {
       expect(argument.value).toBe(42);
     });
 
-    it("should allow recipe code to convert back to cells", () => {
+    it("should allow pattern code to convert back to cells", () => {
       const schema = {
         type: "object",
         properties: {
@@ -3168,7 +3168,7 @@ describe("toCell and toOpaqueRef hooks", () => {
 
       const inputCell = runtime.getCell<{ data: string }>(
         space,
-        "hook-recipe-convert",
+        "hook-pattern-convert",
         schema,
         tx,
       );
@@ -3176,7 +3176,7 @@ describe("toCell and toOpaqueRef hooks", () => {
 
       const argument = inputCell.asSchema(schema).get();
 
-      // Recipe code can use toCell to get back to the cell
+      // Pattern code can use toCell to get back to the cell
       const cellFromHook = (argument as any)[toCell]();
       expect(isCell(cellFromHook)).toBe(true);
       const cellResult = cellFromHook.get();

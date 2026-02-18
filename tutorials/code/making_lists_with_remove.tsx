@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { type Cell, Default, handler, recipe, UI } from "commontools";
+import { type Cell, Default, handler, pattern, UI } from "commontools";
 
 interface FriendListState {
   names: Default<
@@ -40,8 +40,7 @@ const removeItem = handler<
   },
 );
 
-export default recipe<FriendListState>(
-  "making lists - with remove",
+export default pattern<FriendListState>(
   (state) => {
     return {
       [UI]: (

@@ -1075,7 +1075,7 @@ tree construction.
  * - **BLAKE2b** -- recommended as a second supported algorithm (faster in
  *   software, same security margin).
  *
- * Specific hashing contexts (e.g., recipe ID generation vs. request
+ * Specific hashing contexts (e.g., pattern ID generation vs. request
  * deduplication) specify which algorithm is used in that context.
  *
  * Output format depends on context. When a string representation is needed,
@@ -1195,7 +1195,7 @@ later serialized to JSON, CBOR, or Automerge.
 ### 6.5 Use Cases
 
 Canonical hashing is used for:
-- Recipe ID generation (derived from recipe definition)
+- Pattern ID generation (derived from pattern definition)
 - Request deduplication
 - Causal chain references (hashing the causal tree of what led to the data's
   existence)

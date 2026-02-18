@@ -1,13 +1,13 @@
 # Runner
 
-The Runner package provides a reactive runtime for executing recipes
+The Runner package provides a reactive runtime for executing patterns
 (computational graphs) with automatic dependency tracking, state management, and
 persistence.
 
 ## Key Features
 
 - **Cell-based Reactivity**: Create, manage, and observe reactive data cells
-- **Recipe Execution**: Run computational graphs defined as recipes
+- **Pattern Execution**: Run computational graphs defined as patterns
 - **Automatic Dependency Tracking**: Changes propagate through your application
   automatically
 - **Schema Validation**: Validate and transform data against JSON Schema
@@ -39,7 +39,7 @@ const runtime = new Runtime({
   }),
   consoleHandler: myConsoleHandler, // Optional
   errorHandlers: [myErrorHandler], // Optional
-  recipeEnvironment: { apiUrl: "https://api.example.com" }, // Optional
+  patternEnvironment: { apiUrl: "https://api.example.com" }, // Optional
   debug: false, // Optional
 });
 
@@ -47,7 +47,7 @@ const runtime = new Runtime({
 const cell = runtime.getCell("my-space", "my-cause", schema);
 const doc = runtime.documentMap.getDoc(value, cause, space);
 await cell.sync();
-const recipe = await runtime.recipeManager.loadRecipe(recipeId);
+const pattern = await runtime.patternManager.loadPattern(patternId);
 
 // Wait for all operations to complete
 await runtime.idle();
@@ -69,11 +69,11 @@ purposes:
 - `src/cell.ts`: Defines the `Cell` abstraction and its implementation
 - `src/doc.ts`: Implements `DocImpl` which represents stored documents in
   storage
-- `src/runner.ts`: Provides the runtime for executing recipes
+- `src/runner.ts`: Provides the runtime for executing patterns
 - `src/scheduler.ts`: Manages execution order and batching of reactive updates
 - `src/storage.ts`: Manages persistence and synchronization
 - `src/doc-map.ts`: Manages the mapping between entities and documents
-- `src/recipe-manager.ts`: Handles recipe loading, compilation, and caching
+- `src/pattern-manager.ts`: Handles pattern loading, compilation, and caching
 - `src/module.ts`: Manages module registration and retrieval
 
 ## Core Concepts
@@ -116,13 +116,13 @@ This approach replaces the previous distinction between CellLinks and Aliases.
 - These mechanisms allow building complex, interconnected data structures
 - The system automatically traverses links when needed
 
-### Recipe System
+### Pattern System
 
-Recipes define computational graphs that process data:
+Patterns define computational graphs that process data:
 
 - Created using the Builder package (`@commontools/builder`)
 - Define inputs, outputs, and transformation logic
-- Can be composed into larger recipes
+- Can be composed into larger patterns
 - Executed by the Runner with automatic dependency tracking
 
 ### Storage Layer
@@ -316,16 +316,16 @@ const nameCell = userCell.key("name");
 console.log(nameCell.get()); // "Alice"
 ```
 
-### Running Recipes
+### Running Patterns
 
-Recipes define computational graphs that process data. Recipes are created using
-the Builder package and executed by the Runner, which manages dependencies and
-updates results automatically.
+Patterns define computational graphs that process data. Patterns are created
+using the Builder package and executed by the Runner, which manages dependencies
+and updates results automatically.
 
 ```typescript
 import { Runtime } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { derive, recipe } from "@commontools/builder";
+import { derive, pattern } from "@commontools/builder";
 import { Identity } from "@commontools/identity";
 
 // Set up storage manager
@@ -340,8 +340,8 @@ const runtime = new Runtime({
 ```
 
 ```typescript
-// Define a recipe with input and output schemas
-const doubleNumberRecipe = recipe(
+// Define a pattern with input and output schemas
+const doubleNumberPattern = pattern(
   // Input schema
   {
     type: "object",
@@ -371,8 +371,12 @@ const resultCell = runtime.documentMap.getDoc(
   "my-space",
 );
 
-// Run the recipe
-const result = runtime.runner.run(doubleNumberRecipe, { value: 5 }, resultCell);
+// Run the pattern
+const result = runtime.runner.run(
+  doubleNumberPattern,
+  { value: 5 },
+  resultCell,
+);
 
 // Await the computation graph to settle
 await runtime.idle();
@@ -386,7 +390,7 @@ sourceCell.key("argument").key("value").set(10);
 await runtime.idle();
 console.log(result.get()); // { result: 20 }
 
-// Stop recipe execution when no longer needed
+// Stop pattern execution when no longer needed
 runtime.runner.stop(result);
 ```
 
@@ -415,7 +419,7 @@ const runtime = new Runtime({
   storageManager,
   consoleHandler: myConsoleHandler, // Optional
   errorHandlers: [myErrorHandler], // Optional
-  recipeEnvironment: { apiUrl: "https://api.example.com" }, // Optional
+  patternEnvironment: { apiUrl: "https://api.example.com" }, // Optional
   debug: false, // Optional
 });
 ```
@@ -657,7 +661,7 @@ interface RuntimeOptions {
   storageManager: IStorageManager; // Required: storage manager implementation
   consoleHandler?: ConsoleHandler; // Optional: custom console handling
   errorHandlers?: ErrorHandler[]; // Optional: error handling
-  recipeEnvironment?: RecipeEnvironment; // Optional: recipe env vars
+  patternEnvironment?: PatternEnvironment; // Optional: pattern env vars
   debug?: boolean; // Optional: debug logging
 }
 ```
@@ -709,12 +713,12 @@ catch errors at compile time.
 Understanding the data flow in the Runner helps visualize how different
 components interact:
 
-1. **Input** → Data enters the system through Cell updates or recipe executions
+1. **Input** → Data enters the system through Cell updates or pattern executions
 2. **Validation** → Schema validation ensures data conforms to expected
    structure (so far only on get, not yet on write)
-3. **Processing** → Recipes transform data according to their logic
-4. **Reactivity** → Changes propagate to dependent cells and recipes through the
-   unified sigil-based linking system
+3. **Processing** → Patterns transform data according to their logic
+4. **Reactivity** → Changes propagate to dependent cells and patterns through
+   the unified sigil-based linking system
 5. **Storage** → Updated data is persisted to storage if configured
 6. **Synchronization** → Changes are synchronized across clients if enabled
 
@@ -729,10 +733,10 @@ The Runtime coordinates several core services:
 - **Storage**: Handles persistence and synchronization with configurable
   backends
 - **DocumentMap**: Maps entity IDs to document instances and manages creation
-- **RecipeManager**: Loads, compiles, and caches recipe definitions
-- **ModuleRegistry**: Manages module registration and retrieval for recipes
-- **Runner**: Executes recipes and manages their lifecycle
-- **Harness**: Provides the execution environment for recipe code
+- **PatternManager**: Loads, compiles, and caches pattern definitions
+- **ModuleRegistry**: Manages module registration and retrieval for patterns
+- **Runner**: Executes patterns and manages their lifecycle
+- **Harness**: Provides the execution environment for pattern code
 
 All services receive the Runtime instance as a dependency, enabling proper
 isolation and testability without global state.

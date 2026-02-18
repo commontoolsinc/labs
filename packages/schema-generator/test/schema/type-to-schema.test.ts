@@ -7,15 +7,15 @@ describe("Schema: type-to-schema parity", () => {
   it("generates schemas for inputs/outputs structures", async () => {
     const code = `
       interface UpdaterInput { newValues: string[]; }
-      interface RecipeInput { values: Cell<string[]>; }
-      interface RecipeOutput { values: string[]; updater: Stream<UpdaterInput>; }
+      interface PatternInput { values: Cell<string[]>; }
+      interface PatternOutput { values: string[]; updater: Stream<UpdaterInput>; }
     `;
     const { type: uType, checker: uChecker, typeNode: uNode } =
       await getTypeFromCode(code, "UpdaterInput");
     const { type: iType, checker: iChecker, typeNode: iNode } =
-      await getTypeFromCode(code, "RecipeInput");
+      await getTypeFromCode(code, "PatternInput");
     const { type: oType, checker: oChecker, typeNode: oNode } =
-      await getTypeFromCode(code, "RecipeOutput");
+      await getTypeFromCode(code, "PatternOutput");
     const gen = createSchemaTransformerV2();
     const u = asObjectSchema(gen.generateSchema(uType, uChecker, uNode));
     const i = asObjectSchema(gen.generateSchema(iType, iChecker, iNode));
@@ -25,12 +25,12 @@ describe("Schema: type-to-schema parity", () => {
     const uNewValues = u.properties?.newValues as any;
     expect(uNewValues?.type).toBe("array");
     expect(uNewValues?.items?.type).toBe("string");
-    // RecipeInput
+    // PatternInput
     const iValues = i.properties?.values as any;
     expect(iValues?.asCell).toBe(true);
     expect(iValues?.type).toBe("array");
     expect(iValues?.items?.type).toBe("string");
-    // RecipeOutput
+    // PatternOutput
     const oValues = o.properties?.values as any;
     expect(oValues?.type).toBe("array");
     expect(oValues?.items?.type).toBe("string");

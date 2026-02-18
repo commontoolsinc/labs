@@ -10,7 +10,7 @@ import {
   type Default,
   handler,
   NAME,
-  recipe,
+  pattern,
   UI,
   Writable,
 } from "commontools";
@@ -119,8 +119,7 @@ const setGender = handler<
 });
 
 // ===== The Pattern =====
-export const GenderModule = recipe<GenderModuleInput, GenderModuleInput>(
-  "GenderModule",
+export const GenderModule = pattern<GenderModuleInput, GenderModuleInput>(
   ({ gender }) => {
     const displayText = computed(() => {
       const currentGender = gender.get();

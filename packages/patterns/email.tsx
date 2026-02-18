@@ -5,7 +5,7 @@
  * A composable pattern that can be used standalone or embedded in containers
  * like Record. Stores one email with a label (Personal, Work, School, etc.)
  */
-import { computed, type Default, NAME, recipe, UI } from "commontools";
+import { computed, type Default, NAME, pattern, UI } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
 // ===== Standard Labels =====
@@ -40,8 +40,7 @@ export interface EmailModuleInput {
 }
 
 // ===== The Pattern =====
-export const EmailModule = recipe<EmailModuleInput, EmailModuleInput>(
-  "EmailModule",
+export const EmailModule = pattern<EmailModuleInput, EmailModuleInput>(
   ({ label, address }) => {
     // Build display text
     const displayText = computed(() => {

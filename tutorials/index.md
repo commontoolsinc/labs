@@ -24,7 +24,7 @@ It is still a work in progress.
 - pass reference to toggle an item (constant time)
 - How to derive from two state inputs
 - How to read a value
-- recipe input and output - schemas
+- pattern input and output - schemas
 - derive
 - other builtins
   - ifelse

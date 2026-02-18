@@ -213,14 +213,14 @@ const userSchema = {
 } as const satisfies JSONSchema;
 ```
 
-### Handler and Recipe Transformations
+### Handler and Pattern Transformations
 
-The schema transformer also converts `handler` and `recipe` calls with type
+The schema transformer also converts `handler` and `pattern` calls with type
 arguments:
 
 ```typescript
 /// <cts-enable />
-import { Cell, handler, recipe } from "commontools";
+import { Cell, handler, pattern } from "commontools";
 
 // Handler with type arguments
 const myHandler = handler<ClickEvent, { count: Cell<number> }>(
@@ -229,8 +229,8 @@ const myHandler = handler<ClickEvent, { count: Cell<number> }>(
   },
 );
 
-// Recipe with type argument
-export default recipe<CounterState>("Counter", (state) => {
+// Pattern with type argument
+export default pattern<CounterState>("Counter", (state) => {
   return { [UI]: <div>Count: {state.count}</div> };
 });
 
@@ -252,7 +252,7 @@ const myHandler = handler(
   },
 );
 
-export default recipe(
+export default pattern(
   {
     type: "object",
     properties: {
@@ -341,7 +341,7 @@ const schema = {
 ## FUTURE: Semantic Validation
 
 A critical aspect of the AST system is semantic validation that runs
-**regardless of transformation mode**. This validation ensures recipes follow
+**regardless of transformation mode**. This validation ensures patterns follow
 CommonTools patterns correctly and provides helpful error messages for both
 humans and LLMs.
 
@@ -419,10 +419,10 @@ automatically upgraded.
 
 #### 3. Reactive Pattern Validation
 
-At runtime we can detect some invalid statements while compiling recipes, such
-as `item.status = 'initializing';` in a recipe body.
+At runtime we can detect some invalid statements while compiling patterns, such
+as `item.status = 'initializing';` in a pattern body.
 
-> Can't read value during recipe creation.
+> Can't read value during pattern creation.
 
 By validating the AST we can ensure reactive patterns are used correctly, and
 provide better guidance:
@@ -442,23 +442,23 @@ OpaqueRef values are immutable. To update arrays:
 Or use a handler to manage state updates.
 ```
 
-#### 4. Recipe Structure Validation
+#### 4. Pattern Structure Validation
 
-Validate overall recipe structure:
+Validate overall pattern structure:
 
 ```typescript
 // ❌ Invalid - missing UI export
-export default recipe(schema, schema, (state) => {
+export default pattern(schema, schema, (state) => {
   return {
     count: state.count + 1  // This will error in validation
   };
 });
 
 // Error:
-Error: Recipe must return UI element or have [UI] property.
+Error: Pattern must return UI element or have [UI] property.
 Found: Object with only data properties
 
-Recipes must render UI. Either:
+Patterns must render UI. Either:
 1. Return a JSX element directly
 2. Include a [UI] property with JSX
 3. Use a fragment to wrap multiple elements
@@ -512,12 +512,12 @@ const transformer = createOpaqueRefTransformer(program, {
 ## Current Transformer Architecture
 
 The OpaqueRef transformer handles both OpaqueRef transformations AND schema
-transformations for `handler` and `recipe` calls. This is intentional - the
+transformations for `handler` and `pattern` calls. This is intentional - the
 OpaqueRef transformer:
 
 1. **Transforms JSX expressions** - Wraps OpaqueRef operations in `derive()` and
    `ifElse()`
-2. **Transforms handler/recipe calls** - Converts type arguments to schema
+2. **Transforms handler/pattern calls** - Converts type arguments to schema
    objects
 3. **Manages imports** - Adds necessary imports for `derive`, `ifElse`,
    `toSchema`
@@ -570,7 +570,7 @@ interface TransformerOptions {
 
 ```typescript
 /// <cts-enable />
-import { Cell, cell, derive, ifElse, recipe, toSchema, UI } from "commontools";
+import { Cell, cell, derive, ifElse, pattern, toSchema, UI } from "commontools";
 
 interface TodoItem {
   id: string;
@@ -583,7 +583,7 @@ interface TodoState {
   filter: "all" | "active" | "completed";
 }
 
-export default recipe<TodoState>("TodoList", (state) => {
+export default pattern<TodoState>("TodoList", (state) => {
   // These statement-level operations are NOT transformed:
   // They will fail at runtime if you try to use OpaqueRef directly
   // const activeItems = state.items.filter((item) => !item.completed); // ❌ Not transformed
@@ -613,7 +613,7 @@ export default recipe<TodoState>("TodoList", (state) => {
 });
 
 // After transformation:
-export default recipe(
+export default pattern(
   {
     type: "object",
     properties: {

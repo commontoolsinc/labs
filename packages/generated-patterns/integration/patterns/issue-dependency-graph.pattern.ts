@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -317,8 +317,7 @@ const liftOrderText = lift((ids: string[]) =>
 
 const liftCycleStatus = lift((flag: boolean) => flag ? "cycle" : "valid");
 
-export const issueDependencyGraph = recipe<IssueDependencyArgs>(
-  "Issue Dependency Graph",
+export const issueDependencyGraph = pattern<IssueDependencyArgs>(
   ({ issues }) => {
     const rejectedEdges = cell<RejectedEdge[]>([]);
 

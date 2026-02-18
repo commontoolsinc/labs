@@ -6,7 +6,7 @@ import {
   derive,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -282,8 +282,7 @@ const recordFeatureUsage = handler(
   },
 );
 
-export const featureUsageAnalytics = recipe<FeatureUsageArgs>(
-  "Feature Usage Analytics",
+export const featureUsageAnalytics = pattern<FeatureUsageArgs>(
   ({ events, defaultDelta }) => {
     const lastEvent = cell("none");
 

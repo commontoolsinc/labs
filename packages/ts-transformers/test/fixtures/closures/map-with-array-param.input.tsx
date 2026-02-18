@@ -1,7 +1,7 @@
 /// <cts-enable />
-import { cell, recipe, UI } from "commontools";
+import { cell, pattern, UI } from "commontools";
 
-export default recipe("MapWithArrayParam", (_state) => {
+export default pattern((_state) => {
   const items = cell([1, 2, 3, 4, 5]);
 
   return {

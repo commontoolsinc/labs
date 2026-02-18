@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -384,10 +384,9 @@ const liftSessionWord = lift((count: number) =>
   count === 1 ? "session" : "sessions"
 );
 
-export const studentAttendanceTrackerPattern = recipe<
+export const studentAttendanceTrackerPattern = pattern<
   StudentAttendanceTrackerArgs
 >(
-  "Student Attendance Tracker",
   ({ roster }) => {
     const runtimeSeed = cell(0);
 

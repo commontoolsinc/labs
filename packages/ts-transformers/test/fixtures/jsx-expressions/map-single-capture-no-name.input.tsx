@@ -1,7 +1,7 @@
 /// <cts-enable />
-import { cell, recipe, UI } from "commontools";
+import { cell, pattern, UI } from "commontools";
 
-export default recipe((_state: any) => {
+export default pattern((_state: any) => {
   const people = cell([
     { id: "1", name: "Alice" },
     { id: "2", name: "Bob" },

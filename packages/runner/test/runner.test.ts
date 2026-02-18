@@ -3,7 +3,7 @@ import { expect } from "@std/expect";
 import "@commontools/utils/equal-ignoring-symbols";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { NAME, type Recipe } from "../src/builder/types.ts";
+import { NAME, type Pattern } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { extractDefaultValues, mergeObjects } from "../src/runner.ts";
 import {
@@ -17,7 +17,7 @@ import {
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-describe("runRecipe", () => {
+describe("runPattern", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
 
@@ -38,7 +38,7 @@ describe("runRecipe", () => {
   });
 
   it("should work with passthrough", async () => {
-    const recipe = {
+    const pattern = {
       argumentSchema: {
         type: "object",
         properties: {
@@ -58,7 +58,7 @@ describe("runRecipe", () => {
           outputs: { value: { $alias: { path: ["internal", "output"] } } },
         },
       ],
-    } as Recipe;
+    } as Pattern;
 
     const resultCell = runtime.getCell(
       space,
@@ -66,7 +66,7 @@ describe("runRecipe", () => {
     );
     const result = runtime.run(
       undefined,
-      recipe,
+      pattern,
       { input: 1 },
       resultCell,
     );
@@ -89,8 +89,8 @@ describe("runRecipe", () => {
     expect(resultValue).toEqual({ output: 1 });
   });
 
-  it("should work with nested recipes", async () => {
-    const innerRecipe = {
+  it("should work with nested patterns", async () => {
+    const innerPattern = {
       argumentSchema: {
         type: "object",
         properties: {
@@ -113,9 +113,9 @@ describe("runRecipe", () => {
           },
         },
       ],
-    } as Recipe;
+    } as Pattern;
 
-    const outerRecipe = {
+    const outerPattern = {
       argumentSchema: {
         type: "object",
         properties: {
@@ -127,20 +127,20 @@ describe("runRecipe", () => {
       result: { result: { $alias: { path: ["internal", "output"] } } },
       nodes: [
         {
-          module: { type: "recipe", implementation: innerRecipe },
+          module: { type: "pattern", implementation: innerPattern },
           inputs: { input: { $alias: { path: ["argument", "value"] } } },
           outputs: { $alias: { path: ["internal", "output"] } },
         },
       ],
-    } as Recipe;
+    } as Pattern;
 
     const resultCell = runtime.getCell(
       space,
-      "should work with nested recipes",
+      "should work with nested patterns",
     );
     const result = runtime.run(
       undefined,
-      outerRecipe,
+      outerPattern,
       { value: 5 },
       resultCell,
     );
@@ -150,7 +150,7 @@ describe("runRecipe", () => {
   });
 
   it("should run a simple module", async () => {
-    const mockRecipe: Recipe = {
+    const mockPattern: Pattern = {
       argumentSchema: {},
       resultSchema: {},
       result: { result: { $alias: { path: ["internal", "result"] } } },
@@ -175,7 +175,7 @@ describe("runRecipe", () => {
     );
     const result = runtime.run(
       tx,
-      mockRecipe,
+      mockPattern,
       { value: 1 },
       resultCell,
     );
@@ -190,7 +190,7 @@ describe("runRecipe", () => {
   it("should run a simple module with no outputs", async () => {
     let ran = false;
 
-    const mockRecipe: Recipe = {
+    const mockPattern: Pattern = {
       argumentSchema: {},
       resultSchema: {},
       result: { result: { $alias: { path: ["internal", "result"] } } },
@@ -212,7 +212,7 @@ describe("runRecipe", () => {
       space,
       "should run a simple module with no outputs",
     );
-    const result = await runtime.runSynced(resultCell, mockRecipe, {
+    const result = await runtime.runSynced(resultCell, mockPattern, {
       value: 1,
     });
     const resultValue = await result.pull();
@@ -223,7 +223,7 @@ describe("runRecipe", () => {
   it("should handle incorrect inputs gracefully", async () => {
     let ran = false;
 
-    const mockRecipe: Recipe = {
+    const mockPattern: Pattern = {
       argumentSchema: {},
       resultSchema: {},
       result: { result: { $alias: { path: ["internal", "result"] } } },
@@ -245,7 +245,7 @@ describe("runRecipe", () => {
       space,
       "should handle incorrect inputs gracefully",
     );
-    const result = await runtime.runSynced(resultCell, mockRecipe, {
+    const result = await runtime.runSynced(resultCell, mockPattern, {
       value: 1,
     });
     const resultValue2 = await result.pull();
@@ -254,8 +254,8 @@ describe("runRecipe", () => {
     expect(ran).toBe(false);
   });
 
-  it("should handle nested recipes", async () => {
-    const nestedRecipe: Recipe = {
+  it("should handle nested patterns", async () => {
+    const nestedPattern: Pattern = {
       argumentSchema: {},
       resultSchema: {},
       result: { $alias: { cell: 1, path: ["internal", "result"] } },
@@ -271,13 +271,13 @@ describe("runRecipe", () => {
       ],
     };
 
-    const mockRecipe: Recipe = {
+    const mockPattern: Pattern = {
       argumentSchema: {},
       resultSchema: {},
       result: { result: { $alias: { path: ["internal", "result"] } } },
       nodes: [
         {
-          module: { type: "recipe", implementation: nestedRecipe },
+          module: { type: "pattern", implementation: nestedPattern },
           inputs: { input: { $alias: { path: ["argument", "value"] } } },
           outputs: { $alias: { path: ["internal", "result"] } },
         },
@@ -286,11 +286,11 @@ describe("runRecipe", () => {
 
     const resultCell = runtime.getCell(
       space,
-      "should handle nested recipes",
+      "should handle nested patterns",
     );
     const result = runtime.run(
       undefined,
-      mockRecipe,
+      mockPattern,
       { value: 1 },
       resultCell,
     );
@@ -299,7 +299,7 @@ describe("runRecipe", () => {
   });
 
   it("should allow passing a cell as a binding", async () => {
-    const recipe: Recipe = {
+    const pattern: Pattern = {
       argumentSchema: {},
       resultSchema: {},
       result: { output: { $alias: { path: ["argument", "output"] } } },
@@ -332,7 +332,7 @@ describe("runRecipe", () => {
 
     const result = runtime.run(
       undefined,
-      recipe,
+      pattern,
       inputCell,
       resultCell,
     );
@@ -343,7 +343,7 @@ describe("runRecipe", () => {
     expect(resultValue).toEqual({ output: 20 });
 
     // The result should alias the original cell. Let's verify by stopping the
-    // recipe and sending a new value to the input cell.
+    // pattern and sending a new value to the input cell.
     runtime.runner.stop(result);
 
     const tx2 = runtime.edit();
@@ -354,8 +354,8 @@ describe("runRecipe", () => {
     expect(resultValue).toEqual({ output: 40 });
   });
 
-  it("should allow stopping a recipe", async () => {
-    const recipe: Recipe = {
+  it("should allow stopping a pattern", async () => {
+    const pattern: Pattern = {
       argumentSchema: {},
       resultSchema: {},
       result: { output: { $alias: { path: ["argument", "output"] } } },
@@ -374,24 +374,24 @@ describe("runRecipe", () => {
     const tx = runtime.edit();
     const inputCell = runtime.getCell<{ input: number; output: number }>(
       space,
-      "should allow stopping a recipe: input cell",
+      "should allow stopping a pattern: input cell",
       undefined,
       tx,
     );
     inputCell.set({ input: 10, output: 0 });
     const resultCell = runtime.getCell(
       space,
-      "should allow stopping a recipe",
+      "should allow stopping a pattern",
       undefined,
       tx,
     );
 
-    // Commit the initial values before running the recipe
+    // Commit the initial values before running the pattern
     await tx.commit();
 
     const result = runtime.run(
       undefined,
-      recipe,
+      pattern,
       inputCell,
       resultCell,
     );
@@ -406,7 +406,7 @@ describe("runRecipe", () => {
     inputCellValue = await inputCell.pull();
     expect(inputCellValue).toMatchObject({ input: 20, output: 40 });
 
-    // Stop the recipe
+    // Stop the pattern
     runtime.runner.stop(result);
 
     const tx3 = runtime.edit();
@@ -416,10 +416,10 @@ describe("runRecipe", () => {
     inputCellValue = await inputCell.pull();
     expect(inputCellValue).toMatchObject({ input: 40, output: 40 });
 
-    // Restart the recipe
+    // Restart the pattern
     runtime.run(
       undefined,
-      recipe,
+      pattern,
       undefined,
       result,
     );
@@ -429,7 +429,7 @@ describe("runRecipe", () => {
   });
 
   it("should apply default values from argument schema", async () => {
-    const recipe: Recipe = {
+    const pattern: Pattern = {
       argumentSchema: {
         type: "object",
         properties: {
@@ -461,7 +461,7 @@ describe("runRecipe", () => {
 
     const resultWithPartial = runtime.run(
       undefined,
-      recipe,
+      pattern,
       { input: 10 },
       resultWithPartialCell,
     );
@@ -476,7 +476,7 @@ describe("runRecipe", () => {
 
     const resultWithDefaults = runtime.run(
       undefined,
-      recipe,
+      pattern,
       {},
       resultWithDefaultsCell,
     );
@@ -485,7 +485,7 @@ describe("runRecipe", () => {
   });
 
   it("should handle complex nested schema types", async () => {
-    const recipe: Recipe = {
+    const pattern: Pattern = {
       argumentSchema: {
         type: "object",
         properties: {
@@ -539,7 +539,7 @@ describe("runRecipe", () => {
     );
     const result = runtime.run(
       undefined,
-      recipe,
+      pattern,
       { config: { values: [10, 20, 30, 40], operation: "avg" } },
       resultCell,
     );
@@ -549,7 +549,7 @@ describe("runRecipe", () => {
     // Test with a different operation
     const result2 = runtime.run(
       undefined,
-      recipe,
+      pattern,
       { config: { values: [10, 20, 30, 40], operation: "max" } },
       resultCell,
     );
@@ -558,7 +558,7 @@ describe("runRecipe", () => {
   });
 
   it("should merge arguments with defaults from schema", async () => {
-    const recipe: Recipe = {
+    const pattern: Pattern = {
       argumentSchema: {
         type: "object",
         properties: {
@@ -599,7 +599,7 @@ describe("runRecipe", () => {
     );
     const result = runtime.run(
       undefined,
-      recipe,
+      pattern,
       { options: { value: 10 }, input: 5 },
       resultCell,
     );
@@ -614,7 +614,7 @@ describe("runRecipe", () => {
   });
 
   it("should preserve NAME between runs", async () => {
-    const recipe: Recipe = {
+    const pattern: Pattern = {
       argumentSchema: {},
       resultSchema: {},
       initial: { internal: { counter: 0 } },
@@ -644,7 +644,7 @@ describe("runRecipe", () => {
     // First run
     runtime.run(
       undefined,
-      recipe,
+      pattern,
       { value: 1 },
       resultCell,
     );
@@ -657,10 +657,10 @@ describe("runRecipe", () => {
     resultCell.withTx(tx).update({ [NAME]: "my counter" });
     await tx.commit();
 
-    // Second run with same recipe but different argument
+    // Second run with same pattern but different argument
     runtime.run(
       undefined,
-      recipe,
+      pattern,
       { value: 2 },
       resultCell,
     );
@@ -669,8 +669,8 @@ describe("runRecipe", () => {
     expect(cellValue?.counter).toEqual(2);
   });
 
-  it("should create separate copies of initial values for each recipe instance", async () => {
-    const recipe: Recipe = {
+  it("should create separate copies of initial values for each pattern instance", async () => {
+    const pattern: Pattern = {
       argumentSchema: {
         type: "object",
         properties: {
@@ -711,7 +711,7 @@ describe("runRecipe", () => {
     );
     const result1 = runtime.run(
       undefined,
-      recipe,
+      pattern,
       { input: 5 },
       result1Cell,
     );
@@ -724,7 +724,7 @@ describe("runRecipe", () => {
     );
     const result2 = runtime.run(
       undefined,
-      recipe,
+      pattern,
       { input: 10 },
       result2Cell,
     );
@@ -766,15 +766,15 @@ describe("storage subscription", () => {
     await storageManager?.close();
   });
 
-  it("clears cached recipes when storage notifies of changes", () => {
+  it("clears cached patterns when storage notifies of changes", () => {
     const internals = runtime.runner as unknown as {
-      resultRecipeCache: Map<string, string>;
+      resultPatternCache: Map<string, string>;
       createStorageSubscription(): IStorageSubscription;
     };
 
-    const uri = "recipe-cache-test" as URI;
+    const uri = "pattern-cache-test" as URI;
     const key = `${space}/${uri}`;
-    internals.resultRecipeCache.set(key, "cached-recipe");
+    internals.resultPatternCache.set(key, "cached-pattern");
 
     const notification = {
       type: "commit",
@@ -795,7 +795,7 @@ describe("storage subscription", () => {
     const subscription = internals.createStorageSubscription();
     subscription.next(notification);
 
-    expect(internals.resultRecipeCache.has(key)).toBe(false);
+    expect(internals.resultPatternCache.has(key)).toBe(false);
   });
 });
 
@@ -818,7 +818,7 @@ describe("setup/start", () => {
   });
 
   it("setup does not schedule; start schedules and runs", async () => {
-    const recipe: Recipe = {
+    const pattern: Pattern = {
       argumentSchema: {
         type: "object",
         properties: { input: { type: "number" }, output: { type: "number" } },
@@ -837,7 +837,7 @@ describe("setup/start", () => {
     const resultCell = runtime.getCell(space, "setup does not schedule");
 
     // Only setup – should not run the node yet
-    runtime.setup(undefined, recipe, { input: 1 }, resultCell);
+    runtime.setup(undefined, pattern, { input: 1 }, resultCell);
 
     // Output hasn't been computed yet
     let cellValue = await resultCell.pull();
@@ -849,8 +849,8 @@ describe("setup/start", () => {
     expect(cellValue).toEqual({ output: 1 });
   });
 
-  it("setup with same recipe updates argument without restart", async () => {
-    const recipe: Recipe = {
+  it("setup with same pattern updates argument without restart", async () => {
+    const pattern: Pattern = {
       argumentSchema: {
         type: "object",
         properties: { input: { type: "number" }, output: { type: "number" } },
@@ -867,19 +867,19 @@ describe("setup/start", () => {
     };
 
     const resultCell = runtime.getCell(space, "setup updates argument");
-    runtime.setup(undefined, recipe, { input: 1 }, resultCell);
+    runtime.setup(undefined, pattern, { input: 1 }, resultCell);
     runtime.start(resultCell);
     let cellValue = await resultCell.pull();
     expect(cellValue).toEqual({ output: 1 });
 
     // Update only via setup; scheduler should react to argument change
-    runtime.setup(undefined, recipe, { input: 2 }, resultCell);
+    runtime.setup(undefined, pattern, { input: 2 }, resultCell);
     cellValue = await resultCell.pull();
     expect(cellValue).toEqual({ output: 2 });
   });
 
   it("start is idempotent when called multiple times", async () => {
-    const recipe: Recipe = {
+    const pattern: Pattern = {
       argumentSchema: {
         type: "object",
         properties: { input: { type: "number" } },
@@ -899,7 +899,7 @@ describe("setup/start", () => {
     };
 
     const resultCell = runtime.getCell(space, "start idempotent");
-    runtime.setup(undefined, recipe, { input: 7 }, resultCell);
+    runtime.setup(undefined, pattern, { input: 7 }, resultCell);
     runtime.start(resultCell);
     runtime.start(resultCell);
 
@@ -907,13 +907,13 @@ describe("setup/start", () => {
     expect(cellValue).toEqual({ output: 7 });
 
     // Change input and ensure only a single recomputation occurs in effect
-    runtime.setup(undefined, recipe, { input: 9 }, resultCell);
+    runtime.setup(undefined, pattern, { input: 9 }, resultCell);
     cellValue = await resultCell.pull();
     expect(cellValue).toEqual({ output: 9 });
   });
 
   it("stop and restart works with setup/start", async () => {
-    const recipe: Recipe = {
+    const pattern: Pattern = {
       argumentSchema: {
         type: "object",
         properties: { input: { type: "number" } },
@@ -933,7 +933,7 @@ describe("setup/start", () => {
     };
 
     const resultCell = runtime.getCell(space, "stop and restart");
-    runtime.setup(undefined, recipe, { input: 1 }, resultCell);
+    runtime.setup(undefined, pattern, { input: 1 }, resultCell);
     runtime.start(resultCell);
     let cellValue = await resultCell.pull();
     expect(cellValue).toEqual({ output: 1 });
@@ -942,7 +942,7 @@ describe("setup/start", () => {
     runtime.runner.stop(resultCell);
 
     // Change argument via setup; without start nothing should recompute yet
-    runtime.setup(undefined, recipe, { input: 5 }, resultCell);
+    runtime.setup(undefined, pattern, { input: 5 }, resultCell);
     cellValue = await resultCell.pull();
     // Still the old output
     expect(cellValue).toEqual({ output: 1 });
@@ -953,7 +953,7 @@ describe("setup/start", () => {
     expect(cellValue).toEqual({ output: 5 });
   });
 
-  it("setup with Module wraps to recipe and runs on start", async () => {
+  it("setup with Module wraps to pattern and runs on start", async () => {
     const mod = {
       type: "javascript" as const,
       implementation: (v: { input: number }) => ({ output: v.input * 3 }),
@@ -971,8 +971,8 @@ describe("setup/start", () => {
     expect(cellValue).toEqual({ output: 6 });
   });
 
-  it("setup without recipe reuses previous recipe", async () => {
-    const recipe: Recipe = {
+  it("setup without pattern reuses previous pattern", async () => {
+    const pattern: Pattern = {
       argumentSchema: {
         type: "object",
         properties: { input: { type: "number" }, output: { type: "number" } },
@@ -988,13 +988,13 @@ describe("setup/start", () => {
       ],
     };
 
-    const resultCell = runtime.getCell(space, "setup reuse previous recipe");
-    runtime.setup(undefined, recipe, { input: 5 }, resultCell);
+    const resultCell = runtime.getCell(space, "setup reuse previous pattern");
+    runtime.setup(undefined, pattern, { input: 5 }, resultCell);
     runtime.start(resultCell);
     const cellValue = await resultCell.pull();
     expect(cellValue).toEqual({ output: 5 });
 
-    // Stop and setup without specifying recipe; should reuse stored one
+    // Stop and setup without specifying pattern; should reuse stored one
     runtime.runner.stop(resultCell);
     runtime.setup(
       undefined,
@@ -1008,7 +1008,7 @@ describe("setup/start", () => {
       output: { $alias: { path: ["internal", "output"] } },
     });
 
-    // Verify a recipe id is present after setup without passing recipe
+    // Verify a pattern id is present after setup without passing pattern
     const source = resultCell.getSourceCell()!;
     const typeValue = source.key("$TYPE").get();
     expect(typeof typeValue).toEqual("string");
@@ -1023,7 +1023,7 @@ describe("setup/start", () => {
   });
 
   it("setup with cell argument and start reacts to cell updates", async () => {
-    const recipe: Recipe = {
+    const pattern: Pattern = {
       argumentSchema: {
         type: "object",
         properties: { input: { type: "number" }, output: { type: "number" } },
@@ -1053,7 +1053,7 @@ describe("setup/start", () => {
     await tx.commit();
 
     const resultCell = runtime.getCell(space, "setup with cell arg");
-    runtime.setup(undefined, recipe, inputCell, resultCell);
+    runtime.setup(undefined, pattern, inputCell, resultCell);
     runtime.start(resultCell);
     let cellValue = await resultCell.pull();
     expect(cellValue).toEqual({ output: 6 });
@@ -1174,7 +1174,7 @@ describe("runner utils", () => {
 
   describe("start() lazy sync behavior", () => {
     it("start() returns Promise<boolean> that resolves to true", async () => {
-      const recipe: Recipe = {
+      const pattern: Pattern = {
         argumentSchema: {
           type: "object",
           properties: { input: { type: "number" } },
@@ -1194,7 +1194,7 @@ describe("runner utils", () => {
       };
 
       const resultCell = runtime.getCell(space, "start returns promise");
-      runtime.setup(undefined, recipe, { input: 5 }, resultCell);
+      runtime.setup(undefined, pattern, { input: 5 }, resultCell);
       const result = await runtime.start(resultCell);
       expect(result).toBe(true);
       await runtime.idle();
@@ -1202,7 +1202,7 @@ describe("runner utils", () => {
     });
 
     it("start() returns true immediately if already running", async () => {
-      const recipe: Recipe = {
+      const pattern: Pattern = {
         argumentSchema: {
           type: "object",
           properties: { input: { type: "number" } },
@@ -1222,7 +1222,7 @@ describe("runner utils", () => {
       };
 
       const resultCell = runtime.getCell(space, "start idempotent");
-      runtime.setup(undefined, recipe, { input: 1 }, resultCell);
+      runtime.setup(undefined, pattern, { input: 1 }, resultCell);
       await runtime.start(resultCell);
       await runtime.idle();
 
@@ -1232,7 +1232,7 @@ describe("runner utils", () => {
     });
 
     it("start() runs synchronously when data is available", async () => {
-      const recipe: Recipe = {
+      const pattern: Pattern = {
         argumentSchema: {
           type: "object",
           properties: { input: { type: "number" } },
@@ -1252,7 +1252,7 @@ describe("runner utils", () => {
       };
 
       const resultCell = runtime.getCell(space, "start sync behavior");
-      runtime.setup(undefined, recipe, { input: 4 }, resultCell);
+      runtime.setup(undefined, pattern, { input: 4 }, resultCell);
 
       // start() should execute synchronously when data is available
       // The piece should be registered in cancels map immediately
@@ -1267,7 +1267,7 @@ describe("runner utils", () => {
     });
 
     it("start() on subpath cell starts the root cell", async () => {
-      const recipe: Recipe = {
+      const pattern: Pattern = {
         argumentSchema: {
           type: "object",
           properties: { input: { type: "number" } },
@@ -1291,7 +1291,7 @@ describe("runner utils", () => {
       };
 
       const resultCell = runtime.getCell(space, "start subpath cell");
-      runtime.setup(undefined, recipe, { input: 5 }, resultCell);
+      runtime.setup(undefined, pattern, { input: 5 }, resultCell);
 
       // Get a subpath cell
       const subpathCell = resultCell.key("nested").key("value");
@@ -1309,8 +1309,8 @@ describe("runner utils", () => {
       ).toBe(true);
     });
 
-    it("restarts with new recipe when $TYPE changes via setup()", async () => {
-      const recipe1: Recipe = {
+    it("restarts with new pattern when $TYPE changes via setup()", async () => {
+      const pattern1: Pattern = {
         argumentSchema: {
           type: "object",
           properties: { input: { type: "number" } },
@@ -1329,7 +1329,7 @@ describe("runner utils", () => {
         ],
       };
 
-      const recipe2: Recipe = {
+      const pattern2: Pattern = {
         argumentSchema: {
           type: "object",
           properties: { input: { type: "number" } },
@@ -1348,16 +1348,16 @@ describe("runner utils", () => {
         ],
       };
 
-      const resultCell = runtime.getCell(space, "recipe change restart");
+      const resultCell = runtime.getCell(space, "pattern change restart");
 
-      // Run with first recipe
-      runtime.run(undefined, recipe1, { input: 5 }, resultCell);
+      // Run with first pattern
+      runtime.run(undefined, pattern1, { input: 5 }, resultCell);
       await runtime.idle();
       expect(resultCell.getAsQueryResult()).toEqual({ output: 10 }); // 5 * 2
 
-      // Change recipe via setup (not run or start)
+      // Change pattern via setup (not run or start)
       // The $TYPE sink should detect the change and restart
-      await runtime.setup(undefined, recipe2, { input: 5 }, resultCell);
+      await runtime.setup(undefined, pattern2, { input: 5 }, resultCell);
       await runtime.idle();
       expect(resultCell.getAsQueryResult()).toEqual({ output: 50 }); // 5 * 10
     });

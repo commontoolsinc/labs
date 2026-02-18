@@ -6,7 +6,7 @@ import {
   derive,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
   toSchema,
 } from "commontools";
@@ -162,8 +162,7 @@ const liftDifferenceSummary = lift(
   },
 );
 
-export const counterWithDerivedDifference = recipe<DerivedDifferenceArgs>(
-  "Counter With Derived Difference",
+export const counterWithDerivedDifference = pattern<DerivedDifferenceArgs>(
   ({ primary, secondary, primaryStep, secondaryStep }) => {
     const sequence = cell(0);
     const differenceHistory = cell<number[]>([], { type: "array" });

@@ -23,7 +23,7 @@ describe("Conflict Reproduction", () => {
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
   let lift: ReturnType<typeof createBuilder>["commontools"]["lift"];
-  let recipe: ReturnType<typeof createBuilder>["commontools"]["recipe"];
+  let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
   let cell: ReturnType<typeof createBuilder>["commontools"]["cell"];
   let handler: ReturnType<typeof createBuilder>["commontools"]["handler"];
   let conflictErrors: Error[];
@@ -53,7 +53,7 @@ describe("Conflict Reproduction", () => {
     tx = runtime.edit();
 
     const { commontools } = createBuilder();
-    ({ lift, recipe, cell, handler } = commontools);
+    ({ lift, pattern, cell, handler } = commontools);
   });
 
   afterEach(async () => {
@@ -83,8 +83,7 @@ describe("Conflict Reproduction", () => {
       context.sequence.set(context.sequence.get() + 1);
     });
 
-    const conflictRepro = recipe<{ items: Item[] }>(
-      "Conflict Repro",
+    const conflictRepro = pattern<{ items: Item[] }>(
       ({ items }) => {
         const sequence = cell(0);
 
@@ -156,8 +155,7 @@ describe("Conflict Reproduction", () => {
       context.sequence.set(context.sequence.get() + 1);
     });
 
-    const conflictReproNoLift = recipe<{ items: Item[] }>(
-      "Conflict Repro No Lift",
+    const conflictReproNoLift = pattern<{ items: Item[] }>(
       ({ items }) => {
         const sequence = cell(0);
 

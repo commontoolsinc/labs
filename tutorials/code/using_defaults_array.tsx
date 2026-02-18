@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { type Cell, Default, handler, recipe, UI } from "commontools";
+import { type Cell, Default, handler, pattern, UI } from "commontools";
 
 interface TodoListState {
   items: Default<string[], ["Pay bill", "Write code", "Dinner with friends"]>;
@@ -18,7 +18,7 @@ const addItem = handler<
   },
 );
 
-export default recipe<TodoListState>("Todo List with Default", (state) => {
+export default pattern<TodoListState>((state) => {
   return {
     [UI]: (
       <div>

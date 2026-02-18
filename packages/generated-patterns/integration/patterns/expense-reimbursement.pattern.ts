@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -301,8 +301,7 @@ const liftPaidTotal = lift((data: ExpenseTotals) => data.paid);
 const liftPendingPayment = lift((data: ExpenseTotals) => data.pendingPayment);
 const liftSummaryLabel = lift(buildSummaryLabel);
 
-export const expenseReimbursement = recipe<ExpenseReimbursementArgs>(
-  "Expense Reimbursement Tracker",
+export const expenseReimbursement = pattern<ExpenseReimbursementArgs>(
   ({ claims }) => {
     const history = cell<string[]>(["Reimbursement tracker initialized"]);
     const latestAction = cell("Reimbursement tracker initialized");

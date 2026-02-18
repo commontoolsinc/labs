@@ -20,7 +20,7 @@ import {
   connectInputAndOutputs,
 } from "./node-utils.ts";
 import { moduleToJSON } from "./json-utils.ts";
-import { getTopFrame } from "./recipe.ts";
+import { getTopFrame } from "./pattern.ts";
 import { generateHandlerSchema } from "../schema.ts";
 
 export function createNodeFactory<T = any, R = any>(

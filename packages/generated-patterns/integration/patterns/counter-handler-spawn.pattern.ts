@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
   toSchema,
 } from "commontools";
@@ -21,8 +21,7 @@ const childIncrement = handler(
   },
 );
 
-const spawnedChild = recipe<{ value: Default<number, 0> }, SpawnedChildState>(
-  "Spawned Child Counter",
+const spawnedChild = pattern<{ value: Default<number, 0> }, SpawnedChildState>(
   ({ value }) => {
     return {
       value,
@@ -74,8 +73,7 @@ const spawnChild = handler(
   },
 );
 
-export const counterWithHandlerSpawn = recipe<HandlerSpawnArgs>(
-  "Counter With Handler Spawn",
+export const counterWithHandlerSpawn = pattern<HandlerSpawnArgs>(
   ({ children }) => {
     return {
       children,

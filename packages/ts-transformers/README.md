@@ -25,7 +25,7 @@ state.items.map((item) => item.price * state.discount);
 
 // Output: Schema-annotated form
 state.items.mapWithPattern(
-  recipe(
+  pattern(
     inputSchema,
     outputSchema,
     ({ element: item, params: { state } }) =>
@@ -97,13 +97,13 @@ works for scope detection.
 
 ### Key Transformations
 
-| Input Pattern         | Output                                   | Purpose                   |
-| --------------------- | ---------------------------------------- | ------------------------- |
-| `array.map(fn)`       | `array.mapWithPattern(recipe, captures)` | Explicit closure captures |
-| `expr1 * expr2`       | `derive(schema, schema, inputs, fn)`     | Data flow boundary        |
-| `onClick={() => ...}` | `handler(eventSchema, stateSchema, fn)`  | Handler with dual schemas |
-| `Cell<T>`             | `{ type: "...", asCell: true }`          | Writable reactive ref     |
-| `OpaqueRef<T>`        | `{ type: "...", asOpaque: true }`        | Read-only reactive ref    |
+| Input Pattern         | Output                                    | Purpose                   |
+| --------------------- | ----------------------------------------- | ------------------------- |
+| `array.map(fn)`       | `array.mapWithPattern(pattern, captures)` | Explicit closure captures |
+| `expr1 * expr2`       | `derive(schema, schema, inputs, fn)`      | Data flow boundary        |
+| `onClick={() => ...}` | `handler(eventSchema, stateSchema, fn)`   | Handler with dual schemas |
+| `Cell<T>`             | `{ type: "...", asCell: true }`           | Writable reactive ref     |
+| `OpaqueRef<T>`        | `{ type: "...", asOpaque: true }`         | Read-only reactive ref    |
 
 ## Documentation
 

@@ -5,7 +5,7 @@
  * A composable pattern that can be used standalone or embedded in containers
  * like Record. Tracks birthday with separate month, day, and year fields.
  */
-import { computed, type Default, NAME, recipe, UI } from "commontools";
+import { computed, type Default, NAME, pattern, UI } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
 // ===== Self-Describing Metadata =====
@@ -77,8 +77,7 @@ export interface BirthdayModuleInput {
 }
 
 // ===== The Pattern =====
-export const BirthdayModule = recipe<BirthdayModuleInput, BirthdayModuleInput>(
-  "BirthdayModule",
+export const BirthdayModule = pattern<BirthdayModuleInput, BirthdayModuleInput>(
   ({ birthMonth, birthDay, birthYear }) => {
     // Compute display text for NAME
     const displayText = computed(() => {

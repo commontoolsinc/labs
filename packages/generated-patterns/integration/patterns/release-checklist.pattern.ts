@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, handler, lift, recipe, str } from "commontools";
+import { Cell, Default, handler, lift, pattern, str } from "commontools";
 
 type ReleaseTaskStatus = "pending" | "in_progress" | "blocked" | "done";
 
@@ -316,8 +316,7 @@ const liftRemainingRequired = lift((info: ReleaseChecklistStats) =>
 const liftBlockedTasks = lift((info: ReleaseChecklistStats) => info.blocked);
 const liftDescribeGating = lift(describeGating);
 
-export const releaseChecklist = recipe<ReleaseChecklistArgs>(
-  "Release Checklist",
+export const releaseChecklist = pattern<ReleaseChecklistArgs>(
   ({ tasks }) => {
     const sanitizedTasks = liftSanitizeTaskList(tasks);
     const stats = liftAnalyzeTasks(sanitizedTasks);

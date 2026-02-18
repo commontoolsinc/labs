@@ -17,9 +17,9 @@
  * const comments = await client.listComments(fileId);
  * ```
  */
-import { Cell, getRecipeEnvironment } from "commontools";
+import { Cell, getPatternEnvironment } from "commontools";
 
-const env = getRecipeEnvironment();
+const env = getPatternEnvironment();
 
 // Re-export Auth type for convenience
 export type { Auth } from "../google-auth.tsx";

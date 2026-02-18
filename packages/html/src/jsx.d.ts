@@ -2846,7 +2846,7 @@ type EventHandler<T> =
   | Stream<T>
   | Stream<void>;
 
-// `Charm` is not a recipe type.
+// `Charm` is not a pattern type.
 type Charm = any;
 
 type OutlinerNode = {

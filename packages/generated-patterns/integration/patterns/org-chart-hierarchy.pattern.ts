@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -292,8 +292,7 @@ const liftChainSummaries = lift((chains: Record<string, string[]>) =>
     .sort((left, right) => left.localeCompare(right))
 );
 
-export const orgChartHierarchy = recipe<OrgChartArgs>(
-  "Org Chart Hierarchy",
+export const orgChartHierarchy = pattern<OrgChartArgs>(
   ({ members }) => {
     const history = cell<string[]>([]);
 

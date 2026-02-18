@@ -6,7 +6,7 @@ import {
   derive,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -61,8 +61,7 @@ const liftLastEventView = lift((label: string | undefined) =>
   typeof label === "string" && label.length > 0 ? label : "none"
 );
 
-export const counterNoOpEvents = recipe<NoOpCounterArgs>(
-  "Counter No-Op Events",
+export const counterNoOpEvents = pattern<NoOpCounterArgs>(
   ({ value }) => {
     const updates = cell(0);
     const lastEvent = cell("none");

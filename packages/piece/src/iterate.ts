@@ -7,13 +7,13 @@ import {
   type JSONSchema,
   type JSONSchemaMutable,
   type MemorySpace,
-  type RecipeMeta,
+  type PatternMeta,
   type Runtime,
   type RuntimeProgram,
 } from "@commontools/runner";
 import { PieceManager } from "./manager.ts";
 import { pieceSourceCellSchema } from "@commontools/runner/schemas";
-import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.ts";
+import { buildFullPattern, getIframePattern } from "./iframe/pattern.ts";
 import { buildPrompt, RESPONSE_PREFILL } from "./iframe/prompt.ts";
 import {
   applyDefaults,
@@ -25,7 +25,7 @@ import {
   LLMClient,
 } from "@commontools/llm";
 import { injectUserCode } from "./iframe/static.ts";
-import { IFrameRecipe, WorkflowForm } from "./index.ts";
+import { IFramePattern, WorkflowForm } from "./index.ts";
 import { console } from "./conditional-console.ts";
 import { StaticCache } from "@commontools/static";
 
@@ -112,7 +112,7 @@ export async function iterate(
 ): Promise<{ cell: Cell<unknown>; llmRequestId?: string }> {
   const optionsWithDefaults = applyDefaults(options);
   const { generationId } = optionsWithDefaults;
-  const { iframe } = getIframeRecipe(piece, pieceManager.runtime);
+  const { iframe } = getIframePattern(piece, pieceManager.runtime);
 
   const prevSpec = iframe?.spec;
   if (plan?.description === undefined) {
@@ -130,7 +130,7 @@ export async function iterate(
   }, optionsWithDefaults);
 
   return {
-    cell: await generateNewRecipeVersion(
+    cell: await generateNewPatternVersion(
       pieceManager,
       piece,
       {
@@ -150,40 +150,40 @@ export function extractTitle(src: string, defaultTitle: string): string {
   return htmlTitleMatch || jsTitleMatch || defaultTitle;
 }
 
-export const generateNewRecipeVersion = async (
+export const generateNewPatternVersion = async (
   pieceManager: PieceManager,
   parent: Cell<unknown>,
-  newRecipe:
-    & Pick<IFrameRecipe, "src" | "spec">
-    & Partial<Omit<IFrameRecipe, "src" | "spec">>,
+  newPattern:
+    & Pick<IFramePattern, "src" | "spec">
+    & Partial<Omit<IFramePattern, "src" | "spec">>,
   generationId?: string,
   llmRequestId?: string,
 ) => {
-  const parentInfo = getIframeRecipe(parent, pieceManager.runtime);
-  if (!parentInfo.recipeId) {
-    throw new Error("No recipeId found for piece");
+  const parentInfo = getIframePattern(parent, pieceManager.runtime);
+  if (!parentInfo.patternId) {
+    throw new Error("No patternId found for piece");
   }
 
-  const parentRecipe = await pieceManager.runtime.recipeManager.loadRecipe(
-    parentInfo.recipeId,
+  const parentPattern = await pieceManager.runtime.patternManager.loadPattern(
+    parentInfo.patternId,
     pieceManager.getSpace(),
   );
 
-  const name = extractTitle(newRecipe.src, "<unknown>");
+  const name = extractTitle(newPattern.src, "<unknown>");
   const argumentSchema =
     (parentInfo.iframe
       ? parentInfo.iframe.argumentSchema
-      : parentRecipe.argumentSchema) ?? { type: "object" };
+      : parentPattern.argumentSchema) ?? { type: "object" };
   const resultSchema =
     (parentInfo.iframe
       ? parentInfo.iframe.resultSchema
-      : parentRecipe.resultSchema) ?? { type: "object" };
+      : parentPattern.resultSchema) ?? { type: "object" };
 
-  const fullSrc = buildFullRecipe({
+  const fullSrc = buildFullPattern({
     ...parentInfo.iframe, // ignored if undefined
     argumentSchema,
     resultSchema,
-    ...newRecipe,
+    ...newPattern,
     name,
   });
 
@@ -192,18 +192,18 @@ export const generateNewRecipeVersion = async (
       detail: {
         type: "job-update",
         jobId: generationId,
-        status: "Compiling recipe...",
+        status: "Compiling pattern...",
       },
     }),
   );
 
   // Pass the newSpec so it's properly persisted and can be displayed/edited
-  const newPiece = await compileAndRunRecipe(
+  const newPiece = await compileAndRunPattern(
     pieceManager,
     fullSrc,
-    newRecipe.spec!,
+    newPattern.spec!,
     parent.getSourceCell()?.key("argument"),
-    parentInfo.recipeId ? [parentInfo.recipeId] : undefined,
+    parentInfo.patternId ? [parentInfo.patternId] : undefined,
     llmRequestId,
   );
 
@@ -370,7 +370,7 @@ async function singlePhaseCodeGeneration(
   const fullCode = injectUserCode(sourceCode);
 
   const name = extractTitle(sourceCode, title); // Use the generated title as fallback
-  const newRecipeSrc = buildFullRecipe({
+  const newPatternSrc = buildFullPattern({
     src: fullCode,
     spec: form.plan.description,
     plan: Array.isArray(form.plan.features)
@@ -387,7 +387,7 @@ async function singlePhaseCodeGeneration(
   return {
     newSpec: form.plan.description,
     newIFrameSrc: fullCode,
-    newRecipeSrc,
+    newPatternSrc,
     name,
     schema,
     llmRequestId,
@@ -475,7 +475,7 @@ async function twoPhaseCodeGeneration(
   });
 
   const name = extractTitle(newIFrameSrc, title); // Use the generated title as fallback
-  const newRecipeSrc = buildFullRecipe({
+  const newPatternSrc = buildFullPattern({
     src: newIFrameSrc,
     spec,
     plan,
@@ -488,7 +488,7 @@ async function twoPhaseCodeGeneration(
   return {
     newSpec,
     newIFrameSrc,
-    newRecipeSrc,
+    newPatternSrc,
     name,
     schema,
     llmRequestId,
@@ -496,14 +496,14 @@ async function twoPhaseCodeGeneration(
 }
 
 /**
- * Cast a new recipe from a goal and data
+ * Cast a new pattern from a goal and data
  *
  * @param pieceManager Piece manager representing the space this will be generated in
- * @param goal A user level goal for the new recipe, can reference specific data via `key`
- * @param data Data passed to the recipe, can be a combination of data and cells
- * @returns A new recipe cell
+ * @param goal A user level goal for the new pattern, can reference specific data via `key`
+ * @param data Data passed to the pattern, can be a combination of data and cells
+ * @returns A new pattern cell
  */
-export async function castNewRecipe(
+export async function castNewPattern(
   pieceManager: PieceManager,
   form: WorkflowForm,
 ): Promise<{ cell: Cell<unknown>; llmRequestId?: string }> {
@@ -520,7 +520,7 @@ export async function castNewRecipe(
   );
 
   // Prototype workflow: combine steps
-  const { newSpec, newRecipeSrc, llmRequestId } =
+  const { newSpec, newPatternSrc, llmRequestId } =
     form.classification?.workflowType === "imagine-single-phase"
       ? await singlePhaseCodeGeneration(form, existingSchema)
       : await twoPhaseCodeGeneration(form, existingSchema);
@@ -532,15 +532,15 @@ export async function castNewRecipe(
       detail: {
         type: "job-update",
         jobId: form.meta.generationId,
-        status: "Compiling recipe...",
+        status: "Compiling pattern...",
       },
     }),
   );
 
   return {
-    cell: await compileAndRunRecipe(
+    cell: await compileAndRunPattern(
       pieceManager,
-      newRecipeSrc,
+      newPatternSrc,
       newSpec,
       input,
       undefined,
@@ -550,55 +550,55 @@ export async function castNewRecipe(
   };
 }
 
-export async function compileRecipe(
-  recipeSrc: string | RuntimeProgram,
+export async function compilePattern(
+  patternSrc: string | RuntimeProgram,
   spec: string,
   runtime: Runtime,
   space: MemorySpace,
   parents?: string[],
 ) {
-  const recipe = await runtime.recipeManager.compileRecipe(recipeSrc);
+  const pattern = await runtime.patternManager.compilePattern(patternSrc);
 
-  if (!recipe) {
-    throw new Error("No default recipe found in the compiled exports.");
+  if (!pattern) {
+    throw new Error("No default pattern found in the compiled exports.");
   }
   const parentsIds = parents?.map((id) => id.toString());
-  const recipeId = runtime.recipeManager.registerRecipe(recipe, recipeSrc);
+  const patternId = runtime.patternManager.registerPattern(pattern, patternSrc);
 
-  // Record metadata fields (spec, parents) for this recipe
-  await runtime.recipeManager.setRecipeMetaFields(recipeId, {
+  // Record metadata fields (spec, parents) for this pattern
+  await runtime.patternManager.setPatternMetaFields(patternId, {
     spec,
     parents: parentsIds,
-  } as Partial<Mutable<RecipeMeta>>);
-  await runtime.recipeManager.saveAndSyncRecipe({
-    recipeId,
+  } as Partial<Mutable<PatternMeta>>);
+  await runtime.patternManager.saveAndSyncPattern({
+    patternId,
     space,
   });
 
-  return recipe;
+  return pattern;
 }
 
-export async function compileAndRunRecipe(
+export async function compileAndRunPattern(
   pieceManager: PieceManager,
-  recipeSrc: string,
+  patternSrc: string,
   spec: string,
   runOptions: unknown,
   parents?: string[],
   llmRequestId?: string,
 ): Promise<Cell<unknown>> {
-  const recipe = await compileRecipe(
-    recipeSrc,
+  const pattern = await compilePattern(
+    patternSrc,
     spec,
     pieceManager.runtime,
     pieceManager.getSpace(),
     parents,
   );
-  if (!recipe) {
-    throw new Error("Failed to compile recipe");
+  if (!pattern) {
+    throw new Error("Failed to compile pattern");
   }
 
   return await pieceManager.runPersistent(
-    recipe,
+    pattern,
     runOptions,
     undefined,
     llmRequestId,

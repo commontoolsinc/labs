@@ -1152,7 +1152,7 @@ export class XSchedulerGraph extends LitElement {
 
     // Infer parent relationships for sinks without parents by matching entity IDs
     // This handles the case where sinks are created outside of action execution
-    // but logically belong to a recipe/module action
+    // but logically belong to a pattern/module action
     const inferredParents = this.inferParentsByEntity(graphData.nodes);
 
     // Create a combined view with both explicit and inferred parents
@@ -1381,7 +1381,7 @@ export class XSchedulerGraph extends LitElement {
    * Extract the entity ID from an action name.
    * Handles formats like:
    * - sink:did:key:.../of:entityId/path
-   * - action:recipe:did:key:.../of:entityId/path
+   * - action:pattern:did:key:.../of:entityId/path
    */
   private extractEntityId(actionId: string): string | undefined {
     // Look for "of:" pattern which precedes the entity ID

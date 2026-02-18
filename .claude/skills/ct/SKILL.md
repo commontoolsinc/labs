@@ -1,10 +1,10 @@
 ---
 name: ct
 description: Guide for using the ct (CommonTools) binary to interact with pieces,
-  recipes, and the Common Fabric. Use this skill when deploying recipes, managing
-  pieces, linking data between pieces, or debugging recipe execution. Triggers include
-  requests to "deploy this recipe", "call a handler", "link these pieces", "get data
-  from piece", or "test this recipe locally".
+  patterns, and the Common Fabric. Use this skill when deploying patterns, managing
+  pieces, linking data between pieces, or debugging pattern execution. Triggers include
+  requests to "deploy this pattern", "call a handler", "link these pieces", "get data
+  from piece", or "test this pattern locally".
 ---
 
 # CT CLI

@@ -14,7 +14,7 @@ describe("when and unless built-in functions", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
-  let recipe: ReturnType<typeof createBuilder>["commontools"]["recipe"];
+  let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
   let lift: ReturnType<typeof createBuilder>["commontools"]["lift"];
   let when: ReturnType<typeof createBuilder>["commontools"]["when"];
   let unless: ReturnType<typeof createBuilder>["commontools"]["unless"];
@@ -29,7 +29,7 @@ describe("when and unless built-in functions", () => {
     tx = runtime.edit();
 
     const { commontools } = createBuilder();
-    ({ recipe, lift, when, unless } = commontools);
+    ({ pattern, lift, when, unless } = commontools);
   });
 
   afterEach(async () => {
@@ -40,8 +40,7 @@ describe("when and unless built-in functions", () => {
 
   describe("when function (&& semantics)", () => {
     it("returns value when condition is truthy (true)", async () => {
-      const testRecipe = recipe<{ condition: boolean }>(
-        "when truthy test",
+      const testPattern = pattern<{ condition: boolean }>(
         ({ condition }) => {
           const result = when(condition, "success");
           return { result };
@@ -56,7 +55,7 @@ describe("when and unless built-in functions", () => {
       );
       const result = runtime.run(
         tx,
-        testRecipe,
+        testPattern,
         { condition: true },
         resultCell,
       );
@@ -67,8 +66,7 @@ describe("when and unless built-in functions", () => {
     });
 
     it("returns falsy condition when condition is false", async () => {
-      const testRecipe = recipe<{ condition: boolean }>(
-        "when falsy false test",
+      const testPattern = pattern<{ condition: boolean }>(
         ({ condition }) => {
           const result = when(condition, "success");
           return { result };
@@ -83,7 +81,7 @@ describe("when and unless built-in functions", () => {
       );
       const result = runtime.run(
         tx,
-        testRecipe,
+        testPattern,
         { condition: false },
         resultCell,
       );
@@ -94,8 +92,7 @@ describe("when and unless built-in functions", () => {
     });
 
     it("returns value when condition is truthy number (1)", async () => {
-      const testRecipe = recipe<{ condition: number }>(
-        "when truthy number test",
+      const testPattern = pattern<{ condition: number }>(
         ({ condition }) => {
           const result = when(condition, "has value");
           return { result };
@@ -108,7 +105,12 @@ describe("when and unless built-in functions", () => {
         undefined,
         tx,
       );
-      const result = runtime.run(tx, testRecipe, { condition: 42 }, resultCell);
+      const result = runtime.run(
+        tx,
+        testPattern,
+        { condition: 42 },
+        resultCell,
+      );
       tx.commit();
 
       const value = await result.pull();
@@ -116,8 +118,7 @@ describe("when and unless built-in functions", () => {
     });
 
     it("returns 0 when condition is 0 (falsy)", async () => {
-      const testRecipe = recipe<{ condition: number }>(
-        "when falsy zero test",
+      const testPattern = pattern<{ condition: number }>(
         ({ condition }) => {
           const result = when(condition, "has value");
           return { result };
@@ -130,7 +131,7 @@ describe("when and unless built-in functions", () => {
         undefined,
         tx,
       );
-      const result = runtime.run(tx, testRecipe, { condition: 0 }, resultCell);
+      const result = runtime.run(tx, testPattern, { condition: 0 }, resultCell);
       tx.commit();
 
       const value = await result.pull();
@@ -138,8 +139,7 @@ describe("when and unless built-in functions", () => {
     });
 
     it("returns empty string when condition is empty string (falsy)", async () => {
-      const testRecipe = recipe<{ condition: string }>(
-        "when falsy empty string test",
+      const testPattern = pattern<{ condition: string }>(
         ({ condition }) => {
           const result = when(condition, "fallback");
           return { result };
@@ -152,7 +152,12 @@ describe("when and unless built-in functions", () => {
         undefined,
         tx,
       );
-      const result = runtime.run(tx, testRecipe, { condition: "" }, resultCell);
+      const result = runtime.run(
+        tx,
+        testPattern,
+        { condition: "" },
+        resultCell,
+      );
       tx.commit();
 
       const value = await result.pull();
@@ -160,8 +165,7 @@ describe("when and unless built-in functions", () => {
     });
 
     it("returns value when condition is non-empty string (truthy)", async () => {
-      const testRecipe = recipe<{ condition: string }>(
-        "when truthy string test",
+      const testPattern = pattern<{ condition: string }>(
         ({ condition }) => {
           const result = when(condition, "found");
           return { result };
@@ -176,7 +180,7 @@ describe("when and unless built-in functions", () => {
       );
       const result = runtime.run(
         tx,
-        testRecipe,
+        testPattern,
         { condition: "hello" },
         resultCell,
       );
@@ -187,8 +191,7 @@ describe("when and unless built-in functions", () => {
     });
 
     it("works with derived condition", async () => {
-      const testRecipe = recipe<{ count: number }>(
-        "when derived condition test",
+      const testPattern = pattern<{ count: number }>(
         ({ count }) => {
           const isPositive = lift((n: number) => n > 0)(count);
           const result = when(isPositive, "positive");
@@ -202,7 +205,7 @@ describe("when and unless built-in functions", () => {
         undefined,
         tx,
       );
-      const result = runtime.run(tx, testRecipe, { count: 5 }, resultCell);
+      const result = runtime.run(tx, testPattern, { count: 5 }, resultCell);
       tx.commit();
 
       const value = await result.pull();
@@ -210,8 +213,7 @@ describe("when and unless built-in functions", () => {
     });
 
     it("works with derived condition returning false", async () => {
-      const testRecipe = recipe<{ count: number }>(
-        "when derived false condition test",
+      const testPattern = pattern<{ count: number }>(
         ({ count }) => {
           const isPositive = lift((n: number) => n > 0)(count);
           const result = when(isPositive, "positive");
@@ -225,7 +227,7 @@ describe("when and unless built-in functions", () => {
         undefined,
         tx,
       );
-      const result = runtime.run(tx, testRecipe, { count: -3 }, resultCell);
+      const result = runtime.run(tx, testPattern, { count: -3 }, resultCell);
       tx.commit();
 
       const value = await result.pull();
@@ -235,8 +237,7 @@ describe("when and unless built-in functions", () => {
 
   describe("unless function (|| semantics)", () => {
     it("returns truthy condition as-is when condition is true", async () => {
-      const testRecipe = recipe<{ condition: boolean }>(
-        "unless truthy test",
+      const testPattern = pattern<{ condition: boolean }>(
         ({ condition }) => {
           const result = unless(condition, "fallback");
           return { result };
@@ -251,7 +252,7 @@ describe("when and unless built-in functions", () => {
       );
       const result = runtime.run(
         tx,
-        testRecipe,
+        testPattern,
         { condition: true },
         resultCell,
       );
@@ -262,8 +263,7 @@ describe("when and unless built-in functions", () => {
     });
 
     it("returns fallback value when condition is false", async () => {
-      const testRecipe = recipe<{ condition: boolean }>(
-        "unless falsy false test",
+      const testPattern = pattern<{ condition: boolean }>(
         ({ condition }) => {
           const result = unless(condition, "fallback");
           return { result };
@@ -278,7 +278,7 @@ describe("when and unless built-in functions", () => {
       );
       const result = runtime.run(
         tx,
-        testRecipe,
+        testPattern,
         { condition: false },
         resultCell,
       );
@@ -289,8 +289,7 @@ describe("when and unless built-in functions", () => {
     });
 
     it("returns truthy number as-is", async () => {
-      const testRecipe = recipe<{ condition: number }>(
-        "unless truthy number test",
+      const testPattern = pattern<{ condition: number }>(
         ({ condition }) => {
           const result = unless(condition, 999);
           return { result };
@@ -303,7 +302,12 @@ describe("when and unless built-in functions", () => {
         undefined,
         tx,
       );
-      const result = runtime.run(tx, testRecipe, { condition: 42 }, resultCell);
+      const result = runtime.run(
+        tx,
+        testPattern,
+        { condition: 42 },
+        resultCell,
+      );
       tx.commit();
 
       const value = await result.pull();
@@ -311,8 +315,7 @@ describe("when and unless built-in functions", () => {
     });
 
     it("returns fallback when condition is 0 (falsy)", async () => {
-      const testRecipe = recipe<{ condition: number }>(
-        "unless falsy zero test",
+      const testPattern = pattern<{ condition: number }>(
         ({ condition }) => {
           const result = unless(condition, 999);
           return { result };
@@ -325,7 +328,7 @@ describe("when and unless built-in functions", () => {
         undefined,
         tx,
       );
-      const result = runtime.run(tx, testRecipe, { condition: 0 }, resultCell);
+      const result = runtime.run(tx, testPattern, { condition: 0 }, resultCell);
       tx.commit();
 
       const value = await result.pull();
@@ -333,8 +336,7 @@ describe("when and unless built-in functions", () => {
     });
 
     it("returns truthy string as-is", async () => {
-      const testRecipe = recipe<{ condition: string }>(
-        "unless truthy string test",
+      const testPattern = pattern<{ condition: string }>(
         ({ condition }) => {
           const result = unless(condition, "default");
           return { result };
@@ -349,7 +351,7 @@ describe("when and unless built-in functions", () => {
       );
       const result = runtime.run(
         tx,
-        testRecipe,
+        testPattern,
         { condition: "hello" },
         resultCell,
       );
@@ -360,8 +362,7 @@ describe("when and unless built-in functions", () => {
     });
 
     it("returns fallback when condition is empty string (falsy)", async () => {
-      const testRecipe = recipe<{ condition: string }>(
-        "unless falsy empty string test",
+      const testPattern = pattern<{ condition: string }>(
         ({ condition }) => {
           const result = unless(condition, "default");
           return { result };
@@ -374,7 +375,12 @@ describe("when and unless built-in functions", () => {
         undefined,
         tx,
       );
-      const result = runtime.run(tx, testRecipe, { condition: "" }, resultCell);
+      const result = runtime.run(
+        tx,
+        testPattern,
+        { condition: "" },
+        resultCell,
+      );
       tx.commit();
 
       const value = await result.pull();
@@ -382,8 +388,7 @@ describe("when and unless built-in functions", () => {
     });
 
     it("works with derived condition", async () => {
-      const testRecipe = recipe<{ name: string }>(
-        "unless derived condition test",
+      const testPattern = pattern<{ name: string }>(
         ({ name }) => {
           const displayName = lift((n: string) => n || "")(name);
           const result = unless(displayName, "Anonymous");
@@ -397,7 +402,12 @@ describe("when and unless built-in functions", () => {
         undefined,
         tx,
       );
-      const result = runtime.run(tx, testRecipe, { name: "Alice" }, resultCell);
+      const result = runtime.run(
+        tx,
+        testPattern,
+        { name: "Alice" },
+        resultCell,
+      );
       tx.commit();
 
       const value = await result.pull();
@@ -405,8 +415,7 @@ describe("when and unless built-in functions", () => {
     });
 
     it("works with derived condition returning empty", async () => {
-      const testRecipe = recipe<{ name: string }>(
-        "unless derived empty condition test",
+      const testPattern = pattern<{ name: string }>(
         ({ name }) => {
           const displayName = lift((n: string) => n || "")(name);
           const result = unless(displayName, "Anonymous");
@@ -420,7 +429,7 @@ describe("when and unless built-in functions", () => {
         undefined,
         tx,
       );
-      const result = runtime.run(tx, testRecipe, { name: "" }, resultCell);
+      const result = runtime.run(tx, testPattern, { name: "" }, resultCell);
       tx.commit();
 
       const value = await result.pull();
@@ -430,8 +439,7 @@ describe("when and unless built-in functions", () => {
 
   describe("when and unless combined patterns", () => {
     it("chain when followed by unless (a && b || c pattern)", async () => {
-      const testRecipe = recipe<{ hasData: boolean; data: string }>(
-        "when unless chain test",
+      const testPattern = pattern<{ hasData: boolean; data: string }>(
         ({ hasData, data }) => {
           // Equivalent to: hasData && data || "no data"
           const dataIfAvailable = when(hasData, data);
@@ -449,7 +457,7 @@ describe("when and unless built-in functions", () => {
       );
       const result1 = runtime.run(
         tx,
-        testRecipe,
+        testPattern,
         { hasData: true, data: "hello" },
         resultCell1,
       );
@@ -460,8 +468,7 @@ describe("when and unless built-in functions", () => {
     });
 
     it("chain when followed by unless returns fallback when first is false", async () => {
-      const testRecipe = recipe<{ hasData: boolean; data: string }>(
-        "when unless chain fallback test",
+      const testPattern = pattern<{ hasData: boolean; data: string }>(
         ({ hasData, data }) => {
           const dataIfAvailable = when(hasData, data);
           const result = unless(dataIfAvailable, "no data");
@@ -477,7 +484,7 @@ describe("when and unless built-in functions", () => {
       );
       const result = runtime.run(
         tx,
-        testRecipe,
+        testPattern,
         { hasData: false, data: "ignored" },
         resultCell,
       );
@@ -488,8 +495,7 @@ describe("when and unless built-in functions", () => {
     });
 
     it("multiple when clauses (a && b && c pattern)", async () => {
-      const testRecipe = recipe<{ a: boolean; b: boolean }>(
-        "multiple when test",
+      const testPattern = pattern<{ a: boolean; b: boolean }>(
         ({ a, b }) => {
           // Equivalent to: a && b && "all true"
           const aAndB = when(a, b);
@@ -507,7 +513,7 @@ describe("when and unless built-in functions", () => {
       );
       const result1 = runtime.run(
         tx,
-        testRecipe,
+        testPattern,
         { a: true, b: true },
         resultCell1,
       );
@@ -518,8 +524,7 @@ describe("when and unless built-in functions", () => {
     });
 
     it("multiple when returns false when first condition is false", async () => {
-      const testRecipe = recipe<{ a: boolean; b: boolean }>(
-        "multiple when first false test",
+      const testPattern = pattern<{ a: boolean; b: boolean }>(
         ({ a, b }) => {
           const aAndB = when(a, b);
           const result = when(aAndB, "all true");
@@ -535,7 +540,7 @@ describe("when and unless built-in functions", () => {
       );
       const result = runtime.run(
         tx,
-        testRecipe,
+        testPattern,
         { a: false, b: true },
         resultCell,
       );
@@ -546,8 +551,7 @@ describe("when and unless built-in functions", () => {
     });
 
     it("multiple unless clauses (a || b || c pattern)", async () => {
-      const testRecipe = recipe<{ a: string; b: string }>(
-        "multiple unless test",
+      const testPattern = pattern<{ a: string; b: string }>(
         ({ a, b }) => {
           // Equivalent to: a || b || "default"
           const aOrB = unless(a, b);
@@ -565,7 +569,7 @@ describe("when and unless built-in functions", () => {
       );
       const result1 = runtime.run(
         tx,
-        testRecipe,
+        testPattern,
         { a: "first", b: "second" },
         resultCell1,
       );
@@ -576,8 +580,7 @@ describe("when and unless built-in functions", () => {
     });
 
     it("multiple unless falls through to second when first is falsy", async () => {
-      const testRecipe = recipe<{ a: string; b: string }>(
-        "multiple unless second test",
+      const testPattern = pattern<{ a: string; b: string }>(
         ({ a, b }) => {
           const aOrB = unless(a, b);
           const result = unless(aOrB, "default");
@@ -593,7 +596,7 @@ describe("when and unless built-in functions", () => {
       );
       const result = runtime.run(
         tx,
-        testRecipe,
+        testPattern,
         { a: "", b: "second" },
         resultCell,
       );
@@ -604,8 +607,7 @@ describe("when and unless built-in functions", () => {
     });
 
     it("multiple unless falls through to default when all are falsy", async () => {
-      const testRecipe = recipe<{ a: string; b: string }>(
-        "multiple unless default test",
+      const testPattern = pattern<{ a: string; b: string }>(
         ({ a, b }) => {
           const aOrB = unless(a, b);
           const result = unless(aOrB, "default");
@@ -619,7 +621,7 @@ describe("when and unless built-in functions", () => {
         undefined,
         tx,
       );
-      const result = runtime.run(tx, testRecipe, { a: "", b: "" }, resultCell);
+      const result = runtime.run(tx, testPattern, { a: "", b: "" }, resultCell);
       tx.commit();
 
       const value = await result.pull();

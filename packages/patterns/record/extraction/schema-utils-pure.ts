@@ -70,7 +70,7 @@ export function isInternalModule(type: string): boolean {
 /**
  * Type-safe helper to extract resultSchema from a pattern/piece.
  *
- * Pattern outputs implement the Recipe interface which includes resultSchema.
+ * Pattern outputs implement the Pattern interface which includes resultSchema.
  * This helper safely extracts it with proper type checking.
  *
  * @param piece - The piece/pattern instance (usually stored as `unknown`)

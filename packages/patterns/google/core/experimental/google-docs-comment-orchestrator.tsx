@@ -4,7 +4,7 @@ import {
   Default,
   derive,
   generateObject,
-  getRecipeEnvironment,
+  getPatternEnvironment,
   handler,
   ifElse,
   NAME,
@@ -26,7 +26,7 @@ import {
   type ScopeKey,
 } from "../util/google-auth-manager.tsx";
 
-const _env = getRecipeEnvironment();
+const _env = getPatternEnvironment();
 
 // Debug flag for development - disable in production
 const DEBUG_ORCHESTRATOR = false;

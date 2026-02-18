@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { type Cell, Default, handler, lift, recipe } from "commontools";
+import { type Cell, Default, handler, lift, pattern } from "commontools";
 
 interface SearchResult {
   id: string;
@@ -312,8 +312,7 @@ const liftScoreSummary = lift((input: {
   weights: string;
 }) => `${input.title} leads at ${input.score} with ${input.weights}`);
 
-export const searchRelevanceTuning = recipe<SearchRelevanceArgs>(
-  "Search Relevance Tuning Pattern",
+export const searchRelevanceTuning = pattern<SearchRelevanceArgs>(
   ({ results, weights }) => {
     const sanitizedResults = liftSanitizeResults(results);
     const sanitizedWeights = liftSanitizeWeights(weights);

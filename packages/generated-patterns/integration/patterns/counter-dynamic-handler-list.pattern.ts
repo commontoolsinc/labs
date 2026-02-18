@@ -6,7 +6,7 @@ import {
   derive,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
   toSchema,
 } from "commontools";
@@ -154,8 +154,7 @@ const liftSequenceView = lift((count: number | undefined) =>
   Math.max(0, toInteger(count, 0))
 );
 
-export const counterWithDynamicHandlerList = recipe<DynamicHandlerArgs>(
-  "Counter With Dynamic Handler List",
+export const counterWithDynamicHandlerList = pattern<DynamicHandlerArgs>(
   ({ values }) => {
     const lastAdjustment = cell<AdjustmentRecord>({
       index: -1,

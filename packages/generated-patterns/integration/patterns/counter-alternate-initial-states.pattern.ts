@@ -6,7 +6,7 @@ import {
   derive,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -197,9 +197,9 @@ const liftActiveState = lift(
   },
 );
 
-export const counterWithAlternateInitialStates = recipe<
+export const counterWithAlternateInitialStates = pattern<
   AlternateInitialStatesArgs
->("Counter With Alternate Initial States", ({ states }) => {
+>(({ states }) => {
   const sanitizedStates = liftSanitizeStateSeeds(states);
 
   const activeStateId = cell(fallbackState().id);

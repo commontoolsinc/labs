@@ -17,7 +17,7 @@ import { type CellHandle, isCellHandle } from "@commontools/runtime-client";
  * Usage:
  * <ct-theme .theme=${partialTheme}><slot/></ct-theme>
  *
- * The component merges a partial theme (recipe-style) with defaults,
+ * The component merges a partial theme (pattern-style) with defaults,
  * provides the result via context, and sets CSS custom properties on
  * the host so descendants pick up tokens.
  *
@@ -30,7 +30,7 @@ export class CTThemeProvider extends BaseElement {
     }
   `;
 
-  /** Partial or full theme object (recipe-style supported) */
+  /** Partial or full theme object (pattern-style supported) */
   @property({ attribute: false })
   theme: any = {};
 

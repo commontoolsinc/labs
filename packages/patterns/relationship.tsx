@@ -10,7 +10,7 @@ import {
   type Default,
   handler,
   NAME,
-  recipe,
+  pattern,
   UI,
   Writable,
 } from "commontools";
@@ -97,11 +97,10 @@ const toggleInnerCircle = handler<
 });
 
 // ===== The Pattern =====
-export const RelationshipModule = recipe<
+export const RelationshipModule = pattern<
   RelationshipModuleInput,
   RelationshipModuleInput
 >(
-  "RelationshipModule",
   ({ relationTypes, closeness, howWeMet, innerCircle }) => {
     const displayText = computed(() => {
       const types = relationTypes || [];

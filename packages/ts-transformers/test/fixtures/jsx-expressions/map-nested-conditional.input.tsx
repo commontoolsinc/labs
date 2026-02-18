@@ -1,7 +1,7 @@
 /// <cts-enable />
-import { cell, recipe, UI } from "commontools";
+import { cell, pattern, UI } from "commontools";
 
-export default recipe("MapNestedConditional", (_state) => {
+export default pattern((_state) => {
   const items = cell([{ name: "apple" }, { name: "banana" }]);
   const showList = cell(true);
 

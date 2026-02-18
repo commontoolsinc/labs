@@ -1,29 +1,29 @@
 import { createJsonSchema, type JSONSchema, NAME } from "@commontools/runner";
-import { DEFAULT_MODEL_NAME, fixRecipePrompt } from "@commontools/llm";
+import { DEFAULT_MODEL_NAME, fixPatternPrompt } from "@commontools/llm";
 import { Cell } from "@commontools/runner";
 
-import { getIframeRecipe } from "./iframe/recipe.ts";
+import { getIframePattern } from "./iframe/pattern.ts";
 import { extractUserCode, injectUserCode } from "./iframe/static.ts";
 import { WorkflowForm } from "./index.ts";
-import { compileAndRunRecipe, generateNewRecipeVersion } from "./iterate.ts";
+import { compileAndRunPattern, generateNewPatternVersion } from "./iterate.ts";
 import { PieceManager } from "./manager.ts";
 import { nameSchema } from "@commontools/runner/schemas";
 import { processWorkflow, ProcessWorkflowOptions } from "./workflow.ts";
 
 export const castSpellAsPiece = async (
   pieceManager: PieceManager,
-  recipeKey: string,
+  patternKey: string,
   argument: Cell<unknown>,
 ) => {
-  if (recipeKey && argument) {
+  if (patternKey && argument) {
     console.log("Syncing...");
-    const recipeId = recipeKey.replace("spell-", "");
-    const recipe = await pieceManager.syncRecipeById(recipeId);
-    if (!recipe) return;
+    const patternId = patternKey.replace("spell-", "");
+    const pattern = await pieceManager.syncPatternById(patternId);
+    if (!pattern) return;
 
     console.log("Casting...");
     return await pieceManager.runPersistent(
-      recipe,
+      pattern,
       argument,
     );
   }
@@ -47,12 +47,12 @@ export const createDataPiece = (
     `    ${key}: data.${key},\n`
   ).join("\n");
 
-  const dataRecipeSrc = `import { h } from "@commontools/html";
-  import { recipe, UI, NAME, derive, type JSONSchema } from "@commontools/runner";
+  const dataPatternSrc = `import { h } from "@commontools/html";
+  import { pattern, UI, NAME, derive, type JSONSchema } from "@commontools/runner";
 
   const schema = ${schemaString};
 
-  export default recipe(schema, schema, (data) => ({
+  export default pattern((data) => ({
     [NAME]: "${name ?? "Data Import"}",
     [UI]: <div><h2>Your data has this schema</h2><pre>${
     schemaString.replaceAll("{", "&#123;")
@@ -60,11 +60,11 @@ export const createDataPiece = (
       .replaceAll("\n", "<br/>")
   }</pre></div>,
     ${result}
-  }));`;
+  }), schema, schema);`;
 
-  return compileAndRunRecipe(
+  return compileAndRunPattern(
     pieceManager,
-    dataRecipeSrc,
+    dataPatternSrc,
     name ?? "Data Import",
     data,
   );
@@ -76,21 +76,21 @@ export async function fixItPiece(
   error: Error,
   model = DEFAULT_MODEL_NAME,
 ): Promise<Cell<unknown>> {
-  const iframeRecipe = getIframeRecipe(piece, pieceManager.runtime);
-  if (!iframeRecipe.iframe) {
+  const iframePattern = getIframePattern(piece, pieceManager.runtime);
+  if (!iframePattern.iframe) {
     throw new Error("Fixit only works for iframe pieces");
   }
 
   // Extract just the user code portion instead of using the full source
-  const userCode = extractUserCode(iframeRecipe.iframe.src);
+  const userCode = extractUserCode(iframePattern.iframe.src);
   if (!userCode) {
     throw new Error("Could not extract user code from iframe source");
   }
 
-  const fixedUserCode = await fixRecipePrompt(
-    iframeRecipe.iframe.spec,
+  const fixedUserCode = await fixPatternPrompt(
+    iframePattern.iframe.spec,
     userCode, // Send only the user code portion
-    JSON.stringify(iframeRecipe.iframe.argumentSchema),
+    JSON.stringify(iframePattern.iframe.argumentSchema),
     error.message,
     {
       model,
@@ -101,10 +101,10 @@ export async function fixItPiece(
   // Inject the fixed user code back into the template
   const fixedFullCode = injectUserCode(fixedUserCode);
 
-  return generateNewRecipeVersion(
+  return generateNewPatternVersion(
     pieceManager,
     piece,
-    { src: fixedFullCode, spec: iframeRecipe.iframe.spec },
+    { src: fixedFullCode, spec: iframePattern.iframe.spec },
   );
 }
 
@@ -117,22 +117,22 @@ export async function renamePiece(
   piece.key(NAME).set(newName);
 }
 
-export async function addGithubRecipe(
+export async function addGithubPattern(
   pieceManager: PieceManager,
   filename: string,
   spec: string,
   runOptions: unknown,
 ): Promise<Cell<unknown>> {
   const response = await fetch(
-    `https://raw.githubusercontent.com/commontoolsinc/labs/refs/heads/main/recipes/${filename}?${Date.now()}`,
+    `https://raw.githubusercontent.com/commontoolsinc/labs/refs/heads/main/deprecated-patterns/${filename}?${Date.now()}`,
   );
   if (!response.ok) {
     throw new Error(
-      `Failed to fetch recipe from GitHub: ${response.status} ${response.statusText}`,
+      `Failed to fetch pattern from GitHub: ${response.status} ${response.statusText}`,
     );
   }
   const src = await response.text();
-  return await compileAndRunRecipe(
+  return await compileAndRunPattern(
     pieceManager,
     src,
     spec,

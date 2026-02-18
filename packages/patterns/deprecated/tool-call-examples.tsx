@@ -1,9 +1,9 @@
 /// <cts-enable />
-import { generateText, NAME, recipe, str, UI, Writable } from "commontools";
+import { generateText, NAME, pattern, str, UI, Writable } from "commontools";
 
 import { calculator } from "../system/common-tools.tsx";
 
-export default recipe("ToolCallExamples", () => {
+export default pattern(() => {
   const expression = Writable.of("1+1");
 
   const text = generateText({

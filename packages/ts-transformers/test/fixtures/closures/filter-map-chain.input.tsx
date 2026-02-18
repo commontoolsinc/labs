@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 
 interface Item {
   id: number;
@@ -12,7 +12,7 @@ interface State {
   taxRate: number;
 }
 
-export default recipe<State>("FilterMapChain", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>

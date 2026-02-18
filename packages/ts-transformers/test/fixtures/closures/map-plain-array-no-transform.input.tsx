@@ -1,11 +1,11 @@
 /// <cts-enable />
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 
 interface State {
   multiplier: number;
 }
 
-export default recipe<State>("PlainArrayNoTransform", (state) => {
+export default pattern<State>((state) => {
   const plainArray = [1, 2, 3, 4, 5];
 
   return {

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 
 interface State {
   user: {
@@ -77,7 +77,7 @@ interface State {
   };
 }
 
-export default recipe<State>("ParentSuppressionEdge", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>

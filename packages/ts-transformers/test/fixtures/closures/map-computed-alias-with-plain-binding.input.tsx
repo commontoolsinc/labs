@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { recipe, UI } from "commontools";
+import { pattern, UI } from "commontools";
 
 function dynamicKey(): "value" {
   return "value";
@@ -14,7 +14,7 @@ interface State {
   items: Item[];
 }
 
-export default recipe<State>("MapComputedAliasWithPlainBinding", (state) => {
+export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>

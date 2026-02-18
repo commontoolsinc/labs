@@ -5,7 +5,7 @@ import {
   Default,
   derive,
   handler,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -84,8 +84,9 @@ const fallbackSelection: ChildView = {
   label: "Counter 1 value 0",
 };
 
-export const counterComputedChildSelection = recipe<ComputedChildSelectionArgs>(
-  "Counter With Computed Child Selection",
+export const counterComputedChildSelection = pattern<
+  ComputedChildSelectionArgs
+>(
   ({ counts }) => {
     const normalizedCounts = computed(() => sanitizeCounts(counts));
     const children = computed(() => buildChildViews(normalizedCounts));

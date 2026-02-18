@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, handler, recipe, str } from "commontools";
+import { Cell, Default, handler, pattern, str } from "commontools";
 
 interface BoundedCounterArgs {
   value: Default<number, 0>;
@@ -21,8 +21,7 @@ const clampValue = handler(
   },
 );
 
-export const boundedCounter = recipe<BoundedCounterArgs>(
-  "Bounded Counter",
+export const boundedCounter = pattern<BoundedCounterArgs>(
   ({ value, min, max }) => {
     const label = str`Value ${value} (min ${min}, max ${max})`;
 

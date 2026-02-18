@@ -182,8 +182,8 @@ export const DEFAULT_BG_OPTIONS = {
 
 ```typescript
 export interface Module {
-  type: "ref" | "javascript" | "recipe" | "raw" | "isolated" | "passthrough";
-  implementation?: ((...args: any[]) => any) | Recipe | string;
+  type: "ref" | "javascript" | "pattern" | "raw" | "isolated" | "passthrough";
+  implementation?: ((...args: any[]) => any) | Pattern | string;
   wrapper?: "handler";
   argumentSchema?: JSONSchema;
   resultSchema?: JSONSchema;
@@ -212,8 +212,8 @@ type Module =
     resultSchema?: JSONSchema;
   }
   | {
-    type: "recipe";
-    implementation: Recipe;
+    type: "pattern";
+    implementation: Pattern;
     wrapper?: "handler";
     argumentSchema?: JSONSchema;
     resultSchema?: JSONSchema;

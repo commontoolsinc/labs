@@ -67,7 +67,7 @@ FILES_TO_CHECK+=("${DIRS[@]}")
 
 # Glob patterns - bash expands these with nullglob set
 FILES_TO_CHECK+=(tasks/*.ts)
-FILES_TO_CHECK+=(recipes/[!_]*.ts*)
+FILES_TO_CHECK+=(deprecated-patterns/[!_]*.ts*)
 FILES_TO_CHECK+=(packages/ui/src/v2/components/*[!outliner]/*.ts*)
 FILES_TO_CHECK+=(packages/cli/*.ts)
 FILES_TO_CHECK+=(packages/static/*.ts)

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, handler, lift, recipe, str } from "commontools";
+import { Cell, Default, handler, lift, pattern, str } from "commontools";
 
 interface CounterEntry {
   id?: string;
@@ -123,8 +123,7 @@ const liftLabels = lift((entries: AggregatedCounter[]) =>
   entries.map((entry) => entry.label)
 );
 
-export const counterAggregator = recipe<CounterAggregatorArgs>(
-  "Counter Aggregator",
+export const counterAggregator = pattern<CounterAggregatorArgs>(
   ({ counters }) => {
     const sanitizedCounters = liftSanitizedCounters(counters);
 

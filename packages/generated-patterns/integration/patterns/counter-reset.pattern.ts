@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, handler, recipe, str } from "commontools";
+import { Cell, Default, handler, pattern, str } from "commontools";
 
 interface ResetCounterArgs {
   value: Default<number, 0>;
@@ -27,8 +27,7 @@ const resetCounter = handler(
   },
 );
 
-export const counterWithReset = recipe<ResetCounterArgs>(
-  "Counter With Reset",
+export const counterWithReset = pattern<ResetCounterArgs>(
   ({ value, baseline }) => {
     return {
       value,

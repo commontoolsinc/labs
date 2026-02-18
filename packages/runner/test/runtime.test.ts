@@ -64,7 +64,7 @@ describe("Runtime", () => {
       `,
     });
     const compiled = await compiler.resolveAndCompile(program, {
-      filename: "recipe-abc.js",
+      filename: "pattern-abc.js",
       bundleExportAll: true,
     });
     let thrown: Error | undefined;

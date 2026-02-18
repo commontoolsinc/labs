@@ -1,7 +1,7 @@
 #!/usr/bin/env -S deno run --allow-read --allow-net --allow-env
 // Load .env file
 import { parseArgs } from "@std/cli/parse-args";
-import { compileRecipe, PieceManager } from "@commontools/piece";
+import { compilePattern, PieceManager } from "@commontools/piece";
 import {
   getEntityId,
   isStream,
@@ -21,7 +21,7 @@ const {
   spaceName,
   spaceDID,
   pieceId,
-  recipeFile,
+  patternFile,
   cause,
   input,
   userKey,
@@ -32,7 +32,7 @@ const {
     "spaceName",
     "spaceDID",
     "pieceId",
-    "recipeFile",
+    "patternFile",
     "cause",
     "input",
     "userKey",
@@ -202,17 +202,17 @@ async function main() {
 
   inputValue = mapToCell(inputValue);
 
-  if (recipeFile) {
+  if (patternFile) {
     try {
-      const recipeSrc = await Deno.readTextFile(recipeFile);
-      const recipe = await compileRecipe(
-        recipeSrc,
-        "recipe",
+      const patternSrc = await Deno.readTextFile(patternFile);
+      const patternResult = await compilePattern(
+        patternSrc,
+        "pattern",
         runtime,
         space,
       );
       const piece = await pieceManager.runPersistent(
-        recipe,
+        patternResult,
         inputValue,
         cause,
       );
@@ -234,7 +234,7 @@ async function main() {
         Deno.exit(0);
       }
     } catch (error) {
-      console.error("Error loading and compiling recipe:", error);
+      console.error("Error loading and compiling pattern:", error);
       if (quit) {
         await runtime.storageManager.synced();
         Deno.exit(1);

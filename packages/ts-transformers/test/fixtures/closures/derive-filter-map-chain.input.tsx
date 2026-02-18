@@ -1,12 +1,12 @@
 /// <cts-enable />
-import { derive, recipe } from "commontools";
+import { derive, pattern } from "commontools";
 
 interface Preference {
   ingredient: string;
   preference: "liked" | "disliked";
 }
 
-export default recipe<{ preferences: Preference[]; foodDescription: string }>((state) => {
+export default pattern<{ preferences: Preference[]; foodDescription: string }>((state) => {
   // Using object input form for derive - exactly like the issue describes
   // This matches: derive({ foodDescription, preferences }, ({ foodDescription: food, preferences: prefs }) => ...)
   const wishQuery = derive(
@@ -21,7 +21,7 @@ export default recipe<{ preferences: Preference[]; foodDescription: string }>((s
         .filter((p) => p.preference === "liked")
         .map((p) => p.ingredient)
         .join(", ");
-      return `Recipe for ${food} with: ${liked}`;
+      return `Pattern for ${food} with: ${liked}`;
     }
   );
 

@@ -31,7 +31,7 @@ describe("llmDialog", () => {
   let patternTool: ReturnType<
     typeof createBuilder
   >["commontools"]["patternTool"];
-  let recipe: ReturnType<typeof createBuilder>["commontools"]["recipe"];
+  let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
   let llmDialog: ReturnType<typeof createBuilder>["commontools"]["llmDialog"];
 
   beforeEach(() => {
@@ -44,7 +44,7 @@ describe("llmDialog", () => {
     tx = runtime.edit();
 
     const { commontools } = createBuilder();
-    ({ recipe, llmDialog, Cell, patternTool } = commontools);
+    ({ pattern, llmDialog, Cell, patternTool } = commontools);
   });
 
   afterEach(async () => {
@@ -124,9 +124,7 @@ describe("llmDialog", () => {
       required: ["addMessage"],
     } as const satisfies JSONSchema;
 
-    const testRecipe = recipe(
-      false,
-      resultSchema,
+    const testPattern = pattern(
       () => {
         const messages = Cell.of<BuiltInLLMMessage[]>([]);
         const dialog = llmDialog({
@@ -139,12 +137,14 @@ describe("llmDialog", () => {
           messages,
         };
       },
+      false,
+      resultSchema,
     );
 
-    // We need to define the result schema for the recipe to include addMessage as a stream
-    // The recipe builder infers this from the return value, but we might need to be explicit if it's a stream?
+    // We need to define the result schema for the pattern to include addMessage as a stream
+    // The pattern builder infers this from the return value, but we might need to be explicit if it's a stream?
     // The user said: "setting the result schema to { asStream: true } for that part"
-    // This usually implies using `recipe(...).schema(...)` or relying on inference if it works.
+    // This usually implies using `pattern(...).schema(...)` or relying on inference if it works.
     // But `dialog.addMessage` comes from `llmDialog` result which already has `asStream: true` in its schema.
     // So hopefully inference works.
 
@@ -155,7 +155,7 @@ describe("llmDialog", () => {
       tx,
     );
 
-    const result = runtime.run(tx, testRecipe, {}, resultCell);
+    const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
     // Get the addMessage handler
@@ -255,7 +255,11 @@ describe("llmDialog", () => {
       required: ["addMessage"],
     } as const satisfies JSONSchema;
 
-    const getWeatherTool = recipe(
+    const getWeatherTool = pattern(
+      ({ location: _location }: any) => {
+        toolCalled = true;
+        return toolResult;
+      },
       {
         description: "Get the weather for a location",
         type: "object",
@@ -265,15 +269,9 @@ describe("llmDialog", () => {
         required: ["location"],
       } as const satisfies JSONSchema,
       { type: "string" },
-      ({ location: _location }: any) => {
-        toolCalled = true;
-        return toolResult;
-      },
     );
 
-    const testRecipe = recipe(
-      false,
-      resultSchema,
+    const testPattern = pattern(
       () => {
         const messages = Cell.of<BuiltInLLMMessage[]>([]);
         const dialog = llmDialog({
@@ -291,6 +289,8 @@ describe("llmDialog", () => {
           messages,
         };
       },
+      false,
+      resultSchema,
     );
 
     const resultCell = runtime.getCell(
@@ -300,7 +300,7 @@ describe("llmDialog", () => {
       tx,
     );
 
-    const result = runtime.run(tx, testRecipe, {}, resultCell);
+    const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
     const addMessage = await result.key("addMessage").pull();
@@ -409,9 +409,7 @@ describe("llmDialog", () => {
       required: ["addMessage"],
     } as const satisfies JSONSchema;
 
-    const testRecipe = recipe(
-      false,
-      resultSchema,
+    const testPattern = pattern(
       () => {
         const messages = Cell.of<BuiltInLLMMessage[]>([]);
         const dialog = llmDialog({
@@ -424,6 +422,8 @@ describe("llmDialog", () => {
           messages,
         };
       },
+      false,
+      resultSchema,
     );
 
     const resultCell = runtime.getCell(
@@ -433,7 +433,7 @@ describe("llmDialog", () => {
       tx,
     );
 
-    const result = runtime.run(tx, testRecipe, {}, resultCell);
+    const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
     const addMessage = await result.key("addMessage").pull();
@@ -577,9 +577,7 @@ describe("llmDialog", () => {
       required: ["addMessage"],
     } as const satisfies JSONSchema;
 
-    const testRecipe = recipe(
-      false,
-      resultSchema,
+    const testPattern = pattern(
       () => {
         const messages = Cell.of<BuiltInLLMMessage[]>([]);
         const dialog = llmDialog({
@@ -592,6 +590,8 @@ describe("llmDialog", () => {
           messages,
         };
       },
+      false,
+      resultSchema,
     );
 
     const resultCell = runtime.getCell(
@@ -601,7 +601,7 @@ describe("llmDialog", () => {
       tx,
     );
 
-    const result = runtime.run(tx, testRecipe, {}, resultCell);
+    const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
     const addMessage = await result.key("addMessage").pull();
@@ -677,12 +677,10 @@ describe("llmDialog", () => {
       required: ["addMessage"],
     } as const satisfies JSONSchema;
 
-    const testRecipe = recipe(
-      false,
-      resultSchema,
+    const testPattern = pattern(
       () => {
         const messages = Cell.of<BuiltInLLMMessage[]>([]);
-        // Create context cell inside recipe
+        // Create context cell inside pattern
         const contextCell = Cell.of({ value: "test context data" });
         const dialog = llmDialog({
           messages,
@@ -697,6 +695,8 @@ describe("llmDialog", () => {
           messages,
         };
       },
+      false,
+      resultSchema,
     );
 
     const resultCell = runtime.getCell(
@@ -706,7 +706,7 @@ describe("llmDialog", () => {
       tx,
     );
 
-    const result = runtime.run(tx, testRecipe, {}, resultCell);
+    const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
     const addMessage = await result.key("addMessage").pull();
@@ -811,12 +811,10 @@ describe("llmDialog", () => {
       required: ["addMessage"],
     } as const satisfies JSONSchema;
 
-    const testRecipe = recipe(
-      false,
-      resultSchema,
+    const testPattern = pattern(
       () => {
         const messages = Cell.of<BuiltInLLMMessage[]>([]);
-        // Create context cell inside recipe
+        // Create context cell inside pattern
         const contextCell = Cell.of({ value: "context data" });
         const dialog = llmDialog({
           messages,
@@ -831,6 +829,8 @@ describe("llmDialog", () => {
           messages,
         };
       },
+      false,
+      resultSchema,
     );
 
     const resultCell = runtime.getCell(
@@ -840,7 +840,7 @@ describe("llmDialog", () => {
       tx,
     );
 
-    const result = runtime.run(tx, testRecipe, {}, resultCell);
+    const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
     const addMessage = await result.key("addMessage").pull();

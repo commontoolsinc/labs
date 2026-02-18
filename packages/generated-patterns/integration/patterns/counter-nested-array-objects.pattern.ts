@@ -5,7 +5,7 @@ import {
   derive,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -144,8 +144,7 @@ const liftAllNotes = lift((items: { notes: string[] }[] | undefined) => {
   });
 });
 
-export const counterWithNestedArrayObjects = recipe<NestedArrayArgs>(
-  "Counter With Nested Array Objects",
+export const counterWithNestedArrayObjects = pattern<NestedArrayArgs>(
   ({ groups }) => {
     const totals = derive(groups, countTotals);
     const summaries = derive(groups, summarizeGroups);

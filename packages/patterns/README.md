@@ -59,10 +59,10 @@ keywords/features.
   - **Data types**: array of tuples (date/pizza strings), web response object
   - **Keywords**: fetchData, lift, string parsing, map
 
-- system/common-tools.tsx: Reusable tool recipes and handlers for LLM
+- system/common-tools.tsx: Reusable tool patterns and handlers for LLM
   integration
   - **Data types**: array of list items (objects), API response objects
-  - **Keywords**: handler, recipe as tool, fetchData, derive, ifElse
+  - **Keywords**: handler, pattern as tool, fetchData, derive, ifElse
 
 - counter.tsx: Basic counter with increment/decrement operations
   - **Data types**: number
@@ -78,9 +78,10 @@ keywords/features.
   - **Data types**: boolean
   - **Keywords**: ct-checkbox, handler, checked property, onct-change, ifElse
 
-- examples/ct-render.tsx: Rendering sub-recipes with ct-render component
+- examples/ct-render.tsx: Rendering sub-patterns with ct-render component
   - **Data types**: number (counter value)
-  - **Keywords**: ct-render, $cell, nested recipes, recipe composition, handler
+  - **Keywords**: ct-render, $cell, nested patterns, pattern composition,
+    handler
 
 - ct-select.tsx: Dropdown select component with various value types
   - **Data types**: string, number
@@ -95,7 +96,7 @@ keywords/features.
   navigation
   - **Data types**: array of pieces (MentionableCharm objects)
   - **Keywords**: wish, derive, navigateTo, handler, ct-table, ct-button,
-    multiple recipe instantiation
+    multiple pattern instantiation
 
 - dice.tsx: Dice roller with random number generation
   - **Data types**: number
@@ -105,9 +106,9 @@ keywords/features.
   - **Data types**: complex API response object, string (URL)
   - **Keywords**: fetchData, lift, derive, ct-input, $value, string parsing
 
-- instantiate-recipe.tsx: Factory pattern for creating counter instances
+- instantiate-pattern.tsx: Factory pattern for creating counter instances
   - **Data types**: number, piece references
-  - **Keywords**: navigateTo, handler, recipe instantiation, factory pattern
+  - **Keywords**: navigateTo, handler, pattern instantiation, factory pattern
 
 - linkedlist-in-cell.tsx: Linked list data structure implementation
   - **Data types**: linked list object (recursive structure with value/next)
@@ -130,7 +131,7 @@ keywords/features.
 
 - nested-counter.tsx: Counter with nested sub-counter instances
   - **Data types**: number
-  - **Keywords**: nested recipes, recipe composition, passing cells, str
+  - **Keywords**: nested patterns, pattern composition, passing cells, str
     template, handler
 
 - notes/note.tsx: Note-taking app with backlinks and mentions

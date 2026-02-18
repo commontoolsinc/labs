@@ -5,7 +5,7 @@ import {
   Default,
   handler,
   lift,
-  recipe,
+  pattern,
   str,
 } from "commontools";
 
@@ -223,8 +223,7 @@ const relocateInventory = handler(
   },
 );
 
-export const warehouseBinMap = recipe<WarehouseBinMapArgs>(
-  "Warehouse Bin Map",
+export const warehouseBinMap = pattern<WarehouseBinMapArgs>(
   ({ bins, items }) => {
     const binsList = liftSanitizeBins(bins);
     const rawItems = liftRawItems(items);

@@ -17,6 +17,8 @@
   },
   "lint": {
     "exclude": [
+      "./test/fixtures/**/*.expected.js",
+      "./test/fixtures/**/*.expected.jsx",
       "./test/fixtures/**/*.expected.ts",
       "./test/fixtures/**/*.expected.tsx"
     ]

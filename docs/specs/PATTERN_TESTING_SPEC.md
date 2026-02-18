@@ -238,7 +238,7 @@ async function runTestPattern(testPath: string, options: TestOptions): Promise<T
     new FileSystemProgramResolver(testPath)
   );
   const { main } = await engine.process(program, { noCheck: false, noRun: false });
-  const testPatternFactory = main.default as Recipe;
+  const testPatternFactory = main.default as Pattern;
 
   // 3. Instantiate the test pattern with proper space context
   const tx = runtime.edit();

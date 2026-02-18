@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, cell, Default, handler, lift, recipe, str } from "commontools";
+import { Cell, cell, Default, handler, lift, pattern, str } from "commontools";
 
 type SortDirection = "asc" | "desc";
 
@@ -90,8 +90,7 @@ const toggleSortDirection = handler(
   },
 );
 
-export const counterWithSortDirectionToggle = recipe<SortDirectionToggleArgs>(
-  "Counter With Sort Direction Toggle",
+export const counterWithSortDirectionToggle = pattern<SortDirectionToggleArgs>(
   ({ count, entries, direction }) => {
     const directionHistory = cell<SortDirection[]>([]);
 

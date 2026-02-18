@@ -2,7 +2,7 @@
 import {
   computed,
   Default,
-  getRecipeEnvironment,
+  getPatternEnvironment,
   handler,
   NAME,
   pattern,
@@ -11,7 +11,7 @@ import {
   Writable,
 } from "commontools";
 
-const env = getRecipeEnvironment();
+const env = getPatternEnvironment();
 
 // Debug logging - set to true when debugging token refresh issues
 const DEBUG_AUTH = false;

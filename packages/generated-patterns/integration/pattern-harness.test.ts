@@ -371,8 +371,8 @@ import {
   scenarios as surveyResponseAnalyzerScenarios,
 } from "./patterns/survey-response-analyzer.ts";
 import {
-  scenarios as recipeIngredientScalerScenarios,
-} from "./patterns/recipe-ingredient-scaler.ts";
+  scenarios as patternIngredientScalerScenarios,
+} from "./patterns/pattern-ingredient-scaler.ts";
 import {
   scenarios as releaseChecklistScenarios,
 } from "./patterns/release-checklist.ts";
@@ -485,7 +485,7 @@ const allScenarios = [
   ...markdownPreviewToggleScenarios,
   ...researchCitationManagerScenarios,
   ...surveyResponseAnalyzerScenarios,
-  ...recipeIngredientScalerScenarios,
+  ...patternIngredientScalerScenarios,
   ...releaseChecklistScenarios,
   ...toggleScenarios,
   ...doubleCounterSharedIncrementScenarios,

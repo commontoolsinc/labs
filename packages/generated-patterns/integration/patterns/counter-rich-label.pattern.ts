@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, handler, recipe, str } from "commontools";
+import { Cell, Default, handler, pattern, str } from "commontools";
 
 interface RichLabelArgs {
   value: Default<number, 0>;
@@ -20,8 +20,7 @@ const adjustWithStep = handler(
   },
 );
 
-export const counterWithRichLabel = recipe<RichLabelArgs>(
-  "Counter With Rich Label",
+export const counterWithRichLabel = pattern<RichLabelArgs>(
   ({ value, prefix, step, unit }) => {
     const detail = str`step ${step} ${unit}`;
     const label = str`${prefix}: ${value} (${detail})`;
