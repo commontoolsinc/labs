@@ -511,13 +511,10 @@ export abstract class BaseObjectTraverser {
     // a full re-traversal. Caching collapses this to one visit per cell.
     // itemLink must be part of the key because the same data reached through
     // different links produces different query result proxies / cell identities.
-    // Capture the original itemLink for memo keys since the array branch mutates
-    // the parameter variable during iteration.
     // Skip when defaultValue is provided since it can alter the result.
-    const originalItemLink = itemLink;
     if (defaultValue === undefined) {
-      const memoKey = originalItemLink
-        ? addressKey(doc.address) + "|" + addressKey(originalItemLink)
+      const memoKey = itemLink
+        ? addressKey(doc.address) + "|" + addressKey(itemLink)
         : addressKey(doc.address);
       const cached = this.dagMemo.get(memoKey);
       if (cached !== undefined) {
@@ -557,6 +554,7 @@ export abstract class BaseObjectTraverser {
         };
         // We follow the first link in array elements so we don't have
         // strangeness with setting item at 0 to item at 1
+        let arrayElementLink = itemLink;
         if (isPrimitiveCellLink(item)) {
           const [redirDoc, redirSelector] = this.getDocAtPath(
             docItem,
@@ -567,7 +565,7 @@ export abstract class BaseObjectTraverser {
           const [linkDoc, _selector] = this.nextLink(redirDoc, redirSelector);
           // our item link should point one past the last redirect, but it may
           // be invalid (in which case, we should base the link on redirDoc).
-          itemLink = getNormalizedLink(
+          arrayElementLink = getNormalizedLink(
             linkDoc.value !== undefined ? linkDoc.address : redirDoc.address,
           );
           // We can follow all the links, since we don't need to track cells
@@ -580,7 +578,7 @@ export abstract class BaseObjectTraverser {
             );
           }
         }
-        return this.traverseDAG(docItem, itemDefault, itemLink);
+        return this.traverseDAG(docItem, itemDefault, arrayElementLink);
       });
       // We copy the contents of our result into newValue so that if we have a
       // cycle, we can return newValue before we actually finish populating it.
@@ -593,8 +591,8 @@ export abstract class BaseObjectTraverser {
       const newLink = getNormalizedLink(doc.address, true);
       const arrayResult = this.objectCreator.createObject(newLink, newValue);
       if (defaultValue === undefined) {
-        const memoKey = originalItemLink
-          ? addressKey(doc.address) + "|" + addressKey(originalItemLink)
+        const memoKey = itemLink
+          ? addressKey(doc.address) + "|" + addressKey(itemLink)
           : addressKey(doc.address);
         this.dagMemo.set(memoKey, arrayResult);
       }
@@ -679,8 +677,8 @@ export abstract class BaseObjectTraverser {
         const newLink = itemLink ?? getNormalizedLink(doc.address, true);
         const recordResult = this.objectCreator.createObject(newLink, newValue);
         if (defaultValue === undefined) {
-          const memoKey = originalItemLink
-            ? addressKey(doc.address) + "|" + addressKey(originalItemLink)
+          const memoKey = itemLink
+            ? addressKey(doc.address) + "|" + addressKey(itemLink)
             : addressKey(doc.address);
           this.dagMemo.set(memoKey, recordResult);
         }
