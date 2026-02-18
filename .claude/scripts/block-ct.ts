@@ -17,9 +17,14 @@ if (!cmd) Deno.exit(0);
 // Don't inspect git commit message content for command patterns
 if (isGitCommit(cmd)) Deno.exit(0);
 
-// Remove quoted strings before checking for ct commands
-// This prevents false positives from file paths containing "ct"
-const cmdWithoutQuotes = cmd.replace(/(['"`])[^'"`]*?\1/g, "");
+// Remove quoted strings and heredoc content before checking for ct commands
+// This prevents false positives from file paths or heredocs containing "ct"
+let cmdWithoutQuotes = cmd.replace(/(['"`])[^'"`]*?\1/g, "");
+// Remove heredoc content: <<'EOF' ... EOF or <<EOF ... EOF
+cmdWithoutQuotes = cmdWithoutQuotes.replace(
+  /<<'?(\w+)'?[\s\S]*?\n\1/g,
+  "",
+);
 
 // Match `ct` as a standalone command (not `deno task ct` or part of another word)
 // Matches: ct, ./ct, /path/to/ct but not `deno task ct` or `select`

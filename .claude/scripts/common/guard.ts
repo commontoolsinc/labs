@@ -8,8 +8,15 @@
  */
 export function guardProjectDir(): void {
   const projectDir = Deno.env.get("CLAUDE_PROJECT_DIR") || "";
-  if (projectDir && !Deno.cwd().startsWith(projectDir)) {
-    Deno.exit(0);
+  if (projectDir) {
+    const cwd = Deno.cwd();
+    // Enforce path boundary: cwd must be the project dir itself or a subdirectory.
+    // Without the separator check, "/repo2" would wrongly match "/repo".
+    const isInProject = cwd === projectDir ||
+      cwd.startsWith(projectDir + "/");
+    if (!isInProject) {
+      Deno.exit(0);
+    }
   }
 }
 
