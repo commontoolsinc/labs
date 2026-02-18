@@ -161,39 +161,43 @@ const refreshCommits = handler({}, {
   // state.commits.update(() => commits);
 });
 
-export default pattern(patternSchema, outputSchema, ({ repo, owner }: any) => {
-  const commits = cell<GitHubCommit[]>([]);
+export default pattern(
+  ({ repo, owner }: any) => {
+    const commits = cell<GitHubCommit[]>([]);
 
-  return {
-    [NAME]: str`GitHub Commits: ${repo}/${owner}`,
-    [UI]: (
-      <div
-        style={{
-          fontFamily: "system-ui, -apple-system, sans-serif",
-          padding: "20px",
-        }}
-      >
-        <button
-          type="button"
-          onClick={refreshCommits({ commits, repo, owner })}
+    return {
+      [NAME]: str`GitHub Commits: ${repo}/${owner}`,
+      [UI]: (
+        <div
           style={{
-            padding: "8px 16px",
-            backgroundColor: "#2ea44f",
-            color: "white",
-            border: "none",
-            borderRadius: "6px",
-            cursor: "pointer",
-            marginBottom: "20px",
+            fontFamily: "system-ui, -apple-system, sans-serif",
+            padding: "20px",
           }}
         >
-          Refresh Commits
-        </button>
-        <pre>
+          <button
+            type="button"
+            onClick={refreshCommits({ commits, repo, owner })}
+            style={{
+              padding: "8px 16px",
+              backgroundColor: "#2ea44f",
+              color: "white",
+              border: "none",
+              borderRadius: "6px",
+              cursor: "pointer",
+              marginBottom: "20px",
+            }}
+          >
+            Refresh Commits
+          </button>
+          <pre>
           {derive(commits, (commits) => JSON.stringify(commits, null, 2))}
-        </pre>
-      </div>
-    ),
-    updater: refreshCommits({ commits, repo, owner }),
-    commits,
-  };
-});
+          </pre>
+        </div>
+      ),
+      updater: refreshCommits({ commits, repo, owner }),
+      commits,
+    };
+  },
+  patternSchema,
+  outputSchema,
+);

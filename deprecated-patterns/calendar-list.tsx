@@ -94,8 +94,6 @@ const CalendarListOutputSchema = {
 } as const satisfies JSONSchema;
 
 export default pattern(
-  CalendarListInputSchema,
-  CalendarListOutputSchema,
   ({ events }: any) => {
     // Transform calendar events into list items with title field
     // NOTE(@bf): without derive I get a "Error loading and compiling pattern: Error: Can't read value during pattern creation."
@@ -160,4 +158,6 @@ export default pattern(
       items,
     };
   },
+  CalendarListInputSchema,
+  CalendarListOutputSchema,
 );

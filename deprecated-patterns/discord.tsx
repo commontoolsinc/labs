@@ -120,8 +120,6 @@ export async function fetchMessages(requestor_id: string) {
 }
 
 export default pattern(
-  InputSchema,
-  ResultSchema,
   ({ requestor_id }: any) => {
     const messages = cell<MessageSchema[]>([]);
     derive(messages, (_) => {
@@ -145,4 +143,6 @@ export default pattern(
       bgUpdater: discordUpdater({ messages, requestor_id }),
     };
   },
+  InputSchema,
+  ResultSchema,
 );

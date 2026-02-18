@@ -20,8 +20,6 @@ const InputSchema = {
 const OutputSchema = InputSchema;
 
 export default pattern(
-  InputSchema,
-  OutputSchema,
   ({ title, content }: any) => {
     return {
       [NAME]: title,
@@ -47,4 +45,6 @@ export default pattern(
       content,
     };
   },
+  InputSchema,
+  OutputSchema,
 );

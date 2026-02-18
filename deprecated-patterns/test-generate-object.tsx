@@ -60,56 +60,60 @@ const inputSchema = toSchema<InputState>({
 
 const outputSchema = toSchema<NumberStory>();
 
-export default pattern(inputSchema, outputSchema, (cell: any) => {
-  // Use generateObject to get structured data from the LLM
-  const { result: object, pending } = generateObject<NumberStory>(
-    generatePrompt({ number: cell.number }),
-  );
+export default pattern(
+  (cell: any) => {
+    // Use generateObject to get structured data from the LLM
+    const { result: object, pending } = generateObject<NumberStory>(
+      generatePrompt({ number: cell.number }),
+    );
 
-  const imageUrl = generateImageUrl({
-    imagePrompt: object?.imagePrompt || "robot thinking",
-  });
+    const imageUrl = generateImageUrl({
+      imagePrompt: object?.imagePrompt || "robot thinking",
+    });
 
-  return {
-    [NAME]: str`Number Story: ${object?.title || "Loading..."}`,
-    [UI]: (
-      <div>
-        <ct-button onClick={adder({ number: cell.number })}>
-          Current number: {cell.number} (click to increment)
-        </ct-button>
-        {ifElse(
-          pending,
-          <p>Generating story...</p>,
-          <div>
-            <h1>{object?.title}</h1>
-            <p>
-              <img
-                src={imageUrl}
-              />
-            </p>
-            <p>{object?.story}</p>
-            <p>
-              <em>{object?.storyOrigin}</em>
-            </p>
+    return {
+      [NAME]: str`Number Story: ${object?.title || "Loading..."}`,
+      [UI]: (
+        <div>
+          <ct-button onClick={adder({ number: cell.number })}>
+            Current number: {cell.number} (click to increment)
+          </ct-button>
+          {ifElse(
+            pending,
+            <p>Generating story...</p>,
             <div>
-              <p>See also these interesting numbers:</p>
-              <ul>
-                {object?.seeAlso?.map((n: number) => (
-                  <li>
-                    <ct-button
-                      onClick={setNumber({ number: cell.number, n })}
-                    >
-                      {n}
-                    </ct-button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>,
-        )}
-      </div>
-    ),
-    number: cell.number,
-    ...object,
-  };
-});
+              <h1>{object?.title}</h1>
+              <p>
+                <img
+                  src={imageUrl}
+                />
+              </p>
+              <p>{object?.story}</p>
+              <p>
+                <em>{object?.storyOrigin}</em>
+              </p>
+              <div>
+                <p>See also these interesting numbers:</p>
+                <ul>
+                  {object?.seeAlso?.map((n: number) => (
+                    <li>
+                      <ct-button
+                        onClick={setNumber({ number: cell.number, n })}
+                      >
+                        {n}
+                      </ct-button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>,
+          )}
+        </div>
+      ),
+      number: cell.number,
+      ...object,
+    };
+  },
+  inputSchema,
+  outputSchema,
+);

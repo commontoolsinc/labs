@@ -25,8 +25,6 @@ const ExtractPagesOutputSchema = {
 } as const satisfies JSONSchema;
 
 export default pattern(
-  ExtractPagesInputSchema,
-  ExtractPagesOutputSchema,
   ({ allCharms }: any) => {
     const results = derive(allCharms, (cs: any[] | undefined) => {
       return cs?.reduce(
@@ -53,4 +51,6 @@ export default pattern(
       [NAME]: "All Pages",
     };
   },
+  ExtractPagesInputSchema,
+  ExtractPagesOutputSchema,
 );

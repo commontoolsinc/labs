@@ -56,10 +56,14 @@ const inst: IFramePattern = /* IFRAME-V0 */ {
 const runIframePattern = (
   { argumentSchema, resultSchema, src, name }: IFramePattern,
 ) =>
-  pattern(argumentSchema, resultSchema, (data: any) => ({
-    [NAME]: name,
-    [UI]: <ct-iframe src={src} $context={data as CellLike<any>}></ct-iframe>,
-    count: data.count,
-  }));
+  pattern(
+    (data: any) => ({
+      [NAME]: name,
+      [UI]: <ct-iframe src={src} $context={data as CellLike<any>}></ct-iframe>,
+      count: data.count,
+    }),
+    argumentSchema,
+    resultSchema,
+  );
 
 export default runIframePattern(inst);

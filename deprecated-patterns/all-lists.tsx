@@ -25,8 +25,6 @@ const ExtractListsOutputSchema = {
 } as const satisfies JSONSchema;
 
 export default pattern(
-  ExtractListsInputSchema,
-  ExtractListsOutputSchema,
   ({ allCharms }: any) => {
     const results = derive(allCharms, (cs: any[] | undefined) => {
       return cs?.reduce(
@@ -49,4 +47,6 @@ export default pattern(
       [NAME]: "All Lists",
     };
   },
+  ExtractListsInputSchema,
+  ExtractListsOutputSchema,
 );

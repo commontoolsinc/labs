@@ -66,32 +66,36 @@ const outputSchema = {
   },
 } as const satisfies JSONSchema;
 
-export default pattern(inputSchema, outputSchema, ({ values }: any) => {
-  derive(values, (values) => {
-    console.log("values#", values?.length);
-  });
-  return {
-    [NAME]: str`Simple Value: ${
-      derive(values, (values) => values?.length || 0)
-    }`,
-    [UI]: (
-      <div>
-        <button
-          type="button"
-          onClick={adder({ values })}
-        >
-          Add Value
-        </button>
+export default pattern(
+  ({ values }: any) => {
+    derive(values, (values) => {
+      console.log("values#", values?.length);
+    });
+    return {
+      [NAME]: str`Simple Value: ${
+        derive(values, (values) => values?.length || 0)
+      }`,
+      [UI]: (
         <div>
-          {values.map((value: any, index: any) => (
-            <div>
-              {index}: {value}
-            </div>
-          ))}
+          <button
+            type="button"
+            onClick={adder({ values })}
+          >
+            Add Value
+          </button>
+          <div>
+            {values.map((value: any, index: any) => (
+              <div>
+                {index}: {value}
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
-    ),
-    updater: updater({ values }),
-    values,
-  };
-});
+      ),
+      updater: updater({ values }),
+      values,
+    };
+  },
+  inputSchema,
+  outputSchema,
+);

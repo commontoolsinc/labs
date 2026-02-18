@@ -90,8 +90,6 @@ const pushObjectsHandler = handler(
 );
 
 export default pattern(
-  InputSchema,
-  OutputSchema,
   () => {
     const my_numbers_array = cell<number[]>([]);
     const my_objects_array = cell<{ count: number }[]>([]);
@@ -125,4 +123,6 @@ export default pattern(
       pushObjectsHandler: pushObjectsHandler({ array: my_objects_array }),
     };
   },
+  InputSchema,
+  OutputSchema,
 );

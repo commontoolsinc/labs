@@ -325,21 +325,21 @@ export type SchemaWithoutCell<
 declare module "commontools" {
   // Augment PatternFunction with schema-based overloads
   interface PatternFunction {
-    // Two schemas + function: infer types from JSONSchema literals
+    // Function + two schemas: infer types from JSONSchema literals
     <IS extends JSONSchema = JSONSchema, OS extends JSONSchema = JSONSchema>(
-      argumentSchema: IS,
-      resultSchema: OS,
       fn: (
         input: OpaqueRef<Schema<IS>> & { [SELF]: OpaqueRef<Schema<OS>> },
       ) => Opaque<Schema<OS>>,
+      argumentSchema: IS,
+      resultSchema: OS,
     ): PatternFactory<SchemaWithoutCell<IS>, SchemaWithoutCell<OS>>;
 
-    // One schema + function: infer input type from JSONSchema literal
+    // Function + one schema: infer input type from JSONSchema literal
     <IS extends JSONSchema = JSONSchema>(
-      argumentSchema: IS,
       fn: (
         input: OpaqueRef<Schema<IS>> & { [SELF]: OpaqueRef<any> },
       ) => any,
+      argumentSchema: IS,
     ): PatternFactory<SchemaWithoutCell<IS>, any>;
   }
 

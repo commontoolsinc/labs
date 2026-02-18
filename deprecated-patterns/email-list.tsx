@@ -144,8 +144,6 @@ const EmailListOutputSchema = {
 } as const satisfies JSONSchema;
 
 export default pattern(
-  EmailListInputSchema,
-  EmailListOutputSchema,
   ({ emails, settings }: any) => {
     // Transform emails into list items with title field
     // NOTE(@bf): without derive I get a "Error loading and compiling pattern: Error: Can't read value during pattern creation."
@@ -260,4 +258,6 @@ export default pattern(
       items,
     };
   },
+  EmailListInputSchema,
+  EmailListOutputSchema,
 );

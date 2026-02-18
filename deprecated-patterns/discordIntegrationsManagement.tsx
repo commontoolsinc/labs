@@ -29,8 +29,6 @@ const ResultSchema = {
 } as const satisfies JSONSchema;
 
 export default pattern(
-  InputSchema,
-  ResultSchema,
   ({ charms }: any) => {
     derive(charms, (charms) => {
       console.log("charms", charms);
@@ -50,4 +48,6 @@ export default pattern(
       charms,
     };
   },
+  InputSchema,
+  ResultSchema,
 );
