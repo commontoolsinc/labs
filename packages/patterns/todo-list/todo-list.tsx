@@ -11,6 +11,8 @@ import {
   Writable,
 } from "commontools";
 
+import Suggestion from "../system/suggestion.tsx";
+
 // ===== Types =====
 
 /** A #todo item */
@@ -57,6 +59,15 @@ export const TodoItemPiece = pattern<
             x
           </ct-button>
         </ct-hstack>
+
+        <details>
+          <summary>AI Suggestions</summary>
+          <Suggestion
+            situation="Help the user complete this todo"
+            context={{ title: item.title }}
+            initialResults={[]}
+          />
+        </details>
       </ct-card>
     ),
   };
