@@ -175,15 +175,18 @@ objects into these classes when bridging from the JS wild west to `StorableValue
 and unwraps them when bridging back.
 
 Because each wrapper genuinely implements `StorableInstance` (with real
-`[DECONSTRUCT]` and `[RECONSTRUCT]` methods), the serialization and hashing
-systems process them through the same path as any other `StorableInstance` —
-no special cases needed.
+`[DECONSTRUCT]` and `[RECONSTRUCT]` methods), the serialization system
+processes them through the same uniform `StorableInstance` path — no special
+cases needed in the serializer. The hashing system also uses the standard
+`TAG_STORABLE` path for most wrappers, but optimizes `StorableDate` and
+`StorableUint8Array` with dedicated `TAG_DATE` and `TAG_BYTES` tags for
+content-level identity (see Section 6.3).
 
 #### 1.4.1 Wrapper Class Summary
 
 | Wrapper Class | Wraps | Type Tag | Deconstructed State | Notes |
 |---------------|-------|----------|---------------------|-------|
-| `StorableError` | `Error` | `Error@1` | `{ name, message, stack?, cause?, ...custom }` | Captures `name`, `message`, `stack` (if present), `cause` (if present), and custom enumerable properties. Nested values (including `cause`) are recursively processed. |
+| `StorableError` | `Error` | `Error@1` | `{ name, message, stack?, cause?, ...custom }` | Captures `name`, `message`, `stack` (if present), `cause` (if present), and custom enumerable properties. The conversion layer (Section 8.2) recursively converts nested values (including `cause` and custom properties) before wrapping, ensuring all values are `StorableValue` when `[DECONSTRUCT]` runs. |
 | `StorableMap` | `Map` | `Map@1` | `[[key, value], ...]` | Entry pairs as an array of two-element arrays. Insertion order is preserved. Keys and values are recursively processed. |
 | `StorableSet` | `Set` | `Set@1` | `[value, ...]` | Elements as an array. Iteration order is preserved. Values are recursively processed. |
 | `StorableDate` | `Date` | `Date@1` | `string` (ISO 8601 UTC) | Deconstructed state is a string — the serializer recurses into it and finds a primitive. |
@@ -221,6 +224,11 @@ export class StorableError implements StorableInstance {
   constructor(readonly error: Error) {}
 
   [DECONSTRUCT](): StorableValue {
+    // IMPORTANT: By the time [DECONSTRUCT] is called, all nested values
+    // must already be StorableValue. The conversion layer (Section 8.2)
+    // is responsible for recursively converting Error internals (cause,
+    // custom properties) BEFORE wrapping into StorableError. This method
+    // simply extracts the already-converted state.
     const state: Record<string, StorableValue> = {
       name:    this.error.name,
       message: this.error.message,
@@ -229,7 +237,6 @@ export class StorableError implements StorableInstance {
       state.stack = this.error.stack;
     }
     if (this.error.cause !== undefined) {
-      // `cause` may itself need conversion; the serializer handles recursion.
       state.cause = this.error.cause as StorableValue;
     }
     for (const key of Object.keys(this.error)) {
@@ -1616,7 +1623,7 @@ export function toDeepStorableValue(
 |------------|--------|
 | `null`, `boolean`, `number`, `string`, `undefined`, `bigint` | Returned as-is (primitives are `StorableValue` directly). `-0` is normalized to `0`. Non-finite numbers (`NaN`, `Infinity`) cause rejection. |
 | `StorableInstance` (including wrapper classes) | Returned as-is (already `StorableValue`). |
-| `Error` | Wrapped into `StorableError`. |
+| `Error` | Wrapped into `StorableError`. Before wrapping, `cause` and custom enumerable properties are recursively converted to `StorableValue` (deep variant) or left as-is (shallow variant). This ensures that by the time `StorableError.[DECONSTRUCT]` runs, all nested values are already valid `StorableValue`. |
 | `Map` | Wrapped into `StorableMap`. Keys and values are recursively converted (deep variant only). |
 | `Set` | Wrapped into `StorableSet`. Elements are recursively converted (deep variant only). |
 | `Date` | Wrapped into `StorableDate`. |
