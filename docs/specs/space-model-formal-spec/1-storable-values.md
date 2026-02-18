@@ -1505,13 +1505,16 @@ boundary-only serialization and the three-layer architecture:
 7. Update internal code to work with `StorableValue` types rather than JSON
    shapes or raw native objects.
 
-> **`toJSON()` migration:** Types that currently use `toJSON()` for
-> serialization will need to implement the storable protocol
-> (`[DECONSTRUCT]`/`[RECONSTRUCT]`) instead. The `toJSON()` approach eagerly
-> converts to JSON-compatible shapes, which is incompatible with late
-> serialization. Implementors should replace `toJSON()` methods with
-> `[DECONSTRUCT]` (returning essential state as rich types) and add a static
-> `[RECONSTRUCT]` method on the class.
+> **`toJSON()` compatibility and migration.** `toStorableValue()` and its
+> variants currently honor `toJSON()` methods on objects that have them — if an
+> object has a `toJSON()` method and does not implement `StorableInstance`, the
+> conversion functions call `toJSON()` and process the result. This preserves
+> backward compatibility with existing code. However, `toJSON()` support is
+> **marked for removal**: it eagerly converts to JSON-compatible shapes, which
+> is incompatible with late serialization. Implementors should migrate to the
+> storable protocol (`[DECONSTRUCT]`/`[RECONSTRUCT]`) instead. Once all callers
+> have migrated, `toJSON()` support will be removed from the conversion
+> functions.
 
 ### 7.2 Unifying JSON Encoding
 
