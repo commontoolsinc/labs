@@ -3,9 +3,7 @@ import {
   computed,
   Default,
   equals,
-  generateObject,
   handler,
-  ifElse,
   NAME,
   OpaqueRef,
   pattern,
@@ -186,58 +184,44 @@ const updateItemByTitleHandler = handler<
   items.set(newItems);
 });
 
-// ===== Sub-patterns for subtask rendering =====
+// ===== Sub-pattern for item rendering =====
 
-interface SubtaskItem {
-  label: string;
-  done: Default<boolean, false>;
-}
-
-/** Renders a single subtask row with collapsible AI suggestion */
-const SubtaskRow = pattern<
-  { subtask: SubtaskItem; parentTitle: string },
+const DoItemCard = pattern<
+  { item: DoItem; removeItem: Stream<{ item: DoItem }> },
   { [UI]: VNode; [NAME]: string }
->(({ subtask, parentTitle }) => {
+>(({ item, removeItem }) => {
   return {
-    [NAME]: "Subtask",
+    [NAME]: "Do Item",
     [UI]: (
-      <div>
-        <ct-hstack gap="2" align="center" style="padding: 2px 0;">
-          <ct-checkbox $checked={subtask.done} />
-          <span style="font-size: 0.85rem;">{subtask.label}</span>
+      <ct-card style={`margin-left: ${(item.indent ?? 0) * 24}px;`}>
+        <ct-hstack gap="2" align="center">
+          <ct-checkbox $checked={item.done} />
+          <ct-input
+            $value={item.title}
+            style="flex: 1;"
+            placeholder="Item..."
+          />
+          <ct-button
+            variant="ghost"
+            onClick={() => removeItem.send({ item })}
+          >
+            x
+          </ct-button>
         </ct-hstack>
-        <details style="margin-left: 24px;">
-          <summary style="cursor: pointer; font-size: 0.75rem; color: var(--ct-color-gray-400);">
-            AI Suggestion
+
+        <details style="margin-top: 8px; margin-left: 24px;">
+          <summary style="cursor: pointer; font-size: 0.8rem; color: var(--ct-color-gray-500);">
+            AI Suggestions
           </summary>
           <Suggestion
             situation={computed(
-              () =>
-                `Help the user complete this subtask: "${subtask.label}" (part of: "${parentTitle}")`,
+              () => `Help the user complete this task: "${item.title}"`,
             )}
-            context={{ parentTask: parentTitle, subtask: subtask.label }}
+            context={{ title: item.title }}
             initialResults={[]}
           />
         </details>
-      </div>
-    ),
-  };
-});
-
-/** Renders a list of subtasks — must receive subtaskItems as a direct input
- *  so the CTS transformer can convert .map() to .mapWithPattern() */
-const SubtasksList = pattern<
-  { subtaskItems: SubtaskItem[]; parentTitle: string },
-  { [UI]: VNode; [NAME]: string }
->(({ subtaskItems, parentTitle }) => {
-  return {
-    [NAME]: "Subtasks List",
-    [UI]: (
-      <ct-vstack gap="1">
-        {subtaskItems.map((subtask) => (
-          <SubtaskRow subtask={subtask} parentTitle={parentTitle} />
-        ))}
-      </ct-vstack>
+      </ct-card>
     ),
   };
 });
@@ -257,45 +241,6 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
   const removeItemByTitle = removeItemByTitleHandler({ items });
   const updateItemByTitle = updateItemByTitleHandler({ items });
 
-  // Auto-generate subtasks for each item (like shopping-list's per-item AI categorization)
-  const itemsWithSubtasks = items.map((item) => {
-    const subtaskPrompt = computed(
-      () =>
-        `Break this task into 1-5 concrete, actionable subtasks: ${item.title}`,
-    );
-
-    const subtasks = generateObject<{ items: SubtaskItem[] }>({
-      system:
-        "You break tasks into concrete, actionable subtasks. Each subtask should be a clear, specific step. Generate 1-5 subtasks. Fewer is better if the task is simple.",
-      prompt: subtaskPrompt,
-      schema: {
-        type: "object",
-        properties: {
-          items: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                label: { type: "string" },
-                done: { type: "boolean", default: false },
-              },
-              required: ["label"],
-            },
-          },
-        },
-        required: ["items"],
-      },
-      model: "anthropic:claude-haiku-4-5",
-    });
-
-    // Extract items array via computed (?.  not allowed in reactive JSX context)
-    const subtaskItems = computed(() => {
-      return subtasks.result?.items || [];
-    });
-
-    return { item, subtasks, subtaskItems };
-  });
-
   // Compact UI - embeddable widget without ct-screen wrapper
   const compactUI = (
     <ct-vstack gap="2">
@@ -306,26 +251,9 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
         </span>
       </ct-hstack>
 
-      <ct-vstack gap="1">
+      <ct-vstack gap="2">
         {items.map((item) => (
-          <ct-hstack
-            gap="2"
-            align="center"
-            style={`margin-left: ${(item.indent ?? 0) * 24}px;`}
-          >
-            <ct-checkbox $checked={item.done} />
-            <ct-input
-              $value={item.title}
-              style="flex: 1;"
-              placeholder="Item..."
-            />
-            <ct-button
-              variant="ghost"
-              onClick={() => removeItem.send({ item })}
-            >
-              x
-            </ct-button>
-          </ct-hstack>
+          <DoItemCard item={item} removeItem={removeItem} />
         ))}
 
         {hasNoItems
@@ -350,7 +278,9 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
   );
 
   return {
-    [NAME]: computed(() => `Do List (${items.get().length})`),
+    [NAME]: computed(() =>
+      `Do List (${items.get().length})`
+    ),
     [UI]: (
       <ct-screen>
         <ct-vstack slot="header" gap="1">
@@ -364,43 +294,8 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
 
         <ct-vscroll flex showScrollbar fadeEdges>
           <ct-vstack gap="2" style="padding: 1rem;">
-            {itemsWithSubtasks.map((entry) => (
-              <ct-card
-                style={`margin-left: ${(entry.item.indent ?? 0) * 24}px;`}
-              >
-                <ct-hstack gap="2" align="center">
-                  <ct-checkbox $checked={entry.item.done} />
-                  <ct-input
-                    $value={entry.item.title}
-                    style="flex: 1;"
-                    placeholder="Item..."
-                  />
-                  <ct-button
-                    variant="ghost"
-                    onClick={() => removeItem.send({ item: entry.item })}
-                  >
-                    x
-                  </ct-button>
-                </ct-hstack>
-
-                <details style="margin-top: 8px; margin-left: 24px;">
-                  <summary style="cursor: pointer; font-size: 0.8rem; color: var(--ct-color-gray-500);">
-                    Subtasks
-                  </summary>
-                  <ct-vstack gap="1" style="margin-top: 4px;">
-                    {ifElse(
-                      entry.subtasks.pending,
-                      <div style="color: var(--ct-color-gray-400); font-size: 0.8rem; padding: 4px;">
-                        Generating subtasks...
-                      </div>,
-                      <SubtasksList
-                        subtaskItems={entry.subtaskItems}
-                        parentTitle={entry.item.title}
-                      />,
-                    )}
-                  </ct-vstack>
-                </details>
-              </ct-card>
+            {items.map((item) => (
+              <DoItemCard item={item} removeItem={removeItem} />
             ))}
 
             {hasNoItems
