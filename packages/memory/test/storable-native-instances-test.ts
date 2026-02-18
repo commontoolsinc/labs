@@ -5,6 +5,7 @@ import type { ReconstructionContext } from "../storable-protocol.ts";
 import type { StorableValue } from "../interface.ts";
 import {
   deepNativeValueFromStorableValue,
+  FrozenDate,
   FrozenMap,
   FrozenSet,
   nativeValueFromStorableValue,
@@ -340,20 +341,21 @@ describe("storable-native-instances", () => {
       expect(() => sd[DECONSTRUCT]()).toThrow("not yet implemented");
     });
 
-    it("StorableDate.toNativeValue(true) returns frozen Date", () => {
+    it("StorableDate.toNativeValue(true) returns FrozenDate", () => {
       const date = new Date("2024-01-01");
       const sd = new StorableDate(date);
       const result = sd.toNativeValue(true);
-      expect(result).toBe(date);
-      expect(Object.isFrozen(result)).toBe(true);
+      expect(result).toBeInstanceOf(FrozenDate);
+      expect(result).toBeInstanceOf(Date);
+      expect(result.getTime()).toBe(date.getTime());
     });
 
-    it("StorableDate.toNativeValue(false) returns unfrozen Date", () => {
+    it("StorableDate.toNativeValue(false) returns original Date", () => {
       const date = new Date("2024-01-01");
       const sd = new StorableDate(date);
       const result = sd.toNativeValue(false);
       expect(result).toBe(date);
-      expect(Object.isFrozen(result)).toBe(false);
+      expect(result).not.toBeInstanceOf(FrozenDate);
     });
 
     it("StorableUint8Array implements StorableInstance", () => {
@@ -506,6 +508,138 @@ describe("storable-native-instances", () => {
   });
 
   // --------------------------------------------------------------------------
+  // FrozenDate
+  // --------------------------------------------------------------------------
+
+  describe("FrozenDate", () => {
+    it("is instanceof Date", () => {
+      const fd = new FrozenDate("2024-01-01");
+      expect(fd instanceof Date).toBe(true);
+    });
+
+    it("preserves the time value", () => {
+      const original = new Date("2024-06-15T12:30:00Z");
+      const fd = new FrozenDate(original);
+      expect(fd.getTime()).toBe(original.getTime());
+      expect(fd.toISOString()).toBe(original.toISOString());
+    });
+
+    it("supports construction from number", () => {
+      const ts = Date.now();
+      const fd = new FrozenDate(ts);
+      expect(fd.getTime()).toBe(ts);
+    });
+
+    it("supports construction from string", () => {
+      const fd = new FrozenDate("2024-01-01T00:00:00Z");
+      expect(fd.toISOString()).toBe("2024-01-01T00:00:00.000Z");
+    });
+
+    it("supports read operations", () => {
+      const fd = new FrozenDate("2024-06-15T12:30:45.123Z");
+      expect(fd.getFullYear()).toBe(2024);
+      expect(fd.getUTCMonth()).toBe(5); // June = 5
+      expect(fd.getUTCDate()).toBe(15);
+      expect(fd.getUTCHours()).toBe(12);
+      expect(fd.getUTCMinutes()).toBe(30);
+      expect(fd.getUTCSeconds()).toBe(45);
+      expect(fd.getUTCMilliseconds()).toBe(123);
+    });
+
+    it("throws on setTime()", () => {
+      const fd = new FrozenDate("2024-01-01");
+      expect(() => fd.setTime(0)).toThrow("Cannot mutate a FrozenDate");
+    });
+
+    it("throws on setMilliseconds()", () => {
+      const fd = new FrozenDate("2024-01-01");
+      expect(() => fd.setMilliseconds(500)).toThrow(
+        "Cannot mutate a FrozenDate",
+      );
+    });
+
+    it("throws on setUTCMilliseconds()", () => {
+      const fd = new FrozenDate("2024-01-01");
+      expect(() => fd.setUTCMilliseconds(500)).toThrow(
+        "Cannot mutate a FrozenDate",
+      );
+    });
+
+    it("throws on setSeconds()", () => {
+      const fd = new FrozenDate("2024-01-01");
+      expect(() => fd.setSeconds(30)).toThrow("Cannot mutate a FrozenDate");
+    });
+
+    it("throws on setUTCSeconds()", () => {
+      const fd = new FrozenDate("2024-01-01");
+      expect(() => fd.setUTCSeconds(30)).toThrow(
+        "Cannot mutate a FrozenDate",
+      );
+    });
+
+    it("throws on setMinutes()", () => {
+      const fd = new FrozenDate("2024-01-01");
+      expect(() => fd.setMinutes(15)).toThrow("Cannot mutate a FrozenDate");
+    });
+
+    it("throws on setUTCMinutes()", () => {
+      const fd = new FrozenDate("2024-01-01");
+      expect(() => fd.setUTCMinutes(15)).toThrow(
+        "Cannot mutate a FrozenDate",
+      );
+    });
+
+    it("throws on setHours()", () => {
+      const fd = new FrozenDate("2024-01-01");
+      expect(() => fd.setHours(6)).toThrow("Cannot mutate a FrozenDate");
+    });
+
+    it("throws on setUTCHours()", () => {
+      const fd = new FrozenDate("2024-01-01");
+      expect(() => fd.setUTCHours(6)).toThrow("Cannot mutate a FrozenDate");
+    });
+
+    it("throws on setDate()", () => {
+      const fd = new FrozenDate("2024-01-01");
+      expect(() => fd.setDate(15)).toThrow("Cannot mutate a FrozenDate");
+    });
+
+    it("throws on setUTCDate()", () => {
+      const fd = new FrozenDate("2024-01-01");
+      expect(() => fd.setUTCDate(15)).toThrow("Cannot mutate a FrozenDate");
+    });
+
+    it("throws on setMonth()", () => {
+      const fd = new FrozenDate("2024-01-01");
+      expect(() => fd.setMonth(6)).toThrow("Cannot mutate a FrozenDate");
+    });
+
+    it("throws on setUTCMonth()", () => {
+      const fd = new FrozenDate("2024-01-01");
+      expect(() => fd.setUTCMonth(6)).toThrow("Cannot mutate a FrozenDate");
+    });
+
+    it("throws on setFullYear()", () => {
+      const fd = new FrozenDate("2024-01-01");
+      expect(() => fd.setFullYear(2025)).toThrow(
+        "Cannot mutate a FrozenDate",
+      );
+    });
+
+    it("throws on setUTCFullYear()", () => {
+      const fd = new FrozenDate("2024-01-01");
+      expect(() => fd.setUTCFullYear(2025)).toThrow(
+        "Cannot mutate a FrozenDate",
+      );
+    });
+
+    it("is Object.isFrozen", () => {
+      const fd = new FrozenDate("2024-01-01");
+      expect(Object.isFrozen(fd)).toBe(true);
+    });
+  });
+
+  // --------------------------------------------------------------------------
   // nativeValueFromStorableValue (shallow unwrap)
   // --------------------------------------------------------------------------
 
@@ -550,12 +684,12 @@ describe("storable-native-instances", () => {
       expect(result).not.toBeInstanceOf(FrozenSet);
     });
 
-    it("unwraps StorableDate to frozen Date (default)", () => {
+    it("unwraps StorableDate to FrozenDate (default)", () => {
       const date = new Date("2024-01-01");
       const sd = new StorableDate(date);
       const result = nativeValueFromStorableValue(sd as StorableValue);
-      expect(result).toBe(date);
-      expect(Object.isFrozen(result)).toBe(true);
+      expect(result).toBeInstanceOf(FrozenDate);
+      expect((result as Date).getTime()).toBe(date.getTime());
     });
 
     it("unwraps StorableUint8Array to Blob (default frozen)", () => {

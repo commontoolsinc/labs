@@ -248,12 +248,7 @@ export class StorableDate extends StorableNativeWrapper {
   }
 
   toNativeValue(frozen: boolean): Date {
-    // Object.freeze prevents property modification but does NOT prevent
-    // Date mutation methods (setTime, setFullYear, etc.) from modifying
-    // the internal [[DateValue]] slot. A FrozenDate wrapper (like
-    // FrozenMap/FrozenSet) would be needed for full immutability.
-    if (frozen) Object.freeze(this.date);
-    return this.date;
+    return frozen ? new FrozenDate(this.date.getTime()) : this.date;
   }
 
   static [RECONSTRUCT](
@@ -301,7 +296,7 @@ export class StorableUint8Array extends StorableNativeWrapper {
 }
 
 // ---------------------------------------------------------------------------
-// Frozen collection types
+// Frozen built-in types
 // ---------------------------------------------------------------------------
 
 /**
@@ -379,6 +374,89 @@ export class FrozenSet<T> extends Set<T> {
   override clear(): void {
     if (Object.isFrozen(this)) throw new TypeError("Cannot mutate a FrozenSet");
     super.clear();
+  }
+}
+
+/**
+ * Effectively-immutable `Date` wrapper. Extends `Date` so that
+ * `instanceof Date` checks still pass, but all `set*()` mutation methods
+ * throw. `Object.freeze()` alone cannot protect Date because the mutators
+ * modify the internal `[[DateValue]]` slot, not own properties.
+ *
+ * See Section 2.9 of the formal spec (frozen built-in types).
+ */
+export class FrozenDate extends Date {
+  constructor(value: number | string | Date) {
+    super(value instanceof Date ? value.getTime() : value);
+    Object.freeze(this);
+  }
+
+  private _throw(): never {
+    throw new TypeError("Cannot mutate a FrozenDate");
+  }
+
+  override setTime(_time: number): number {
+    this._throw();
+  }
+  override setMilliseconds(_ms: number): number {
+    this._throw();
+  }
+  override setUTCMilliseconds(_ms: number): number {
+    this._throw();
+  }
+  override setSeconds(_sec: number, _ms?: number): number {
+    this._throw();
+  }
+  override setUTCSeconds(_sec: number, _ms?: number): number {
+    this._throw();
+  }
+  override setMinutes(_min: number, _sec?: number, _ms?: number): number {
+    this._throw();
+  }
+  override setUTCMinutes(_min: number, _sec?: number, _ms?: number): number {
+    this._throw();
+  }
+  override setHours(
+    _hours: number,
+    _min?: number,
+    _sec?: number,
+    _ms?: number,
+  ): number {
+    this._throw();
+  }
+  override setUTCHours(
+    _hours: number,
+    _min?: number,
+    _sec?: number,
+    _ms?: number,
+  ): number {
+    this._throw();
+  }
+  override setDate(_date: number): number {
+    this._throw();
+  }
+  override setUTCDate(_date: number): number {
+    this._throw();
+  }
+  override setMonth(_month: number, _date?: number): number {
+    this._throw();
+  }
+  override setUTCMonth(_month: number, _date?: number): number {
+    this._throw();
+  }
+  override setFullYear(
+    _year: number,
+    _month?: number,
+    _date?: number,
+  ): number {
+    this._throw();
+  }
+  override setUTCFullYear(
+    _year: number,
+    _month?: number,
+    _date?: number,
+  ): number {
+    this._throw();
   }
 }
 
