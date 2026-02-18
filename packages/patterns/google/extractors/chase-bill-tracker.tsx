@@ -28,6 +28,7 @@ import {
 } from "commontools";
 import BillExtractor, {
   type Auth,
+  type BillAnalysis,
   formatCurrency,
   formatDate,
   formatIdentifier,
@@ -127,7 +128,13 @@ export default pattern<PatternInput>(
       const paidKeys = manuallyPaid?.get() || [];
       const isDemoMode = demoMode?.get() ?? true;
       return processBills(
-        tracker.rawAnalyses || [],
+        (tracker.rawAnalyses || []) as ReadonlyArray<
+          {
+            emailId: string;
+            emailDate: string;
+            analysis?: { result?: BillAnalysis };
+          }
+        >,
         tracker.paymentConfirmations || {},
         paidKeys,
         isDemoMode,

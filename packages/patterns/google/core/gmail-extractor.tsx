@@ -68,6 +68,7 @@ import {
   generateObject,
   handler,
   JSONSchema,
+  pattern,
   Stream,
 } from "commontools";
 import GmailImporter, { type Auth, type Email } from "./gmail-importer.tsx";
@@ -143,7 +144,7 @@ export interface AnalysisItem<T = unknown> {
 /**
  * Output of GmailExtractor.
  */
-export interface GmailExtractorOutput<T = unknown> {
+export interface GmailExtractorOutput {
   /** Raw emails from Gmail */
   emails: Email[];
   /** Count of emails fetched */
@@ -153,8 +154,8 @@ export interface GmailExtractorOutput<T = unknown> {
     email: Email;
     emailId: string;
     emailDate: string;
-    analysis: { pending?: boolean; result?: T; error?: unknown };
-    result?: T;
+    analysis: { pending?: boolean; result?: unknown; error?: unknown };
+    result?: unknown;
     pending: boolean;
     error: unknown;
   }>;
@@ -299,41 +300,32 @@ function interpolateTemplate(template: string, email: Email): string {
 }
 
 /**
- * Helper to track progress of analyses for custom analysis patterns.
- * Provides consistent pendingCount/completedCount across all patterns.
- *
- * Usage:
- * ```tsx
- * const customAnalyses = extractor.emails.map((email) => {
- *   const analysis = generateObject({ ... });
- *   return { email, analysis };
- * });
- * const { pendingCount, completedCount } = trackAnalyses(customAnalyses);
- * ```
+ * Count pending analyses in a list.
+ * Pure function - callers should wrap in computed() for reactivity.
  */
-export function trackAnalyses<T>(analyses: AnalysisItem<T>[]) {
-  // Use index access since analyses may be a reactive mapped array
-  // (from .map() on a reactive cell) which doesn't support .filter()
-  const pendingCount = computed(() => {
-    const len = analyses?.length || 0;
-    let count = 0;
-    for (let i = 0; i < len; i++) {
-      if (analyses[i]?.analysis?.pending) count++;
+export function countPending<T>(analyses: AnalysisItem<T>[]): number {
+  const len = analyses?.length || 0;
+  let count = 0;
+  for (let i = 0; i < len; i++) {
+    if (analyses[i]?.analysis?.pending) count++;
+  }
+  return count;
+}
+
+/**
+ * Count completed analyses in a list.
+ * Pure function - callers should wrap in computed() for reactivity.
+ */
+export function countCompleted<T>(analyses: AnalysisItem<T>[]): number {
+  const len = analyses?.length || 0;
+  let count = 0;
+  for (let i = 0; i < len; i++) {
+    const a = analyses[i];
+    if (a?.analysis?.pending === false && a?.analysis?.result !== undefined) {
+      count++;
     }
-    return count;
-  });
-  const completedCount = computed(() => {
-    const len = analyses?.length || 0;
-    let count = 0;
-    for (let i = 0; i < len; i++) {
-      const a = analyses[i];
-      if (a?.analysis?.pending === false && a?.analysis?.result !== undefined) {
-        count++;
-      }
-    }
-    return count;
-  });
-  return { pendingCount, completedCount };
+  }
+  return count;
 }
 
 // =============================================================================
@@ -406,63 +398,59 @@ const removeLabelsHandler = handler<
  * GmailExtractor Building Block
  *
  * Encapsulates the common email→LLM→items pipeline for Gmail-based patterns.
- *
- * @typeParam T - The shape of extracted items (must match extraction.schema)
  */
-function GmailExtractor<T = unknown>(input: GmailExtractorInput) {
-  const {
+const GmailExtractor = pattern<GmailExtractorInput, GmailExtractorOutput>(
+  ({
     gmailQuery,
     extraction,
     title,
     resolveInlineImages,
     limit,
     overrideAuth,
-  } = input;
+  }) => {
+    // Instantiate Gmail Importer with the provided settings
+    const gmailImporter = GmailImporter({
+      settings: {
+        gmailFilterQuery: computed(() => gmailQuery || "in:INBOX"),
+        autoFetchOnAuth: true,
+        resolveInlineImages: computed(() => resolveInlineImages ?? false),
+        limit: computed(() => limit ?? 100),
+        debugMode: false,
+      },
+      overrideAuth,
+    });
 
-  // Instantiate Gmail Importer with the provided settings
-  const gmailImporter = GmailImporter({
-    settings: {
-      gmailFilterQuery: gmailQuery || "in:INBOX",
-      autoFetchOnAuth: true,
-      resolveInlineImages: resolveInlineImages ?? false,
-      limit: limit ?? 100,
-      debugMode: false,
-    },
-    overrideAuth,
-  });
+    // Get emails from the importer
+    const emails = gmailImporter.emails;
+    const emailCount = computed(() => emails?.length || 0);
 
-  // Get emails from the importer
-  const emails = gmailImporter.emails;
-  const emailCount = computed(() => emails?.length || 0);
+    // Check connection status using the importer's resolved auth state
+    // GmailImporter exposes isReady which checks: ifElse(overrideAuth.token, overrideAuth, wishedAuth).token
+    // This properly handles both overrideAuth and wish()-based auth
+    const isConnected = gmailImporter.isReady;
 
-  // Check connection status using the importer's resolved auth state
-  // GmailImporter exposes isReady which checks: ifElse(overrideAuth.token, overrideAuth, wishedAuth).token
-  // This properly handles both overrideAuth and wish()-based auth
-  const isConnected = gmailImporter.isReady;
+    // Auto-detect whether to run analysis based on presence of extraction config
+    const shouldRunAnalysis = computed(() =>
+      !!(extraction.promptTemplate?.trim() && extraction.schema)
+    );
 
-  // Auto-detect whether to run analysis based on presence of extraction config
-  const shouldRunAnalysis =
-    !!(extraction?.promptTemplate?.trim() && extraction?.schema);
+    // Capture extraction config values for use inside .map() callback
+    const extractionSchema = extraction.schema;
+    const extractionPromptTemplate = extraction.promptTemplate;
 
-  // Reactive LLM analysis - analyze each email (only if extraction is provided)
-  // Note: consumers can access result via item.analysis.result or item.result
-  // Result type is inferred from extraction.schema by the runtime
-  const rawAnalyses = shouldRunAnalysis
-    ? emails.map((email: Email) => {
-      const analysis = generateObject<T>({
+    // Reactive LLM analysis - analyze each email (only if extraction is provided)
+    // Note: consumers can access result via item.analysis.result or item.result
+    // Result type is inferred from extraction.schema by the runtime
+    const rawAnalyses = emails.map((email: Email) => {
+      const analysis = generateObject({
         prompt: computed(() => {
-          if (!email?.markdownContent) {
-            return undefined;
-          }
-
-          const template = extraction?.promptTemplate || "";
-          if (!template) {
-            return undefined;
-          }
-
+          if (!shouldRunAnalysis) return undefined;
+          if (!email.markdownContent) return undefined;
+          const template = extractionPromptTemplate || "";
+          if (!template) return undefined;
           return interpolateTemplate(template, email);
         }),
-        schema: extraction?.schema as JSONSchema,
+        schema: extractionSchema as JSONSchema,
         model: "anthropic:claude-sonnet-4-5",
       });
 
@@ -475,217 +463,211 @@ function GmailExtractor<T = unknown>(input: GmailExtractorInput) {
         pending: analysis.pending,
         error: analysis.error,
       };
-    })
-    : ([] as Array<{
-      email: Email;
-      emailId: string;
-      emailDate: string;
-      analysis: { pending?: boolean; result?: T; error?: unknown };
-      result?: T;
-      pending: boolean;
-      error: unknown;
-    }>);
+    });
 
-  // Compute pending/completed counts using index access (rawAnalyses from .map()
-  // is a reactive mapped array that doesn't support .filter() directly)
-  const pendingCount = computed(() => {
-    if (!shouldRunAnalysis) return 0;
-    const len = rawAnalyses?.length || 0;
-    let count = 0;
-    for (let i = 0; i < len; i++) {
-      if (rawAnalyses[i]?.analysis?.pending) count++;
-    }
-    return count;
-  });
-  const completedCount = computed(() => {
-    if (!shouldRunAnalysis) return 0;
-    const len = rawAnalyses?.length || 0;
-    let count = 0;
-    for (let i = 0; i < len; i++) {
-      const a = rawAnalyses[i];
-      if (a?.analysis?.pending === false && a?.analysis?.result !== undefined) {
-        count++;
+    // Compute pending/completed counts using index access (rawAnalyses from .map()
+    // is a reactive mapped array that doesn't support .filter() directly)
+    const pendingCount = computed(() => {
+      if (!shouldRunAnalysis) return 0;
+      const len = rawAnalyses?.length || 0;
+      let count = 0;
+      for (let i = 0; i < len; i++) {
+        if (rawAnalyses[i]?.analysis?.pending) count++;
       }
-    }
-    return count;
-  });
+      return count;
+    });
+    const completedCount = computed(() => {
+      if (!shouldRunAnalysis) return 0;
+      const len = rawAnalyses?.length || 0;
+      let count = 0;
+      for (let i = 0; i < len; i++) {
+        const a = rawAnalyses[i];
+        if (
+          a?.analysis?.pending === false && a?.analysis?.result !== undefined
+        ) {
+          count++;
+        }
+      }
+      return count;
+    });
 
-  // Note: Handler operations removed - they were unused and the authForHandlers wrapper
-  // was an anti-pattern (Writable.of + computed side effect).
-  // GmailImporter already handles auth via wish() when overrideAuth isn't provided.
-  // If write operations are needed in the future, pass overrideAuth directly to handlers.
+    // Note: Handler operations removed - they were unused and the authForHandlers wrapper
+    // was an anti-pattern (Writable.of + computed side effect).
+    // GmailImporter already handles auth via wish() when overrideAuth isn't provided.
+    // If write operations are needed in the future, pass overrideAuth directly to handlers.
 
-  // UI Components
+    // UI Components
 
-  // Auth status UI (from Gmail importer)
-  const authStatusUI = gmailImporter.authUI;
+    // Auth status UI (from Gmail importer)
+    const authStatusUI = gmailImporter.authUI;
 
-  // Connection status UI
-  // Pre-compute reactive values outside JSX to avoid computed() in style attributes
-  const connectedBgColor = computed(
-    () => (isConnected ? "#d1fae5" : "#fef3c7"),
-  );
-  const connectedBorder = computed(() =>
-    isConnected ? "1px solid #10b981" : "1px solid #f59e0b"
-  );
-  const connectedDisplay = computed(() => (isConnected ? "block" : "none"));
+    // Connection status UI
+    // Pre-compute reactive values outside JSX to avoid computed() in style attributes
+    const connectedBgColor = computed(
+      () => (isConnected ? "#d1fae5" : "#fef3c7"),
+    );
+    const connectedBorder = computed(() =>
+      isConnected ? "1px solid #10b981" : "1px solid #f59e0b"
+    );
+    const connectedDisplay = computed(() => (isConnected ? "block" : "none"));
 
-  const connectionStatusUI = (
-    <div
-      style={{
-        padding: "12px 16px",
-        backgroundColor: connectedBgColor,
-        borderRadius: "8px",
-        border: connectedBorder,
-        display: connectedDisplay,
-      }}
-    >
+    const connectionStatusUI = (
       <div
         style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "8px",
+          padding: "12px 16px",
+          backgroundColor: connectedBgColor,
+          borderRadius: "8px",
+          border: connectedBorder,
+          display: connectedDisplay,
         }}
       >
-        <span
+        <div
           style={{
-            width: "10px",
-            height: "10px",
-            borderRadius: "50%",
-            backgroundColor: "#10b981",
-          }}
-        />
-        <span>Connected to Gmail</span>
-        <span style={{ marginLeft: "auto", color: "#059669" }}>
-          {computed(() => emailCount)} emails found
-        </span>
-        <button
-          type="button"
-          onClick={gmailImporter.bgUpdater}
-          style={{
-            marginLeft: "8px",
-            padding: "6px 12px",
-            backgroundColor: "#10b981",
-            color: "white",
-            border: "none",
-            borderRadius: "6px",
-            cursor: "pointer",
-            fontSize: "13px",
-            fontWeight: "500",
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
           }}
         >
-          Fetch Emails
-        </button>
+          <span
+            style={{
+              width: "10px",
+              height: "10px",
+              borderRadius: "50%",
+              backgroundColor: "#10b981",
+            }}
+          />
+          <span>Connected to Gmail</span>
+          <span style={{ marginLeft: "auto", color: "#059669" }}>
+            {emailCount} emails found
+          </span>
+          <button
+            type="button"
+            onClick={gmailImporter.bgUpdater}
+            style={{
+              marginLeft: "8px",
+              padding: "6px 12px",
+              backgroundColor: "#10b981",
+              color: "white",
+              border: "none",
+              borderRadius: "6px",
+              cursor: "pointer",
+              fontSize: "13px",
+              fontWeight: "500",
+            }}
+          >
+            Fetch Emails
+          </button>
+        </div>
       </div>
-    </div>
-  );
+    );
 
-  // Analysis progress UI (only shown when extraction is enabled)
-  // Pre-compute reactive values outside JSX
-  const analysisDisplay = computed(() =>
-    isConnected && shouldRunAnalysis ? "block" : "none"
-  );
-  const pendingDisplay = computed(() => (pendingCount > 0 ? "flex" : "none"));
+    // Analysis progress UI (only shown when extraction is enabled)
+    // Pre-compute reactive values outside JSX
+    const analysisDisplay = computed(() =>
+      isConnected && shouldRunAnalysis ? "block" : "none"
+    );
+    const pendingDisplay = computed(() => (pendingCount > 0 ? "flex" : "none"));
 
-  const analysisProgressUI = (
-    <div
-      style={{
-        padding: "12px 16px",
-        backgroundColor: "#eff6ff",
-        borderRadius: "8px",
-        border: "1px solid #3b82f6",
-        display: analysisDisplay,
-      }}
-    >
+    const analysisProgressUI = (
+      <div
+        style={{
+          padding: "12px 16px",
+          backgroundColor: "#eff6ff",
+          borderRadius: "8px",
+          border: "1px solid #3b82f6",
+          display: analysisDisplay,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "12px",
+          }}
+        >
+          <span style={{ fontWeight: "600" }}>Analysis:</span>
+          <span>{emailCount} emails</span>
+          <div
+            style={{
+              display: pendingDisplay,
+              alignItems: "center",
+              gap: "4px",
+              color: "#2563eb",
+            }}
+          >
+            <ct-loader size="sm" />
+            <span>{pendingCount} analyzing...</span>
+          </div>
+          <span style={{ color: "#059669" }}>
+            {completedCount} completed
+          </span>
+        </div>
+      </div>
+    );
+
+    // Preview UI for card displays
+    const previewUI = (
       <div
         style={{
           display: "flex",
           alignItems: "center",
           gap: "12px",
+          padding: "8px 12px",
         }}
       >
-        <span style={{ fontWeight: "600" }}>Analysis:</span>
-        <span>{computed(() => emailCount)} emails</span>
         <div
           style={{
-            display: pendingDisplay,
+            width: "36px",
+            height: "36px",
+            borderRadius: "8px",
+            backgroundColor: "#eff6ff",
+            border: "2px solid #3b82f6",
+            color: "#1d4ed8",
+            display: "flex",
             alignItems: "center",
-            gap: "4px",
-            color: "#2563eb",
+            justifyContent: "center",
+            fontWeight: "bold",
+            fontSize: "16px",
           }}
         >
-          <ct-loader size="sm" />
-          <span>{computed(() => pendingCount)} analyzing...</span>
+          {completedCount}
         </div>
-        <span style={{ color: "#059669" }}>
-          {computed(() => completedCount)} completed
-        </span>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: "600", fontSize: "14px" }}>
+            {title || "Email Items"}
+          </div>
+          <div style={{ fontSize: "12px", color: "#6b7280" }}>
+            {emailCount} emails
+          </div>
+          <ProcessingStatus
+            totalCount={emailCount}
+            pendingCount={pendingCount}
+            completedCount={completedCount}
+          />
+        </div>
       </div>
-    </div>
-  );
+    );
 
-  // Preview UI for card displays
-  const previewUI = (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: "12px",
-        padding: "8px 12px",
-      }}
-    >
-      <div
-        style={{
-          width: "36px",
-          height: "36px",
-          borderRadius: "8px",
-          backgroundColor: "#eff6ff",
-          border: "2px solid #3b82f6",
-          color: "#1d4ed8",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontWeight: "bold",
-          fontSize: "16px",
-        }}
-      >
-        {computed(() => completedCount)}
-      </div>
-      <div style={{ flex: 1 }}>
-        <div style={{ fontWeight: "600", fontSize: "14px" }}>
-          {title || "Email Items"}
-        </div>
-        <div style={{ fontSize: "12px", color: "#6b7280" }}>
-          {computed(() => emailCount)} emails
-        </div>
-        <ProcessingStatus
-          totalCount={emailCount}
-          pendingCount={pendingCount}
-          completedCount={completedCount}
-        />
-      </div>
-    </div>
-  );
-
-  return {
-    emails,
-    emailCount,
-    rawAnalyses,
-    pendingCount,
-    completedCount,
-    isConnected,
-    ui: {
-      authStatusUI,
-      connectionStatusUI,
-      analysisProgressUI,
-      previewUI,
-    },
-    gmailImporter,
-    refresh: gmailImporter.bgUpdater,
-    addLabels: addLabelsHandler({ auth: overrideAuth }),
-    removeLabels: removeLabelsHandler({ auth: overrideAuth }),
-  };
-}
+    return {
+      emails,
+      emailCount,
+      rawAnalyses,
+      pendingCount,
+      completedCount,
+      isConnected,
+      ui: {
+        authStatusUI,
+        connectionStatusUI,
+        analysisProgressUI,
+        previewUI,
+      },
+      gmailImporter,
+      refresh: gmailImporter.bgUpdater,
+      addLabels: addLabelsHandler({ auth: overrideAuth }),
+      removeLabels: removeLabelsHandler({ auth: overrideAuth }),
+    };
+  },
+);
 
 // Export the building block as default
 export default GmailExtractor;

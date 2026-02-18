@@ -231,7 +231,7 @@ interface PatternOutput {
 
 export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
   // Use GmailExtractor with built-in LLM extraction
-  const extractor = GmailExtractor<ScheduleChangeAnalysisResult>({
+  const extractor = GmailExtractor({
     gmailQuery: SCHEDULE_CHANGE_GMAIL_QUERY,
     extraction: {
       promptTemplate: EXTRACTION_PROMPT_TEMPLATE,
@@ -250,7 +250,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
   const emailAnalyses = computed(() =>
     rawAnalyses?.map((item) => ({
       ...item,
-      result: item.analysis?.result,
+      result: item.analysis?.result as ScheduleChangeAnalysisResult | undefined,
     })) || []
   );
 
@@ -271,7 +271,9 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
     sevenDaysFromNow.setDate(sevenDaysFromNow.getDate() + 7);
 
     for (const analysisItem of emailAnalyses || []) {
-      const result = analysisItem.result;
+      const result = analysisItem.result as
+        | ScheduleChangeAnalysisResult
+        | undefined;
       if (!result) continue;
 
       // Skip if not a schedule change
@@ -1020,147 +1022,152 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
                     LLM Analysis Results:
                   </h4>
                   <ct-vstack gap="2">
-                    {emailAnalyses.map((analysis) => (
-                      <div
-                        style={{
-                          padding: "12px",
-                          backgroundColor: "white",
-                          borderRadius: "6px",
-                          border: computed(() =>
-                            analysis.pending
-                              ? "1px solid #fbbf24"
-                              : analysis.error
-                              ? "1px solid #ef4444"
-                              : analysis.result?.isScheduleChange
-                              ? "1px solid #10b981"
-                              : "1px solid #d1d5db"
-                          ),
-                          fontSize: "12px",
-                        }}
-                      >
+                    {emailAnalyses.map((analysis) => {
+                      const debugResult = analysis.result as
+                        | ScheduleChangeAnalysisResult
+                        | undefined;
+                      return (
                         <div
                           style={{
-                            fontWeight: "600",
-                            marginBottom: "4px",
-                            color: "#111827",
-                          }}
-                        >
-                          {analysis.email.subject}
-                        </div>
-
-                        <div
-                          style={{
-                            display: analysis.pending ? "flex" : "none",
-                            alignItems: "center",
-                            gap: "4px",
-                            color: "#f59e0b",
-                            marginTop: "4px",
-                          }}
-                        >
-                          <ct-loader size="sm" />
-                          <span>Analyzing...</span>
-                        </div>
-
-                        <div
-                          style={{
-                            display: analysis.error ? "block" : "none",
-                            color: "#dc2626",
-                            marginTop: "4px",
-                          }}
-                        >
-                          Error:{" "}
-                          {computed(() =>
-                            analysis.error ? String(analysis.error) : ""
-                          )}
-                        </div>
-
-                        <div
-                          style={{
-                            display: computed(() =>
-                              !analysis.pending &&
-                                !analysis.error &&
-                                analysis.result
-                                ? "block"
-                                : "none"
+                            padding: "12px",
+                            backgroundColor: "white",
+                            borderRadius: "6px",
+                            border: computed(() =>
+                              analysis.pending
+                                ? "1px solid #fbbf24"
+                                : analysis.error
+                                ? "1px solid #ef4444"
+                                : debugResult?.isScheduleChange
+                                ? "1px solid #10b981"
+                                : "1px solid #d1d5db"
                             ),
+                            fontSize: "12px",
                           }}
                         >
                           <div
                             style={{
-                              marginTop: "8px",
-                              padding: "8px",
-                              backgroundColor: computed(() =>
-                                analysis.result?.isScheduleChange
-                                  ? "#d1fae5"
-                                  : "#f3f4f6"
-                              ),
-                              borderRadius: "4px",
+                              fontWeight: "600",
+                              marginBottom: "4px",
+                              color: "#111827",
                             }}
                           >
-                            <div style={{ color: "#374151" }}>
-                              <strong>Is Schedule Change:</strong>{" "}
-                              {computed(() =>
-                                analysis.result?.isScheduleChange ? "Yes" : "No"
-                              )}
-                            </div>
+                            {analysis.email.subject}
+                          </div>
+
+                          <div
+                            style={{
+                              display: analysis.pending ? "flex" : "none",
+                              alignItems: "center",
+                              gap: "4px",
+                              color: "#f59e0b",
+                              marginTop: "4px",
+                            }}
+                          >
+                            <ct-loader size="sm" />
+                            <span>Analyzing...</span>
+                          </div>
+
+                          <div
+                            style={{
+                              display: analysis.error ? "block" : "none",
+                              color: "#dc2626",
+                              marginTop: "4px",
+                            }}
+                          >
+                            Error:{" "}
+                            {computed(() =>
+                              analysis.error ? String(analysis.error) : ""
+                            )}
+                          </div>
+
+                          <div
+                            style={{
+                              display: computed(() =>
+                                !analysis.pending &&
+                                  !analysis.error &&
+                                  debugResult
+                                  ? "block"
+                                  : "none"
+                              ),
+                            }}
+                          >
                             <div
                               style={{
-                                color: "#374151",
-                                marginTop: "4px",
-                                display: computed(() =>
-                                  analysis.result?.isScheduleChange
-                                    ? "block"
-                                    : "none"
+                                marginTop: "8px",
+                                padding: "8px",
+                                backgroundColor: computed(() =>
+                                  debugResult?.isScheduleChange
+                                    ? "#d1fae5"
+                                    : "#f3f4f6"
                                 ),
+                                borderRadius: "4px",
                               }}
                             >
-                              <strong>Type:</strong>{" "}
-                              {computed(() =>
-                                analysis.result?.changeType || "N/A"
-                              )}
-                            </div>
-                            <div
-                              style={{
-                                color: "#374151",
-                                marginTop: "4px",
-                                display: computed(() =>
-                                  analysis.result?.isScheduleChange
-                                    ? "block"
-                                    : "none"
-                                ),
-                              }}
-                            >
-                              <strong>Event:</strong>{" "}
-                              {computed(() =>
-                                analysis.result?.originalEvent || "N/A"
-                              )}
-                            </div>
-                            <div
-                              style={{
-                                color: "#374151",
-                                marginTop: "4px",
-                                display: computed(() =>
-                                  analysis.result?.isScheduleChange
-                                    ? "block"
-                                    : "none"
-                                ),
-                              }}
-                            >
-                              <strong>Original Date:</strong>{" "}
-                              {computed(() =>
-                                formatDate(analysis.result?.originalDate)
-                              )}
-                            </div>
-                            <div style={{ color: "#374151", marginTop: "4px" }}>
-                              <strong>Summary:</strong>{" "}
-                              {computed(() =>
-                                analysis.result?.summary || "N/A"
-                              )}
+                              <div style={{ color: "#374151" }}>
+                                <strong>Is Schedule Change:</strong>{" "}
+                                {computed(() =>
+                                  debugResult?.isScheduleChange ? "Yes" : "No"
+                                )}
+                              </div>
+                              <div
+                                style={{
+                                  color: "#374151",
+                                  marginTop: "4px",
+                                  display: computed(() =>
+                                    debugResult?.isScheduleChange
+                                      ? "block"
+                                      : "none"
+                                  ),
+                                }}
+                              >
+                                <strong>Type:</strong>{" "}
+                                {computed(() =>
+                                  debugResult?.changeType || "N/A"
+                                )}
+                              </div>
+                              <div
+                                style={{
+                                  color: "#374151",
+                                  marginTop: "4px",
+                                  display: computed(() =>
+                                    debugResult?.isScheduleChange
+                                      ? "block"
+                                      : "none"
+                                  ),
+                                }}
+                              >
+                                <strong>Event:</strong>{" "}
+                                {computed(() =>
+                                  debugResult?.originalEvent || "N/A"
+                                )}
+                              </div>
+                              <div
+                                style={{
+                                  color: "#374151",
+                                  marginTop: "4px",
+                                  display: computed(() =>
+                                    debugResult?.isScheduleChange
+                                      ? "block"
+                                      : "none"
+                                  ),
+                                }}
+                              >
+                                <strong>Original Date:</strong>{" "}
+                                {computed(() =>
+                                  formatDate(debugResult?.originalDate)
+                                )}
+                              </div>
+                              <div
+                                style={{ color: "#374151", marginTop: "4px" }}
+                              >
+                                <strong>Summary:</strong>{" "}
+                                {computed(() => debugResult?.summary || "N/A")}
+                              </div>
                             </div>
                           </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </ct-vstack>
                 </div>
               </details>

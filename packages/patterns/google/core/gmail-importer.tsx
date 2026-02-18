@@ -729,9 +729,10 @@ export async function process(
 
   // Get existing email IDs and create a map for efficient updates
   const existingEmails = state.emails.get();
-  const emailMap = new Map(
-    existingEmails.map((email) => [email.key("id").get(), email]),
-  );
+  const emailMap = new Map<string, Writable<Email>>();
+  for (const email of existingEmails) {
+    emailMap.set(email.key("id").get(), email);
+  }
   const existingEmailIds = new Set(emailMap.keys());
 
   // Try incremental sync if we have a historyId
@@ -1031,39 +1032,6 @@ const toggleResolveInlineImages = handler<
     settings.set({ ...current, resolveInlineImages: target.checked });
   },
 );
-
-// Pattern tool callbacks - must be defined at module scope
-const searchEmailsCallback = (
-  { query, emails }: { query: string; emails: Email[] },
-) => {
-  return derive({ query, emails }, ({ query, emails }) => {
-    if (!query || !emails) return [];
-    const lowerQuery = query.toLowerCase();
-    return emails.filter((email) =>
-      email.subject?.toLowerCase().includes(lowerQuery) ||
-      email.from?.toLowerCase().includes(lowerQuery) ||
-      email.snippet?.toLowerCase().includes(lowerQuery)
-    );
-  });
-};
-
-const getEmailCountCallback = ({ emails }: { emails: Email[] }) => {
-  return derive(emails, (list: Email[]) => list?.length || 0);
-};
-
-const getRecentEmailsCallback = (
-  { count, emails }: { count: number; emails: Email[] },
-) => {
-  return derive({ count, emails }, ({ count, emails }) => {
-    if (!emails || emails.length === 0) return "No emails";
-    const recent = emails.slice(0, count || 5);
-    return recent.map((email) =>
-      `From: ${email.from}\nSubject: ${email.subject}\nDate: ${
-        new Date(email.date).toLocaleDateString()
-      }`
-    ).join("\n\n");
-  });
-};
 
 export default pattern<{
   settings: Default<Settings, {
@@ -1385,10 +1353,41 @@ export default pattern<{
       emailCount: derive(emails, (list: Email[]) => list?.length || 0),
       bgUpdater: googleUpdaterStream,
       isReady,
-      // Pattern tools for omnibot - using module-scope callbacks
-      searchEmails: patternTool(searchEmailsCallback, { emails }),
-      getEmailCount: patternTool(getEmailCountCallback, { emails }),
-      getRecentEmails: patternTool(getRecentEmailsCallback, { emails }),
+      // Pattern tools for omnibot
+      searchEmails: patternTool(
+        ({ query, emails }: { query: string; emails: Email[] }) => {
+          return derive({ query, emails }, ({ query, emails }) => {
+            if (!query || !emails) return [];
+            const lowerQuery = query.toLowerCase();
+            return emails.filter((email) =>
+              email.subject?.toLowerCase().includes(lowerQuery) ||
+              email.from?.toLowerCase().includes(lowerQuery) ||
+              email.snippet?.toLowerCase().includes(lowerQuery)
+            );
+          });
+        },
+        { emails },
+      ),
+      getEmailCount: patternTool(
+        ({ emails }: { emails: Email[] }) => {
+          return derive(emails, (list: Email[]) => list?.length || 0);
+        },
+        { emails },
+      ),
+      getRecentEmails: patternTool(
+        ({ count, emails }: { count: number; emails: Email[] }) => {
+          return derive({ count, emails }, ({ count, emails }) => {
+            if (!emails || emails.length === 0) return "No emails";
+            const recent = emails.slice(0, count || 5);
+            return recent.map((email) =>
+              `From: ${email.from}\nSubject: ${email.subject}\nDate: ${
+                new Date(email.date).toLocaleDateString()
+              }`
+            ).join("\n\n");
+          });
+        },
+        { emails },
+      ),
     };
   },
 );
