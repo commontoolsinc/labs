@@ -381,9 +381,12 @@ export function deepNativeValueFromStorableValue(
   }
 
   // Objects -- recursively unwrap values. Output is not frozen.
+  // Skip prototype-sensitive keys to prevent prototype pollution.
   const result: Record<string, unknown> = {};
   for (const [key, val] of Object.entries(value)) {
-    result[key] = deepNativeValueFromStorableValue(val as StorableValue);
+    if (key !== "__proto__" && key !== "constructor") {
+      result[key] = deepNativeValueFromStorableValue(val as StorableValue);
+    }
   }
   return result;
 }
