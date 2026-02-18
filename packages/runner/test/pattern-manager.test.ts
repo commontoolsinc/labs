@@ -44,7 +44,7 @@ describe("PatternManager program persistence", () => {
             "import { pattern, lift } from 'commontools';",
             "import { double } from './util.ts';",
             "const dbl = lift((x:number)=>double(x));",
-            "export default pattern<{ value: number }>('Test', ({ value }) => {",
+            "export default pattern<{ value: number }>(({ value }) => {",
             "  return { result: dbl(value) };",
             "});",
           ].join("\n"),
@@ -96,7 +96,7 @@ describe("PatternManager program persistence", () => {
           name: "/main.ts",
           contents: [
             "import { pattern } from 'commontools';",
-            "export default pattern<{ x: number }>('Idempotent', ({ x }) => ({ x }));",
+            "export default pattern<{ x: number }>(({ x }) => ({ x }));",
           ].join("\n"),
         },
       ],
@@ -126,7 +126,7 @@ describe("PatternManager.compileOrGetPattern", () => {
         name: "/main.ts",
         contents: [
           "import { pattern } from 'commontools';",
-          "export default pattern<{ x: number }>('Cached', ({ x }) => ({ doubled: x }));",
+          "export default pattern<{ x: number }>(({ x }) => ({ doubled: x }));",
         ].join("\n"),
       },
     ],
@@ -139,7 +139,7 @@ describe("PatternManager.compileOrGetPattern", () => {
         name: "/main.ts",
         contents: [
           "import { pattern } from 'commontools';",
-          "export default pattern<{ y: number }>('Different', ({ y }) => ({ tripled: y }));",
+          "export default pattern<{ y: number }>(({ y }) => ({ tripled: y }));",
         ].join("\n"),
       },
     ],
@@ -211,7 +211,7 @@ describe("PatternManager.compileOrGetPattern", () => {
   it("works with string input (single file)", async () => {
     const source = [
       "import { pattern } from 'commontools';",
-      "export default pattern<{ n: number }>('FromString', ({ n }) => ({ result: n }));",
+      "export default pattern<{ n: number }>(({ n }) => ({ result: n }));",
     ].join("\n");
 
     const pattern = await runtime.patternManager.compileOrGetPattern(source);
