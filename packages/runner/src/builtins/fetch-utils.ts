@@ -46,6 +46,10 @@ export async function tryClaimMutex<T extends Record<string, any>>(
   _error: Cell<any>,
   internal: Cell<Schema<typeof internalSchema>>,
   requestId: string,
+  snapshotInputs: (
+    proxy: T,
+    tx: IExtendedStorageTransaction,
+  ) => T,
   timeout: number = REQUEST_TIMEOUT,
 ): Promise<{
   claimed: boolean;
@@ -72,14 +76,11 @@ export async function tryClaimMutex<T extends Record<string, any>>(
     const now = Date.now();
 
     // Snapshot inputs as plain data while the transaction is active.
-    // getAsQueryResult returns a QueryResultProxy that lazily resolves
-    // entity-decomposed nested properties (e.g. options.headers) through
-    // the transaction. Once the transaction commits, the proxy falls back
-    // to ad-hoc reads that can't follow entity links reliably. Serializing
-    // here forces full materialization within the transaction scope.
-    inputs = JSON.parse(
-      JSON.stringify(inputsCell.getAsQueryResult([], tx)),
-    ) as T;
+    // The caller-provided snapshotInputs reads each field from the proxy
+    // (which resolves entity-decomposed nested properties through the tx)
+    // and returns a plain object safe to use after the transaction commits.
+    const proxy = inputsCell.getAsQueryResult([], tx);
+    inputs = snapshotInputs(proxy, tx);
     inputHash = computeInputHash(tx, inputsCell);
 
     // Can claim if:

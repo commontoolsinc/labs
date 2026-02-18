@@ -194,6 +194,31 @@ export function fetchData(
         error,
         internal,
         newRequestId,
+        // Snapshot inputs as plain data and preprocess body while the
+        // transaction is active. This ensures nested proxy values like
+        // options.headers are materialized before the tx commits, and
+        // consolidates body serialization in one place.
+        (proxy) => {
+          const { url, mode, options, result: _result } = proxy;
+          const snapshotOptions = options
+            ? {
+              ...options,
+              method: options.method as string | undefined,
+              headers: options.headers
+                ? { ...(options.headers as Record<string, string>) }
+                : undefined,
+              body: options.body !== undefined &&
+                  typeof options.body !== "string"
+                ? JSON.stringify(options.body)
+                : options.body as string | undefined,
+            }
+            : undefined;
+          return {
+            url: url as string,
+            mode: mode as "text" | "json" | undefined,
+            options: snapshotOptions,
+          } as typeof proxy;
+        },
       ).then(
         ({ claimed, inputs, inputHash }) => {
           if (!claimed) {
@@ -276,19 +301,14 @@ async function startFetch(
     return (mode || "json") === "json" ? await r.json() : await r.text();
   };
 
-  const fetchOptions = { ...options };
-  if (
-    fetchOptions.body !== undefined && typeof fetchOptions.body !== "string"
-  ) {
-    fetchOptions.body = JSON.stringify(fetchOptions.body);
-  }
-
+  // Body preprocessing (stringify non-string bodies) is handled by the
+  // snapshotInputs callback in tryClaimMutex, so options is ready to use.
   try {
     const response = await fetch(
       new URL(url, getPatternEnvironment().apiUrl),
       {
         signal: abortSignal,
-        ...fetchOptions,
+        ...options,
       },
     );
 
