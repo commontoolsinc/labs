@@ -28,6 +28,16 @@ const triggerGeneration = handler<
   });
 });
 
+const sendMessage = handler<
+  { detail: { text: string; attachments?: Array<any> } },
+  { addMessage: Stream<BuiltInLLMMessage> }
+>((event, { addMessage }) => {
+  addMessage.send({
+    role: "user",
+    content: [{ type: "text" as const, text: event.detail.text }],
+  });
+});
+
 export default pattern<
   {
     situation: string;
@@ -112,6 +122,11 @@ Use the user context above to personalize your suggestions when relevant.`;
           ),
         )}
       </ct-cell-context>
+      <ct-prompt-input
+        placeholder="Refine suggestion..."
+        pending={pending}
+        onct-send={sendMessage({ addMessage })}
+      />
     </div>
   );
 
