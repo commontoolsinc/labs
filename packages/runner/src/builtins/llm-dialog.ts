@@ -1760,8 +1760,14 @@ async function invokeToolCall(
   }
 
   if (resolved.type === "finalResult") {
-    // Return the structured result directly
-    return traverseAndCellify(runtime, space, resolved.result);
+    // Return the structured result as a proper tool result with {type, value}
+    // wrapper matching LanguageModelV2ToolResultOutput, so the message can be
+    // re-sent to the AI SDK if seeded into llmDialog.
+    const cellified = traverseAndCellify(runtime, space, resolved.result);
+    return {
+      type: "json",
+      value: cellified,
+    };
   }
 
   // Handle run-type tools (external, run with pattern/handler)
@@ -2126,12 +2132,49 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
   const augmentedSystem = (system ?? "") + linkModelDocs + cellsDocs +
     listRecentHint;
 
-  // Use JSON round-trip to resolve cell proxies and @link references to plain
-  // JSON before sending to the server. messagesCell.get() returns proxy objects
-  // that don't serialize correctly through client.sendRequest's JSON.stringify.
-  const resolvedMessages = JSON.parse(
-    JSON.stringify(messagesCell.get()),
-  ) as readonly BuiltInLLMMessage[];
+  // Resolve cell proxies in seeded messages. When messages are seeded from
+  // generateObject's conversation, @link references in tool-call inputs and
+  // tool-result outputs get re-hydrated into live Cell objects by the cell
+  // system. These can contain circular structures ($UI → $mentionable → $UI).
+  // We re-serialize input/output fields using traverseAndSerialize, passing
+  // each tool's inputSchema so cell-typed properties are converted to @links.
+  const rawMessages = messagesCell.get() as BuiltInLLMMessage[];
+  const resolvedMessages = rawMessages.map((msg) => {
+    if (!Array.isArray(msg.content)) return msg;
+    return {
+      ...msg,
+      content: (msg.content as any[]).map((part) => {
+        if (part?.type === "tool-call" && part.input !== undefined) {
+          const toolSchema = toolCatalog.llmTools[part.toolName]?.inputSchema;
+          return {
+            ...part,
+            input: traverseAndSerialize(
+              part.input,
+              toolSchema,
+              new Set(),
+              space,
+            ),
+          };
+        }
+        if (part?.type === "tool-result" && part.output !== undefined) {
+          const toolSchema = toolCatalog.llmTools[part.toolName]?.inputSchema;
+          return {
+            ...part,
+            output: {
+              ...part.output,
+              value: traverseAndSerialize(
+                part.output.value,
+                toolSchema,
+                new Set(),
+                space,
+              ),
+            },
+          };
+        }
+        return part;
+      }),
+    };
+  }) as readonly BuiltInLLMMessage[];
 
   const llmParams: LLMRequest = {
     system: augmentedSystem,

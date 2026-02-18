@@ -937,7 +937,9 @@ export function generateObject<T extends Record<string, unknown>>(
                   p.toolName === llmToolExecutionHelpers.FINAL_RESULT_TOOL_NAME,
               );
               if (finalResultCall) {
-                finalResult = finalResultCall.result as T;
+                // Unwrap the {type, value} wrapper added by invokeToolCall
+                const raw = finalResultCall.result as any;
+                finalResult = (raw?.value ?? raw) as T;
               }
 
               const toolResultMessages = llmToolExecutionHelpers

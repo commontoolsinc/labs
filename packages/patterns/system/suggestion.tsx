@@ -49,34 +49,22 @@ const sendFollowUp = handler<
 // Wraps the shared fetchAndRunPattern and writes the result cell to
 // activeResult via extraParams, so the UI updates without needing the LLM
 // to call a separate presentResult tool.
-const dialogFetchAndRun = pattern<{
-  url: string;
-  args: Writable<any>;
-  target: Writable<{ active: Writable<any> | null }>;
-}>(({ url, args, target }) => {
-  const inner = fetchAndRunPattern({ url, args });
-  const cell = computed(() => inner?.cell);
-  // Auto-present: when the inner pattern resolves, write to activeResult
-  computed(() => {
-    const c = cell;
-    if (c) {
-      try {
-        target.set({ active: c });
-      } catch { /* ct check only */ }
-    }
-  });
-  return inner;
+// finalResult handler for llmDialog — matches the generateObject builtin so
+// seeded messages pass through, and auto-presents when called during dialog.
+// Must be a handler (not pattern) because patterns run in a separate space
+// and can't .set() on cells from the parent pattern.
+const presentResult = handler<
+  { cell: Writable<any> },
+  { activeResult: Writable<{ active: Writable<any> | null }> }
+>((event, { activeResult }) => {
+  activeResult.set({ active: event.cell });
 });
 
-const askUserFn = pattern<{
-  question: string;
-  options?: string[];
-  target: Writable<{ question: string; options?: string[] } | null>;
-}>(({ question, options, target }) => {
-  try {
-    target.set({ question, options });
-  } catch { /* ct check only */ }
-  return { question, options };
+const askUserHandler = handler<
+  { question: string; options?: string[] },
+  { pendingQuestion: Writable<{ question: string; options?: string[] } | null> }
+>((event, { pendingQuestion }) => {
+  pendingQuestion.set({ question: event.question, options: event.options });
 });
 
 const answerQuestion = handler<
@@ -170,13 +158,15 @@ Use the user context above to personalize your suggestions when relevant.`;
     return `You are helping the user refine a result. You previously found and launched a pattern for them.${profileCtx}
 
 Tools:
-- fetchAndRunPattern({ url, args }): Fetch a pattern from a URL and run it. The result is automatically displayed.
+- fetchAndRunPattern({ url, args }): Fetch a pattern from a URL and run it.
 - listPatternIndex(): List all available patterns with their URLs.
+- finalResult({ cell }): Present a result to the user. Pass the cell from fetchAndRunPattern.
 - askUser({ question, options? }): Ask the user a clarifying question. STOP after calling this.
 
 When the user asks to change or improve the result:
 1. Call listPatternIndex() to find the right pattern URL
-2. Call fetchAndRunPattern({ url: "<pattern-url>", args: {} }) to launch it`;
+2. Call fetchAndRunPattern({ url: "<pattern-url>", args: {} }) to launch it
+3. Call finalResult({ cell }) with the resulting cell to display it`;
   });
 
   // NOTE: Intentionally NOT passing `context` here. The context cells contain
@@ -187,11 +177,10 @@ When the user asks to change or improve the result:
     system: dialogSystemPrompt,
     messages: dialogMessages,
     tools: {
-      fetchAndRunPattern: patternTool(dialogFetchAndRun, {
-        target: activeResult,
-      }),
+      fetchAndRunPattern: patternTool(fetchAndRunPattern),
       listPatternIndex: patternTool(listPatternIndex),
-      askUser: patternTool(askUserFn, { target: pendingQuestion }),
+      askUser: { handler: askUserHandler({ pendingQuestion }) },
+      finalResult: { handler: presentResult({ activeResult }) },
     },
     model: "anthropic:claude-sonnet-4-5",
     builtinTools: false,
