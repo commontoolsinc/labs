@@ -17,6 +17,7 @@ import { MentionController } from "../../core/mention-controller.ts";
 import { createCellController } from "../../core/cell-controller.ts";
 import "../ct-button/ct-button.ts";
 import "../ct-chip/ct-chip.ts";
+import "../ct-voice-input/ct-voice-input.ts";
 
 /**
  * Attachment data structure
@@ -303,6 +304,21 @@ export class CTPromptInput extends BaseElement {
             box-shadow: 0 0 0 0.5px
               var(--ct-theme-color-primary, rgba(59, 130, 246, 0.1));
             }
+
+            /* Embedded voice input - compact styling */
+            .voice-wrapper ct-voice-input {
+              --ct-theme-spacing-normal: 0;
+            }
+
+            .voice-wrapper ct-voice-input::part(container) {
+              gap: 0;
+            }
+
+            /* Override the voice input button to fit the controls row */
+            .voice-wrapper {
+              display: flex;
+              align-items: center;
+            }
           `,
         ];
 
@@ -321,6 +337,7 @@ export class CTPromptInput extends BaseElement {
           mentionable: { type: Object, attribute: false },
           modelItems: { type: Array, attribute: false },
           model: { type: Object, attribute: false },
+          voice: { type: Boolean, reflect: true },
         };
 
         declare placeholder: string;
@@ -336,6 +353,7 @@ export class CTPromptInput extends BaseElement {
         declare mentionable: CellHandle<MentionableArray> | null;
         declare modelItems: Array<ModelItem | undefined>;
         declare model: CellHandle<string> | string | null;
+        declare voice: boolean;
 
         @consume({ context: themeContext, subscribe: true })
         @property({ attribute: false })
@@ -380,6 +398,7 @@ export class CTPromptInput extends BaseElement {
           this.mentionable = null;
           this.modelItems = [];
           this.model = null;
+          this.voice = false;
         }
 
         override connectedCallback(): void {
@@ -774,6 +793,22 @@ export class CTPromptInput extends BaseElement {
                   >
                     📎
                   </div>
+
+                  <!-- Voice input -->
+                  ${this.voice
+                    ? html`
+                      <div class="voice-wrapper">
+                        <ct-voice-input
+                          recordingMode="hold"
+                          autoTranscribe
+                          .showWaveform="${false}"
+                          ?disabled="${this.disabled}"
+                          @ct-transcription-complete="${this
+                            ._handleTranscription}"
+                        ></ct-voice-input>
+                      </div>
+                    `
+                    : ""}
                 </div>
               </div>
             </div>
@@ -861,6 +896,38 @@ export class CTPromptInput extends BaseElement {
               )}
             </div>
           `;
+        }
+
+        /**
+         * Handle voice transcription complete - append text to textarea
+         */
+        private _handleTranscription(e: CustomEvent) {
+          const text = e.detail?.transcription?.text;
+          if (!text) return;
+
+          const textarea = this._textareaElement as HTMLTextAreaElement;
+          if (!textarea) return;
+
+          this.value = this.value + (this.value ? " " : "") + text;
+          textarea.value = this.value;
+
+          // Auto-resize and notify
+          if (this.autoResize) {
+            textarea.style.height = "auto";
+            textarea.style.height = `${
+              Math.min(
+                textarea.scrollHeight,
+                parseFloat(
+                  getComputedStyle(this).getPropertyValue(
+                    "--ct-prompt-input-max-height",
+                  ) || "12rem",
+                ) * 16,
+              )
+            }px`;
+          }
+
+          this.emit("ct-input", { value: this.value });
+          textarea.focus();
         }
 
         /**

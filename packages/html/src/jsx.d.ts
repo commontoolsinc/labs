@@ -3143,6 +3143,7 @@ interface CTPromptInputAttributes<T> extends CTHTMLAttributes<T> {
   "disabled"?: boolean;
   "autoResize"?: boolean;
   "pending"?: boolean;
+  "voice"?: boolean;
 }
 
 interface CTAttachmentsBarAttributes<T> extends CTHTMLAttributes<T> {
