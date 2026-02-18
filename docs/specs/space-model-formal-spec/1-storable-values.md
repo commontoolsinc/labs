@@ -98,6 +98,22 @@ type StorableValue =
   | { [key: string]: StorableValue };
 ```
 
+> **Excluded JS types.** The following JavaScript types are explicitly **not**
+> storable and cause rejection (thrown error) in `toStorableValueOrThrow()` and
+> `canBeStored()`:
+>
+> - `symbol` — Symbols are inherently local (not serializable across realms or
+>   processes). Symbol-keyed properties on objects are silently ignored; a bare
+>   `symbol` value is rejected outright.
+> - `function` — Functions are opaque closures with no portable representation.
+>   Objects with a `[DECONSTRUCT]` method are not functions in this sense — they
+>   are `StorableInstance`s.
+>
+> These are the two JS primitive types (`typeof` returns `"symbol"` or
+> `"function"`) that are absent from the `StorableValue` union. All other
+> `typeof` results (`"undefined"`, `"boolean"`, `"number"`, `"string"`,
+> `"bigint"`, `"object"`) have corresponding `StorableValue` arms.
+
 #### `StorableNativeObject`
 
 A separate type — **outside** the `StorableValue` hierarchy — defines the raw
