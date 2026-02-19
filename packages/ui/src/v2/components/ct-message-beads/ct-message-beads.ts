@@ -82,17 +82,31 @@ export class CTMessageBeads extends BaseElement {
         flex-wrap: wrap;
         gap: 3px;
         align-items: center;
+        background: rgba(0, 0, 0, 0.05);
+        border-radius: 12px;
+        padding: 2px 6px;
+      }
+      @keyframes bead-in {
+        from {
+          opacity: 0;
+          transform: scale(0.3) translateY(4px);
+        }
+        to {
+          opacity: 1;
+          transform: scale(1) translateY(0);
+        }
       }
       .bead {
-        width: 8px;
-        height: 8px;
+        width: 6px;
+        height: 6px;
         border-radius: 50%;
         cursor: pointer;
         flex-shrink: 0;
         transition: transform 100ms ease, box-shadow 100ms ease;
+        animation: bead-in 250ms ease-out both;
       }
       .bead:hover {
-        transform: scale(1.5);
+        transform: scale(1.6);
       }
       .bead.blue {
         background: #3b82f6;
@@ -124,9 +138,14 @@ export class CTMessageBeads extends BaseElement {
       .bead.gray:hover {
         box-shadow: 0 0 0 2px rgba(156, 163, 175, 0.3);
       }
+      .label {
+        font-size: 10px;
+        color: #9ca3af;
+        margin-right: 2px;
+      }
       .spinner {
-        width: 8px;
-        height: 8px;
+        width: 6px;
+        height: 6px;
         border-radius: 50%;
         border: 1.5px solid rgba(156, 163, 175, 0.3);
         border-top-color: #9ca3af;
@@ -165,6 +184,7 @@ export class CTMessageBeads extends BaseElement {
   static override properties = {
     messages: { attribute: false },
     pending: { type: Boolean, reflect: true },
+    label: { type: String },
   } as const;
 
   @property({ attribute: false })
@@ -176,11 +196,15 @@ export class CTMessageBeads extends BaseElement {
   @property({ type: Boolean, reflect: true })
   declare pending: boolean;
 
+  @property({ type: String })
+  declare label: string;
+
   #tooltip: HTMLDivElement | null = null;
 
   constructor() {
     super();
     this.pending = false;
+    this.label = "";
   }
 
   private get _messagesValue(): BuiltInLLMMessage[] | undefined {
@@ -307,6 +331,7 @@ export class CTMessageBeads extends BaseElement {
       return html`
         <div
           class="bead ${color}"
+          style="animation-delay: ${i * 30}ms"
           @mouseenter="${(e: MouseEvent) => this._onBeadEnter(e, i)}"
           @mouseleave="${this._onBeadLeave}"
           @click="${(e: MouseEvent) => this._onBeadClick(e, i)}"
@@ -316,7 +341,11 @@ export class CTMessageBeads extends BaseElement {
     });
 
     return html`
-      ${beads} ${this.pending
+      ${this.label
+        ? html`
+          <span class="label">${this.label}</span>
+        `
+        : nothing} ${beads} ${this.pending
         ? html`
           <div class="spinner"></div>
         `

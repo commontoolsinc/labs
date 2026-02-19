@@ -1,7 +1,6 @@
 # Common Patterns
 
-Prefix the URLs with
-`https://raw.githubusercontent.com/commontoolsinc/labs/refs/heads/main/packages/patterns/`
+Prefix the URLs with `http://localhost:8000/api/patterns/`
 
 ---
 
@@ -619,19 +618,21 @@ interface ImageOutput {
 
 ## `deep-research.tsx`
 
-Deep research agent that searches the web and synthesizes findings into a
-structured response. Give it a question and optional context, and it will
-search, read sources, and provide a comprehensive answer.
+Deep research agent that uses llmDialog to search the web and synthesize
+findings. Shows live progress via ct-message-beads and renders a structured
+result with summary, confidence, and sources. Supports follow-up refinement.
 
-**Keywords:** llm, research, web-search, tools, generateObject, agent
+**Keywords:** llm, research, web-search, tools, llmDialog, agent, beads
 
 ### Input Schema
 
 ```ts
 type Input = {
   /** The research question to investigate */
-  question: string;
-  /** Optional context to provide to the agent */
+  situation: Default<string, "What are the latest developments in AI agents?">;
+  /** Message history (managed by llmDialog) */
+  messages?: Writable<Default<Array<BuiltInLLMMessage>, []>>;
+  /** Optional context cells to provide to the agent */
   context?: { [id: string]: any };
 };
 ```
@@ -647,10 +648,7 @@ type ResearchResult = {
 };
 
 type Output = {
-  question: string;
-  result: Writable<ResearchResult | undefined>;
-  pending: boolean;
-  error: unknown;
+  result: ResearchResult | undefined;
 };
 ```
 

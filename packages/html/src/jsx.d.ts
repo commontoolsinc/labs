@@ -3135,6 +3135,7 @@ interface CTChatAttributes<T> extends CTHTMLAttributes<T> {
 interface CTMessageBeadsAttributes<T> extends CTHTMLAttributes<T> {
   "$messages"?: CellLike<any>;
   "pending"?: boolean;
+  "label"?: string;
   "onct-refine"?: EventHandler<any>;
 }
 

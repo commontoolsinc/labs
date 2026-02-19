@@ -1,95 +1,142 @@
 /// <cts-enable />
 import {
+  type BuiltInLLMMessage,
   computed,
-  generateObject,
+  type Default,
+  handler,
+  llmDialog,
   NAME,
   pattern,
   patternTool,
   str,
+  type Stream,
   toSchema,
   UI,
+  type VNode,
   Writable,
 } from "commontools";
 import { readWebpage, searchWeb } from "./system/common-tools.tsx";
 
 type ResearchResult = {
-  /** Concise answer to the research question */
   summary: string;
-  /** Key findings from the research */
   findings: {
     title: string;
     source: string;
     content: string;
   }[];
-  /** List of URLs consulted */
   sources: string[];
-  /** Confidence level in the answer */
   confidence: "high" | "medium" | "low";
 };
 
-export default pattern<
-  { question: string; context?: { [id: string]: any } },
+const triggerGeneration = handler<
+  unknown,
   {
-    question: string;
-    result: Writable<ResearchResult | undefined>;
-    pending: boolean;
-    error?: unknown;
+    addMessage: Stream<BuiltInLLMMessage>;
+    situation: string;
+    result: any | null;
   }
->(({ question, context }) => {
-  const research = generateObject({
-    system:
-      `You are a deep research agent. Given a question, use the available tools to:
+>((_, { addMessage, situation, result }) => {
+  if (!result) {
+    addMessage.send({
+      role: "user",
+      content: [{ type: "text" as const, text: situation }],
+    });
+  }
+});
+
+const sendMessage = handler<
+  { detail: { text: string; attachments?: Array<any> } },
+  { addMessage: Stream<BuiltInLLMMessage> }
+>((event, { addMessage }) => {
+  addMessage.send({
+    role: "user",
+    content: [{ type: "text" as const, text: event.detail.text }],
+  });
+});
+
+const showRefineInput = handler<unknown, { showRefine: Writable<boolean> }>(
+  (_, { showRefine }) => {
+    showRefine.set(true);
+  },
+);
+
+export default pattern<
+  {
+    situation: Default<
+      string,
+      "What are the latest developments in AI agents?"
+    >;
+    messages?: Writable<Default<Array<BuiltInLLMMessage>, []>>;
+    context?: { [id: string]: any };
+  },
+  { result: any; [UI]: VNode }
+>(({ situation, messages, context }) => {
+  const systemPrompt = computed(() =>
+    `You are a deep research agent. Given a question, use the available tools to:
 1. Search the web for relevant information
 2. Read promising web pages to gather detailed content
 3. Synthesize your findings into a comprehensive answer
 
-Be thorough - search for multiple aspects of the question and read several sources before forming your answer.`,
-    prompt: question,
-    context,
+Be thorough - search for multiple aspects of the question and read several sources before forming your answer.
+When done, call presentResult with your structured findings.`
+  );
+
+  const {
+    addMessage,
+    pending,
+    result: dialogResult,
+  } = llmDialog({
+    system: systemPrompt,
+    messages,
     tools: {
       searchWeb: patternTool(searchWeb),
       readWebpage: patternTool(readWebpage),
     },
-    schema: toSchema<ResearchResult>(),
     model: "anthropic:claude-sonnet-4-5",
+    context: computed(() => context ?? {}),
+    resultSchema: toSchema<ResearchResult>(),
   });
 
+  const result = computed(() => dialogResult as ResearchResult | undefined);
+  const showRefine = Writable.of(false);
+
   return {
-    [NAME]: str`Research: ${question}`,
-    result: research.result,
-    pending: research.pending,
-    error: research.error,
-    question,
+    [NAME]: str`Research: ${situation}`,
+    result,
     [UI]: (
-      <div>
-        <ct-textarea
-          $value={question}
-          placeholder="Enter your research question..."
+      <div style="display:contents">
+        <ct-autostart
+          onstart={triggerGeneration({
+            addMessage,
+            situation,
+            result,
+          })}
         />
-        {computed(() => {
-          if (research.pending) return <div>Researching...</div>;
-          if (research.error) return <div>Error: {String(research.error)}</div>;
-          if (!research.result) return <div>No results</div>;
-          return (
-            <div>
-              <h3>Summary</h3>
-              <p>{research.result.summary}</p>
-              <p>
-                <em>Confidence: {research.result.confidence}</em>
-              </p>
-              <h3>Sources</h3>
-              <ul>
-                {research.result.sources.map((url: string) => (
-                  <li>
-                    <a href={url} target="_blank">
-                      {url}
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          );
-        })}
+        <ct-message-beads
+          label="research"
+          $messages={messages}
+          pending={pending}
+          onct-refine={showRefineInput({ showRefine })}
+        />
+        <div>
+          <h3>{computed(() => result?.summary ? "Summary" : "")}</h3>
+          <p>{computed(() => result?.summary ?? "")}</p>
+          <p>
+            <em>
+              {computed(() =>
+                result?.confidence ? `Confidence: ${result.confidence}` : ""
+              )}
+            </em>
+          </p>
+          <h3>{computed(() => result?.sources?.length ? "Sources" : "")}</h3>
+          <p>{computed(() => result?.sources?.join("\n") ?? "")}</p>
+        </div>
+        <ct-prompt-input
+          placeholder="Refine research..."
+          pending={pending}
+          style={computed(() => showRefine.get() ? "" : "display:none")}
+          onct-send={sendMessage({ addMessage })}
+        />
       </div>
     ),
   };
