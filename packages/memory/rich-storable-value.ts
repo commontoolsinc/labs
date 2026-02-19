@@ -1,5 +1,9 @@
 import { isInstance, isRecord } from "@commontools/utils/types";
-import type { StorableValue, StorableValueLayer } from "./interface.ts";
+import type {
+  StorableNativeObject,
+  StorableValue,
+  StorableValueLayer,
+} from "./interface.ts";
 
 /**
  * Shallow conversion that preserves `Error` instances and `undefined`. For
@@ -10,10 +14,19 @@ import type { StorableValue, StorableValueLayer } from "./interface.ts";
  * This function is self-contained (does not delegate back to `toStorableValue`)
  * to avoid circular dispatch when the `richStorableValues` flag is ON.
  *
- * Used when the `richStorableValues` flag is ON. See Section 5.1 of the
- * StorableDatum widening design doc.
+ * Used when the `richStorableValues` flag is ON.
+ *
+ * @param value - The value to convert.
+ * @param freeze - When `true` (default), freezes the result if it is an
+ *   object or array. When `false`, wrapping and validation still occur but
+ *   the result is left mutable. Stub: freeze behavior wired in the
+ *   three-layer rework PR.
  */
-export function toRichStorableValue(value: unknown): StorableValueLayer {
+export function toRichStorableValue(
+  value: unknown,
+  freeze = true,
+): StorableValueLayer {
+  void freeze; // Stub: freeze dispatch wired in three-layer rework PR.
   // Error instances pass through as-is (late serialization).
   if (Error.isError(value)) {
     return value as Error;
@@ -124,8 +137,17 @@ const PROCESSING = Symbol("PROCESSING");
  * parameterization more invasive than duplication.
  *
  * Used when the `richStorableValues` flag is ON.
+ *
+ * @param value - The value to convert.
+ * @param freeze - When `true` (default), deep-freezes the result tree.
+ *   When `false`, wrapping and validation still occur but the result is
+ *   left mutable. Stub: freeze behavior wired in the three-layer rework PR.
  */
-export function toDeepRichStorableValue(value: unknown): StorableValue {
+export function toDeepRichStorableValue(
+  value: unknown,
+  freeze = true,
+): StorableValue {
+  void freeze; // Stub: freeze dispatch wired in three-layer rework PR.
   return toDeepRichStorableValueInternal(value, new Map()) as StorableValue;
 }
 
@@ -285,4 +307,20 @@ function isRichStorableArray(array: unknown[]): boolean {
     const n = Number(k);
     return !Number.isInteger(n) || n < 0 || n >= len;
   });
+}
+
+/**
+ * Returns `true` if `toDeepRichStorableValue()` would succeed on the value.
+ * Checks whether the value is a `StorableValue`, a `StorableNativeObject`,
+ * or a deep tree thereof.
+ *
+ * Stub: delegates to `isRichStorableValue()` for now. The three-layer rework
+ * PR replaces this with a full recursive implementation that handles
+ * `StorableNativeObject` types (Error, Map, Set, Date, Uint8Array, Blob,
+ * toJSON-capable objects) and cycle detection.
+ */
+export function canBeStored(
+  value: unknown,
+): value is StorableValue | StorableNativeObject {
+  return isRichStorableValue(value);
 }
