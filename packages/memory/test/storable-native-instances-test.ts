@@ -9,9 +9,6 @@ import type { ReconstructionContext } from "../storable-protocol.ts";
 import type { StorableValue } from "../interface.ts";
 import {
   deepNativeValueFromStorableValue,
-  FrozenDate,
-  FrozenMap,
-  FrozenSet,
   nativeValueFromStorableValue,
   StorableDate,
   StorableError,
@@ -20,6 +17,7 @@ import {
   StorableSet,
   StorableUint8Array,
 } from "../storable-native-instances.ts";
+import { FrozenDate, FrozenMap, FrozenSet } from "../frozen-builtins.ts";
 
 /** Dummy reconstruction context for tests. */
 const dummyContext: ReconstructionContext = {
@@ -243,11 +241,24 @@ describe("storable-native-instances", () => {
       expect(restored.error.name).toBe("SpecialType");
     });
 
-    it("toNativeValue(true) returns frozen error", () => {
+    it("toNativeValue(true) returns frozen error (copy of unfrozen)", () => {
       const err = new Error("native");
       const se = new StorableError(err);
       const result = se.toNativeValue(true);
-      expect(result).toBe(err);
+      // Creates a frozen copy since the input is unfrozen.
+      expect(result).toBeInstanceOf(Error);
+      expect(result.message).toBe("native");
+      expect(Object.isFrozen(result)).toBe(true);
+      // Original should NOT be mutated.
+      expect(Object.isFrozen(err)).toBe(false);
+    });
+
+    it("toNativeValue(true) returns same error if already frozen", () => {
+      const err = new Error("native");
+      Object.freeze(err);
+      const se = new StorableError(err);
+      const result = se.toNativeValue(true);
+      expect(result).toBe(err); // same reference
       expect(Object.isFrozen(result)).toBe(true);
     });
 
@@ -255,7 +266,18 @@ describe("storable-native-instances", () => {
       const err = new Error("native");
       const se = new StorableError(err);
       const result = se.toNativeValue(false);
-      expect(result).toBe(err);
+      expect(result).toBe(err); // same reference (already unfrozen)
+      expect(Object.isFrozen(result)).toBe(false);
+    });
+
+    it("toNativeValue(false) returns unfrozen copy of frozen error", () => {
+      const err = new Error("native");
+      Object.freeze(err);
+      const se = new StorableError(err);
+      const result = se.toNativeValue(false);
+      // Creates an unfrozen copy since the input is frozen.
+      expect(result).toBeInstanceOf(Error);
+      expect(result.message).toBe("native");
       expect(Object.isFrozen(result)).toBe(false);
     });
   });
@@ -400,250 +422,6 @@ describe("storable-native-instances", () => {
   });
 
   // --------------------------------------------------------------------------
-  // FrozenMap
-  // --------------------------------------------------------------------------
-
-  describe("FrozenMap", () => {
-    it("is instanceof Map", () => {
-      const fm = new FrozenMap([["a", 1]]);
-      expect(fm instanceof Map).toBe(true);
-    });
-
-    it("is Object.isFrozen", () => {
-      const fm = new FrozenMap([["a", 1]]);
-      expect(Object.isFrozen(fm)).toBe(true);
-    });
-
-    it("supports read operations", () => {
-      const fm = new FrozenMap<string, number>([["a", 1], ["b", 2]]);
-      expect(fm.size).toBe(2);
-      expect(fm.get("a")).toBe(1);
-      expect(fm.get("b")).toBe(2);
-      expect(fm.has("a")).toBe(true);
-      expect(fm.has("c")).toBe(false);
-    });
-
-    it("throws on set()", () => {
-      const fm = new FrozenMap<string, number>([["a", 1]]);
-      expect(() => fm.set("b", 2)).toThrow("Cannot mutate a FrozenMap");
-    });
-
-    it("throws on delete()", () => {
-      const fm = new FrozenMap<string, number>([["a", 1]]);
-      expect(() => fm.delete("a")).toThrow("Cannot mutate a FrozenMap");
-    });
-
-    it("throws on clear()", () => {
-      const fm = new FrozenMap<string, number>([["a", 1]]);
-      expect(() => fm.clear()).toThrow("Cannot mutate a FrozenMap");
-    });
-
-    it("supports forEach iteration", () => {
-      const fm = new FrozenMap([["x", 10], ["y", 20]]);
-      const entries: [string, number][] = [];
-      fm.forEach((v, k) => entries.push([k, v]));
-      expect(entries).toEqual([["x", 10], ["y", 20]]);
-    });
-
-    it("supports empty construction", () => {
-      const fm = new FrozenMap();
-      expect(fm.size).toBe(0);
-    });
-
-    it("supports null entries argument", () => {
-      const fm = new FrozenMap(null);
-      expect(fm.size).toBe(0);
-    });
-  });
-
-  // --------------------------------------------------------------------------
-  // FrozenSet
-  // --------------------------------------------------------------------------
-
-  describe("FrozenSet", () => {
-    it("is instanceof Set", () => {
-      const fs = new FrozenSet([1, 2, 3]);
-      expect(fs instanceof Set).toBe(true);
-    });
-
-    it("is Object.isFrozen", () => {
-      const fs = new FrozenSet([1, 2, 3]);
-      expect(Object.isFrozen(fs)).toBe(true);
-    });
-
-    it("supports read operations", () => {
-      const fs = new FrozenSet<number>([1, 2, 3]);
-      expect(fs.size).toBe(3);
-      expect(fs.has(1)).toBe(true);
-      expect(fs.has(4)).toBe(false);
-    });
-
-    it("throws on add()", () => {
-      const fs = new FrozenSet<number>([1]);
-      expect(() => fs.add(2)).toThrow("Cannot mutate a FrozenSet");
-    });
-
-    it("throws on delete()", () => {
-      const fs = new FrozenSet<number>([1]);
-      expect(() => fs.delete(1)).toThrow("Cannot mutate a FrozenSet");
-    });
-
-    it("throws on clear()", () => {
-      const fs = new FrozenSet<number>([1]);
-      expect(() => fs.clear()).toThrow("Cannot mutate a FrozenSet");
-    });
-
-    it("supports forEach iteration", () => {
-      const fs = new FrozenSet([10, 20, 30]);
-      const values: number[] = [];
-      fs.forEach((v) => values.push(v));
-      expect(values).toEqual([10, 20, 30]);
-    });
-
-    it("supports empty construction", () => {
-      const fs = new FrozenSet();
-      expect(fs.size).toBe(0);
-    });
-
-    it("supports null values argument", () => {
-      const fs = new FrozenSet(null);
-      expect(fs.size).toBe(0);
-    });
-  });
-
-  // --------------------------------------------------------------------------
-  // FrozenDate
-  // --------------------------------------------------------------------------
-
-  describe("FrozenDate", () => {
-    it("is instanceof Date", () => {
-      const fd = new FrozenDate("2024-01-01");
-      expect(fd instanceof Date).toBe(true);
-    });
-
-    it("preserves the time value", () => {
-      const original = new Date("2024-06-15T12:30:00Z");
-      const fd = new FrozenDate(original);
-      expect(fd.getTime()).toBe(original.getTime());
-      expect(fd.toISOString()).toBe(original.toISOString());
-    });
-
-    it("supports construction from number", () => {
-      const ts = Date.now();
-      const fd = new FrozenDate(ts);
-      expect(fd.getTime()).toBe(ts);
-    });
-
-    it("supports construction from string", () => {
-      const fd = new FrozenDate("2024-01-01T00:00:00Z");
-      expect(fd.toISOString()).toBe("2024-01-01T00:00:00.000Z");
-    });
-
-    it("supports read operations", () => {
-      const fd = new FrozenDate("2024-06-15T12:30:45.123Z");
-      expect(fd.getFullYear()).toBe(2024);
-      expect(fd.getUTCMonth()).toBe(5); // June = 5
-      expect(fd.getUTCDate()).toBe(15);
-      expect(fd.getUTCHours()).toBe(12);
-      expect(fd.getUTCMinutes()).toBe(30);
-      expect(fd.getUTCSeconds()).toBe(45);
-      expect(fd.getUTCMilliseconds()).toBe(123);
-    });
-
-    it("throws on setTime()", () => {
-      const fd = new FrozenDate("2024-01-01");
-      expect(() => fd.setTime(0)).toThrow("Cannot mutate a FrozenDate");
-    });
-
-    it("throws on setMilliseconds()", () => {
-      const fd = new FrozenDate("2024-01-01");
-      expect(() => fd.setMilliseconds(500)).toThrow(
-        "Cannot mutate a FrozenDate",
-      );
-    });
-
-    it("throws on setUTCMilliseconds()", () => {
-      const fd = new FrozenDate("2024-01-01");
-      expect(() => fd.setUTCMilliseconds(500)).toThrow(
-        "Cannot mutate a FrozenDate",
-      );
-    });
-
-    it("throws on setSeconds()", () => {
-      const fd = new FrozenDate("2024-01-01");
-      expect(() => fd.setSeconds(30)).toThrow("Cannot mutate a FrozenDate");
-    });
-
-    it("throws on setUTCSeconds()", () => {
-      const fd = new FrozenDate("2024-01-01");
-      expect(() => fd.setUTCSeconds(30)).toThrow(
-        "Cannot mutate a FrozenDate",
-      );
-    });
-
-    it("throws on setMinutes()", () => {
-      const fd = new FrozenDate("2024-01-01");
-      expect(() => fd.setMinutes(15)).toThrow("Cannot mutate a FrozenDate");
-    });
-
-    it("throws on setUTCMinutes()", () => {
-      const fd = new FrozenDate("2024-01-01");
-      expect(() => fd.setUTCMinutes(15)).toThrow(
-        "Cannot mutate a FrozenDate",
-      );
-    });
-
-    it("throws on setHours()", () => {
-      const fd = new FrozenDate("2024-01-01");
-      expect(() => fd.setHours(6)).toThrow("Cannot mutate a FrozenDate");
-    });
-
-    it("throws on setUTCHours()", () => {
-      const fd = new FrozenDate("2024-01-01");
-      expect(() => fd.setUTCHours(6)).toThrow("Cannot mutate a FrozenDate");
-    });
-
-    it("throws on setDate()", () => {
-      const fd = new FrozenDate("2024-01-01");
-      expect(() => fd.setDate(15)).toThrow("Cannot mutate a FrozenDate");
-    });
-
-    it("throws on setUTCDate()", () => {
-      const fd = new FrozenDate("2024-01-01");
-      expect(() => fd.setUTCDate(15)).toThrow("Cannot mutate a FrozenDate");
-    });
-
-    it("throws on setMonth()", () => {
-      const fd = new FrozenDate("2024-01-01");
-      expect(() => fd.setMonth(6)).toThrow("Cannot mutate a FrozenDate");
-    });
-
-    it("throws on setUTCMonth()", () => {
-      const fd = new FrozenDate("2024-01-01");
-      expect(() => fd.setUTCMonth(6)).toThrow("Cannot mutate a FrozenDate");
-    });
-
-    it("throws on setFullYear()", () => {
-      const fd = new FrozenDate("2024-01-01");
-      expect(() => fd.setFullYear(2025)).toThrow(
-        "Cannot mutate a FrozenDate",
-      );
-    });
-
-    it("throws on setUTCFullYear()", () => {
-      const fd = new FrozenDate("2024-01-01");
-      expect(() => fd.setUTCFullYear(2025)).toThrow(
-        "Cannot mutate a FrozenDate",
-      );
-    });
-
-    it("is Object.isFrozen", () => {
-      const fd = new FrozenDate("2024-01-01");
-      expect(Object.isFrozen(fd)).toBe(true);
-    });
-  });
-
-  // --------------------------------------------------------------------------
   // nativeValueFromStorableValue (shallow unwrap)
   // --------------------------------------------------------------------------
 
@@ -652,7 +430,9 @@ describe("storable-native-instances", () => {
       const err = new TypeError("test");
       const se = new StorableError(err);
       const result = nativeValueFromStorableValue(se as StorableValue);
-      expect(result).toBe(err);
+      // Creates a frozen copy since the input error is unfrozen.
+      expect(result).toBeInstanceOf(TypeError);
+      expect((result as Error).message).toBe("test");
       expect(Object.isFrozen(result)).toBe(true);
     });
 
@@ -718,14 +498,38 @@ describe("storable-native-instances", () => {
       expect(nativeValueFromStorableValue(true)).toBe(true);
     });
 
-    it("passes through plain objects", () => {
+    it("returns frozen copy of unfrozen plain objects (frozen=true)", () => {
       const obj = { a: 1 } as StorableValue;
+      const result = nativeValueFromStorableValue(obj);
+      expect(Object.isFrozen(result)).toBe(true);
+      expect((result as Record<string, unknown>).a).toBe(1);
+    });
+
+    it("passes through frozen plain objects (frozen=true)", () => {
+      const obj = Object.freeze({ a: 1 }) as StorableValue;
       expect(nativeValueFromStorableValue(obj)).toBe(obj);
     });
 
-    it("passes through arrays", () => {
+    it("passes through unfrozen plain objects (frozen=false)", () => {
+      const obj = { a: 1 } as StorableValue;
+      expect(nativeValueFromStorableValue(obj, false)).toBe(obj);
+    });
+
+    it("returns frozen copy of unfrozen arrays (frozen=true)", () => {
       const arr = [1, 2] as StorableValue;
+      const result = nativeValueFromStorableValue(arr);
+      expect(Object.isFrozen(result)).toBe(true);
+      expect(result).toEqual([1, 2]);
+    });
+
+    it("passes through frozen arrays (frozen=true)", () => {
+      const arr = Object.freeze([1, 2]) as StorableValue;
       expect(nativeValueFromStorableValue(arr)).toBe(arr);
+    });
+
+    it("passes through unfrozen arrays (frozen=false)", () => {
+      const arr = [1, 2] as StorableValue;
+      expect(nativeValueFromStorableValue(arr, false)).toBe(arr);
     });
   });
 

@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
-  canBeStored,
   isArrayIndexPropertyName,
   isStorableValue,
   resetExperimentalStorableConfig,
@@ -9,6 +8,8 @@ import {
   toDeepStorableValue,
   toStorableValue,
 } from "../storable-value.ts";
+import { StorableError } from "../storable-native-instances.ts";
+import { isStorableInstance } from "../storable-protocol.ts";
 
 describe("storable-value", () => {
   describe("isArrayIndexPropertyName", () => {
@@ -878,102 +879,236 @@ describe("storable-value", () => {
   });
 
   // --------------------------------------------------------------------------
-  // canBeStored (public API)
+  // freeze parameter (rich path only)
   // --------------------------------------------------------------------------
 
-  describe("canBeStored", () => {
-    describe("legacy mode (richStorableValues OFF)", () => {
-      it("accepts null", () => {
-        expect(canBeStored(null)).toBe(true);
+  describe("freeze parameter (rich path)", () => {
+    beforeEach(() => {
+      setExperimentalStorableConfig({ richStorableValues: true });
+    });
+
+    afterEach(() => {
+      resetExperimentalStorableConfig();
+    });
+
+    describe("toStorableValue", () => {
+      it("freezes plain objects by default", () => {
+        const result = toStorableValue({ a: 1 });
+        expect(Object.isFrozen(result)).toBe(true);
       });
 
-      it("accepts booleans", () => {
-        expect(canBeStored(true)).toBe(true);
-        expect(canBeStored(false)).toBe(true);
+      it("freezes arrays by default", () => {
+        const result = toStorableValue([1, 2, 3]);
+        expect(Object.isFrozen(result)).toBe(true);
       });
 
-      it("accepts finite numbers", () => {
-        expect(canBeStored(42)).toBe(true);
-        expect(canBeStored(0)).toBe(true);
-        expect(canBeStored(-1.5)).toBe(true);
+      it("does not freeze plain objects when freeze=false", () => {
+        const result = toStorableValue({ a: 1 }, false);
+        expect(Object.isFrozen(result)).toBe(false);
       });
 
-      it("accepts strings", () => {
-        expect(canBeStored("hello")).toBe(true);
-        expect(canBeStored("")).toBe(true);
+      it("does not freeze arrays when freeze=false", () => {
+        const result = toStorableValue([1, 2, 3], false);
+        expect(Object.isFrozen(result)).toBe(false);
       });
 
-      it("accepts undefined", () => {
-        expect(canBeStored(undefined)).toBe(true);
+      it("wraps Error even when freeze=false", () => {
+        const error = new Error("test");
+        const result = toStorableValue(error, false);
+        expect(result).not.toBe(error);
+        expect(Object.isFrozen(result)).toBe(false);
       });
 
-      it("accepts plain objects", () => {
-        expect(canBeStored({ a: 1 })).toBe(true);
-        expect(canBeStored({})).toBe(true);
-      });
-
-      it("accepts dense arrays", () => {
-        expect(canBeStored([1, 2, 3])).toBe(true);
-        expect(canBeStored([])).toBe(true);
-      });
-
-      it("rejects symbols", () => {
-        expect(canBeStored(Symbol("x"))).toBe(false);
-      });
-
-      it("rejects functions", () => {
-        expect(canBeStored(() => {})).toBe(false);
-      });
-
-      it("rejects bigint", () => {
-        expect(canBeStored(BigInt(42))).toBe(false);
+      it("primitives are unaffected by freeze parameter", () => {
+        expect(toStorableValue(42, false)).toBe(42);
+        expect(toStorableValue("hello", false)).toBe("hello");
+        expect(toStorableValue(true, false)).toBe(true);
+        expect(toStorableValue(null, false)).toBe(null);
+        expect(toStorableValue(undefined, false)).toBe(undefined);
+        expect(toStorableValue(BigInt(42), false)).toBe(BigInt(42));
       });
     });
 
-    describe("rich mode (richStorableValues ON)", () => {
-      beforeEach(() => {
-        setExperimentalStorableConfig({ richStorableValues: true });
-      });
-      afterEach(() => {
-        resetExperimentalStorableConfig();
-      });
-
-      it("accepts null", () => {
-        expect(canBeStored(null)).toBe(true);
+    describe("toDeepStorableValue", () => {
+      it("deep-freezes objects by default", () => {
+        const result = toDeepStorableValue({ a: { b: 1 } }) as Record<
+          string,
+          unknown
+        >;
+        expect(Object.isFrozen(result)).toBe(true);
+        expect(Object.isFrozen(result.a)).toBe(true);
       });
 
-      it("accepts undefined", () => {
-        expect(canBeStored(undefined)).toBe(true);
+      it("deep-freezes arrays by default", () => {
+        const result = toDeepStorableValue([[1, 2], [3, 4]]) as unknown[][];
+        expect(Object.isFrozen(result)).toBe(true);
+        expect(Object.isFrozen(result[0])).toBe(true);
       });
 
-      it("accepts plain objects", () => {
-        expect(canBeStored({ a: 1 })).toBe(true);
+      it("does not freeze objects when freeze=false", () => {
+        const result = toDeepStorableValue({ a: { b: 1 } }, false) as Record<
+          string,
+          unknown
+        >;
+        expect(Object.isFrozen(result)).toBe(false);
+        expect(Object.isFrozen(result.a)).toBe(false);
       });
 
-      it("accepts Error instances", () => {
-        expect(canBeStored(new Error("test"))).toBe(true);
+      it("does not freeze arrays when freeze=false", () => {
+        const result = toDeepStorableValue(
+          [[1, 2], [3, 4]],
+          false,
+        ) as unknown[][];
+        expect(Object.isFrozen(result)).toBe(false);
+        expect(Object.isFrozen(result[0])).toBe(false);
       });
 
-      it("rejects symbols", () => {
-        expect(canBeStored(Symbol("x"))).toBe(false);
+      it("allows mutation when freeze=false", () => {
+        const result = toDeepStorableValue({ a: 1 }, false) as Record<
+          string,
+          unknown
+        >;
+        expect(() => {
+          result.a = 2;
+        }).not.toThrow();
+        expect(result.a).toBe(2);
+      });
+
+      it("still performs wrapping when freeze=false", () => {
+        const error = new Error("test");
+        const result = toDeepStorableValue(
+          { error },
+          false,
+        ) as Record<string, unknown>;
+        // Error should be wrapped into StorableError even without freezing.
+        expect(result.error).not.toBe(error);
+        expect(Object.isFrozen(result)).toBe(false);
+      });
+
+      it("still validates when freeze=false", () => {
+        expect(() => toDeepStorableValue(Symbol("bad"), false)).toThrow();
+      });
+
+      it("primitives are unaffected by freeze parameter", () => {
+        expect(toDeepStorableValue(42, false)).toBe(42);
+        expect(toDeepStorableValue("hello", false)).toBe("hello");
+        expect(toDeepStorableValue(null, false)).toBe(null);
       });
     });
   });
 
-  // --------------------------------------------------------------------------
-  // freeze parameter (API surface)
-  // --------------------------------------------------------------------------
+  // =========================================================================
+  // Error internals conversion (rich path): cause and custom properties must
+  // be recursively converted to StorableValue before wrapping in StorableError
+  // =========================================================================
 
-  describe("freeze parameter (API surface)", () => {
-    it("toStorableValue accepts a second argument", () => {
-      // Verify the parameter exists without error.
-      expect(toStorableValue(42, true)).toBe(42);
-      expect(toStorableValue(42, false)).toBe(42);
+  describe("Error internals deep conversion (rich path)", () => {
+    beforeEach(() => {
+      setExperimentalStorableConfig({ richStorableValues: true });
+    });
+    afterEach(() => {
+      resetExperimentalStorableConfig();
     });
 
-    it("toDeepStorableValue accepts a second argument", () => {
-      expect(toDeepStorableValue(42, true)).toBe(42);
-      expect(toDeepStorableValue(42, false)).toBe(42);
+    it("converts Error with raw Error cause into nested StorableError", () => {
+      const inner = new Error("inner");
+      const outer = new Error("outer", { cause: inner });
+      const result = toDeepStorableValue(outer);
+
+      // Top level should be a StorableError.
+      expect(result).toBeInstanceOf(StorableError);
+      const se = result as StorableError;
+      expect(se.error.message).toBe("outer");
+
+      // cause should also be a StorableError (not a raw Error).
+      expect(se.error.cause).toBeInstanceOf(StorableError);
+      const innerSe = se.error.cause as StorableError;
+      expect(innerSe.error.message).toBe("inner");
+    });
+
+    it("converts deeply nested Error chain (3 levels)", () => {
+      const root = new Error("root");
+      const mid = new Error("mid", { cause: root });
+      const top = new Error("top", { cause: mid });
+      const result = toDeepStorableValue(top) as StorableError;
+
+      expect(result.error.message).toBe("top");
+      const midSe = result.error.cause as StorableError;
+      expect(midSe).toBeInstanceOf(StorableError);
+      expect(midSe.error.message).toBe("mid");
+      const rootSe = midSe.error.cause as StorableError;
+      expect(rootSe).toBeInstanceOf(StorableError);
+      expect(rootSe.error.message).toBe("root");
+    });
+
+    it("converts custom enumerable properties on Error", () => {
+      const error = new Error("with props") as Error & {
+        statusCode: number;
+        details: { nested: string };
+      };
+      error.statusCode = 404;
+      error.details = { nested: "value" };
+
+      const result = toDeepStorableValue(error) as StorableError;
+      expect(result.error.message).toBe("with props");
+      // Custom properties should be preserved and converted.
+      const converted = result.error as unknown as Record<string, unknown>;
+      expect(converted.statusCode).toBe(404);
+      expect(converted.details).toEqual({ nested: "value" });
+    });
+
+    it("converts Error with non-Error cause (plain object)", () => {
+      const cause = { code: "ENOENT", path: "/missing" };
+      const error = new Error("file error", { cause });
+      const result = toDeepStorableValue(error) as StorableError;
+
+      // cause should be a plain object (already valid StorableValue).
+      expect(result.error.cause).toEqual({ code: "ENOENT", path: "/missing" });
+      expect(Object.isFrozen(result.error.cause)).toBe(true);
+    });
+
+    it("preserves Error subclass through internals conversion", () => {
+      const inner = new RangeError("bad range");
+      const outer = new TypeError("bad type", { cause: inner });
+      const result = toDeepStorableValue(outer) as StorableError;
+
+      expect(result.error).toBeInstanceOf(TypeError);
+      expect(result.error.name).toBe("TypeError");
+      const innerSe = result.error.cause as StorableError;
+      expect(innerSe.error).toBeInstanceOf(RangeError);
+      expect(innerSe.error.name).toBe("RangeError");
+    });
+
+    it("does not mutate the original Error's cause", () => {
+      const inner = new Error("inner");
+      const outer = new Error("outer", { cause: inner });
+      toDeepStorableValue(outer);
+
+      // Original Error's cause should still be the raw Error, not StorableError.
+      expect(outer.cause).toBe(inner);
+      expect(outer.cause).not.toBeInstanceOf(StorableError);
+    });
+
+    it("handles Error with undefined cause (no conversion needed)", () => {
+      const error = new Error("simple");
+      const result = toDeepStorableValue(error) as StorableError;
+      expect(result.error.cause).toBeUndefined();
+    });
+
+    it("freezes the StorableError wrapper when freeze=true", () => {
+      const error = new Error("freeze me", { cause: new Error("nested") });
+      const result = toDeepStorableValue(error);
+      expect(Object.isFrozen(result)).toBe(true);
+    });
+
+    it("does not freeze StorableError wrapper when freeze=false", () => {
+      const error = new Error("no freeze", { cause: new Error("nested") });
+      const result = toDeepStorableValue(error, false);
+      expect(Object.isFrozen(result)).toBe(false);
+      // But internals should still be converted.
+      expect(result).toBeInstanceOf(StorableError);
+      const se = result as StorableError;
+      expect(se.error.cause).toBeInstanceOf(StorableError);
     });
   });
 });
