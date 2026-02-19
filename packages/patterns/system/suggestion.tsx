@@ -44,6 +44,12 @@ const sendMessage = handler<
   });
 });
 
+const showRefineInput = handler<unknown, { showRefine: Writable<boolean> }>(
+  (_, { showRefine }) => {
+    showRefine.set(true);
+  },
+);
+
 export default pattern<
   {
     situation: string;
@@ -88,6 +94,7 @@ Use the user context above to personalize your suggestions when relevant.`;
   });
 
   const messages = Writable.of<BuiltInLLMMessage[]>([]);
+  const showRefine = Writable.of(false);
 
   const {
     addMessage,
@@ -128,7 +135,7 @@ Use the user context above to personalize your suggestions when relevant.`;
           result: llmResult,
         })}
       />
-      <ct-cell-link $cell={llmResult} />
+      <ct-cell-link $cell={llmResult} style={computed(() => llmResult ? "" : "display:none")} />
       <ct-cell-context $cell={llmResult}>
         {ifElse(
           computed(() => !!llmResult),
@@ -136,10 +143,16 @@ Use the user context above to personalize your suggestions when relevant.`;
           undefined,
         )}
       </ct-cell-context>
-      <ct-message-beads $messages={messages} pending={pending} />
+      <ct-message-beads
+        label="suggestion"
+        $messages={messages}
+        pending={pending}
+        onct-refine={showRefineInput({ showRefine })}
+      />
       <ct-prompt-input
         placeholder="Refine suggestion..."
         pending={pending}
+        style={computed(() => showRefine.get() ? "" : "display:none")}
         onct-send={sendMessage({ addMessage })}
       />
     </div>
