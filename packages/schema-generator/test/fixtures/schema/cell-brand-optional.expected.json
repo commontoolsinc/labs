@@ -12,8 +12,15 @@
       ]
     },
     "OptionalCell": {
-      "asCell": true,
-      "type": "number"
+      "anyOf": [
+        {
+          "type": "undefined"
+        },
+        {      
+          "asCell": true,
+          "type": "number"
+        }
+      ]
     }
   },
   "properties": {

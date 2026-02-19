@@ -813,8 +813,9 @@ export class CommonToolsFormatter implements TypeFormatter {
       const memberType = members[i]!;
       const memberNode = unionNode?.types[i];
 
-      // Skip undefined (optionality handled via JSON Schema required array)
+      // Include undefined as an explicit type in the schema
       if (this.isUndefinedType(memberType)) {
+        schemas.push({ type: "undefined" });
         continue;
       }
 

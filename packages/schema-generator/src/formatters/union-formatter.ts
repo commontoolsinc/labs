@@ -97,26 +97,20 @@ export class UnionFormatter implements TypeFormatter {
     if (context.widenLiterals && unionOptions.length > 1) {
       unionOptions = this.mergeIdenticalSchemas(unionOptions);
     }
-    let unionSchema: SchemaDefinition & { anyOf: SchemaDefinition[] } = {
-      anyOf: [],
-    };
+    const anyOf: SchemaDefinition[] = [];
     for (const option of unionOptions) {
-      const merged = this.mergePrimitiveSchemaToAnyOf(
-        unionSchema.anyOf,
-        option,
-      );
-      if (merged === true) {
+      // mergePrimitiveSchemaIntoAnyOf mutates anyOf in place; returns true to short-circuit
+      if (this.mergePrimitiveSchemaIntoAnyOf(anyOf, option)) {
         return true;
       }
-      unionSchema = merged;
     }
 
     // If only one schema remains after filtering/merging, return it directly without anyOf wrapper
-    if (unionSchema.anyOf.length === 1) {
-      return unionSchema.anyOf[0]!;
+    if (anyOf.length === 1) {
+      return anyOf[0]!;
     }
 
-    return unionSchema;
+    return { anyOf };
   }
 
   /**
@@ -155,64 +149,21 @@ export class UnionFormatter implements TypeFormatter {
   }
 
   /**
-   * Add a new schema option that is either boolean, or has only a `type`
-   * field and possibly an `enum` field.
-   *
-   * This is used to merge multiple primitive types into a single schema definition.
+   * Merge `cur` into the `anyOf` accumulator array in place.
+   * Returns true if the result is the permissive schema (short-circuit the caller).
    */
-  // private mergePrimitiveSchemaOption(
-  //   acc: SchemaDefinition,
-  //   cur: SchemaDefinition,
-  // ): SchemaDefinition {
-  //   if (cur === true || acc === true) {
-  //     return true;
-  //   } else if (cur == false) {
-  //     return acc;
-  //   } else if (acc === false) {
-  //     return cur;
-  //   } else if (acc.anyOf !== undefined) {
-  //     // If we're not already in the anyOf list, add this new option there
-  //     const curStr = JSON.stringify(cur);
-  //     if (!(acc.anyOf.some((option) => JSON.stringify(option) === curStr))) {
-  //       // See if we can merge into one of the anyOf options
-  //       const allPrimitive = acc.anyOf.every((schema) =>
-  //         typeof schema === "boolean" ||
-  //         primitiveSchemaKeys.isSupersetOf(new Set(Object.keys(schema)))
-  //       );
-  //       acc.anyOf.push(cur);
-  //     }
-  //     return acc;
-  //   } else if (acc.type === cur.type && acc.type !== undefined) {
-  //     if (acc.enum !== undefined || cur.enum !== undefined) {
-  //       const merged = new Set([...(acc.enum ?? []), ...(cur.enum ?? [])]);
-  //       return { type: acc.type, enum: [...merged] };
-  //     } else {
-  //       return acc;
-  //     }
-  //   } else if (acc.enum === undefined && cur.enum === undefined) {
-  //     const accTypes = Array.isArray(acc.type) ? acc.type : [acc.type!];
-  //     const curTypes = Array.isArray(cur.type) ? cur.type : [cur.type!];
-  //     const mergedSet = new Set([...accTypes, ...curTypes]);
-  //     const merged = mergedSet.size === 1 ? [...mergedSet][0]! : [...mergedSet];
-  //     return { type: merged };
-  //   } else {
-  //     // have to promote to anyOf
-  //     return { anyOf: [acc, cur] };
-  //   }
-  // }
-
-  private mergePrimitiveSchemaToAnyOf(
+  private mergePrimitiveSchemaIntoAnyOf(
     anyOf: SchemaDefinition[],
     cur: SchemaDefinition,
-  ): SchemaDefinition & { anyOf: SchemaDefinition[] } | true {
+  ): boolean {
     if (cur === true) {
       return true;
     } else if (cur === false) {
-      return { anyOf };
+      return false;
     }
     const curStr = JSON.stringify(cur);
-    if ((anyOf.some((option) => JSON.stringify(option) === curStr))) {
-      return { anyOf };
+    if (anyOf.some((option) => JSON.stringify(option) === curStr)) {
+      return false;
     }
     const primitiveSchemaKeys = new Set(["type", "enum"]);
     // See if we can merge into one of the anyOf options
@@ -263,14 +214,12 @@ export class UnionFormatter implements TypeFormatter {
           ...new Set([...curTypes, ...matchingNonEnumTypes]),
         ].toSorted();
       } else {
-        // no matching type to merge with, add as new anyOf option
         anyOf.push(cur);
       }
     } else {
-      // no matching type to merge with, add as new anyOf option
       anyOf.push(cur);
     }
-    return { anyOf };
+    return false;
   }
 
   /**
