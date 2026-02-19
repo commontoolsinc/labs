@@ -139,7 +139,7 @@ type StorableNativeObject =
   | Date
   | Uint8Array
   | Blob
-  | { toJSON(): string }; // Legacy — see below.
+  | { toJSON(): unknown }; // Legacy — see below.
 ```
 
 The `StorableNativeObject` type exists solely at function parameter/return
@@ -147,9 +147,9 @@ boundaries — for example, `toStorableValue()` accepts
 `StorableValue | StorableNativeObject` as input (Section 8). It is never a
 member of `StorableValue` or `StorableDatum`.
 
-> **Legacy: `{ toJSON(): string }` variant.** The `toJSON()` arm of
-> `StorableNativeObject` represents objects that provide a `toJSON()` method
-> returning a string. The conversion functions call `toJSON()` and process the
+> **Legacy: `{ toJSON(): unknown }` variant.** The `toJSON()` arm of
+> `StorableNativeObject` represents objects that provide a `toJSON()` method.
+> The conversion functions call `toJSON()` and process the
 > result (Section 8.2). This variant is **legacy and marked for removal** —
 > callers should migrate to the storable protocol
 > (`[DECONSTRUCT]`/`[RECONSTRUCT]`). See Section 7.1 for migration guidance.
