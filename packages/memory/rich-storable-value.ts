@@ -1,5 +1,9 @@
 import { isInstance, isRecord } from "@commontools/utils/types";
-import type { StorableValue, StorableValueLayer } from "./interface.ts";
+import type {
+  StorableNativeObject,
+  StorableValue,
+  StorableValueLayer,
+} from "./interface.ts";
 
 /**
  * Shallow conversion that preserves `Error` instances and `undefined`. For
@@ -285,4 +289,20 @@ function isRichStorableArray(array: unknown[]): boolean {
     const n = Number(k);
     return !Number.isInteger(n) || n < 0 || n >= len;
   });
+}
+
+/**
+ * Returns `true` if `toDeepRichStorableValue()` would succeed on the value.
+ * Checks whether the value is a `StorableValue`, a `StorableNativeObject`,
+ * or a deep tree thereof.
+ *
+ * Stub: delegates to `isRichStorableValue()` for now. The three-layer rework
+ * PR replaces this with a full recursive implementation that handles
+ * `StorableNativeObject` types (Error, Map, Set, Date, Uint8Array, Blob,
+ * toJSON-capable objects) and cycle detection.
+ */
+export function canBeStored(
+  value: unknown,
+): value is StorableValue | StorableNativeObject {
+  return isRichStorableValue(value);
 }

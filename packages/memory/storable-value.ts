@@ -5,6 +5,7 @@ import type {
   StorableValueLayer,
 } from "./interface.ts";
 import {
+  canBeStored as canBeStoredRich,
   isRichStorableValue,
   toDeepRichStorableValue,
   toRichStorableValue,
@@ -243,7 +244,7 @@ export function canBeStored(
   value: unknown,
 ): value is StorableValue | StorableNativeObject {
   if (currentConfig.richStorableValues) {
-    return isRichStorableValue(value);
+    return canBeStoredRich(value);
   }
   // In legacy mode, canBeStored is equivalent to isStorableValue --
   // the legacy path doesn't support StorableNativeObject types.
