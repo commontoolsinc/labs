@@ -34,7 +34,7 @@ export type StorableValue = StorableDatum | undefined;
  *
  * `Error` is listed here temporarily for backward compatibility with the
  * existing rich path (which passes Error through as-is). The three-layer
- * rework PR will remove `Error` from this union when the wrapping logic
+ * rework PR removes `Error` from this union when the wrapping logic
  * (Error -> StorableError) is wired in.
  *
  * `undefined` is preserved when the `richStorableValues` flag is ON. When the
