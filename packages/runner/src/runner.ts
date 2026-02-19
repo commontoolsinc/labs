@@ -282,7 +282,7 @@ export class Runner {
     const previousInternal = processCell.key("internal").getRaw({
       meta: ignoreReadForScheduling,
     });
-    const internal: StorableDatum = Object.assign(
+    const internal = Object.assign(
       {},
       cellAwareDeepCopy(
         (defaults as unknown as { internal: StorableDatum })?.internal,
@@ -293,7 +293,7 @@ export class Runner {
           : {},
       ),
       isRecord(previousInternal) ? previousInternal : {},
-    );
+    ) as StorableDatum;
 
     // Still necessary until we consistently use schema for defaults.
     // Only do it on first load.

@@ -1,5 +1,6 @@
 import type { Reference } from "merkle-reference";
 import type { JSONSchema, JSONValue } from "@commontools/api";
+import type { StorableInstance } from "./storable-protocol.ts";
 
 export type SchemaPathSelector = {
   path: readonly string[];
@@ -21,27 +22,42 @@ export type { JSONValue, Reference };
 export type StorableValue = StorableDatum | undefined;
 
 /**
- * The full set of values that the storage layer can represent.
+ * The full set of values that the storage layer can represent. This is the
+ * strongly-typed "middle layer" of the three-layer architecture:
  *
- * The stage 1 additions (`undefined` and `Error`) are accepted at the type
- * level unconditionally, but the runtime conversion functions only preserve
- * them when the experimental `richStorableValues` flag is ON. When the flag
- * is OFF, `Error` is eagerly converted to `{"@Error": ...}`, `undefined` in
- * arrays is converted to `null`, and `undefined` object properties are
- * omitted -- matching current behavior.
+ *   JavaScript "wild west" (unknown) <-> StorableValue <-> Serialized (Uint8Array)
+ *
+ * Native JS object types (`Error`, `Map`, `Set`, `Date`, `Uint8Array`) enter
+ * the storable layer via wrapper classes (e.g. `StorableError`) that implement
+ * `StorableInstance`. However, `bigint` is a primitive and belongs directly
+ * in `StorableDatum` without wrapping.
+ *
+ * `Error` is listed here temporarily for backward compatibility with the
+ * existing rich path (which passes Error through as-is). The three-layer
+ * rework PR removes `Error` from this union when the wrapping logic
+ * (Error -> StorableError) is wired in.
+ *
+ * `undefined` is preserved when the `richStorableValues` flag is ON. When the
+ * flag is OFF, `undefined` in arrays is converted to `null` and `undefined`
+ * object properties are omitted -- matching legacy behavior.
  */
 export type StorableDatum =
-  // -- Primitives (status quo) --
+  // -- Primitives --
   | null
   | boolean
   | number
   | string
-  // -- Containers (status quo) --
+  | bigint
+  // -- Containers --
   | StorableArray
   | StorableObject
-  // -- Stage 1 additions (experimental: richStorableValues) --
-  | undefined
-  | Error;
+  // -- Protocol types (Cell, Stream, UnknownStorable, ProblematicStorable,
+  //    and native wrappers like StorableError at runtime) --
+  | StorableInstance
+  // -- Transitional: removed when three-layer rework wires Error wrapping --
+  | Error
+  // -- Extended primitives (experimental: richStorableValues) --
+  | undefined;
 
 /** An array of storable data. */
 export interface StorableArray extends ArrayLike<StorableDatum> {}
