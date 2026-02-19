@@ -129,10 +129,19 @@ most runtime code runs in a web worker, so its loggers are in a separate
 
 - **Debugger UI**: Open the debugger panel and use the Logger and Scheduler tabs
   to view worker counts, timing, and flags.
-- **IPC via RuntimeClient**: If you have a `RuntimeClient` reference, use
-  `rt.getLoggerCounts()` to fetch worker counts/timing/flags, or
-  `rt.setLoggerLevel()` / `rt.setLoggerEnabled()` to control worker loggers
-  programmatically.
+- **IPC via `commontools.rt`**: The `RuntimeClient` is exposed on
+  `commontools.rt` for console access:
+
+```javascript
+// Fetch worker counts, timing, and flags
+await commontools.rt.getLoggerCounts()
+
+// Control worker loggers
+await commontools.rt.setLoggerLevel("debug")         // all loggers
+await commontools.rt.setLoggerLevel("debug", "runner") // specific logger
+await commontools.rt.setLoggerEnabled(true)            // enable all
+await commontools.rt.setLoggerEnabled(false, "runner") // disable one
+```
 
 ## Quick Reference
 
@@ -154,3 +163,7 @@ most runtime code runs in a web worker, so its loggers are in a separate
 | `commontools.resetAllTimingStats()` | Reset all timing |
 | `commontools.resetAllCountBaselines()` | Set count baselines |
 | `commontools.resetAllTimingBaselines()` | Set timing baselines |
+| `commontools.rt` | RuntimeClient for worker IPC |
+| `commontools.rt.setLoggerLevel(lvl, name?)` | Set worker logger level |
+| `commontools.rt.setLoggerEnabled(on, name?)` | Enable/disable worker logger |
+| `commontools.rt.getLoggerCounts()` | Get worker logger counts/timing/flags |

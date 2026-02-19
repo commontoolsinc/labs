@@ -359,6 +359,10 @@ sudo update-ca-certificates
 
 ### Running Tests
 
+> **Note:** CI enforces that `main` always type-checks and all tests pass, so
+> you don't need to verify the baseline against a clean tree before testing your
+> changes.
+
 - Check typings with `deno task check`.
 - Run linter with `deno lint`.
 - Run all tests using `deno task test` (NOT `deno test`)
