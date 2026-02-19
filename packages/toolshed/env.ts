@@ -157,6 +157,10 @@ const EnvSchema = z.object({
   SANDBOX_SERVICE_URL: z.string().default(
     "https://sandbox.stage.commontools.dev",
   ),
+
+  // URL that sandboxes should use to reach the toolshed API (injected as
+  // CT_API_URL into every sandbox exec). Defaults to API_URL if not set.
+  SANDBOX_TOOLSHED_URL: z.string().optional(),
 });
 
 export type env = z.infer<typeof EnvSchema>;

@@ -99,6 +99,13 @@ export const sandboxExec: AppRouteHandler<SandboxExecRoute> = async (c) => {
 
   logger.info({ sandboxId, command }, "Sandbox exec request");
 
+  // Inject CT_API_URL so `ct` inside sandboxes can reach the toolshed
+  const sandboxToolshedUrl = env.SANDBOX_TOOLSHED_URL || env.API_URL;
+  const mergedEnv: Record<string, string> = {
+    CT_API_URL: sandboxToolshedUrl,
+    ...(environment || {}),
+  };
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
 
@@ -111,7 +118,7 @@ export const sandboxExec: AppRouteHandler<SandboxExecRoute> = async (c) => {
         sandboxId,
         command,
         workingDirectory,
-        environment,
+        mergedEnv,
         controller.signal,
       );
       logger.info(
@@ -131,7 +138,7 @@ export const sandboxExec: AppRouteHandler<SandboxExecRoute> = async (c) => {
           sandboxId,
           command,
           workingDirectory,
-          environment,
+          mergedEnv,
           controller.signal,
         );
         logger.info(
