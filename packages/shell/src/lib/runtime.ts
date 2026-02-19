@@ -156,6 +156,19 @@ export class RuntimeInternals extends EventTarget {
     await this.#client.dispose();
   }
 
+  async trackRecentPiece(pieceId: string): Promise<void> {
+    this.#check();
+    try {
+      const spaceRoot = await this.getSpaceRootPattern();
+      const trackRecent = spaceRoot.cell().key("trackRecent" as any);
+      const page = await this.#client.getPage(pieceId);
+      if (!page) return;
+      await (trackRecent as any).send({ piece: page.cell() });
+    } catch (e) {
+      console.error("[RuntimeInternals] Failed to track recent piece:", e);
+    }
+  }
+
   #onConsole = (e: RuntimeClientEvents["console"][0]) => {
     const { metadata, method, args } = e;
     if (metadata?.pieceId) {

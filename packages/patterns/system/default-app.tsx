@@ -319,6 +319,25 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
             </div>
 
             <div style={{ flex: "1", minWidth: "0" }}>
+              {recentPieces.get().length > 0 && (
+                <ct-vstack gap="4" style={{ marginBottom: "16px" }}>
+                  <h3 style={{ margin: "0", fontSize: "16px" }}>Recent</h3>
+                  <ct-table full-width hover>
+                    <tbody>
+                      {recentPieces.map((piece: any) => (
+                        <tr>
+                          <td>
+                            <ct-cell-context $cell={piece}>
+                              <ct-cell-link $cell={piece} />
+                            </ct-cell-context>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </ct-table>
+                </ct-vstack>
+              )}
+
               <ct-vstack gap="4">
                 <h3 style={{ margin: "0", fontSize: "16px" }}>Pieces</h3>
                 <style>
