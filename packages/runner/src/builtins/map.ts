@@ -73,7 +73,8 @@ export function map(
       {
         type: "object",
         properties: {
-          list: { type: "array", items: { asCell: true, not: true } },
+          // type=null is a hack to not load the actual entries here
+          list: { type: "array", items: { asCell: true, type: "null" } },
           op: { asCell: true },
         },
         required: ["op"],
