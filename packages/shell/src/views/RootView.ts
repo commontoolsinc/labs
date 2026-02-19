@@ -82,6 +82,9 @@ export class XRootView extends BaseView {
           // Clear the runtime and space when no app state
           this.runtime = undefined;
           this.space = undefined;
+          if (globalThis.commontools) {
+            globalThis.commontools.rt = undefined;
+          }
           return undefined;
         }
 
@@ -95,12 +98,22 @@ export class XRootView extends BaseView {
           rt.dispose().catch(console.error);
           this.runtime = undefined;
           this.space = undefined;
+          if (globalThis.commontools) {
+            globalThis.commontools.rt = undefined;
+          }
           return;
         }
 
         // Update the provided runtime and space values
         this.runtime = rt.runtime();
         this.space = rt.space() as DID;
+
+        // Expose RuntimeClient for console debugging
+        // (e.g. commontools.rt.setLoggerLevel("debug"))
+        if (!globalThis.commontools) {
+          (globalThis as any).commontools = {};
+        }
+        globalThis.commontools.rt = this.runtime;
 
         return rt;
       },
