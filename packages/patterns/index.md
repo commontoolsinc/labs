@@ -588,6 +588,31 @@ interface Output {
 }
 ```
 
+## `image.tsx`
+
+Display an image from a URL or data URI with optional caption. Useful for
+rendering images when an LLM has a URL to display.
+
+**Keywords:** image, photo, picture, display, url, data-uri, base64
+
+### Input Schema
+
+```ts
+interface ImageInput {
+  url?: Default<string, "">;
+  caption?: Default<string, "">;
+}
+```
+
+### Output Schema
+
+```ts
+interface ImageOutput {
+  url: string;
+  caption: string;
+}
+```
+
 ---
 
 # AI & Capability Demos
