@@ -8,7 +8,11 @@ import {
 } from "../serialization.ts";
 import { JsonEncodingContext } from "../json-encoding.ts";
 import type { ReconstructionContext } from "../storable-protocol.ts";
-import { DECONSTRUCT, isStorable, RECONSTRUCT } from "../storable-protocol.ts";
+import {
+  DECONSTRUCT,
+  isStorableInstance,
+  RECONSTRUCT,
+} from "../storable-protocol.ts";
 import type { StorableClass, StorableInstance } from "../storable-protocol.ts";
 import type { StorableValue } from "../interface.ts";
 import type { SerializedForm } from "../json-serialization-context.ts";
@@ -823,37 +827,37 @@ describe("serialization", () => {
   });
 
   // --------------------------------------------------------------------------
-  // storable-protocol: isStorable type guard
+  // storable-protocol: isStorableInstance type guard
   // --------------------------------------------------------------------------
 
-  describe("isStorable type guard", () => {
+  describe("isStorableInstance type guard", () => {
     it("returns false for null", () => {
-      expect(isStorable(null)).toBe(false);
+      expect(isStorableInstance(null)).toBe(false);
     });
 
     it("returns false for undefined", () => {
-      expect(isStorable(undefined)).toBe(false);
+      expect(isStorableInstance(undefined)).toBe(false);
     });
 
     it("returns false for primitives", () => {
-      expect(isStorable(42)).toBe(false);
-      expect(isStorable("hello")).toBe(false);
-      expect(isStorable(true)).toBe(false);
+      expect(isStorableInstance(42)).toBe(false);
+      expect(isStorableInstance("hello")).toBe(false);
+      expect(isStorableInstance(true)).toBe(false);
     });
 
     it("returns false for plain objects", () => {
-      expect(isStorable({})).toBe(false);
-      expect(isStorable({ a: 1 })).toBe(false);
+      expect(isStorableInstance({})).toBe(false);
+      expect(isStorableInstance({ a: 1 })).toBe(false);
     });
 
     it("returns true for UnknownStorable", () => {
       const us = new UnknownStorable("Test@1", null);
-      expect(isStorable(us)).toBe(true);
+      expect(isStorableInstance(us)).toBe(true);
     });
 
     it("returns true for ProblematicStorable", () => {
       const ps = new ProblematicStorable("Test@1", null, "oops");
-      expect(isStorable(ps)).toBe(true);
+      expect(isStorableInstance(ps)).toBe(true);
     });
 
     it("returns true for custom StorableInstance", () => {
@@ -862,7 +866,7 @@ describe("serialization", () => {
           return { value: 42 };
         },
       };
-      expect(isStorable(instance)).toBe(true);
+      expect(isStorableInstance(instance)).toBe(true);
     });
   });
 

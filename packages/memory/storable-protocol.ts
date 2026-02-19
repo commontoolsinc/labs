@@ -76,7 +76,7 @@ export interface ReconstructionContext {
  * Type guard: checks whether a value implements the storable protocol. The
  * presence of `[DECONSTRUCT]` is the brand. See Section 2.6 of the formal spec.
  */
-export function isStorable(value: unknown): value is StorableInstance {
+export function isStorableInstance(value: unknown): value is StorableInstance {
   return value != null &&
     typeof value === "object" &&
     DECONSTRUCT in value;

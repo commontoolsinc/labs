@@ -1,7 +1,7 @@
 import type { StorableValue } from "./interface.ts";
 import {
   DECONSTRUCT,
-  isStorable,
+  isStorableInstance,
   RECONSTRUCT,
   type ReconstructionContext,
   type StorableConverter,
@@ -273,7 +273,7 @@ export const StorableInstanceHandler: TypeHandler = {
   tag: "",
 
   canSerialize(value: StorableValue): boolean {
-    return isStorable(value);
+    return isStorableInstance(value);
   },
 
   serialize(
@@ -321,7 +321,7 @@ export const StorableInstanceHandler: TypeHandler = {
  */
 export function createDefaultRegistry(): TypeHandlerRegistry {
   const registry = new TypeHandlerRegistry();
-  // StorableInstance first (most specific -- checked via isStorable brand).
+  // StorableInstance first (most specific -- checked via isStorableInstance brand).
   registry.register(StorableInstanceHandler);
   // Error before undefined (Error is a broader instanceof check).
   registry.register(ErrorHandler);

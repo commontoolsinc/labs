@@ -1,6 +1,10 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { DECONSTRUCT, isStorable, RECONSTRUCT } from "../storable-protocol.ts";
+import {
+  DECONSTRUCT,
+  isStorableInstance,
+  RECONSTRUCT,
+} from "../storable-protocol.ts";
 import type { ReconstructionContext } from "../storable-protocol.ts";
 import type { StorableValue } from "../interface.ts";
 import {
@@ -34,9 +38,9 @@ describe("storable-native-instances", () => {
   // --------------------------------------------------------------------------
 
   describe("StorableError", () => {
-    it("implements StorableInstance (isStorable returns true)", () => {
+    it("implements StorableInstance (isStorableInstance returns true)", () => {
       const se = new StorableError(new Error("test"));
-      expect(isStorable(se)).toBe(true);
+      expect(isStorableInstance(se)).toBe(true);
     });
 
     it("has typeTag 'Error@1'", () => {
@@ -263,7 +267,7 @@ describe("storable-native-instances", () => {
   describe("stub wrappers", () => {
     it("StorableMap implements StorableInstance", () => {
       const sm = new StorableMap(new Map());
-      expect(isStorable(sm)).toBe(true);
+      expect(isStorableInstance(sm)).toBe(true);
       expect(sm.typeTag).toBe("Map@1");
     });
 
@@ -303,7 +307,7 @@ describe("storable-native-instances", () => {
 
     it("StorableSet implements StorableInstance", () => {
       const ss = new StorableSet(new Set());
-      expect(isStorable(ss)).toBe(true);
+      expect(isStorableInstance(ss)).toBe(true);
       expect(ss.typeTag).toBe("Set@1");
     });
 
@@ -332,7 +336,7 @@ describe("storable-native-instances", () => {
 
     it("StorableDate implements StorableInstance", () => {
       const sd = new StorableDate(new Date());
-      expect(isStorable(sd)).toBe(true);
+      expect(isStorableInstance(sd)).toBe(true);
       expect(sd.typeTag).toBe("Date@1");
     });
 
@@ -360,7 +364,7 @@ describe("storable-native-instances", () => {
 
     it("StorableUint8Array implements StorableInstance", () => {
       const su = new StorableUint8Array(new Uint8Array([1, 2, 3]));
-      expect(isStorable(su)).toBe(true);
+      expect(isStorableInstance(su)).toBe(true);
       expect(su.typeTag).toBe("Bytes@1");
     });
 
