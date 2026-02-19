@@ -25,6 +25,7 @@ import OmniboxFAB from "./omnibox-fab.tsx";
 import DoList from "../do-list/do-list.tsx";
 import Notebook from "../notes/notebook.tsx";
 import NotesImportExport from "../notes/notes-import-export.tsx";
+import PieceGrid from "./piece-grid.tsx";
 
 type MinimalPiece = {
   [NAME]?: string;
@@ -213,6 +214,9 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
     },
   });
 
+  const gridView = PieceGrid({ pieces: visiblePieces });
+  const recentGridView = PieceGrid({ pieces: recentPieces });
+
   return {
     backlinksIndex: index,
     [NAME]: computed(() => `Space Home (${visiblePieces.length})`),
@@ -321,7 +325,10 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
             <div style={{ flex: "1", minWidth: "0" }}>
               {recentPieces.get().length > 0 && (
                 <ct-vstack gap="4" style={{ marginBottom: "16px" }}>
-                  <h3 style={{ margin: "0", fontSize: "16px" }}>Recent</h3>
+                  <ct-hstack gap="2" align="center">
+                    <h3 style={{ margin: "0", fontSize: "16px" }}>Recent</h3>
+                    <ct-cell-link $cell={recentGridView} />
+                  </ct-hstack>
                   <ct-table full-width hover>
                     <tbody>
                       {recentPieces.map((piece: any) => (
@@ -339,7 +346,10 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
               )}
 
               <ct-vstack gap="4">
-                <h3 style={{ margin: "0", fontSize: "16px" }}>Pieces</h3>
+                <ct-hstack gap="2" align="center">
+                  <h3 style={{ margin: "0", fontSize: "16px" }}>Pieces</h3>
+                  <ct-cell-link $cell={gridView} />
+                </ct-hstack>
                 <style>
                   {`
                     .pattern-link {

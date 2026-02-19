@@ -296,7 +296,7 @@ export class CTMessageBeads extends BaseElement {
       const pr = panel.getBoundingClientRect();
       let top = rect.top - pr.height - 6;
       let left = rect.left + rect.width / 2 - pr.width / 2;
-      left = Math.max(8, Math.min(left, window.innerWidth - pr.width - 8));
+      left = Math.max(8, Math.min(left, globalThis.innerWidth - pr.width - 8));
       if (top < 8) top = rect.bottom + 6;
       panel.style.top = `${Math.round(top)}px`;
       panel.style.left = `${Math.round(left)}px`;
