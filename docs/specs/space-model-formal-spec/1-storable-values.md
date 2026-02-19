@@ -1589,16 +1589,16 @@ boundary-only serialization and the three-layer architecture:
 7. Update internal code to work with `StorableValue` types rather than JSON
    shapes or raw native objects.
 
-> **`toJSON()` compatibility and migration.** `toStorableValue()` and its
-> variants currently honor `toJSON()` methods on objects that have them — if an
-> object has a `toJSON()` method and does not implement `StorableInstance`, the
-> conversion functions call `toJSON()` and process the result. This preserves
-> backward compatibility with existing code. However, `toJSON()` support is
-> **marked for removal**: it eagerly converts to JSON-compatible shapes, which
-> is incompatible with late serialization. Implementors should migrate to the
-> storable protocol (`[DECONSTRUCT]`/`[RECONSTRUCT]`) instead. Once all callers
-> have migrated, `toJSON()` support will be removed from the conversion
-> functions.
+> **Legacy: `toJSON()` compatibility and migration.** `toStorableValue()` and
+> its variants currently honor `toJSON()` methods on objects that have them — if
+> an object has a `toJSON()` method and does not implement `StorableInstance`,
+> the conversion functions call `toJSON()` and process the result. This is
+> legacy behavior that preserves backward compatibility with existing code.
+> `toJSON()` support is **marked for removal**: it eagerly converts to
+> JSON-compatible shapes, which is incompatible with late serialization.
+> Implementors should migrate to the storable protocol
+> (`[DECONSTRUCT]`/`[RECONSTRUCT]`) instead. Once all callers have migrated,
+> `toJSON()` support will be removed from the conversion functions.
 
 ### 7.2 Unifying JSON Encoding
 
@@ -1707,6 +1707,15 @@ export function toDeepStorableValue(
 | `Blob` | **Throws.** `Blob` content is only accessible via asynchronous methods (`arrayBuffer()`, `stream()`), so the synchronous conversion path cannot extract its bytes. Callers must convert a `Blob` to `Uint8Array` before passing it to `toStorableValue()`. A future async conversion path may accept `Blob` directly. |
 | `StorableValue[]` | Shallow: returned as-is (frozen if `freeze` is true). Deep: elements recursively converted (frozen at each level if `freeze` is true). |
 | `{ [key: string]: StorableValue }` | Shallow: returned as-is (frozen if `freeze` is true). Deep: values recursively converted (frozen at each level if `freeze` is true). |
+
+> **Legacy: `toJSON()` support.** The conversion functions (`toStorableValue()`,
+> `toDeepStorableValue()`, and `toStorableValueOrThrow()` / its deep variant)
+> currently also accept objects that have a `toJSON()` method but do not
+> implement `StorableInstance`. For such objects, the function calls `toJSON()`
+> and recursively processes the result. This is a transitional mechanism for
+> backward compatibility; callers should migrate to the storable protocol
+> (`[DECONSTRUCT]`/`[RECONSTRUCT]`). The `toJSON()` path will be removed in a
+> future version. See also Section 7.1.
 
 #### Freeze Semantics
 
@@ -1852,6 +1861,14 @@ etc.).
 > if the caller intends to convert on success, calling
 > `toDeepStorableValueOrThrow()` directly (and catching the error) avoids
 > walking the tree twice.
+
+> **Legacy `toJSON()` caveat.** The type predicate narrows to
+> `StorableValue | StorableNativeObject`, which reflects the non-legacy storage
+> model. However, `canBeStored()` also returns `true` for objects with a
+> `toJSON()` method (legacy support — see Section 7.1). Such objects are not
+> covered by the type predicate narrowing. Callers using `canBeStored()` as a
+> type guard should be aware of this gap; it will be resolved when `toJSON()`
+> support is removed.
 
 ### 8.5 `nativeValueFromStorableValue()`
 
