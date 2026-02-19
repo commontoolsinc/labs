@@ -15,6 +15,7 @@ describe("fetch-data mutex mechanism", () => {
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
   let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
+  let computed: ReturnType<typeof createBuilder>["commontools"]["computed"];
   let byRef: ReturnType<typeof createBuilder>["commontools"]["byRef"];
   let originalFetch: typeof globalThis.fetch;
   let fetchCalls: Array<{ url: string; init?: RequestInit }>;
@@ -29,6 +30,7 @@ describe("fetch-data mutex mechanism", () => {
 
     const { commontools } = createBuilder();
     pattern = commontools.pattern;
+    computed = commontools.computed;
     byRef = commontools.byRef;
 
     // Set up pattern environment with a mock base URL
@@ -378,14 +380,11 @@ describe("fetch-data mutex mechanism", () => {
 
   it("should include computed options on the first fetch (CT-1246)", async () => {
     const fetchData = byRef("fetchData");
-    const { commontools } = createBuilder();
-    const { computed } = commontools;
 
     // Options come from a computed — this is the scenario that triggers the bug.
     // Without the fix, the first fetch fires before the computed settles,
     // sending the request without the Accept header.
-    const testRecipe = recipe<{ url: string }>(
-      "Computed Options Test",
+    const testRecipe = pattern<{ url: string }>(
       ({ url }) => {
         const options = computed(() => ({
           headers: { Accept: "application/vnd.github.v3.star+json" },
