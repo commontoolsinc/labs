@@ -87,7 +87,7 @@ export class CTMessageBeads extends BaseElement {
         width: 8px;
         height: 8px;
         border-radius: 50%;
-        cursor: default;
+        cursor: pointer;
         flex-shrink: 0;
         transition: transform 100ms ease, box-shadow 100ms ease;
       }
@@ -275,6 +275,15 @@ export class CTMessageBeads extends BaseElement {
     this.#showTooltip(msgs[index], e.currentTarget as HTMLElement);
   };
 
+  private _onBeadClick = (_e: MouseEvent, index: number) => {
+    const msgs = this._messagesValue;
+    if (!msgs?.[index]) return;
+    console.log(
+      `[ct-message-beads] message ${index}:`,
+      JSON.parse(JSON.stringify(msgs[index])),
+    );
+  };
+
   private _onBeadLeave = () => {
     this.#unmountTooltip();
   };
@@ -300,6 +309,7 @@ export class CTMessageBeads extends BaseElement {
           class="bead ${color}"
           @mouseenter="${(e: MouseEvent) => this._onBeadEnter(e, i)}"
           @mouseleave="${this._onBeadLeave}"
+          @click="${(e: MouseEvent) => this._onBeadClick(e, i)}"
         >
         </div>
       `;
