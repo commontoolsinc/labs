@@ -2908,6 +2908,7 @@ interface CTTableElement extends CTHTMLElement {}
 interface CTTagsElement extends CTHTMLElement {}
 interface CTPromptInputElement extends CTHTMLElement {}
 interface CTChatElement extends CTHTMLElement {}
+interface CTMessageBeadsElement extends CTHTMLElement {}
 interface CTAttachmentsBarElement extends CTHTMLElement {}
 interface CTCTCollapsibleElement extends CTHTMLElement {}
 interface CTFragmentElement extends CTHTMLElement {}
@@ -3129,6 +3130,12 @@ interface CTChatAttributes<T> extends CTHTMLAttributes<T> {
   "pending"?: boolean;
   "theme"?: CTThemeInput;
   "tools"?: any;
+}
+
+interface CTMessageBeadsAttributes<T> extends CTHTMLAttributes<T> {
+  "$messages"?: CellLike<any>;
+  "pending"?: boolean;
+  "onct-refine"?: EventHandler<any>;
 }
 
 interface CTPromptInputAttributes<T> extends CTHTMLAttributes<T> {
@@ -4686,6 +4693,10 @@ declare global {
       "ct-chat": CTDOM.DetailedHTMLProps<
         CTChatAttributes<CTChatElement>,
         CTChatElement
+      >;
+      "ct-message-beads": CTDOM.DetailedHTMLProps<
+        CTMessageBeadsAttributes<CTMessageBeadsElement>,
+        CTMessageBeadsElement
       >;
       "ct-attachments-bar": CTDOM.DetailedHTMLProps<
         CTAttachmentsBarAttributes<CTAttachmentsBarElement>,

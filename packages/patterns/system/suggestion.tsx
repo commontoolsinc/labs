@@ -16,7 +16,7 @@ import {
   type WishState,
   Writable,
 } from "commontools";
-import { fetchAndRunPattern, listPatternIndex } from "./common-tools.tsx";
+import { bash, fetchAndRunPattern, listPatternIndex } from "./common-tools.tsx";
 
 const triggerGeneration = handler<
   unknown,
@@ -76,6 +76,10 @@ export default pattern<
     return profileText ? `\n\n--- User Context ---\n${profileText}\n---` : "";
   });
 
+  const sandboxId = Writable.of(
+    `suggestion-${Math.random().toString(36).slice(2, 10)}`,
+  );
+
   const systemPrompt = computed(() => {
     const profileCtx = profileContext;
     return `Find a useful pattern, run it, then call presentResult with the cell link.${profileCtx}
@@ -95,6 +99,7 @@ Use the user context above to personalize your suggestions when relevant.`;
     tools: {
       fetchAndRunPattern: patternTool(fetchAndRunPattern),
       listPatternIndex: patternTool(listPatternIndex),
+      bash: patternTool(bash, { sandboxId }),
     },
     model: "anthropic:claude-haiku-4-5",
     context,
@@ -123,15 +128,12 @@ Use the user context above to personalize your suggestions when relevant.`;
           result: llmResult,
         })}
       />
+      <ct-cell-link $cell={llmResult} />
       <ct-cell-context $cell={llmResult}>
         {ifElse(
           computed(() => !!llmResult),
           computed(() => llmResult),
-          ifElse(
-            computed(() => !!pending),
-            <span>Searching...</span>,
-            undefined,
-          ),
+          <ct-message-beads $messages={messages} pending={pending} />,
         )}
       </ct-cell-context>
       <ct-prompt-input
