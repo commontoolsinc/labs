@@ -12,8 +12,12 @@ export default pattern(({ a, b }) => {
             type: "object",
             properties: {
                 a: {
-                    type: "string",
-                    asCell: true
+                    anyOf: [{
+                            type: "undefined"
+                        }, {
+                            type: "string",
+                            asCell: true
+                        }]
                 }
             },
             required: ["a"]
@@ -24,8 +28,12 @@ export default pattern(({ a, b }) => {
             type: "object",
             properties: {
                 b: {
-                    type: "number",
-                    asCell: true
+                    anyOf: [{
+                            type: "undefined"
+                        }, {
+                            type: "number",
+                            asCell: true
+                        }]
                 }
             },
             required: ["b"]

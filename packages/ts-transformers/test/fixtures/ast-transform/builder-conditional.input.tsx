@@ -11,7 +11,7 @@ export default pattern<PatternState>((state) => {
     [NAME]: state.label,
     [UI]: (
       <section>
-        {state && state.count > 0 ? <p>Positive</p> : <p>Non-positive</p>}
+        {state.count > 0 ? <p>Positive</p> : <p>Non-positive</p>}
       </section>
     ),
   };

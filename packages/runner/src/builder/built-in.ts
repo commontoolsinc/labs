@@ -407,7 +407,7 @@ export const patternTool = (<
   E extends Partial<T> = Record<PropertyKey, never>,
 >(
   fnOrPattern:
-    | ((input: OpaqueRef<Required<T>>) => any)
+    | ((input: OpaqueRef<T>) => any)
     | PatternFactory<T, any>,
   extraParams?: Opaque<E>,
 ): PatternToolResult<E> => {

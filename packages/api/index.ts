@@ -1395,17 +1395,17 @@ export interface BuiltInCompileAndRunState<T> {
 export interface PatternFunction {
   // Function-only overload: T and R inferred from function
   <T, R>(
-    fn: (input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<R> }) => Opaque<R>,
+    fn: (input: OpaqueRef<T> & { [SELF]: OpaqueRef<R> }) => Opaque<R>,
   ): PatternFactory<StripCell<T>, StripCell<R>>;
 
   // Function-only overload: T explicit, R inferred
   <T>(
-    fn: (input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<any> }) => any,
+    fn: (input: OpaqueRef<T> & { [SELF]: OpaqueRef<any> }) => any,
   ): PatternFactory<StripCell<T>, StripCell<ReturnType<typeof fn>>>;
 
   // Function + schema overload: T explicit, R inferred
   <T>(
-    fn: (input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<any> }) => any,
+    fn: (input: OpaqueRef<T> & { [SELF]: OpaqueRef<any> }) => any,
     argumentSchema: JSONSchema,
     resultSchema?: JSONSchema,
   ): PatternFactory<StripCell<T>, StripCell<ReturnType<typeof fn>>>;
@@ -1413,7 +1413,7 @@ export interface PatternFunction {
   // Function + schema overload: T and R explicit
   <T, R>(
     fn: (
-      input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<R> },
+      input: OpaqueRef<T> & { [SELF]: OpaqueRef<R> },
     ) => Opaque<R>,
     argumentSchema: JSONSchema,
     resultSchema?: JSONSchema,
@@ -1434,7 +1434,7 @@ export type PatternToolFunction = <
   E extends object = Record<PropertyKey, never>,
 >(
   fnOrPattern:
-    | ((input: OpaqueRef<Required<T>>) => any)
+    | ((input: OpaqueRef<T>) => any)
     | PatternFactory<T, any>,
   // Validate that E (after stripping cells) is a subset of T
   extraParams?: StripCell<E> extends Partial<T> ? Opaque<E> : never,
