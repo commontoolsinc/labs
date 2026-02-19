@@ -905,6 +905,7 @@ functions, not by the context or by individual types. See Section 4.5.
 import { DECONSTRUCT, RECONSTRUCT, isStorableInstance } from './storable-protocol';
 import type { SerializationContext, SerializedForm } from './serialization-context';
 import { UnknownStorable } from './unknown-storable';
+import { ProblematicStorable } from './problematic-storable';
 
 /**
  * Serialize a storable value for boundary crossing. Recursively processes
@@ -1039,6 +1040,23 @@ export function deserialize(
     // value `undefined`.
     if (tag === 'Undefined@1') {
       return undefined;
+    }
+
+    // `BigInt@1`: validate and reconstruct a `bigint` primitive.
+    // Deserialization cannot assume type safety from the wire — the state
+    // must be validated before use. See Section 5.3 deserialization
+    // validation note.
+    if (tag === 'BigInt@1') {
+      if (typeof state !== 'string') {
+        return new ProblematicStorable('BigInt@1', state as StorableValue,
+          'BigInt@1 state must be a string');
+      }
+      try {
+        return BigInt(state);
+      } catch {
+        return new ProblematicStorable('BigInt@1', state as StorableValue,
+          'BigInt@1 state is not a valid integer representation');
+      }
     }
 
     // `hole` is not valid outside of array deserialization; if encountered
@@ -1247,6 +1265,17 @@ round-trip correctly.
 // Tag: "BigInt@1"
 // { "/BigInt@1": string }
 ```
+
+> **Deserialization validation.** Deserialization cannot assume type safety from
+> the wire. Each type handler must validate the format of its state before
+> processing. For example, the `BigInt@1` handler must validate that its state
+> is a `string` (and a valid decimal integer representation) before calling
+> `BigInt(state)`. On malformed input — wrong type, invalid format, or missing
+> fields — the handler should produce a `ProblematicStorable` (Section 3.4)
+> rather than throwing or silently producing garbage. This principle applies to
+> all type handlers, not just `BigInt@1`: `Date@1` should validate its ISO 8601
+> string, `Bytes@1` should validate its base64 string, and so on. Wire data is
+> untrusted input.
 
 > **Sparse array encoding in JSON.** Even when an array contains holes, it is
 > serialized as a JSON array. Runs of consecutive holes are represented by
@@ -1777,9 +1806,11 @@ code (which doesn't) gets explicit error handling.
 // file: packages/common/storable-value.ts
 
 /**
- * Type guard: returns `true` if `toDeepStorableValue()` would succeed on
+ * Type predicate: returns `true` if `toDeepStorableValue()` would succeed on
  * the given value — i.e., the value is a `StorableValue`, a
- * `StorableNativeObject`, or a tree of these types.
+ * `StorableNativeObject`, or a tree of these types. The return type is a
+ * type predicate (`value is StorableValue | StorableNativeObject`), so
+ * callers can use `canBeStored(x)` as a type guard in conditionals.
  *
  * This is a check-without-conversion function for system boundaries where
  * code receives `unknown` and needs to determine convertibility without
@@ -1795,7 +1826,9 @@ code (which doesn't) gets explicit error handling.
  * - `toDeepStorableValueOrThrow(x)`: Actually performs the conversion,
  *   throwing on unsupported types.
  */
-export function canBeStored(value: unknown): boolean;
+export function canBeStored(
+  value: unknown,
+): value is StorableValue | StorableNativeObject;
 ```
 
 The function recursively checks the value tree. It returns `true` if and only
@@ -1829,7 +1862,7 @@ etc.).
  * Convert a `StorableValue` back to a value tree containing native JS types.
  * Wrapper classes are unwrapped to their native equivalents:
  *
- * - `StorableError`      -> `Error`
+ * - `StorableError`      -> `Error` (frozen copy when frozen; mutable copy when not)
  * - `StorableMap`        -> `FrozenMap` (when frozen) or `Map` (when not)
  * - `StorableSet`        -> `FrozenSet` (when frozen) or `Set` (when not)
  * - `StorableDate`       -> `FrozenDate` (when frozen) or `Date` (when not)
@@ -1839,15 +1872,20 @@ etc.).
  * `ProblematicStorable`, etc.) pass through unchanged.
  *
  * **Shallow:** Only unwraps the top-level value. Array elements and object
- * property values are not recursively unwrapped.
+ * property values are not recursively unwrapped. However, non-wrapper values
+ * (arrays, plain objects) may be copied to match the `frozen` argument —
+ * for example, a frozen array is returned as-is when `frozen` is `true`,
+ * but a new unfrozen copy is returned when `frozen` is `false`.
  *
- * **Immutability is preserved for collections, dates, and binary data.**
- * When `freeze` is `true` (the default), `StorableMap` and `StorableSet`
- * unwrap to `FrozenMap` and `FrozenSet` respectively — effectively-immutable
- * wrappers that expose read-only interfaces and throw on mutation attempts.
- * `StorableDate` unwraps to `FrozenDate` — a `Date` subclass that overrides
- * all `set*()` methods to throw `TypeError`. `StorableUint8Array` unwraps to
- * `Blob`, which is inherently immutable (see rationale below). This preserves
+ * **The `frozen` argument is always honored.** The freeze state of every
+ * value in the output matches the `frozen` argument. When `freeze` is `true`
+ * (the default), `StorableMap` and `StorableSet` unwrap to `FrozenMap` and
+ * `FrozenSet` respectively — effectively-immutable wrappers that expose
+ * read-only interfaces and throw on mutation attempts. `StorableDate` unwraps
+ * to `FrozenDate` — a `Date` subclass that overrides all `set*()` methods to
+ * throw `TypeError`. `StorableUint8Array` unwraps to `Blob`, which is
+ * inherently immutable (see rationale below). `StorableError` unwraps to a
+ * frozen copy of the `Error` (the original is never mutated). This preserves
  * the immutable-forward guarantee even in the "JS wild west" layer. When
  * `freeze` is `false`, mutable native types are returned instead.
  */
@@ -1871,18 +1909,45 @@ export function deepNativeValueFromStorableValue(
 
 | Input | Output (frozen) | Output (not frozen) |
 |-------|-----------------|---------------------|
-| `StorableError` | `Error` | `Error` |
+| `StorableError` | `Error` (frozen copy) | `Error` (mutable copy) |
 | `StorableMap` | `FrozenMap` (read-only; throws on mutation) | `Map` (mutable) |
 | `StorableSet` | `FrozenSet` (read-only; throws on mutation) | `Set` (mutable) |
 | `StorableDate` | `FrozenDate` (`Date` subclass; throws on mutation) | `Date` (mutable) |
 | `StorableUint8Array` | `Blob` (inherently immutable) | `Uint8Array` (mutable) |
 | Other `StorableInstance` | Passed through unchanged | Passed through unchanged |
 | Primitives | Passed through unchanged | Passed through unchanged |
-| Arrays (deep variant) | Recursively unwrapped; output array is NOT frozen | Same |
-| Plain objects (deep variant) | Recursively unwrapped; output object is NOT frozen | Same |
+| Arrays (deep variant) | Recursively unwrapped; output frozen | Recursively unwrapped; output NOT frozen |
+| Plain objects (deep variant) | Recursively unwrapped; output frozen | Recursively unwrapped; output NOT frozen |
 
 The output type is `StorableValue | StorableNativeObject`, reflecting that the
 result may contain native JS types at any depth.
+
+**The `frozen` parameter is always honored.** The freeze state of every value in
+the output tree matches the `frozen` argument. Specifically:
+
+- If `frozen` is `true` and a value is already frozen, it is returned as-is.
+- If `frozen` is `true` and a value is unfrozen, a new frozen copy is returned.
+- If `frozen` is `false` and a value is frozen, a new unfrozen (mutable) copy is
+  returned.
+- If `frozen` is `false` and a value is already unfrozen, it is returned as-is
+  (or a copy is returned if structural changes are needed, e.g., unwrapping
+  children in the deep variant).
+
+This applies uniformly to all output values — arrays, plain objects, `Error`s,
+and all wrapper-derived native types. Primitives are inherently immutable and
+need no freeze/thaw action. Copying may be needed in both directions: freezing
+unfrozen values _and_ thawing frozen values.
+
+For the **shallow** function, non-wrapper values (arrays and plain objects) may
+be copied to match the `frozen` argument. Primitives pass through unchanged.
+
+**Deep variant recurses into `StorableError` internals.** The deep variant
+(`deepNativeValueFromStorableValue`) recurses into `StorableError` internals —
+specifically, the `cause` chain and custom enumerable properties — unwrapping any
+nested `StorableInstance` values. This ensures the output is fully "native JS"
+with no storable wrappers at any depth. Without this recursion, an Error's
+`cause` could still contain `StorableInstance` wrappers (e.g., a nested
+`StorableError`).
 
 > **Why `FrozenMap` / `FrozenSet`?** `Object.freeze()` does not prevent
 > mutation of `Map` and `Set` — their `set()`, `delete()`, `add()`, and
@@ -1926,10 +1991,13 @@ deepNativeValueFromStorableValue(toDeepStorableValue(v))
 
 produces a value that is structurally equivalent to `v` — the same data at the
 same positions. The round-tripped value is not necessarily `===` to the original
-(wrapping and unwrapping creates new objects), and the **types may change** when
-frozen: a mutable `Map` becomes a `FrozenMap`, a mutable `Set` becomes a
-`FrozenSet`, a `Date` becomes a `FrozenDate`, and a `Uint8Array` becomes a
-`Blob`. The data content is preserved; the mutability is not.
+(wrapping and unwrapping creates new objects), and the **freeze state may
+change**: when `frozen` is `true` (the default), the output tree is fully frozen
+— arrays and plain objects are frozen via `Object.freeze()`, a mutable `Map`
+becomes a `FrozenMap`, a mutable `Set` becomes a `FrozenSet`, a `Date` becomes a
+`FrozenDate`, a `Uint8Array` becomes a `Blob`, and `Error`s are frozen copies.
+When `frozen` is `false`, the output tree is fully mutable. The data content is
+preserved; the mutability matches the `frozen` argument.
 
 Similarly, for any `StorableValue` `sv`:
 
