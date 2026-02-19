@@ -133,9 +133,10 @@ Use the user context above to personalize your suggestions when relevant.`;
         {ifElse(
           computed(() => !!llmResult),
           computed(() => llmResult),
-          <ct-message-beads $messages={messages} pending={pending} />,
+          undefined,
         )}
       </ct-cell-context>
+      <ct-message-beads $messages={messages} pending={pending} />
       <ct-prompt-input
         placeholder="Refine suggestion..."
         pending={pending}

@@ -31,52 +31,41 @@ function classifyMessage(msg: BuiltInLLMMessage): BeadColor {
   return "green";
 }
 
-function tooltipInfo(msg: BuiltInLLMMessage): {
-  role: string;
-  type: string;
-  preview: string;
-  toolName?: string;
-} {
-  const role = msg.role;
-  let type = "text";
-  let preview = "";
-  let toolName: string | undefined;
+/** Single-line summary for a message, e.g. "user: What's the weather?" or "→ bash(ls -la…)" */
+function beadLabel(msg: BuiltInLLMMessage): string {
+  const clip = (s: string, n: number) =>
+    s.length > n ? s.slice(0, n) + "\u2026" : s;
 
   if (typeof msg.content === "string") {
-    preview = msg.content.slice(0, 100);
-  } else if (Array.isArray(msg.content)) {
-    const parts = msg.content as BuiltInLLMContentPart[];
-    const types = parts.map((p: BuiltInLLMContentPart) => p.type);
-    if (types.includes("tool-call")) {
-      type = "tool-call";
-      const tc = parts.find(
-        (p: BuiltInLLMContentPart) => p.type === "tool-call",
-      ) as BuiltInLLMToolCallPart;
-      toolName = tc?.toolName;
-      preview = `${tc?.toolName}(${JSON.stringify(tc?.input).slice(0, 60)})`;
-    } else if (types.includes("tool-result")) {
-      type = "tool-result";
-      const tr = parts.find(
-        (p: BuiltInLLMContentPart) => p.type === "tool-result",
-      ) as BuiltInLLMToolResultPart;
-      toolName = tr?.toolName;
-      preview = JSON.stringify(tr?.output).slice(0, 100);
-    } else if (types.includes("image")) {
-      type = "image";
-      preview = "[image]";
-    } else {
-      const textPart = parts.find(
-        (p: BuiltInLLMContentPart) => p.type === "text",
-      );
-      if (textPart && textPart.type === "text") {
-        preview = textPart.text.slice(0, 100);
-      }
-    }
+    return `${msg.role}: ${clip(msg.content, 50)}`;
   }
 
-  if (preview.length >= 100) preview += "\u2026";
+  if (!Array.isArray(msg.content)) return msg.role;
 
-  return { role, type, preview, toolName };
+  const parts = msg.content as BuiltInLLMContentPart[];
+
+  const tc = parts.find(
+    (p: BuiltInLLMContentPart) => p.type === "tool-call",
+  ) as BuiltInLLMToolCallPart | undefined;
+  if (tc) return `\u2192 ${tc.toolName}`;
+
+  const tr = parts.find(
+    (p: BuiltInLLMContentPart) => p.type === "tool-result",
+  ) as BuiltInLLMToolResultPart | undefined;
+  if (tr) return `\u2190 ${tr.toolName}`;
+
+  if (parts.some((p: BuiltInLLMContentPart) => p.type === "image")) {
+    return `${msg.role}: [image]`;
+  }
+
+  const text = parts.find(
+    (p: BuiltInLLMContentPart) => p.type === "text",
+  );
+  if (text && text.type === "text") {
+    return `${msg.role}: ${clip(text.text, 50)}`;
+  }
+
+  return msg.role;
 }
 
 export class CTMessageBeads extends BaseElement {
@@ -239,65 +228,42 @@ export class CTMessageBeads extends BaseElement {
 
   #showTooltip(msg: BuiltInLLMMessage, beadEl: HTMLElement): void {
     this.#mountTooltip();
-    const info = tooltipInfo(msg);
+    const label = beadLabel(msg);
     const tpl = html`
       <style>
       .tp {
         position: fixed;
         background: #1e293b;
-        color: #f1f5f9;
-        padding: 6px 10px;
-        border-radius: 6px;
-        font-size: 0.72rem;
-        font-family: system-ui, sans-serif;
-        line-height: 1.4;
-        max-width: 320px;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
-        white-space: pre-wrap;
-        word-break: break-word;
-      }
-      .tp-role {
-        font-weight: 600;
-        text-transform: uppercase;
-        font-size: 0.65rem;
-        opacity: 0.7;
-      }
-      .tp-tool {
-        color: #fbbf24;
-      }
-      .tp-preview {
-        margin-top: 2px;
+        color: #e2e8f0;
+        padding: 2px 7px;
+        border-radius: 4px;
+        font: 500 11px/1.3 system-ui, sans-serif;
+        white-space: nowrap;
+        max-width: 240px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+        pointer-events: none;
       }
       </style>
-      <div class="tp">
-        <div class="tp-role">
-          ${info.role} &middot; ${info.type}
-        </div>
-        ${info.toolName
-          ? html`
-            <div class="tp-tool">${info.toolName}</div>
-          `
-          : nothing}
-        <div class="tp-preview">${info.preview || "(empty)"}</div>
-      </div>
+      <div class="tp">${label}</div>
     `;
     render(tpl, this.#tooltip!);
 
-    // Position above the bead
     const rect = beadEl.getBoundingClientRect();
     const panel = this.#tooltip!.querySelector(".tp") as HTMLElement;
     if (!panel) return;
 
-    // Initial placement for measurement
-    panel.style.top = `${rect.top}px`;
-    panel.style.left = `${rect.left}px`;
+    // Place offscreen for measurement, then position
+    panel.style.top = "-9999px";
+    panel.style.left = "-9999px";
 
     requestAnimationFrame(() => {
       const pr = panel.getBoundingClientRect();
-      let top = rect.top - pr.height - 6;
+      let top = rect.top - pr.height - 4;
       let left = rect.left + rect.width / 2 - pr.width / 2;
-      left = Math.max(8, Math.min(left, globalThis.innerWidth - pr.width - 8));
-      if (top < 8) top = rect.bottom + 6;
+      left = Math.max(4, Math.min(left, globalThis.innerWidth - pr.width - 4));
+      if (top < 4) top = rect.bottom + 4;
       panel.style.top = `${Math.round(top)}px`;
       panel.style.left = `${Math.round(left)}px`;
     });
