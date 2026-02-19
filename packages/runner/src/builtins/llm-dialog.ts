@@ -41,6 +41,7 @@ import {
   isCellResultForDereferencing,
 } from "../query-result-proxy.ts";
 import { ContextualFlowControl } from "../cfc.ts";
+import { resolveLink } from "../link-resolution.ts";
 
 // Avoid importing from @commontools/piece to prevent circular deps in tests
 
@@ -815,6 +816,7 @@ function buildToolCatalog(
   toolsCell:
     | Cell<Record<string, Schema<typeof LLMToolSchema>>>
     | Cell<Record<string, BuiltInLLMTool> | undefined>,
+  includeBuiltinTools = true,
 ): ToolCatalog {
   const { legacy } = collectToolEntries(
     toolsCell.asSchema(
@@ -843,52 +845,78 @@ function buildToolCatalog(
       continue;
     }
     inputSchema = normalizeInputSchema(inputSchema);
+
+    // Strip extraParams keys from the schema so the LLM doesn't see them.
+    // extraParams are pre-filled by the caller (e.g. patternTool(fn, { target }))
+    // and merged at invocation time — the LLM should not provide them.
+    const extra = toolValue?.extraParams;
+    if (extra && typeof extra === "object" && !Array.isArray(extra)) {
+      const extraKeys = Object.keys(extra);
+      if (extraKeys.length > 0) {
+        const schema = inputSchema as Record<string, unknown>;
+        const props = schema.properties as Record<string, unknown> | undefined;
+        if (props) {
+          const filtered = { ...props };
+          for (const k of extraKeys) delete filtered[k];
+          inputSchema = { ...schema, properties: filtered };
+        }
+        const req = (schema as any).required as unknown[] | undefined;
+        if (Array.isArray(req)) {
+          (inputSchema as any).required = req.filter(
+            (k: unknown) => !extraKeys.includes(k as string),
+          );
+        }
+      }
+    }
+
     const description: string = toolValue.description ??
       (inputSchema as any)?.description ?? "";
     llmTools[entry.name] = { description, inputSchema };
     dynamicToolCells.set(entry.name, entry.cell);
   }
 
-  llmTools[READ_TOOL_NAME] = {
-    description:
-      'Read data from any cell. Input: { "@link": "/of:bafyabc123/path" }. ' +
-      "Returns the cell's data with nested cells as link objects. " +
-      "Compose with invoke(): invoke() returns a link, then read(link) gets the data. ",
-    inputSchema: READ_INPUT_SCHEMA,
-  };
-  llmTools[INVOKE_TOOL_NAME] = {
-    description:
-      'Invoke a handler or pattern. Input: { "@link": "/of:bafyabc123/doThing" }, plus optional args. ' +
-      'Returns { "@link": "/of:xyz/result" } pointing to the result cell. ',
-    inputSchema: INVOKE_INPUT_SCHEMA,
-  };
-  llmTools[PIN_TOOL_NAME] = {
-    description:
-      'Pin a cell for easy reference. Input: { "@link": "/of:bafyabc123" } and a name. ' +
-      "Pinned cells and their values appear in the system prompt. " +
-      "Use to track important cells you're working with.",
-    inputSchema: PIN_INPUT_SCHEMA,
-  };
-  llmTools[UNPIN_TOOL_NAME] = {
-    description: 'Unpin a cell. Input: { "@link": "/of:bafyabc123" }. ' +
-      "Use when you no longer need quick access to a cell.",
-    inputSchema: UNPIN_INPUT_SCHEMA,
-  };
-  llmTools[UPDATE_ARGUMENT_TOOL_NAME] = {
-    description:
-      'Update arguments of a running pattern instance. Input: { "@link": "/of:bafyabc123" } and updates object. ' +
-      "The pattern will automatically re-execute with the new arguments. " +
-      "Use after invoke() creates a pattern, or to modify attached pattern instances. " +
-      'Example: updateArgument({ "@link": "/of:xyz" }, { "query": "new search" })',
-    inputSchema: UPDATE_ARGUMENT_INPUT_SCHEMA,
-  };
-  llmTools[SCHEMA_TOOL_NAME] = {
-    description:
-      "Get the JSON schema for a cell to understand its structure, fields, and handlers. " +
-      'Input: { "@link": "/of:bafyabc123" }. ' +
-      "Returns schema showing what data can be read and what handlers can be invoked. ",
-    inputSchema: SCHEMA_INPUT_SCHEMA,
-  };
+  if (includeBuiltinTools) {
+    llmTools[READ_TOOL_NAME] = {
+      description:
+        'Read data from any cell. Input: { "@link": "/of:bafyabc123/path" }. ' +
+        "Returns the cell's data with nested cells as link objects. " +
+        "Compose with invoke(): invoke() returns a link, then read(link) gets the data. ",
+      inputSchema: READ_INPUT_SCHEMA,
+    };
+    llmTools[INVOKE_TOOL_NAME] = {
+      description:
+        'Invoke a handler or pattern. Input: { "@link": "/of:bafyabc123/doThing" }, plus optional args. ' +
+        'Returns { "@link": "/of:xyz/result" } pointing to the result cell. ',
+      inputSchema: INVOKE_INPUT_SCHEMA,
+    };
+    llmTools[PIN_TOOL_NAME] = {
+      description:
+        'Pin a cell for easy reference. Input: { "@link": "/of:bafyabc123" } and a name. ' +
+        "Pinned cells and their values appear in the system prompt. " +
+        "Use to track important cells you're working with.",
+      inputSchema: PIN_INPUT_SCHEMA,
+    };
+    llmTools[UNPIN_TOOL_NAME] = {
+      description: 'Unpin a cell. Input: { "@link": "/of:bafyabc123" }. ' +
+        "Use when you no longer need quick access to a cell.",
+      inputSchema: UNPIN_INPUT_SCHEMA,
+    };
+    llmTools[UPDATE_ARGUMENT_TOOL_NAME] = {
+      description:
+        'Update arguments of a running pattern instance. Input: { "@link": "/of:bafyabc123" } and updates object. ' +
+        "The pattern will automatically re-execute with the new arguments. " +
+        "Use after invoke() creates a pattern, or to modify attached pattern instances. " +
+        'Example: updateArgument({ "@link": "/of:xyz" }, { "query": "new search" })',
+      inputSchema: UPDATE_ARGUMENT_INPUT_SCHEMA,
+    };
+    llmTools[SCHEMA_TOOL_NAME] = {
+      description:
+        "Get the JSON schema for a cell to understand its structure, fields, and handlers. " +
+        'Input: { "@link": "/of:bafyabc123" }. ' +
+        "Returns schema showing what data can be read and what handlers can be invoked. ",
+      inputSchema: SCHEMA_INPUT_SCHEMA,
+    };
+  }
 
   return { llmTools, dynamicToolCells };
 }
@@ -1609,14 +1637,22 @@ async function handleInvoke(
     if (pattern) {
       runtime.run(tx, pattern, { ...input, ...extraParams }, result);
     } else if (handler) {
-      handler.withTx(tx).send({
-        ...input,
-        result, // doesn't HAVE to be used, but can be
-      }, (completedTx: IExtendedStorageTransaction) => {
+      // Bypass handler.send() which calls convertCellsToLinks(), destroying
+      // live Cell references from traverseAndCellify. Instead, resolve the
+      // handler's stream link and queue the event directly on the scheduler.
+      const handlerLink = handler.getAsNormalizedFullLink();
+      const resolvedLink = resolveLink(runtime, tx, handlerLink);
+      const onCommit = (completedTx: IExtendedStorageTransaction) => {
         const summary = formatTransactionSummary(completedTx, space);
         const value = result.withTx(completedTx);
         resolve({ value, summary });
-      });
+      };
+      runtime.scheduler.queueEvent(
+        resolvedLink,
+        { ...input, result },
+        undefined,
+        onCommit,
+      );
     } else {
       throw new Error("Tool has neither pattern nor handler");
     }
@@ -1655,12 +1691,17 @@ async function handleInvoke(
 
   // Patterns always write to the result cell, so always return the link
   if (pattern) {
+    // TODO(CT-1205): result.get() returns infinitely-nested cell proxies
+    // (from ifElse/computed). traverseAndSerialize collapses these into a
+    // single @link, hiding inner properties like { cell, error } from the
+    // LLM. See CT-1205-INVESTIGATION.md for the research plan.
+    const resultValue = result.get();
     return {
       type: "json",
       value: {
         "@resultLocation": resultLink,
         result: traverseAndSerialize(
-          result.get(),
+          resultValue,
           resultSchema,
           new Set(),
           space,
@@ -1733,8 +1774,14 @@ async function invokeToolCall(
   }
 
   if (resolved.type === "finalResult") {
-    // Return the structured result directly
-    return traverseAndCellify(runtime, space, resolved.result);
+    // Return the structured result as a proper tool result with {type, value}
+    // wrapper matching LanguageModelV2ToolResultOutput, so the message can be
+    // re-sent to the AI SDK if seeded into llmDialog.
+    const cellified = traverseAndCellify(runtime, space, resolved.result);
+    return {
+      type: "json",
+      value: cellified,
+    };
   }
 
   // Handle run-type tools (external, run with pattern/handler)
@@ -2008,7 +2055,7 @@ async function startRequest(
     }
   }
 
-  const { system, maxTokens, model } = inputs.get();
+  const { system, maxTokens, model, builtinTools } = inputs.get();
 
   const messagesCell = inputs.key("messages");
   const toolsCell = inputs.key("tools") as Cell<
@@ -2039,7 +2086,7 @@ async function startRequest(
     result.withTx(tx).key("pinnedCells").set(mergedPinnedCells as any);
   });
 
-  const toolCatalog = buildToolCatalog(toolsCell);
+  const toolCatalog = buildToolCatalog(toolsCell, builtinTools !== false);
 
   // Build available cells documentation (both context and pinned cells)
   const context = inputs.key("context").get();
@@ -2099,9 +2146,53 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
   const augmentedSystem = (system ?? "") + linkModelDocs + cellsDocs +
     listRecentHint;
 
+  // Resolve cell proxies in seeded messages. When messages are seeded from
+  // generateObject's conversation, @link references in tool-call inputs and
+  // tool-result outputs get re-hydrated into live Cell objects by the cell
+  // system. These can contain circular structures ($UI → $mentionable → $UI).
+  // We re-serialize input/output fields using traverseAndSerialize, passing
+  // each tool's inputSchema so cell-typed properties are converted to @links.
+  const rawMessages = messagesCell.get() as BuiltInLLMMessage[];
+  const resolvedMessages = rawMessages.map((msg) => {
+    if (!Array.isArray(msg.content)) return msg;
+    return {
+      ...msg,
+      content: (msg.content as any[]).map((part) => {
+        if (part?.type === "tool-call" && part.input !== undefined) {
+          const toolSchema = toolCatalog.llmTools[part.toolName]?.inputSchema;
+          return {
+            ...part,
+            input: traverseAndSerialize(
+              part.input,
+              toolSchema,
+              new Set(),
+              space,
+            ),
+          };
+        }
+        if (part?.type === "tool-result" && part.output !== undefined) {
+          const toolSchema = toolCatalog.llmTools[part.toolName]?.inputSchema;
+          return {
+            ...part,
+            output: {
+              ...part.output,
+              value: traverseAndSerialize(
+                part.output.value,
+                toolSchema,
+                new Set(),
+                space,
+              ),
+            },
+          };
+        }
+        return part;
+      }),
+    };
+  }) as readonly BuiltInLLMMessage[];
+
   const llmParams: LLMRequest = {
     system: augmentedSystem,
-    messages: messagesCell.get() as readonly BuiltInLLMMessage[],
+    messages: resolvedMessages,
     maxTokens: maxTokens,
     stream: true,
     model: model ?? DEFAULT_MODEL_NAME,

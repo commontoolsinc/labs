@@ -1291,6 +1291,11 @@ export interface BuiltInLLMParams {
    * These cells appear in the system prompt with their schemas and current values.
    */
   context?: Record<string, AnyCell<any>>;
+  /**
+   * Whether to include built-in tools (read, invoke, schema, pin, unpin, updateArgument).
+   * Defaults to true. Set to false to only expose the tools passed via `tools`.
+   */
+  builtinTools?: boolean;
 }
 
 export interface BuiltInLLMState {
@@ -1306,6 +1311,7 @@ export interface BuiltInLLMGenerateObjectState<T> {
   result?: T;
   partial?: string;
   error?: unknown;
+  messages?: BuiltInLLMMessage[];
   cancelGeneration: Stream<void>;
 }
 

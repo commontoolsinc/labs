@@ -114,6 +114,7 @@ const GenerateObjectResultSchema = {
     error: {},
     partial: { type: "string" },
     requestHash: { type: "string" },
+    messages: { type: "array" },
   },
   required: ["pending"],
 } as const satisfies JSONSchema;
@@ -859,6 +860,9 @@ export function generateObject<T extends Record<string, unknown>>(
           thisRun,
         );
 
+      // Track accumulated messages across tool-calling loop
+      let accumulatedMessages: readonly BuiltInLLMMessage[] = requestMessages;
+
       // Build tool catalog with finalResult tool
       const resultPromise = (async () => {
         try {
@@ -933,7 +937,9 @@ export function generateObject<T extends Record<string, unknown>>(
                   p.toolName === llmToolExecutionHelpers.FINAL_RESULT_TOOL_NAME,
               );
               if (finalResultCall) {
-                finalResult = finalResultCall.result as T;
+                // Unwrap the {type, value} wrapper added by invokeToolCall
+                const raw = finalResultCall.result as any;
+                finalResult = (raw?.value ?? raw) as T;
               }
 
               const toolResultMessages = llmToolExecutionHelpers
@@ -944,6 +950,8 @@ export function generateObject<T extends Record<string, unknown>>(
                 assistantMessage,
                 ...toolResultMessages,
               ];
+
+              accumulatedMessages = updatedMessages;
 
               // Continue if finalResult wasn't called yet
               if (!finalResultCall) {
@@ -980,6 +988,23 @@ export function generateObject<T extends Record<string, unknown>>(
             resultCell.key("error").withTx(tx).set(undefined);
             resultCell.key("requestHash").withTx(tx).set(hash);
           });
+
+          // Write messages separately so a serialization failure
+          // doesn't block the result from being delivered.
+          try {
+            await runtime.editWithRetry((tx) => {
+              resultCell
+                .key("messages")
+                .withTx(tx)
+                .set([...accumulatedMessages]);
+            });
+          } catch (messagesError) {
+            logger.warn(
+              "llm",
+              "Failed to write accumulated messages to result cell:",
+              messagesError,
+            );
+          }
         })
         .catch((e) =>
           handleLLMError(
