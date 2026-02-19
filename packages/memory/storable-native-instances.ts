@@ -6,13 +6,38 @@ import {
   type ReconstructionContext,
   type StorableInstance,
 } from "./storable-protocol.ts";
+import { TAGS } from "./type-tags.ts";
+import { FrozenDate, FrozenMap, FrozenSet } from "./frozen-builtins.ts";
+
+// ---------------------------------------------------------------------------
+// Utility: native-instance type guard
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns `true` if the value is a native JS object type that the storable
+ * system knows how to wrap (Error, Map, Set, Date, Uint8Array). These are
+ * the "wild-west" instances that get converted into `StorableNativeWrapper`
+ * subclasses by the conversion layer.
+ */
+export function isConvertibleNativeInstance(value: object): boolean {
+  return (
+    Error.isError(value) ||
+    value instanceof Map ||
+    value instanceof Set ||
+    value instanceof Date ||
+    value instanceof Uint8Array
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Utility: safe property copy
 // ---------------------------------------------------------------------------
 
 /** Keys that must never be copied to prevent prototype pollution. */
-const UNSAFE_KEYS = new Set(["__proto__", "constructor"]);
+export const UNSAFE_KEYS: FrozenSet<string> = new FrozenSet([
+  "__proto__",
+  "constructor",
+]);
 
 /**
  * Copy own enumerable properties from `source` to `target`, skipping
@@ -29,6 +54,46 @@ function copyOwnSafeProperties(
     if (noOverride && key in target) continue;
     target[key] = (source as Record<string, unknown>)[key];
   }
+}
+
+// ---------------------------------------------------------------------------
+// Utility: freeze-state matching
+// ---------------------------------------------------------------------------
+
+/**
+ * Return `value` if its freeze state already matches `frozen`, otherwise
+ * shallow-copy via `copy` and optionally freeze the result. This is the
+ * common "match frozenness" pattern used by `toNativeValue()` implementations:
+ * never mutate the original, create a copy only when the freeze state differs.
+ */
+function matchFrozenness<T extends object>(
+  value: T,
+  frozen: boolean,
+  copy: (v: T) => T,
+): T {
+  const isFrozen = Object.isFrozen(value);
+  if (frozen === isFrozen) return value;
+  const result = copy(value);
+  if (frozen) Object.freeze(result);
+  return result;
+}
+
+/**
+ * Create a shallow copy of an Error, preserving constructor, name, message,
+ * stack, cause, and custom enumerable properties. Used by `toNativeValue()`
+ * when the freeze state of the wrapped Error doesn't match the requested state.
+ */
+function copyError(error: Error): Error {
+  const copy = new (error.constructor as ErrorConstructor)(error.message);
+  if (copy.name !== error.name) copy.name = error.name;
+  if (error.stack !== undefined) copy.stack = error.stack;
+  if (error.cause !== undefined) copy.cause = error.cause;
+  copyOwnSafeProperties(
+    error,
+    copy as unknown as Record<string, unknown>,
+    true,
+  );
+  return copy;
 }
 
 // ---------------------------------------------------------------------------
@@ -84,8 +149,8 @@ export abstract class StorableNativeWrapper implements StorableInstance {
  * See Section 1.4.1 of the formal spec.
  */
 export class StorableError extends StorableNativeWrapper {
-  /** The type tag used in the wire format. */
-  readonly typeTag = "Error@1";
+  /** The type tag used in the wire format (`TAGS.Error`). */
+  readonly typeTag = TAGS.Error;
 
   constructor(
     /** The wrapped native `Error`. */
@@ -102,6 +167,12 @@ export class StorableError extends StorableNativeWrapper {
    * `type` is the constructor name (e.g. "TypeError") used for reconstruction.
    * `name` is the `.name` property -- emitted as `null` when it equals `type`
    * (the common case) to avoid redundancy.
+   *
+   * **Invariant**: By the time this method runs, `this.error.cause` and any
+   * custom enumerable properties are already `StorableValue`. The conversion
+   * layer (`convertErrorInternals()` in `rich-storable-value.ts`) ensures
+   * this by recursively converting Error internals before wrapping in
+   * `StorableError`. The `as StorableValue` casts below are therefore safe.
    */
   [DECONSTRUCT](): StorableValue {
     const type = this.error.constructor.name;
@@ -126,8 +197,7 @@ export class StorableError extends StorableNativeWrapper {
   }
 
   toNativeValue(frozen: boolean): Error {
-    if (frozen) Object.freeze(this.error);
-    return this.error;
+    return matchFrozenness(this.error, frozen, copyError);
   }
 
   /**
@@ -184,7 +254,7 @@ export class StorableError extends StorableNativeWrapper {
  * wrapped collection are not supported on non-Error wrappers.
  */
 export class StorableMap extends StorableNativeWrapper {
-  readonly typeTag = "Map@1";
+  readonly typeTag = TAGS.Map;
   constructor(readonly map: Map<StorableValue, StorableValue>) {
     super();
   }
@@ -211,7 +281,7 @@ export class StorableMap extends StorableNativeWrapper {
  * wrapped collection are not supported on non-Error wrappers.
  */
 export class StorableSet extends StorableNativeWrapper {
-  readonly typeTag = "Set@1";
+  readonly typeTag = TAGS.Set;
   constructor(readonly set: Set<StorableValue>) {
     super();
   }
@@ -238,7 +308,7 @@ export class StorableSet extends StorableNativeWrapper {
  * wrapped value are not supported on non-Error wrappers.
  */
 export class StorableDate extends StorableNativeWrapper {
-  readonly typeTag = "Date@1";
+  readonly typeTag = TAGS.Date;
   constructor(readonly date: Date) {
     super();
   }
@@ -266,7 +336,7 @@ export class StorableDate extends StorableNativeWrapper {
  * wrappers.
  */
 export class StorableUint8Array extends StorableNativeWrapper {
-  readonly typeTag = "Bytes@1";
+  readonly typeTag = TAGS.Bytes;
   constructor(readonly bytes: Uint8Array) {
     super();
   }
@@ -296,209 +366,21 @@ export class StorableUint8Array extends StorableNativeWrapper {
 }
 
 // ---------------------------------------------------------------------------
-// Frozen built-in types
-// ---------------------------------------------------------------------------
-
-/**
- * Effectively-immutable `Map` wrapper. Extends `Map` so that `instanceof Map`
- * checks still pass, but all mutation methods throw. Returned by
- * `nativeValueFromStorableValue()` for `StorableMap` to preserve the
- * immutability guarantee across the StorableValue -> native round-trip.
- *
- * Uses `Object.freeze(this)` after population; mutation overrides check
- * `Object.isFrozen(this)`.
- *
- * See Section 2.9 of the formal spec (frozen built-in types).
- */
-export class FrozenMap<K, V> extends Map<K, V> {
-  constructor(entries?: Iterable<readonly [K, V]> | null) {
-    super();
-    if (entries) {
-      for (const [k, v] of entries) {
-        super.set(k, v);
-      }
-    }
-    Object.freeze(this);
-  }
-
-  override set(key: K, value: V): this {
-    if (Object.isFrozen(this)) throw new TypeError("Cannot mutate a FrozenMap");
-    return super.set(key, value);
-  }
-
-  override delete(key: K): boolean {
-    if (Object.isFrozen(this)) throw new TypeError("Cannot mutate a FrozenMap");
-    return super.delete(key);
-  }
-
-  override clear(): void {
-    if (Object.isFrozen(this)) throw new TypeError("Cannot mutate a FrozenMap");
-    super.clear();
-  }
-}
-
-/**
- * Effectively-immutable `Set` wrapper. Extends `Set` so that `instanceof Set`
- * checks still pass, but all mutation methods throw. Returned by
- * `nativeValueFromStorableValue()` for `StorableSet` to preserve the
- * immutability guarantee across the StorableValue -> native round-trip.
- *
- * Uses `Object.freeze(this)` after population; mutation overrides check
- * `Object.isFrozen(this)`.
- *
- * See Section 2.9 of the formal spec (frozen built-in types).
- */
-export class FrozenSet<T> extends Set<T> {
-  constructor(values?: Iterable<T> | null) {
-    super();
-    if (values) {
-      for (const v of values) {
-        super.add(v);
-      }
-    }
-    Object.freeze(this);
-  }
-
-  override add(value: T): this {
-    if (Object.isFrozen(this)) throw new TypeError("Cannot mutate a FrozenSet");
-    return super.add(value);
-  }
-
-  override delete(value: T): boolean {
-    if (Object.isFrozen(this)) {
-      throw new TypeError("Cannot mutate a FrozenSet");
-    }
-    return super.delete(value);
-  }
-
-  override clear(): void {
-    if (Object.isFrozen(this)) throw new TypeError("Cannot mutate a FrozenSet");
-    super.clear();
-  }
-}
-
-/**
- * Effectively-immutable `Date` wrapper. Extends `Date` so that
- * `instanceof Date` checks still pass, but all `set*()` mutation methods
- * throw. `Object.freeze()` alone cannot protect Date because the mutators
- * modify the internal `[[DateValue]]` slot, not own properties.
- *
- * See Section 2.9 of the formal spec (frozen built-in types).
- */
-export class FrozenDate extends Date {
-  constructor(value: number | string | Date) {
-    super(value instanceof Date ? value.getTime() : value);
-    Object.freeze(this);
-  }
-
-  #throw(): never {
-    throw new TypeError("Cannot mutate a FrozenDate");
-  }
-
-  override setTime(_time: number): number {
-    this.#throw();
-  }
-  override setMilliseconds(_ms: number): number {
-    this.#throw();
-  }
-  override setUTCMilliseconds(_ms: number): number {
-    this.#throw();
-  }
-  override setSeconds(_sec: number, _ms?: number): number {
-    this.#throw();
-  }
-  override setUTCSeconds(_sec: number, _ms?: number): number {
-    this.#throw();
-  }
-  override setMinutes(_min: number, _sec?: number, _ms?: number): number {
-    this.#throw();
-  }
-  override setUTCMinutes(_min: number, _sec?: number, _ms?: number): number {
-    this.#throw();
-  }
-  override setHours(
-    _hours: number,
-    _min?: number,
-    _sec?: number,
-    _ms?: number,
-  ): number {
-    this.#throw();
-  }
-  override setUTCHours(
-    _hours: number,
-    _min?: number,
-    _sec?: number,
-    _ms?: number,
-  ): number {
-    this.#throw();
-  }
-  override setDate(_date: number): number {
-    this.#throw();
-  }
-  override setUTCDate(_date: number): number {
-    this.#throw();
-  }
-  override setMonth(_month: number, _date?: number): number {
-    this.#throw();
-  }
-  override setUTCMonth(_month: number, _date?: number): number {
-    this.#throw();
-  }
-  override setFullYear(
-    _year: number,
-    _month?: number,
-    _date?: number,
-  ): number {
-    this.#throw();
-  }
-  override setUTCFullYear(
-    _year: number,
-    _month?: number,
-    _date?: number,
-  ): number {
-    this.#throw();
-  }
-}
-
-// ---------------------------------------------------------------------------
-// StorableNativeObject type
-// ---------------------------------------------------------------------------
-
-/**
- * Union of raw native JS **object** types that the storable type system can
- * convert into `StorableInstance` wrappers. These are the inputs to the
- * "sausage grinder" -- `toStorableValue()` accepts
- * `StorableValue | StorableNativeObject`, meaning callers can pass in either
- * already-storable data or raw native JS objects. The conversion produces
- * `StorableInstance` wrappers (StorableError, StorableMap, etc.) that live
- * inside `StorableValue` via the `StorableInstance` arm of `StorableDatum`.
- *
- * `Blob` is included because `StorableUint8Array.toNativeValue(true)` returns
- * a `Blob` (immutable by nature) instead of a `Uint8Array`. The synchronous
- * serialization path throws on `Blob` since its data access methods are async.
- *
- * Note: `bigint` is NOT included here -- it is a primitive (like `undefined`)
- * and belongs directly in `StorableDatum` without wrapping.
- */
-export type StorableNativeObject =
-  | Error
-  | Map<unknown, unknown>
-  | Set<unknown>
-  | Date
-  | Uint8Array
-  | Blob;
-
-// ---------------------------------------------------------------------------
 // Unwrapping: StorableValue -> native JS types
 // ---------------------------------------------------------------------------
 
 /**
  * Shallow unwrap: if the top-level value is a `StorableNativeWrapper`, call
  * its `toNativeValue()` method. Other values (primitives, arrays, objects,
- * non-native `StorableInstance` values) pass through as-is.
+ * non-native `StorableInstance` values) pass through as-is, but their freeze
+ * state is adjusted to match the `frozen` argument.
  *
- * When `frozen` is true (the default), collections are returned as FrozenMap /
- * FrozenSet. When false, mutable copies are returned instead.
+ * The freeze-state contract: the output's freeze state ALWAYS matches `frozen`.
+ * - `frozen === true` and value is already frozen -> return as-is.
+ * - `frozen === true` and value is unfrozen -> return a frozen copy.
+ * - `frozen === false` and value is frozen -> return an unfrozen copy.
+ * - `frozen === false` and value is unfrozen -> return as-is.
+ * Primitives are inherently immutable and always pass through unchanged.
  */
 export function nativeValueFromStorableValue(
   value: StorableValue,
@@ -507,24 +389,63 @@ export function nativeValueFromStorableValue(
   if (value instanceof StorableNativeWrapper) {
     return value.toNativeValue(frozen);
   }
-  return value;
+
+  // Primitives (null, undefined, boolean, number, string, bigint) are
+  // inherently immutable -- no freeze adjustment needed.
+  if (value === null || value === undefined || typeof value !== "object") {
+    return value;
+  }
+
+  // Non-native StorableInstance values (Cell, Stream, UnknownStorable, etc.)
+  // pass through unchanged -- spreading would strip their prototype/methods,
+  // and their freeze state is an internal concern of the wrapper.
+  if (isStorableInstance(value)) return value;
+
+  // For arrays and plain objects: ensure the freeze state matches `frozen`.
+  const isFrozen = Object.isFrozen(value);
+  if (frozen === isFrozen) return value; // already matches
+
+  if (frozen) {
+    // Value is unfrozen but caller wants frozen -> freeze a shallow copy.
+    if (Array.isArray(value)) {
+      return Object.freeze([...value]);
+    }
+    return Object.freeze({ ...value });
+  }
+
+  // Value is frozen but caller wants unfrozen -> shallow copy.
+  if (Array.isArray(value)) {
+    return [...value];
+  }
+  return { ...(value as Record<string, unknown>) };
 }
 
 /**
  * Deep unwrap: recursively walk a `StorableValue` tree, unwrapping any
  * `StorableNativeWrapper` values to their underlying native types via
- * `toNativeValue()`. Arrays and objects are copied (not frozen). Non-native
- * `StorableInstance` values (Cell, Stream, UnknownStorable, etc.) pass
- * through as-is.
+ * `toNativeValue()`. Non-native `StorableInstance` values (Cell, Stream,
+ * UnknownStorable, etc.) pass through as-is.
+ *
+ * The freeze-state contract: the output's freeze state ALWAYS matches `frozen`.
+ * Arrays and objects are copied and frozen/unfrozen accordingly. For
+ * `StorableError`, the inner Error's `cause` and custom properties are also
+ * recursively unwrapped (since they may contain `StorableInstance` wrappers).
  *
  * When `frozen` is true (the default), collections are returned as FrozenMap /
- * FrozenSet. When false, mutable copies are returned instead.
+ * FrozenSet and plain objects/arrays are frozen. When false, mutable copies are
+ * returned.
  */
 export function deepNativeValueFromStorableValue(
   value: StorableValue,
   frozen = true,
 ): unknown {
-  // Native wrappers -> native types.
+  // StorableError: deep-unwrap the inner Error's internals (cause, custom
+  // properties) since they may contain StorableInstance wrappers.
+  if (value instanceof StorableError) {
+    return deepUnwrapError(value.error, frozen);
+  }
+
+  // Other native wrappers (Map, Set, Date, Uint8Array) -> native types.
   if (value instanceof StorableNativeWrapper) {
     return value.toNativeValue(frozen);
   }
@@ -539,7 +460,7 @@ export function deepNativeValueFromStorableValue(
     return value;
   }
 
-  // Arrays -- recursively unwrap elements.
+  // Arrays -- recursively unwrap elements, then freeze if requested.
   if (Array.isArray(value)) {
     const result: unknown[] = [];
     for (let i = 0; i < value.length; i++) {
@@ -553,10 +474,11 @@ export function deepNativeValueFromStorableValue(
         );
       }
     }
+    if (frozen) Object.freeze(result);
     return result;
   }
 
-  // Objects -- recursively unwrap values.
+  // Objects -- recursively unwrap values, then freeze if requested.
   // Skip prototype-sensitive keys to prevent prototype pollution.
   const result: Record<string, unknown> = {};
   for (const [key, val] of Object.entries(value)) {
@@ -567,5 +489,40 @@ export function deepNativeValueFromStorableValue(
       );
     }
   }
+  if (frozen) Object.freeze(result);
   return result;
+}
+
+/**
+ * Deep-unwrap an Error's internals: recursively unwrap `cause` and custom
+ * enumerable properties that may contain `StorableInstance` wrappers. Creates
+ * a copy of the Error to avoid mutating the stored value. Freezes the result
+ * when `frozen` is true.
+ */
+function deepUnwrapError(error: Error, frozen: boolean): Error {
+  const copy = new (error.constructor as ErrorConstructor)(error.message);
+  if (copy.name !== error.name) copy.name = error.name;
+  if (error.stack !== undefined) copy.stack = error.stack;
+
+  // Recursively unwrap cause.
+  if (error.cause !== undefined) {
+    copy.cause = deepNativeValueFromStorableValue(
+      error.cause as StorableValue,
+      frozen,
+    );
+  }
+
+  // Recursively unwrap custom enumerable properties.
+  const SKIP = new Set(["name", "message", "stack", "cause"]);
+  for (const key of Object.keys(error)) {
+    if (SKIP.has(key) || UNSAFE_KEYS.has(key)) continue;
+    (copy as unknown as Record<string, unknown>)[key] =
+      deepNativeValueFromStorableValue(
+        (error as unknown as Record<string, unknown>)[key] as StorableValue,
+        frozen,
+      );
+  }
+
+  if (frozen) Object.freeze(copy);
+  return copy;
 }

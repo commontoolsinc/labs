@@ -6,6 +6,14 @@ import type {
 } from "./json-serialization-context.ts";
 import { UnknownStorable } from "./unknown-storable.ts";
 import { ProblematicStorable } from "./problematic-storable.ts";
+import {
+  StorableDate,
+  StorableError,
+  StorableMap,
+  StorableSet,
+  StorableUint8Array,
+} from "./storable-native-instances.ts";
+import { TAGS } from "./type-tags.ts";
 
 /**
  * JSON serialization context implementing the `/<Type>@<Version>` wire format
@@ -28,10 +36,17 @@ export class JsonEncodingContext
   constructor(options?: { lenient?: boolean }) {
     this.lenient = options?.lenient ?? false;
 
-    // Error@1, Undefined@1, and `hole` are all handled by type handlers in
-    // the TypeHandlerRegistry, not the class registry here. Future rounds
-    // will register Link@1, Stream@1, Map@1, Set@1, Bytes@1, Date@1,
-    // BigInt@1 as appropriate.
+    // Register native wrapper classes for deserialization. Each wrapper's
+    // static [RECONSTRUCT] method is used by the class registry fallback
+    // path in deserialize(). This replaces the old ErrorHandler approach.
+    this.registry.set(TAGS.Error, StorableError);
+    this.registry.set(TAGS.Map, StorableMap);
+    this.registry.set(TAGS.Set, StorableSet);
+    this.registry.set(TAGS.Date, StorableDate);
+    // Note: TAGS.BigInt is NOT registered here -- bigint is a primitive in
+    // StorableDatum and is handled by a TypeHandler (like UndefinedHandler),
+    // not a StorableInstance wrapper.
+    this.registry.set(TAGS.Bytes, StorableUint8Array);
   }
 
   /** Get the wire format tag for a storable instance's type. */
@@ -42,9 +57,12 @@ export class JsonEncodingContext
     if (value instanceof ProblematicStorable) {
       return value.typeTag;
     }
-    // Shouldn't be reached for the types in scope -- Error, undefined, and
-    // Hole are handled by type handlers directly. Future rounds will add
-    // Cell/Stream/etc. here.
+    // Check for typeTag property (used by native-wrapping StorableInstance classes).
+    const typeTag = (value as { typeTag?: unknown }).typeTag;
+    if (typeof typeTag === "string") {
+      return typeTag;
+    }
+    // Future rounds will add Cell/Stream/etc. here.
     throw new Error(
       `JsonEncodingContext: no tag registered for value: ${value}`,
     );
