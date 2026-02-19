@@ -272,9 +272,8 @@ export function toStorableValue(
   value: unknown,
   freeze = true,
 ): StorableValueLayer {
-  void freeze; // Freeze dispatch wired in three-layer rework PR.
   if (currentConfig.richStorableValues) {
-    return toRichStorableValue(value);
+    return toRichStorableValue(value, freeze);
   }
   return toStorableValueLegacy(value);
 }
@@ -381,9 +380,8 @@ export function toDeepStorableValue(
   value: unknown,
   freeze = true,
 ): StorableValue {
-  void freeze; // Freeze dispatch wired in three-layer rework PR.
   if (currentConfig.richStorableValues) {
-    return toDeepRichStorableValue(value);
+    return toDeepRichStorableValue(value, freeze);
   }
   return toDeepStorableValueLegacy(value);
 }
