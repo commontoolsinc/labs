@@ -23,6 +23,7 @@ import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { llmToolExecutionHelpers } from "./llm-dialog.ts";
 import {
+  LLMContentSchema,
   LLMMessageSchema,
   LLMParamsSchema,
   LLMToolSchema,
@@ -42,7 +43,7 @@ const client = new LLMClient();
 const GenerateTextParamsSchema = {
   type: "object",
   properties: {
-    prompt: { type: "string" },
+    prompt: LLMContentSchema,
     messages: { type: "array", items: LLMMessageSchema },
     context: {
       type: "object",
@@ -59,7 +60,7 @@ const GenerateTextParamsSchema = {
 const GenerateObjectParamsSchema = {
   type: "object",
   properties: {
-    prompt: { type: "string" },
+    prompt: LLMContentSchema,
     messages: { type: "array", items: LLMMessageSchema },
     context: {
       type: "object",
@@ -580,7 +581,8 @@ export function generateText(
       .get();
 
     // If neither prompt nor messages is provided, don't make a request
-    if (!prompt && !messages) {
+    const hasPrompt = Array.isArray(prompt) ? prompt.length > 0 : !!prompt;
+    if (!hasPrompt && !messages) {
       resultWithLog.set(undefined);
       errorWithLog.set(undefined);
       partialWithLog.set(undefined);
@@ -779,7 +781,8 @@ export function generateObject<T extends Record<string, unknown>>(
       metadata,
     } = inputs.withTx(tx).get() ?? {};
 
-    if ((!prompt && (!messages || messages.length === 0)) || !schema) {
+    const hasPrompt = Array.isArray(prompt) ? prompt.length > 0 : !!prompt;
+    if ((!hasPrompt && (!messages || messages.length === 0)) || !schema) {
       resultWithLog.set(undefined);
       errorWithLog.set(undefined);
       partialWithLog.set(undefined);

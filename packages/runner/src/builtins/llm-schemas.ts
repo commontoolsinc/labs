@@ -1,30 +1,34 @@
 import type { JSONSchema } from "@commontools/api";
 
+export const LLMContentSchema = {
+  anyOf: [
+    { type: "string" },
+    {
+      type: "array",
+      items: {
+        anyOf: [{
+          type: "object",
+          properties: {
+            type: { type: "string" },
+            text: { type: "string" },
+            image: { type: "string" },
+            toolCallId: { type: "string" },
+            toolName: { type: "string" },
+            input: { type: "object" },
+            output: {},
+          },
+          required: ["type"],
+        }, { type: "string" }],
+      },
+    },
+  ],
+} as const satisfies JSONSchema;
+
 export const LLMMessageSchema = {
   type: "object",
   properties: {
     role: { type: "string" },
-    content: {
-      anyOf: [{
-        type: "array",
-        items: {
-          anyOf: [{
-            type: "object",
-            properties: {
-              // This should be anyOf with const values for type
-              type: { type: "string" },
-              text: { type: "string" },
-              image: { type: "string" },
-              toolCallId: { type: "string" },
-              toolName: { type: "string" },
-              input: { type: "object" },
-              output: {},
-            },
-            required: ["type"],
-          }, { type: "string" }],
-        },
-      }, { type: "string" }],
-    },
+    content: LLMContentSchema,
   },
   required: ["role", "content"],
 } as const satisfies JSONSchema;
