@@ -25,6 +25,7 @@
     }
   },
   "required": [
+    "maybeCell", 
     "nullableCell"
   ],
   "type": "object"

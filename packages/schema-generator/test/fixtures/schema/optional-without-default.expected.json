@@ -1,7 +1,10 @@
 {
   "properties": {
     "bothOptional": {
-      "type": "number"
+      "type": [
+        "number",
+        "undefined"
+      ]
     },
     "optionalFlag": {
       "type": "string"
@@ -10,11 +13,15 @@
       "type": "string"
     },
     "unionUndefined": {
-      "type": "string"
+      "type": [
+        "string",
+        "undefined"
+      ]
     }
   },
   "required": [
-    "required"
+    "required",
+    "unionUndefined"
   ],
   "type": "object"
 }

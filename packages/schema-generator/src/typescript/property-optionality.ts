@@ -76,7 +76,7 @@ export function isOptionalProperty(
 ): boolean {
   // Primary: check SymbolFlags.Optional
   // This correctly reflects Required<>, Partial<>, and ? modifiers
-  if (symbol && (symbol.flags & ts.SymbolFlags.Optional) !== 0) {
+  if (symbol && isOptionalSymbol(symbol)) {
     return true;
   }
 
@@ -86,9 +86,13 @@ export function isOptionalProperty(
   }
 
   // Check Default<T | undefined, V>
-  if (typeNode && checker && isDefaultNodeWithUndefined(typeNode, checker)) {
+  if (checker && isDefaultNodeWithUndefined(typeNode, checker)) {
     return true;
   }
 
   return false;
+}
+
+export function isOptionalSymbol(symbol: ts.Symbol): boolean {
+  return (symbol.flags & ts.SymbolFlags.Optional) !== 0;
 }

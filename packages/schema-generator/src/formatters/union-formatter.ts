@@ -10,7 +10,7 @@ import {
   getNativeTypeSchema,
   TypeWithInternals,
 } from "../type-utils.ts";
-import { isRecord } from "@commontools/utils/types";
+import { isObject, isRecord } from "@commontools/utils/types";
 
 export class UnionFormatter implements TypeFormatter {
   constructor(private schemaGenerator: SchemaGenerator) {}
@@ -27,14 +27,9 @@ export class UnionFormatter implements TypeFormatter {
       throw new Error("UnionFormatter received empty union type");
     }
 
-    // Filter out undefined from unions; schema handles optionality via required array
-    const filtered = members.filter((m) =>
-      (m.flags & ts.TypeFlags.Undefined) === 0
-    );
-
     // Detect presence of null
-    const hasNull = filtered.some((m) => (m.flags & ts.TypeFlags.Null) !== 0);
-    const nonNull = filtered.filter((m) => (m.flags & ts.TypeFlags.Null) === 0);
+    const hasNull = members.some((m) => (m.flags & ts.TypeFlags.Null) !== 0);
+    const nonNull = members.filter((m) => (m.flags & ts.TypeFlags.Null) === 0);
 
     const generate = (t: ts.Type, typeNode?: ts.TypeNode): SchemaDefinition => {
       const native = getNativeTypeSchema(t, context.typeChecker);
@@ -96,21 +91,34 @@ export class UnionFormatter implements TypeFormatter {
     }
 
     // Fallback: anyOf of member schemas (excluding null/undefined handled above)
-    let anyOf = nonNull.map((m) => generate(m));
-    if (hasNull) anyOf.push({ type: "null" });
-
+    let unionOptions = members.map((m) => generate(m));
     // When widenLiterals is true, try to merge structurally identical schemas
     // that only differ in literal enum values
-    if (context.widenLiterals && anyOf.length > 1) {
-      anyOf = this.mergeIdenticalSchemas(anyOf);
+    if (context.widenLiterals && unionOptions.length > 1) {
+      unionOptions = this.mergeIdenticalSchemas(unionOptions);
+    }
+    let unionSchema: SchemaDefinition & { anyOf: SchemaDefinition[] } = {
+      anyOf: [],
+    };
+    for (const option of unionOptions) {
+      console.log("merging", option, unionSchema);
+      const merged = this.mergePrimitiveSchemaToAnyOf(
+        unionSchema.anyOf,
+        option,
+      );
+      if (merged === true) {
+        return true;
+      }
+      unionSchema = merged;
+      console.log("merged", option, unionSchema);
     }
 
     // If only one schema remains after filtering/merging, return it directly without anyOf wrapper
-    if (anyOf.length === 1) {
-      return anyOf[0]!;
+    if (unionSchema.anyOf.length === 1) {
+      return unionSchema.anyOf[0]!;
     }
 
-    return { anyOf };
+    return unionSchema;
   }
 
   /**
@@ -146,6 +154,122 @@ export class UnionFormatter implements TypeFormatter {
     }
 
     return result;
+  }
+
+  /**
+   * Add a new schema option that is either boolean, or has only a `type`
+   * field and possibly an `enum` field.
+   *
+   * This is used to merge multiple primitive types into a single schema definition.
+   */
+  // private mergePrimitiveSchemaOption(
+  //   acc: SchemaDefinition,
+  //   cur: SchemaDefinition,
+  // ): SchemaDefinition {
+  //   if (cur === true || acc === true) {
+  //     return true;
+  //   } else if (cur == false) {
+  //     return acc;
+  //   } else if (acc === false) {
+  //     return cur;
+  //   } else if (acc.anyOf !== undefined) {
+  //     // If we're not already in the anyOf list, add this new option there
+  //     const curStr = JSON.stringify(cur);
+  //     if (!(acc.anyOf.some((option) => JSON.stringify(option) === curStr))) {
+  //       // See if we can merge into one of the anyOf options
+  //       const allPrimitive = acc.anyOf.every((schema) =>
+  //         typeof schema === "boolean" ||
+  //         primitiveSchemaKeys.isSupersetOf(new Set(Object.keys(schema)))
+  //       );
+  //       acc.anyOf.push(cur);
+  //     }
+  //     return acc;
+  //   } else if (acc.type === cur.type && acc.type !== undefined) {
+  //     if (acc.enum !== undefined || cur.enum !== undefined) {
+  //       const merged = new Set([...(acc.enum ?? []), ...(cur.enum ?? [])]);
+  //       return { type: acc.type, enum: [...merged] };
+  //     } else {
+  //       return acc;
+  //     }
+  //   } else if (acc.enum === undefined && cur.enum === undefined) {
+  //     const accTypes = Array.isArray(acc.type) ? acc.type : [acc.type!];
+  //     const curTypes = Array.isArray(cur.type) ? cur.type : [cur.type!];
+  //     const mergedSet = new Set([...accTypes, ...curTypes]);
+  //     const merged = mergedSet.size === 1 ? [...mergedSet][0]! : [...mergedSet];
+  //     return { type: merged };
+  //   } else {
+  //     // have to promote to anyOf
+  //     return { anyOf: [acc, cur] };
+  //   }
+  // }
+
+  private mergePrimitiveSchemaToAnyOf(
+    anyOf: SchemaDefinition[],
+    cur: SchemaDefinition,
+  ): SchemaDefinition & { anyOf: SchemaDefinition[] } | true {
+    if (cur === true) {
+      return true;
+    } else if (cur === false) {
+      return { anyOf };
+    }
+    const curStr = JSON.stringify(cur);
+    if ((anyOf.some((option) => JSON.stringify(option) === curStr))) {
+      return { anyOf };
+    }
+    const primitiveSchemaKeys = new Set(["type", "enum"]);
+    // See if we can merge into one of the anyOf options
+    const primitiveSchemas = anyOf.filter((schema) =>
+      typeof schema === "boolean" ||
+      primitiveSchemaKeys.isSupersetOf(new Set(Object.keys(schema)))
+    );
+    const matchingType = primitiveSchemas.find((option) =>
+      isObject(option) && "type" in option && option.type === cur.type
+    );
+    if (
+      isRecord(cur) && Array.isArray(cur.enum) && isRecord(matchingType) &&
+      Array.isArray(matchingType.enum)
+    ) {
+      // Add our enum values to their enum values, and keep the same type
+      const mergedEnum = new Set([
+        ...matchingType.enum,
+        ...cur.enum,
+      ]);
+      // Special case for boolean with all options
+      if (
+        cur.type === "boolean" && mergedEnum.has(true) &&
+        mergedEnum.has(false)
+      ) {
+        delete matchingType.enum;
+        // this collapse may allow us to combine with other options that have only a type,
+        // but I'm not doing that currently.
+      } else {
+        matchingType.enum = [...mergedEnum].toSorted();
+      }
+    } else if (isRecord(matchingType)) {
+      // If either entry is missing an enum, we can have any value of that type, so clear enum
+      delete matchingType.enum;
+    } else if (cur.enum === undefined) {
+      // If we have a non-enum, we can merge with any existing non-enum of any type
+      const matchingNonEnum = primitiveSchemas.find((option) =>
+        isRecord(option) && option.enum === undefined
+      );
+      if (isObject(matchingNonEnum)) {
+        const curTypes = Array.isArray(cur.type) ? cur.type : [cur.type!];
+        const matchingNonEnumTypes = Array.isArray(matchingNonEnum.type)
+          ? matchingNonEnum.type
+          : [matchingNonEnum.type!];
+        matchingNonEnum.type = [
+          ...new Set([...curTypes, ...matchingNonEnumTypes]),
+        ].toSorted();
+      } else {
+        // no matching type to merge with, add as new anyOf option
+        anyOf.push(cur);
+      }
+    } else {
+      // no matching type to merge with, add as new anyOf option
+      anyOf.push(cur);
+    }
+    return { anyOf };
   }
 
   /**

@@ -38,13 +38,9 @@
       ]
     },
     "value": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "number"
-        }
+      "type": [
+        "number",
+        "string"
       ],
       "default": 42
     }

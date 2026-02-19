@@ -11,7 +11,10 @@ import {
   safeGetPropertyType,
 } from "../type-utils.ts";
 import { getCellWrapperInfo } from "../typescript/cell-brand.ts";
-import { isOptionalProperty } from "../typescript/property-optionality.ts";
+import {
+  isDefaultNodeWithUndefined,
+  isOptionalSymbol,
+} from "../typescript/property-optionality.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
 import { extractDocFromSymbolAndDecls, getDeclDocs } from "../doc-utils.ts";
 import { getLogger } from "@commontools/utils/logger";
@@ -145,12 +148,8 @@ export class ObjectFormatter implements TypeFormatter {
         if (wrapperSchema) {
           // This is a factory that returns a wrapper type (Stream or Cell)
           if (
-            !isOptionalProperty(
-              prop,
-              resolvedPropType,
-              propTypeNode,
-              checker,
-            )
+            !isOptionalSymbol(prop) &&
+            !isDefaultNodeWithUndefined(propTypeNode, checker)
           ) {
             required.push(propName);
           }
@@ -160,7 +159,8 @@ export class ObjectFormatter implements TypeFormatter {
       }
 
       if (
-        !isOptionalProperty(prop, resolvedPropType, propTypeNode, checker)
+        !isOptionalSymbol(prop) &&
+        !isDefaultNodeWithUndefined(propTypeNode, checker)
       ) {
         required.push(propName);
       }
