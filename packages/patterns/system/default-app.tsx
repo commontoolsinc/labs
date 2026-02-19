@@ -46,9 +46,12 @@ interface PiecesListOutput {
 const _visit = handler<
   Record<string, never>,
   { piece: Writable<MinimalPiece> }
->((_, state) => {
-  return navigateTo(state.piece);
-}, { proxy: true });
+>(
+  (_, state) => {
+    return navigateTo(state.piece);
+  },
+  { proxy: true },
+);
 
 const removePiece = handler<
   Record<string, never>,
@@ -58,8 +61,8 @@ const removePiece = handler<
   }
 >((_, state) => {
   const allPiecesValue = state.allPieces.get();
-  const index = allPiecesValue.findIndex((c: any) =>
-    c && state.piece.equals(c)
+  const index = allPiecesValue.findIndex(
+    (c: any) => c && state.piece.equals(c),
   );
 
   if (index !== -1) {
@@ -111,11 +114,13 @@ const closeMenu = handler<void, { menuOpen: Writable<boolean> }>(
 const menuNewNote = handler<void, { menuOpen: Writable<boolean> }>(
   (_, { menuOpen }) => {
     menuOpen.set(false);
-    return navigateTo(Note({
-      title: "New Note",
-      content: "",
-      noteId: generateId(),
-    }));
+    return navigateTo(
+      Note({
+        title: "New Note",
+        content: "",
+        noteId: generateId(),
+      }),
+    );
   },
 );
 
@@ -193,7 +198,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
     })
   );
 
-  const index = BacklinksIndex({ allPieces });
+  const index = BacklinksIndex({});
   const doListItems = Writable.of<any[]>([]);
   const doList = DoList({ items: doListItems });
 
@@ -304,72 +309,82 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
         </ct-toolbar>
 
         <ct-vscroll flex showScrollbar>
-          <ct-vstack gap="4" padding="6">
-            {doList.compactUI}
+          <ct-hstack gap="6" padding="6" align="start">
+            <div style={{ flex: "1", minWidth: "0" }}>
+              <ct-vstack gap="4">
+                <h3 style={{ margin: "0", fontSize: "16px" }}>Do List</h3>
+                <ct-cell-link $cell={doList} />
+                {doList.compactUI}
+              </ct-vstack>
+            </div>
 
-            <style>
-              {`
-                .pattern-link {
-                  cursor: pointer;
-                  color: inherit;
-                  text-decoration: none;
-                }
-                .pattern-link:hover {
-                  text-decoration: underline;
-                }
-              `}
-            </style>
+            <div style={{ flex: "1", minWidth: "0" }}>
+              <ct-vstack gap="4">
+                <h3 style={{ margin: "0", fontSize: "16px" }}>Pieces</h3>
+                <style>
+                  {`
+                    .pattern-link {
+                      cursor: pointer;
+                      color: inherit;
+                      text-decoration: none;
+                    }
+                    .pattern-link:hover {
+                      text-decoration: underline;
+                    }
+                  `}
+                </style>
 
-            <ct-table full-width hover>
-              <tbody>
-                {visiblePieces.map((piece) => {
-                  // Check if piece is a notebook by NAME prefix (isNotebook prop not reliable through proxy)
-                  const isNotebook = computed(() => {
-                    const name = piece?.[NAME];
-                    const result = typeof name === "string" &&
-                      name.startsWith("📓");
-                    return result;
-                  });
+                <ct-table full-width hover>
+                  <tbody>
+                    {visiblePieces.map((piece) => {
+                      const isNotebook = computed(() => {
+                        const name = piece?.[NAME];
+                        const result = typeof name === "string" &&
+                          name.startsWith("📓");
+                        return result;
+                      });
 
-                  const link = (
-                    <ct-drag-source $cell={piece} type="note">
-                      <ct-cell-context $cell={piece}>
-                        <ct-cell-link $cell={piece} />
-                      </ct-cell-context>
-                    </ct-drag-source>
-                  );
+                      const link = (
+                        <ct-drag-source $cell={piece} type="note">
+                          <ct-cell-context $cell={piece}>
+                            <ct-cell-link $cell={piece} />
+                          </ct-cell-context>
+                        </ct-drag-source>
+                      );
 
-                  return (
-                    <tr>
-                      <td>
-                        {ifElse(
-                          isNotebook,
-                          <ct-drop-zone
-                            accept="note"
-                            onct-drop={dropOntoNotebook({
-                              notebook: piece as any,
-                            })}
-                          >
-                            {link}
-                          </ct-drop-zone>,
-                          link,
-                        )}
-                      </td>
-                      <td>
-                        <ct-button
-                          size="sm"
-                          variant="ghost"
-                          onClick={removePiece({ piece, allPieces })}
-                        >
-                          🗑️
-                        </ct-button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </ct-table>
-          </ct-vstack>
+                      return (
+                        <tr>
+                          <td>
+                            {ifElse(
+                              isNotebook,
+                              <ct-drop-zone
+                                accept="note"
+                                onct-drop={dropOntoNotebook({
+                                  notebook: piece as any,
+                                })}
+                              >
+                                {link}
+                              </ct-drop-zone>,
+                              link,
+                            )}
+                          </td>
+                          <td>
+                            <ct-button
+                              size="sm"
+                              variant="ghost"
+                              onClick={removePiece({ piece, allPieces })}
+                            >
+                              🗑️
+                            </ct-button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </ct-table>
+              </ct-vstack>
+            </div>
+          </ct-hstack>
         </ct-vscroll>
       </ct-screen>
     ),
