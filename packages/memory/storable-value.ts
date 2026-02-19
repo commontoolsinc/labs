@@ -1,5 +1,9 @@
 import { isInstance, isRecord } from "@commontools/utils/types";
-import type { StorableValue, StorableValueLayer } from "./interface.ts";
+import type {
+  StorableNativeObject,
+  StorableValue,
+  StorableValueLayer,
+} from "./interface.ts";
 import {
   isRichStorableValue,
   toDeepRichStorableValue,
@@ -151,6 +155,9 @@ function specialInstanceToStorableValue(
 /**
  * Checks whether a value has a callable `toJSON()` method.
  *
+ * TODO: Remove `toJSON()` support once all callers have migrated to
+ * `[DECONSTRUCT]`. See spec Section 7.1.
+ *
  * @param value - The value to check.
  * @returns `true` if the value has a `toJSON` method that is a function.
  */
@@ -217,6 +224,33 @@ export function isStorableValue(value: unknown): value is StorableValueLayer {
 }
 
 /**
+ * Returns `true` if `toDeepStorableValue()` would succeed on the value.
+ * Checks whether the value is a `StorableValue`, a `StorableNativeObject`,
+ * or a deep tree thereof. Recursive: all nested values in arrays and objects
+ * must also be storable or convertible.
+ *
+ * The distinction:
+ * - `isStorableValue(x)` -- "is x already a `StorableValue`?"
+ * - `canBeStored(x)` -- "could x be converted to a `StorableValue`?"
+ *
+ * Only available when `richStorableValues` is ON. When the flag is OFF, this
+ * falls back to a non-recursive check equivalent to `isStorableValue()`.
+ *
+ * @param value - The value to check.
+ * @returns `true` if the value can be stored, `false` otherwise.
+ */
+export function canBeStored(
+  value: unknown,
+): value is StorableValue | StorableNativeObject {
+  if (currentConfig.richStorableValues) {
+    return isRichStorableValue(value);
+  }
+  // In legacy mode, canBeStored is equivalent to isStorableValue --
+  // the legacy path doesn't support StorableNativeObject types.
+  return isStorableValue(value);
+}
+
+/**
  * Converts a value to a storable (JSON-encodable) form. JSON-encodable values
  * pass through as-is. Functions and instances (non-plain objects) are converted
  * via `toJSON()` if available. Throws on non-encodable primitives (`bigint`,
@@ -226,10 +260,18 @@ export function isStorableValue(value: unknown): value is StorableValueLayer {
  * values (that is, it doesn't iterate over array or object contents).
  *
  * @param value - The value to convert.
+ * @param freeze - When `true` (default), freezes the result if it is an
+ *   object or array. When `false`, wrapping and validation still occur but
+ *   the result is left mutable. Only applies when `richStorableValues` is ON;
+ *   the legacy path does not freeze.
  * @returns The storable value (original or converted).
  * @throws Error if the value can't be converted to a JSON-encodable form.
  */
-export function toStorableValue(value: unknown): StorableValueLayer {
+export function toStorableValue(
+  value: unknown,
+  freeze = true,
+): StorableValueLayer {
+  void freeze; // Freeze dispatch wired in three-layer rework PR.
   if (currentConfig.richStorableValues) {
     return toRichStorableValue(value);
   }
@@ -327,10 +369,18 @@ const PROCESSING = Symbol("PROCESSING");
  * properties.
  *
  * @param value - The value to convert.
+ * @param freeze - When `true` (default), deep-freezes the result tree.
+ *   When `false`, wrapping and validation still occur but the result is
+ *   left mutable. Only applies when `richStorableValues` is ON; the legacy
+ *   path does not freeze.
  * @returns The storable value (original or converted).
  * @throws Error if the value (or any nested value) can't be converted.
  */
-export function toDeepStorableValue(value: unknown): StorableValue {
+export function toDeepStorableValue(
+  value: unknown,
+  freeze = true,
+): StorableValue {
+  void freeze; // Freeze dispatch wired in three-layer rework PR.
   if (currentConfig.richStorableValues) {
     return toDeepRichStorableValue(value);
   }

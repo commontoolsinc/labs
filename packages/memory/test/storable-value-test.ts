@@ -1,8 +1,11 @@
-import { describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
+  canBeStored,
   isArrayIndexPropertyName,
   isStorableValue,
+  resetExperimentalStorableConfig,
+  setExperimentalStorableConfig,
   toDeepStorableValue,
   toStorableValue,
 } from "../storable-value.ts";
@@ -871,6 +874,106 @@ describe("storable-value", () => {
           "Cannot store array with enumerable named properties",
         );
       });
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // canBeStored (public API)
+  // --------------------------------------------------------------------------
+
+  describe("canBeStored", () => {
+    describe("legacy mode (richStorableValues OFF)", () => {
+      it("accepts null", () => {
+        expect(canBeStored(null)).toBe(true);
+      });
+
+      it("accepts booleans", () => {
+        expect(canBeStored(true)).toBe(true);
+        expect(canBeStored(false)).toBe(true);
+      });
+
+      it("accepts finite numbers", () => {
+        expect(canBeStored(42)).toBe(true);
+        expect(canBeStored(0)).toBe(true);
+        expect(canBeStored(-1.5)).toBe(true);
+      });
+
+      it("accepts strings", () => {
+        expect(canBeStored("hello")).toBe(true);
+        expect(canBeStored("")).toBe(true);
+      });
+
+      it("accepts undefined", () => {
+        expect(canBeStored(undefined)).toBe(true);
+      });
+
+      it("accepts plain objects", () => {
+        expect(canBeStored({ a: 1 })).toBe(true);
+        expect(canBeStored({})).toBe(true);
+      });
+
+      it("accepts dense arrays", () => {
+        expect(canBeStored([1, 2, 3])).toBe(true);
+        expect(canBeStored([])).toBe(true);
+      });
+
+      it("rejects symbols", () => {
+        expect(canBeStored(Symbol("x"))).toBe(false);
+      });
+
+      it("rejects functions", () => {
+        expect(canBeStored(() => {})).toBe(false);
+      });
+
+      it("rejects bigint", () => {
+        expect(canBeStored(BigInt(42))).toBe(false);
+      });
+    });
+
+    describe("rich mode (richStorableValues ON)", () => {
+      beforeEach(() => {
+        setExperimentalStorableConfig({ richStorableValues: true });
+      });
+      afterEach(() => {
+        resetExperimentalStorableConfig();
+      });
+
+      it("accepts null", () => {
+        expect(canBeStored(null)).toBe(true);
+      });
+
+      it("accepts undefined", () => {
+        expect(canBeStored(undefined)).toBe(true);
+      });
+
+      it("accepts plain objects", () => {
+        expect(canBeStored({ a: 1 })).toBe(true);
+      });
+
+      it("accepts Error instances", () => {
+        expect(canBeStored(new Error("test"))).toBe(true);
+      });
+
+      it("rejects symbols", () => {
+        expect(canBeStored(Symbol("x"))).toBe(false);
+      });
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // freeze parameter (API surface)
+  // --------------------------------------------------------------------------
+
+  describe("freeze parameter (API surface)", () => {
+    it("toStorableValue accepts a second argument", () => {
+      // Verify the parameter exists without error.
+      expect(toStorableValue(42, true)).toBe(42);
+      expect(toStorableValue(42, false)).toBe(42);
+    });
+
+    it("toDeepStorableValue accepts a second argument", () => {
+      expect(toDeepStorableValue(42, true)).toBe(42);
+      expect(toDeepStorableValue(42, false)).toBe(42);
     });
   });
 });
