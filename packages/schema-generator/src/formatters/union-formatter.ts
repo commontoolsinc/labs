@@ -101,7 +101,6 @@ export class UnionFormatter implements TypeFormatter {
       anyOf: [],
     };
     for (const option of unionOptions) {
-      console.log("merging", option, unionSchema);
       const merged = this.mergePrimitiveSchemaToAnyOf(
         unionSchema.anyOf,
         option,
@@ -110,7 +109,6 @@ export class UnionFormatter implements TypeFormatter {
         return true;
       }
       unionSchema = merged;
-      console.log("merged", option, unionSchema);
     }
 
     // If only one schema remains after filtering/merging, return it directly without anyOf wrapper
@@ -225,6 +223,9 @@ export class UnionFormatter implements TypeFormatter {
     const matchingType = primitiveSchemas.find((option) =>
       isObject(option) && "type" in option && option.type === cur.type
     );
+    const isCurPrimitive = primitiveSchemaKeys.isSupersetOf(
+      new Set(Object.keys(cur)),
+    );
     if (
       isRecord(cur) && Array.isArray(cur.enum) && isRecord(matchingType) &&
       Array.isArray(matchingType.enum)
@@ -248,8 +249,8 @@ export class UnionFormatter implements TypeFormatter {
     } else if (isRecord(matchingType)) {
       // If either entry is missing an enum, we can have any value of that type, so clear enum
       delete matchingType.enum;
-    } else if (cur.enum === undefined) {
-      // If we have a non-enum, we can merge with any existing non-enum of any type
+    } else if (isCurPrimitive && cur.enum === undefined) {
+      // If cur is a primitive non-enum, we can merge with any existing non-enum primitive
       const matchingNonEnum = primitiveSchemas.find((option) =>
         isRecord(option) && option.enum === undefined
       );

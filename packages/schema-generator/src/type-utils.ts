@@ -146,13 +146,22 @@ export function safeGetPropertyType(
               return typeFromDecl;
             }
           } else if (nonUndefinedTypes.length > 1) {
-            // Multiple non-undefined types - check if decl is also a union with the same types
-            // For now, just check string equality which should work for most cases
-            const withoutUndefinedStr = nonUndefinedTypes.map((t) =>
-              checker.typeToString(t)
-            ).join(" | ");
+            // Compare as sets (order-independent) since TypeScript's internal union ordering
+            // (primitives before object types) may differ from the source declaration order.
+            // e.g. `Date | null` declared in source becomes `null | Date` internally.
+            const nonUndefinedStrs = new Set(
+              nonUndefinedTypes.map((t) => checker.typeToString(t)),
+            );
+            const declMemberStrs: Set<string> = typeFromDecl.isUnion()
+              ? new Set(
+                (typeFromDecl as ts.UnionType).types.map((t) =>
+                  checker.typeToString(t)
+                ),
+              )
+              : new Set([declStr]);
             if (
-              withoutUndefinedStr === declStr || declStr === withoutUndefinedStr
+              nonUndefinedStrs.size === declMemberStrs.size &&
+              [...nonUndefinedStrs].every((s) => declMemberStrs.has(s))
             ) {
               return typeFromDecl;
             }
