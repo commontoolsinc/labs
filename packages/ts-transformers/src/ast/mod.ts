@@ -25,7 +25,6 @@ export {
   isFunctionParameter,
   isMethodCall,
   isOptionalMemberSymbol,
-  isOptionalProperty,
   setParentPointers,
   visitEachChildWithJsx,
 } from "./utils.ts";

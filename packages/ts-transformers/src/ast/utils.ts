@@ -135,11 +135,8 @@ export function setParentPointers(node: ts.Node, parent?: ts.Node): void {
 }
 
 // Import and re-export the shared optionality check from schema-generator
-import {
-  isOptionalProperty,
-  isOptionalSymbol,
-} from "@commontools/schema-generator/property-optionality";
-export { isOptionalProperty, isOptionalSymbol };
+import { isOptionalSymbol } from "@commontools/schema-generator/property-optionality";
+export { isOptionalSymbol };
 
 /**
  * Check if a property access expression refers to an optional property.
