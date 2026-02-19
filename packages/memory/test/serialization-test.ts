@@ -18,6 +18,15 @@ import type { StorableValue } from "../interface.ts";
 import type { SerializedForm } from "../json-serialization-context.ts";
 import { UnknownStorable } from "../unknown-storable.ts";
 import { ProblematicStorable } from "../problematic-storable.ts";
+import {
+  deepNativeValueFromStorableValue,
+  nativeValueFromStorableValue,
+  StorableError,
+  StorableMap,
+  StorableSet,
+} from "../storable-native-instances.ts";
+import { FrozenMap, FrozenSet } from "../frozen-builtins.ts";
+import { canBeStored } from "../rich-storable-value.ts";
 
 /** Creates a standard test context (non-lenient) and a mock runtime. */
 function makeTestContext() {
@@ -90,17 +99,19 @@ describe("serialization", () => {
       expect(result.count).toBe(42);
     });
 
-    it("round-trips Error through Uint8Array", () => {
+    it("round-trips StorableError through Uint8Array", () => {
       const { context, runtime } = makeTestContext();
-      const err = new TypeError("oops");
-      const bytes = serializeToBytes(err, context);
+      const err = new StorableError(new TypeError("oops"));
+      const bytes = serializeToBytes(err as StorableValue, context);
       const result = deserializeFromBytes(
         bytes,
         context,
         runtime,
-      ) as Error;
-      expect(result).toBeInstanceOf(TypeError);
-      expect(result.message).toBe("oops");
+      );
+      expect(result).toBeInstanceOf(StorableError);
+      const se = result as unknown as StorableError;
+      expect(se.error).toBeInstanceOf(TypeError);
+      expect(se.error.message).toBe("oops");
     });
 
     it("round-trips undefined through Uint8Array", () => {
@@ -114,7 +125,7 @@ describe("serialization", () => {
       const { context, runtime } = makeTestContext();
       const value = {
         users: [{ name: "Alice" }, { name: "Bob" }],
-        error: new Error("fail"),
+        error: new StorableError(new Error("fail")),
         nothing: undefined,
       } as unknown as StorableValue;
       const bytes = serializeToBytes(value, context);
@@ -125,7 +136,7 @@ describe("serialization", () => {
       ) as Record<string, StorableValue>;
       const users = result.users as StorableValue[];
       expect((users[0] as Record<string, StorableValue>).name).toBe("Alice");
-      expect(result.error).toBeInstanceOf(Error);
+      expect(result.error).toBeInstanceOf(StorableError);
       expect(result.nothing).toBe(undefined);
     });
   });
@@ -226,74 +237,269 @@ describe("serialization", () => {
   });
 
   // --------------------------------------------------------------------------
-  // Error instances
+  // bigint (primitive, handled by BigIntHandler)
   // --------------------------------------------------------------------------
 
-  describe("Error", () => {
-    it("serializes basic Error to /Error@1", () => {
+  describe("bigint", () => {
+    it("serializes to { '/BigInt@1': '<string>' }", () => {
       const { context } = makeTestContext();
-      const result = serialize(new Error("test"), context) as Record<
-        string,
-        unknown
-      >;
+      const result = serialize(
+        42n as StorableValue,
+        context,
+      );
+      expect(result).toEqual({ "/BigInt@1": "42" });
+    });
+
+    it("round-trips at top level", () => {
+      const result = roundTrip(42n as StorableValue);
+      expect(result).toBe(42n);
+    });
+
+    it("round-trips negative bigint", () => {
+      const result = roundTrip(-999n as StorableValue);
+      expect(result).toBe(-999n);
+    });
+
+    it("round-trips zero bigint", () => {
+      const result = roundTrip(0n as StorableValue);
+      expect(result).toBe(0n);
+    });
+
+    it("round-trips large bigint", () => {
+      const big = 2n ** 64n;
+      const result = roundTrip(big as StorableValue);
+      expect(result).toBe(big);
+    });
+
+    it("round-trips in arrays", () => {
+      const arr = [1, 42n, "hello"] as unknown as StorableValue;
+      const result = roundTrip(arr) as StorableValue[];
+      expect(result[0]).toBe(1);
+      expect(result[1]).toBe(42n);
+      expect(result[2]).toBe("hello");
+    });
+
+    it("round-trips as object values", () => {
+      const obj = { a: 1, b: 42n } as unknown as StorableValue;
+      const result = roundTrip(obj) as Record<string, StorableValue>;
+      expect(result.a).toBe(1);
+      expect(result.b).toBe(42n);
+    });
+
+    it("is distinct from number", () => {
+      const { context } = makeTestContext();
+      const serializedNum = serialize(42, context);
+      const serializedBig = serialize(
+        42n as StorableValue,
+        context,
+      );
+      expect(serializedNum).not.toEqual(serializedBig);
+    });
+
+    it("deserializes non-string state to ProblematicStorable", () => {
+      const { context, runtime } = makeTestContext();
+      // Manually construct a wire value with a non-string BigInt@1 state.
+      const data = { "/BigInt@1": 42 } as SerializedForm;
+      const result = deserialize(data, context, runtime);
+      expect(result).toBeInstanceOf(ProblematicStorable);
+      const prob = result as unknown as ProblematicStorable;
+      expect(prob.typeTag).toBe("BigInt@1");
+      expect(prob.state).toBe(42);
+    });
+
+    it("deserializes null state to ProblematicStorable", () => {
+      const { context, runtime } = makeTestContext();
+      const data = { "/BigInt@1": null } as SerializedForm;
+      const result = deserialize(data, context, runtime);
+      expect(result).toBeInstanceOf(ProblematicStorable);
+    });
+
+    it("deserializes object state to ProblematicStorable", () => {
+      const { context, runtime } = makeTestContext();
+      const data = { "/BigInt@1": { bad: true } } as SerializedForm;
+      const result = deserialize(data, context, runtime);
+      expect(result).toBeInstanceOf(ProblematicStorable);
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // StorableError (Error wrapper)
+  // --------------------------------------------------------------------------
+
+  describe("StorableError", () => {
+    it("serializes basic StorableError to /Error@1", () => {
+      const { context } = makeTestContext();
+      const se = new StorableError(new Error("test"));
+      const result = serialize(
+        se as StorableValue,
+        context,
+      ) as Record<string, unknown>;
       expect(Object.keys(result)).toEqual(["/Error@1"]);
       const state = result["/Error@1"] as Record<string, unknown>;
-      expect(state.name).toBe("Error");
+      expect(state.type).toBe("Error");
+      expect(state.name).toBe(null); // null = same as type (common case)
       expect(state.message).toBe("test");
     });
 
-    it("round-trips basic Error", () => {
-      const err = new Error("hello");
-      const result = roundTrip(err) as Error;
-      expect(result).toBeInstanceOf(Error);
-      expect(result.name).toBe("Error");
-      expect(result.message).toBe("hello");
+    it("round-trips basic Error via StorableError", () => {
+      const se = new StorableError(new Error("hello"));
+      const result = roundTrip(
+        se as StorableValue,
+      ) as unknown as StorableError;
+      expect(result).toBeInstanceOf(StorableError);
+      expect(result.error).toBeInstanceOf(Error);
+      expect(result.error.name).toBe("Error");
+      expect(result.error.message).toBe("hello");
     });
 
     it("round-trips TypeError", () => {
-      const err = new TypeError("bad type");
-      const result = roundTrip(err) as Error;
-      expect(result).toBeInstanceOf(TypeError);
-      expect(result.name).toBe("TypeError");
-      expect(result.message).toBe("bad type");
+      const se = new StorableError(new TypeError("bad type"));
+      const result = roundTrip(
+        se as StorableValue,
+      ) as unknown as StorableError;
+      expect(result).toBeInstanceOf(StorableError);
+      expect(result.error).toBeInstanceOf(TypeError);
+      expect(result.error.name).toBe("TypeError");
+      expect(result.error.message).toBe("bad type");
     });
 
     it("round-trips RangeError", () => {
-      const err = new RangeError("out of range");
-      const result = roundTrip(err) as Error;
-      expect(result).toBeInstanceOf(RangeError);
-      expect(result.name).toBe("RangeError");
+      const se = new StorableError(new RangeError("out of range"));
+      const result = roundTrip(
+        se as StorableValue,
+      ) as unknown as StorableError;
+      expect(result).toBeInstanceOf(StorableError);
+      expect(result.error).toBeInstanceOf(RangeError);
+      expect(result.error.name).toBe("RangeError");
     });
 
     it("round-trips Error with cause", () => {
-      const inner = new Error("inner");
-      const outer = new Error("outer", { cause: inner });
-      const result = roundTrip(outer) as Error;
-      expect(result.message).toBe("outer");
-      expect(result.cause).toBeInstanceOf(Error);
-      expect((result.cause as Error).message).toBe("inner");
+      const inner = new StorableError(new Error("inner"));
+      const outer = new StorableError(
+        new Error("outer", { cause: inner }),
+      );
+      const result = roundTrip(
+        outer as StorableValue,
+      ) as unknown as StorableError;
+      expect(result.error.message).toBe("outer");
+      // The cause was serialized as a StorableError (the inner wrapper).
+      // After round-trip, the cause is a StorableError.
+      expect(result.error.cause).toBeInstanceOf(StorableError);
+      expect(
+        (result.error.cause as StorableError).error.message,
+      ).toBe("inner");
     });
 
     it("round-trips Error with custom properties", () => {
       const err = new Error("oops");
       (err as unknown as Record<string, unknown>).code = 42;
       (err as unknown as Record<string, unknown>).detail = "more info";
-      const result = roundTrip(err) as Error;
-      expect(result.message).toBe("oops");
+      const se = new StorableError(err);
+      const result = roundTrip(
+        se as StorableValue,
+      ) as unknown as StorableError;
+      expect(result.error.message).toBe("oops");
       expect(
-        (result as unknown as Record<string, unknown>).code,
+        (result.error as unknown as Record<string, unknown>).code,
       ).toBe(42);
       expect(
-        (result as unknown as Record<string, unknown>).detail,
+        (result.error as unknown as Record<string, unknown>).detail,
       ).toBe("more info");
     });
 
     it("round-trips Error with custom name", () => {
       const err = new Error("custom");
       err.name = "MyCustomError";
-      const result = roundTrip(err) as Error;
-      expect(result.name).toBe("MyCustomError");
-      expect(result.message).toBe("custom");
+      const se = new StorableError(err);
+      const result = roundTrip(
+        se as StorableValue,
+      ) as unknown as StorableError;
+      expect(result.error.name).toBe("MyCustomError");
+      expect(result.error.message).toBe("custom");
+    });
+
+    it("wire format has name: null when name matches type (TypeError)", () => {
+      const { context } = makeTestContext();
+      // TypeError: name === constructor.name === "TypeError"
+      const se = new StorableError(new TypeError("type check"));
+      const result = serialize(
+        se as StorableValue,
+        context,
+      ) as Record<string, unknown>;
+      const state = result["/Error@1"] as Record<string, unknown>;
+      expect(state.type).toBe("TypeError");
+      expect(state.name).toBe(null); // null = same as type
+      expect(state.message).toBe("type check");
+    });
+
+    it("wire format has explicit name when name differs from type", () => {
+      const { context } = makeTestContext();
+      const err = new Error("custom");
+      err.name = "MyCustomError";
+      const se = new StorableError(err);
+      const result = serialize(
+        se as StorableValue,
+        context,
+      ) as Record<string, unknown>;
+      const state = result["/Error@1"] as Record<string, unknown>;
+      expect(state.type).toBe("Error");
+      expect(state.name).toBe("MyCustomError");
+      expect(state.message).toBe("custom");
+    });
+
+    it("round-trips TypeError preserving name === type identity", () => {
+      // After round-trip, name and type should both be "TypeError",
+      // and the Error should reconstruct as a TypeError instance.
+      const se = new StorableError(new TypeError("rt"));
+      const result = roundTrip(
+        se as StorableValue,
+      ) as unknown as StorableError;
+      expect(result.error).toBeInstanceOf(TypeError);
+      expect(result.error.name).toBe("TypeError");
+      expect(result.error.constructor.name).toBe("TypeError");
+    });
+
+    it("round-trips Error with mismatched name and type", () => {
+      // Error constructor is "Error" but name is overridden.
+      const err = new Error("mismatch");
+      err.name = "CustomName";
+      const se = new StorableError(err);
+      const result = roundTrip(
+        se as StorableValue,
+      ) as unknown as StorableError;
+      expect(result.error).toBeInstanceOf(Error);
+      expect(result.error.name).toBe("CustomName");
+      expect(result.error.constructor.name).toBe("Error");
+    });
+
+    it("isStorableInstance returns true for StorableError", () => {
+      const se = new StorableError(new Error("test"));
+      expect(isStorableInstance(se)).toBe(true);
+    });
+
+    it("has typeTag property", () => {
+      const se = new StorableError(new Error("test"));
+      expect(se.typeTag).toBe("Error@1");
+    });
+
+    it("round-trips StorableError with pre-converted cause (raw Error)", () => {
+      // Simulates what toDeepStorableValue produces: a StorableError
+      // wrapping an Error whose cause is itself a StorableError (not a
+      // raw Error). The serializer's recurse on [DECONSTRUCT] output
+      // must find StorableValue, not raw Error.
+      const innerSe = new StorableError(new Error("inner"));
+      const outerErr = new Error("outer");
+      outerErr.cause = innerSe;
+      const outerSe = new StorableError(outerErr);
+
+      const result = roundTrip(
+        outerSe as StorableValue,
+      ) as unknown as StorableError;
+      expect(result.error.message).toBe("outer");
+      expect(result.error.cause).toBeInstanceOf(StorableError);
+      expect(
+        (result.error.cause as StorableError).error.message,
+      ).toBe("inner");
     });
   });
 
@@ -669,7 +875,7 @@ describe("serialization", () => {
       (us as unknown as { state: StorableValue }).state = [
         us,
       ] as unknown as StorableValue;
-      expect(() => serialize(us as unknown as StorableValue, context))
+      expect(() => serialize(us as StorableValue, context))
         .toThrow(
           "Circular reference",
         );
@@ -708,14 +914,6 @@ describe("serialization", () => {
         },
       };
 
-      // Manually add the class to the context's registry.
-      // We need to access the private registry -- use a dedicated test context.
-      // Instead, we'll create wire data for Error@1 with invalid state and
-      // see if lenient mode catches the reconstruction error.
-
-      // Actually, Error@1 IS registered and its reconstructor is resilient.
-      // Let's test with a custom serialized form that we know will fail:
-      // We can create a mock by overriding getClassFor on the context.
       const mockContext = {
         ...context,
         getClassFor(tag: string) {
@@ -744,7 +942,7 @@ describe("serialization", () => {
       );
       const { context, runtime } = makeTestContext();
       const serialized = serialize(
-        prob as unknown as StorableValue,
+        prob as StorableValue,
         context,
       );
       expect(serialized).toEqual({ "/BadType@1": "original data" });
@@ -752,6 +950,47 @@ describe("serialization", () => {
       // Deserializing produces UnknownStorable (BadType@1 is not registered).
       const deserialized = deserialize(serialized, context, runtime);
       expect(deserialized).toBeInstanceOf(UnknownStorable);
+    });
+
+    it("wraps failed Error@1 reconstruction in lenient mode", () => {
+      const context = new JsonEncodingContext({ lenient: true });
+      const runtime: ReconstructionContext = {
+        getCell(_ref) {
+          throw new Error("not available");
+        },
+      };
+
+      // Create a mock context that overrides getClassFor to return a
+      // throwing class for Error@1.
+      const ThrowingErrorClass: StorableClass<StorableInstance> = {
+        [RECONSTRUCT](
+          _state: StorableValue,
+          _context: ReconstructionContext,
+        ): StorableInstance {
+          throw new Error("Error reconstruction failed");
+        },
+      };
+
+      const mockContext = {
+        ...context,
+        getClassFor(tag: string) {
+          if (tag === "Error@1") return ThrowingErrorClass;
+          return context.getClassFor(tag);
+        },
+        getTagFor: context.getTagFor.bind(context),
+        encode: context.encode.bind(context),
+        decode: context.decode.bind(context),
+        lenient: true,
+      };
+
+      const data = {
+        "/Error@1": { name: "Error", message: "test" },
+      } as SerializedForm;
+      const result = deserialize(data, mockContext, runtime);
+      expect(result).toBeInstanceOf(ProblematicStorable);
+      const prob = result as unknown as ProblematicStorable;
+      expect(prob.typeTag).toBe("Error@1");
+      expect(prob.error).toBe("Error reconstruction failed");
     });
   });
 
@@ -868,6 +1107,11 @@ describe("serialization", () => {
       };
       expect(isStorableInstance(instance)).toBe(true);
     });
+
+    it("returns true for StorableError", () => {
+      const se = new StorableError(new Error("test"));
+      expect(isStorableInstance(se)).toBe(true);
+    });
   });
 
   // --------------------------------------------------------------------------
@@ -960,11 +1204,15 @@ describe("serialization", () => {
       expect(ctx.getTagFor(ps)).toBe("Bad@1");
     });
 
-    it("getClassFor returns undefined for Error@1 (handled by TypeHandler)", () => {
+    it("getTagFor returns typeTag for StorableError", () => {
       const ctx = new JsonEncodingContext();
-      // Error@1 is handled by ErrorHandler in the TypeHandlerRegistry,
-      // not the context's class registry.
-      expect(ctx.getClassFor("Error@1")).toBeUndefined();
+      const se = new StorableError(new Error("test"));
+      expect(ctx.getTagFor(se)).toBe("Error@1");
+    });
+
+    it("getClassFor returns StorableError for Error@1", () => {
+      const ctx = new JsonEncodingContext();
+      expect(ctx.getClassFor("Error@1")).toBeDefined();
     });
 
     it("getClassFor returns undefined for unknown tags", () => {
@@ -1000,6 +1248,272 @@ describe("serialization", () => {
   });
 
   // --------------------------------------------------------------------------
+  // nativeValueFromStorableValue
+  // --------------------------------------------------------------------------
+
+  describe("nativeValueFromStorableValue", () => {
+    it("unwraps StorableError to Error (frozen)", () => {
+      const err = new Error("test");
+      const se = new StorableError(err);
+      const result = nativeValueFromStorableValue(se as StorableValue);
+      expect(result).toBeInstanceOf(Error);
+      expect((result as Error).message).toBe("test");
+      expect(Object.isFrozen(result)).toBe(true);
+    });
+
+    it("unwraps StorableError to Error (unfrozen)", () => {
+      const err = new Error("test");
+      const se = new StorableError(err);
+      const result = nativeValueFromStorableValue(
+        se as StorableValue,
+        false,
+      );
+      expect(result).toBe(err); // same reference when unfrozen
+      expect(result).toBeInstanceOf(Error);
+      expect(Object.isFrozen(result)).toBe(false);
+    });
+
+    it("passes through primitives", () => {
+      expect(nativeValueFromStorableValue(null)).toBe(null);
+      expect(nativeValueFromStorableValue(undefined)).toBe(undefined);
+      expect(nativeValueFromStorableValue(42)).toBe(42);
+      expect(nativeValueFromStorableValue("hello")).toBe("hello");
+      expect(nativeValueFromStorableValue(true)).toBe(true);
+    });
+
+    it("returns frozen copy of unfrozen plain objects (frozen=true)", () => {
+      const obj = { a: 1 } as unknown as StorableValue;
+      const result = nativeValueFromStorableValue(obj);
+      expect(Object.isFrozen(result)).toBe(true);
+      expect((result as Record<string, unknown>).a).toBe(1);
+    });
+
+    it("passes through unfrozen plain objects (frozen=false)", () => {
+      const obj = { a: 1 } as unknown as StorableValue;
+      expect(nativeValueFromStorableValue(obj, false)).toBe(obj);
+    });
+
+    it("passes through frozen plain objects (frozen=true)", () => {
+      const obj = Object.freeze({ a: 1 }) as unknown as StorableValue;
+      expect(nativeValueFromStorableValue(obj, true)).toBe(obj);
+    });
+
+    it("returns unfrozen copy of frozen plain objects (frozen=false)", () => {
+      const obj = Object.freeze({ a: 1 }) as unknown as StorableValue;
+      const result = nativeValueFromStorableValue(obj, false);
+      expect(Object.isFrozen(result)).toBe(false);
+      expect((result as Record<string, unknown>).a).toBe(1);
+    });
+
+    it("returns frozen copy of unfrozen arrays (frozen=true)", () => {
+      const arr = [1, 2, 3] as StorableValue;
+      const result = nativeValueFromStorableValue(arr);
+      expect(Object.isFrozen(result)).toBe(true);
+      expect(result).toEqual([1, 2, 3]);
+    });
+
+    it("passes through unfrozen arrays (frozen=false)", () => {
+      const arr = [1, 2, 3] as StorableValue;
+      expect(nativeValueFromStorableValue(arr, false)).toBe(arr);
+    });
+
+    it("passes through non-native StorableInstance unchanged (frozen=true)", () => {
+      // Non-native StorableInstance values (UnknownStorable, Cell, etc.) pass
+      // through as-is -- spreading would strip their prototype/methods.
+      const us = new UnknownStorable("Test@1", null);
+      const result = nativeValueFromStorableValue(us as StorableValue);
+      expect(result).toBe(us);
+    });
+
+    it("passes through non-native StorableInstance unchanged (frozen=false)", () => {
+      const us = new UnknownStorable("Test@1", null);
+      expect(nativeValueFromStorableValue(
+        us as StorableValue,
+        false,
+      )).toBe(us);
+    });
+
+    it("unwraps StorableMap to FrozenMap", () => {
+      const map = new Map<StorableValue, StorableValue>([
+        ["a", 1],
+        ["b", 2],
+      ] as [StorableValue, StorableValue][]);
+      const sm = new StorableMap(map);
+      const result = nativeValueFromStorableValue(
+        sm as StorableValue,
+      );
+      expect(result).toBeInstanceOf(FrozenMap);
+      expect(result).toBeInstanceOf(Map);
+      expect((result as Map<string, number>).get("a")).toBe(1);
+      expect((result as Map<string, number>).get("b")).toBe(2);
+      expect((result as Map<string, number>).size).toBe(2);
+    });
+
+    it("unwraps StorableSet to FrozenSet", () => {
+      const set = new Set<StorableValue>([1, 2, 3] as StorableValue[]);
+      const ss = new StorableSet(set);
+      const result = nativeValueFromStorableValue(
+        ss as StorableValue,
+      );
+      expect(result).toBeInstanceOf(FrozenSet);
+      expect(result).toBeInstanceOf(Set);
+      expect((result as Set<number>).has(1)).toBe(true);
+      expect((result as Set<number>).has(2)).toBe(true);
+      expect((result as Set<number>).has(3)).toBe(true);
+      expect((result as Set<number>).size).toBe(3);
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // deepNativeValueFromStorableValue
+  // --------------------------------------------------------------------------
+
+  describe("deepNativeValueFromStorableValue", () => {
+    it("deeply unwraps StorableError in objects (frozen)", () => {
+      const err = new Error("deep");
+      const se = new StorableError(err);
+      const obj = {
+        error: se,
+        code: 500,
+      } as unknown as StorableValue;
+      const result = deepNativeValueFromStorableValue(obj) as Record<
+        string,
+        unknown
+      >;
+      expect(result.error).toBeInstanceOf(Error);
+      expect((result.error as Error).message).toBe("deep");
+      expect(Object.isFrozen(result.error)).toBe(true);
+      expect(result.code).toBe(500);
+      expect(Object.isFrozen(result)).toBe(true);
+    });
+
+    it("deeply unwraps StorableError in arrays (frozen)", () => {
+      const err = new Error("array");
+      const se = new StorableError(err);
+      const arr = [1, se, 3] as unknown as StorableValue;
+      const result = deepNativeValueFromStorableValue(arr) as unknown[];
+      expect(result[0]).toBe(1);
+      expect(result[1]).toBeInstanceOf(Error);
+      expect((result[1] as Error).message).toBe("array");
+      expect(Object.isFrozen(result[1])).toBe(true);
+      expect(result[2]).toBe(3);
+      expect(Object.isFrozen(result)).toBe(true);
+    });
+
+    it("output is not frozen when frozen=false", () => {
+      const obj = Object.freeze({
+        a: 1,
+        b: "two",
+      }) as unknown as StorableValue;
+      const result = deepNativeValueFromStorableValue(obj, false) as Record<
+        string,
+        unknown
+      >;
+      // Output should be a new, unfrozen object.
+      expect(Object.isFrozen(result)).toBe(false);
+      result.a = 99; // should not throw
+      expect(result.a).toBe(99);
+    });
+
+    it("output is frozen when frozen=true (default)", () => {
+      const obj = { a: 1, b: "two" } as unknown as StorableValue;
+      const result = deepNativeValueFromStorableValue(obj) as Record<
+        string,
+        unknown
+      >;
+      expect(Object.isFrozen(result)).toBe(true);
+    });
+
+    it("preserves sparse holes", () => {
+      const arr = new Array(3) as StorableValue[];
+      arr[0] = 1;
+      arr[2] = 3;
+      Object.freeze(arr);
+      const result = deepNativeValueFromStorableValue(
+        arr as StorableValue,
+      ) as unknown[];
+      expect(result.length).toBe(3);
+      expect(result[0]).toBe(1);
+      expect(1 in result).toBe(false); // hole preserved
+      expect(result[2]).toBe(3);
+    });
+
+    it("passes through non-native StorableInstance", () => {
+      const us = new UnknownStorable("Test@1", null);
+      const obj = { thing: us } as unknown as StorableValue;
+      const result = deepNativeValueFromStorableValue(obj) as Record<
+        string,
+        unknown
+      >;
+      expect(result.thing).toBe(us);
+    });
+
+    it("deeply unwraps StorableMap to FrozenMap", () => {
+      const map = new Map<StorableValue, StorableValue>([
+        ["x", 10],
+      ] as [StorableValue, StorableValue][]);
+      const sm = new StorableMap(map);
+      const obj = { data: sm } as unknown as StorableValue;
+      const result = deepNativeValueFromStorableValue(obj) as Record<
+        string,
+        unknown
+      >;
+      expect(result.data).toBeInstanceOf(FrozenMap);
+      expect((result.data as Map<string, number>).get("x")).toBe(10);
+    });
+
+    it("deeply unwraps StorableSet to FrozenSet", () => {
+      const set = new Set<StorableValue>([42] as StorableValue[]);
+      const ss = new StorableSet(set);
+      const arr = [ss] as unknown as StorableValue;
+      const result = deepNativeValueFromStorableValue(arr) as unknown[];
+      expect(result[0]).toBeInstanceOf(FrozenSet);
+      expect((result[0] as Set<number>).has(42)).toBe(true);
+    });
+
+    it("deeply unwraps Error internals (C2)", () => {
+      // Error with a StorableError cause and a custom StorableMap property.
+      const innerErr = new Error("inner");
+      const innerSe = new StorableError(innerErr);
+      const outerErr = new Error("outer");
+      outerErr.cause = innerSe;
+      (outerErr as unknown as Record<string, unknown>).data = new StorableMap(
+        new Map([["k", 1]] as [StorableValue, StorableValue][]),
+      );
+      const outerSe = new StorableError(outerErr);
+
+      const result = deepNativeValueFromStorableValue(
+        outerSe as StorableValue,
+      ) as Error;
+      expect(result).toBeInstanceOf(Error);
+      expect(result.message).toBe("outer");
+      // cause should be deeply unwrapped to a native Error, not StorableError.
+      expect(result.cause).toBeInstanceOf(Error);
+      expect((result.cause as Error).message).toBe("inner");
+      // custom property should be unwrapped to FrozenMap.
+      const data = (result as unknown as Record<string, unknown>).data;
+      expect(data).toBeInstanceOf(FrozenMap);
+    });
+
+    it("deeply unwraps Error internals unfrozen (C2)", () => {
+      const innerErr = new Error("inner");
+      const innerSe = new StorableError(innerErr);
+      const outerErr = new Error("outer");
+      outerErr.cause = innerSe;
+      const outerSe = new StorableError(outerErr);
+
+      const result = deepNativeValueFromStorableValue(
+        outerSe as StorableValue,
+        false,
+      ) as Error;
+      expect(result).toBeInstanceOf(Error);
+      expect(Object.isFrozen(result)).toBe(false);
+      expect(result.cause).toBeInstanceOf(Error);
+      expect(Object.isFrozen(result.cause)).toBe(false);
+    });
+  });
+
+  // --------------------------------------------------------------------------
   // Complex round-trip scenarios
   // --------------------------------------------------------------------------
 
@@ -1029,24 +1543,190 @@ describe("serialization", () => {
       expect("debug" in meta).toBe(true);
     });
 
-    it("round-trips Error in array", () => {
-      const arr = [1, new Error("oops"), 3] as StorableValue;
+    it("round-trips StorableError in array", () => {
+      const se = new StorableError(new Error("oops"));
+      const arr = [1, se, 3] as unknown as StorableValue;
       const result = roundTrip(arr) as StorableValue[];
       expect(result[0]).toBe(1);
-      expect(result[1]).toBeInstanceOf(Error);
-      expect((result[1] as Error).message).toBe("oops");
+      expect(result[1]).toBeInstanceOf(StorableError);
+      expect(
+        (result[1] as unknown as StorableError).error.message,
+      ).toBe("oops");
       expect(result[2]).toBe(3);
     });
 
-    it("round-trips Error as object value", () => {
+    it("round-trips StorableError as object value", () => {
       const obj = {
-        error: new Error("fail"),
+        error: new StorableError(new Error("fail")),
         code: 500,
       } as unknown as StorableValue;
       const result = roundTrip(obj) as Record<string, StorableValue>;
-      expect(result.error).toBeInstanceOf(Error);
-      expect((result.error as Error).message).toBe("fail");
+      expect(result.error).toBeInstanceOf(StorableError);
+      expect(
+        (result.error as unknown as StorableError).error.message,
+      ).toBe("fail");
       expect(result.code).toBe(500);
+    });
+
+    it("wire format is unchanged (backward compatible)", () => {
+      // StorableError should produce the same wire format as the old ErrorHandler.
+      const { context } = makeTestContext();
+      const se = new StorableError(new TypeError("compat test"));
+      const serialized = serialize(
+        se as StorableValue,
+        context,
+      ) as Record<string, unknown>;
+      expect(Object.keys(serialized)).toEqual(["/Error@1"]);
+      const state = serialized["/Error@1"] as Record<string, unknown>;
+      expect(state.type).toBe("TypeError");
+      expect(state.name).toBe(null); // null = same as type (common case)
+      expect(state.message).toBe("compat test");
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // canBeStored: deep storability check
+  // --------------------------------------------------------------------------
+
+  describe("canBeStored", () => {
+    // -- Primitives that ARE storable --
+    it("accepts null", () => {
+      expect(canBeStored(null)).toBe(true);
+    });
+
+    it("accepts boolean", () => {
+      expect(canBeStored(true)).toBe(true);
+      expect(canBeStored(false)).toBe(true);
+    });
+
+    it("accepts finite numbers", () => {
+      expect(canBeStored(42)).toBe(true);
+      expect(canBeStored(0)).toBe(true);
+      expect(canBeStored(-3.14)).toBe(true);
+    });
+
+    it("accepts strings", () => {
+      expect(canBeStored("hello")).toBe(true);
+      expect(canBeStored("")).toBe(true);
+    });
+
+    it("accepts undefined", () => {
+      expect(canBeStored(undefined)).toBe(true);
+    });
+
+    it("accepts bigint", () => {
+      expect(canBeStored(42n)).toBe(true);
+      expect(canBeStored(0n)).toBe(true);
+    });
+
+    // -- Primitives that are NOT storable --
+    it("rejects NaN", () => {
+      expect(canBeStored(NaN)).toBe(false);
+    });
+
+    it("rejects Infinity", () => {
+      expect(canBeStored(Infinity)).toBe(false);
+      expect(canBeStored(-Infinity)).toBe(false);
+    });
+
+    it("rejects symbols", () => {
+      expect(canBeStored(Symbol("test"))).toBe(false);
+    });
+
+    it("rejects functions without toJSON", () => {
+      expect(canBeStored(() => 42)).toBe(false);
+    });
+
+    // -- StorableNativeObject types (would be wrapped) --
+    it("accepts Error instances", () => {
+      expect(canBeStored(new Error("test"))).toBe(true);
+      expect(canBeStored(new TypeError("test"))).toBe(true);
+    });
+
+    it("accepts Map instances", () => {
+      expect(canBeStored(new Map())).toBe(true);
+    });
+
+    it("accepts Set instances", () => {
+      expect(canBeStored(new Set())).toBe(true);
+    });
+
+    it("accepts Date instances", () => {
+      expect(canBeStored(new Date())).toBe(true);
+    });
+
+    it("accepts Uint8Array instances", () => {
+      expect(canBeStored(new Uint8Array([1, 2, 3]))).toBe(true);
+    });
+
+    // -- StorableInstance values --
+    it("accepts StorableError wrappers", () => {
+      expect(canBeStored(new StorableError(new Error("test")))).toBe(true);
+    });
+
+    // -- Containers --
+    it("accepts plain objects with storable values", () => {
+      expect(canBeStored({ a: 1, b: "hello", c: null })).toBe(true);
+    });
+
+    it("accepts arrays with storable values", () => {
+      expect(canBeStored([1, "hello", null, true])).toBe(true);
+    });
+
+    it("accepts nested structures", () => {
+      expect(canBeStored({
+        users: [{ name: "Alice", age: 30 }],
+        meta: { version: 1 },
+      })).toBe(true);
+    });
+
+    // -- Deep checks with StorableNativeObject --
+    it("accepts objects containing Error values", () => {
+      expect(canBeStored({ error: new Error("test"), code: 500 })).toBe(true);
+    });
+
+    it("accepts arrays containing Error values", () => {
+      expect(canBeStored([1, new Error("test"), "hello"])).toBe(true);
+    });
+
+    // -- Rejections --
+    it("rejects class instances without toJSON", () => {
+      class Foo {
+        x = 1;
+      }
+      expect(canBeStored(new Foo())).toBe(false);
+    });
+
+    it("rejects objects with non-storable nested values", () => {
+      expect(canBeStored({ a: 1, b: Symbol("bad") })).toBe(false);
+    });
+
+    it("rejects arrays with non-storable elements", () => {
+      expect(canBeStored([1, Symbol("bad")])).toBe(false);
+    });
+
+    it("rejects deeply nested non-storable values", () => {
+      expect(canBeStored({
+        a: { b: { c: [1, 2, { d: Symbol("bad") }] } },
+      })).toBe(false);
+    });
+
+    // -- Circular references --
+    it("returns false for circular references", () => {
+      const obj: Record<string, unknown> = { a: 1 };
+      obj.self = obj;
+      expect(canBeStored(obj)).toBe(false);
+    });
+
+    // -- toJSON support --
+    it("accepts objects with toJSON returning storable values", () => {
+      const obj = { toJSON: () => ({ x: 1 }) };
+      expect(canBeStored(obj)).toBe(true);
+    });
+
+    it("rejects objects with toJSON returning non-storable values", () => {
+      const obj = { toJSON: () => Symbol("bad") };
+      expect(canBeStored(obj)).toBe(false);
     });
   });
 });

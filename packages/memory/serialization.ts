@@ -11,6 +11,7 @@ import {
   createDefaultRegistry,
   type TypeHandlerRegistry,
 } from "./type-handlers.ts";
+import { TAGS } from "./type-tags.ts";
 
 /** Shared default handler registry, created once. */
 const defaultRegistry: TypeHandlerRegistry = createDefaultRegistry();
@@ -71,8 +72,8 @@ export function deserializeFromBytes(
 
 /**
  * Recursively freeze arrays and plain objects. Primitives pass through
- * unchanged. Used by the `/quote` deserialization path to ensure the freeze
- * guarantee applies uniformly to all `deserialize()` output.
+ * unchanged. Used by the `TAGS.quote` deserialization path to ensure the
+ * freeze guarantee applies uniformly to all `deserialize()` output.
  */
 function deepFreeze(value: SerializedForm): SerializedForm {
   if (value === null || typeof value !== "object") {
@@ -170,7 +171,7 @@ export function serialize(
           count++;
           i++;
         }
-        result.push(context.encode("hole", count));
+        result.push(context.encode(TAGS.hole, count));
       } else {
         result.push(
           serialize(value[i] as StorableValue, context, seen, registry),
@@ -201,12 +202,12 @@ export function serialize(
 
   seen.delete(value as object);
 
-  // Apply `/object` escaping per Section 5.6: if the result has exactly one
-  // key and that key starts with `/`, wrap in `{ "/object": ... }` so the
+  // Apply `TAGS.object` escaping per Section 5.6: if the result has exactly
+  // one key and that key starts with `/`, wrap in `{ "/object": ... }` so the
   // deserializer does not misinterpret it as a tagged type.
   const keys = Object.keys(result);
   if (keys.length === 1 && keys[0].startsWith("/")) {
-    return { "/object": result } as SerializedForm;
+    return { [`/${TAGS.object}`]: result } as SerializedForm;
   }
 
   return result as SerializedForm;
@@ -230,10 +231,10 @@ export function deserialize(
   if (decoded !== null) {
     const { tag, state } = decoded;
 
-    // `/object` unwrapping (Section 5.6): strip the wrapper and take the
+    // `TAGS.object` unwrapping (Section 5.6): strip the wrapper and take the
     // inner object's keys literally; inner values go through normal
     // deserialization.
-    if (tag === "object") {
+    if (tag === TAGS.object) {
       const inner = state as Record<string, SerializedForm>;
       const result: Record<string, StorableValue> = {};
       for (const [key, val] of Object.entries(inner)) {
@@ -242,11 +243,11 @@ export function deserialize(
       return Object.freeze(result);
     }
 
-    // `/quote` literal handling (Section 5.6): return the inner value as-is
-    // with no deserialization of nested special forms. Deep-freeze arrays and
-    // plain objects so the freeze guarantee applies uniformly to all
-    // `deserialize()` output.
-    if (tag === "quote") {
+    // `TAGS.quote` literal handling (Section 5.6): return the inner value
+    // as-is with no deserialization of nested special forms. Deep-freeze
+    // arrays and plain objects so the freeze guarantee applies uniformly
+    // to all `deserialize()` output.
+    if (tag === TAGS.quote) {
       return deepFreeze(state) as StorableValue;
     }
 
@@ -302,7 +303,7 @@ export function deserialize(
     return data;
   }
 
-  // Arrays: recursively deserialize elements. `hole` entries use
+  // Arrays: recursively deserialize elements. `TAGS.hole` entries use
   // run-length encoding -- the state is a positive integer indicating how
   // many consecutive holes to skip.
   if (Array.isArray(data)) {
@@ -311,7 +312,7 @@ export function deserialize(
     let logicalLength = 0;
     for (const entry of data) {
       const entryDecoded = context.decode(entry);
-      if (entryDecoded !== null && entryDecoded.tag === "hole") {
+      if (entryDecoded !== null && entryDecoded.tag === TAGS.hole) {
         logicalLength += entryDecoded.state as number;
       } else {
         logicalLength++;
@@ -322,7 +323,7 @@ export function deserialize(
     let targetIndex = 0;
     for (const entry of data) {
       const entryDecoded = context.decode(entry);
-      if (entryDecoded !== null && entryDecoded.tag === "hole") {
+      if (entryDecoded !== null && entryDecoded.tag === TAGS.hole) {
         // Skip `state` indices -- leave them absent, creating true holes.
         targetIndex += entryDecoded.state as number;
       } else {

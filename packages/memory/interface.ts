@@ -27,15 +27,10 @@ export type StorableValue = StorableDatum | undefined;
  *
  *   JavaScript "wild west" (unknown) <-> StorableValue <-> Serialized (Uint8Array)
  *
- * Native JS object types (`Error`, `Map`, `Set`, `Date`, `Uint8Array`) enter
- * the storable layer via wrapper classes (e.g. `StorableError`) that implement
- * `StorableInstance`. However, `bigint` is a primitive and belongs directly
- * in `StorableDatum` without wrapping.
- *
- * `Error` is listed here temporarily for backward compatibility with the
- * existing rich path (which passes Error through as-is). The three-layer
- * rework PR removes `Error` from this union when the wrapping logic
- * (Error -> StorableError) is wired in.
+ * Native JS object types (`Error`, `Map`, `Set`, `Date`, `Uint8Array`) are
+ * NOT direct members. They enter the storable layer via wrapper classes
+ * (e.g. `StorableError`) that implement `StorableInstance`. However, `bigint`
+ * is a primitive and belongs directly in `StorableDatum` without wrapping.
  *
  * `undefined` is preserved when the `richStorableValues` flag is ON. When the
  * flag is OFF, `undefined` in arrays is converted to `null` and `undefined`
@@ -54,8 +49,6 @@ export type StorableDatum =
   // -- Protocol types (Cell, Stream, UnknownStorable, ProblematicStorable,
   //    and native wrappers like StorableError at runtime) --
   | StorableInstance
-  // -- Transitional: removed when three-layer rework wires Error wrapping --
-  | Error
   // -- Extended primitives (experimental: richStorableValues) --
   | undefined;
 
