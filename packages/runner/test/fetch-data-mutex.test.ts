@@ -15,6 +15,7 @@ describe("fetch-data mutex mechanism", () => {
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
   let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
+  let computed: ReturnType<typeof createBuilder>["commontools"]["computed"];
   let byRef: ReturnType<typeof createBuilder>["commontools"]["byRef"];
   let originalFetch: typeof globalThis.fetch;
   let fetchCalls: Array<{ url: string; init?: RequestInit }>;
@@ -29,6 +30,7 @@ describe("fetch-data mutex mechanism", () => {
 
     const { commontools } = createBuilder();
     pattern = commontools.pattern;
+    computed = commontools.computed;
     byRef = commontools.byRef;
 
     // Set up pattern environment with a mock base URL
@@ -374,5 +376,55 @@ describe("fetch-data mutex mechanism", () => {
     expect(data.result).toBeUndefined();
     expect(data.error).toBeUndefined();
     expect(data.pending).toBe(false);
+  });
+
+  it("should include computed options on the first fetch (CT-1246)", async () => {
+    const fetchData = byRef("fetchData");
+
+    // Options come from a computed — this is the scenario that triggers the bug.
+    // Without the fix, the first fetch fires before the computed settles,
+    // sending the request without the Accept header.
+    const testRecipe = pattern<{ url: string }>(
+      ({ url }) => {
+        const options = computed(() => ({
+          headers: { Accept: "application/vnd.github.v3.star+json" },
+        }));
+        return fetchData({ url, options });
+      },
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "computed-options-test",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(
+      tx,
+      testRecipe,
+      { url: "http://mock-test-server.local/api/stars" },
+      resultCell,
+    );
+    tx.commit();
+
+    // Pull and wait for the fetch to complete
+    await result.pull();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    await result.pull();
+
+    // Filter to only the calls that hit our endpoint
+    const relevantCalls = fetchCalls.filter((c) =>
+      c.url.includes("/api/stars")
+    );
+
+    // The key assertion: every fetch call should include the computed headers.
+    // Before the fix, the first call would have undefined options (no headers).
+    expect(relevantCalls.length).toBeGreaterThan(0);
+    for (const call of relevantCalls) {
+      expect(call.init?.headers).toBeDefined();
+      expect(
+        (call.init?.headers as Record<string, string>)?.["Accept"],
+      ).toBe("application/vnd.github.v3.star+json");
+    }
   });
 });

@@ -46,6 +46,7 @@ export async function tryClaimMutex<T extends Record<string, any>>(
   _error: Cell<any>,
   internal: Cell<Schema<typeof internalSchema>>,
   requestId: string,
+  snapshotInputs: (cell: Cell<T>) => T,
   timeout: number = REQUEST_TIMEOUT,
 ): Promise<{
   claimed: boolean;
@@ -56,12 +57,21 @@ export async function tryClaimMutex<T extends Record<string, any>>(
   let inputHash = "";
   let inputs = {} as T;
 
+  // Wait for all pending computeds to settle before reading inputs.
+  // Without this, computed inputs (e.g. options) may still be undefined
+  // on the first run because the scheduler hasn't evaluated them yet.
+  await runtime.idle();
+
   await runtime.editWithRetry((tx) => {
     const currentInternal = internal.withTx(tx).get();
     const isPending = pending.withTx(tx).get();
     const now = Date.now();
 
-    inputs = inputsCell.getAsQueryResult([], tx);
+    // The caller-provided snapshotInputs receives the cell with the active
+    // transaction attached. It uses cell.asSchema(...).get() to materialize
+    // a plain snapshot via the schema system, then does any additional
+    // preprocessing (e.g. stringifying request bodies).
+    inputs = snapshotInputs(inputsCell.withTx(tx));
     inputHash = computeInputHash(tx, inputsCell);
 
     // Can claim if:
@@ -81,6 +91,7 @@ export async function tryClaimMutex<T extends Record<string, any>>(
       claimed = false;
     }
   });
+
   return { claimed, inputs, inputHash };
 }
 
