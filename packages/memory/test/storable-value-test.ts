@@ -9,7 +9,6 @@ import {
   toStorableValue,
 } from "../storable-value.ts";
 import { StorableError } from "../storable-native-instances.ts";
-import { isStorableInstance } from "../storable-protocol.ts";
 
 describe("storable-value", () => {
   describe("isArrayIndexPropertyName", () => {

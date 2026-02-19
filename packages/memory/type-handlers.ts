@@ -2,7 +2,6 @@ import type { StorableValue } from "./interface.ts";
 import {
   DECONSTRUCT,
   isStorableInstance,
-  RECONSTRUCT,
   type ReconstructionContext,
   type StorableInstance,
 } from "./storable-protocol.ts";
