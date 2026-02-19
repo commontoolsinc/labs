@@ -13,7 +13,6 @@ import {
   BuiltInGenerateTextParams,
   BuiltInLLMMessage,
   BuiltInLLMParams,
-  JSONSchema,
 } from "@commontools/api";
 import type { Schema } from "@commontools/api/schema";
 import { refer } from "merkle-reference/json";
@@ -23,9 +22,12 @@ import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { llmToolExecutionHelpers } from "./llm-dialog.ts";
 import {
-  LLMContentSchema,
-  LLMMessageSchema,
+  GenerateObjectParamsSchema,
+  GenerateObjectResultSchema,
+  GenerateTextParamsSchema,
+  GenerateTextResultSchema,
   LLMParamsSchema,
+  LLMResultSchema,
   LLMToolSchema,
 } from "./llm-schemas.ts";
 import { isObject } from "@commontools/utils/types";
@@ -39,85 +41,6 @@ const client = new LLMClient();
 
 // TODO(ja): investigate if generateText should be replaced by
 // fetchData with streaming support
-
-const GenerateTextParamsSchema = {
-  type: "object",
-  properties: {
-    prompt: LLMContentSchema,
-    messages: { type: "array", items: LLMMessageSchema },
-    context: {
-      type: "object",
-      additionalProperties: { asCell: true },
-      default: {},
-    },
-    system: { type: "string" },
-    model: { type: "string" },
-    maxTokens: { type: "number" },
-    tools: { type: "object", additionalProperties: LLMToolSchema, default: {} },
-  },
-} as const satisfies JSONSchema;
-
-const GenerateObjectParamsSchema = {
-  type: "object",
-  properties: {
-    prompt: LLMContentSchema,
-    messages: { type: "array", items: LLMMessageSchema },
-    context: {
-      type: "object",
-      additionalProperties: { asCell: true },
-      default: {},
-    },
-    schema: { type: "object" },
-    system: { type: "string" },
-    model: { type: "string" },
-    maxTokens: { type: "number" },
-    cache: { type: "boolean" },
-    metadata: { type: "object" },
-    tools: { type: "object", additionalProperties: LLMToolSchema },
-  },
-  required: ["schema"],
-} as const satisfies JSONSchema;
-
-const LLMResultSchema = {
-  type: "object",
-  properties: {
-    pending: { type: "boolean", default: false },
-    result: {
-      anyOf: [
-        { type: "string" },
-        { type: "array", items: { type: "object" } },
-      ],
-    },
-    error: {},
-    partial: { type: "string" },
-    requestHash: { type: "string" },
-  },
-  required: ["pending"],
-} as const satisfies JSONSchema;
-
-const GenerateTextResultSchema = {
-  type: "object",
-  properties: {
-    pending: { type: "boolean", default: false },
-    result: { type: "string" },
-    error: {},
-    partial: { type: "string" },
-    requestHash: { type: "string" },
-  },
-  required: ["pending"],
-} as const satisfies JSONSchema;
-
-const GenerateObjectResultSchema = {
-  type: "object",
-  properties: {
-    pending: { type: "boolean", default: false },
-    result: { type: "object" },
-    error: {},
-    partial: { type: "string" },
-    requestHash: { type: "string" },
-  },
-  required: ["pending"],
-} as const satisfies JSONSchema;
 
 /** Batch interval for partial streaming updates (~15fps). */
 const PARTIAL_BATCH_MS = 66;
