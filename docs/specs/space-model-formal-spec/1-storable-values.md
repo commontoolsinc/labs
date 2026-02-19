@@ -138,13 +138,21 @@ type StorableNativeObject =
   | Set<StorableValue | StorableNativeObject>
   | Date
   | Uint8Array
-  | Blob;
+  | Blob
+  | { toJSON(): unknown }; // Legacy — see below.
 ```
 
 The `StorableNativeObject` type exists solely at function parameter/return
 boundaries — for example, `toStorableValue()` accepts
 `StorableValue | StorableNativeObject` as input (Section 8). It is never a
 member of `StorableValue` or `StorableDatum`.
+
+> **Legacy: `{ toJSON(): unknown }` variant.** The `toJSON()` arm of
+> `StorableNativeObject` represents objects that provide a `toJSON()` method.
+> The conversion functions call `toJSON()` and process the
+> result (Section 8.2). This variant is **legacy and marked for removal** —
+> callers should migrate to the storable protocol
+> (`[DECONSTRUCT]`/`[RECONSTRUCT]`). See Section 7.1 for migration guidance.
 
 ### 1.3 Primitive Types
 
@@ -1837,7 +1845,8 @@ if the value is:
 - A primitive (`null`, `boolean`, `number` (finite), `string`, `undefined`,
   `bigint`)
 - A `StorableInstance` (including the native object wrapper classes)
-- A `StorableNativeObject` (`Error`, `Map`, `Set`, `Date`, `Uint8Array`)
+- A `StorableNativeObject` (`Error`, `Map`, `Set`, `Date`, `Uint8Array`,
+  or an object with a `toJSON()` method — legacy)
 - An array where every present element satisfies `canBeStored()`
 - A plain object where every value satisfies `canBeStored()`
 
