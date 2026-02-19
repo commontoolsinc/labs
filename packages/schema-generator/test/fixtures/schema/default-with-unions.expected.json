@@ -38,11 +38,11 @@
       ]
     },
     "value": {
+      "default": 42,
       "type": [
         "number",
         "string"
-      ],
-      "default": 42
+      ]
     }
   },
   "required": [

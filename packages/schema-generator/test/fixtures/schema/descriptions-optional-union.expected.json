@@ -1,21 +1,23 @@
 {
   "properties": {
     "flag": {
-      "description": "maybe flag",
       "anyOf": [
         {
           "type": "undefined"
         },
         {
           "type": "boolean"
-        } 
-      ]
+        }
+      ],
+      "description": "maybe flag"
     },
     "label": {
       "description": "maybe label",
       "type": "string"
     }
   },
-  "required": ["flag"],
+  "required": [
+    "flag"
+  ],
   "type": "object"
 }

@@ -16,7 +16,7 @@
         {
           "type": "undefined"
         },
-        {      
+        {
           "asCell": true,
           "type": "number"
         }
@@ -32,7 +32,7 @@
     }
   },
   "required": [
-    "maybeCell", 
+    "maybeCell",
     "nullableCell"
   ],
   "type": "object"
