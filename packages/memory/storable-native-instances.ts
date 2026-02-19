@@ -1,7 +1,7 @@
 import type { StorableValue } from "./interface.ts";
 import {
   DECONSTRUCT,
-  isStorable,
+  isStorableInstance,
   RECONSTRUCT,
   type ReconstructionContext,
   type StorableInstance,
@@ -530,7 +530,7 @@ export function deepNativeValueFromStorableValue(
   }
 
   // Other StorableInstance (Cell, Stream, UnknownStorable, etc.) -- pass through.
-  if (isStorable(value)) return value;
+  if (isStorableInstance(value)) return value;
 
   // Storable primitives (null, undefined, boolean, number, string, bigint)
   // pass through. Note: `symbol` and `function` are NOT storable and cannot
