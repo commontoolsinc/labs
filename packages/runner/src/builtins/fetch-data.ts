@@ -11,6 +11,13 @@ import {
   tryWriteResult,
 } from "./fetch-utils.ts";
 
+/** The shape of fetchData's input cell. */
+type FetchDataInputs = {
+  url: string;
+  mode?: "text" | "json";
+  options?: { body?: any; method?: string; headers?: Record<string, string> };
+};
+
 /**
  * Schema for fetchData inputs. Fully specifying the structure (except body,
  * which is `any`) lets cell.asSchema(schema).get() materialize nested
@@ -32,7 +39,6 @@ const fetchDataInputSchema = {
         },
       },
     },
-    result: {},
   },
 } as const satisfies JSONSchema;
 
@@ -47,12 +53,7 @@ const fetchDataInputSchema = {
  * @returns { pending: boolean, result: any, error: any } - As individual docs, representing `pending` state, final `result`, and any `error`.
  */
 export function fetchData(
-  inputsCell: Cell<{
-    url: string;
-    mode?: "text" | "json";
-    options?: { body?: any; method?: string; headers?: Record<string, string> };
-    result?: any;
-  }>,
+  inputsCell: Cell<FetchDataInputs>,
   sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
   addCancel: (cancel: () => void) => void,
   cause: Cell<any>[],
@@ -220,28 +221,23 @@ export function fetchData(
         internal,
         newRequestId,
         // Materialize inputs via the schema system and preprocess body.
-        // asSchema().get() returns a plain snapshot with nested properties
-        // (like options.headers) fully resolved, safe to use after commit.
+        // asSchema().get() returns a frozen plain snapshot with nested
+        // properties (like options.headers) fully resolved, safe to use
+        // after commit.
         (cell) => {
-          const snapshot = cell.asSchema(fetchDataInputSchema).get() as {
-            url: string;
-            mode?: "text" | "json";
-            options?: {
-              body?: any;
-              method?: string;
-              headers?: Record<string, string>;
-            };
-          };
-          // Stringify non-string bodies so startFetch receives ready-to-send options
-          if (
-            snapshot.options?.body !== undefined &&
-            typeof snapshot.options.body !== "string"
-          ) {
-            (snapshot.options as any).body = JSON.stringify(
-              snapshot.options.body,
-            );
-          }
-          return snapshot as typeof cell extends Cell<infer U> ? U : never;
+          const snapshot = cell.asSchema(fetchDataInputSchema).get();
+          // Stringify non-string bodies so startFetch receives ready-to-send
+          // options. Since .get() returns a frozen object, build a new one.
+          const body = snapshot.options?.body;
+          const options = snapshot.options
+            ? {
+              ...snapshot.options,
+              body: body !== undefined && typeof body !== "string"
+                ? JSON.stringify(body)
+                : body,
+            }
+            : undefined;
+          return { ...snapshot, options } as FetchDataInputs;
         },
       ).then(
         ({ claimed, inputs, inputHash }) => {
@@ -301,16 +297,10 @@ export function fetchData(
 
 async function startFetch(
   runtime: Runtime,
-  inputsCell: Cell<{
-    url: string;
-    mode?: "text" | "json";
-    options?: { body?: any; method?: string; headers?: Record<string, string> };
-  }>,
+  inputsCell: Cell<FetchDataInputs>,
   url: string,
   mode: "text" | "json" | undefined,
-  options:
-    | { body?: any; method?: string; headers?: Record<string, string> }
-    | undefined,
+  options: FetchDataInputs["options"],
   inputHash: string,
   pending: Cell<boolean>,
   result: Cell<any | undefined>,
