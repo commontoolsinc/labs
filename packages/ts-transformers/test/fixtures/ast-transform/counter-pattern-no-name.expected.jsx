@@ -46,11 +46,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "number"
-                }, {
-                    type: "string"
-                }]
+            type: ["number", "string"]
         } as const satisfies __ctHelpers.JSONSchema, state.value, __ctHelpers.derive({
             type: "object",
             properties: {

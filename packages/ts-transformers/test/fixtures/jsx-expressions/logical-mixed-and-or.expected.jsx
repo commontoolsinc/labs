@@ -25,11 +25,7 @@ export default pattern((_state) => {
         [UI]: (<div>
         {/* (condition && value) || fallback pattern */}
         <span>{__ctHelpers.unless({
-            anyOf: [{
-                    type: "string"
-                }, {
-                    type: "boolean"
-                }]
+            type: ["boolean", "string"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
@@ -67,11 +63,7 @@ export default pattern((_state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "string"
-                }, {
-                    type: "boolean"
-                }]
+            type: ["boolean", "string"]
         } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {

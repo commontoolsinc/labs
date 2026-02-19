@@ -200,16 +200,20 @@ export class UnionFormatter implements TypeFormatter {
     } else if (isRecord(matchingType)) {
       // If either entry is missing an enum, we can have any value of that type, so clear enum
       delete matchingType.enum;
-    } else if (isCurPrimitive && cur.enum === undefined) {
-      // If cur is a primitive non-enum, we can merge with any existing non-enum primitive
+    } else if (
+      isCurPrimitive && cur.enum === undefined && cur.type !== undefined
+    ) {
+      // If cur is a primitive non-enum with a known type, we can merge with any existing non-enum primitive
       const matchingNonEnum = primitiveSchemas.find((option) =>
         isRecord(option) && option.enum === undefined
       );
       if (isObject(matchingNonEnum)) {
-        const curTypes = Array.isArray(cur.type) ? cur.type : [cur.type!];
-        const matchingNonEnumTypes = Array.isArray(matchingNonEnum.type)
+        const curTypes = Array.isArray(cur.type) ? cur.type : [cur.type];
+        const matchingNonEnumTypes = matchingNonEnum.type === undefined
+          ? []
+          : Array.isArray(matchingNonEnum.type)
           ? matchingNonEnum.type
-          : [matchingNonEnum.type!];
+          : [matchingNonEnum.type];
         matchingNonEnum.type = [
           ...new Set([...curTypes, ...matchingNonEnumTypes]),
         ].toSorted();

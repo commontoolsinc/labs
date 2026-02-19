@@ -4,7 +4,9 @@ export default function TestLiteralWidenNullUndefined() {
     const _c1 = cell(null, {
         type: "null"
     } as const satisfies __ctHelpers.JSONSchema);
-    const _c2 = cell(undefined, true as const satisfies __ctHelpers.JSONSchema);
+    const _c2 = cell(undefined, {
+        type: "undefined"
+    } as const satisfies __ctHelpers.JSONSchema);
     return null;
 }
 // @ts-ignore: Internals
