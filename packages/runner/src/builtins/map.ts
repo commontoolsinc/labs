@@ -69,17 +69,14 @@ export function map(
       sendResult(tx, result);
     }
     const resultWithLog = result.withTx(tx);
-    const { list, op, params } = inputsCell.asSchema(
+    const { list, op } = inputsCell.asSchema(
       {
         type: "object",
         properties: {
-          list: { type: "array", items: { asCell: true } },
+          list: { type: "array", items: { asCell: true, not: true } },
           op: { asCell: true },
-          params: { type: "object" },
         },
-        // TODO(@ubik2): removed "list", since we handle that below
         required: ["op"],
-        additionalProperties: false,
       } as const satisfies JSONSchema,
     ).withTx(tx).get();
 
@@ -121,20 +118,12 @@ export function map(
         tx,
       );
       // Determine which mode we're in based on presence of params
-      const patternInputs = params !== undefined
-        ? {
-          // Closure mode: include params
-          element: inputsCell.key("list").key(initializedUpTo),
-          index: initializedUpTo,
-          array: inputsCell.key("list"),
-          params: inputsCell.key("params"),
-        }
-        : {
-          // Legacy mode: no params
-          element: inputsCell.key("list").key(initializedUpTo),
-          index: initializedUpTo,
-          array: inputsCell.key("list"),
-        };
+      const patternInputs = {
+        element: inputsCell.key("list").key(initializedUpTo),
+        index: initializedUpTo,
+        array: inputsCell.key("list"),
+        params: inputsCell.key("params"),
+      };
 
       runtime.runner.run(
         tx,
