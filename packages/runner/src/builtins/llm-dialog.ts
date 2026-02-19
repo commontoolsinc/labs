@@ -54,6 +54,35 @@ const REQUEST_TIMEOUT = 1000 * 60 * 5; // 5 minutes
 const TOOL_CALL_TIMEOUT = 1000 * 30 * 1; // 30 seconds
 
 /**
+ * Create a copy of a recipe with argumentSchema set to `false` on all node
+ * modules. This disables the strict argument validation in
+ * instantiateJavaScriptNode that was introduced by the unified traversal
+ * (5d352fc09). When argumentSchema is `false`, the action always runs
+ * regardless of whether validateAndTransform can match the data.
+ *
+ * This is needed for tool call patterns because:
+ * 1. `asOpaque` flags in schemas cause mismatches with $alias link schemas
+ * 2. Internal builtin nodes also have schema mismatches after the traversal change
+ * 3. "ref" type modules resolve to original registry entries, bypassing any
+ *    schema modifications on the recipe copy
+ *
+ * Setting argumentSchema to false is safe here because this only affects the
+ * ephemeral recipe copy created for this tool call invocation.
+ */
+function prepareRecipeForToolCall(recipe: Readonly<Recipe>): Recipe {
+  return {
+    ...recipe,
+    nodes: recipe.nodes.map((node) => ({
+      ...node,
+      module: {
+        ...node.module,
+        argumentSchema: false as unknown as JSONSchema,
+      },
+    })),
+  };
+}
+
+/**
  * Remove the injected `result` field from a JSON schema so tools don't
  * advertise it as an input parameter.
  */
@@ -1565,6 +1594,14 @@ function handleUpdateArgument(
 
 /**
  * Handles the invoke tool call (both pattern and handler execution).
+ *
+ * For patterns: starts the pattern via runtime.run(), then polls the result
+ * cell until a non-undefined value appears. This avoids relying on reactive
+ * sink subscriptions whose dependency tracking can miss changes through
+ * link chains.
+ *
+ * For handlers: uses the handler's onComplete callback for immediate
+ * resolution, falling back to polling the result cell.
  */
 async function handleInvoke(
   runtime: Runtime,
@@ -1572,6 +1609,7 @@ async function handleInvoke(
   resolved: ResolvedToolCall,
 ): Promise<{ type: string; value: any }> {
   const toolCall = resolved.call;
+  const startTime = Date.now();
 
   // Extract pattern/handler/params based on the resolved type
   let pattern: Readonly<Pattern> | undefined;
@@ -1592,22 +1630,34 @@ async function handleInvoke(
 
   const input = traverseAndCellify(runtime, space, toolCall.input) as object;
 
-  const { resolve, promise } = Promise.withResolvers<any>();
-
   // Create result cell reference that will be set in the transaction
   let result: Cell<any> = null as any;
+  let handlerResolved = false;
+  let _handlerResult: { value: any; summary: any } | undefined;
+
+  logger.info("tool-invoke", () => [
+    `Starting tool: ${toolCall.name} (${resolved.type})`,
+  ]);
 
   await runtime.editWithRetry((tx) => {
-    // Create the result cell within the transaction context
+    // Create the result cell WITHOUT a schema. Tool call results are read via
+    // getRaw() and traverseAndSerialize() below, not via schema-validated get().
+    // Using a schema here causes validateAndTransform to reject $alias structures
+    // that don't carry matching schema annotations (asOpaque, etc.).
     result = runtime.getCell<any>(
       space,
       toolCall.id,
-      pattern ? pattern.resultSchema : undefined,
+      undefined,
       tx,
     );
 
     if (pattern) {
-      runtime.run(tx, pattern, { ...input, ...extraParams }, result);
+      // Prepare the recipe for tool call execution by disabling strict argument
+      // validation on all nodes. The unified traversal (5d352fc09) made
+      // validateAndTransform too strict for tool call patterns where arguments
+      // are plain JSON values and internal nodes have schema mismatches.
+      const toolPattern = prepareRecipeForToolCall(pattern);
+      runtime.run(tx, toolPattern, { ...input, ...extraParams }, result);
     } else if (handler) {
       handler.withTx(tx).send({
         ...input,
@@ -1615,34 +1665,60 @@ async function handleInvoke(
       }, (completedTx: IExtendedStorageTransaction) => {
         const summary = formatTransactionSummary(completedTx, space);
         const value = result.withTx(completedTx);
-        resolve({ value, summary });
+        handlerResolved = true;
+        _handlerResult = { value, summary };
       });
     } else {
       throw new Error("Tool has neither pattern nor handler");
     }
   });
 
-  await runtime.idle();
+  // Poll the result cell until a value appears or timeout is reached.
+  // This replaces a previous sink-based approach where reactive dependency
+  // tracking through validateAndTransform could miss changes propagated
+  // through link chains, causing the subscription to never re-fire.
+  const deadline = Date.now() + TOOL_CALL_TIMEOUT;
+  const POLL_INTERVAL = 200;
 
-  // Wait for the pattern/handler to complete and write the result
-  const cancel = result.sink((r) => {
-    r !== undefined && resolve(r);
-  });
+  let pollCount = 0;
+  while (Date.now() < deadline) {
+    // Let the scheduler process pending work
+    await runtime.idle();
+    pollCount++;
 
-  let timeout;
-  const timeoutPromise = new Promise((_, reject) => {
-    timeout = setTimeout(() => {
-      reject(new Error("Tool call timed out"));
-    }, TOOL_CALL_TIMEOUT);
-  }).then(() => {
+    // For handlers, check the callback first
+    if (handlerResolved) {
+      logger.info("tool-invoke", () => [
+        `Tool completed via handler callback: ${toolCall.name} (${
+          Date.now() - startTime
+        }ms)`,
+      ]);
+      break;
+    }
+
+    // Check if the result cell has any data. Use get() without a strict
+    // schema (the cell was created without one) so aliases are followed
+    // using the default "any" schema without strict type validation.
+    const val = result.get();
+    if (val !== undefined) {
+      logger.info("tool-invoke", () => [
+        `Tool completed via result cell: ${toolCall.name} (${
+          Date.now() - startTime
+        }ms, ${pollCount} polls)`,
+      ]);
+      break;
+    }
+
+    // Sleep briefly before next poll to avoid busy-waiting
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL));
+  }
+
+  // Check if we timed out
+  if (!handlerResolved && result.get() === undefined) {
+    logger.warn("tool-invoke", () => [
+      `Tool timed out: ${toolCall.name} after ${TOOL_CALL_TIMEOUT}ms`,
+    ]);
     throw new Error("Tool call timed out");
-  });
-
-  try {
-    await Promise.race([promise, timeoutPromise]);
-  } finally {
-    clearTimeout(timeout);
-    cancel();
   }
 
   // Get the actual entity ID from the result cell
