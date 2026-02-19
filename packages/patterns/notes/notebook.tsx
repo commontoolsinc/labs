@@ -921,7 +921,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
 
     return {
       // Include 📓 marker in NAME for reliable identification through proxy
-      [NAME]: computed(() => `📓 ${title} (${noteCount})`),
+      [NAME]: computed(() => `📓 ${title.get()} (${noteCount})`),
       isNotebook,
       isHidden,
       [UI]: (
