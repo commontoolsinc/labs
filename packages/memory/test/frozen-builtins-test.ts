@@ -256,5 +256,13 @@ describe("frozen-builtins", () => {
         "Cannot mutate a FrozenDate",
       );
     });
+
+    it("throws on setYear() (legacy method)", () => {
+      const fd = new FrozenDate("2024-01-01");
+      // deno-lint-ignore no-explicit-any
+      expect(() => (fd as any).setYear(99)).toThrow(
+        "Cannot mutate a FrozenDate",
+      );
+    });
   });
 });

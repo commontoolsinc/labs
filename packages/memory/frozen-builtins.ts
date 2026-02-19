@@ -173,4 +173,8 @@ export class FrozenDate extends Date {
   ): number {
     this.#throw();
   }
+  /** @deprecated Legacy method; guarded for completeness. */
+  setYear(_year: number): number {
+    this.#throw();
+  }
 }
