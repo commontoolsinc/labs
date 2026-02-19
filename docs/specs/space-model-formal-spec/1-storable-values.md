@@ -138,13 +138,21 @@ type StorableNativeObject =
   | Set<StorableValue | StorableNativeObject>
   | Date
   | Uint8Array
-  | Blob;
+  | Blob
+  | { toJSON(): string }; // Legacy — see below.
 ```
 
 The `StorableNativeObject` type exists solely at function parameter/return
 boundaries — for example, `toStorableValue()` accepts
 `StorableValue | StorableNativeObject` as input (Section 8). It is never a
 member of `StorableValue` or `StorableDatum`.
+
+> **Legacy: `{ toJSON(): string }` variant.** The `toJSON()` arm of
+> `StorableNativeObject` represents objects that provide a `toJSON()` method
+> returning a string. The conversion functions call `toJSON()` and process the
+> result (Section 8.2). This variant is **legacy and marked for removal** —
+> callers should migrate to the storable protocol
+> (`[DECONSTRUCT]`/`[RECONSTRUCT]`). See Section 7.1 for migration guidance.
 
 ### 1.3 Primitive Types
 
@@ -1846,7 +1854,8 @@ if the value is:
 - A primitive (`null`, `boolean`, `number` (finite), `string`, `undefined`,
   `bigint`)
 - A `StorableInstance` (including the native object wrapper classes)
-- A `StorableNativeObject` (`Error`, `Map`, `Set`, `Date`, `Uint8Array`)
+- A `StorableNativeObject` (`Error`, `Map`, `Set`, `Date`, `Uint8Array`,
+  or an object with a `toJSON()` method — legacy)
 - An array where every present element satisfies `canBeStored()`
 - A plain object where every value satisfies `canBeStored()`
 
@@ -1862,13 +1871,12 @@ etc.).
 > `toDeepStorableValueOrThrow()` directly (and catching the error) avoids
 > walking the tree twice.
 
-> **Legacy `toJSON()` caveat.** The type predicate narrows to
-> `StorableValue | StorableNativeObject`, which reflects the non-legacy storage
-> model. However, `canBeStored()` also returns `true` for objects with a
-> `toJSON()` method (legacy support — see Section 7.1). Such objects are not
-> covered by the type predicate narrowing. Callers using `canBeStored()` as a
-> type guard should be aware of this gap; it will be resolved when `toJSON()`
-> support is removed.
+> **Legacy `toJSON()` note.** The type predicate narrows to
+> `StorableValue | StorableNativeObject`. Because `StorableNativeObject`
+> includes the legacy `{ toJSON(): string }` variant (Section 1.2),
+> `canBeStored()` returns `true` — and the predicate correctly narrows — for
+> objects with a `toJSON()` method. This variant is legacy and will be removed
+> along with `toJSON()` support (see Section 7.1).
 
 ### 8.5 `nativeValueFromStorableValue()`
 
