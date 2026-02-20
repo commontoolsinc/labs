@@ -207,7 +207,7 @@ Navigate back to the space home.
 
 ### Step 13: Suggestion Refinement / Follow-up
 
-Back on the space home, find a do-list item with a completed suggestion (expand it if collapsed). Below the suggestion result, there is a **"Refine suggestion..."** input (`ct-prompt-input`). This allows you to continue the conversation with the suggestion LLM.
+Back on the space home, find a do-list item with a completed suggestion (expand it if collapsed). The **"Refine suggestion..."** input is hidden by default. To reveal it, click the **"+"** button on the `ct-message-beads` widget (the row of colored dots at the bottom of the suggestion). This toggles the `ct-prompt-input` visible, which allows you to continue the conversation with the suggestion LLM.
 
 For the **budget item**, type a refinement like:
 > Actually I need to include a standing desk — reallocate the budget to fit one in under $500
@@ -333,7 +333,7 @@ These were discovered during tour runs and should be expected:
 
 8. **Grid view is a separate piece, not an in-page toggle.** Click the `ct-cell-link` chip next to the "Recent" or "Pieces" heading to navigate to the PieceGrid view.
 
-9. **Suggestion refinement input.** The `ct-prompt-input` with "Refine suggestion..." placeholder is inside the expanded AI Suggestions area, below the result. It may not be visible until a suggestion completes.
+9. **Suggestion refinement input requires clicking "+".** The "Refine suggestion..." input is hidden by default. To reveal it, click the **"+"** button on the `ct-message-beads` widget (the row of colored dots). This toggles the `ct-prompt-input` visible below the beads. The input has a Send button and a file upload (paperclip) icon.
 
 12. **Content area scrolling.** The space home content (do-list, pieces) is inside a scrollable container within shadow DOM. `window.scrollBy()` does NOT work. To scroll, use JS eval to find the scrollable container and call `scrollBy()` on it:
     ```js
@@ -361,6 +361,10 @@ These were discovered during tour runs and should be expected:
 10. **Do-list indentation.** The Omnibot uses `indent` values (0=root, 1=subtask, 2=sub-subtask) when rearranging items. The visual indentation in the do-list reflects this hierarchy.
 
 11. **Newlines in `agent-browser type` trigger Enter/submit.** Never include newlines in typed text — the chat input interprets them as send. Write everything on one line.
+
+13. **Omnibox dismissal eats the first click.** After using the Omnibot to add items, clicking anywhere on the page first dismisses the omnibox panel — it does NOT also interact with whatever is underneath. You need a second click to actually interact with elements like AI Suggestions disclosures. Tip: once you see items appear in the do-list, you can immediately click the page to dismiss the omnibox rather than waiting for the LLM to finish its full response.
+
+14. **Don't wait for Omnibot "complete" to proceed.** When adding do-list items, the items appear in the list as soon as the `addDoItems` tool executes. The LLM may continue generating a text summary after that — you don't need to wait for it. Dismiss the omnibox and move on.
 
 ## Rules
 

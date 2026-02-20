@@ -322,8 +322,14 @@ Be matter-of-fact. Prefer action to explanation.`;
                 null,
               )}
 
-              {/* Prompt input - always at bottom */}
+              {/* Message beads + prompt input - always at bottom */}
               <div style="padding: 0.5rem; flex-shrink: 0;">
+                <div style="padding: 0 0.25rem 0.25rem;">
+                  <ct-message-beads
+                    $messages={omnibot.messages}
+                    pending={omnibot.pending}
+                  />
+                </div>
                 {omnibot.ui.promptInput}
               </div>
             </div>,

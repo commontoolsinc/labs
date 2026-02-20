@@ -90,6 +90,8 @@ export default pattern<
     const profileCtx = profileContext;
     return `Find a useful pattern, run it, then call presentResult with the cell link.${profileCtx}
 
+    Your textual responses are invisible to the user, they can only see the presented result.
+
 Use the user context above to personalize your suggestions when relevant.`;
   });
 
@@ -108,7 +110,7 @@ Use the user context above to personalize your suggestions when relevant.`;
       listPatternIndex: patternTool(listPatternIndex),
       bash: patternTool(bash, { sandboxId }),
     },
-    model: "anthropic:claude-haiku-4-5",
+    model: "anthropic:claude-sonnet-4-5",
     context,
     resultSchema: toSchema<{ cell: Writable<any> }>(),
   });
@@ -135,7 +137,10 @@ Use the user context above to personalize your suggestions when relevant.`;
           result: llmResult,
         })}
       />
-      <ct-cell-link $cell={llmResult} style={computed(() => llmResult ? "" : "display:none")} />
+      <ct-cell-link
+        $cell={llmResult}
+        style={computed(() => (llmResult ? "" : "display:none"))}
+      />
       <ct-cell-context $cell={llmResult}>
         {ifElse(
           computed(() => !!llmResult),
@@ -152,7 +157,7 @@ Use the user context above to personalize your suggestions when relevant.`;
       <ct-prompt-input
         placeholder="Refine suggestion..."
         pending={pending}
-        style={computed(() => showRefine.get() ? "" : "display:none")}
+        style={computed(() => (showRefine.get() ? "" : "display:none"))}
         onct-send={sendMessage({ addMessage })}
       />
     </div>

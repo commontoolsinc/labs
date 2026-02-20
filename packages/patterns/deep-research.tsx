@@ -71,14 +71,17 @@ export default pattern<
   },
   { result: any; [UI]: VNode }
 >(({ situation, messages, context }) => {
-  const systemPrompt = computed(() =>
-    `You are a deep research agent. Given a question, use the available tools to:
+  const systemPrompt = computed(
+    () =>
+      `You are a deep research agent. Given a question, use the available tools to:
 1. Search the web for relevant information
 2. Read promising web pages to gather detailed content
 3. Synthesize your findings into a comprehensive answer
 
+Your textual responses are invisible to the user, they can only see the presented result.
+
 Be thorough - search for multiple aspects of the question and read several sources before forming your answer.
-When done, call presentResult with your structured findings.`
+When done, call presentResult with your structured findings.`,
   );
 
   const {
@@ -119,22 +122,28 @@ When done, call presentResult with your structured findings.`
           onct-refine={showRefineInput({ showRefine })}
         />
         <div>
-          <h3>{computed(() => result?.summary ? "Summary" : "")}</h3>
+          <h3>{computed(() => (result?.summary ? "Summary" : ""))}</h3>
           <p>{computed(() => result?.summary ?? "")}</p>
           <p>
             <em>
               {computed(() =>
-                result?.confidence ? `Confidence: ${result.confidence}` : ""
+                result?.confidence ? `Confidence: ${result.confidence}` : "",
               )}
             </em>
           </p>
-          <h3>{computed(() => result?.sources?.length ? "Sources" : "")}</h3>
+          <h3>{computed(() => (result?.findings?.length ? "Findings" : ""))}</h3>
+          <p style="white-space:pre-wrap">{computed(() =>
+            result?.findings?.map((f: any) =>
+              `${f.title}\n${f.content}\n(${f.source})`
+            ).join("\n\n") ?? "",
+          )}</p>
+          <h3>{computed(() => (result?.sources?.length ? "Sources" : ""))}</h3>
           <p>{computed(() => result?.sources?.join("\n") ?? "")}</p>
         </div>
         <ct-prompt-input
           placeholder="Refine research..."
           pending={pending}
-          style={computed(() => showRefine.get() ? "" : "display:none")}
+          style={computed(() => (showRefine.get() ? "" : "display:none"))}
           onct-send={sendMessage({ addMessage })}
         />
       </div>

@@ -201,10 +201,7 @@ const DoItemCard = pattern<
             style="flex: 1;"
             placeholder="Item..."
           />
-          <ct-button
-            variant="ghost"
-            onClick={() => removeItem.send({ item })}
-          >
+          <ct-button variant="ghost" onClick={() => removeItem.send({ item })}>
             x
           </ct-button>
         </ct-hstack>
@@ -244,25 +241,16 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
   // Compact UI - embeddable widget without ct-screen wrapper
   const compactUI = (
     <ct-vstack gap="2">
-      <ct-hstack justify="between" align="center">
-        <ct-heading level={5}>Do List</ct-heading>
-        <span style="font-size: 0.875rem; color: var(--ct-color-gray-500);">
-          {itemCount} items
-        </span>
-      </ct-hstack>
-
       <ct-vstack gap="2">
         {items.map((item) => (
           <DoItemCard item={item} removeItem={removeItem} />
         ))}
 
-        {hasNoItems
-          ? (
-            <div style="text-align: center; color: var(--ct-color-gray-500); padding: 1rem;">
-              No items yet. Add one below!
-            </div>
-          )
-          : null}
+        {hasNoItems ? (
+          <div style="text-align: center; color: var(--ct-color-gray-500); padding: 1rem;">
+            No items yet. Add one below!
+          </div>
+        ) : null}
       </ct-vstack>
 
       <ct-message-input
@@ -278,9 +266,7 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
   );
 
   return {
-    [NAME]: computed(() =>
-      `Do List (${items.get().length})`
-    ),
+    [NAME]: computed(() => `Do List (${items.get().length})`),
     [UI]: (
       <ct-screen>
         <ct-vstack slot="header" gap="1">
@@ -298,13 +284,11 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
               <DoItemCard item={item} removeItem={removeItem} />
             ))}
 
-            {hasNoItems
-              ? (
-                <div style="text-align: center; color: var(--ct-color-gray-500); padding: 2rem;">
-                  No items yet. Add one below!
-                </div>
-              )
-              : null}
+            {hasNoItems ? (
+              <div style="text-align: center; color: var(--ct-color-gray-500); padding: 2rem;">
+                No items yet. Add one below!
+              </div>
+            ) : null}
           </ct-vstack>
         </ct-vscroll>
 
