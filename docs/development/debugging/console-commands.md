@@ -143,6 +143,35 @@ await commontools.rt.setLoggerEnabled(true)            // enable all
 await commontools.rt.setLoggerEnabled(false, "runner") // disable one
 ```
 
+## VDOM Debug Helpers
+
+Inspect the VDOM tree structure and applicator state. See
+[VDOM Debug Helpers](vdom-debug.md) for full documentation.
+
+```javascript
+// List all active renderings
+commontools.vdom.renders()
+
+// Pretty-print the VDOM tree
+await commontools.vdom.dump()
+
+// Get the raw VDOM tree object (children expanded, props as CellHandles)
+await commontools.vdom.tree()
+
+// Node/listener counts per renderer
+commontools.vdom.stats()
+
+// Look up a DOM node by applicator node ID
+commontools.vdom.nodeForId(1)
+
+// Target a specific render by index or container element
+await commontools.vdom.dump(0)
+await commontools.vdom.dump(document.querySelector('#my-container'))
+
+// Raw access to the active renders registry
+commontools.vdom.registry
+```
+
 ## Quick Reference
 
 | Command | Description |
@@ -167,3 +196,9 @@ await commontools.rt.setLoggerEnabled(false, "runner") // disable one
 | `commontools.rt.setLoggerLevel(lvl, name?)` | Set worker logger level |
 | `commontools.rt.setLoggerEnabled(on, name?)` | Enable/disable worker logger |
 | `commontools.rt.getLoggerCounts()` | Get worker logger counts/timing/flags |
+| `commontools.vdom.renders()` | List active renderings |
+| `commontools.vdom.tree(el?)` | Raw VDOM tree object |
+| `commontools.vdom.dump(el?)` | Pretty-print VDOM tree |
+| `commontools.vdom.stats()` | Node/listener counts per renderer |
+| `commontools.vdom.nodeForId(id, el?)` | Look up DOM node by ID |
+| `commontools.vdom.registry` | Raw active renders registry |

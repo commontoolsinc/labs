@@ -236,6 +236,34 @@ export class DomApplicator {
     ]);
   }
 
+  /**
+   * Return a snapshot of internal state for debugging.
+   * Returns live maps directly (no clone cost, fine for debug).
+   */
+  getDebugInfo(): {
+    nodeCount: number;
+    listenerCount: number;
+    totalListeners: number;
+    rootNodeId: number | null;
+    nodes: Map<number, Node>;
+    nodeParents: Map<number, number>;
+    nodeChildren: Map<number, Set<number>>;
+  } {
+    let totalListeners = 0;
+    for (const listeners of this.eventListeners.values()) {
+      totalListeners += listeners.size;
+    }
+    return {
+      nodeCount: this.nodes.size,
+      listenerCount: this.eventListeners.size,
+      totalListeners,
+      rootNodeId: this.rootNodeId,
+      nodes: this.nodes,
+      nodeParents: this.nodeParents,
+      nodeChildren: this.nodeChildren,
+    };
+  }
+
   // ============== Operation Implementations ==============
 
   private createElement(nodeId: number, tagName: string): void {

@@ -12,7 +12,8 @@
     "./mock-doc": "./src/mock-doc.ts",
     "./worker": "./src/worker/mod.ts",
     "./main": "./src/main/mod.ts",
-    "./vdom-ops": "./src/vdom-ops.ts"
+    "./vdom-ops": "./src/vdom-ops.ts",
+    "./debug": "./src/debug.ts"
   },
   "imports": {
     "htmlparser2": "npm:htmlparser2",

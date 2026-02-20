@@ -30,6 +30,21 @@ import { rendererVDOMSchema } from "@commontools/runner/schemas";
 import { VDomRenderer } from "./main/renderer.ts";
 //import { animate } from "./debug-element.ts";
 
+/** Tracks an active rendering for debug inspection. */
+export interface ActiveRender {
+  parent: HTMLElement;
+  cell: CellHandle<VNode> | null;
+  renderer: VDomRenderer | null;
+  path: "worker" | "legacy";
+}
+
+const activeRenders = new Map<HTMLElement, ActiveRender>();
+
+/** Get a read-only view of all active renderings. */
+export function getActiveRenders(): ReadonlyMap<HTMLElement, ActiveRender> {
+  return activeRenders;
+}
+
 export interface RenderOptions {
   setProp?: SetPropHandler;
   document?: Document;
@@ -96,6 +111,14 @@ function renderViaWorker(
     setProp: options.setProp,
   });
 
+  // Register in active renders registry
+  activeRenders.set(parent, {
+    parent,
+    cell: cellHandle,
+    renderer,
+    path: "worker",
+  });
+
   // Start rendering asynchronously
   let cancelAsync: (() => Promise<void>) | null = null;
   let disposed = false;
@@ -120,6 +143,7 @@ function renderViaWorker(
   // Return synchronous cancel function
   return () => {
     disposed = true;
+    activeRenders.delete(parent);
     if (cancelAsync) {
       cancelAsync().catch(() => {});
     }
@@ -144,9 +168,17 @@ function renderLegacy(
     view = view.asSchema(rendererVDOMSchema) as CellHandle<VNode>;
   }
 
+  // Register in active renders registry
+  activeRenders.set(parent, {
+    parent,
+    cell: rootCell ?? null,
+    renderer: null,
+    path: "legacy",
+  });
+
   const optionsWithCell = rootCell ? { ...options, rootCell } : options;
 
-  return effect(view as VNode, (value: VNode | undefined) => {
+  const cancelEffect = effect(view as VNode, (value: VNode | undefined) => {
     if (!value) {
       return;
     }
@@ -156,6 +188,11 @@ function renderLegacy(
     }
     return renderImpl(parent, value, optionsWithCell, visited);
   });
+
+  return () => {
+    activeRenders.delete(parent);
+    cancelEffect();
+  };
 }
 
 export const renderImpl = (
