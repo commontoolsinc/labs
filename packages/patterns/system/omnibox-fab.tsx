@@ -278,6 +278,7 @@ Be matter-of-fact. Prefer action to explanation.`;
       messages: omnibot.messages,
       [UI]: (
         <ct-drop-zone
+          style="position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); width: 360px; height: 48px; z-index: 997;"
           onct-drop={handleDropToPin({
             pinToChat: omnibot.pinToChat,
             fabExpanded,
@@ -296,8 +297,8 @@ Be matter-of-fact. Prefer action to explanation.`;
             {ifElse(
               fabExpanded,
               <div style="width: 100%; display: flex; flex-direction: column; max-height: 580px;">
-                {/* Chevron at top - the "handle" for the drawer */}
-                <div style="border-bottom: 1px solid #e5e5e5; flex-shrink: 0;">
+                {/* Chevron to expand chat history */}
+                <div style="display: flex; justify-content: center; flex-shrink: 0;">
                   <ct-chevron-button
                     expanded={showHistory}
                     loading={omnibot.pending}
@@ -305,6 +306,7 @@ Be matter-of-fact. Prefer action to explanation.`;
                   />
                 </div>
 
+                {/* Expandable chat history */}
                 <div
                   style={computed(() => {
                     const show = showHistory.get();
@@ -314,12 +316,12 @@ Be matter-of-fact. Prefer action to explanation.`;
                       show ? "1" : "0"
                     }; max-height: ${
                       show ? "480px" : "0"
-                    }; overflow: hidden; transition: opacity 300ms ease, max-height 400ms cubic-bezier(0.34, 1.56, 0.64, 1), flex 400ms cubic-bezier(0.34, 1.56, 0.64, 1); pointer-events: ${
+                    }; overflow: hidden; transition: opacity 200ms ease, max-height 300ms ease; pointer-events: ${
                       show ? "auto" : "none"
                     };`;
                   })}
                 >
-                  <div style="padding: .25rem; flex-shrink: 0;">
+                  <div style="padding: 4px 8px; flex-shrink: 0;">
                     {omnibot.ui.attachmentsAndTools}
                   </div>
                   <div style="flex: 1; overflow-y: auto; min-height: 0;">
@@ -336,7 +338,7 @@ Be matter-of-fact. Prefer action to explanation.`;
                     return !show && latestAssistantMessage &&
                       assistantMessageCount !== dismissedIdx;
                   }),
-                  <div style="margin: .5rem; margin-bottom: 0; padding: 0; flex-shrink: 0; position: relative;">
+                  <div style="margin: 4px 8px 0; padding: 0; flex-shrink: 0; position: relative;">
                     <ct-button
                       variant="ghost"
                       size="icon"
@@ -366,8 +368,8 @@ Be matter-of-fact. Prefer action to explanation.`;
                   null,
                 )}
 
-                {/* Prompt input - always at bottom */}
-                <div style="padding: 0.5rem; flex-shrink: 0;">
+                {/* Prompt input */}
+                <div style="padding: 4px 8px 8px; flex-shrink: 0;">
                   {omnibot.ui.promptInput}
                 </div>
               </div>,
@@ -378,7 +380,9 @@ Be matter-of-fact. Prefer action to explanation.`;
               slot="collapsed"
               $messages={omnibot.messages}
               pending={omnibot.pending}
-            />
+            >
+              Ask about anything...
+            </ct-message-beads>
           </ct-fab>
         </ct-drop-zone>
       ),

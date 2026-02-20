@@ -211,14 +211,15 @@ export class CTFab extends BaseElement {
         /* Expanded state */
         :host([expanded]) .fab {
           width: min(560px, calc(100vw - 48px));
-          min-height: 128px;
+          min-height: 80px;
           max-height: 90vh;
           height: auto;
-          border-radius: 6px;
+          border-radius: 12px;
           cursor: default;
           background: var(--ct-theme-color-background, #fafafa);
           overflow: visible;
-          border: 1px solid var(--ct-theme-color-border, #ccc);
+          border: 1px solid var(--ct-theme-color-border, #e5e5e5);
+          box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
         }
 
         /* Mobile responsive - don't exceed viewport */
@@ -276,10 +277,10 @@ export class CTFab extends BaseElement {
         .fab-collapsed {
           display: flex;
           align-items: center;
-          justify-content: center;
           gap: 8px;
           padding: 0 16px;
           width: 100%;
+          height: 48px;
           pointer-events: none;
           opacity: 1;
           transform: scale(1);
@@ -297,7 +298,10 @@ export class CTFab extends BaseElement {
             text-overflow: ellipsis;
           }
 
-          :host([expanded]) .fab-collapsed,
+          :host([expanded]) .fab-collapsed {
+            display: none;
+          }
+
           :host([collapsing]) .fab-collapsed {
             opacity: 0;
             transform: scale(0.95);
@@ -354,7 +358,7 @@ export class CTFab extends BaseElement {
             /* Panel content */
             .fab-panel {
               width: 100%;
-              height: 100%;
+              display: none;
               opacity: 0;
               transform: scale(0.95);
               pointer-events: none;
@@ -365,6 +369,7 @@ export class CTFab extends BaseElement {
               }
 
               :host([expanded]) .fab-panel {
+                display: block;
                 opacity: 1;
                 transform: scale(1);
                 pointer-events: auto;
@@ -372,6 +377,7 @@ export class CTFab extends BaseElement {
               }
 
               :host([collapsing]) .fab-panel {
+                display: block;
                 opacity: 0;
                 transform: scale(0.95);
                 pointer-events: none;
@@ -456,11 +462,17 @@ export class CTFab extends BaseElement {
           override connectedCallback() {
             super.connectedCallback();
             document.addEventListener("keydown", this._handleKeydown);
+            globalThis.addEventListener("click", this._handleWindowClick, true);
           }
 
           override disconnectedCallback() {
             super.disconnectedCallback();
             document.removeEventListener("keydown", this._handleKeydown);
+            globalThis.removeEventListener(
+              "click",
+              this._handleWindowClick,
+              true,
+            );
             if (this.collapseTimeout !== null) {
               clearTimeout(this.collapseTimeout);
             }
@@ -547,9 +559,20 @@ export class CTFab extends BaseElement {
             }
           };
 
-          private _handleBackdropClick = (e: MouseEvent) => {
-            if (this.expanded) {
-              e.stopPropagation(); // Prevent event from bubbling to host element's onClick
+          private _handleWindowClick = (e: MouseEvent) => {
+            if (!this.expanded) return;
+
+            // Check if click was inside the fab panel
+            const fabEl = this.shadowRoot?.querySelector(".fab");
+            if (!fabEl) return;
+
+            const rect = fabEl.getBoundingClientRect();
+            const inside = e.clientX >= rect.left &&
+              e.clientX <= rect.right &&
+              e.clientY >= rect.top &&
+              e.clientY <= rect.bottom;
+
+            if (!inside) {
               this.emit("ct-fab-backdrop-click");
             }
           };
@@ -578,10 +601,9 @@ export class CTFab extends BaseElement {
           override render() {
             const previewMsg = this._resolvedPreviewMessage;
             return html`
-              <!-- Backdrop -->
+              <!-- Backdrop visual (blur effect with mask) -->
               <div
                 class="backdrop ${this.expanded ? "active" : ""}"
-                @click="${this._handleBackdropClick}"
                 part="backdrop"
               >
               </div>
