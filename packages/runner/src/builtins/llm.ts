@@ -806,7 +806,7 @@ export function generateObject<T extends Record<string, unknown>>(
     const hasTools = isObject(tools) && Object.keys(tools).length > 0;
 
     if (hasTools) {
-      // Use tool-calling path with finalResult builtin tool
+      // Use tool-calling path with presentResult builtin tool
       const llmParams: LLMRequest = {
         system: (system ?? "") + contextDocs,
         messages: requestMessages,
@@ -859,7 +859,7 @@ export function generateObject<T extends Record<string, unknown>>(
           thisRun,
         );
 
-      // Build tool catalog with finalResult tool
+      // Build tool catalog with presentResult tool
       const resultPromise = (async () => {
         try {
           const toolsCell = inputs.key("tools").asSchema({

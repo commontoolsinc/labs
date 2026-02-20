@@ -15,5 +15,3 @@ export class CTAutostart extends BaseElement {
     }
   }
 }
-
-globalThis.customElements.define("ct-autostart", CTAutostart);

@@ -2,8 +2,8 @@
  * Integration tests for generateObject with tool calling support.
  *
  * These tests verify that the generateObject builtin correctly:
- * 1. Adds the finalResult tool to the tool catalog when tools are provided
- * 2. Handles multi-step tool calling (user tools + finalResult)
+ * 1. Adds the presentResult tool to the tool catalog when tools are provided
+ * 2. Handles multi-step tool calling (user tools + presentResult)
  * 3. Maintains backward compatibility when no tools are provided
  */
 
@@ -68,7 +68,7 @@ describe("generateObject with tools", () => {
     await storageManager?.close();
   });
 
-  it("should add finalResult tool to catalog and extract structured result", async () => {
+  it("should add presentResult tool to catalog and extract structured result", async () => {
     // Define a simple schema for the expected result
     const resultSchema: JSONSchema = {
       type: "object",
@@ -79,30 +79,30 @@ describe("generateObject with tools", () => {
       required: ["name", "age"],
     };
 
-    const testPrompt = "test-finalResult-person-with-name-and-age";
+    const testPrompt = "test-presentResult-person-with-name-and-age";
 
-    // Mock the LLM response to include a finalResult tool call
+    // Mock the LLM response to include a presentResult tool call
     addMockResponse(
       (req) => {
-        // Match on unique prompt and verify finalResult tool is present
+        // Match on unique prompt and verify presentResult tool is present
         return req.messages.some((m) =>
           typeof m.content === "string" && m.content.includes(testPrompt)
-        ) && req.tools?.["finalResult"] !== undefined;
+        ) && req.tools?.["presentResult"] !== undefined;
       },
       {
         role: "assistant",
         content: [
           {
             type: "tool-call",
-            toolCallId: "call_finalResult_1",
-            toolName: "finalResult",
+            toolCallId: "call_presentResult_1",
+            toolName: "presentResult",
             input: {
               name: "Alice",
               age: 30,
             },
           },
         ],
-        id: "mock-finalResult-response",
+        id: "mock-presentResult-response",
       },
     );
 
@@ -124,7 +124,7 @@ describe("generateObject with tools", () => {
 
     const resultCell = runtime.getCell(
       space,
-      "generateObject-finalResult-test",
+      "generateObject-presentResult-test",
       testPattern.resultSchema,
       tx,
     );
@@ -204,7 +204,7 @@ describe("generateObject with tools", () => {
     });
   });
 
-  it("should handle errors when finalResult is never called", async () => {
+  it("should handle errors when presentResult is never called", async () => {
     const resultSchema: JSONSchema = {
       type: "object",
       properties: {
@@ -213,23 +213,23 @@ describe("generateObject with tools", () => {
       required: ["value"],
     };
 
-    const testPrompt = "test-error-no-finalResult-number";
+    const testPrompt = "test-error-no-presentResult-number";
 
-    // Mock response that never calls finalResult
+    // Mock response that never calls presentResult
     addMockResponse(
       (req) =>
         req.messages.some((m) =>
           typeof m.content === "string" && m.content.includes(testPrompt)
-        ) && req.tools?.["finalResult"] !== undefined,
+        ) && req.tools?.["presentResult"] !== undefined,
       {
         role: "assistant",
         content: [
           {
             type: "text",
-            text: "I refuse to call finalResult",
+            text: "I refuse to call presentResult",
           },
         ],
-        id: "mock-no-finalResult",
+        id: "mock-no-presentResult",
       },
     );
 
@@ -265,7 +265,7 @@ describe("generateObject with tools", () => {
     expect(result.key("result").get()).toBeUndefined();
   });
 
-  it("should pass schema to finalResult tool inputSchema", async () => {
+  it("should pass schema to presentResult tool inputSchema", async () => {
     let capturedToolSchema: JSONSchema | undefined;
 
     const resultSchema: JSONSchema = {
@@ -288,11 +288,11 @@ describe("generateObject with tools", () => {
         const matches =
           req.messages.some((m) =>
             typeof m.content === "string" && m.content.includes(testPrompt)
-          ) && req.tools?.["finalResult"] !== undefined;
+          ) && req.tools?.["presentResult"] !== undefined;
 
-        // Capture the schema from the finalResult tool
-        if (matches && req.tools?.["finalResult"]) {
-          capturedToolSchema = req.tools["finalResult"].inputSchema;
+        // Capture the schema from the presentResult tool
+        if (matches && req.tools?.["presentResult"]) {
+          capturedToolSchema = req.tools["presentResult"].inputSchema;
         }
         return matches;
       },
@@ -301,8 +301,8 @@ describe("generateObject with tools", () => {
         content: [
           {
             type: "tool-call",
-            toolCallId: "call_finalResult_schema",
-            toolName: "finalResult",
+            toolCallId: "call_presentResult_schema",
+            toolName: "presentResult",
             input: {
               items: ["a", "b", "c"],
               total: 3,
@@ -344,7 +344,7 @@ describe("generateObject with tools", () => {
 
     await runtime.idle();
 
-    // Verify the schema was passed correctly to finalResult tool
+    // Verify the schema was passed correctly to presentResult tool
     expect(capturedToolSchema).toEqual(resultSchema);
   });
 
@@ -374,14 +374,14 @@ describe("generateObject with tools", () => {
       (req) =>
         req.messages.some((m) =>
           typeof m.content === "string" && m.content.includes(testPrompt)
-        ) && req.tools?.["finalResult"] !== undefined,
+        ) && req.tools?.["presentResult"] !== undefined,
       {
         role: "assistant",
         content: [
           {
             type: "tool-call",
             toolCallId: "call_nested_schema",
-            toolName: "finalResult",
+            toolName: "presentResult",
             input: {
               user: {
                 name: "Bob",
@@ -460,7 +460,7 @@ describe("generateObject with tools", () => {
         const matches =
           req.messages.some((m) =>
             typeof m.content === "string" && m.content.includes(uniqueMarker)
-          ) && req.tools?.["finalResult"] !== undefined;
+          ) && req.tools?.["presentResult"] !== undefined;
 
         if (matches) {
           capturedMessages = req.messages;
@@ -473,7 +473,7 @@ describe("generateObject with tools", () => {
           {
             type: "tool-call",
             toolCallId: "call_messages_test",
-            toolName: "finalResult",
+            toolName: "presentResult",
             input: {
               response: "Final response",
             },
@@ -522,7 +522,7 @@ describe("generateObject with tools", () => {
     );
   });
 
-  it("should handle multiple tool calls with handler-based tools before finalResult", async () => {
+  it("should handle multiple tool calls with handler-based tools before presentResult", async () => {
     const resultSchema: JSONSchema = {
       type: "object",
       properties: {
@@ -546,7 +546,7 @@ describe("generateObject with tools", () => {
         ) &&
         req.tools?.["getData"] !== undefined &&
         req.tools?.["countItems"] !== undefined &&
-        req.tools?.["finalResult"] !== undefined,
+        req.tools?.["presentResult"] !== undefined,
       {
         role: "assistant",
         content: [
@@ -585,7 +585,7 @@ describe("generateObject with tools", () => {
       },
     );
 
-    // Step 3: After countItems result, call finalResult
+    // Step 3: After countItems result, call presentResult
     addMockResponse(
       (req) =>
         req.messages.some((m: any) =>
@@ -600,8 +600,8 @@ describe("generateObject with tools", () => {
         content: [
           {
             type: "tool-call",
-            toolCallId: "call_finalResult_1",
-            toolName: "finalResult",
+            toolCallId: "call_presentResult_1",
+            toolName: "presentResult",
             input: {
               summary: "Found 3 items",
               count: 3,
@@ -702,7 +702,7 @@ describe("generateObject with tools", () => {
     });
   });
 
-  it("should handle multiple tool calls with patternTool-based tools before finalResult", async () => {
+  it("should handle multiple tool calls with patternTool-based tools before presentResult", async () => {
     const resultSchema: JSONSchema = {
       type: "object",
       properties: {
@@ -723,7 +723,7 @@ describe("generateObject with tools", () => {
         ) &&
         req.tools?.["listItems"] !== undefined &&
         req.tools?.["countItems"] !== undefined &&
-        req.tools?.["finalResult"] !== undefined,
+        req.tools?.["presentResult"] !== undefined,
       {
         role: "assistant",
         content: [
@@ -762,7 +762,7 @@ describe("generateObject with tools", () => {
       },
     );
 
-    // Step 3: After countItems result, call finalResult
+    // Step 3: After countItems result, call presentResult
     addMockResponse(
       (req) =>
         req.messages.some((m: any) =>
@@ -777,8 +777,8 @@ describe("generateObject with tools", () => {
         content: [
           {
             type: "tool-call",
-            toolCallId: "call_finalResult_1",
-            toolName: "finalResult",
+            toolCallId: "call_presentResult_1",
+            toolName: "presentResult",
             input: {
               name: "Item Collection",
               itemCount: 3,
@@ -883,7 +883,7 @@ describe("generateObject with tools", () => {
         ) &&
         req.tools?.["fetchData"] !== undefined &&
         req.tools?.["analyzeData"] !== undefined &&
-        req.tools?.["finalResult"] !== undefined,
+        req.tools?.["presentResult"] !== undefined,
       {
         role: "assistant",
         content: [
@@ -922,7 +922,7 @@ describe("generateObject with tools", () => {
       },
     );
 
-    // Step 3: Call finalResult
+    // Step 3: Call presentResult
     addMockResponse(
       (req) =>
         req.messages.some((m: any) =>
@@ -937,8 +937,8 @@ describe("generateObject with tools", () => {
         content: [
           {
             type: "tool-call",
-            toolCallId: "call_finalResult_1",
-            toolName: "finalResult",
+            toolCallId: "call_presentResult_1",
+            toolName: "presentResult",
             input: {
               analysis: "Data contains 5 numeric values",
               total: 5,
@@ -1025,7 +1025,7 @@ describe("generateObject with tools", () => {
     });
   });
 
-  it("should handle parallel tool calls before finalResult", async () => {
+  it("should handle parallel tool calls before presentResult", async () => {
     const resultSchema: JSONSchema = {
       type: "object",
       properties: {
@@ -1038,7 +1038,7 @@ describe("generateObject with tools", () => {
 
     const toolCallLog: string[] = [];
 
-    // Mock parallel tool calls followed by finalResult
+    // Mock parallel tool calls followed by presentResult
     // Step 1: Call both toolA and toolB in parallel
     addMockResponse(
       (req) =>
@@ -1047,7 +1047,7 @@ describe("generateObject with tools", () => {
         ) &&
         req.tools?.["toolA"] !== undefined &&
         req.tools?.["toolB"] !== undefined &&
-        req.tools?.["finalResult"] !== undefined,
+        req.tools?.["presentResult"] !== undefined,
       {
         role: "assistant",
         content: [
@@ -1068,7 +1068,7 @@ describe("generateObject with tools", () => {
       },
     );
 
-    // Step 2: After both results, call finalResult
+    // Step 2: After both results, call presentResult
     addMockResponse(
       (req) =>
         req.messages.some((m: any) =>
@@ -1090,8 +1090,8 @@ describe("generateObject with tools", () => {
         content: [
           {
             type: "tool-call",
-            toolCallId: "call_finalResult_1",
-            toolName: "finalResult",
+            toolCallId: "call_presentResult_1",
+            toolName: "presentResult",
             input: {
               combined: "A and B",
             },
@@ -1183,16 +1183,16 @@ describe("generateObject with tools", () => {
   });
 
   it("should return a cell when LLM returns a link object", async () => {
-    const finalResultCell = runtime.getCell(
+    const presentResultCell = runtime.getCell(
       space,
       "generateObject-link-test-result",
       undefined,
       tx,
     );
 
-    const finalResultValue = { test: "success" };
-    finalResultCell.set(finalResultValue);
-    const linkedCellId = finalResultCell.getAsNormalizedFullLink().id;
+    const presentResultValue = { test: "success" };
+    presentResultCell.set(presentResultValue);
+    const linkedCellId = presentResultCell.getAsNormalizedFullLink().id;
 
     const resultSchema: JSONSchema = {
       type: "object",
@@ -1207,14 +1207,14 @@ describe("generateObject with tools", () => {
       (req) =>
         req.messages.some((m) =>
           typeof m.content === "string" && m.content.includes(testPrompt)
-        ) && req.tools?.["finalResult"] !== undefined,
+        ) && req.tools?.["presentResult"] !== undefined,
       {
         role: "assistant",
         content: [
           {
             type: "tool-call",
-            toolCallId: "call_finalResult_link",
-            toolName: "finalResult",
+            toolCallId: "call_presentResult_link",
+            toolName: "presentResult",
             input: {
               link: {
                 "@link": `/${linkedCellId}`,
@@ -1268,7 +1268,7 @@ describe("generateObject with tools", () => {
     const value = result.key("result").key("link").get();
     const link = parseLink(value);
 
-    expect(value).toEqual(finalResultValue);
+    expect(value).toEqual(presentResultValue);
     expect(link?.id).toBe(linkedCellId);
   });
 });

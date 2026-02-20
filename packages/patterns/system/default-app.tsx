@@ -323,7 +323,8 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
             </div>
 
             <div style={{ flex: "1", minWidth: "0" }}>
-              {recentPieces.get().length > 0 && (
+              {ifElse(
+                computed(() => recentPieces.length > 0),
                 <ct-vstack gap="4" style={{ marginBottom: "16px" }}>
                   <ct-hstack gap="2" align="center">
                     <h3 style={{ margin: "0", fontSize: "16px" }}>Recent</h3>
@@ -342,7 +343,8 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                       ))}
                     </tbody>
                   </ct-table>
-                </ct-vstack>
+                </ct-vstack>,
+                undefined,
               )}
 
               <ct-vstack gap="4">
@@ -350,18 +352,6 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                   <h3 style={{ margin: "0", fontSize: "16px" }}>Pieces</h3>
                   <ct-cell-link $cell={gridView} />
                 </ct-hstack>
-                <style>
-                  {`
-                    .pattern-link {
-                      cursor: pointer;
-                      color: inherit;
-                      text-decoration: none;
-                    }
-                    .pattern-link:hover {
-                      text-decoration: underline;
-                    }
-                  `}
-                </style>
 
                 <ct-table full-width hover>
                   <tbody>

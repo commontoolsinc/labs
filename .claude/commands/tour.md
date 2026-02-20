@@ -184,7 +184,7 @@ Click the disclosure summary on one of the items (e.g. "Plan a weekend camping t
 
 A Suggestion pattern will activate and begin generating. Watch for:
 - **`ct-message-beads`** — colored dots representing the LLM conversation. A spinning gray dot means the LLM is working. Blue = user, green = assistant text, amber = assistant tool calls, purple = tool results.
-- The LLM (Claude Haiku) will call tools like `listPatternIndex`, `fetchAndRunPattern`, or `bash` to find/create a relevant result.
+- The LLM (Claude Sonnet) will call tools like `listPatternIndex`, `fetchAndRunPattern`, or `bash` to find/create a relevant result.
 - When done, a **`ct-cell-link`** chip (pill) appears showing the resulting piece.
 
 Narrate the bead activity as it happens — describe what tools are being called and what's appearing. Wait for the suggestion to complete. Take a screenshot.
@@ -335,7 +335,7 @@ These were discovered during tour runs and should be expected:
 
 9. **Suggestion refinement input requires clicking "+".** The "Refine suggestion..." input is hidden by default. To reveal it, click the **"+"** button on the `ct-message-beads` widget (the row of colored dots). This toggles the `ct-prompt-input` visible below the beads. The input has a Send button and a file upload (paperclip) icon.
 
-12. **Content area scrolling.** The space home content (do-list, pieces) is inside a scrollable container within shadow DOM. `window.scrollBy()` does NOT work. To scroll, use JS eval to find the scrollable container and call `scrollBy()` on it:
+10. **Content area scrolling.** The space home content (do-list, pieces) is inside a scrollable container within shadow DOM. `window.scrollBy()` does NOT work. To scroll, use JS eval to find the scrollable container and call `scrollBy()` on it:
     ```js
     (() => {
       function findScrollable(node, depth) {
@@ -358,9 +358,9 @@ These were discovered during tour runs and should be expected:
     })()
     ```
 
-10. **Do-list indentation.** The Omnibot uses `indent` values (0=root, 1=subtask, 2=sub-subtask) when rearranging items. The visual indentation in the do-list reflects this hierarchy.
+11. **Do-list indentation.** The Omnibot uses `indent` values (0=root, 1=subtask, 2=sub-subtask) when rearranging items. The visual indentation in the do-list reflects this hierarchy.
 
-11. **Newlines in `agent-browser type` trigger Enter/submit.** Never include newlines in typed text — the chat input interprets them as send. Write everything on one line.
+12. **Newlines in `agent-browser type` trigger Enter/submit.** Never include newlines in typed text — the chat input interprets them as send. Write everything on one line.
 
 13. **Omnibox dismissal eats the first click.** After using the Omnibot to add items, clicking anywhere on the page first dismisses the omnibox panel — it does NOT also interact with whatever is underneath. You need a second click to actually interact with elements like AI Suggestions disclosures. Tip: once you see items appear in the do-list, you can immediately click the page to dismiss the omnibox rather than waiting for the LLM to finish its full response.
 

@@ -302,10 +302,7 @@ export class CTMessageBeads extends BaseElement {
   private _onBeadClick = (_e: MouseEvent, index: number) => {
     const msgs = this._messagesValue;
     if (!msgs?.[index]) return;
-    console.log(
-      `[ct-message-beads] message ${index}:`,
-      JSON.parse(JSON.stringify(msgs[index])),
-    );
+    // Future: show message detail on click
   };
 
   private _onBeadLeave = () => {

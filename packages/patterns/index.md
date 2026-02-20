@@ -1,6 +1,7 @@
 # Common Patterns
 
-Prefix the URLs with `http://localhost:8000/api/patterns/`
+Prefix the URLs with
+`https://raw.githubusercontent.com/commontoolsinc/labs/refs/heads/main/packages/patterns/`
 
 ---
 
@@ -23,6 +24,50 @@ interface CounterOutput {
   value: number;
   increment: Stream<void>;
   decrement: Stream<void>;
+}
+```
+
+## `do-list/do-list.tsx`
+
+A task list pattern with AI suggestions per item, indent-based subtasks, and
+LLM-friendly title-based handlers.
+
+**Keywords:** do-list, tasks, AI-suggestions, indent, suggestion, llmDialog
+
+### Input Schema
+
+```ts
+interface DoItem {
+  title: string;
+  done: Default<boolean, false>;
+  indent: Default<number, 0>;
+  aiEnabled: Default<boolean, false>;
+}
+
+interface DoListInput {
+  items?: Writable<Default<DoItem[], []>>;
+}
+```
+
+### Output Schema
+
+```ts
+interface DoListOutput {
+  items: DoItem[];
+  itemCount: number;
+  compactUI: VNode;
+  addItem: OpaqueRef<Stream<{ title: string; indent?: number }>>;
+  removeItem: OpaqueRef<Stream<{ item: DoItem }>>;
+  updateItem: OpaqueRef<
+    Stream<{ item: DoItem; title?: string; done?: boolean }>
+  >;
+  addItems: OpaqueRef<
+    Stream<{ items: Array<{ title: string; indent?: number }> }>
+  >;
+  removeItemByTitle: OpaqueRef<Stream<{ title: string }>>;
+  updateItemByTitle: OpaqueRef<
+    Stream<{ title: string; newTitle?: string; done?: boolean }>
+  >;
 }
 ```
 
@@ -1047,4 +1092,24 @@ type Input = Record<string, never>;
 ```ts
 // Uses wish<Array<Favorite>>({ query: "#favorites" }) internally
 // Displays favorited pieces with remove functionality
+```
+
+## `system/piece-grid.tsx`
+
+A thumbnail tile grid view for pieces with scaled-down ct-render previews.
+
+**Keywords:** grid, pieces, thumbnail, preview, ct-render
+
+### Input Schema
+
+```ts
+type Input = {
+  pieces: Piece[];
+};
+```
+
+### Output Schema
+
+```ts
+// Returns a 3-column grid view of pieces with live previews
 ```
