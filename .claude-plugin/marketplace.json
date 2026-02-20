@@ -1,0 +1,11 @@
+{
+  "name": "common-tools-marketplace",
+  "owner": { "name": "Common Tools Team" },
+  "plugins": [
+    {
+      "name": "common-tools",
+      "source": ".",
+      "description": "Common Tools development skills, agents, and workflows"
+    }
+  ]
+}

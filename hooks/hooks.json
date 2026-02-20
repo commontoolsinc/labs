@@ -1,0 +1,85 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "deno run --allow-read --allow-env \"${CLAUDE_PLUGIN_ROOT}/.claude/scripts/block-git-amend.ts\""
+          },
+          {
+            "type": "command",
+            "command": "deno run --allow-read --allow-env \"${CLAUDE_PLUGIN_ROOT}/.claude/scripts/block-node.ts\""
+          },
+          {
+            "type": "command",
+            "command": "deno run --allow-read --allow-env \"${CLAUDE_PLUGIN_ROOT}/.claude/scripts/block-ct.ts\""
+          },
+          {
+            "type": "command",
+            "command": "deno run --allow-read --allow-run --allow-env \"${CLAUDE_PLUGIN_ROOT}/.claude/scripts/pre-commit.ts\""
+          },
+          {
+            "type": "command",
+            "command": "deno run --allow-read --allow-env \"${CLAUDE_PLUGIN_ROOT}/.claude/scripts/deno-test-filter.ts\""
+          },
+          {
+            "type": "command",
+            "command": "deno run --allow-read --allow-env \"${CLAUDE_PLUGIN_ROOT}/.claude/scripts/ask-before-delete-spaces.ts\""
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "deno run --allow-read \"${CLAUDE_PLUGIN_ROOT}/.claude/scripts/pre-edit-reminders.ts\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "deno run --allow-read --allow-run \"${CLAUDE_PLUGIN_ROOT}/.claude/scripts/post-edit-ts.ts\""
+          }
+        ]
+      },
+      {
+        "matcher": "ExitPlanMode",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "deno run --allow-read \"${CLAUDE_PLUGIN_ROOT}/.claude/scripts/post-exit-plan.ts\""
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "deno run --allow-read --allow-run \"${CLAUDE_PLUGIN_ROOT}/.claude/scripts/subagent-stop.ts\"",
+            "timeout": 120
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "deno run --allow-read --allow-run \"${CLAUDE_PLUGIN_ROOT}/.claude/scripts/stop-check.ts\""
+          }
+        ]
+      }
+    ]
+  }
+}
