@@ -66,6 +66,9 @@ const evalAndStore = handler<
   const expr = inputText.get();
   console.log(`[data-model-test] evaluating: ${expr}`);
   try {
+    // Intentional use of `new Function` for testing: This pattern exists to
+    // exercise the data model's serialization of arbitrary JS values. Patterns
+    // run inside the sandboxed piece runtime, not the host.
     const result = new Function(`return (${expr})`)();
     console.log(`[data-model-test] result:`, result);
     value.set(result);
