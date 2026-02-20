@@ -1970,10 +1970,13 @@ export function llmDialog(
           }
 
           // Add new pinned cell
-          pinnedCells.withTx(tx).set([
+          const updated = [
             ...current,
             { path: event.path, name: event.name },
-          ]);
+          ];
+          pinnedCells.withTx(tx).set(updated);
+          // Also update result so the pattern sees the change immediately
+          result.withTx(tx).key("pinnedCells").set(updated as any);
         },
       );
 
@@ -1983,6 +1986,8 @@ export function llmDialog(
         (tx: IExtendedStorageTransaction, _event: void) => {
           // Clear all pinned cells
           pinnedCells.withTx(tx).set([]);
+          // Also update result so the pattern sees the change immediately
+          result.withTx(tx).key("pinnedCells").set([] as any);
         },
       );
 
