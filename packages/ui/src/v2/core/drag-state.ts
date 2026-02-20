@@ -1,4 +1,6 @@
-import type { CellHandle } from "@commontools/runtime-client";
+import { type CellHandle, UI } from "@commontools/runtime-client";
+import { render } from "@commontools/html/client";
+import "../components/ct-cell-link/ct-cell-link.ts";
 
 /**
  * State information for an active drag operation.
@@ -165,6 +167,53 @@ export function subscribeToDrag(listener: DragListener): () => void {
   return () => {
     listeners.delete(listener);
   };
+}
+
+/**
+ * Create a drag preview element for a cell.
+ * Uses the cell's [UI] property if available, otherwise falls back to
+ * a static ct-cell-link pill.
+ *
+ * @param cell - The CellHandle to create a preview for
+ * @returns The preview element (not yet added to DOM)
+ */
+export function createDragPreview(cell: CellHandle): HTMLElement {
+  const preview = document.createElement("div");
+  preview.style.cssText = `
+    position: fixed;
+    pointer-events: none;
+    z-index: 10000;
+    opacity: 0.9;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    background: white;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    padding: 0.5rem;
+    max-width: 300px;
+    max-height: 200px;
+    overflow: hidden;
+  `;
+
+  const cellValue = cell.get();
+  if (cellValue && typeof cellValue === "object" && UI in cellValue) {
+    try {
+      render(preview, (cellValue as Record<string, unknown>)[UI] as any);
+    } catch (error) {
+      console.warn("[drag-state] Failed to render [UI] preview:", error);
+      _addFallbackPreview(preview, cell);
+    }
+  } else {
+    _addFallbackPreview(preview, cell);
+  }
+
+  return preview;
+}
+
+function _addFallbackPreview(container: HTMLElement, cell: CellHandle) {
+  const link = document.createElement("ct-cell-link");
+  link.cell = cell;
+  link.isStatic = true;
+  container.appendChild(link);
 }
 
 /**
