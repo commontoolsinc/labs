@@ -9,6 +9,20 @@
  */
 
 // ---------------------------------------------------------------------------
+// Shared freeze guard
+// ---------------------------------------------------------------------------
+
+/**
+ * Throw `TypeError` if `obj` is frozen. Called by mutation overrides in the
+ * `Frozen*` classes to enforce immutability.
+ */
+function throwIfFrozen(obj: object, className: string): void {
+  if (Object.isFrozen(obj)) {
+    throw new TypeError(`Cannot mutate a ${className}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // FrozenMap
 // ---------------------------------------------------------------------------
 
@@ -28,17 +42,17 @@ export class FrozenMap<K, V> extends Map<K, V> {
   }
 
   override set(key: K, value: V): this {
-    if (Object.isFrozen(this)) throw new TypeError("Cannot mutate a FrozenMap");
+    throwIfFrozen(this, "FrozenMap");
     return super.set(key, value);
   }
 
   override delete(key: K): boolean {
-    if (Object.isFrozen(this)) throw new TypeError("Cannot mutate a FrozenMap");
+    throwIfFrozen(this, "FrozenMap");
     return super.delete(key);
   }
 
   override clear(): void {
-    if (Object.isFrozen(this)) throw new TypeError("Cannot mutate a FrozenMap");
+    throwIfFrozen(this, "FrozenMap");
     super.clear();
   }
 }
@@ -63,19 +77,17 @@ export class FrozenSet<T> extends Set<T> {
   }
 
   override add(value: T): this {
-    if (Object.isFrozen(this)) throw new TypeError("Cannot mutate a FrozenSet");
+    throwIfFrozen(this, "FrozenSet");
     return super.add(value);
   }
 
   override delete(value: T): boolean {
-    if (Object.isFrozen(this)) {
-      throw new TypeError("Cannot mutate a FrozenSet");
-    }
+    throwIfFrozen(this, "FrozenSet");
     return super.delete(value);
   }
 
   override clear(): void {
-    if (Object.isFrozen(this)) throw new TypeError("Cannot mutate a FrozenSet");
+    throwIfFrozen(this, "FrozenSet");
     super.clear();
   }
 }
@@ -97,7 +109,11 @@ export class FrozenDate extends Date {
   }
 
   #throw(): never {
-    throw new TypeError("Cannot mutate a FrozenDate");
+    throwIfFrozen(this, "FrozenDate");
+    // `throwIfFrozen` always throws for a frozen instance, but TypeScript
+    // doesn't know that -- the `never` return satisfies the override
+    // signatures.
+    throw new Error("unreachable");
   }
 
   override setTime(_time: number): number {
