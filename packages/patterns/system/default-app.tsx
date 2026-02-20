@@ -21,6 +21,7 @@ const generateId = () =>
 const MAX_RECENT_CHARMS = 10;
 
 import BacklinksIndex, { type MentionablePiece } from "./backlinks-index.tsx";
+import SummaryIndex from "./summary-index.tsx";
 import OmniboxFAB from "./omnibox-fab.tsx";
 import Notebook from "../notes/notebook.tsx";
 import NotesImportExport from "../notes/notes-import-export.tsx";
@@ -193,6 +194,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
   );
 
   const index = BacklinksIndex({});
+  const summaryIdx = SummaryIndex({ mentionable: index.mentionable });
 
   const fab = OmniboxFAB({
     mentionable: index.mentionable,
@@ -200,6 +202,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
 
   return {
     backlinksIndex: index,
+    summaryIndex: summaryIdx,
     [NAME]: computed(() => `Space Home (${visiblePieces.length})`),
     [UI]: (
       <ct-screen>
