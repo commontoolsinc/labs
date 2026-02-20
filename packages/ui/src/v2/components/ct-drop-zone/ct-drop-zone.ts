@@ -170,6 +170,7 @@ export class CTDropZone extends BaseElement {
       // Emit drop event with pointer coordinates and drop zone rect
       this.emit("ct-drop", {
         sourceCell: dragState.cell,
+        sourceCellRef: dragState.cell.ref(),
         type: dragState.type,
         pointerX: dragState.pointerX,
         pointerY: dragState.pointerY,

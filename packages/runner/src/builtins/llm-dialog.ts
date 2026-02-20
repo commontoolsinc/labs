@@ -419,6 +419,16 @@ const resultSchema = {
     result: {},
     addMessage: { ...LLMMessageSchema, asStream: true },
     cancelGeneration: { asStream: true },
+    pinCell: {
+      type: "object",
+      properties: {
+        path: { type: "string" },
+        name: { type: "string" },
+      },
+      required: ["path", "name"],
+      asStream: true,
+    },
+    unpinAllCells: { asStream: true },
     flattenedTools: { type: "object", default: {} },
     pinnedCells: {
       type: "array",
@@ -1870,6 +1880,8 @@ export function llmDialog(
         ...result.getRaw(),
         addMessage: { $stream: true },
         cancelGeneration: { $stream: true },
+        pinCell: { $stream: true },
+        unpinAllCells: { $stream: true },
         pinnedCells: [],
       });
 
@@ -1938,6 +1950,39 @@ export function llmDialog(
           // Cancel request by setting pending to false. This will trigger the
           // code below to be executed in all tabs.
           pending.withTx(tx).set(false);
+        },
+      );
+
+      // Declare `pinCell` handler and register
+      createHandler<{ path: string; name: string }>(
+        result.key("pinCell") as unknown as Stream<
+          { path: string; name: string }
+        >,
+        (
+          tx: IExtendedStorageTransaction,
+          event: { path: string; name: string },
+        ) => {
+          const current = pinnedCells.withTx(tx).get() || [];
+
+          // Check if already pinned
+          if (current.some((p) => p.path === event.path)) {
+            return;
+          }
+
+          // Add new pinned cell
+          pinnedCells.withTx(tx).set([
+            ...current,
+            { path: event.path, name: event.name },
+          ]);
+        },
+      );
+
+      // Declare `unpinAllCells` handler and register
+      createHandler<void>(
+        result.key("unpinAllCells") as unknown as Stream<void>,
+        (tx: IExtendedStorageTransaction, _event: void) => {
+          // Clear all pinned cells
+          pinnedCells.withTx(tx).set([]);
         },
       );
 
