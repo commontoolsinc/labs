@@ -655,7 +655,7 @@ export class CTFab extends BaseElement {
                   ${this.pinCount > 0
                     ? html`
                       <span class="pin-dots">${Array.from(
-                        { length: this.pinCount },
+                        { length: Math.min(this.pinCount, 8) },
                         () =>
                           html`
                             <span class="pin-dot"></span>
@@ -690,7 +690,7 @@ export class CTFab extends BaseElement {
                     role="assistant"
                     compact
                     .content="${previewMsg}"
-                  />
+                  ></ct-chat-message>
                 </div>
               `
               : nothing}
