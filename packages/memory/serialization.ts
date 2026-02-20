@@ -207,7 +207,7 @@ export function serialize(
   // deserializer does not misinterpret it as a tagged type.
   const keys = Object.keys(result);
   if (keys.length === 1 && keys[0].startsWith("/")) {
-    return { [`/${TAGS.object}`]: result } as SerializedForm;
+    return context.encode(TAGS.object, result) as SerializedForm;
   }
 
   return result as SerializedForm;
@@ -268,7 +268,7 @@ export function deserialize(
 
     if (cls) {
       // In lenient mode, catch reconstruction failures and wrap them.
-      if ("lenient" in context && (context as { lenient: boolean }).lenient) {
+      if (context.lenient) {
         try {
           return cls[RECONSTRUCT](
             deserializedState,
@@ -307,8 +307,12 @@ export function deserialize(
   // run-length encoding -- the state is a positive integer indicating how
   // many consecutive holes to skip.
   if (Array.isArray(data)) {
-    // First pass: compute the logical length. This iterates over the
-    // wire-format entries (not the logical length), so it is O(entries).
+    // Two-pass decode: the first pass computes the logical array length so we
+    // can pre-allocate with `new Array(logicalLength)`, which produces true
+    // sparse holes (absent indices) rather than `undefined` entries. The second
+    // pass fills in elements. Each entry's `context.decode()` is called twice,
+    // but decode is cheap (single-key object inspection), and the alternative
+    // (single-pass with dynamic resizing) would require post-hoc hole creation.
     let logicalLength = 0;
     for (const entry of data) {
       const entryDecoded = context.decode(entry);
