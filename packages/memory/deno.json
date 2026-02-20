@@ -53,6 +53,7 @@
     "./type-handlers": "./type-handlers.ts",
     "./unknown-storable": "./unknown-storable.ts",
     "./problematic-storable": "./problematic-storable.ts",
+    "./frozen-builtins": "./frozen-builtins.ts",
     "./storable-native-instances": "./storable-native-instances.ts"
   },
   "imports": {
