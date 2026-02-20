@@ -89,7 +89,10 @@ export class XAppView extends BaseView {
       this._patternError = undefined;
       if ("pieceId" in app.view && app.view.pieceId) {
         try {
-          return await rt.getPattern(app.view.pieceId);
+          const pattern = await rt.getPattern(app.view.pieceId);
+          // Track as recently visited (fire-and-forget)
+          rt.trackRecentPiece(app.view.pieceId);
+          return pattern;
         } catch (e) {
           if (!signal.aborted) {
             this._patternError = e as any;

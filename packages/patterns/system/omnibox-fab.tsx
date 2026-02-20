@@ -7,6 +7,7 @@ import {
   navigateTo,
   pattern,
   patternTool,
+  Stream,
   UI,
   when,
   wish,
@@ -25,8 +26,21 @@ import {
 } from "./common-tools.tsx";
 import { MentionablePiece } from "./backlinks-index.tsx";
 
+interface DoListTools {
+  addItem: Stream<{ title: string; indent?: number }>;
+  addItems: Stream<{ items: Array<{ title: string; indent?: number }> }>;
+  removeItemByTitle: Stream<{ title: string }>;
+  updateItemByTitle: Stream<{
+    title: string;
+    newTitle?: string;
+    done?: boolean;
+  }>;
+  items: any[];
+}
+
 interface OmniboxFABInput {
   mentionable: Writable<MentionablePiece[]>;
+  doListTools: DoListTools;
 }
 
 const toggle = handler<any, { value: Writable<boolean> }>((_, { value }) => {
@@ -88,8 +102,24 @@ const listRecent = pattern<
   },
 );
 
+/** Read current do list items */
+const readDoList = pattern<
+  { items: Array<{ title: string; done: boolean; indent: number }> },
+  {
+    result: Array<{
+      title: string;
+      done: boolean;
+      indent: number;
+    }>;
+  }
+>(
+  ({ items }) => {
+    return { result: items };
+  },
+);
+
 export default pattern<OmniboxFABInput>(
-  (_) => {
+  ({ doListTools }) => {
     const mentionable =
       wish<MentionablePiece[]>({ query: "#mentionable" }).result;
     const recentPieces = wish<MentionablePiece[]>({ query: "#recent" }).result;
@@ -119,6 +149,13 @@ Tool usage priority:
 - Search web only as last resort when nothing exists in the space
 - Use bash to run shell commands in a persistent Linux sandbox (Ubuntu). Installed packages and files persist across calls.
 
+Do-list management:
+- When users mention tasks, action items, or things to do, use addDoItem or addDoItems
+- When users paste a block of text with multiple items, parse into items and use addDoItems to batch-add
+- Use readDoList to check current items before making changes
+- Use updateDoItem to mark done or rename; removeDoItem only for explicit deletion
+- Use indent levels for sub-tasks (0=root, 1=sub-task, 2=sub-sub-task)
+
 Be matter-of-fact. Prefer action to explanation.`;
     });
 
@@ -142,6 +179,28 @@ Be matter-of-fact. Prefer action to explanation.`;
         listRecent: patternTool(listRecent, { recentPieces }),
         updateProfile: patternTool(updateProfile),
         bash: patternTool(bash, { sandboxId }),
+        addDoItem: {
+          handler: doListTools.addItem,
+          description:
+            "Add a task to the do list. Use indent for sub-tasks (0=root, 1=sub, 2=sub-sub).",
+        },
+        addDoItems: {
+          handler: doListTools.addItems,
+          description:
+            "Add multiple tasks at once. Use when parsing text into items.",
+        },
+        removeDoItem: {
+          handler: doListTools.removeItemByTitle,
+          description: "Remove a task and its subtasks by title.",
+        },
+        updateDoItem: {
+          handler: doListTools.updateItemByTitle,
+          description:
+            "Update a task by title. Set done=true to complete, newTitle to rename.",
+        },
+        readDoList: patternTool(readDoList, {
+          items: doListTools.items,
+        }),
       },
     });
 
@@ -263,8 +322,14 @@ Be matter-of-fact. Prefer action to explanation.`;
                 null,
               )}
 
-              {/* Prompt input - always at bottom */}
+              {/* Message beads + prompt input - always at bottom */}
               <div style="padding: 0.5rem; flex-shrink: 0;">
+                <div style="padding: 0 0.25rem 0.25rem;">
+                  <ct-message-beads
+                    $messages={omnibot.messages}
+                    pending={omnibot.pending}
+                  />
+                </div>
                 {omnibot.ui.promptInput}
               </div>
             </div>,

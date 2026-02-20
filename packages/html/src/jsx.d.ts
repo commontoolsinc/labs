@@ -2876,6 +2876,7 @@ interface CTThemeElement extends CTHTMLElement {}
 interface CTCodeEditorElement extends CTHTMLElement {}
 interface CTCodeEditorLegacyElement extends CTHTMLElement {}
 interface CTScreenElement extends CTHTMLElement {}
+interface CTAutostartElement extends CTHTMLElement {}
 interface CTAutoLayoutElement extends CTHTMLElement {}
 interface CTButtonElement extends CTHTMLElement {}
 interface CTCopyButtonElement extends CTHTMLElement {}
@@ -2907,6 +2908,7 @@ interface CTTableElement extends CTHTMLElement {}
 interface CTTagsElement extends CTHTMLElement {}
 interface CTPromptInputElement extends CTHTMLElement {}
 interface CTChatElement extends CTHTMLElement {}
+interface CTMessageBeadsElement extends CTHTMLElement {}
 interface CTAttachmentsBarElement extends CTHTMLElement {}
 interface CTCTCollapsibleElement extends CTHTMLElement {}
 interface CTFragmentElement extends CTHTMLElement {}
@@ -3130,6 +3132,13 @@ interface CTChatAttributes<T> extends CTHTMLAttributes<T> {
   "tools"?: any;
 }
 
+interface CTMessageBeadsAttributes<T> extends CTHTMLAttributes<T> {
+  "$messages"?: CellLike<any>;
+  "pending"?: boolean;
+  "label"?: string;
+  "onct-refine"?: EventHandler<any>;
+}
+
 interface CTPromptInputAttributes<T> extends CTHTMLAttributes<T> {
   "placeholder"?: string;
   "buttonText"?: string;
@@ -3142,6 +3151,7 @@ interface CTPromptInputAttributes<T> extends CTHTMLAttributes<T> {
   "disabled"?: boolean;
   "autoResize"?: boolean;
   "pending"?: boolean;
+  "voice"?: boolean;
 }
 
 interface CTAttachmentsBarAttributes<T> extends CTHTMLAttributes<T> {
@@ -3718,6 +3728,10 @@ interface CTCodeEditorAttributes<T> extends CTHTMLAttributes<T> {
   "onct-blur"?: any;
   "onbacklink-click"?: any;
   "onbacklink-create"?: any;
+}
+
+interface CTAutostartAttributes<T> extends CTHTMLAttributes<T> {
+  "onstart"?: any;
 }
 
 interface CTAutoLayoutAttributes<T> extends CTHTMLAttributes<T> {
@@ -4569,6 +4583,10 @@ declare global {
         CTHTMLAttributes<CTScreenElement>,
         CTScreenElement
       >;
+      "ct-autostart": CTDOM.DetailedHTMLProps<
+        CTAutostartAttributes<CTAutostartElement>,
+        CTAutostartElement
+      >;
       "ct-autolayout": CTDOM.DetailedHTMLProps<
         CTAutoLayoutAttributes<CTAutoLayoutElement>,
         CTAutoLayoutElement
@@ -4676,6 +4694,10 @@ declare global {
       "ct-chat": CTDOM.DetailedHTMLProps<
         CTChatAttributes<CTChatElement>,
         CTChatElement
+      >;
+      "ct-message-beads": CTDOM.DetailedHTMLProps<
+        CTMessageBeadsAttributes<CTMessageBeadsElement>,
+        CTMessageBeadsElement
       >;
       "ct-attachments-bar": CTDOM.DetailedHTMLProps<
         CTAttachmentsBarAttributes<CTAttachmentsBarElement>,

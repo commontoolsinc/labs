@@ -1,11 +1,14 @@
 /// <cts-enable />
 import {
+  type BuiltInLLMMessage,
   computed,
   type Default,
-  generateObject,
+  handler,
   ifElse,
+  llmDialog,
   pattern,
   patternTool,
+  type Stream,
   toSchema,
   UI,
   type VNode,
@@ -13,7 +16,39 @@ import {
   type WishState,
   Writable,
 } from "commontools";
-import { fetchAndRunPattern, listPatternIndex } from "./common-tools.tsx";
+import { bash, fetchAndRunPattern, listPatternIndex } from "./common-tools.tsx";
+
+const triggerGeneration = handler<
+  unknown,
+  {
+    addMessage: Stream<BuiltInLLMMessage>;
+    situation: string;
+    result: any | null;
+  }
+>((_, { addMessage, situation, result }) => {
+  if (!result) {
+    addMessage.send({
+      role: "user",
+      content: [{ type: "text" as const, text: situation }],
+    });
+  }
+});
+
+const sendMessage = handler<
+  { detail: { text: string; attachments?: Array<any> } },
+  { addMessage: Stream<BuiltInLLMMessage> }
+>((event, { addMessage }) => {
+  addMessage.send({
+    role: "user",
+    content: [{ type: "text" as const, text: event.detail.text }],
+  });
+});
+
+const showRefineInput = handler<unknown, { showRefine: Writable<boolean> }>(
+  (_, { showRefine }) => {
+    showRefine.set(true);
+  },
+);
 
 export default pattern<
   {
@@ -47,26 +82,40 @@ export default pattern<
     return profileText ? `\n\n--- User Context ---\n${profileText}\n---` : "";
   });
 
+  const sandboxId = Writable.of(
+    `suggestion-${Math.random().toString(36).slice(2, 10)}`,
+  );
+
   const systemPrompt = computed(() => {
     const profileCtx = profileContext;
-    return `Find a useful pattern, run it, pass link to final result.${profileCtx}
+    return `Find a useful pattern, run it, then call presentResult with the cell link.${profileCtx}
+
+    Your textual responses are invisible to the user, they can only see the presented result.
 
 Use the user context above to personalize your suggestions when relevant.`;
   });
 
-  const suggestion = generateObject({
+  const messages = Writable.of<BuiltInLLMMessage[]>([]);
+  const showRefine = Writable.of(false);
+
+  const {
+    addMessage,
+    pending,
+    result: suggestionResult,
+  } = llmDialog({
     system: systemPrompt,
-    prompt: situation,
-    context,
+    messages,
     tools: {
       fetchAndRunPattern: patternTool(fetchAndRunPattern),
       listPatternIndex: patternTool(listPatternIndex),
+      bash: patternTool(bash, { sandboxId }),
     },
-    model: "anthropic:claude-haiku-4-5",
-    schema: toSchema<{ cell: Writable<any> }>(),
+    model: "anthropic:claude-sonnet-4-5",
+    context,
+    resultSchema: toSchema<{ cell: Writable<any> }>(),
   });
 
-  const llmResult = computed(() => suggestion.result?.cell);
+  const llmResult = computed(() => suggestionResult?.cell);
 
   // Reactively select between picker and LLM result. This must be a named
   // computed variable — the CTS transformer leaves named Cells as-is in the
@@ -80,9 +129,38 @@ Use the user context above to personalize your suggestions when relevant.`;
   // re-evaluations (creating VNodes inside a computed causes the
   // reconciler to re-mount the DOM, losing inner subscriptions).
   const freeformUI = (
-    <ct-cell-context $cell={llmResult}>
-      {computed(() => llmResult ?? "Searching...")}
-    </ct-cell-context>
+    <div style="display:contents">
+      <ct-autostart
+        onstart={triggerGeneration({
+          addMessage,
+          situation,
+          result: llmResult,
+        })}
+      />
+      <ct-cell-link
+        $cell={llmResult}
+        style={computed(() => (llmResult ? "" : "display:none"))}
+      />
+      <ct-cell-context $cell={llmResult}>
+        {ifElse(
+          computed(() => !!llmResult),
+          computed(() => llmResult),
+          undefined,
+        )}
+      </ct-cell-context>
+      <ct-message-beads
+        label="suggestion"
+        $messages={messages}
+        pending={pending}
+        onct-refine={showRefineInput({ showRefine })}
+      />
+      <ct-prompt-input
+        placeholder="Refine suggestion..."
+        pending={pending}
+        style={computed(() => (showRefine.get() ? "" : "display:none"))}
+        onct-send={sendMessage({ addMessage })}
+      />
+    </div>
   );
 
   const pickerUI = (
