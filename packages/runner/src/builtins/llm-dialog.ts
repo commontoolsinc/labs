@@ -2203,22 +2203,19 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
             pinnedCells,
           );
 
-          // If presentResult was called, cellify the raw input and store on
-          // the dialog's result cell. We cellify from the raw tool call input
-          // (not the serialized tool result) to get live Cell references.
+          // If presentResult was called, cellify the raw input so we can
+          // store it on the dialog's result cell (guarded by requestId below).
+          let cellifiedResult: unknown | undefined;
           if (userResultSchema) {
             const presentResultPart = toolCallParts.find(
               (p) => p.toolName === PRESENT_RESULT_TOOL_NAME,
             );
             if (presentResultPart) {
-              const cellified = traverseAndCellify(
+              cellifiedResult = traverseAndCellify(
                 runtime,
                 space,
                 presentResultPart.input,
               );
-              await runtime.editWithRetry((tx) => {
-                result.withTx(tx).key("result").set(cellified);
-              });
             }
           }
 
@@ -2272,6 +2269,11 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
             internal,
             requestId,
             (tx) => {
+              // Write presentResult atomically with tool result messages,
+              // guarded by requestId to prevent stale writes from canceled requests.
+              if (cellifiedResult !== undefined) {
+                result.withTx(tx).key("result").set(cellifiedResult);
+              }
               messagesCell.withTx(tx).push(
                 ...(toolResultMessages as Schema<typeof LLMMessageSchema>[]),
               );

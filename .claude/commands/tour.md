@@ -327,7 +327,7 @@ These were discovered during tour runs and should be expected:
 
 5. **Font warnings.** You may see JetBrainsMono font OTS parsing warnings in the console — these are cosmetic and not errors.
 
-6. **AI Suggestion generation takes time.** Each suggestion runs an LLM call (Claude Haiku) that may take 10-30 seconds. Wait patiently and narrate the bead activity as it happens.
+6. **AI Suggestion generation takes time.** Each suggestion runs an LLM call (Claude Sonnet) that may take 10-30 seconds. Wait patiently and narrate the bead activity as it happens.
 
 7. **"AI Suggestions" `<details>` elements are in shadow DOM.** They do NOT appear in accessibility snapshots. You must use JS eval to recursively walk shadow roots, find `<details>` elements, get their `<summary>` bounding boxes, and click at those coordinates. See Step 10 for the exact JS snippet. After expanding one, re-run the JS to get updated positions since other items shift down.
 
