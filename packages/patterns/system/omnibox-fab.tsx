@@ -284,7 +284,7 @@ Be matter-of-fact. Prefer action to explanation.`;
       messages: omnibot.messages,
       [UI]: (
         <ct-drop-zone
-          style="position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); width: 360px; height: 48px; z-index: 997;"
+          style="position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); width: 300px; height: 40px; z-index: 997;"
           onct-drop={handleDropToPin({
             pinToChat: omnibot.pinToChat,
             fabExpanded,

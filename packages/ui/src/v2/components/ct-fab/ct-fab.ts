@@ -41,8 +41,8 @@ export class CTFab extends BaseElement {
         (which lay out in the host context, not the shadow DOM)
         have a proper layout context */
       :host(:not([expanded])) {
-        width: 360px;
-        height: 48px;
+        width: 300px;
+        height: 40px;
       }
 
       *,
@@ -155,12 +155,12 @@ export class CTFab extends BaseElement {
 
       /* Position variants */
       :host([position="bottom-right"]) .fab-container {
-        bottom: 24px;
+        bottom: 12px;
         right: 24px;
       }
 
       :host([position="bottom-left"]) .fab-container {
-        bottom: 24px;
+        bottom: 12px;
         left: 24px;
       }
 
@@ -175,7 +175,7 @@ export class CTFab extends BaseElement {
       }
 
       :host([position="bottom-center"]) .fab-container {
-        bottom: 24px;
+        bottom: 12px;
         left: 50%;
         transform: translateX(-50%);
       }
@@ -183,10 +183,10 @@ export class CTFab extends BaseElement {
       /* Main morphing element */
       .fab {
         position: relative;
-        width: 360px;
-        height: 48px;
+        width: 300px;
+        height: 40px;
         background: var(--ct-theme-color-surface, #000);
-        border-radius: 24px;
+        border-radius: 20px;
         /*box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1),
           0 4px 16px rgba(0, 0, 0, 0.08);*/
         display: flex;
@@ -204,10 +204,9 @@ export class CTFab extends BaseElement {
           background var(--ct-theme-animation-duration, 300ms) ease;
         }
 
-        /* Collapsed state gets light surface and cursor pointer */
+        /* Collapsed state */
         :host(:not([expanded])) .fab {
-          background: var(--ct-theme-color-background, #fafafa);
-          border: 1px solid var(--ct-theme-color-border, #e0e0e0);
+          border: none;
           cursor: pointer;
         }
 
@@ -288,7 +287,7 @@ export class CTFab extends BaseElement {
           gap: 8px;
           padding: 0 16px;
           width: 100%;
-          height: 48px;
+          height: 40px;
           pointer-events: none;
           opacity: 1;
           transform: scale(1);
@@ -299,8 +298,8 @@ export class CTFab extends BaseElement {
           }
 
           .fab-placeholder {
-            color: var(--ct-theme-color-text-muted, #999);
-            font-size: 14px;
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 12px;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;

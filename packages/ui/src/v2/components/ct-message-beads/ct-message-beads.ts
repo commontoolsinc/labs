@@ -181,8 +181,8 @@ export class CTMessageBeads extends BaseElement {
         color: #6b7280;
       }
       .placeholder {
-        color: var(--ct-theme-color-text-muted, #999);
-        font-size: 14px;
+        color: rgba(255, 255, 255, 0.5);
+        font-size: 12px;
         white-space: nowrap;
       }
       :host(:not(:empty)) .placeholder {
