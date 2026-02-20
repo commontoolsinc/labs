@@ -54,13 +54,16 @@ describe("ExperimentalOptions", () => {
       const runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager: sm,
-        experimental: { richStorableValues: true },
+        experimental: {
+          richStorableValues: true,
+          canonicalHashing: true,
+        },
       });
       expect(runtime.experimental).toEqual({
         richStorableValues: true,
         storableProtocol: false,
         unifiedJsonEncoding: false,
-        canonicalHashing: false,
+        canonicalHashing: true,
       });
       await runtime.dispose();
       await sm.close();
@@ -257,7 +260,10 @@ describe("ExperimentalOptions", () => {
       const runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager: sm,
-        experimental: { richStorableValues: true },
+        experimental: {
+          richStorableValues: true,
+          canonicalHashing: true,
+        },
       });
 
       const config = getExperimentalStorableConfig();
@@ -286,7 +292,10 @@ describe("ExperimentalOptions", () => {
       const runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager: sm,
-        experimental: { richStorableValues: true },
+        experimental: {
+          richStorableValues: true,
+          canonicalHashing: true,
+        },
       });
 
       expect(getExperimentalStorableConfig().richStorableValues).toBe(true);
