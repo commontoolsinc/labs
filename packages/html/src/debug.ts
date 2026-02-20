@@ -63,7 +63,7 @@ function readCellAsync<T>(cell: CellHandle<T>): Promise<T | undefined> {
           cancel();
           resolve(undefined);
         }
-      }, 3000);
+      }, 30000);
     }
   });
 }
@@ -87,8 +87,9 @@ function formatTree(node: unknown, indent = 0): string {
 
   const obj = node as Record<string, unknown>;
 
-  // Follow $UI indirection — the root cell is often a wrapper with only $UI
-  if ("$UI" in obj && obj.$UI && !obj.name) {
+  // Always follow $UI indirection, matching the render code's behavior
+  // (render.ts follows the [UI] chain unconditionally before processing)
+  if ("$UI" in obj && obj.$UI) {
     return formatTree(obj.$UI, indent);
   }
 
