@@ -376,12 +376,11 @@ describe("storable-native-instances", () => {
       expect(result.getTime()).toBe(date.getTime());
     });
 
-    it("StorableDate.toNativeValue(false) returns a mutable copy", () => {
+    it("StorableDate.toNativeValue(false) returns original Date", () => {
       const date = new Date("2024-01-01");
       const sd = new StorableDate(date);
       const result = sd.toNativeValue(false);
-      expect(result).not.toBe(date);
-      expect(result.getTime()).toBe(date.getTime());
+      expect(result).toBe(date);
       expect(result).not.toBeInstanceOf(FrozenDate);
     });
 
@@ -413,12 +412,11 @@ describe("storable-native-instances", () => {
       expect(new Uint8Array(buf)).toEqual(new Uint8Array([10, 20, 30]));
     });
 
-    it("StorableUint8Array.toNativeValue(false) returns a copy", () => {
+    it("StorableUint8Array.toNativeValue(false) returns Uint8Array", () => {
       const bytes = new Uint8Array([1, 2, 3]);
       const su = new StorableUint8Array(bytes);
       const result = su.toNativeValue(false);
-      expect(result).not.toBe(bytes);
-      expect(result).toEqual(bytes);
+      expect(result).toBe(bytes);
       expect(result).toBeInstanceOf(Uint8Array);
     });
   });
@@ -486,12 +484,11 @@ describe("storable-native-instances", () => {
       expect((result as Blob).size).toBe(3);
     });
 
-    it("unwraps StorableUint8Array to Uint8Array copy when frozen=false", () => {
+    it("unwraps StorableUint8Array to Uint8Array when frozen=false", () => {
       const bytes = new Uint8Array([1, 2, 3]);
       const su = new StorableUint8Array(bytes);
       const result = nativeValueFromStorableValue(su as StorableValue, false);
-      expect(result).not.toBe(bytes);
-      expect(result).toEqual(bytes);
+      expect(result).toBe(bytes);
     });
 
     it("passes through primitives", () => {

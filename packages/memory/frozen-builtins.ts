@@ -23,7 +23,12 @@
  */
 export class FrozenMap<K, V> extends Map<K, V> {
   constructor(entries?: Iterable<readonly [K, V]> | null) {
-    super(entries);
+    super();
+    if (entries) {
+      for (const [k, v] of entries) {
+        super.set(k, v);
+      }
+    }
     Object.freeze(this);
   }
 
@@ -58,7 +63,12 @@ export class FrozenMap<K, V> extends Map<K, V> {
  */
 export class FrozenSet<T> extends Set<T> {
   constructor(values?: Iterable<T> | null) {
-    super(values);
+    super();
+    if (values) {
+      for (const v of values) {
+        super.add(v);
+      }
+    }
     Object.freeze(this);
   }
 

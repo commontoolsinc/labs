@@ -318,9 +318,7 @@ export class StorableDate extends StorableNativeWrapper {
   }
 
   toNativeValue(frozen: boolean): Date {
-    return frozen
-      ? new FrozenDate(this.date.getTime())
-      : new Date(this.date.getTime());
+    return frozen ? new FrozenDate(this.date.getTime()) : this.date;
   }
 
   static [RECONSTRUCT](
@@ -352,12 +350,11 @@ export class StorableUint8Array extends StorableNativeWrapper {
    * a `Uint8Array` (which `Object.freeze()` cannot protect -- typed arrays
    * allow element mutation even when frozen). Callers must handle the Blob's
    * async API (e.g. `blob.arrayBuffer()`). When `frozen` is false, returns
-   * a copy of the `Uint8Array` to prevent callers from mutating the
-   * wrapper's internal state.
+   * the `Uint8Array` directly.
    */
   toNativeValue(frozen: boolean): Blob | Uint8Array {
     if (frozen) return new Blob([this.bytes as BlobPart]);
-    return this.bytes.slice();
+    return this.bytes;
   }
 
   static [RECONSTRUCT](
