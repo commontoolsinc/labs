@@ -408,14 +408,22 @@ export function nativeValueFromStorableValue(
   if (frozen) {
     // Value is unfrozen but caller wants frozen -> freeze a shallow copy.
     if (Array.isArray(value)) {
-      return Object.freeze([...value]);
+      const copy = new Array(value.length);
+      for (let i = 0; i < value.length; i++) {
+        if (i in value) copy[i] = value[i];
+      }
+      return Object.freeze(copy);
     }
     return Object.freeze({ ...value });
   }
 
   // Value is frozen but caller wants unfrozen -> shallow copy.
   if (Array.isArray(value)) {
-    return [...value];
+    const copy = new Array(value.length);
+    for (let i = 0; i < value.length; i++) {
+      if (i in value) copy[i] = value[i];
+    }
+    return copy;
   }
   return { ...(value as Record<string, unknown>) };
 }

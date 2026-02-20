@@ -531,6 +531,40 @@ describe("storable-native-instances", () => {
       const arr = [1, 2] as StorableValue;
       expect(nativeValueFromStorableValue(arr, false)).toBe(arr);
     });
+
+    it("freezing a sparse array preserves holes", () => {
+      // Create a sparse array: [1, <hole>, 3]
+      const sparse = new Array(3) as StorableValue[];
+      sparse[0] = 1 as StorableValue;
+      sparse[2] = 3 as StorableValue;
+      const result = nativeValueFromStorableValue(
+        sparse as StorableValue,
+      ) as unknown[];
+      expect(Object.isFrozen(result)).toBe(true);
+      expect(result.length).toBe(3);
+      expect(result[0]).toBe(1);
+      expect(result[2]).toBe(3);
+      // Verify index 1 is a true hole, not undefined.
+      expect(!(1 in result)).toBe(true);
+    });
+
+    it("unfreezing a sparse array preserves holes", () => {
+      // Create a frozen sparse array: [1, <hole>, 3]
+      const sparse = new Array(3) as StorableValue[];
+      sparse[0] = 1 as StorableValue;
+      sparse[2] = 3 as StorableValue;
+      Object.freeze(sparse);
+      const result = nativeValueFromStorableValue(
+        sparse as StorableValue,
+        false,
+      ) as unknown[];
+      expect(Object.isFrozen(result)).toBe(false);
+      expect(result.length).toBe(3);
+      expect(result[0]).toBe(1);
+      expect(result[2]).toBe(3);
+      // Verify index 1 is a true hole, not undefined.
+      expect(!(1 in result)).toBe(true);
+    });
   });
 
   // --------------------------------------------------------------------------
