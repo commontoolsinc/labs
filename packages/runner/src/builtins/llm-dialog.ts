@@ -1975,8 +1975,22 @@ export function llmDialog(
             { path: event.path, name: event.name },
           ];
           pinnedCells.withTx(tx).set(updated);
-          // Also update result so the pattern sees the change immediately
-          result.withTx(tx).key("pinnedCells").set(updated as any);
+          // Merge with existing result pins (which include context-derived
+          // pins) so we don't clobber them. Deduplicate by path.
+          const existingResult =
+            result.withTx(tx).key("pinnedCells").get() || [];
+          const existingPaths = new Set(
+            existingResult.map((p: PinnedCell) => p.path),
+          );
+          if (!existingPaths.has(event.path)) {
+            result
+              .withTx(tx)
+              .key("pinnedCells")
+              .set([
+                ...existingResult,
+                { path: event.path, name: event.name },
+              ] as any);
+          }
         },
       );
 
@@ -1984,10 +1998,24 @@ export function llmDialog(
       createHandler<void>(
         result.key("unpinAllCells") as unknown as Stream<void>,
         (tx: IExtendedStorageTransaction, _event: void) => {
-          // Clear all pinned cells
+          // Clear user-pinned cells
+          const userPaths = new Set(
+            (pinnedCells.withTx(tx).get() || []).map(
+              (p: PinnedCell) => p.path,
+            ),
+          );
           pinnedCells.withTx(tx).set([]);
-          // Also update result so the pattern sees the change immediately
-          result.withTx(tx).key("pinnedCells").set([] as any);
+          // Keep context-derived pins in result, remove only user pins
+          const existingResult =
+            result.withTx(tx).key("pinnedCells").get() || [];
+          result
+            .withTx(tx)
+            .key("pinnedCells")
+            .set(
+              existingResult.filter(
+                (p: PinnedCell) => !userPaths.has(p.path),
+              ) as any,
+            );
         },
       );
 
