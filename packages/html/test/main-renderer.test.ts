@@ -19,12 +19,16 @@ class MockConnection {
     this.listeners.get(event)?.delete(callback);
   }
 
-  async mountVDom(_mountId: number, _cellRef: CellRef): Promise<{ rootId: number }> {
-    return { rootId: 0 };
+  mountVDom(
+    _mountId: number,
+    _cellRef: CellRef,
+  ): Promise<{ rootId: number }> {
+    return Promise.resolve({ rootId: 0 });
   }
 
-  async unmountVDom(mountId: number): Promise<void> {
+  unmountVDom(mountId: number): Promise<void> {
     this.unmountCalls.push(mountId);
+    return Promise.resolve();
   }
 
   sendVDomEvent(): void {

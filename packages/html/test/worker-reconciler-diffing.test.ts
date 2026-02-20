@@ -324,7 +324,11 @@ Deno.test("worker reconciler diffing - same tag updates in place", async (t) => 
 
       const removeOps = collector.getOpsOfType("remove-node");
       assertEquals(removeOps.length, 1, "Should remove previous root node");
-      assertEquals(reconciler.getRootNodeId(), null, "Root node should be null");
+      assertEquals(
+        reconciler.getRootNodeId(),
+        null,
+        "Root node should be null",
+      );
 
       cancel();
     });
