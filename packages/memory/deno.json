@@ -43,7 +43,12 @@
     "./reference": "./reference.ts",
     "./rich-storable-value": "./rich-storable-value.ts",
     "./schema": "./schema.ts",
-    "./storable-value": "./storable-value.ts"
+    "./storable-value": "./storable-value.ts",
+    "./storable-protocol": "./storable-protocol.ts",
+    "./serialization-context": "./serialization-context.ts",
+    "./type-tags": "./type-tags.ts",
+    "./unknown-storable": "./unknown-storable.ts",
+    "./problematic-storable": "./problematic-storable.ts"
   },
   "imports": {
     "@db/sqlite": "jsr:@db/sqlite@^0.12.0",
