@@ -127,16 +127,20 @@ When done, call presentResult with your structured findings.`,
           <p>
             <em>
               {computed(() =>
-                result?.confidence ? `Confidence: ${result.confidence}` : "",
+                result?.confidence ? `Confidence: ${result.confidence}` : ""
               )}
             </em>
           </p>
-          <h3>{computed(() => (result?.findings?.length ? "Findings" : ""))}</h3>
-          <p style="white-space:pre-wrap">{computed(() =>
-            result?.findings?.map((f: any) =>
-              `${f.title}\n${f.content}\n(${f.source})`
-            ).join("\n\n") ?? "",
-          )}</p>
+          <h3>
+            {computed(() => (result?.findings?.length ? "Findings" : ""))}
+          </h3>
+          <p style="white-space:pre-wrap">
+            {computed(() =>
+              result?.findings?.map((f: any) =>
+                `${f.title}\n${f.content}\n(${f.source})`
+              ).join("\n\n") ?? ""
+            )}
+          </p>
           <h3>{computed(() => (result?.sources?.length ? "Sources" : ""))}</h3>
           <p>{computed(() => result?.sources?.join("\n") ?? "")}</p>
         </div>

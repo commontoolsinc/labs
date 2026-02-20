@@ -246,11 +246,13 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
           <DoItemCard item={item} removeItem={removeItem} />
         ))}
 
-        {hasNoItems ? (
-          <div style="text-align: center; color: var(--ct-color-gray-500); padding: 1rem;">
-            No items yet. Add one below!
-          </div>
-        ) : null}
+        {hasNoItems
+          ? (
+            <div style="text-align: center; color: var(--ct-color-gray-500); padding: 1rem;">
+              No items yet. Add one below!
+            </div>
+          )
+          : null}
       </ct-vstack>
 
       <ct-message-input
@@ -266,7 +268,9 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
   );
 
   return {
-    [NAME]: computed(() => `Do List (${items.get().length})`),
+    [NAME]: computed(() =>
+      `Do List (${items.get().length})`
+    ),
     [UI]: (
       <ct-screen>
         <ct-vstack slot="header" gap="1">
@@ -284,11 +288,13 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
               <DoItemCard item={item} removeItem={removeItem} />
             ))}
 
-            {hasNoItems ? (
-              <div style="text-align: center; color: var(--ct-color-gray-500); padding: 2rem;">
-                No items yet. Add one below!
-              </div>
-            ) : null}
+            {hasNoItems
+              ? (
+                <div style="text-align: center; color: var(--ct-color-gray-500); padding: 2rem;">
+                  No items yet. Add one below!
+                </div>
+              )
+              : null}
           </ct-vstack>
         </ct-vscroll>
 
