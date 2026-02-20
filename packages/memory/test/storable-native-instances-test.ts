@@ -381,8 +381,8 @@ describe("storable-native-instances", () => {
       const sd = new StorableDate(date);
       const result = sd.toNativeValue(false);
       expect(result).not.toBe(date);
-      expect(result).not.toBeInstanceOf(FrozenDate);
       expect(result.getTime()).toBe(date.getTime());
+      expect(result).not.toBeInstanceOf(FrozenDate);
     });
 
     it("StorableUint8Array implements StorableInstance", () => {
@@ -418,8 +418,8 @@ describe("storable-native-instances", () => {
       const su = new StorableUint8Array(bytes);
       const result = su.toNativeValue(false);
       expect(result).not.toBe(bytes);
+      expect(result).toEqual(bytes);
       expect(result).toBeInstanceOf(Uint8Array);
-      expect(result).toEqual(new Uint8Array([1, 2, 3]));
     });
   });
 
@@ -491,8 +491,7 @@ describe("storable-native-instances", () => {
       const su = new StorableUint8Array(bytes);
       const result = nativeValueFromStorableValue(su as StorableValue, false);
       expect(result).not.toBe(bytes);
-      expect(result).toBeInstanceOf(Uint8Array);
-      expect(result).toEqual(new Uint8Array([1, 2, 3]));
+      expect(result).toEqual(bytes);
     });
 
     it("passes through primitives", () => {
