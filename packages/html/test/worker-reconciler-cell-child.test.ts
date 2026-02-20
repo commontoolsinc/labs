@@ -285,6 +285,104 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
   );
 
   await t.step(
+    "emits remove-event (not remove-prop) when an event prop is removed",
+    async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+      });
+
+      const rootCell = new MockCell({
+        type: "vnode",
+        name: "button",
+        props: { onClick: () => {} },
+        children: ["Click me"],
+      });
+
+      reconciler.mount(rootCell as any);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      collector.clear();
+
+      rootCell.set({
+        type: "vnode",
+        name: "button",
+        props: {},
+        children: ["Click me"],
+      });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const removeEventOps = collector.getOpsOfType("remove-event");
+      assertEquals(removeEventOps.length, 1, "Should emit remove-event");
+      assertEquals(
+        (removeEventOps[0] as { eventType: string }).eventType,
+        "click",
+      );
+
+      const removePropOps = collector.getOpsOfType("remove-prop");
+      const hasOnClickRemoveProp = removePropOps.some((op) =>
+        (op as { key: string }).key === "onClick"
+      );
+      assertEquals(
+        hasOnClickRemoveProp,
+        false,
+        "Should not emit remove-prop for onClick",
+      );
+    },
+  );
+
+  await t.step(
+    "normalizes binding key when removing $props",
+    async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+      });
+
+      const valueCell = runtime.getCell(
+        signer.did(),
+        "binding-removal-cell",
+        undefined,
+        dummyTx,
+      );
+      valueCell.set("hello");
+
+      const rootCell = new MockCell({
+        type: "vnode",
+        name: "ct-input",
+        props: { $value: valueCell },
+        children: [],
+      });
+
+      reconciler.mount(rootCell as any);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      collector.clear();
+
+      rootCell.set({
+        type: "vnode",
+        name: "ct-input",
+        props: {},
+        children: [],
+      });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const removePropOps = collector.getOpsOfType("remove-prop");
+      const hasValueRemove = removePropOps.some((op) =>
+        (op as { key: string }).key === "value"
+      );
+      const hasBindingSyntaxRemove = removePropOps.some((op) =>
+        (op as { key: string }).key === "$value"
+      );
+
+      assertEquals(hasValueRemove, true, "Should remove normalized key");
+      assertEquals(
+        hasBindingSyntaxRemove,
+        false,
+        "Should not remove $value literal key",
+      );
+    },
+  );
+
+  await t.step(
     "deduplicates identical values from Cell",
     async () => {
       const collector = createOpsCollector();

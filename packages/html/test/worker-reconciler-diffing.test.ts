@@ -290,6 +290,44 @@ Deno.test("worker reconciler diffing - same tag updates in place", async (t) => 
 
       cancel();
     });
+
+    await t.step("clears root when Cell emits undefined", async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+      });
+
+      const vnodeCell = runtime.getCell<WorkerVNode>(
+        space,
+        "test-vnode-root-clear",
+        undefined,
+        tx,
+      );
+
+      vnodeCell.set({
+        type: "vnode",
+        name: "div",
+        props: { id: "root-clear" },
+        children: ["Hello"],
+      } as WorkerVNode);
+      await tx.commit();
+      tx = runtime.edit();
+
+      const cancel = reconciler.mount(vnodeCell as Cell<WorkerVNode>);
+      await runtime.idle();
+      collector.clear();
+
+      vnodeCell.withTx(tx).set(undefined as unknown as WorkerVNode);
+      await tx.commit();
+      tx = runtime.edit();
+      await runtime.idle();
+
+      const removeOps = collector.getOpsOfType("remove-node");
+      assertEquals(removeOps.length, 1, "Should remove previous root node");
+      assertEquals(reconciler.getRootNodeId(), null, "Root node should be null");
+
+      cancel();
+    });
   } finally {
     await tx.commit();
     await runtime?.dispose();
