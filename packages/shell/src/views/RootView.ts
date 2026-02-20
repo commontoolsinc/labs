@@ -15,6 +15,7 @@ import { Task } from "@lit/task";
 import { type RuntimeClient } from "@commontools/runtime-client";
 import { type DID } from "@commontools/identity";
 import { RuntimeInternals } from "../lib/runtime.ts";
+import { createVDomDebugHelpers } from "@commontools/html/debug";
 import { runtimeContext, spaceContext } from "@commontools/ui";
 import { provide } from "@lit/context";
 
@@ -114,6 +115,7 @@ export class XRootView extends BaseView {
           (globalThis as any).commontools = {};
         }
         globalThis.commontools.rt = this.runtime;
+        globalThis.commontools.vdom = createVDomDebugHelpers();
 
         return rt;
       },

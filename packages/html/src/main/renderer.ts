@@ -187,6 +187,20 @@ export class VDomRenderer {
       : null;
   }
 
+  /**
+   * Get the underlying DomApplicator for debug inspection.
+   */
+  getApplicator(): DomApplicator {
+    return this.applicator;
+  }
+
+  /**
+   * Get the current mount ID, or null if not mounted.
+   */
+  getMountId(): number | null {
+    return this.mountId;
+  }
+
   // ============== Private Methods ==============
 
   private handleVDomBatch = (notification: VDomBatchNotification): void => {
