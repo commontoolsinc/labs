@@ -115,6 +115,7 @@ export class CTCellLink extends BaseElement {
   private _endDrag() {
     document.removeEventListener("pointermove", this._boundPointerMove);
     document.removeEventListener("pointerup", this._boundPointerUp);
+    document.removeEventListener("pointercancel", this._boundPointerUp);
 
     if (this._isDragging) {
       endDrag();
@@ -232,6 +233,7 @@ export class CTCellLink extends BaseElement {
 
     document.addEventListener("pointermove", this._boundPointerMove);
     document.addEventListener("pointerup", this._boundPointerUp);
+    document.addEventListener("pointercancel", this._boundPointerUp);
   }
 
   private _onPointerMove(e: PointerEvent) {

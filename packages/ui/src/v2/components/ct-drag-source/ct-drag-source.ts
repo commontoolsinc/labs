@@ -85,10 +85,10 @@ export class CTDragSource extends BaseElement {
   }
 
   private async _resolveCell() {
+    // Clear immediately so stale values can't be used during async resolution
+    this._resolvedCell = undefined;
     if (this.cell) {
       this._resolvedCell = await this.cell.resolveAsCell();
-    } else {
-      this._resolvedCell = undefined;
     }
   }
 
@@ -121,6 +121,7 @@ export class CTDragSource extends BaseElement {
     // Add document-level listeners for move and up
     document.addEventListener("pointermove", this._boundPointerMove);
     document.addEventListener("pointerup", this._boundPointerUp);
+    document.addEventListener("pointercancel", this._boundPointerUp);
   }
 
   private _handlePointerMove(e: PointerEvent) {
@@ -157,6 +158,7 @@ export class CTDragSource extends BaseElement {
     // Clean up listeners
     document.removeEventListener("pointermove", this._boundPointerMove);
     document.removeEventListener("pointerup", this._boundPointerUp);
+    document.removeEventListener("pointercancel", this._boundPointerUp);
 
     if (this._isDragging) {
       // Drop detection is now handled by drop-zones polling the drag state
