@@ -842,7 +842,7 @@ function getDisplayInfo(
 }
 
 // ===== The Record Pattern =====
-const Record = pattern<RecordInput, RecordOutput>(
+const Record = pattern<Required<RecordInput>, RecordOutput>(
   ({ title, subPieces, trashedSubPieces, [SELF]: self }) => {
     // Local state
     const selectedAddType = Writable.of<string>("");

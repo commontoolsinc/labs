@@ -45,7 +45,7 @@ const onAnswer = handler<
  * Designed as "suggestion fuel" - useful when the system needs more information
  * before proceeding, or to prompt the user to think about something.
  */
-const Question = pattern<QuestionInput, QuestionOutput>(
+const Question = pattern<Required<QuestionInput>, QuestionOutput>(
   ({ topic, context }) => {
     const prompt = computed(() => {
       const t = topic || "the current situation";

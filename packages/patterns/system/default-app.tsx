@@ -113,7 +113,10 @@ const menuNewNote = handler<void, { menuOpen: Writable<boolean> }>(
     return navigateTo(Note({
       title: "New Note",
       content: "",
+      isHidden: false,
       noteId: generateId(),
+      linkPattern: "",
+      parentNotebook: null,
     }));
   },
 );

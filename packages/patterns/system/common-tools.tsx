@@ -210,7 +210,14 @@ export const bash = pattern<BashRequest, BashResult | { error: string }>(
       options: {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: { sandboxId, command, workingDirectory, timeout, environment },
+        body: {
+          sandboxId,
+          command,
+          // optional parameters - only include if provided
+          ...(workingDirectory && { workingDirectory }),
+          ...(timeout && { timeout }),
+          ...(environment && { environment }),
+        },
       },
     });
     return ifElse(error, { error }, result);

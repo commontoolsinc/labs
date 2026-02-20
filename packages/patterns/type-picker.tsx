@@ -89,7 +89,15 @@ const applyTemplate = handler<
   const selfEntry = current.find((e) => e?.type === "type-picker");
 
   // Create factory for Notes that uses the linkPatternJson for wiki-links
-  const createNotesPiece = () => Note({ linkPattern: linkPatternJson });
+  const createNotesPiece = () =>
+    Note({
+      title: "Untitled Note",
+      content: "",
+      isHidden: false,
+      noteId: "",
+      linkPattern: linkPatternJson ?? "",
+      parentNotebook: null,
+    });
 
   // Create template modules (skip notes since we keep existing one)
   const templateEntries = createTemplateModules(templateId, createNotesPiece);

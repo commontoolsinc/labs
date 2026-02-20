@@ -342,7 +342,7 @@ const bigAddButtonStyle = {
 // MAIN PATTERN
 // ============================================================================
 
-const Profile = pattern<ProfileInput, Output>(
+const Profile = pattern<Required<ProfileInput>, Output>(
   ({
     self,
     partner,
