@@ -36,6 +36,7 @@ export interface NotePiece {
   [NAME]?: string;
   title?: string;
   content?: string;
+  summary?: string;
   isHidden?: boolean;
   noteId?: string;
   backlinks?: MentionablePiece[];

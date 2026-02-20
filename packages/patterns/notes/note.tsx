@@ -35,6 +35,7 @@ interface NoteOutput {
   [UI]: VNode;
   title: string;
   content: string;
+  summary: string;
   mentioned: Default<MentionablePiece[], []>;
   backlinks: MentionablePiece[];
   isHidden: boolean;
@@ -172,6 +173,19 @@ const Note = pattern<NoteInput, NoteOutput>(
 
     // Backlinks - populated by backlinks-index.tsx
     const backlinks = Writable.of<MentionablePiece[]>([]);
+
+    // Summary - truncated content for search indexing
+    const summary = computed(() => {
+      const text = content.get();
+      if (!text || text.trim() === "") return "";
+      const cleaned = text.trim();
+      if (cleaned.length <= 200) return cleaned;
+      const truncated = cleaned.slice(0, 200);
+      const lastSpace = truncated.lastIndexOf(" ");
+      return lastSpace > 150
+        ? truncated.slice(0, lastSpace) + "..."
+        : truncated + "...";
+    });
 
     // ===== Actions =====
 
@@ -513,6 +527,7 @@ const Note = pattern<NoteInput, NoteOutput>(
       ),
       title,
       content,
+      summary,
       mentioned,
       backlinks,
       isHidden,
