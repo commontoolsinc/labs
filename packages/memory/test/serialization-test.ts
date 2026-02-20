@@ -320,6 +320,16 @@ describe("serialization", () => {
       const result = deserialize(data, context, runtime);
       expect(result).toBeInstanceOf(ProblematicStorable);
     });
+
+    it("deserializes invalid string state to ProblematicStorable", () => {
+      const { context, runtime } = makeTestContext();
+      const data = { "/BigInt@1": "hello" } as SerializedForm;
+      const result = deserialize(data, context, runtime);
+      expect(result).toBeInstanceOf(ProblematicStorable);
+      const prob = result as unknown as ProblematicStorable;
+      expect(prob.typeTag).toBe("BigInt@1");
+      expect(prob.state).toBe("hello");
+    });
   });
 
   // --------------------------------------------------------------------------

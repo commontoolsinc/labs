@@ -176,7 +176,15 @@ export const BigIntHandler: TypeHandler = {
         `bigint: expected string state, got ${typeof state}`,
       );
     }
-    return BigInt(state);
+    try {
+      return BigInt(state);
+    } catch {
+      return makeProblematic(
+        TAGS.BigInt,
+        state,
+        `bigint: invalid string: ${state}`,
+      );
+    }
   },
 };
 
