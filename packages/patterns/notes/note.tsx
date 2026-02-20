@@ -228,7 +228,7 @@ const Note = pattern<NoteInput, NoteOutput>(
       // Add to parent notebook if we can find it in mentionable
       if (notebook) {
         const nbName = notebook[NAME];
-        const found = mentionable.find((c) => c[NAME] === nbName) as
+        const found = mentionable.find((c) => c?.[NAME] === nbName) as
           | NotebookPiece
           | undefined;
         if (found?.isNotebook && found?.notes) {
