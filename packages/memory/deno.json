@@ -48,7 +48,9 @@
     "./serialization-context": "./serialization-context.ts",
     "./type-tags": "./type-tags.ts",
     "./unknown-storable": "./unknown-storable.ts",
-    "./problematic-storable": "./problematic-storable.ts"
+    "./problematic-storable": "./problematic-storable.ts",
+    "./frozen-builtins": "./frozen-builtins.ts",
+    "./storable-native-instances": "./storable-native-instances.ts"
   },
   "imports": {
     "@db/sqlite": "jsr:@db/sqlite@^0.12.0",
