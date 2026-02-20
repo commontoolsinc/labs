@@ -31,16 +31,3 @@ export type JsonSerializationContext = SerializationContext<JsonWireValue>;
  * still import it from here during the transition.
  */
 export type { SerializationContext } from "./serialization-context.ts";
-
-/**
- * Convenience type guard: checks if a `SerializationContext` is a JSON context
- * (i.e., its serialized form is `JsonWireValue`). Useful for code that needs to
- * distinguish JSON contexts from potential future binary contexts.
- */
-export function isJsonContext(
-  _context: SerializationContext<unknown>,
-): _context is JsonSerializationContext {
-  // For now, all contexts are JSON contexts. This will become meaningful
-  // when binary contexts are introduced.
-  return true;
-}

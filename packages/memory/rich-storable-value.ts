@@ -251,6 +251,10 @@ function toDeepRichStorableValueInternal(
     return value as StorableValue;
   }
 
+  // TODO(danfuzz): Look into avoiding this special case for StorableError.
+  // Ideally the recursive internals conversion would be handled generically
+  // rather than requiring a type-specific branch here.
+  //
   // StorableError wraps a raw Error whose internals (cause, custom
   // properties) may contain raw native types that aren't StorableValue.
   // We must recursively convert those internals NOW so that when
