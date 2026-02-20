@@ -246,6 +246,12 @@ Be matter-of-fact. Prefer action to explanation.`;
     const showHistory = Writable.of(false);
     const peekDismissedIndex = Writable.of(-1);
 
+    // Derive pin count for collapsed state dots
+    const pinCount = computed(() => {
+      const pinned = omnibot.pinnedCells;
+      return pinned ? pinned.length : 0;
+    });
+
     // Derive assistant message count for dismiss tracking
     const assistantMessageCount = computed(() => {
       return omnibot.messages
@@ -289,7 +295,10 @@ Be matter-of-fact. Prefer action to explanation.`;
             variant="primary"
             position="bottom-center"
             pending={omnibot.pending}
+            pinCount={pinCount}
+            $messages={omnibot.messages}
             $previewMessage={latestAssistantMessage}
+            placeholder="Ask about anything..."
             onct-fab-backdrop-click={closeFab({ fabExpanded })}
             onct-fab-escape={closeFab({ fabExpanded })}
             onClick={toggle({ value: fabExpanded })}
@@ -375,14 +384,6 @@ Be matter-of-fact. Prefer action to explanation.`;
               </div>,
               null,
             )}
-            {/* Beads in collapsed pill */}
-            <ct-message-beads
-              slot="collapsed"
-              $messages={omnibot.messages}
-              pending={omnibot.pending}
-            >
-              Ask about anything...
-            </ct-message-beads>
           </ct-fab>
         </ct-drop-zone>
       ),

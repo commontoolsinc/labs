@@ -3415,7 +3415,10 @@ interface CTFabAttributes<T> extends CTHTMLAttributes<T> {
     | "top-left"
     | "bottom-center";
   "pending"?: boolean;
+  "pinCount"?: number;
+  "$messages"?: CellLike<any[]>;
   "$previewMessage"?: CellLike<string | null>;
+  "placeholder"?: string;
 }
 
 interface CTModalAttributes<T> extends CTHTMLAttributes<T> {
