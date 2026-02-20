@@ -324,7 +324,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
 
             <div style={{ flex: "1", minWidth: "0" }}>
               {ifElse(
-                computed(() => recentPieces.length > 0),
+                computed(() => recentPieces.get().length > 0),
                 <ct-vstack gap="4" style={{ marginBottom: "16px" }}>
                   <ct-hstack gap="2" align="center">
                     <h3 style={{ margin: "0", fontSize: "16px" }}>Recent</h3>
