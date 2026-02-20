@@ -1,16 +1,14 @@
-import { css, html } from "lit";
-import { property } from "lit/decorators.js";
+import { css, html, type PropertyValues } from "lit";
+import { property, state } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
 import {
+  createDragPreview,
   endDrag,
   startDrag,
   updateDragPointer,
 } from "../../core/drag-state.ts";
-import { render } from "@commontools/html/client";
-import { UI } from "@commontools/runtime-client";
 import type { CellHandle } from "@commontools/runtime-client";
 import "../ct-cell-context/ct-cell-context.ts";
-import "../ct-cell-link/ct-cell-link.ts";
 
 /**
  * CTDragSource - Wraps draggable content and initiates drag operations
@@ -67,6 +65,9 @@ export class CTDragSource extends BaseElement {
   @property({ type: Boolean, reflect: true })
   disabled?: boolean;
 
+  @state()
+  private _resolvedCell?: CellHandle;
+
   private _isDragging = false;
   private _isTracking = false;
   private _startX = 0;
@@ -75,6 +76,21 @@ export class CTDragSource extends BaseElement {
   private _preview?: HTMLElement;
   private _boundPointerMove = this._handlePointerMove.bind(this);
   private _boundPointerUp = this._handlePointerUp.bind(this);
+
+  protected override willUpdate(changedProperties: PropertyValues) {
+    super.willUpdate(changedProperties);
+    if (changedProperties.has("cell")) {
+      this._resolveCell();
+    }
+  }
+
+  private async _resolveCell() {
+    // Clear immediately so stale values can't be used during async resolution
+    this._resolvedCell = undefined;
+    if (this.cell) {
+      this._resolvedCell = await this.cell.resolveAsCell();
+    }
+  }
 
   private _handlePointerDown(e: PointerEvent) {
     // Skip if disabled
@@ -105,6 +121,7 @@ export class CTDragSource extends BaseElement {
     // Add document-level listeners for move and up
     document.addEventListener("pointermove", this._boundPointerMove);
     document.addEventListener("pointerup", this._boundPointerUp);
+    document.addEventListener("pointercancel", this._boundPointerUp);
   }
 
   private _handlePointerMove(e: PointerEvent) {
@@ -141,6 +158,7 @@ export class CTDragSource extends BaseElement {
     // Clean up listeners
     document.removeEventListener("pointermove", this._boundPointerMove);
     document.removeEventListener("pointerup", this._boundPointerUp);
+    document.removeEventListener("pointercancel", this._boundPointerUp);
 
     if (this._isDragging) {
       // Drop detection is now handled by drop-zones polling the drag state
@@ -162,7 +180,8 @@ export class CTDragSource extends BaseElement {
   }
 
   private _startDrag(e: PointerEvent) {
-    if (!this.cell) {
+    const cell = this._resolvedCell ?? this.cell;
+    if (!cell) {
       return;
     }
 
@@ -178,7 +197,7 @@ export class CTDragSource extends BaseElement {
     }
 
     // Create preview element
-    this._preview = this._createPreview();
+    this._preview = createDragPreview(cell);
     document.body.appendChild(this._preview);
 
     // Position preview near cursor
@@ -187,7 +206,7 @@ export class CTDragSource extends BaseElement {
 
     // Start drag in drag state
     startDrag({
-      cell: this.cell,
+      cell,
       type: this.type,
       sourceElement: this,
       preview: this._preview,
@@ -196,63 +215,12 @@ export class CTDragSource extends BaseElement {
     });
 
     // Emit drag start event
-    this.emit("ct-drag-start", { cell: this.cell });
-  }
-
-  private _createPreview(): HTMLElement {
-    if (!this.cell) {
-      throw new Error("Cannot create preview without cell");
-    }
-
-    const preview = document.createElement("div");
-    // Apply inline styles since this element is appended to document.body
-    // (outside our shadow DOM where .preview class would apply)
-    preview.style.cssText = `
-      position: fixed;
-      pointer-events: none;
-      z-index: 10000;
-      opacity: 0.9;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-      background: white;
-      border: 1px solid #ccc;
-      padding: 0.5rem;
-      border-radius: 4px;
-      max-width: 300px;
-      max-height: 200px;
-      overflow: hidden;
-    `;
-
-    // Check if cell value has [UI] property
-    const cellValue = this.cell.get();
-    if (cellValue && typeof cellValue === "object" && UI in cellValue) {
-      // Render using [UI]
-      try {
-        const uiValue = (cellValue as Record<string, unknown>)[UI];
-        render(preview, uiValue as any);
-      } catch (error) {
-        console.warn("[ct-drag-source] Failed to render [UI]:", error);
-        this._createFallbackPreview(preview);
-      }
-    } else {
-      // Use ct-cell-link as fallback
-      this._createFallbackPreview(preview);
-    }
-
-    return preview;
-  }
-
-  private _createFallbackPreview(container: HTMLElement) {
-    if (!this.cell) {
-      return;
-    }
-
-    const link = document.createElement("ct-cell-link");
-    link.cell = this.cell;
-    container.appendChild(link);
+    this.emit("ct-drag-start", { cell });
   }
 
   private _endDrag() {
-    if (!this.cell) {
+    const cell = this._resolvedCell ?? this.cell;
+    if (!cell) {
       return;
     }
 
@@ -267,7 +235,7 @@ export class CTDragSource extends BaseElement {
     endDrag();
 
     // Emit drag end event
-    this.emit("ct-drag-end", { cell: this.cell });
+    this.emit("ct-drag-end", { cell });
 
     this._preview = undefined;
   }

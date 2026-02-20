@@ -133,7 +133,10 @@ export default pattern<CardPilesInput, CardPilesOutput>(({ pile1, pile2 }) => {
           minHeight: "200px",
         }}
       >
-        <ct-drop-zone accept="card" onct-drop={moveToPile1({ pile1, pile2 })}>
+        <ct-drop-zone
+          accept="card,cell-link"
+          onct-drop={moveToPile1({ pile1, pile2 })}
+        >
           <div
             style={{
               minWidth: "120px",
@@ -226,7 +229,10 @@ export default pattern<CardPilesInput, CardPilesOutput>(({ pile1, pile2 }) => {
           </div>
         </ct-drop-zone>
 
-        <ct-drop-zone accept="card" onct-drop={moveToPile2({ pile1, pile2 })}>
+        <ct-drop-zone
+          accept="card,cell-link"
+          onct-drop={moveToPile2({ pile1, pile2 })}
+        >
           <div
             style={{
               minWidth: "120px",

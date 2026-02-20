@@ -19,27 +19,40 @@ interface Item {
 
 interface DragDropDemoInput {
   availableItems: Default<Item[], []>;
-  droppedItems: Writable<Item[]>;
+  droppedItems: Default<Item[], []>;
 }
 
 interface DragDropDemoOutput {
-  availableItems: Default<Item[], []>;
-  droppedItems: Writable<Item[]>;
+  availableItems: Item[];
+  droppedItems: Item[];
 }
 
 // Handler to remove an item from the dropped list
 const removeItem = handler<
   unknown,
   { droppedItems: Writable<Item[]>; item: Writable<Item> }
->(
-  (_, { droppedItems, item }) => {
-    const current = droppedItems.get();
-    const index = current.findIndex((el) => equals(item, el));
-    if (index >= 0) {
-      droppedItems.set(current.toSpliced(index, 1));
-    }
-  },
-);
+>((_, { droppedItems, item }) => {
+  const current = droppedItems.get();
+  const index = current.findIndex((el) => equals(item, el));
+  if (index >= 0) {
+    droppedItems.set(current.toSpliced(index, 1));
+  }
+});
+
+// Handler for dropping an item into the drop zone
+const dropItem = handler<
+  { detail: { sourceCell: Writable<Item> } },
+  { droppedItems: Writable<Item[]> }
+>((e, props) => {
+  if (!props) {
+    console.warn("[drag-drop-demo] dropItem: props is undefined");
+    return;
+  }
+  const sourceItem = e.detail?.sourceCell?.get() as Item;
+  if (sourceItem) {
+    props.droppedItems.push(sourceItem);
+  }
+});
 
 export default pattern<DragDropDemoInput, DragDropDemoOutput>(
   ({ availableItems, droppedItems }) => {
@@ -49,7 +62,7 @@ export default pattern<DragDropDemoInput, DragDropDemoOutput>(
     const items = computed(() => {
       const defaultItems: Item[] = [
         { title: "Item A", [UI]: <div>Hello World!!!</div> },
-        counter as any, // TODO(seefeld): fix this, title is indeed missing
+        { title: "Counter", [UI]: counter[UI] }, // TODO(seefeld): fix this, title is indeed missing
         { title: "Item C" },
       ];
 
@@ -57,7 +70,7 @@ export default pattern<DragDropDemoInput, DragDropDemoOutput>(
     });
 
     // Check if dropped items is empty
-    const isEmpty = computed(() => droppedItems.get().length === 0);
+    const isEmpty = computed(() => droppedItems.length === 0);
 
     return {
       [NAME]: "Drag Drop Demo",
@@ -87,16 +100,13 @@ export default pattern<DragDropDemoInput, DragDropDemoOutput>(
                   </div>
                 </ct-drag-source>
               ))}
+              <ct-cell-link $cell={counter} />
             </div>
           </div>
 
           <ct-drop-zone
-            accept="item"
-            onct-drop={(e: { detail: { sourceCell: Writable<Item> } }) => {
-              const sourceItem = e.detail.sourceCell.get() as Item;
-              // Append the dropped item to the list
-              droppedItems.push(sourceItem);
-            }}
+            accept="item,cell-link"
+            onct-drop={dropItem({ droppedItems })}
           >
             <div
               style={{
