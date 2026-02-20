@@ -112,12 +112,13 @@ function renderViaWorker(
   });
 
   // Register in active renders registry
-  activeRenders.set(parent, {
+  const entry: ActiveRender = {
     parent,
     cell: cellHandle,
     renderer,
     path: "worker",
-  });
+  };
+  activeRenders.set(parent, entry);
 
   // Start rendering asynchronously
   let cancelAsync: (() => Promise<void>) | null = null;
@@ -143,7 +144,10 @@ function renderViaWorker(
   // Return synchronous cancel function
   return () => {
     disposed = true;
-    activeRenders.delete(parent);
+    // Only remove if we're still the active render for this parent
+    if (activeRenders.get(parent) === entry) {
+      activeRenders.delete(parent);
+    }
     if (cancelAsync) {
       cancelAsync().catch(() => {});
     }
@@ -169,12 +173,13 @@ function renderLegacy(
   }
 
   // Register in active renders registry
-  activeRenders.set(parent, {
+  const entry: ActiveRender = {
     parent,
     cell: rootCell ?? null,
     renderer: null,
     path: "legacy",
-  });
+  };
+  activeRenders.set(parent, entry);
 
   const optionsWithCell = rootCell ? { ...options, rootCell } : options;
 
@@ -190,7 +195,10 @@ function renderLegacy(
   });
 
   return () => {
-    activeRenders.delete(parent);
+    // Only remove if we're still the active render for this parent
+    if (activeRenders.get(parent) === entry) {
+      activeRenders.delete(parent);
+    }
     cancelEffect();
   };
 }
