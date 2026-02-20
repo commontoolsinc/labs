@@ -5,6 +5,8 @@ import type { CellHandle } from "@commontools/runtime-client";
 import { isCellHandle } from "@commontools/runtime-client";
 import { fabAnimations } from "./styles.ts";
 import { stringSchema } from "@commontools/runner/schemas";
+// Side-effect import to ensure ct-message-beads is registered
+import "../ct-message-beads/ct-message-beads.ts";
 
 /**
  * A morphing floating action button that expands into a panel.
@@ -13,17 +15,16 @@ import { stringSchema } from "@commontools/runner/schemas";
  *
  * @attr {boolean} expanded - Whether the FAB is expanded (controlled state)
  * @attr {string} variant - Visual variant: "default" | "primary"
- * @attr {string} position - Screen position: "bottom-right" | "bottom-left" | "top-right" | "top-left"
+ * @attr {string} position - Screen position: "bottom-right" | "bottom-left" | "top-right" | "top-left" | "bottom-center"
  *
  * @fires ct-fab-backdrop-click - Fired when user clicks backdrop
  * @fires ct-fab-escape - Fired when user presses Escape
  *
- * @slot icon - Content for the FAB icon (collapsed state)
  * @slot - Content for the expanded panel
  *
  * @csspart fab - The morphing container element
  * @csspart backdrop - The backdrop overlay
- * @csspart icon - The icon container
+ * @csspart collapsed - The collapsed pill content container
  * @csspart panel - The panel container
  */
 export class CTFab extends BaseElement {
@@ -34,6 +35,14 @@ export class CTFab extends BaseElement {
       :host {
         display: block;
         box-sizing: border-box;
+      }
+
+      /* Give host dimensions when collapsed so slotted children
+        (which lay out in the host context, not the shadow DOM)
+        have a proper layout context */
+      :host(:not([expanded])) {
+        width: 300px;
+        height: 40px;
       }
 
       *,
@@ -123,6 +132,21 @@ export class CTFab extends BaseElement {
         );
       }
 
+      :host([position="bottom-center"]) .backdrop {
+        mask-image: radial-gradient(
+          circle at bottom center,
+          rgba(0, 0, 0, 1) 0%,
+          rgba(0, 0, 0, 0.5) 40%,
+          rgba(0, 0, 0, 0) 70%
+        );
+        -webkit-mask-image: radial-gradient(
+          circle at bottom center,
+          rgba(0, 0, 0, 1) 0%,
+          rgba(0, 0, 0, 0.5) 40%,
+          rgba(0, 0, 0, 0) 70%
+        );
+      }
+
       /* FAB container - positioned by host */
       .fab-container {
         position: fixed;
@@ -131,12 +155,12 @@ export class CTFab extends BaseElement {
 
       /* Position variants */
       :host([position="bottom-right"]) .fab-container {
-        bottom: 24px;
+        bottom: 12px;
         right: 24px;
       }
 
       :host([position="bottom-left"]) .fab-container {
-        bottom: 24px;
+        bottom: 12px;
         left: 24px;
       }
 
@@ -150,16 +174,21 @@ export class CTFab extends BaseElement {
         left: 24px;
       }
 
+      :host([position="bottom-center"]) .fab-container {
+        bottom: 12px;
+        left: 50%;
+        transform: translateX(-50%);
+      }
+
       /* Main morphing element */
       .fab {
         position: relative;
-        width: 56px;
-        height: 56px;
+        width: 300px;
+        height: 40px;
         background: var(--ct-theme-color-surface, #000);
-        border-radius: 16%;
+        border-radius: 20px;
         /*box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1),
           0 4px 16px rgba(0, 0, 0, 0.08);*/
-        cursor: pointer;
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -175,6 +204,12 @@ export class CTFab extends BaseElement {
           background var(--ct-theme-animation-duration, 300ms) ease;
         }
 
+        /* Collapsed state */
+        :host(:not([expanded])) .fab {
+          border: none;
+          cursor: pointer;
+        }
+
         /* Variant: primary */
         :host([variant="primary"]) .fab {
           background: var(--ct-theme-color-primary, #3b82f6);
@@ -182,15 +217,16 @@ export class CTFab extends BaseElement {
 
         /* Expanded state */
         :host([expanded]) .fab {
-          width: 400px;
-          min-height: 128px;
+          width: min(560px, calc(100vw - 48px));
+          min-height: 80px;
           max-height: 90vh;
           height: auto;
-          border-radius: 6px;
+          border-radius: 12px;
           cursor: default;
           background: var(--ct-theme-color-background, #fafafa);
           overflow: visible;
-          border: 1px solid var(--ct-theme-color-border, #ccc);
+          border: 1px solid var(--ct-theme-color-border, #e5e5e5);
+          box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
         }
 
         /* Mobile responsive - don't exceed viewport */
@@ -231,6 +267,12 @@ export class CTFab extends BaseElement {
             top: auto;
             left: auto;
           }
+
+          :host([position="bottom-center"]) .fab-container {
+            bottom: 12px;
+            left: 50%;
+            transform: translateX(-50%);
+          }
         }
 
         /* Collapsing state - triggers content fade-out */
@@ -238,36 +280,66 @@ export class CTFab extends BaseElement {
           cursor: default;
         }
 
-        /* FAB icon */
-        .fab-icon {
-          position: absolute;
-          width: 24px;
-          height: 24px;
-          color: white;
+        /* FAB collapsed pill content */
+        .fab-collapsed {
           display: flex;
           align-items: center;
-          justify-content: center;
+          gap: 8px;
+          padding: 0 16px;
+          width: 100%;
+          height: 40px;
           pointer-events: none;
           opacity: 1;
-          transform: scale(1) rotate(0deg);
+          transform: scale(1);
           transition:
             opacity calc(var(--ct-theme-animation-duration, 300ms) * 0.5) ease,
             transform var(--ct-theme-animation-duration, 300ms)
             cubic-bezier(0.34, 1.56, 0.64, 1);
           }
 
-          :host([expanded]) .fab-icon,
-          :host([collapsing]) .fab-icon {
+          .fab-placeholder {
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 12px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          }
+
+          ct-message-beads {
+            flex: 1;
+            min-width: 0;
+          }
+
+          .pin-dots {
+            display: inline-flex;
+            gap: 3px;
+            align-items: center;
+            flex-shrink: 0;
+          }
+
+          .pin-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.7);
+          }
+
+          :host([expanded]) .fab-collapsed {
+            display: none;
+          }
+
+          :host([collapsing]) .fab-collapsed {
             opacity: 0;
-            transform: scale(0.5) rotate(90deg);
+            transform: scale(0.95);
           }
 
           /* Preview notification */
           .preview-notification {
             position: fixed;
-            bottom: 88px;
-            right: 24px;
-            max-width: 360px;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            max-width: 400px;
             background: none;
             padding: 0;
             z-index: 998;
@@ -288,7 +360,7 @@ export class CTFab extends BaseElement {
           /* Panel content */
           .fab-panel {
             width: 100%;
-            height: 100%;
+            display: none;
             opacity: 0;
             transform: scale(0.95);
             pointer-events: none;
@@ -299,6 +371,7 @@ export class CTFab extends BaseElement {
             }
 
             :host([expanded]) .fab-panel {
+              display: block;
               opacity: 1;
               transform: scale(1);
               pointer-events: auto;
@@ -306,6 +379,7 @@ export class CTFab extends BaseElement {
             }
 
             :host([collapsing]) .fab-panel {
+              display: block;
               opacity: 0;
               transform: scale(0.95);
               pointer-events: none;
@@ -325,6 +399,9 @@ export class CTFab extends BaseElement {
           position: { type: String, reflect: true },
           previewMessage: { type: Object, attribute: false },
           pending: { type: Boolean, reflect: true },
+          messages: { type: Object, attribute: false },
+          placeholderText: { type: String, attribute: "placeholder" },
+          pinCount: { type: Number, attribute: false },
         };
 
         /**
@@ -347,7 +424,8 @@ export class CTFab extends BaseElement {
           | "bottom-right"
           | "bottom-left"
           | "top-right"
-          | "top-left";
+          | "top-left"
+          | "bottom-center";
 
         /**
          * Latest message to show as preview notification
@@ -364,6 +442,24 @@ export class CTFab extends BaseElement {
          */
         @property({ type: Boolean, reflect: true })
         declare pending: boolean;
+
+        /**
+         * Messages cell handle for beads display in collapsed state
+         */
+        @property({ type: Object, attribute: false })
+        declare messages: CellHandle | undefined;
+
+        /**
+         * Placeholder text shown in collapsed state when no messages
+         */
+        @property({ type: String, attribute: "placeholder" })
+        declare placeholderText: string;
+
+        /**
+         * Number of pinned items to show as dots in collapsed state
+         */
+        @property({ type: Number, attribute: false })
+        declare pinCount: number;
 
         /**
          * Internal collapsing state for animation timing
@@ -384,16 +480,24 @@ export class CTFab extends BaseElement {
           this.variant = "default";
           this.position = "bottom-right";
           this.pending = false;
+          this.placeholderText = "Ask about anything...";
+          this.pinCount = 0;
         }
 
         override connectedCallback() {
           super.connectedCallback();
           document.addEventListener("keydown", this._handleKeydown);
+          globalThis.addEventListener("click", this._handleWindowClick, true);
         }
 
         override disconnectedCallback() {
           super.disconnectedCallback();
           document.removeEventListener("keydown", this._handleKeydown);
+          globalThis.removeEventListener(
+            "click",
+            this._handleWindowClick,
+            true,
+          );
           if (this.collapseTimeout !== null) {
             clearTimeout(this.collapseTimeout);
           }
@@ -480,9 +584,20 @@ export class CTFab extends BaseElement {
           }
         };
 
-        private _handleBackdropClick = (e: MouseEvent) => {
-          if (this.expanded) {
-            e.stopPropagation(); // Prevent event from bubbling to host element's onClick
+        private _handleWindowClick = (e: MouseEvent) => {
+          if (!this.expanded) return;
+
+          // Check if click was inside the fab panel
+          const fabEl = this.shadowRoot?.querySelector(".fab");
+          if (!fabEl) return;
+
+          const rect = fabEl.getBoundingClientRect();
+          const inside = e.clientX >= rect.left &&
+            e.clientX <= rect.right &&
+            e.clientY >= rect.top &&
+            e.clientY <= rect.bottom;
+
+          if (!inside) {
             this.emit("ct-fab-backdrop-click");
           }
         };
@@ -511,10 +626,9 @@ export class CTFab extends BaseElement {
         override render() {
           const previewMsg = this._resolvedPreviewMessage;
           return html`
-            <!-- Backdrop -->
+            <!-- Backdrop visual (blur effect with mask) -->
             <div
               class="backdrop ${this.expanded ? "active" : ""}"
-              @click="${this._handleBackdropClick}"
               part="backdrop"
             >
             </div>
@@ -530,16 +644,35 @@ export class CTFab extends BaseElement {
                 tabindex="${this.expanded ? "-1" : "0"}"
                 part="fab"
               >
-                <!-- Icon (collapsed state) -->
-                <div class="fab-icon" part="icon">
-                  <slot name="icon">
-                    <ct-logo
-                      width="44"
-                      height="44"
-                      background-color="transparent"
-                      ?loading="${this.pending}"
-                    />
-                  </slot>
+                <!-- Collapsed pill content -->
+                <div class="fab-collapsed" part="collapsed">
+                  <ct-logo
+                    width="28"
+                    height="28"
+                    background-color="transparent"
+                    ?loading="${this.pending}"
+                  ></ct-logo>
+                  ${this.pinCount > 0
+                    ? html`
+                      <span class="pin-dots">${Array.from(
+                        { length: Math.min(this.pinCount, 8) },
+                        () =>
+                          html`
+                            <span class="pin-dot"></span>
+                          `,
+                      )}</span>
+                    `
+                    : nothing} ${this.messages
+                    ? html`
+                      <ct-message-beads
+                        .messages="${this.messages}"
+                        ?pending="${this.pending}"
+                      >${this.placeholderText}</ct-message-beads>
+                    `
+                    : html`
+                      <span class="fab-placeholder">${this
+                        .placeholderText}</span>
+                    `}
                 </div>
 
                 <!-- Panel content (expanded state) -->
@@ -557,7 +690,7 @@ export class CTFab extends BaseElement {
                     role="assistant"
                     compact
                     .content="${previewMsg}"
-                  />
+                  ></ct-chat-message>
                 </div>
               `
               : nothing}

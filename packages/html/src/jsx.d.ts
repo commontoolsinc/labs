@@ -3388,7 +3388,13 @@ interface CTDropZoneAttributes<T> extends CTHTMLAttributes<T> {
   "accept"?: string;
   "onct-drag-enter"?: EventHandler<{ sourceCell: any; type?: string }>;
   "onct-drag-leave"?: EventHandler<{}>;
-  "onct-drop"?: EventHandler<{ sourceCell: any; type?: string }>;
+  "onct-drop"?: EventHandler<
+    {
+      sourceCell: any;
+      sourceCellRef?: { id: string; space: string; path: string[] };
+      type?: string;
+    }
+  >;
 }
 
 interface CTLoaderAttributes<T> extends CTHTMLAttributes<T> {
@@ -3402,9 +3408,17 @@ interface CTLoaderAttributes<T> extends CTHTMLAttributes<T> {
 interface CTFabAttributes<T> extends CTHTMLAttributes<T> {
   "expanded"?: boolean;
   "variant"?: "default" | "primary";
-  "position"?: "bottom-right" | "bottom-left" | "top-right" | "top-left";
+  "position"?:
+    | "bottom-right"
+    | "bottom-left"
+    | "top-right"
+    | "top-left"
+    | "bottom-center";
   "pending"?: boolean;
+  "pinCount"?: number;
+  "$messages"?: CellLike<any[]>;
   "$previewMessage"?: CellLike<string | null>;
+  "placeholder"?: string;
 }
 
 interface CTModalAttributes<T> extends CTHTMLAttributes<T> {

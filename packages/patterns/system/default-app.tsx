@@ -417,5 +417,6 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
     // Exported handlers (bound to state cells for external callers)
     addPiece: addPiece({ allPieces }),
     trackRecent: trackRecent({ recentPieces }),
+    pinToChat: fab.pinToChat,
   };
 });

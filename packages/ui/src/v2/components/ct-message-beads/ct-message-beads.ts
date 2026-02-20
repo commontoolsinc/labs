@@ -82,6 +82,8 @@ export class CTMessageBeads extends BaseElement {
         flex-wrap: wrap;
         gap: 3px;
         align-items: center;
+      }
+      :host([has-messages]) {
         background: rgba(0, 0, 0, 0.05);
         border-radius: 12px;
         padding: 2px 6px;
@@ -177,6 +179,14 @@ export class CTMessageBeads extends BaseElement {
       .refine-btn:hover {
         background: rgba(156, 163, 175, 0.15);
         color: #6b7280;
+      }
+      .placeholder {
+        color: rgba(255, 255, 255, 0.5);
+        font-size: 12px;
+        white-space: nowrap;
+      }
+      :host(:not(:empty)) .placeholder {
+        display: contents;
       }
     `,
   ];
@@ -315,12 +325,17 @@ export class CTMessageBeads extends BaseElement {
 
   override render() {
     const msgs = this._messagesValue;
-    if (!msgs || msgs.length === 0) {
+    const hasMessages = msgs && msgs.length > 0;
+    this.toggleAttribute("has-messages", !!hasMessages);
+
+    if (!hasMessages) {
       return this.pending
         ? html`
           <div class="spinner"></div>
         `
-        : nothing;
+        : html`
+          <span class="placeholder"><slot></slot></span>
+        `;
     }
 
     const beads = msgs.map((msg, i) => {

@@ -1321,6 +1321,8 @@ export interface BuiltInLLMDialogState {
   error?: unknown;
   cancelGeneration: Stream<void>;
   addMessage: Stream<BuiltInLLMMessage>;
+  pinCell: Stream<{ path: string; name: string }>;
+  unpinAllCells: Stream<void>;
   flattenedTools: Record<string, any>;
   pinnedCells: Array<{ path: string; name: string }>;
 }

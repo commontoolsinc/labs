@@ -419,6 +419,16 @@ const resultSchema = {
     result: {},
     addMessage: { ...LLMMessageSchema, asStream: true },
     cancelGeneration: { asStream: true },
+    pinCell: {
+      type: "object",
+      properties: {
+        path: { type: "string" },
+        name: { type: "string" },
+      },
+      required: ["path", "name"],
+      asStream: true,
+    },
+    unpinAllCells: { asStream: true },
     flattenedTools: { type: "object", default: {} },
     pinnedCells: {
       type: "array",
@@ -1870,6 +1880,8 @@ export function llmDialog(
         ...result.getRaw(),
         addMessage: { $stream: true },
         cancelGeneration: { $stream: true },
+        pinCell: { $stream: true },
+        unpinAllCells: { $stream: true },
         pinnedCells: [],
       });
 
@@ -1938,6 +1950,72 @@ export function llmDialog(
           // Cancel request by setting pending to false. This will trigger the
           // code below to be executed in all tabs.
           pending.withTx(tx).set(false);
+        },
+      );
+
+      // Declare `pinCell` handler and register
+      createHandler<{ path: string; name: string }>(
+        result.key("pinCell") as unknown as Stream<
+          { path: string; name: string }
+        >,
+        (
+          tx: IExtendedStorageTransaction,
+          event: { path: string; name: string },
+        ) => {
+          const current = pinnedCells.withTx(tx).get() || [];
+
+          // Check if already pinned
+          if (current.some((p) => p.path === event.path)) {
+            return;
+          }
+
+          // Add new pinned cell
+          const updated = [
+            ...current,
+            { path: event.path, name: event.name },
+          ];
+          pinnedCells.withTx(tx).set(updated);
+          // Merge with existing result pins (which include context-derived
+          // pins) so we don't clobber them. Deduplicate by path.
+          const existingResult = result.withTx(tx).key("pinnedCells").get() ||
+            [];
+          const existingPaths = new Set(
+            existingResult.map((p: any) => p.path),
+          );
+          if (!existingPaths.has(event.path)) {
+            result
+              .withTx(tx)
+              .key("pinnedCells")
+              .set([
+                ...existingResult,
+                { path: event.path, name: event.name },
+              ] as any);
+          }
+        },
+      );
+
+      // Declare `unpinAllCells` handler and register
+      createHandler<void>(
+        result.key("unpinAllCells") as unknown as Stream<void>,
+        (tx: IExtendedStorageTransaction, _event: void) => {
+          // Clear user-pinned cells
+          const userPaths = new Set(
+            (pinnedCells.withTx(tx).get() || []).map(
+              (p: PinnedCell) => p.path,
+            ),
+          );
+          pinnedCells.withTx(tx).set([]);
+          // Keep context-derived pins in result, remove only user pins
+          const existingResult = result.withTx(tx).key("pinnedCells").get() ||
+            [];
+          result
+            .withTx(tx)
+            .key("pinnedCells")
+            .set(
+              existingResult.filter(
+                (p: any) => !userPaths.has(p.path),
+              ) as any,
+            );
         },
       );
 
