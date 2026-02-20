@@ -254,6 +254,22 @@ export function deserialize(
     // --- Type handler dispatch (map-based tag lookup) ---
     const handler = registry.getDeserializer(tag);
     if (handler) {
+      if (context.lenient) {
+        try {
+          return handler.deserialize(
+            state,
+            context,
+            runtime,
+            (v: SerializedForm) => deserialize(v, context, runtime, registry),
+          );
+        } catch (e: unknown) {
+          return new ProblematicStorable(
+            tag,
+            state as unknown as StorableValue,
+            e instanceof Error ? e.message : String(e),
+          ) as unknown as StorableValue;
+        }
+      }
       return handler.deserialize(
         state,
         context,
