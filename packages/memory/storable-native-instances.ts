@@ -264,7 +264,10 @@ export class StorableMap extends StorableNativeWrapper {
   }
 
   toNativeValue(frozen: boolean): Map<StorableValue, StorableValue> {
-    return frozen ? new FrozenMap(this.map) : new Map(this.map);
+    if (frozen) {
+      return this.map instanceof FrozenMap ? this.map : new FrozenMap(this.map);
+    }
+    return this.map instanceof FrozenMap ? new Map(this.map) : this.map;
   }
 
   static [RECONSTRUCT](
@@ -291,7 +294,10 @@ export class StorableSet extends StorableNativeWrapper {
   }
 
   toNativeValue(frozen: boolean): Set<StorableValue> {
-    return frozen ? new FrozenSet(this.set) : new Set(this.set);
+    if (frozen) {
+      return this.set instanceof FrozenSet ? this.set : new FrozenSet(this.set);
+    }
+    return this.set instanceof FrozenSet ? new Set(this.set) : this.set;
   }
 
   static [RECONSTRUCT](
@@ -318,9 +324,14 @@ export class StorableDate extends StorableNativeWrapper {
   }
 
   toNativeValue(frozen: boolean): Date {
-    return frozen
-      ? new FrozenDate(this.date.getTime())
-      : new Date(this.date.getTime());
+    if (frozen) {
+      return this.date instanceof FrozenDate
+        ? this.date
+        : new FrozenDate(this.date);
+    }
+    return this.date instanceof FrozenDate
+      ? new Date(this.date.getTime())
+      : this.date;
   }
 
   static [RECONSTRUCT](
@@ -352,12 +363,11 @@ export class StorableUint8Array extends StorableNativeWrapper {
    * a `Uint8Array` (which `Object.freeze()` cannot protect -- typed arrays
    * allow element mutation even when frozen). Callers must handle the Blob's
    * async API (e.g. `blob.arrayBuffer()`). When `frozen` is false, returns
-   * a copy of the `Uint8Array` to prevent callers from mutating the
-   * wrapper's internal state.
+   * the original `Uint8Array` directly (no defensive copy).
    */
   toNativeValue(frozen: boolean): Blob | Uint8Array {
     if (frozen) return new Blob([this.bytes as BlobPart]);
-    return this.bytes.slice();
+    return this.bytes;
   }
 
   static [RECONSTRUCT](
