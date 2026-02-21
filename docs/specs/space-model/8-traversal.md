@@ -124,6 +124,52 @@ Defaults:
 - With `traverseCells = false` (runtime transforms), `asCell`/`asStream` boundaries produce cell/stream objects without deep traversal of nested content
 - With `traverseCells = true` (query traversal), linked content is traversed to register dependencies
 
+### Detection Rules
+
+`asCellOrStream(schema)` is true when:
+
+- schema object has `asCell: true` or `asStream: true`
+- or schema has `anyOf` and every option is `asCellOrStream`
+- or schema has `oneOf` and every option is `asCellOrStream`
+
+Notes:
+
+- This check is shallow for `anyOf`/`oneOf` options; refs inside options are not fully resolved before this check.
+- This check determines traversal boundary behavior, not whether final output is a JS Cell object. Output shape still depends on the active `objectCreator`.
+
+### Behavior by Value Shape
+
+| Value shape | `traverseCells = false` (runtime transform path) | `traverseCells = true` (query path) |
+| --- | --- | --- |
+| Primitive value with `asCell/asStream` | Boundary at current node. Traverser calls `createObject(link, value)` and does not descend. In runtime object creator this yields a cell-like wrapper. | No boundary shortcut from `traverseCells`; traversal still resolves value normally and query object creator returns plain traversed data. |
+| Object property, inline non-link value, schema has `asCell/asStream` | Boundary at property. Property value is replaced by `createObject(propertyLink, undefined)` and nested fields are not traversed. | No boundary shortcut; traverses/validates nested object content. |
+| Object property, link value, schema has `asCell/asStream` | Follows write redirects to stable target, then creates boundary object from resolved link (`getNextCellLink` path). | Follows redirects and continues traversal into resolved target content. |
+| Array element, link value, schema has `asCell/asStream` | Resolves write redirects first, then follows one additional link step for array semantics, then emits boundary object for the resolved target link. | Performs same link resolution, then continues schema traversal into the resolved element value. |
+| Array element, inline non-link object, schema has `asCell/asStream` | Boundary at element index. Emits `createObject(indexLink, undefined)`; no nested traversal for element fields. | No boundary shortcut; element object is traversed against element schema. |
+| Array element, inline non-link object, schema is not `asCell/asStream` | Element is wrapped via data-cell URI identity (`createDataCellURI`) for stable link identity during nested traversal. | Same behavior. |
+
+### Pointer and Redirect Details at Boundaries
+
+For pointer values, boundary behavior is based on the write-redirect-resolved document:
+
+1. Resolve only write-redirect links (`lastNode = "writeRedirect"`).
+2. If runtime boundary mode (`traverseCells = false`) and schema is `asCell/asStream`, compute cell link from that resolved location:
+   - if resolved value is still a link, follow one more link (`getNextCellLink`)
+   - else use normalized link to current resolved address
+3. Return `createObject(cellLink, undefined)`.
+
+Broken redirect case:
+
+- If redirect target is `undefined` and schema is `asCell/asStream`, traversal returns an error/invalid result (no boundary object is emitted).
+
+### Missing Values and Defaults at `asCell/asStream` Paths
+
+- Missing linked value + `asCell/asStream`: treated as invalid for boundary creation.
+- Property defaults with `asCell/asStream`:
+  - when a property schema default exists, traversal enters `traverseWithSchema({ value: undefined }, propSchema)`
+  - default application uses the resolved schema, including defaults behind top-level `$ref`
+  - emitted value is produced by `objectCreator.applyDefault` / `createObject`, so runtime and query outputs differ by object creator behavior
+
 ---
 
 ## Cycle and DAG Rules
