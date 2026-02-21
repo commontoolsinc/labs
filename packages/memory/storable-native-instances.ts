@@ -56,28 +56,6 @@ function copyOwnSafeProperties(
   }
 }
 
-// ---------------------------------------------------------------------------
-// Utility: freeze-state matching
-// ---------------------------------------------------------------------------
-
-/**
- * Return `value` if its freeze state already matches `frozen`, otherwise
- * shallow-copy via `copy` and optionally freeze the result. This is the
- * common "match frozenness" pattern used by `toNativeValue()` implementations:
- * never mutate the original, create a copy only when the freeze state differs.
- */
-function matchFrozenness<T extends object>(
-  value: T,
-  frozen: boolean,
-  copy: (v: T) => T,
-): T {
-  const isFrozen = Object.isFrozen(value);
-  if (frozen === isFrozen) return value;
-  const result = copy(value);
-  if (frozen) Object.freeze(result);
-  return result;
-}
-
 /**
  * Create a shallow copy of an Error, preserving constructor, name, message,
  * stack, cause, and custom enumerable properties. Used by `toNativeValue()`
@@ -133,8 +111,16 @@ export abstract class StorableNativeWrapper implements StorableInstance {
   abstract readonly typeTag: string;
   abstract [DECONSTRUCT](): StorableValue;
 
+  /** Return the underlying native value in frozen (immutable) form. */
+  protected abstract toNativeFrozen(): unknown;
+
+  /** Return the underlying native value in thawed (mutable) form. */
+  protected abstract toNativeThawed(): unknown;
+
   /** Return the underlying native value, optionally frozen. */
-  abstract toNativeValue(frozen: boolean): unknown;
+  toNativeValue(frozen: boolean): unknown {
+    return frozen ? this.toNativeFrozen() : this.toNativeThawed();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -196,8 +182,18 @@ export class StorableError extends StorableNativeWrapper {
     return state as StorableValue;
   }
 
-  toNativeValue(frozen: boolean): Error {
-    return matchFrozenness(this.error, frozen, copyError);
+  override toNativeValue(frozen: boolean): Error {
+    return super.toNativeValue(frozen) as Error;
+  }
+
+  protected toNativeFrozen(): Error {
+    return Object.isFrozen(this.error)
+      ? this.error
+      : Object.freeze(copyError(this.error));
+  }
+
+  protected toNativeThawed(): Error {
+    return Object.isFrozen(this.error) ? copyError(this.error) : this.error;
   }
 
   /**
@@ -263,10 +259,15 @@ export class StorableMap extends StorableNativeWrapper {
     throw new Error("StorableMap: not yet implemented");
   }
 
-  toNativeValue(frozen: boolean): Map<StorableValue, StorableValue> {
-    if (frozen) {
-      return this.map instanceof FrozenMap ? this.map : new FrozenMap(this.map);
-    }
+  override toNativeValue(frozen: boolean): Map<StorableValue, StorableValue> {
+    return super.toNativeValue(frozen) as Map<StorableValue, StorableValue>;
+  }
+
+  protected toNativeFrozen(): Map<StorableValue, StorableValue> {
+    return this.map instanceof FrozenMap ? this.map : new FrozenMap(this.map);
+  }
+
+  protected toNativeThawed(): Map<StorableValue, StorableValue> {
     return this.map instanceof FrozenMap ? new Map(this.map) : this.map;
   }
 
@@ -293,10 +294,15 @@ export class StorableSet extends StorableNativeWrapper {
     throw new Error("StorableSet: not yet implemented");
   }
 
-  toNativeValue(frozen: boolean): Set<StorableValue> {
-    if (frozen) {
-      return this.set instanceof FrozenSet ? this.set : new FrozenSet(this.set);
-    }
+  override toNativeValue(frozen: boolean): Set<StorableValue> {
+    return super.toNativeValue(frozen) as Set<StorableValue>;
+  }
+
+  protected toNativeFrozen(): Set<StorableValue> {
+    return this.set instanceof FrozenSet ? this.set : new FrozenSet(this.set);
+  }
+
+  protected toNativeThawed(): Set<StorableValue> {
     return this.set instanceof FrozenSet ? new Set(this.set) : this.set;
   }
 
@@ -323,12 +329,17 @@ export class StorableDate extends StorableNativeWrapper {
     throw new Error("StorableDate: not yet implemented");
   }
 
-  toNativeValue(frozen: boolean): Date {
-    if (frozen) {
-      return this.date instanceof FrozenDate
-        ? this.date
-        : new FrozenDate(this.date);
-    }
+  override toNativeValue(frozen: boolean): Date {
+    return super.toNativeValue(frozen) as Date;
+  }
+
+  protected toNativeFrozen(): Date {
+    return this.date instanceof FrozenDate
+      ? this.date
+      : new FrozenDate(this.date);
+  }
+
+  protected toNativeThawed(): Date {
     return this.date instanceof FrozenDate
       ? new Date(this.date.getTime())
       : this.date;
@@ -358,15 +369,20 @@ export class StorableUint8Array extends StorableNativeWrapper {
     throw new Error("StorableUint8Array: not yet implemented");
   }
 
+  override toNativeValue(frozen: boolean): Blob | Uint8Array {
+    return super.toNativeValue(frozen) as Blob | Uint8Array;
+  }
+
   /**
-   * When `frozen` is true, returns a `Blob` (immutable by nature) instead of
-   * a `Uint8Array` (which `Object.freeze()` cannot protect -- typed arrays
-   * allow element mutation even when frozen). Callers must handle the Blob's
-   * async API (e.g. `blob.arrayBuffer()`). When `frozen` is false, returns
-   * the original `Uint8Array` directly (no defensive copy).
+   * Returns a `Blob` (immutable by nature) instead of a `Uint8Array` (which
+   * `Object.freeze()` cannot protect -- typed arrays allow element mutation
+   * even when frozen). Callers must handle the Blob's async API.
    */
-  toNativeValue(frozen: boolean): Blob | Uint8Array {
-    if (frozen) return new Blob([this.bytes as BlobPart]);
+  protected toNativeFrozen(): Blob {
+    return new Blob([this.bytes as BlobPart]);
+  }
+
+  protected toNativeThawed(): Uint8Array {
     return this.bytes;
   }
 
