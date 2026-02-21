@@ -1,5 +1,4 @@
 import { assertEquals, assertNotEquals, assertThrows } from "@std/assert";
-import { createHash } from "node:crypto";
 import { canonicalHash } from "../canonical-hash.ts";
 import {
   StorableDate,
@@ -7,12 +6,15 @@ import {
   StorableUint8Array,
 } from "../storable-native-instances.ts";
 
+// Dynamic import to satisfy the no-external-import lint rule.
+const nodeCrypto = await import("node:crypto");
+
 /**
  * Compute the SHA-256 hash of a raw byte sequence (for verifying against
  * byte-level spec examples).
  */
 function sha256(bytes: number[]): Uint8Array {
-  return createHash("sha256").update(new Uint8Array(bytes)).digest();
+  return nodeCrypto.createHash("sha256").update(new Uint8Array(bytes)).digest();
 }
 
 function hex(hash: Uint8Array): string {
