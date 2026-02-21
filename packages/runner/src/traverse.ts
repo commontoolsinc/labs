@@ -227,10 +227,9 @@ export class CompoundCycleTracker<EqualKey, DeepEqualKey, Value = unknown> {
           ]);
           return;
         }
+        entries.splice(index, 1);
         if (entries.length === 0) {
           this.partial.delete(partialKey);
-        } else {
-          entries.splice(index, 1);
         }
       },
     };
@@ -1705,8 +1704,61 @@ export class SchemaObjectTraverser<V extends StorableDatum>
           ],
         );
         return { error: new Error("No matching anyOf") };
+      } else if (resolved.oneOf) {
+        const { oneOf, ...restSchema } = resolved;
+        // Consider items without asCell or asStream first, since if we aren't
+        // traversing cells, we consider them a match.
+        const sortedOneOf = [
+          ...oneOf.filter((option) =>
+            !SchemaObjectTraverser.asCellOrStream(option)
+          ),
+          ...oneOf.filter(SchemaObjectTraverser.asCellOrStream),
+        ];
+        let matchCount = 0;
+        let match: Immutable<StorableValue> | undefined = undefined;
+        for (const optionSchema of sortedOneOf) {
+          if (ContextualFlowControl.isFalseSchema(optionSchema)) {
+            continue;
+          }
+          const mergedSchema = mergeSchemaOption(restSchema, optionSchema);
+          // TODO(@ubik2): do i need to merge the link schema?
+          const { ok: val, error } = this.traverseWithSchema(
+            doc,
+            mergedSchema,
+            link,
+          );
+          if (error === undefined) {
+            matchCount++;
+            match = val;
+          }
+        }
+        if (matchCount === 1) {
+          return { ok: match! };
+        }
+        if (matchCount === 0) {
+          logger.info(
+            "traverse",
+            () => [
+              "No matching oneOf",
+              doc,
+              sortedOneOf,
+              this.getDebugValue(doc),
+            ],
+          );
+          return { error: new Error("No matching oneOf") };
+        }
+        logger.info(
+          "traverse",
+          () => [
+            "Multiple matching oneOf",
+            doc,
+            sortedOneOf,
+            this.getDebugValue(doc),
+          ],
+        );
+        return { error: new Error("Multiple matching oneOf") };
       } else if (resolved.allOf) {
-        let lastVal;
+        const matches: Immutable<StorableValue>[] = [];
         const { allOf, ...restSchema } = resolved;
         for (const optionSchema of allOf) {
           if (ContextualFlowControl.isFalseSchema(optionSchema)) {
@@ -1731,15 +1783,18 @@ export class SchemaObjectTraverser<V extends StorableDatum>
             );
             return { error };
           }
-          // FIXME(@ubik2): these value objects should be merged. While this
-          // isn't JSONSchema spec, when we have an allOf with branches where
-          // name is set in one schema, but the address is ignored, and a
-          // second option where address is set, and name is ignored, we want
-          // to include both.
-          lastVal = val;
+          matches.push(val);
         }
         if (allOf.length > 0) {
-          return { ok: lastVal };
+          const merged = this.objectCreator.mergeMatches(
+            matches as StorableDatum[],
+            resolved,
+          );
+          return {
+            ok: (merged ?? matches[matches.length - 1]) as Immutable<
+              StorableValue
+            >,
+          };
         }
         // If we have allOf: [], just ignore it and continue
         // TODO(@ubik2) -- maybe swap the schema to true
@@ -1770,7 +1825,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     if (doc.value === undefined) {
       // If we have a default, annotate it and return it
       // Otherwise, return undefined
-      const defaultValue = this.applyDefault(doc, schema);
+      const defaultValue = this.applyDefault(doc, resolved);
       return (defaultValue !== undefined)
         ? { ok: defaultValue }
         : this.isValidType(schemaObj, "undefined")
@@ -1903,7 +1958,9 @@ export class SchemaObjectTraverser<V extends StorableDatum>
       for (const option of schemaObj.oneOf) {
         if (this.isValidType(option, valueType)) {
           validOptions++;
-          break;
+          if (validOptions > 1) {
+            return false;
+          }
         }
       }
       if (validOptions !== 1) {
