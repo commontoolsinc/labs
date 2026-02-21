@@ -67,7 +67,7 @@ interface SimpleListOutput {
 
 // ===== The Pattern =====
 export const SimpleListModule = pattern<
-  Required<SimpleListInput>,
+  SimpleListInput,
   SimpleListOutput
 >(({ items }) => {
   // Pattern-body actions - preferred for single-use handlers

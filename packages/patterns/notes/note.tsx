@@ -132,7 +132,7 @@ const translatePattern = pattern<
 
 // ===== Pattern =====
 
-const Note = pattern<Required<NoteInput>, NoteOutput>(
+const Note = pattern<NoteInput, NoteOutput>(
   ({
     title,
     content,
@@ -219,9 +219,8 @@ const Note = pattern<Required<NoteInput>, NoteOutput>(
       const note = Note({
         title: "New Note",
         content: "",
-        isHidden: !!notebook,
         noteId: generateId(),
-        linkPattern: "",
+        isHidden: !!notebook,
         parentNotebook: notebook,
       });
       allPieces.push(note as any); // Required for persistence

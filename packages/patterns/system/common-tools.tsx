@@ -214,9 +214,9 @@ export const bash = pattern<BashRequest, BashResult | { error: string }>(
           sandboxId,
           command,
           // optional parameters - only include if provided
-          ...(workingDirectory && { workingDirectory }),
-          ...(timeout && { timeout }),
-          ...(environment && { environment }),
+          ...(workingDirectory !== undefined && { workingDirectory }),
+          ...(timeout !== undefined && { timeout }),
+          ...(environment !== undefined && { environment }),
         },
       },
     });
