@@ -145,4 +145,4 @@ The "event-ness" emerges from the data shape:
 
 ---
 
-**Previous:** [Reactivity](./6-reactivity.md)
+**Previous:** [Reactivity](./6-reactivity.md) | **Next:** [Traversal and Schema Query](./8-traversal.md)
