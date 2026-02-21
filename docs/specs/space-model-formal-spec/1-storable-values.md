@@ -661,7 +661,7 @@ import {
   DECONSTRUCT,
   RECONSTRUCT,
   type StorableInstance,
-  type StorableClass,
+  type StorableValue,
   type ReconstructionContext,
 } from '@common/storable-protocol';
 
@@ -689,10 +689,11 @@ class Temperature implements StorableInstance {
 
   /** Reconstruct from essential state. */
   static [RECONSTRUCT](
-    state: { value: number; unit: TemperatureUnit },
+    state: StorableValue,
     _context: ReconstructionContext,
   ): Temperature {
-    return new Temperature(state.value, state.unit);
+    const s = state as { value: number; unit: TemperatureUnit };
+    return new Temperature(s.value, s.unit);
   }
 }
 ```
