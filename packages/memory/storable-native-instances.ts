@@ -111,14 +111,19 @@ export abstract class StorableNativeWrapper implements StorableInstance {
   abstract readonly typeTag: string;
   abstract [DECONSTRUCT](): StorableValue;
 
-  /** Return the underlying native value in frozen (immutable) form. */
+  /** The wrapped native value, used by `toNativeValue` for freeze-state checks. */
+  protected abstract get wrappedValue(): object;
+
+  /** Convert the wrapped value to frozen form (only called on state mismatch). */
   protected abstract toNativeFrozen(): unknown;
 
-  /** Return the underlying native value in thawed (mutable) form. */
+  /** Convert the wrapped value to thawed form (only called on state mismatch). */
   protected abstract toNativeThawed(): unknown;
 
   /** Return the underlying native value, optionally frozen. */
   toNativeValue(frozen: boolean): unknown {
+    const value = this.wrappedValue;
+    if (frozen === Object.isFrozen(value)) return value;
     return frozen ? this.toNativeFrozen() : this.toNativeThawed();
   }
 }
@@ -182,18 +187,20 @@ export class StorableError extends StorableNativeWrapper {
     return state as StorableValue;
   }
 
+  protected get wrappedValue(): Error {
+    return this.error;
+  }
+
   override toNativeValue(frozen: boolean): Error {
     return super.toNativeValue(frozen) as Error;
   }
 
   protected toNativeFrozen(): Error {
-    return Object.isFrozen(this.error)
-      ? this.error
-      : Object.freeze(copyError(this.error));
+    return Object.freeze(copyError(this.error));
   }
 
   protected toNativeThawed(): Error {
-    return Object.isFrozen(this.error) ? copyError(this.error) : this.error;
+    return copyError(this.error);
   }
 
   /**
@@ -259,16 +266,20 @@ export class StorableMap extends StorableNativeWrapper {
     throw new Error("StorableMap: not yet implemented");
   }
 
+  protected get wrappedValue(): Map<StorableValue, StorableValue> {
+    return this.map;
+  }
+
   override toNativeValue(frozen: boolean): Map<StorableValue, StorableValue> {
     return super.toNativeValue(frozen) as Map<StorableValue, StorableValue>;
   }
 
-  protected toNativeFrozen(): Map<StorableValue, StorableValue> {
-    return this.map instanceof FrozenMap ? this.map : new FrozenMap(this.map);
+  protected toNativeFrozen(): FrozenMap<StorableValue, StorableValue> {
+    return new FrozenMap(this.map);
   }
 
   protected toNativeThawed(): Map<StorableValue, StorableValue> {
-    return this.map instanceof FrozenMap ? new Map(this.map) : this.map;
+    return new Map(this.map);
   }
 
   static [RECONSTRUCT](
@@ -294,16 +305,20 @@ export class StorableSet extends StorableNativeWrapper {
     throw new Error("StorableSet: not yet implemented");
   }
 
+  protected get wrappedValue(): Set<StorableValue> {
+    return this.set;
+  }
+
   override toNativeValue(frozen: boolean): Set<StorableValue> {
     return super.toNativeValue(frozen) as Set<StorableValue>;
   }
 
-  protected toNativeFrozen(): Set<StorableValue> {
-    return this.set instanceof FrozenSet ? this.set : new FrozenSet(this.set);
+  protected toNativeFrozen(): FrozenSet<StorableValue> {
+    return new FrozenSet(this.set);
   }
 
   protected toNativeThawed(): Set<StorableValue> {
-    return this.set instanceof FrozenSet ? new Set(this.set) : this.set;
+    return new Set(this.set);
   }
 
   static [RECONSTRUCT](
@@ -329,20 +344,20 @@ export class StorableDate extends StorableNativeWrapper {
     throw new Error("StorableDate: not yet implemented");
   }
 
+  protected get wrappedValue(): Date {
+    return this.date;
+  }
+
   override toNativeValue(frozen: boolean): Date {
     return super.toNativeValue(frozen) as Date;
   }
 
-  protected toNativeFrozen(): Date {
-    return this.date instanceof FrozenDate
-      ? this.date
-      : new FrozenDate(this.date);
+  protected toNativeFrozen(): FrozenDate {
+    return new FrozenDate(this.date);
   }
 
   protected toNativeThawed(): Date {
-    return this.date instanceof FrozenDate
-      ? new Date(this.date.getTime())
-      : this.date;
+    return new Date(this.date.getTime());
   }
 
   static [RECONSTRUCT](
@@ -369,15 +384,19 @@ export class StorableUint8Array extends StorableNativeWrapper {
     throw new Error("StorableUint8Array: not yet implemented");
   }
 
-  override toNativeValue(frozen: boolean): Blob | Uint8Array {
-    return super.toNativeValue(frozen) as Blob | Uint8Array;
+  protected get wrappedValue(): Uint8Array {
+    return this.bytes;
   }
 
   /**
-   * Returns a `Blob` (immutable by nature) instead of a `Uint8Array` (which
-   * `Object.freeze()` cannot protect -- typed arrays allow element mutation
-   * even when frozen). Callers must handle the Blob's async API.
+   * Overrides the base class entirely because the frozen form is a `Blob`
+   * (immutable by nature), not a frozen `Uint8Array` -- `Object.freeze()`
+   * cannot protect typed arrays from element mutation.
    */
+  override toNativeValue(frozen: boolean): Blob | Uint8Array {
+    return frozen ? this.toNativeFrozen() : this.bytes;
+  }
+
   protected toNativeFrozen(): Blob {
     return new Blob([this.bytes as BlobPart]);
   }
