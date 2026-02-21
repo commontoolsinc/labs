@@ -16,9 +16,9 @@
  * Throw `TypeError` if `obj` is frozen. Called by mutation overrides in the
  * `Frozen*` classes to enforce immutability.
  */
-function throwIfFrozen(obj: object, className: string): void {
+function throwIfFrozen(obj: object): void {
   if (Object.isFrozen(obj)) {
-    throw new TypeError(`Cannot mutate a ${className}`);
+    throw new TypeError(`Cannot mutate a ${obj.constructor.name}`);
   }
 }
 
@@ -42,17 +42,17 @@ export class FrozenMap<K, V> extends Map<K, V> {
   }
 
   override set(key: K, value: V): this {
-    throwIfFrozen(this, "FrozenMap");
+    throwIfFrozen(this);
     return super.set(key, value);
   }
 
   override delete(key: K): boolean {
-    throwIfFrozen(this, "FrozenMap");
+    throwIfFrozen(this);
     return super.delete(key);
   }
 
   override clear(): void {
-    throwIfFrozen(this, "FrozenMap");
+    throwIfFrozen(this);
     super.clear();
   }
 }
@@ -77,17 +77,17 @@ export class FrozenSet<T> extends Set<T> {
   }
 
   override add(value: T): this {
-    throwIfFrozen(this, "FrozenSet");
+    throwIfFrozen(this);
     return super.add(value);
   }
 
   override delete(value: T): boolean {
-    throwIfFrozen(this, "FrozenSet");
+    throwIfFrozen(this);
     return super.delete(value);
   }
 
   override clear(): void {
-    throwIfFrozen(this, "FrozenSet");
+    throwIfFrozen(this);
     super.clear();
   }
 }
@@ -109,7 +109,7 @@ export class FrozenDate extends Date {
   }
 
   #throw(): never {
-    throwIfFrozen(this, "FrozenDate");
+    throwIfFrozen(this);
     // `throwIfFrozen` always throws for a frozen instance, but TypeScript
     // doesn't know that -- the `never` return satisfies the override
     // signatures.
