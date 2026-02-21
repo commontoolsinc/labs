@@ -107,21 +107,22 @@ function errorClassFromType(type: string): ErrorConstructor {
  * deep unwrap functions, replacing their `instanceof` cascades with a single
  * `instanceof StorableNativeWrapper` check.
  */
-export abstract class StorableNativeWrapper implements StorableInstance {
+export abstract class StorableNativeWrapper<T extends object>
+  implements StorableInstance {
   abstract readonly typeTag: string;
   abstract [DECONSTRUCT](): StorableValue;
 
   /** The wrapped native value, used by `toNativeValue` for freeze-state checks. */
-  protected abstract get wrappedValue(): object;
+  protected abstract get wrappedValue(): T;
 
   /** Convert the wrapped value to frozen form (only called on state mismatch). */
-  protected abstract toNativeFrozen(): unknown;
+  protected abstract toNativeFrozen(): T;
 
   /** Convert the wrapped value to thawed form (only called on state mismatch). */
-  protected abstract toNativeThawed(): unknown;
+  protected abstract toNativeThawed(): T;
 
   /** Return the underlying native value, optionally frozen. */
-  toNativeValue(frozen: boolean): unknown {
+  toNativeValue(frozen: boolean): T {
     const value = this.wrappedValue;
     if (frozen === Object.isFrozen(value)) return value;
     return frozen ? this.toNativeFrozen() : this.toNativeThawed();
@@ -139,7 +140,7 @@ export abstract class StorableNativeWrapper implements StorableInstance {
  * `StorableError` via the generic `StorableInstanceHandler` path.
  * See Section 1.4.1 of the formal spec.
  */
-export class StorableError extends StorableNativeWrapper {
+export class StorableError extends StorableNativeWrapper<Error> {
   /** The type tag used in the wire format (`TAGS.Error`). */
   readonly typeTag = TAGS.Error;
 
@@ -189,10 +190,6 @@ export class StorableError extends StorableNativeWrapper {
 
   protected get wrappedValue(): Error {
     return this.error;
-  }
-
-  override toNativeValue(frozen: boolean): Error {
-    return super.toNativeValue(frozen) as Error;
   }
 
   protected toNativeFrozen(): Error {
@@ -256,7 +253,8 @@ export class StorableError extends StorableNativeWrapper {
  * throw until Map support is fully implemented. Extra properties beyond the
  * wrapped collection are not supported on non-Error wrappers.
  */
-export class StorableMap extends StorableNativeWrapper {
+export class StorableMap
+  extends StorableNativeWrapper<Map<StorableValue, StorableValue>> {
   readonly typeTag = TAGS.Map;
   constructor(readonly map: Map<StorableValue, StorableValue>) {
     super();
@@ -268,10 +266,6 @@ export class StorableMap extends StorableNativeWrapper {
 
   protected get wrappedValue(): Map<StorableValue, StorableValue> {
     return this.map;
-  }
-
-  override toNativeValue(frozen: boolean): Map<StorableValue, StorableValue> {
-    return super.toNativeValue(frozen) as Map<StorableValue, StorableValue>;
   }
 
   protected toNativeFrozen(): FrozenMap<StorableValue, StorableValue> {
@@ -295,7 +289,7 @@ export class StorableMap extends StorableNativeWrapper {
  * throw until Set support is fully implemented. Extra properties beyond the
  * wrapped collection are not supported on non-Error wrappers.
  */
-export class StorableSet extends StorableNativeWrapper {
+export class StorableSet extends StorableNativeWrapper<Set<StorableValue>> {
   readonly typeTag = TAGS.Set;
   constructor(readonly set: Set<StorableValue>) {
     super();
@@ -307,10 +301,6 @@ export class StorableSet extends StorableNativeWrapper {
 
   protected get wrappedValue(): Set<StorableValue> {
     return this.set;
-  }
-
-  override toNativeValue(frozen: boolean): Set<StorableValue> {
-    return super.toNativeValue(frozen) as Set<StorableValue>;
   }
 
   protected toNativeFrozen(): FrozenSet<StorableValue> {
@@ -334,7 +324,7 @@ export class StorableSet extends StorableNativeWrapper {
  * throw until Date support is fully implemented. Extra properties beyond the
  * wrapped value are not supported on non-Error wrappers.
  */
-export class StorableDate extends StorableNativeWrapper {
+export class StorableDate extends StorableNativeWrapper<Date> {
   readonly typeTag = TAGS.Date;
   constructor(readonly date: Date) {
     super();
@@ -346,10 +336,6 @@ export class StorableDate extends StorableNativeWrapper {
 
   protected get wrappedValue(): Date {
     return this.date;
-  }
-
-  override toNativeValue(frozen: boolean): Date {
-    return super.toNativeValue(frozen) as Date;
   }
 
   protected toNativeFrozen(): FrozenDate {
@@ -374,7 +360,8 @@ export class StorableDate extends StorableNativeWrapper {
  * Extra properties beyond the wrapped value are not supported on non-Error
  * wrappers.
  */
-export class StorableUint8Array extends StorableNativeWrapper {
+export class StorableUint8Array
+  extends StorableNativeWrapper<Blob | Uint8Array> {
   readonly typeTag = TAGS.Bytes;
   constructor(readonly bytes: Uint8Array) {
     super();
@@ -386,10 +373,6 @@ export class StorableUint8Array extends StorableNativeWrapper {
 
   protected get wrappedValue(): Uint8Array {
     return this.bytes;
-  }
-
-  override toNativeValue(frozen: boolean): Blob | Uint8Array {
-    return super.toNativeValue(frozen) as Blob | Uint8Array;
   }
 
   /**
