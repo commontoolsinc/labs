@@ -1,16 +1,13 @@
 import * as Reference from "merkle-reference";
-import { isDeno } from "@commontools/utils/env";
 import { LRUCache } from "@commontools/utils/cache";
-import { createSHA256, type IHasher } from "hash-wasm";
 import { canonicalHash } from "./canonical-hash.ts";
+import {
+  getHashImplementation,
+  type HashImplementation,
+  sha256,
+} from "./hash-impl.ts";
 export * from "merkle-reference";
-
-/**
- * Which SHA-256 implementation is currently in use.
- */
-export type HashImplementation = "node:crypto" | "hash-wasm" | "noble";
-
-let activeHashImpl: HashImplementation = "noble";
+export type { HashImplementation };
 
 /**
  * Module-level flag for canonical hashing mode, set by the `Runtime`
@@ -78,72 +75,16 @@ const wrappedNodeBuilder = {
 };
 
 /**
- * Internal refer implementation - set based on environment.
- *
- * Priority:
- * 1. Server (Deno): node:crypto - hardware accelerated via OpenSSL
- * 2. Browser: hash-wasm - WASM SHA-256, ~3x faster than pure JS
- * 3. Fallback: @noble/hashes (via merkle-reference default)
+ * Build the merkle-reference tree builder using the best available SHA-256.
  */
-let referImpl: (<T>(source: T) => Reference.View<T>) | null = null;
+const treeBuilder = Reference.Tree.createBuilder(
+  sha256,
+  wrappedNodeBuilder,
+);
 
-// Initialize hash implementation based on environment
-if (isDeno()) {
-  // Server: use node:crypto for hardware acceleration
-  try {
-    const nodeCrypto = await import("node:crypto");
-    const nodeSha256 = (payload: Uint8Array): Uint8Array => {
-      return nodeCrypto.createHash("sha256").update(payload).digest();
-    };
-    const treeBuilder = Reference.Tree.createBuilder(
-      nodeSha256,
-      wrappedNodeBuilder,
-    );
-    referImpl = <T>(source: T): Reference.View<T> => {
-      return treeBuilder.refer(source) as unknown as Reference.View<T>;
-    };
-    activeHashImpl = "node:crypto";
-  } catch {
-    // node:crypto not available, will try next option
-  }
-}
-
-if (!referImpl) {
-  // Not Deno, or Deno's node:crypto failed — try hash-wasm (browser)
-  try {
-    const hasher: IHasher = await createSHA256();
-    // Note: This hash function is synchronous (no awaits between init/update/digest).
-    // In JS's single-threaded model, synchronous code runs to completion without
-    // interruption, so the shared hasher instance is safe from interleaving.
-    const wasmSha256 = (payload: Uint8Array): Uint8Array => {
-      hasher.init();
-      hasher.update(payload);
-      return hasher.digest("binary");
-    };
-    const treeBuilder = Reference.Tree.createBuilder(
-      wasmSha256,
-      wrappedNodeBuilder,
-    );
-    referImpl = <T>(source: T): Reference.View<T> => {
-      return treeBuilder.refer(source) as unknown as Reference.View<T>;
-    };
-    activeHashImpl = "hash-wasm";
-  } catch {
-    // hash-wasm failed, will use fallback
-  }
-}
-
-if (!referImpl) {
-  // Both optimized paths failed — create fallback with default sha256
-  const fallbackBuilder = Reference.Tree.createBuilder(
-    Reference.sha256,
-    wrappedNodeBuilder,
-  );
-  referImpl = <T>(source: T): Reference.View<T> => {
-    return fallbackBuilder.refer(source) as unknown as Reference.View<T>;
-  };
-  // activeHashImpl stays "noble" (the initial default)
-}
+const referImpl = <T>(source: T): Reference.View<T> => {
+  return treeBuilder.refer(source) as unknown as Reference.View<T>;
+};
 
 /**
  * Cache for {the, of} references (unclaimed facts).
@@ -182,9 +123,8 @@ const isUnclaimed = (
  */
 export const refer = <T>(source: T): Reference.View<T> => {
   if (canonicalHashingEnabled) {
-    // Stub: will be replaced with real canonical hash + Reference wrapper
-    canonicalHash(source);
-    // canonicalHash throws, so this is unreachable for now
+    const digest = canonicalHash(source);
+    return Reference.fromDigest(digest) as Reference.View<T>;
   }
 
   // Cache {the, of} patterns (unclaimed facts)
@@ -206,6 +146,4 @@ export const refer = <T>(source: T): Reference.View<T> => {
 /**
  * Get the currently active SHA-256 implementation.
  */
-export const getHashImplementation = (): HashImplementation => {
-  return activeHashImpl;
-};
+export { getHashImplementation };
