@@ -11,10 +11,11 @@ This is a temporary working checklist for the traversal optimization effort.
 - [x] Add targeted benchmark suite: `packages/runner/test/traverse.bench.ts`
 - [x] Capture baseline benchmark output (JSON):
   - `cd packages/runner && deno bench --allow-read --allow-write --allow-net --allow-ffi --allow-env --no-check --json test/traverse.bench.ts > test/bench-results/traverse-baseline.json`
-- [ ] Add a short benchmark runbook documenting:
+- [x] Add a short benchmark runbook documenting:
   - machine/setup notes
   - command line and filters
   - interpretation guidance (median vs variance)
+  - `packages/runner/test/traverse.bench.md`
 
 ## Optimization Work Items
 
