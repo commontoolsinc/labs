@@ -388,15 +388,15 @@ export class StorableUint8Array extends StorableNativeWrapper {
     return this.bytes;
   }
 
-  /**
-   * Overrides the base class entirely because the frozen form is a `Blob`
-   * (immutable by nature), not a frozen `Uint8Array` -- `Object.freeze()`
-   * cannot protect typed arrays from element mutation.
-   */
   override toNativeValue(frozen: boolean): Blob | Uint8Array {
-    return frozen ? this.toNativeFrozen() : this.bytes;
+    return super.toNativeValue(frozen) as Blob | Uint8Array;
   }
 
+  /**
+   * Returns a `Blob` (immutable by nature). `Uint8Array` cannot be frozen
+   * per the JS spec, so the base class freeze-state check always delegates
+   * here when `frozen=true`.
+   */
   protected toNativeFrozen(): Blob {
     return new Blob([this.bytes as BlobPart]);
   }
