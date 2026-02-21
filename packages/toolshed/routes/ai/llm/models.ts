@@ -389,6 +389,38 @@ if (env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS) {
   });
 }
 
+if (env.CTTS_AI_LLM_GATEWAY_URL) {
+  try {
+    const gatewayUrl = env.CTTS_AI_LLM_GATEWAY_URL;
+    const res = await fetch(`${gatewayUrl}/v1/models`);
+    const data = await res.json();
+
+    const gatewayProvider = createOpenAI({
+      baseURL: `${gatewayUrl}/v1`,
+      apiKey: "gateway",
+    });
+    console.log(" Adding 🤖 gateway");
+
+    for (const model of data.data) {
+      const modelId = model.id;
+      const capabilities = model.capabilities;
+      if (!capabilities) {
+        console.warn(`  Skipping gateway model ${modelId}: no capabilities`);
+        continue;
+      }
+
+      addModel({
+        provider: gatewayProvider,
+        name: `gateway:${modelId}`,
+        aliases: [modelId],
+        capabilities,
+      });
+    }
+  } catch (err) {
+    console.error(" Failed to discover gateway models:", err);
+  }
+}
+
 export const findModel = (name: string) => {
   return MODELS[name];
 };
