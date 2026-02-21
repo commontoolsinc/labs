@@ -314,11 +314,11 @@ describe("ExperimentalOptions", () => {
       expect(typeof ref.toString()).toBe("string");
     });
 
-    it("throws when canonicalHashing is true", () => {
+    it("produces a valid reference when canonicalHashing is true", () => {
       setCanonicalHashConfig(true);
-      expect(() => {
-        refer("hello");
-      }).toThrow("canonicalHashing not yet implemented");
+      const ref = refer("hello");
+      expect(ref).toBeDefined();
+      expect(typeof ref.toString()).toBe("string");
     });
 
     it("works again after reset", () => {
@@ -330,7 +330,7 @@ describe("ExperimentalOptions", () => {
   });
 
   describe("Runtime sets and resets canonicalHashing config", () => {
-    it("constructing Runtime with canonicalHashing causes refer() to throw", async () => {
+    it("constructing Runtime with canonicalHashing enables canonical refer()", async () => {
       const sm = StorageManager.emulate({ as: signer });
       const runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
@@ -338,15 +338,15 @@ describe("ExperimentalOptions", () => {
         experimental: { canonicalHashing: true },
       });
 
-      expect(() => {
-        refer("test");
-      }).toThrow("canonicalHashing not yet implemented");
+      const ref = refer("test");
+      expect(ref).toBeDefined();
+      expect(typeof ref.toString()).toBe("string");
 
       await runtime.dispose();
       await sm.close();
     });
 
-    it("disposing Runtime resets canonicalHashing so refer() works again", async () => {
+    it("disposing Runtime resets canonicalHashing so refer() uses default path", async () => {
       const sm = StorageManager.emulate({ as: signer });
       const runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
@@ -354,15 +354,14 @@ describe("ExperimentalOptions", () => {
         experimental: { canonicalHashing: true },
       });
 
-      expect(() => refer("test")).toThrow(
-        "canonicalHashing not yet implemented",
-      );
+      const canonicalRef = refer("test");
+      expect(canonicalRef).toBeDefined();
 
       await runtime.dispose();
       await sm.close();
 
-      const ref = refer("test");
-      expect(ref).toBeDefined();
+      const defaultRef = refer("test");
+      expect(defaultRef).toBeDefined();
     });
   });
 });
