@@ -644,38 +644,76 @@ export function isStorableInstance(value: unknown): value is StorableInstance {
 }
 ```
 
-### 2.7 Example: Cell
+### 2.7 Example: Temperature (Illustrative)
+
+The following example is artificial, designed to illustrate the `StorableInstance`
+protocol. It is not part of the codebase.
+
+A `Temperature` value type demonstrates why the protocol exists: without it, a
+`Temperature` instance would serialize as a plain object `{ value: 100, unit:
+"C" }`, losing its type identity and any methods. With the protocol, the
+serialization system can round-trip it back to a real `Temperature` instance.
 
 ```typescript
-// file: packages/runner/src/cell.ts (illustrative stub -- simplified from the
-// actual `Cell` class, which has additional overloads and parameters)
+// Illustrative example -- not from the codebase.
 
 import {
   DECONSTRUCT,
   RECONSTRUCT,
   type StorableInstance,
-  type StorableClass,
+  type StorableValue,
   type ReconstructionContext,
 } from '@common/storable-protocol';
 
-class Cell<T> implements StorableInstance {
-  readonly entityId: string;
-  readonly path: string[];
-  readonly space: string;
+type TemperatureUnit = "C" | "F" | "K";
 
-  [DECONSTRUCT]() {
-    return { id: this.entityId, path: this.path, space: this.space };
+class Temperature implements StorableInstance {
+  constructor(
+    readonly value: number,
+    readonly unit: TemperatureUnit,
+  ) {}
+
+  /** Convert to Celsius for comparison. */
+  toCelsius(): number {
+    switch (this.unit) {
+      case "C": return this.value;
+      case "F": return (this.value - 32) * 5 / 9;
+      case "K": return this.value - 273.15;
+    }
   }
 
+  /** Return essential state for serialization. */
+  [DECONSTRUCT]() {
+    return { value: this.value, unit: this.unit };
+  }
+
+  /** Reconstruct from essential state. */
   static [RECONSTRUCT](
-    state: { id: string; path: string[]; space: string },
-    context: ReconstructionContext,
-  ): Cell<unknown> {
-    // May return an existing `Cell` instance (interning).
-    return context.getCell(state) as Cell<unknown>;
+    state: StorableValue,
+    _context: ReconstructionContext,
+  ): Temperature {
+    const s = state as { value: number; unit: TemperatureUnit };
+    return new Temperature(s.value, s.unit);
   }
 }
 ```
+
+**Why the protocol matters.** Without `StorableInstance`, the serialization
+system would see a `Temperature` as an opaque object and either reject it or
+flatten it into `{ value: 100, unit: "C" }`. With the protocol, the
+serialization system:
+
+1. Calls `[DECONSTRUCT]()` to extract the essential state.
+2. Serializes that state (recursively handling any nested `StorableValue`s).
+3. On deserialization, calls `Temperature[RECONSTRUCT](state, context)` to
+   produce a real `Temperature` instance with its methods intact.
+
+**Reference types and `ReconstructionContext`.** The `Temperature` example above
+is a simple value type -- its `[RECONSTRUCT]` creates a fresh instance each
+time. Reference types (such as the runtime's internal `Cell` type) use the
+`ReconstructionContext` parameter to look up or intern existing instances,
+ensuring that two references to the same logical entity deserialize to the same
+object.
 
 ### 2.8 Deconstructed State and Recursion
 
@@ -1871,11 +1909,11 @@ etc.).
  * Convert a `StorableValue` back to a value tree containing native JS types.
  * Wrapper classes are unwrapped to their native equivalents:
  *
- * - `StorableError`      -> `Error` (frozen copy when frozen; mutable copy when not)
- * - `StorableMap`        -> `FrozenMap` (when frozen) or `Map` (when not)
- * - `StorableSet`        -> `FrozenSet` (when frozen) or `Set` (when not)
- * - `StorableDate`       -> `FrozenDate` (when frozen) or `Date` (when not)
- * - `StorableUint8Array` -> `Blob` (when frozen) or `Uint8Array` (when not)
+ * - `StorableError`      -> `Error` (original if freeze state matches; copy otherwise)
+ * - `StorableMap`        -> `FrozenMap` / `Map` (original if freeze state matches; copy otherwise)
+ * - `StorableSet`        -> `FrozenSet` / `Set` (original if freeze state matches; copy otherwise)
+ * - `StorableDate`       -> `FrozenDate` / `Date` (original if freeze state matches; copy otherwise)
+ * - `StorableUint8Array` -> `Blob` (when frozen) or original `Uint8Array` (when not)
  *
  * Non-wrapper `StorableInstance` values (`Cell`, `Stream`, `UnknownStorable`,
  * `ProblematicStorable`, etc.) pass through unchanged.
@@ -1894,9 +1932,16 @@ etc.).
  * to `FrozenDate` — a `Date` subclass that overrides all `set*()` methods to
  * throw `TypeError`. `StorableUint8Array` unwraps to `Blob`, which is
  * inherently immutable (see rationale below). `StorableError` unwraps to a
- * frozen copy of the `Error` (the original is never mutated). This preserves
- * the immutable-forward guarantee even in the "JS wild west" layer. When
- * `freeze` is `false`, mutable native types are returned instead.
+ * frozen `Error`. This preserves the immutable-forward guarantee even in the
+ * "JS wild west" layer. When `freeze` is `false`, mutable native types are
+ * returned instead.
+ *
+ * **No defensive copying.** Wrappers return their internal reference directly
+ * when the freeze state already matches. A new object is constructed only
+ * when the type must change to satisfy the `frozen` argument (e.g., wrapping
+ * a plain `Map` in `FrozenMap`, or copying a `FrozenDate` to a mutable
+ * `Date`). The wrapper's purpose is to provide the storable interface, not to
+ * act as a data firewall.
  */
 export function nativeValueFromStorableValue(
   value: StorableValue,
@@ -1918,11 +1963,11 @@ export function deepNativeValueFromStorableValue(
 
 | Input | Output (frozen) | Output (not frozen) |
 |-------|-----------------|---------------------|
-| `StorableError` | `Error` (frozen copy) | `Error` (mutable copy) |
-| `StorableMap` | `FrozenMap` (read-only; throws on mutation) | `Map` (mutable) |
-| `StorableSet` | `FrozenSet` (read-only; throws on mutation) | `Set` (mutable) |
-| `StorableDate` | `FrozenDate` (`Date` subclass; throws on mutation) | `Date` (mutable) |
-| `StorableUint8Array` | `Blob` (inherently immutable) | `Uint8Array` (mutable) |
+| `StorableError` | `Error` (original if already frozen; frozen copy otherwise) | `Error` (original if already unfrozen; mutable copy otherwise) |
+| `StorableMap` | `FrozenMap` (original if already `FrozenMap`; new wrapper otherwise) | `Map` (original if already plain `Map`; mutable copy otherwise) |
+| `StorableSet` | `FrozenSet` (original if already `FrozenSet`; new wrapper otherwise) | `Set` (original if already plain `Set`; mutable copy otherwise) |
+| `StorableDate` | `FrozenDate` (original if already `FrozenDate`; new wrapper otherwise) | `Date` (original if already plain `Date`; mutable copy otherwise) |
+| `StorableUint8Array` | `Blob` (inherently immutable; always new) | `Uint8Array` (original reference) |
 | Other `StorableInstance` | Passed through unchanged | Passed through unchanged |
 | Primitives | Passed through unchanged | Passed through unchanged |
 | Arrays (deep variant) | Recursively unwrapped; output frozen | Recursively unwrapped; output NOT frozen |
@@ -1934,18 +1979,20 @@ result may contain native JS types at any depth.
 **The `frozen` parameter is always honored.** The freeze state of every value in
 the output tree matches the `frozen` argument. Specifically:
 
-- If `frozen` is `true` and a value is already frozen, it is returned as-is.
-- If `frozen` is `true` and a value is unfrozen, a new frozen copy is returned.
-- If `frozen` is `false` and a value is frozen, a new unfrozen (mutable) copy is
-  returned.
-- If `frozen` is `false` and a value is already unfrozen, it is returned as-is
-  (or a copy is returned if structural changes are needed, e.g., unwrapping
-  children in the deep variant).
+- If `frozen` is `true` and the value's freeze state already matches, the
+  original reference is returned as-is.
+- If `frozen` is `true` and the value is unfrozen, a new frozen variant is
+  constructed (e.g., wrapping a `Map` in `FrozenMap`).
+- If `frozen` is `false` and the value is frozen, a new unfrozen (mutable) copy
+  is returned.
+- If `frozen` is `false` and the value is already unfrozen, the original
+  reference is returned as-is (or a copy is returned if structural changes are
+  needed, e.g., unwrapping children in the deep variant).
 
 This applies uniformly to all output values — arrays, plain objects, `Error`s,
 and all wrapper-derived native types. Primitives are inherently immutable and
-need no freeze/thaw action. Copying may be needed in both directions: freezing
-unfrozen values _and_ thawing frozen values.
+need no freeze/thaw action. A new object is constructed only when the freeze
+state differs between the stored value and the requested output.
 
 For the **shallow** function, non-wrapper values (arrays and plain objects) may
 be copied to match the `frozen` argument. Primitives pass through unchanged.
@@ -1999,14 +2046,16 @@ deepNativeValueFromStorableValue(toDeepStorableValue(v))
 ```
 
 produces a value that is structurally equivalent to `v` — the same data at the
-same positions. The round-tripped value is not necessarily `===` to the original
-(wrapping and unwrapping creates new objects), and the **freeze state may
-change**: when `frozen` is `true` (the default), the output tree is fully frozen
-— arrays and plain objects are frozen via `Object.freeze()`, a mutable `Map`
-becomes a `FrozenMap`, a mutable `Set` becomes a `FrozenSet`, a `Date` becomes a
-`FrozenDate`, a `Uint8Array` becomes a `Blob`, and `Error`s are frozen copies.
-When `frozen` is `false`, the output tree is fully mutable. The data content is
-preserved; the mutability matches the `frozen` argument.
+same positions. The round-tripped value may or may not be `===` to the original:
+when the freeze state already matches, wrappers return their internal reference
+directly; when it differs, a new object is constructed. The **freeze state of
+the output always matches the `frozen` argument**: when `frozen` is `true` (the
+default), the output tree is fully frozen — arrays and plain objects are frozen
+via `Object.freeze()`, a mutable `Map` becomes a `FrozenMap`, a mutable `Set`
+becomes a `FrozenSet`, a `Date` becomes a `FrozenDate`, a `Uint8Array` becomes
+a `Blob`, and `Error`s are frozen. When `frozen` is `false`, the output tree is
+fully mutable. The data content is preserved; the mutability matches the `frozen`
+argument.
 
 Similarly, for any `StorableValue` `sv`:
 

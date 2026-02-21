@@ -56,28 +56,6 @@ function copyOwnSafeProperties(
   }
 }
 
-// ---------------------------------------------------------------------------
-// Utility: freeze-state matching
-// ---------------------------------------------------------------------------
-
-/**
- * Return `value` if its freeze state already matches `frozen`, otherwise
- * shallow-copy via `copy` and optionally freeze the result. This is the
- * common "match frozenness" pattern used by `toNativeValue()` implementations:
- * never mutate the original, create a copy only when the freeze state differs.
- */
-function matchFrozenness<T extends object>(
-  value: T,
-  frozen: boolean,
-  copy: (v: T) => T,
-): T {
-  const isFrozen = Object.isFrozen(value);
-  if (frozen === isFrozen) return value;
-  const result = copy(value);
-  if (frozen) Object.freeze(result);
-  return result;
-}
-
 /**
  * Create a shallow copy of an Error, preserving constructor, name, message,
  * stack, cause, and custom enumerable properties. Used by `toNativeValue()`
@@ -129,12 +107,26 @@ function errorClassFromType(type: string): ErrorConstructor {
  * deep unwrap functions, replacing their `instanceof` cascades with a single
  * `instanceof StorableNativeWrapper` check.
  */
-export abstract class StorableNativeWrapper implements StorableInstance {
+export abstract class StorableNativeWrapper<T extends object>
+  implements StorableInstance {
   abstract readonly typeTag: string;
   abstract [DECONSTRUCT](): StorableValue;
 
+  /** The wrapped native value, used by `toNativeValue` for freeze-state checks. */
+  protected abstract get wrappedValue(): T;
+
+  /** Convert the wrapped value to frozen form (only called on state mismatch). */
+  protected abstract toNativeFrozen(): T;
+
+  /** Convert the wrapped value to thawed form (only called on state mismatch). */
+  protected abstract toNativeThawed(): T;
+
   /** Return the underlying native value, optionally frozen. */
-  abstract toNativeValue(frozen: boolean): unknown;
+  toNativeValue(frozen: boolean): T {
+    const value = this.wrappedValue;
+    if (frozen === Object.isFrozen(value)) return value;
+    return frozen ? this.toNativeFrozen() : this.toNativeThawed();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -148,7 +140,7 @@ export abstract class StorableNativeWrapper implements StorableInstance {
  * `StorableError` via the generic `StorableInstanceHandler` path.
  * See Section 1.4.1 of the formal spec.
  */
-export class StorableError extends StorableNativeWrapper {
+export class StorableError extends StorableNativeWrapper<Error> {
   /** The type tag used in the wire format (`TAGS.Error`). */
   readonly typeTag = TAGS.Error;
 
@@ -196,8 +188,16 @@ export class StorableError extends StorableNativeWrapper {
     return state as StorableValue;
   }
 
-  toNativeValue(frozen: boolean): Error {
-    return matchFrozenness(this.error, frozen, copyError);
+  protected get wrappedValue(): Error {
+    return this.error;
+  }
+
+  protected toNativeFrozen(): Error {
+    return Object.freeze(copyError(this.error));
+  }
+
+  protected toNativeThawed(): Error {
+    return copyError(this.error);
   }
 
   /**
@@ -253,7 +253,8 @@ export class StorableError extends StorableNativeWrapper {
  * throw until Map support is fully implemented. Extra properties beyond the
  * wrapped collection are not supported on non-Error wrappers.
  */
-export class StorableMap extends StorableNativeWrapper {
+export class StorableMap
+  extends StorableNativeWrapper<Map<StorableValue, StorableValue>> {
   readonly typeTag = TAGS.Map;
   constructor(readonly map: Map<StorableValue, StorableValue>) {
     super();
@@ -263,8 +264,16 @@ export class StorableMap extends StorableNativeWrapper {
     throw new Error("StorableMap: not yet implemented");
   }
 
-  toNativeValue(frozen: boolean): Map<StorableValue, StorableValue> {
-    return frozen ? new FrozenMap(this.map) : new Map(this.map);
+  protected get wrappedValue(): Map<StorableValue, StorableValue> {
+    return this.map;
+  }
+
+  protected toNativeFrozen(): FrozenMap<StorableValue, StorableValue> {
+    return new FrozenMap(this.map);
+  }
+
+  protected toNativeThawed(): Map<StorableValue, StorableValue> {
+    return new Map(this.map);
   }
 
   static [RECONSTRUCT](
@@ -280,7 +289,7 @@ export class StorableMap extends StorableNativeWrapper {
  * throw until Set support is fully implemented. Extra properties beyond the
  * wrapped collection are not supported on non-Error wrappers.
  */
-export class StorableSet extends StorableNativeWrapper {
+export class StorableSet extends StorableNativeWrapper<Set<StorableValue>> {
   readonly typeTag = TAGS.Set;
   constructor(readonly set: Set<StorableValue>) {
     super();
@@ -290,8 +299,16 @@ export class StorableSet extends StorableNativeWrapper {
     throw new Error("StorableSet: not yet implemented");
   }
 
-  toNativeValue(frozen: boolean): Set<StorableValue> {
-    return frozen ? new FrozenSet(this.set) : new Set(this.set);
+  protected get wrappedValue(): Set<StorableValue> {
+    return this.set;
+  }
+
+  protected toNativeFrozen(): FrozenSet<StorableValue> {
+    return new FrozenSet(this.set);
+  }
+
+  protected toNativeThawed(): Set<StorableValue> {
+    return new Set(this.set);
   }
 
   static [RECONSTRUCT](
@@ -307,7 +324,7 @@ export class StorableSet extends StorableNativeWrapper {
  * throw until Date support is fully implemented. Extra properties beyond the
  * wrapped value are not supported on non-Error wrappers.
  */
-export class StorableDate extends StorableNativeWrapper {
+export class StorableDate extends StorableNativeWrapper<Date> {
   readonly typeTag = TAGS.Date;
   constructor(readonly date: Date) {
     super();
@@ -317,10 +334,16 @@ export class StorableDate extends StorableNativeWrapper {
     throw new Error("StorableDate: not yet implemented");
   }
 
-  toNativeValue(frozen: boolean): Date {
-    return frozen
-      ? new FrozenDate(this.date.getTime())
-      : new Date(this.date.getTime());
+  protected get wrappedValue(): Date {
+    return this.date;
+  }
+
+  protected toNativeFrozen(): FrozenDate {
+    return new FrozenDate(this.date);
+  }
+
+  protected toNativeThawed(): Date {
+    return new Date(this.date.getTime());
   }
 
   static [RECONSTRUCT](
@@ -337,7 +360,8 @@ export class StorableDate extends StorableNativeWrapper {
  * Extra properties beyond the wrapped value are not supported on non-Error
  * wrappers.
  */
-export class StorableUint8Array extends StorableNativeWrapper {
+export class StorableUint8Array
+  extends StorableNativeWrapper<Blob | Uint8Array> {
   readonly typeTag = TAGS.Bytes;
   constructor(readonly bytes: Uint8Array) {
     super();
@@ -347,17 +371,21 @@ export class StorableUint8Array extends StorableNativeWrapper {
     throw new Error("StorableUint8Array: not yet implemented");
   }
 
+  protected get wrappedValue(): Uint8Array {
+    return this.bytes;
+  }
+
   /**
-   * When `frozen` is true, returns a `Blob` (immutable by nature) instead of
-   * a `Uint8Array` (which `Object.freeze()` cannot protect -- typed arrays
-   * allow element mutation even when frozen). Callers must handle the Blob's
-   * async API (e.g. `blob.arrayBuffer()`). When `frozen` is false, returns
-   * a copy of the `Uint8Array` to prevent callers from mutating the
-   * wrapper's internal state.
+   * Returns a `Blob` (immutable by nature). `Uint8Array` cannot be frozen
+   * per the JS spec, so the base class freeze-state check always delegates
+   * here when `frozen=true`.
    */
-  toNativeValue(frozen: boolean): Blob | Uint8Array {
-    if (frozen) return new Blob([this.bytes as BlobPart]);
-    return this.bytes.slice();
+  protected toNativeFrozen(): Blob {
+    return new Blob([this.bytes as BlobPart]);
+  }
+
+  protected toNativeThawed(): Uint8Array {
+    return this.bytes;
   }
 
   static [RECONSTRUCT](

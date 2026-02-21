@@ -317,14 +317,30 @@ describe("storable-native-instances", () => {
       expect((result as FrozenMap<string, number>).get("a")).toBe(1);
     });
 
-    it("StorableMap.toNativeValue(false) returns mutable Map", () => {
+    it("StorableMap.toNativeValue(false) returns the original Map", () => {
       const map = new Map<StorableValue, StorableValue>([["a", 1]]);
       const sm = new StorableMap(map);
       const result = sm.toNativeValue(false);
+      expect(result).toBe(map); // same reference
       expect(result).toBeInstanceOf(Map);
       expect(result).not.toBeInstanceOf(FrozenMap);
-      (result as Map<string, number>).set("b", 2);
-      expect((result as Map<string, number>).get("b")).toBe(2);
+    });
+
+    it("StorableMap.toNativeValue(true) returns same FrozenMap if already frozen", () => {
+      const fm = new FrozenMap<StorableValue, StorableValue>([["a", 1]]);
+      const sm = new StorableMap(fm);
+      const result = sm.toNativeValue(true);
+      expect(result).toBe(fm); // same reference
+    });
+
+    it("StorableMap.toNativeValue(false) copies a FrozenMap to mutable Map", () => {
+      const fm = new FrozenMap<StorableValue, StorableValue>([["a", 1]]);
+      const sm = new StorableMap(fm);
+      const result = sm.toNativeValue(false);
+      expect(result).not.toBe(fm);
+      expect(result).toBeInstanceOf(Map);
+      expect(result).not.toBeInstanceOf(FrozenMap);
+      expect(result.get("a" as StorableValue)).toBe(1);
     });
 
     it("StorableSet implements StorableInstance", () => {
@@ -346,14 +362,30 @@ describe("storable-native-instances", () => {
       expect((result as FrozenSet<number>).has(1)).toBe(true);
     });
 
-    it("StorableSet.toNativeValue(false) returns mutable Set", () => {
+    it("StorableSet.toNativeValue(false) returns the original Set", () => {
       const set = new Set<StorableValue>([1, 2]);
       const ss = new StorableSet(set);
       const result = ss.toNativeValue(false);
+      expect(result).toBe(set); // same reference
       expect(result).toBeInstanceOf(Set);
       expect(result).not.toBeInstanceOf(FrozenSet);
-      (result as Set<number>).add(3);
-      expect((result as Set<number>).has(3)).toBe(true);
+    });
+
+    it("StorableSet.toNativeValue(true) returns same FrozenSet if already frozen", () => {
+      const fs = new FrozenSet<StorableValue>([1, 2]);
+      const ss = new StorableSet(fs);
+      const result = ss.toNativeValue(true);
+      expect(result).toBe(fs); // same reference
+    });
+
+    it("StorableSet.toNativeValue(false) copies a FrozenSet to mutable Set", () => {
+      const fs = new FrozenSet<StorableValue>([1, 2]);
+      const ss = new StorableSet(fs);
+      const result = ss.toNativeValue(false);
+      expect(result).not.toBe(fs);
+      expect(result).toBeInstanceOf(Set);
+      expect(result).not.toBeInstanceOf(FrozenSet);
+      expect(result.has(1 as StorableValue)).toBe(true);
     });
 
     it("StorableDate implements StorableInstance", () => {
@@ -376,13 +408,29 @@ describe("storable-native-instances", () => {
       expect(result.getTime()).toBe(date.getTime());
     });
 
-    it("StorableDate.toNativeValue(false) returns a mutable copy", () => {
+    it("StorableDate.toNativeValue(false) returns the original Date", () => {
       const date = new Date("2024-01-01");
       const sd = new StorableDate(date);
       const result = sd.toNativeValue(false);
-      expect(result).not.toBe(date);
-      expect(result.getTime()).toBe(date.getTime());
+      expect(result).toBe(date); // same reference
       expect(result).not.toBeInstanceOf(FrozenDate);
+    });
+
+    it("StorableDate.toNativeValue(true) returns same FrozenDate if already frozen", () => {
+      const fd = new FrozenDate("2024-01-01");
+      const sd = new StorableDate(fd);
+      const result = sd.toNativeValue(true);
+      expect(result).toBe(fd); // same reference
+    });
+
+    it("StorableDate.toNativeValue(false) copies a FrozenDate to mutable Date", () => {
+      const fd = new FrozenDate("2024-01-01");
+      const sd = new StorableDate(fd);
+      const result = sd.toNativeValue(false);
+      expect(result).not.toBe(fd);
+      expect(result).toBeInstanceOf(Date);
+      expect(result).not.toBeInstanceOf(FrozenDate);
+      expect(result.getTime()).toBe(fd.getTime());
     });
 
     it("StorableUint8Array implements StorableInstance", () => {
@@ -413,12 +461,11 @@ describe("storable-native-instances", () => {
       expect(new Uint8Array(buf)).toEqual(new Uint8Array([10, 20, 30]));
     });
 
-    it("StorableUint8Array.toNativeValue(false) returns a copy", () => {
+    it("StorableUint8Array.toNativeValue(false) returns the original", () => {
       const bytes = new Uint8Array([1, 2, 3]);
       const su = new StorableUint8Array(bytes);
       const result = su.toNativeValue(false);
-      expect(result).not.toBe(bytes);
-      expect(result).toEqual(bytes);
+      expect(result).toBe(bytes); // same reference
       expect(result).toBeInstanceOf(Uint8Array);
     });
   });
@@ -446,10 +493,11 @@ describe("storable-native-instances", () => {
       expect((result as FrozenMap<string, number>).get("a")).toBe(1);
     });
 
-    it("unwraps StorableMap to mutable Map when frozen=false", () => {
+    it("unwraps StorableMap to original Map when frozen=false", () => {
       const map = new Map<StorableValue, StorableValue>([["a", 1]]);
       const sm = new StorableMap(map);
       const result = nativeValueFromStorableValue(sm as StorableValue, false);
+      expect(result).toBe(map); // same reference
       expect(result).toBeInstanceOf(Map);
       expect(result).not.toBeInstanceOf(FrozenMap);
     });
@@ -462,10 +510,11 @@ describe("storable-native-instances", () => {
       expect((result as FrozenSet<number>).has(1)).toBe(true);
     });
 
-    it("unwraps StorableSet to mutable Set when frozen=false", () => {
+    it("unwraps StorableSet to original Set when frozen=false", () => {
       const set = new Set<StorableValue>([1, 2, 3]);
       const ss = new StorableSet(set);
       const result = nativeValueFromStorableValue(ss as StorableValue, false);
+      expect(result).toBe(set); // same reference
       expect(result).toBeInstanceOf(Set);
       expect(result).not.toBeInstanceOf(FrozenSet);
     });
@@ -486,12 +535,11 @@ describe("storable-native-instances", () => {
       expect((result as Blob).size).toBe(3);
     });
 
-    it("unwraps StorableUint8Array to Uint8Array copy when frozen=false", () => {
+    it("unwraps StorableUint8Array to original Uint8Array when frozen=false", () => {
       const bytes = new Uint8Array([1, 2, 3]);
       const su = new StorableUint8Array(bytes);
       const result = nativeValueFromStorableValue(su as StorableValue, false);
-      expect(result).not.toBe(bytes);
-      expect(result).toEqual(bytes);
+      expect(result).toBe(bytes); // same reference
     });
 
     it("passes through primitives", () => {
