@@ -124,20 +124,20 @@ big-endian byte order.
 ### 4.4 `string`
 
 ```
-Bytes: TAG_STRING  LENGTH_U32BE  CODE_UNITS
-       0x03        <4 bytes>     <2 * length bytes>
+Bytes: TAG_STRING  LENGTH_U32BE  UTF8_BYTES
+       0x03        <4 bytes>     <length bytes>
 ```
 
-Total: 1 + 4 + (2 * N) bytes, where N is the number of UTF-16 code units.
+Total: 1 + 4 + N bytes, where N is the byte length of the UTF-8 encoding.
 
-- **Length**: The number of UTF-16 code units (not bytes, not Unicode scalar
-  values), encoded as uint32 big-endian.
-- **Code units**: Each UTF-16 code unit is encoded as 2 bytes, big-endian.
-  Surrogate pairs (for characters above U+FFFF) appear as two code units, each
-  encoded as a 2-byte big-endian value.
+- **Length**: The number of bytes in the UTF-8 encoding of the string, encoded
+  as uint32 big-endian.
+- **Payload**: The string encoded as UTF-8 bytes. Characters in the Basic
+  Multilingual Plane (U+0000--U+FFFF) use 1--3 bytes; supplementary characters
+  (U+10000 and above) use 4 bytes.
 
 Empty string (`""`) is encoded as `0x03 00 00 00 00` — the tag plus a
-zero-length prefix and no code unit bytes.
+zero-length prefix and no payload bytes.
 
 ### 4.5 `bigint`
 
@@ -228,7 +228,7 @@ Bytes: TAG_OBJECT  KEY_COUNT_U32BE  KEY_0  VALUE_0  KEY_1  VALUE_1  ...
   lexicographically by their UTF-8 byte representation (see Section 5). For each
   key-value pair:
   - The **key** is encoded as a `TAG_STRING`-style value: `TAG_STRING` + uint32
-    BE code unit count + UTF-16 BE code units (same format as Section 4.4).
+    BE byte length + UTF-8 bytes (same format as Section 4.4).
   - The **value** is hashed recursively as a complete tagged value.
 
 Empty object (`{}`) is encoded as `0x09 00 00 00 00` — the tag plus a zero
@@ -294,11 +294,8 @@ This is equivalent to the standard lexicographic ordering on byte sequences and
 matches the behavior of `Uint8Array` comparison or C's `memcmp` with a
 length tie-breaker.
 
-> **Note.** The sort order is determined by the UTF-8 encoding of the keys, not
-> the UTF-16 encoding used in the hash stream. Keys are _sorted_ by UTF-8 but
-> _hashed_ as UTF-16 (using the `TAG_STRING` format from Section 4.4). This
-> distinction matters for strings containing characters above U+007F, where
-> UTF-8 and UTF-16 byte orderings can differ.
+Since all string data in the hash stream uses UTF-8 encoding (Section 4.4),
+the sort order and the hash encoding use the same byte representation.
 
 ---
 
@@ -359,11 +356,10 @@ Note: `-0` produces the same byte stream (normalized to `+0`).
 
 ### 7.6 `"hello"` (string)
 
-`"hello"` has 5 UTF-16 code units: `0x0068`, `0x0065`, `0x006C`, `0x006C`,
-`0x006F`.
+`"hello"` is 5 bytes in UTF-8: `0x68`, `0x65`, `0x6C`, `0x6C`, `0x6F`.
 
 ```
-03  00 00 00 05  00 68 00 65 00 6C 00 6C 00 6F
+03  00 00 00 05  68 65 6C 6C 6F
 ```
 
 ### 7.7 `""` (empty string)
@@ -400,17 +396,17 @@ Full byte stream:
 Two keys. UTF-8 sort order: `"a"` (0x61) < `"b"` (0x62).
 
 - Tag + key count: `09 00 00 00 02`
-- Key `"a"` (1 code unit, `0x0061`): `03 00 00 00 01 00 61`
+- Key `"a"` (1 byte in UTF-8): `03 00 00 00 01 61`
 - Value `1`: `02 3F F0 00 00 00 00 00 00`
-- Key `"b"` (1 code unit, `0x0062`): `03 00 00 00 01 00 62`
+- Key `"b"` (1 byte in UTF-8): `03 00 00 00 01 62`
 - Value `2`: `02 40 00 00 00 00 00 00 00` (IEEE 754 for `2.0`)
 
 Full byte stream:
 ```
 09 00 00 00 02
-03 00 00 00 01 00 61
+03 00 00 00 01 61
 02 3F F0 00 00 00 00 00 00
-03 00 00 00 01 00 62
+03 00 00 00 01 62
 02 40 00 00 00 00 00 00 00
 ```
 
@@ -444,7 +440,7 @@ rather than producing a hash.
 
 | Context                          | Encoding       | Counts            |
 |:---------------------------------|:---------------|:------------------|
-| String code units                | uint32 BE      | UTF-16 code units |
+| String byte length               | uint32 BE      | UTF-8 bytes       |
 | Bigint payload bytes             | uint32 BE      | Bytes             |
 | Byte array (`StorableUint8Array`)| uint32 BE      | Bytes             |
 | Array logical length             | uint32 BE      | Elements + holes  |
