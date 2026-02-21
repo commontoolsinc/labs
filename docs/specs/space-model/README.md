@@ -55,3 +55,4 @@ The specification addresses:
 - [Transactions](./5-transactions.md)
 - [Reactivity](./6-reactivity.md)
 - [Schemas](./7-schemas.md)
+- [Traversal and Schema Query](./8-traversal.md)
