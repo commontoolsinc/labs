@@ -9,6 +9,8 @@ This is a temporary working checklist for the traversal optimization effort.
 ## Benchmark Baseline
 
 - [x] Add targeted benchmark suite: `packages/runner/test/traverse.bench.ts`
+- [x] Add end-to-end benchmark suite:
+      `packages/runner/test/traverse-e2e.bench.ts`
 - [x] Capture baseline benchmark output (JSON):
   - `cd packages/runner && deno bench --allow-read --allow-write --allow-net --allow-ffi --allow-env --no-check --json test/traverse.bench.ts > test/bench-results/traverse-baseline.json`
 - [x] Add a short benchmark runbook documenting:
@@ -59,6 +61,8 @@ This is a temporary working checklist for the traversal optimization effort.
 - `packages/runner/test/bench-results/traverse-after-getAtPath-and-trackers.json`
 - `packages/runner/test/bench-results/traverse-after-getAtPath-trackers-alloc.json`
 - `packages/runner/test/bench-results/traverse-after-asCell-memo-options-final.json`
+- `packages/runner/test/bench-results/traverse-e2e-current.json`
+- `packages/runner/test/bench-results/traverse-e2e-current-rerun.json`
 
 ### Latest benchmark deltas (final vs baseline)
 
