@@ -66,12 +66,16 @@ export default pattern(({ items }) => {
             }
         }
     } as const satisfies __ctHelpers.JSONSchema, {
-        type: "boolean"
-    } as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => items.get().length > 0);
+        anyOf: [{
+                type: "undefined"
+            }, {
+                type: "boolean"
+            }]
+    } as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => items && items.get().length > 0);
     return {
         [UI]: (<div>
         {__ctHelpers.ifElse({
-            type: "boolean",
+            type: ["boolean", "undefined"],
             asOpaque: true
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "array",
@@ -119,7 +123,7 @@ export default pattern(({ items }) => {
                     required: ["$UI"]
                 }
             }
-        } as const satisfies __ctHelpers.JSONSchema, hasItems, items.mapWithPattern(__ctHelpers.pattern(({ element: item, params: {} }) => (<div>
+        } as const satisfies __ctHelpers.JSONSchema, hasItems, items!.mapWithPattern(__ctHelpers.pattern(({ element: item, params: {} }) => (<div>
               <strong>{item.label}</strong>
               <ul>
                 {item.tags.mapWithPattern(__ctHelpers.pattern(({ element: tag, index: i, params: { item } }) => (<li>

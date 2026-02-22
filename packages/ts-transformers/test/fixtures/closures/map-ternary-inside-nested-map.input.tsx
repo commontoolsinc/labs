@@ -27,13 +27,13 @@ interface PatternInput {
 }
 
 export default pattern<PatternInput>(({ items, showInactive }) => {
-  const hasItems = computed(() => items.get().length > 0);
+  const hasItems = computed(() => items && items.get().length > 0);
 
   return {
     [UI]: (
       <div>
         {hasItems ? (
-          items.map((item) => (
+          items!.map((item) => (
             <div>
               {/* Ternary in outer map, outside inner map - should also be ifElse */}
               <strong>{item.tags.length > 0 ? item.label : "No tags"}</strong>

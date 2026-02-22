@@ -20,10 +20,10 @@ export default pattern((_state) => {
                     }]
             },
             retries: {
-                type: "number"
+                type: ["number", "undefined"]
             }
         },
-        required: ["timeout"]
+        required: ["timeout", "retries"]
     } as const satisfies __ctHelpers.JSONSchema);
     const items = cell<string[]>([], {
         type: "array",
@@ -48,10 +48,10 @@ export default pattern((_state) => {
                                 }]
                         },
                         retries: {
-                            type: "number"
+                            type: ["number", "undefined"]
                         }
                     },
-                    required: ["timeout"],
+                    required: ["timeout", "retries"],
                     asCell: true
                 }
             },
@@ -80,10 +80,10 @@ export default pattern((_state) => {
                                 }]
                         },
                         retries: {
-                            type: "number"
+                            type: ["number", "undefined"]
                         }
                     },
-                    required: ["timeout"],
+                    required: ["timeout", "retries"],
                     asCell: true
                 }
             },

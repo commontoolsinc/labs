@@ -220,7 +220,7 @@ describe("Pattern Runner", () => {
 
     const doubleArray = pattern<{ values?: number[] }>(
       ({ values }) => {
-        const doubled = values.map((x) => double(x));
+        const doubled = values?.map((x) => double(x)) ?? [];
         return { doubled };
       },
     );

@@ -779,7 +779,7 @@ describe("Schema-to-TS Type Conversion", () => {
         // These lines verify that input has the correct type according to inputSchema
         const name = input.name;
         const count = input.count;
-        const enabled = input.options.enabled;
+        const enabled = input.options?.enabled;
 
         // Return a value that should match the output schema type
         return {

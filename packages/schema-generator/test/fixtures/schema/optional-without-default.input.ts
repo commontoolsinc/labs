@@ -5,7 +5,7 @@ interface SchemaRoot {
   // Optional flag - should not be in required
   optionalFlag?: string;
 
-  // Union with undefined - should not be in required (Option B)
+  // Union with undefined - should be in required (Option B)
   unionUndefined: string | undefined;
 
   // Both optional flag AND undefined union - should not be in required

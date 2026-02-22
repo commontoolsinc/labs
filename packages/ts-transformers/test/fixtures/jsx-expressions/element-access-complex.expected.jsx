@@ -55,8 +55,12 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number",
-            asOpaque: true
+            anyOf: [{
+                    type: "undefined"
+                }, {
+                    type: "number",
+                    asOpaque: true
+                }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 matrix: state.matrix,
                 row: state.row,
@@ -100,8 +104,12 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: "string",
-            asOpaque: true
+            anyOf: [{
+                    type: "undefined"
+                }, {
+                    type: "string",
+                    asOpaque: true
+                }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 nested: {
                     arrays: state.nested.arrays,
@@ -133,8 +141,12 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: "string",
-            asOpaque: true
+            anyOf: [{
+                    type: "undefined"
+                }, {
+                    type: "string",
+                    asOpaque: true
+                }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.items
             } }, ({ state }) => state.items[state.items.length - 1])}
@@ -194,8 +206,12 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number",
-            asOpaque: true
+            anyOf: [{
+                    type: "undefined"
+                }, {
+                    type: "number",
+                    asOpaque: true
+                }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 arr: state.arr,
                 a: state.a,
@@ -226,8 +242,12 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: "string",
-            asOpaque: true
+            anyOf: [{
+                    type: "undefined"
+                }, {
+                    type: "string",
+                    asOpaque: true
+                }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.items,
                 row: state.row
@@ -257,8 +277,12 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number",
-            asOpaque: true
+            anyOf: [{
+                    type: "undefined"
+                }, {
+                    type: "number",
+                    asOpaque: true
+                }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 arr: state.arr,
                 a: state.a
@@ -307,8 +331,12 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number",
-            asOpaque: true
+            anyOf: [{
+                    type: "undefined"
+                }, {
+                    type: "number",
+                    asOpaque: true
+                }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 users: state.users,
                 selectedUser: state.selectedUser,
@@ -343,8 +371,12 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: "string",
-            asOpaque: true
+            anyOf: [{
+                    type: "undefined"
+                }, {
+                    type: "string",
+                    asOpaque: true
+                }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.items,
                 indices: state.indices
@@ -370,8 +402,12 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number",
-            asOpaque: true
+            anyOf: [{
+                    type: "undefined"
+                }, {
+                    type: "number",
+                    asOpaque: true
+                }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 arr: state.arr
             } }, ({ state }) => state.arr[state.arr[0]!])}</p>

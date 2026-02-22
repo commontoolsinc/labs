@@ -31,8 +31,14 @@ export class PrimitiveFormatter implements TypeFormatter {
   }
 
   formatType(type: ts.Type, context: GenerationContext): SchemaDefinition {
-    const flags = type.flags;
+    return PrimitiveFormatter.getSchemaType(type, context);
+  }
 
+  public static getSchemaType(
+    type: ts.Type,
+    context: GenerationContext,
+  ): SchemaDefinition {
+    const flags = type.flags;
     // Handle literal types first (more specific)
     // If widenLiterals flag is set, skip enum generation and return base type
     if (flags & ts.TypeFlags.StringLiteral) {
@@ -94,9 +100,8 @@ export class PrimitiveFormatter implements TypeFormatter {
       return { type: "null" };
     }
     if (flags & ts.TypeFlags.Undefined) {
-      // undefined: return true to indicate "accept any value"
-      // undefined is handled at runtime/compile time, not by JSON schema validation
-      return true;
+      // undefined isn't normally part of JSON Schema, but we include it
+      return { type: "undefined" };
     }
     if (flags & ts.TypeFlags.Void) {
       // void: return true to indicate "accept any value"

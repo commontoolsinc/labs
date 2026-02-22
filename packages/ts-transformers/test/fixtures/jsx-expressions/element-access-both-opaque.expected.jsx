@@ -31,7 +31,7 @@ export default pattern((_state) => {
             },
             required: ["items", "index"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: "string"
+            type: ["string", "undefined"]
         } as const satisfies __ctHelpers.JSONSchema, {
             items: items,
             index: index

@@ -11,7 +11,9 @@ export default pattern(() => {
     // Pattern 1: undefined as ifTrue (waiting state returns nothing)
     const output1 = ifElse({
         type: "boolean"
-    } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, {
+    } as const satisfies __ctHelpers.JSONSchema, {
+        type: "undefined"
+    } as const satisfies __ctHelpers.JSONSchema, {
         type: "object",
         properties: {
             result: {
@@ -20,13 +22,17 @@ export default pattern(() => {
         },
         required: ["result"]
     } as const satisfies __ctHelpers.JSONSchema, {
-        type: "object",
-        properties: {
-            result: {
-                asOpaque: true
-            }
-        },
-        required: ["result"],
+        anyOf: [{
+                type: "undefined"
+            }, {
+                type: "object",
+                properties: {
+                    result: {
+                        asOpaque: true
+                    }
+                },
+                required: ["result"]
+            }],
         asOpaque: true
     } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
         type: "object",
@@ -41,13 +47,7 @@ export default pattern(() => {
         },
         required: ["pending", "result"]
     } as const satisfies __ctHelpers.JSONSchema, {
-        anyOf: [{
-                type: "boolean",
-                "enum": [false]
-            }, {
-                type: "boolean",
-                asOpaque: true
-            }]
+        type: "boolean"
     } as const satisfies __ctHelpers.JSONSchema, {
         pending: pending,
         result: result
@@ -63,14 +63,20 @@ export default pattern(() => {
             }
         },
         required: ["data"]
-    } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, {
-        type: "object",
-        properties: {
-            data: {
-                asOpaque: true
-            }
-        },
-        required: ["data"],
+    } as const satisfies __ctHelpers.JSONSchema, {
+        type: "undefined"
+    } as const satisfies __ctHelpers.JSONSchema, {
+        anyOf: [{
+                type: "undefined"
+            }, {
+                type: "object",
+                properties: {
+                    data: {
+                        asOpaque: true
+                    }
+                },
+                required: ["data"]
+            }],
         asOpaque: true
     } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
         type: "object",

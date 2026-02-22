@@ -51,8 +51,12 @@ export default pattern(() => {
                             asOpaque: true
                         },
                         result: {
-                            type: "string",
-                            asOpaque: true
+                            anyOf: [{
+                                    type: "undefined"
+                                }, {
+                                    type: ["string", "undefined"],
+                                    asOpaque: true
+                                }]
                         }
                     },
                     required: ["pending"]
@@ -60,8 +64,12 @@ export default pattern(() => {
             },
             required: ["genResult"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: "string",
-            asOpaque: true
+            anyOf: [{
+                    type: "undefined"
+                }, {
+                    type: ["string", "undefined"],
+                    asOpaque: true
+                }]
         } as const satisfies __ctHelpers.JSONSchema, { genResult: {
                 pending: genResult.pending,
                 result: genResult.result

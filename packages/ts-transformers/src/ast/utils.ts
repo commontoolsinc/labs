@@ -135,35 +135,29 @@ export function setParentPointers(node: ts.Node, parent?: ts.Node): void {
 }
 
 // Import and re-export the shared optionality check from schema-generator
-import { isOptionalProperty } from "@commontools/schema-generator/property-optionality";
-export { isOptionalProperty };
+import { isOptionalSymbol } from "@commontools/schema-generator/property-optionality";
+export { isOptionalSymbol };
 
 /**
  * Check if a property access expression refers to an optional property.
- * Returns true if:
- * 1. The property has the `?` optional flag (e.g., `multiplier?: number`)
- * 2. The property type is `T | undefined` (e.g., `multiplier: number | undefined`)
- *
- * This aligns with schema-generator's JSON/runtime semantics.
+ * Returns true if the property has the `?` optional flag
  *
  * @example
  * ```typescript
  * interface Config {
  *   a?: number;                 // => true (has ? flag)
- *   b: number | undefined;      // => true (union with undefined)
+ *   b: number | undefined;      // => false (union with undefined)
  *   c: number;                  // => false (required)
+ *   d?: number | undefined;     // => true (has ? flag)
  * }
- * const expr = // AST node for config.a
- * isOptionalPropertyAccess(expr, checker) // => true
  * ```
  */
-export function isOptionalPropertyAccess(
-  expression: ts.PropertyAccessExpression,
+export function isOptionalMemberSymbol(
+  expression: ts.PropertyAccessExpression | ts.ElementAccessExpression,
   checker: ts.TypeChecker,
 ): boolean {
   const symbol = getMemberSymbol(expression, checker);
-  const type = checker.getTypeAtLocation(expression);
-  return isOptionalProperty(symbol, type);
+  return symbol !== undefined && isOptionalSymbol(symbol);
 }
 
 export function isFunctionParameter(

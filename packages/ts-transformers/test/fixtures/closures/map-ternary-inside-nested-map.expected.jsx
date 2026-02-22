@@ -66,12 +66,16 @@ export default pattern(({ items, showInactive }) => {
             }
         }
     } as const satisfies __ctHelpers.JSONSchema, {
-        type: "boolean"
-    } as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => items.get().length > 0);
+        anyOf: [{
+                type: "undefined"
+            }, {
+                type: "boolean"
+            }]
+    } as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => items && items.get().length > 0);
     return {
         [UI]: (<div>
         {__ctHelpers.ifElse({
-            type: "boolean",
+            type: ["boolean", "undefined"],
             asOpaque: true
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "array",
@@ -119,7 +123,7 @@ export default pattern(({ items, showInactive }) => {
                     required: ["$UI"]
                 }
             }
-        } as const satisfies __ctHelpers.JSONSchema, hasItems, items.mapWithPattern(__ctHelpers.pattern(({ element: item, params: { showInactive } }) => (<div>
+        } as const satisfies __ctHelpers.JSONSchema, hasItems, items!.mapWithPattern(__ctHelpers.pattern(({ element: item, params: { showInactive } }) => (<div>
               {/* Ternary in outer map, outside inner map - should also be ifElse */}
               <strong>{__ctHelpers.ifElse({
             type: "boolean"
@@ -200,8 +204,16 @@ export default pattern(({ items, showInactive }) => {
                 type: "object",
                 properties: {
                     showInactive: {
-                        type: "boolean",
-                        asOpaque: true
+                        anyOf: [{
+                                type: "undefined"
+                            }, {
+                                anyOf: [{
+                                        type: "undefined"
+                                    }, {
+                                        type: "boolean"
+                                    }],
+                                asOpaque: true
+                            }]
                     },
                     tag: {
                         type: "object",
@@ -223,7 +235,7 @@ export default pattern(({ items, showInactive }) => {
                     name: tag.name
                 }
             }, ({ showInactive, tag }) => __ctHelpers.ifElse({
-                type: "boolean"
+                type: ["boolean", "undefined"]
             } as const satisfies __ctHelpers.JSONSchema, {
                 type: "string"
             } as const satisfies __ctHelpers.JSONSchema, {
@@ -260,8 +272,16 @@ export default pattern(({ items, showInactive }) => {
                         type: "object",
                         properties: {
                             showInactive: {
-                                type: "boolean",
-                                asOpaque: true
+                                anyOf: [{
+                                        type: "undefined"
+                                    }, {
+                                        anyOf: [{
+                                                type: "undefined"
+                                            }, {
+                                                type: "boolean"
+                                            }],
+                                        asOpaque: true
+                                    }]
                             }
                         },
                         required: ["showInactive"]
@@ -317,8 +337,16 @@ export default pattern(({ items, showInactive }) => {
                     type: "object",
                     properties: {
                         showInactive: {
-                            type: "boolean",
-                            asOpaque: true
+                            anyOf: [{
+                                    type: "undefined"
+                                }, {
+                                    anyOf: [{
+                                            type: "undefined"
+                                        }, {
+                                            type: "boolean"
+                                        }],
+                                    asOpaque: true
+                                }]
                         }
                     },
                     required: ["showInactive"]
