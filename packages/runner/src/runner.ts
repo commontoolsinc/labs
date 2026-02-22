@@ -1471,7 +1471,12 @@ export class Runner {
         );
 
         const handleErrorOutput = (error: unknown) => {
-          (error as Error & { frame?: Frame }).frame = frame;
+          if (
+            error !== null &&
+            (typeof error === "object" || typeof error === "function")
+          ) {
+            (error as Error & { frame?: Frame }).frame = frame;
+          }
           try {
             sendValueToBinding(tx, processCell, outputs, undefined);
           } catch (bindingError) {
