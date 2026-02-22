@@ -40,42 +40,6 @@ const getArrayVariant = (
   ) as Record<string, unknown> | undefined;
 };
 
-Deno.test("rendererVDOMSchema vdomNode enforces type=vnode", () => {
-  const defs = rendererVDOMSchema.$defs as Record<string, unknown>;
-  const vdomNode = defs.vdomNode as {
-    properties: Record<string, unknown>;
-    required?: string[];
-  };
-  const typeSchema = vdomNode.properties.type as {
-    type: string;
-    enum?: string[];
-  };
-  assertEquals(typeSchema.type, "string");
-  assertEquals(typeSchema.enum, ["vnode"]);
-  assert(
-    Array.isArray(vdomNode.required) && vdomNode.required.includes("type"),
-    "rendererVDOMSchema vdomNode should require type",
-  );
-});
-
-Deno.test("debugVDOMSchema vdomNode enforces type=vnode", () => {
-  const defs = debugVDOMSchema.$defs as Record<string, unknown>;
-  const vdomNode = defs.vdomNode as {
-    properties: Record<string, unknown>;
-    required?: string[];
-  };
-  const typeSchema = vdomNode.properties.type as {
-    type: string;
-    enum?: string[];
-  };
-  assertEquals(typeSchema.type, "string");
-  assertEquals(typeSchema.enum, ["vnode"]);
-  assert(
-    Array.isArray(vdomNode.required) && vdomNode.required.includes("type"),
-    "debugVDOMSchema vdomNode should require type",
-  );
-});
-
 Deno.test("rendererVDOMSchema allows undefined child entries", () => {
   const vdomRenderNode = (rendererVDOMSchema.$defs as Record<string, unknown>)
     .vdomRenderNode;

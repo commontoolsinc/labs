@@ -26,7 +26,7 @@ export const rendererVDOMSchema = {
     vdomNode: {
       type: "object",
       properties: {
-        type: { type: "string", enum: ["vnode"] },
+        type: { type: "string" },
         name: { type: "string" },
         props: {
           type: "object",
@@ -39,7 +39,6 @@ export const rendererVDOMSchema = {
         },
         [UI]: { $ref: "#/$defs/vdomNode" },
       },
-      required: ["type"],
     },
   },
   $ref: "#/$defs/vdomNode",
@@ -70,7 +69,7 @@ export const debugVDOMSchema = {
     vdomNode: {
       type: "object",
       properties: {
-        type: { type: "string", enum: ["vnode"] },
+        type: { type: "string" },
         name: { type: "string" },
         props: {
           type: "object",
@@ -82,7 +81,6 @@ export const debugVDOMSchema = {
         },
         [UI]: { $ref: "#/$defs/vdomNode" },
       },
-      required: ["type"],
     },
   },
   $ref: "#/$defs/vdomNode",
