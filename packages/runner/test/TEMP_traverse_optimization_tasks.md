@@ -11,6 +11,8 @@ This is a temporary working checklist for the traversal optimization effort.
 - [x] Add targeted benchmark suite: `packages/runner/test/traverse.bench.ts`
 - [x] Add end-to-end benchmark suite:
       `packages/runner/test/traverse-e2e.bench.ts`
+- [x] Add mocked retriever deep-link benchmark suite:
+      `packages/runner/test/traverse-mocked-retriever.bench.ts`
 - [x] Capture baseline benchmark output (JSON):
   - `cd packages/runner && deno bench --allow-read --allow-write --allow-net --allow-ffi --allow-env --no-check --json test/traverse.bench.ts > test/bench-results/traverse-baseline.json`
 - [x] Add a short benchmark runbook documenting:
@@ -63,6 +65,9 @@ This is a temporary working checklist for the traversal optimization effort.
 - `packages/runner/test/bench-results/traverse-after-asCell-memo-options-final.json`
 - `packages/runner/test/bench-results/traverse-e2e-current.json`
 - `packages/runner/test/bench-results/traverse-e2e-current-rerun.json`
+- `packages/runner/test/bench-results/traverse-mocked-retriever-r1.json`
+- `packages/runner/test/bench-results/traverse-mocked-retriever-r2.json`
+- `packages/runner/test/bench-results/traverse-mocked-retriever-r3.json`
 
 ### Latest benchmark deltas (final vs baseline)
 
@@ -75,6 +80,15 @@ This is a temporary working checklist for the traversal optimization effort.
 - `asStream object property boundary (traverseCells=false)`: `-18.71%`
 - `asCell array boundary (traverseCells=false)`: `-27.32%`
 - `asCell array deep traversal (traverseCells=true)`: `-23.46%`
+
+### Mocked retriever deep-link benchmark (schema outcome comparison)
+
+- Fixture: deep linked graph (`depth=48`), mock `ObjectStorageManager` backing
+  `ManagedStorageTransaction`, no storage backend overhead.
+- Match case: all required fields present
+- Mismatch case: one deep `meta.marker` required field missing
+- 3-run mean (`avg`): match `13.169ms`, mismatch `26.659ms`
+- Mismatch vs match delta: `+102.64%` (about `2.03x` slower)
 
 ## Exit Criteria
 
