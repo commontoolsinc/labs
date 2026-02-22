@@ -1,4 +1,4 @@
-import { assert } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import {
   debugVDOMSchema,
   rendererVDOMSchema,
@@ -22,29 +22,121 @@ const anyOfIncludesUndefined = (schema: unknown): boolean => {
   return Array.isArray(anyOf) && anyOf.some((entry) => hasUndefinedType(entry));
 };
 
-Deno.test("rendererVDOMSchema allows undefined child entries", () => {
-  const vdomNode = (rendererVDOMSchema.$defs as Record<string, unknown>)
-    .vdomNode as {
-      properties: Record<string, unknown>;
-    };
+const getArrayVariant = (
+  schema: unknown,
+): Record<string, unknown> | undefined => {
+  if (!schema || typeof schema !== "object" || !("anyOf" in schema)) {
+    return undefined;
+  }
+  const anyOf = (schema as { anyOf: unknown[] }).anyOf;
+  if (!Array.isArray(anyOf)) {
+    return undefined;
+  }
+  return anyOf.find((entry) =>
+    !!entry &&
+    typeof entry === "object" &&
+    "type" in entry &&
+    (entry as { type: unknown }).type === "array"
+  ) as Record<string, unknown> | undefined;
+};
 
-  const childArraySchema = vdomNode.properties.children as { items: unknown };
+Deno.test("rendererVDOMSchema allows undefined child entries", () => {
+  const vdomRenderNode = (rendererVDOMSchema.$defs as Record<string, unknown>)
+    .vdomRenderNode;
   assert(
-    anyOfIncludesUndefined(childArraySchema.items),
-    "rendererVDOMSchema.children items should include type=undefined",
+    anyOfIncludesUndefined(vdomRenderNode),
+    "rendererVDOMSchema vdomRenderNode should include type=undefined",
   );
 });
 
 Deno.test("debugVDOMSchema allows undefined child entries", () => {
-  const vdomNode = (debugVDOMSchema.$defs as Record<string, unknown>)
-    .vdomNode as {
-      properties: Record<string, unknown>;
-    };
-
-  const childArraySchema = vdomNode.properties.children as { items: unknown };
+  const vdomRenderNode = (debugVDOMSchema.$defs as Record<string, unknown>)
+    .vdomRenderNode;
   assert(
-    anyOfIncludesUndefined(childArraySchema.items),
-    "debugVDOMSchema.children items should include type=undefined",
+    anyOfIncludesUndefined(vdomRenderNode),
+    "debugVDOMSchema vdomRenderNode should include type=undefined",
+  );
+});
+
+Deno.test("rendererVDOMSchema child arrays recurse through vdomRenderNode", () => {
+  const defs = rendererVDOMSchema.$defs as Record<string, unknown>;
+  const vdomNode = defs.vdomNode as {
+    properties: Record<string, unknown>;
+  };
+  const vdomRenderNode = defs.vdomRenderNode;
+  const childrenSchema = vdomNode.properties.children as {
+    items: unknown;
+  };
+  const nestedArrayVariant = getArrayVariant(vdomRenderNode) as {
+    items: { $ref: string; asCell?: boolean };
+  };
+
+  assert(
+    nestedArrayVariant,
+    "rendererVDOMSchema vdomRenderNode should include an array variant",
+  );
+  assertEquals(
+    nestedArrayVariant.items.$ref,
+    "#/$defs/vdomRenderNode",
+    "nested array items should recurse to vdomRenderNode",
+  );
+  assertEquals(
+    nestedArrayVariant.items.asCell,
+    true,
+    "renderer nested array items should preserve asCell",
+  );
+
+  const childItems = childrenSchema.items as { $ref: string; asCell?: boolean };
+  assertEquals(
+    childItems.$ref,
+    "#/$defs/vdomRenderNode",
+    "children items should point to recursive vdomRenderNode",
+  );
+  assertEquals(
+    childItems.asCell,
+    true,
+    "renderer children items should preserve asCell",
+  );
+});
+
+Deno.test("debugVDOMSchema child arrays recurse through vdomRenderNode", () => {
+  const defs = debugVDOMSchema.$defs as Record<string, unknown>;
+  const vdomNode = defs.vdomNode as {
+    properties: Record<string, unknown>;
+  };
+  const vdomRenderNode = defs.vdomRenderNode;
+  const childrenSchema = vdomNode.properties.children as {
+    items: unknown;
+  };
+  const nestedArrayVariant = getArrayVariant(vdomRenderNode) as {
+    items: { $ref: string; asCell?: boolean };
+  };
+
+  assert(
+    nestedArrayVariant,
+    "debugVDOMSchema vdomRenderNode should include an array variant",
+  );
+  assertEquals(
+    nestedArrayVariant.items.$ref,
+    "#/$defs/vdomRenderNode",
+    "nested array items should recurse to vdomRenderNode",
+  );
+  assertEquals(
+    nestedArrayVariant.items.asCell,
+    undefined,
+    "debug nested array items should not include asCell",
+  );
+
+  const childItems = childrenSchema.items as { $ref: string; asCell?: boolean };
+  assertEquals(
+    childItems.$ref,
+    "#/$defs/vdomRenderNode",
+    "children items should point to recursive vdomRenderNode",
+  );
+  assertEquals(
+    childItems.asCell,
+    undefined,
+    "debug children items should not include asCell",
   );
 });
 
