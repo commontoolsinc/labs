@@ -506,17 +506,18 @@ class VdomChildNode {
 
 function bindProps(
   element: HTMLElement,
-  props: Props | CellHandle<Props>,
+  props: Props | CellHandle<Props> | undefined,
   options: RenderOptions,
 ): Cancel {
   const [cancel, addCancel] = useCancelGroup();
   const setProp = options.setProp ?? setPropDefault;
 
   if (isCellHandle(props)) {
+    const propsCell = props as CellHandle<Props>;
     addCancel(
       effect(
-        props,
-        (resolved) => bindProps(element, resolved as Props, options),
+        propsCell,
+        (resolved) => bindProps(element, resolved, options),
       ),
     );
     return cancel;

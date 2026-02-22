@@ -31,6 +31,7 @@ export type WorkerRenderNode =
 export type WorkerProps = {
   [key: string]:
     | JSONValue
+    | undefined
     | Cell<JSONValue>
     | ((event: unknown) => void) // Event handlers
     | Cell<unknown>; // For $prop bindings
@@ -42,8 +43,11 @@ export type WorkerProps = {
 export interface WorkerVNode {
   type: "vnode";
   name: string;
-  props: WorkerProps | Cell<WorkerProps> | null;
-  children: WorkerRenderNode[];
+  props: WorkerProps | Cell<WorkerProps> | null | undefined;
+  children:
+    | WorkerRenderNode[]
+    | Cell<WorkerRenderNode | WorkerRenderNode[]>
+    | undefined;
 }
 
 /**
