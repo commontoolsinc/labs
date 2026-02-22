@@ -82,23 +82,35 @@ export class MapSet<K, V> {
     this.equalFn = equalFn;
   }
 
+  private findEqualValue(values: Set<V>, value: V): V | undefined {
+    if (this.equalFn === undefined) {
+      return values.has(value) ? value : undefined;
+    }
+    for (const item of values) {
+      if (Object.is(item, value) || this.equalFn(item, value)) {
+        return item;
+      }
+    }
+    return undefined;
+  }
+
   public get(key: K): Set<V> | undefined {
     return this.map.get(key);
   }
 
   public add(key: K, value: V) {
-    const values = this.map.get(key);
+    let values = this.map.get(key);
     if (values === undefined) {
-      const values = new Set<V>([value]);
+      values = new Set<V>();
       this.map.set(key, values);
-    } else if (
+    }
+    if (
       this.equalFn !== undefined &&
-      (values.values().some((item) => this.equalFn!(item, value)))
+      this.findEqualValue(values, value) !== undefined
     ) {
       return;
-    } else {
-      this.map.get(key)!.add(value);
     }
+    values.add(value);
   }
 
   public has(key: K): boolean {
@@ -107,10 +119,13 @@ export class MapSet<K, V> {
 
   public hasValue(key: K, value: V): boolean {
     const values = this.map.get(key);
-    if (values !== undefined && this.equalFn !== undefined) {
-      return values.values().some((item) => this.equalFn!(item, value));
+    if (values === undefined) {
+      return false;
     }
-    return values !== undefined && values.has(value);
+    if (this.equalFn !== undefined) {
+      return this.findEqualValue(values, value) !== undefined;
+    }
+    return values.has(value);
   }
 
   public deleteValue(key: K, value: V): boolean {
@@ -123,13 +138,13 @@ export class MapSet<K, V> {
         // Short cut via object identity
         existing = value;
       } else if (this.equalFn !== undefined) {
-        const match = values.values().find((item) =>
-          this.equalFn!(item, value)
-        );
+        const match = this.findEqualValue(values, value);
         if (match === undefined) {
           return false;
         }
         existing = match;
+      } else {
+        return false;
       }
       const rv = values.delete(existing);
       if (values.size === 0) {
@@ -155,6 +170,8 @@ export class MapSet<K, V> {
 // SchemaPathSelectors are relative to the doc root, so if we want to look at
 // the value of the doc, we need to have "value" in the path.
 const DefaultSelector: SchemaPathSelector = { path: ["value"], schema: true };
+const EmptyPropertiesMarker: JSONSchema = { $comment: "emptyProperties" };
+const MissingPropertyMarker: JSONSchema = { $comment: "missingProperty" };
 
 export class CycleTracker<K> {
   private partial: Set<K>;
@@ -194,6 +211,19 @@ export class CompoundCycleTracker<EqualKey, DeepEqualKey, Value = unknown> {
     this.partial = new Map<EqualKey, [DeepEqualKey, Value?][]>();
   }
 
+  private getMatchIndex(
+    existing: [DeepEqualKey, Value?][],
+    extraKey: DeepEqualKey,
+  ): number {
+    for (let i = 0; i < existing.length; i++) {
+      const [item] = existing[i];
+      if (Object.is(item, extraKey) || deepEqual(item, extraKey)) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
   /**
    * This will do an identity check on the `partialKey` and a deepEqual check on
    * the `extraKey`.
@@ -209,16 +239,14 @@ export class CompoundCycleTracker<EqualKey, DeepEqualKey, Value = unknown> {
       existing = [];
       this.partial.set(partialKey, existing);
     }
-    if (existing.some(([item, _value]) => deepEqual(item, extraKey))) {
+    if (this.getMatchIndex(existing, extraKey) !== -1) {
       return null;
     }
     existing.push([extraKey, value]);
     return {
       [Symbol.dispose]: () => {
         const entries = this.partial.get(partialKey)!;
-        const index = entries.findIndex(([item, _value]) =>
-          deepEqual(item, extraKey)
-        );
+        const index = this.getMatchIndex(entries, extraKey);
         if (index === -1) {
           logger.error("traverse-error", () => [
             "Failed to dispose of missing key",
@@ -227,10 +255,9 @@ export class CompoundCycleTracker<EqualKey, DeepEqualKey, Value = unknown> {
           ]);
           return;
         }
+        entries.splice(index, 1);
         if (entries.length === 0) {
           this.partial.delete(partialKey);
-        } else {
-          entries.splice(index, 1);
         }
       },
     };
@@ -242,10 +269,11 @@ export class CompoundCycleTracker<EqualKey, DeepEqualKey, Value = unknown> {
     if (existing === undefined) {
       return undefined; // no match for partialKey
     }
-    const match = existing.find(([item, _value]) => deepEqual(item, extraKey));
-    if (match === undefined) {
+    const index = this.getMatchIndex(existing, extraKey);
+    if (index === -1) {
       return undefined; // no match for extraKey
     }
+    const match = existing[index];
     const [_key, value] = match;
     return value;
   }
@@ -778,7 +806,8 @@ export function getAtPath(
   SchemaPathSelector | undefined,
 ] {
   let curDoc = doc;
-  let remaining = [...path];
+  let pathIndex = 0;
+  const pathLength = path.length;
 
   while (true) {
     if (isPrimitiveCellLink(curDoc.value)) {
@@ -786,15 +815,18 @@ export function getAtPath(
       // them to resolve the link.
       // we follow all links when the lastNode is value
       // we follow write redirect links when lastNode is writeRedirect
-      const followLink = remaining.length !== 0 || lastNode === "value" ||
+      const followLink = pathIndex < pathLength || lastNode === "value" ||
         lastNode === "writeRedirect" && isWriteRedirectLink(curDoc.value);
       if (!followLink) {
         return [curDoc, selector];
       }
+      // Avoid shift-based path consumption (O(n^2) over deep paths) by slicing
+      // the unconsumed suffix once when we must follow a link.
+      const remainingPath = pathIndex === 0 ? path : path.slice(pathIndex);
       [curDoc, selector] = followPointer(
         tx,
         curDoc,
-        remaining,
+        remainingPath,
         tracker,
         cfc,
         schemaTracker,
@@ -803,11 +835,12 @@ export function getAtPath(
         lastNode,
       );
       // followPointer/getAtPath have resolved all path elements
-      remaining = [];
+      pathIndex = pathLength;
     }
     // Our return should never be a link
     //assert(!isPrimitiveCellLink(curDoc.value));
-    const part = remaining.shift();
+    const part = path[pathIndex];
+    pathIndex++;
     if (part === undefined) {
       return [curDoc, selector];
     }
@@ -816,13 +849,11 @@ export function getAtPath(
     if (Array.isArray(curDoc.value)) {
       if (part === "length") {
         curDoc = {
-          ...curDoc,
           address: { ...curDoc.address, path: [...curDoc.address.path, part] },
           value: curDoc.value.length,
         };
       } else {
         curDoc = {
-          ...curDoc,
           address: { ...curDoc.address, path: [...curDoc.address.path, part] },
           value: elementAt(curDoc.value, part),
         };
@@ -830,7 +861,6 @@ export function getAtPath(
     } else if (isString(curDoc.value) && part === "length") {
       // Handle native property access on string primitives (e.g., .length)
       curDoc = {
-        ...curDoc,
         address: { ...curDoc.address, path: [...curDoc.address.path, part] },
         value: curDoc.value.length,
       };
@@ -839,21 +869,19 @@ export function getAtPath(
     ) {
       const cursorObj = curDoc.value as Immutable<JSONObject>;
       curDoc = {
-        ...curDoc,
         address: { ...curDoc.address, path: [...curDoc.address.path, part] },
         value: cursorObj[part] as Immutable<StorableDatum>,
       };
     } else {
       // we can only descend into pointers, objects, and arrays
       // this can happen when things aren't set up yet, so it's just debug.
-      const missing = [part, ...remaining];
+      const missing = path.slice(pathIndex - 1);
       logger.debug("traverse", () => [
         "Attempted to traverse into non-object/non-array value",
         curDoc,
         missing,
       ]);
       curDoc = {
-        ...curDoc,
         address: {
           ...curDoc.address,
           path: [...curDoc.address.path, ...missing],
@@ -1659,32 +1687,34 @@ export class SchemaObjectTraverser<V extends StorableDatum>
       // a very limited set here, with no support for combinations.
       if (resolved.anyOf) {
         const { anyOf, ...restSchema } = resolved;
+        const matches: Immutable<StorableValue>[] = [];
         // Consider items without asCell or asStream first, since if we aren't
         // traversing cells, we consider them a match.
-        const sortedAnyOf = [
-          ...anyOf.filter((option) =>
-            !SchemaObjectTraverser.asCellOrStream(option)
-          ),
-          ...anyOf.filter(SchemaObjectTraverser.asCellOrStream),
-        ];
-        const matches: Immutable<StorableValue>[] = [];
-        for (const optionSchema of sortedAnyOf) {
-          if (ContextualFlowControl.isFalseSchema(optionSchema)) {
-            continue;
-          }
-          const mergedSchema = mergeSchemaOption(restSchema, optionSchema);
-          // TODO(@ubik2): do i need to merge the link schema?
-          const { ok: val, error } = this.traverseWithSchema(
-            doc,
-            mergedSchema,
-            link,
-          );
-          if (error === undefined) {
-            // We may just have a cell match, so the first match is what we
-            // will return, but in this case, we still want to evaluate with
-            // all the schema options, so we know to include all the potential
-            // docs needed.
-            matches.push(val);
+        for (const prioritizeCells of [false, true] as const) {
+          for (const optionSchema of anyOf) {
+            if (
+              SchemaObjectTraverser.asCellOrStream(optionSchema) !==
+                prioritizeCells
+            ) {
+              continue;
+            }
+            if (ContextualFlowControl.isFalseSchema(optionSchema)) {
+              continue;
+            }
+            const mergedSchema = mergeSchemaOption(restSchema, optionSchema);
+            // TODO(@ubik2): do i need to merge the link schema?
+            const { ok: val, error } = this.traverseWithSchema(
+              doc,
+              mergedSchema,
+              link,
+            );
+            if (error === undefined) {
+              // We may just have a cell match, so the first match is what we
+              // will return, but in this case, we still want to evaluate with
+              // all the schema options, so we know to include all the potential
+              // docs needed.
+              matches.push(val);
+            }
           }
         }
         const merged = this.objectCreator.mergeMatches(
@@ -1700,13 +1730,68 @@ export class SchemaObjectTraverser<V extends StorableDatum>
           () => [
             "No matching anyOf",
             doc,
-            sortedAnyOf,
+            SchemaObjectTraverser.sortByCellOrStreamBoundary(anyOf),
             this.getDebugValue(doc),
           ],
         );
         return { error: new Error("No matching anyOf") };
+      } else if (resolved.oneOf) {
+        const { oneOf, ...restSchema } = resolved;
+        let matchCount = 0;
+        let match: Immutable<StorableValue> | undefined = undefined;
+        // Consider items without asCell or asStream first, since if we aren't
+        // traversing cells, we consider them a match.
+        for (const prioritizeCells of [false, true] as const) {
+          for (const optionSchema of oneOf) {
+            if (
+              SchemaObjectTraverser.asCellOrStream(optionSchema) !==
+                prioritizeCells
+            ) {
+              continue;
+            }
+            if (ContextualFlowControl.isFalseSchema(optionSchema)) {
+              continue;
+            }
+            const mergedSchema = mergeSchemaOption(restSchema, optionSchema);
+            // TODO(@ubik2): do i need to merge the link schema?
+            const { ok: val, error } = this.traverseWithSchema(
+              doc,
+              mergedSchema,
+              link,
+            );
+            if (error === undefined) {
+              matchCount++;
+              match = val;
+            }
+          }
+        }
+        if (matchCount === 1) {
+          return { ok: match! };
+        }
+        if (matchCount === 0) {
+          logger.info(
+            "traverse",
+            () => [
+              "No matching oneOf",
+              doc,
+              SchemaObjectTraverser.sortByCellOrStreamBoundary(oneOf),
+              this.getDebugValue(doc),
+            ],
+          );
+          return { error: new Error("No matching oneOf") };
+        }
+        logger.info(
+          "traverse",
+          () => [
+            "Multiple matching oneOf",
+            doc,
+            SchemaObjectTraverser.sortByCellOrStreamBoundary(oneOf),
+            this.getDebugValue(doc),
+          ],
+        );
+        return { error: new Error("Multiple matching oneOf") };
       } else if (resolved.allOf) {
-        let lastVal;
+        const matches: Immutable<StorableValue>[] = [];
         const { allOf, ...restSchema } = resolved;
         for (const optionSchema of allOf) {
           if (ContextualFlowControl.isFalseSchema(optionSchema)) {
@@ -1731,15 +1816,18 @@ export class SchemaObjectTraverser<V extends StorableDatum>
             );
             return { error };
           }
-          // FIXME(@ubik2): these value objects should be merged. While this
-          // isn't JSONSchema spec, when we have an allOf with branches where
-          // name is set in one schema, but the address is ignored, and a
-          // second option where address is set, and name is ignored, we want
-          // to include both.
-          lastVal = val;
+          matches.push(val);
         }
         if (allOf.length > 0) {
-          return { ok: lastVal };
+          const merged = this.objectCreator.mergeMatches(
+            matches as StorableDatum[],
+            resolved,
+          );
+          return {
+            ok: (merged ?? matches[matches.length - 1]) as Immutable<
+              StorableValue
+            >,
+          };
         }
         // If we have allOf: [], just ignore it and continue
         // TODO(@ubik2) -- maybe swap the schema to true
@@ -1770,7 +1858,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     if (doc.value === undefined) {
       // If we have a default, annotate it and return it
       // Otherwise, return undefined
-      const defaultValue = this.applyDefault(doc, schema);
+      const defaultValue = this.applyDefault(doc, resolved);
       return (defaultValue !== undefined)
         ? { ok: defaultValue }
         : this.isValidType(schemaObj, "undefined")
@@ -1903,7 +1991,9 @@ export class SchemaObjectTraverser<V extends StorableDatum>
       for (const option of schemaObj.oneOf) {
         if (this.isValidType(option, valueType)) {
           validOptions++;
-          break;
+          if (validOptions > 1) {
+            return false;
+          }
         }
       }
       if (validOptions !== 1) {
@@ -1944,6 +2034,9 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         path: curDoc.address.path,
         schema: itemSchema,
       };
+      let itemIsCellOrStream = SchemaObjectTraverser.asCellOrStream(
+        curSelector.schema,
+      );
       // We follow the first link in array elements so we don't have
       // strangeness with setting item at 0 to item at 1. If the element on
       // the array is a link, we follow that link so the returned object is
@@ -1982,6 +2075,9 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         const [linkDoc, linkSelector] = this.nextLink(redirDoc, curSelector);
         curDoc = linkDoc;
         curSelector = linkSelector!;
+        itemIsCellOrStream = SchemaObjectTraverser.asCellOrStream(
+          curSelector.schema,
+        );
         if (curDoc.value === undefined) {
           logger.info(
             "traverse",
@@ -1990,7 +2086,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         }
       } else if (
         isRecord(item) &&
-        !SchemaObjectTraverser.asCellOrStream(curSelector.schema)
+        !itemIsCellOrStream
       ) {
         // We create an element link, but this is just to establish the id if we encounter
         // other links in our data value and we need to construct a relative link.
@@ -2022,7 +2118,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
       // parent's reactive transaction.
       if (
         !this.traverseCells &&
-        SchemaObjectTraverser.asCellOrStream(curSelector.schema)
+        itemIsCellOrStream
       ) {
         if (curDoc.value === undefined) {
           // If we hit a broken link following write redirects, I think we have
@@ -2103,8 +2199,8 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         schema,
         [propKey],
         undefined,
-        { $comment: "emptyProperties" },
-        { $comment: "missingProperty" },
+        EmptyPropertiesMarker,
+        MissingPropertyMarker,
       );
       // Normally, if additionalProperties is not specified, it would
       // default to true. However, if we provided the `properties` field, we
@@ -2127,11 +2223,14 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         ...doc.address,
         path: [...doc.address.path, propKey],
       };
+      const propIsCellOrStream = SchemaObjectTraverser.asCellOrStream(
+        propSchema,
+      );
       // If we have a link, the traverseWithSchema will handle that for us.
       // If we have a value, we instead need to handle it ourselves
       if (
         !this.traverseCells &&
-        SchemaObjectTraverser.asCellOrStream(propSchema) &&
+        propIsCellOrStream &&
         !isPrimitiveCellLink(propValue)
       ) {
         // If we have a value instead of a link, create a link to the value
@@ -2326,24 +2425,47 @@ export class SchemaObjectTraverser<V extends StorableDatum>
    * @param schema
    * @returns
    */
+  private static asCellOrStreamMemo = new WeakMap<JSONSchemaObj, boolean>();
+
+  private static sortByCellOrStreamBoundary(
+    options: readonly JSONSchema[],
+  ): JSONSchema[] {
+    const ordered: JSONSchema[] = [];
+    for (const option of options) {
+      if (!SchemaObjectTraverser.asCellOrStream(option)) {
+        ordered.push(option);
+      }
+    }
+    for (const option of options) {
+      if (SchemaObjectTraverser.asCellOrStream(option)) {
+        ordered.push(option);
+      }
+    }
+    return ordered;
+  }
+
   static asCellOrStream(schema: JSONSchema | undefined): boolean {
     if (schema === undefined || typeof schema === "boolean") {
       return false;
     }
-    if (
-      schema.asCell || schema.asStream ||
-      (Array.isArray(schema.anyOf) &&
-        schema.anyOf.every((option) =>
-          SchemaObjectTraverser.asCellOrStream(option)
-        )) ||
-      (Array.isArray(schema.oneOf) &&
-        schema.oneOf.every((option) =>
-          SchemaObjectTraverser.asCellOrStream(option)
-        ))
-    ) {
+    if (schema.asCell || schema.asStream) {
       return true;
     }
-    return false;
+    const hasAnyOf = Array.isArray(schema.anyOf);
+    const hasOneOf = Array.isArray(schema.oneOf);
+    if (!hasAnyOf && !hasOneOf) {
+      return false;
+    }
+    const cached = this.asCellOrStreamMemo.get(schema);
+    if (cached !== undefined) {
+      return cached;
+    }
+    const value = (hasAnyOf &&
+      schema.anyOf.every((option) => this.asCellOrStream(option))) ||
+      (hasOneOf &&
+        schema.oneOf.every((option) => this.asCellOrStream(option)));
+    this.asCellOrStreamMemo.set(schema, value);
+    return value;
   }
 
   private applyDefault(

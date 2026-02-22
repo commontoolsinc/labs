@@ -986,3 +986,162 @@ describe("SchemaObjectTraverser anyOf/oneOf handling", () => {
     });
   });
 });
+
+describe("SchemaObjectTraverser oneOf correctness", () => {
+  it("rejects values matching multiple oneOf branches", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-oneof-multiple" as URI;
+    const docEntity = docUri as Entity;
+    const docValue = { a: "x", b: "y" };
+
+    const docRevision: Revision<State> = {
+      the: type,
+      of: docEntity,
+      is: { value: docValue },
+      cause: refer({ the: type, of: docEntity }),
+      since: 1,
+    };
+    store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+
+    const schema = {
+      oneOf: [
+        {
+          type: "object",
+          properties: { a: { type: "string" } },
+          required: ["a"],
+        },
+        {
+          type: "object",
+          properties: { b: { type: "string" } },
+          required: ["b"],
+        },
+      ],
+    } as const satisfies JSONSchema;
+
+    const traverser = getTraverser(store, { path: ["value"], schema });
+    const result = traverser.traverse({
+      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
+      value: docValue,
+    });
+
+    expect(result).toBeUndefined();
+  });
+
+  it("rejects values that only match oneOf by type but not constraints", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-oneof-constraints" as URI;
+    const docEntity = docUri as Entity;
+    const docValue = { name: "not-an-id" };
+
+    const docRevision: Revision<State> = {
+      the: type,
+      of: docEntity,
+      is: { value: docValue },
+      cause: refer({ the: type, of: docEntity }),
+      since: 1,
+    };
+    store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+
+    const schema = {
+      oneOf: [
+        {
+          type: "object",
+          required: ["id"],
+          properties: { id: { type: "number" } },
+        },
+        { type: "null" },
+      ],
+    } as const satisfies JSONSchema;
+
+    const traverser = getTraverser(store, { path: ["value"], schema });
+    const result = traverser.traverse({
+      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
+      value: docValue,
+    });
+
+    expect(result).toBeUndefined();
+  });
+});
+
+describe("SchemaObjectTraverser allOf correctness", () => {
+  it("merges all successful allOf branch results", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-allof-merge" as URI;
+    const docEntity = docUri as Entity;
+    const docValue = { a: "x", b: "y" };
+
+    const docRevision: Revision<State> = {
+      the: type,
+      of: docEntity,
+      is: { value: docValue },
+      cause: refer({ the: type, of: docEntity }),
+      since: 1,
+    };
+    store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+
+    const schema = {
+      allOf: [
+        {
+          type: "object",
+          properties: { a: { type: "string" } },
+          required: ["a"],
+          additionalProperties: false,
+        },
+        {
+          type: "object",
+          properties: { b: { type: "string" } },
+          required: ["b"],
+          additionalProperties: false,
+        },
+      ],
+    } as const satisfies JSONSchema;
+
+    const traverser = getTraverser(store, { path: ["value"], schema });
+    const result = traverser.traverse({
+      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
+      value: docValue,
+    });
+
+    expect(result).toEqual({ a: "x", b: "y" });
+  });
+});
+
+describe("SchemaObjectTraverser defaults with $ref", () => {
+  it("applies top-level default from resolved $ref schema", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-default-ref" as URI;
+
+    const schema = {
+      $ref: "#/$defs/Name",
+      $defs: {
+        Name: {
+          type: "string",
+          default: "from-ref",
+        },
+      },
+    } as const satisfies JSONSchema;
+
+    const traverser = getTraverser(store, { path: ["value"], schema });
+    const result = traverser.traverse({
+      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
+      value: undefined,
+    });
+
+    expect(result).toBe("from-ref");
+  });
+});
+
+describe("CompoundCycleTracker cleanup", () => {
+  it("removes empty partial-key entries on dispose", () => {
+    const tracker = new CompoundCycleTracker<object, boolean>();
+    const key = { id: "k1" };
+    const disposable = tracker.include(key, true);
+    expect(disposable).not.toBeNull();
+    disposable![Symbol.dispose]();
+    expect((tracker as any).partial.size).toBe(0);
+  });
+});
