@@ -1939,10 +1939,27 @@ export class Scheduler {
       }
     }
 
-    if (this.errorHandlers.size === 0) {
-      console.error("Uncaught error in action:", errorWithContext);
-    } else {
-      console.error("Error in action:", errorWithContext);
+    try {
+      if (this.errorHandlers.size === 0) {
+        console.error("Uncaught error in action:", errorWithContext);
+      } else {
+        console.error("Error in action:", errorWithContext);
+      }
+    } catch (_e) {
+      // In Web Workers, console.error invokes structuredClone under the hood
+      // to pass data to the main thread IPC. If `errorWithContext` contains
+      // uncloneable objects (like certain Proxies/Functions), it throws a DataCloneError.
+      // If we don't catch it here, it silently crashes the worker/IPC and hides the original error.
+      const fallbackPrefix = this.errorHandlers.size === 0
+        ? "Uncaught error in action [Uncloneable]:"
+        : "Error in action [Uncloneable]:";
+
+      console.error(
+        fallbackPrefix,
+        String(errorWithContext),
+        "\n",
+        errorWithContext.stack,
+      );
     }
   }
 

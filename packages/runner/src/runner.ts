@@ -47,7 +47,7 @@ import {
 import { deepEqual } from "@commontools/utils/deep-equal";
 import { sendValueToBinding } from "./pattern-binding.ts";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
-import { LINK_V1_TAG, SigilLink } from "./sigil-types.ts";
+import { LINK_V1_TAG, type SigilLink } from "./sigil-types.ts";
 import type { Runtime } from "./runtime.ts";
 import type {
   IExtendedStorageTransaction,
@@ -1470,6 +1470,25 @@ export class Runner {
           },
         );
 
+        const handleErrorOutput = (error: unknown) => {
+          if (
+            error !== null &&
+            (typeof error === "object" || typeof error === "function")
+          ) {
+            (error as Error & { frame?: Frame }).frame = frame;
+          }
+          try {
+            sendValueToBinding(tx, processCell, outputs, undefined);
+          } catch (bindingError) {
+            logger.error(
+              "runner",
+              "Failed to write undefined to binding on error",
+              bindingError,
+            );
+          }
+          throw error;
+        };
+
         try {
           const argument = module.argumentSchema !== undefined
             ? inputsCell.asSchema(module.argumentSchema).withTx(tx).get()
@@ -1604,13 +1623,12 @@ export class Runner {
           };
 
           if (result instanceof Promise) {
-            return result.then(postRun);
+            return result.then(postRun).catch(handleErrorOutput);
           } else {
             return postRun(result);
           }
         } catch (error) {
-          (error as Error & { frame?: Frame }).frame = frame;
-          throw error;
+          handleErrorOutput(error);
         } finally {
           popFrame(frame);
         }

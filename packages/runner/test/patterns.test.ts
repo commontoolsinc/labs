@@ -872,7 +872,7 @@ describe("Pattern Runner", () => {
     expect(value).toMatchObject({ result: 2 });
   });
 
-  it("failed lifted functions should be ignored", async () => {
+  it("failed lifted functions should output undefined instead of retaining stale values", async () => {
     let errors = 0;
     let lastError: ErrorWithContext | undefined;
 
@@ -934,7 +934,7 @@ describe("Pattern Runner", () => {
 
     value = await piece.pull();
     expect(errors).toBe(1);
-    expect(value).toMatchObject({ result: 10 });
+    expect(value.result).toBeUndefined();
 
     const patternId = piece.getSourceCell()?.get()?.[TYPE];
     expect(patternId).toBeDefined();
