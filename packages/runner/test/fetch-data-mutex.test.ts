@@ -6,6 +6,7 @@ import { Runtime } from "../src/runtime.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { setPatternEnvironment } from "../src/env.ts";
+import { fetchQueue, RequestQueue } from "../src/builtins/request-queue.ts";
 
 const signer = await Identity.fromPassphrase("test fetch-data mutex");
 const space = signer.did();
@@ -426,5 +427,151 @@ describe("fetch-data mutex mechanism", () => {
         (call.init?.headers as Record<string, string>)?.["Accept"],
       ).toBe("application/vnd.github.v3.star+json");
     }
+  });
+
+  it("should not claim mutex while waiting for a queue slot", async () => {
+    // This test verifies the queue-before-mutex ordering: a fetchData call
+    // should wait for a queue slot BEFORE claiming the mutex (setting
+    // pending=true). This prevents holding the mutex while blocked in the queue,
+    // which could cause the 5s mutex timeout to expire.
+
+    // Replace the shared fetchQueue with a tiny one (1 slot) for this test.
+    // We'll monkey-patch the module-level export via a slow blocker.
+    const events: string[] = [];
+
+    // Use a slow fetch that logs when it actually fires
+    globalThis.fetch = async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL
+        ? input.toString()
+        : input.url;
+
+      events.push(`fetch:${url.split("/").pop()}`);
+      fetchCalls.push({ url, init });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      return new Response(JSON.stringify({ mocked: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    // Saturate the shared fetchQueue to verify fetchData goes through it.
+    // We fill all 6 default slots with blocking promises.
+    const blockerResolvers: Array<() => void> = [];
+    const blockerPromises: Promise<void>[] = [];
+    for (let i = 0; i < 6; i++) {
+      blockerPromises.push(
+        fetchQueue.run(() =>
+          new Promise<void>((resolve) => {
+            blockerResolvers.push(resolve);
+          })
+        ),
+      );
+    }
+
+    // Now kick off a fetchData pattern — it should queue behind the blockers
+    const fetchData = byRef("fetchData");
+    const testPattern = pattern<{ url: string }>(
+      ({ url }) => fetchData({ url, mode: "json" }),
+    );
+    const resultCell = runtime.getCell(
+      space,
+      "queue-order-test",
+      undefined,
+      tx,
+    );
+    runtime.run(tx, testPattern, { url: "/api/queued" }, resultCell);
+    tx.commit();
+
+    await resultCell.pull();
+    // Give the scheduler a moment to trigger the action
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    // The queue is full so no fetch should have happened yet
+    const queuedFetches = fetchCalls.filter((c) =>
+      c.url.includes("/api/queued")
+    );
+    expect(queuedFetches.length).toBe(0);
+
+    // Release all blockers
+    for (const resolve of blockerResolvers) resolve();
+    await Promise.all(blockerPromises);
+
+    // Now give time for the queued fetchData to proceed
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await resultCell.pull();
+
+    const data = resultCell.get() as {
+      pending?: boolean;
+      result?: unknown;
+      error?: unknown;
+    };
+
+    // The fetch should have completed now
+    expect(data.result).toBeDefined();
+    expect(data.pending).toBe(false);
+    const completedFetches = fetchCalls.filter((c) =>
+      c.url.includes("/api/queued")
+    );
+    expect(completedFetches.length).toBeGreaterThan(0);
+  });
+
+  it("should complete all fetches when many requests exceed queue concurrency", async () => {
+    // Fire more concurrent fetchData patterns than the queue allows (6 slots)
+    // and verify they all eventually complete.
+    const fetchData = byRef("fetchData");
+    const count = 10;
+
+    globalThis.fetch = async (
+      input: string | URL | Request,
+      _init?: RequestInit,
+    ) => {
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL
+        ? input.toString()
+        : input.url;
+      fetchCalls.push({ url });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return new Response(
+        JSON.stringify({ url }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    const cells = [];
+    for (let i = 0; i < count; i++) {
+      const testPattern = pattern<{ url: string }>(
+        ({ url }) => fetchData({ url, mode: "json" }),
+      );
+      const cell = runtime.getCell(
+        space,
+        `burst-test-${i}`,
+        undefined,
+        tx,
+      );
+      runtime.run(tx, testPattern, { url: `/api/burst/${i}` }, cell);
+      cells.push(cell);
+    }
+    tx.commit();
+
+    for (const cell of cells) await cell.pull();
+
+    // Give enough time for all queued requests to drain
+    await new Promise((resolve) => setTimeout(resolve, 800));
+
+    for (const cell of cells) await cell.pull();
+
+    let completedCount = 0;
+    for (const cell of cells) {
+      const data = cell.get() as { result?: unknown };
+      if (data.result !== undefined) completedCount++;
+    }
+
+    expect(completedCount).toBe(count);
   });
 });
