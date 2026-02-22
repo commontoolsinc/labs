@@ -284,7 +284,7 @@ function renderNode(
 
   const element = doc.createElement(sanitizedNode.name);
 
-  addCancel(bindProps(element, sanitizedNode.props, options));
+  addCancel(bindProps(element, sanitizedNode.props!, options));
 
   if (sanitizedNode.children !== undefined) {
     addCancel(bindChildren(element, sanitizedNode.children, options, visited));
