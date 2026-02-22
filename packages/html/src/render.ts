@@ -284,7 +284,7 @@ function renderNode(
 
   const element = doc.createElement(sanitizedNode.name);
 
-  addCancel(bindProps(element, sanitizedNode.props!, options));
+  addCancel(bindProps(element, sanitizedNode.props, options));
 
   if (sanitizedNode.children !== undefined) {
     addCancel(bindChildren(element, sanitizedNode.children, options, visited));
@@ -506,17 +506,18 @@ class VdomChildNode {
 
 function bindProps(
   element: HTMLElement,
-  props: Props | CellHandle<Props>,
+  props: Props | CellHandle<Props> | undefined,
   options: RenderOptions,
 ): Cancel {
   const [cancel, addCancel] = useCancelGroup();
   const setProp = options.setProp ?? setPropDefault;
 
   if (isCellHandle(props)) {
+    const propsCell = props as CellHandle<Props>;
     addCancel(
       effect(
-        props,
-        (resolved) => bindProps(element, resolved as Props, options),
+        propsCell,
+        (resolved) => bindProps(element, resolved, options),
       ),
     );
     return cancel;
