@@ -2,6 +2,7 @@ import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import { fetchQueue } from "./request-queue.ts";
 
 /**
  * Stream data from a URL, used for querying Synopsys.
@@ -107,7 +108,7 @@ export function streamData(
     status.controller = controller;
     const thisRun = ++status.run;
 
-    fetch(url, { ...options, signal })
+    fetchQueue.run(() => fetch(url, { ...options, signal }))
       .then(async (response) => {
         const reader = response.body?.getReader();
         const utf8 = new TextDecoder();

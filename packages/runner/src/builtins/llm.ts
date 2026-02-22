@@ -31,6 +31,7 @@ import {
   LLMToolSchema,
 } from "./llm-schemas.ts";
 import { isObject } from "@commontools/utils/types";
+import { llmQueue } from "./request-queue.ts";
 
 const logger = getLogger("llm", {
   enabled: true,
@@ -154,7 +155,9 @@ async function executeWithToolsLoop(params: {
       tools: toolCatalog?.llmTools,
     };
 
-    const llmResult = await client.sendRequest(requestParams, updatePartial);
+    const llmResult = await llmQueue.run(() =>
+      client.sendRequest(requestParams, updatePartial)
+    );
 
     if (thisRun !== getCurrentRun()) return;
 
@@ -824,9 +827,11 @@ export function generateObject<T extends Record<string, unknown>>(
               tools: toolCatalog.llmTools,
             };
 
-            const llmResult = await client.sendRequest(
-              requestParams,
-              updatePartial,
+            const llmResult = await llmQueue.run(() =>
+              client.sendRequest(
+                requestParams,
+                updatePartial,
+              )
             );
 
             if (thisRun !== currentRun) return;
@@ -979,8 +984,10 @@ export function generateObject<T extends Record<string, unknown>>(
       partialWithLog.set(undefined);
       pendingWithLog.set(true);
 
-      const resultPromise = client.generateObject(
-        generateObjectParams,
+      const resultPromise = llmQueue.run(() =>
+        client.generateObject(
+          generateObjectParams,
+        )
       ) as Promise<{
         object: T;
       }>;

@@ -41,6 +41,7 @@ import {
   isCellResultForDereferencing,
 } from "../query-result-proxy.ts";
 import { ContextualFlowControl } from "../cfc.ts";
+import { llmQueue } from "./request-queue.ts";
 
 // Avoid importing from @commontools/piece to prevent circular deps in tests
 
@@ -2207,7 +2208,9 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
   };
 
   // TODO(bf): sendRequest must be given a callback, even if it does nothing
-  const resultPromise = client.sendRequest(llmParams, () => {}, abortSignal);
+  const resultPromise = llmQueue.run(() =>
+    client.sendRequest(llmParams, () => {}, abortSignal)
+  );
 
   resultPromise
     .then(async (llmResult) => {

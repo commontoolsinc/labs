@@ -10,6 +10,7 @@ import {
   tryClaimMutex,
   tryWriteResult,
 } from "./fetch-utils.ts";
+import { fetchQueue } from "./request-queue.ts";
 
 /** The shape of fetchData's input cell. */
 type FetchDataInputs = {
@@ -318,15 +319,16 @@ async function startFetch(
   // Body preprocessing (stringify non-string bodies) is handled by the
   // snapshotInputs callback in tryClaimMutex, so options is ready to use.
   try {
-    const response = await fetch(
-      new URL(url, getPatternEnvironment().apiUrl),
-      {
-        signal: abortSignal,
-        ...options,
-      },
-    );
-
-    const data = await processResponse(response);
+    const data = await fetchQueue.run(async () => {
+      const response = await fetch(
+        new URL(url, getPatternEnvironment().apiUrl),
+        {
+          signal: abortSignal,
+          ...options,
+        },
+      );
+      return processResponse(response);
+    });
     await runtime.idle();
 
     // Try to write result - any tab can write if inputs match
