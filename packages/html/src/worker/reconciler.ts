@@ -456,7 +456,7 @@ export class WorkerReconciler {
   private updatePropsInPlace(
     ctx: ReconcileContext,
     state: NodeState,
-    newProps: WorkerProps | Cell<WorkerProps> | null,
+    newProps: WorkerProps | Cell<WorkerProps> | null | undefined,
   ): void {
     // Handle Cell<Props> - if same cell, do nothing; otherwise re-subscribe
     if (isCell(newProps)) {
@@ -715,10 +715,17 @@ export class WorkerReconciler {
       existingState.cancel();
     }
 
-    // Unregister old handler
+    // Unregister old handler and remove listener from DOM.
+    // We always emit remove-event here so transitions to null/undefined
+    // correctly clear the listener in the main-thread applicator.
     if (state.eventHandlers.has(eventType)) {
       ctx.unregisterHandler(state.eventHandlers.get(eventType)!);
       state.eventHandlers.delete(eventType);
+      this.queueOps([{
+        op: "remove-event",
+        nodeId: state.nodeId,
+        eventType,
+      }]);
     }
 
     if (isStream(value)) {
@@ -759,11 +766,18 @@ export class WorkerReconciler {
 
       const cancel = (value as Cell<(event: unknown) => void>).sink(
         (handler) => {
+          const previousHandlerId = state.eventHandlers.get(eventType);
+          if (previousHandlerId !== undefined) {
+            ctx.unregisterHandler(previousHandlerId);
+            state.eventHandlers.delete(eventType);
+            this.queueOps([{
+              op: "remove-event",
+              nodeId: state.nodeId,
+              eventType,
+            }]);
+          }
+
           if (handler) {
-            const previousHandlerId = state.eventHandlers.get(eventType);
-            if (previousHandlerId !== undefined) {
-              ctx.unregisterHandler(previousHandlerId);
-            }
             const handlerId = ctx.registerHandler(
               handler as (event: unknown) => void,
             );
@@ -1112,7 +1126,7 @@ export class WorkerReconciler {
   private bindProps(
     ctx: ReconcileContext,
     state: NodeState,
-    props: WorkerProps | Cell<WorkerProps> | null,
+    props: WorkerProps | Cell<WorkerProps> | null | undefined,
   ): Cancel {
     if (!props) return () => {};
 
@@ -1191,11 +1205,18 @@ export class WorkerReconciler {
           const eventType = getEventType(key);
           const sinkCancel = (value as Cell<(event: unknown) => void>).sink(
             (handler) => {
+              const previousHandlerId = state.eventHandlers.get(eventType);
+              if (previousHandlerId !== undefined) {
+                ctx.unregisterHandler(previousHandlerId);
+                state.eventHandlers.delete(eventType);
+                this.queueOps([{
+                  op: "remove-event",
+                  nodeId: state.nodeId,
+                  eventType,
+                }]);
+              }
+
               if (handler) {
-                const previousHandlerId = state.eventHandlers.get(eventType);
-                if (previousHandlerId !== undefined) {
-                  ctx.unregisterHandler(previousHandlerId);
-                }
                 // Cast handler to mutable function type for registration
                 const handlerId = ctx.registerHandler(
                   handler as (event: unknown) => void,
@@ -1421,9 +1442,9 @@ export class WorkerReconciler {
     // Normalize to array
     const newChildren = Array.isArray(childrenValue)
       ? childrenValue
-      : childrenValue
-      ? [childrenValue]
-      : [];
+      : (childrenValue === null || childrenValue === undefined)
+      ? []
+      : [childrenValue];
 
     // Generate keys for new children
     const newKeys = generateChildKeys(newChildren);

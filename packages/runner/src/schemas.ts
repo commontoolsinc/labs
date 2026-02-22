@@ -27,6 +27,7 @@ export const rendererVDOMSchema = {
               { type: "number" },
               { type: "boolean" },
               { type: "null" },
+              { type: "undefined" },
               {
                 type: "array",
                 items: { $ref: "#/$defs/vdomNode", asCell: true },
@@ -69,6 +70,7 @@ export const debugVDOMSchema = {
               { type: "number" },
               { type: "boolean" },
               { type: "null" },
+              { type: "undefined" },
               {
                 type: "array",
                 items: { $ref: "#/$defs/vdomNode" },
@@ -147,6 +149,8 @@ export const vnodeSchema = {
         },
       }, {
         type: "null",
+      }, {
+        type: "undefined",
       }],
     },
     Props: {
@@ -175,6 +179,8 @@ export const vnodeSchema = {
           asStream: true,
         }, {
           type: "null",
+        }, {
+          type: "undefined",
         }],
       },
     },
