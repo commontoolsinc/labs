@@ -212,86 +212,89 @@ export function fetchData(
     if (!hasValidResult && !hasError && !alreadyFetching) {
       const newRequestId = crypto.randomUUID();
 
-      // Try to claim mutex - returns immediately if another tab is processing
-      tryClaimMutex(
-        runtime,
-        inputsCell,
-        pending,
-        result,
-        error,
-        internal,
-        newRequestId,
-        // Materialize inputs via the schema system and preprocess body.
-        // asSchema().get() returns a frozen plain snapshot with nested
-        // properties (like options.headers) fully resolved, safe to use
-        // after commit.
-        (cell) => {
-          const snapshot = cell.asSchema(fetchDataInputSchema).get();
-          // Stringify non-string bodies so startFetch receives ready-to-send
-          // options. Since .get() returns a frozen object, build a new one.
-          const body = snapshot.options?.body;
-          const options = snapshot.options
-            ? {
-              ...snapshot.options,
-              body: body !== undefined && typeof body !== "string"
-                ? JSON.stringify(body)
-                : body,
-            }
-            : undefined;
-          return { ...snapshot, options } as FetchDataInputs;
-        },
-      ).then(
-        ({ claimed, inputs, inputHash }) => {
-          if (!claimed) {
-            // Another tab is handling this, we're done
-            return;
-          }
+      // Acquire a queue slot FIRST, then claim the mutex inside it.
+      // This prevents a tab from holding the mutex while waiting for a
+      // queue slot, which could cause the mutex to time out and let
+      // another tab steal the same work.
+      fetchQueue.run(async () => {
+        const { claimed, inputs, inputHash } = await tryClaimMutex(
+          runtime,
+          inputsCell,
+          pending,
+          result,
+          error,
+          internal,
+          newRequestId,
+          // Materialize inputs via the schema system and preprocess body.
+          // asSchema().get() returns a frozen plain snapshot with nested
+          // properties (like options.headers) fully resolved, safe to use
+          // after commit.
+          (cell) => {
+            const snapshot = cell.asSchema(fetchDataInputSchema).get();
+            // Stringify non-string bodies so startFetch receives ready-to-send
+            // options. Since .get() returns a frozen object, build a new one.
+            const body = snapshot.options?.body;
+            const options = snapshot.options
+              ? {
+                ...snapshot.options,
+                body: body !== undefined && typeof body !== "string"
+                  ? JSON.stringify(body)
+                  : body,
+              }
+              : undefined;
+            return { ...snapshot, options } as FetchDataInputs;
+          },
+        );
 
-          const { url, mode, options } = inputs;
+        if (!claimed) {
+          // Another tab is handling this, we're done
+          return;
+        }
 
-          // Clear any previous result/error when starting a new fetch
-          // This ensures observers see a clean pending state
-          runtime.editWithRetry((tx) => {
+        const { url, mode, options } = inputs;
+
+        // Clear any previous result/error when starting a new fetch
+        // This ensures observers see a clean pending state
+        await runtime.editWithRetry((tx) => {
+          result.withTx(tx).set(undefined);
+          error.withTx(tx).set(undefined);
+        });
+
+        // Check if URL became empty while waiting
+        if (!url) {
+          // Release the lock and clear state
+          myRequestId = undefined;
+          await runtime.editWithRetry((tx) => {
+            pending.withTx(tx).set(false);
             result.withTx(tx).set(undefined);
             error.withTx(tx).set(undefined);
-          });
-
-          // Check if URL became empty while waiting for mutex
-          if (!url) {
-            // Release the lock and clear state
-            myRequestId = undefined;
-            runtime.editWithRetry((tx) => {
-              pending.withTx(tx).set(false);
-              result.withTx(tx).set(undefined);
-              error.withTx(tx).set(undefined);
-              internal.withTx(tx).set({
-                requestId: "",
-                lastActivity: 0,
-                inputHash: "",
-              });
+            internal.withTx(tx).set({
+              requestId: "",
+              lastActivity: 0,
+              inputHash: "",
             });
-            return;
-          }
+          });
+          return;
+        }
 
-          abortController = new AbortController();
+        abortController = new AbortController();
 
-          // We claimed the mutex, start the fetch
-          myRequestId = newRequestId;
-          startFetch(
-            runtime,
-            inputsCell,
-            url,
-            mode,
-            options,
-            inputHash,
-            pending,
-            result,
-            error,
-            internal,
-            abortController.signal,
-          );
-        },
-      );
+        // We claimed the mutex, start the fetch (no inner queue needed)
+        myRequestId = newRequestId;
+        await startFetch(
+          runtime,
+          inputsCell,
+          url,
+          mode,
+          options,
+          inputHash,
+          pending,
+          result,
+          error,
+          internal,
+          abortController.signal,
+        );
+      });
     }
   };
 }
@@ -319,16 +322,15 @@ async function startFetch(
   // Body preprocessing (stringify non-string bodies) is handled by the
   // snapshotInputs callback in tryClaimMutex, so options is ready to use.
   try {
-    const data = await fetchQueue.run(async () => {
-      const response = await fetch(
-        new URL(url, getPatternEnvironment().apiUrl),
-        {
-          signal: abortSignal,
-          ...options,
-        },
-      );
-      return processResponse(response);
-    });
+    // No queue wrapping here — the caller already holds a fetchQueue slot.
+    const response = await fetch(
+      new URL(url, getPatternEnvironment().apiUrl),
+      {
+        signal: abortSignal,
+        ...options,
+      },
+    );
+    const data = await processResponse(response);
     await runtime.idle();
 
     // Try to write result - any tab can write if inputs match
