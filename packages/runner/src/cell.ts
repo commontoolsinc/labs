@@ -551,7 +551,7 @@ export class CellImpl<T extends StorableValue>
       this.tx,
       this.link,
       [],
-      options,
+      { ...options, synced: this.synced },
     );
     const elapsed = logger.timeEnd("cell", "get")!;
     if (elapsed > 50) {
