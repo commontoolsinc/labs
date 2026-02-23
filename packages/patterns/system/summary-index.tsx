@@ -41,16 +41,16 @@ function extractSummary(piece: any): string | undefined {
 
 /** Search sub-pattern: filters entries by query matching summary or name. */
 export const searchPattern = pattern<
-  { query: string; entries: SummaryIndexEntry[] },
-  SummaryIndexEntry[]
+  { query: string; entries: Writable<SummaryIndexEntry>[] },
+  Writable<SummaryIndexEntry>[]
 >(({ query, entries }) => {
   return computed(() => {
     if (!query || query.trim() === "") return entries;
     const lowerQuery = query.toLowerCase().trim();
     return entries.filter(
       (entry) =>
-        entry.summary.toLowerCase().includes(lowerQuery) ||
-        entry.name.toLowerCase().includes(lowerQuery),
+        entry.get().summary.toLowerCase().includes(lowerQuery) ||
+        entry.get().name.toLowerCase().includes(lowerQuery),
     );
   });
 });
