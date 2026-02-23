@@ -25,10 +25,10 @@ const TAG_STRING = 0x03;
 const TAG_BIGINT = 0x04;
 const TAG_UNDEFINED = 0x05;
 const TAG_BYTES = 0x06;
-const TAG_ARRAY = 0x08;
-const TAG_OBJECT = 0x09;
-const TAG_INSTANCE = 0x0a;
-const TAG_HOLE = 0x0b;
+const TAG_ARRAY = 0x07;
+const TAG_OBJECT = 0x08;
+const TAG_INSTANCE = 0x09;
+const TAG_HOLE = 0x0a;
 
 // ---------------------------------------------------------------------------
 // Shared scratch buffer (safe in single-threaded synchronous JS -- see

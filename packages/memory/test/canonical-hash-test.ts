@@ -335,18 +335,18 @@ Deno.test("canonicalHash", async (t) => {
 
   await t.step("empty array produces TAG_ARRAY + zero length", () => {
     // LEB128(0) = [0x00]
-    const expected = sha256([0x08, 0x00]);
+    const expected = sha256([0x07, 0x00]);
     assertEquals(canonicalHash([]), expected);
   });
 
   await t.step("sparse array [1, , 3] uses hole run-length encoding", () => {
-    // TAG_ARRAY + LEB128(3) = [0x08, 0x03]
+    // TAG_ARRAY + LEB128(3) = [0x07, 0x03]
     // + number 1 (TAG_NUMBER + IEEE754)
     // + TAG_HOLE + LEB128(1)
     // + number 3 (TAG_NUMBER + IEEE754)
     const expected = sha256([
       // TAG_ARRAY + LEB128 length 3
-      0x08,
+      0x07,
       0x03,
       // Element 0: number 1
       0x02,
@@ -359,7 +359,7 @@ Deno.test("canonicalHash", async (t) => {
       0x00,
       0x00,
       // Element 1: hole run of 1
-      0x0b,
+      0x0a,
       0x01,
       // Element 2: number 3
       0x02,
@@ -386,7 +386,7 @@ Deno.test("canonicalHash", async (t) => {
     // Verify by building the expected byte stream manually
     const expected = sha256([
       // TAG_ARRAY + LEB128 length 5
-      0x08,
+      0x07,
       0x05,
       // Element 0: number 1
       0x02,
@@ -399,7 +399,7 @@ Deno.test("canonicalHash", async (t) => {
       0x00,
       0x00,
       // Elements 1-3: hole run of 3
-      0x0b,
+      0x0a,
       0x03,
       // Element 4: number 5
       0x02,
@@ -441,7 +441,7 @@ Deno.test("canonicalHash", async (t) => {
   // =========================================================================
 
   await t.step("empty object produces TAG_OBJECT + zero key count", () => {
-    const expected = sha256([0x09, 0x00]);
+    const expected = sha256([0x08, 0x00]);
     assertEquals(canonicalHash({}), expected);
   });
 
@@ -457,7 +457,7 @@ Deno.test("canonicalHash", async (t) => {
     // LEB128 lengths are single bytes for small values.
     const expected = sha256([
       // TAG_OBJECT + LEB128(2 keys)
-      0x09,
+      0x08,
       0x02,
       // Key "a": TAG_STRING + LEB128(1) + UTF-8
       0x03,
@@ -588,9 +588,9 @@ Deno.test("canonicalHash", async (t) => {
 
     // TAG_ARRAY + LEB128(5) + TAG_HOLE + LEB128(5)
     const expected = sha256([
-      0x08,
+      0x07,
       0x05,
-      0x0b,
+      0x0a,
       0x05,
     ]);
     assertEquals(hash, expected);
