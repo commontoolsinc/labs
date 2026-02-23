@@ -201,7 +201,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
   );
 
   const index = BacklinksIndex({});
-  const summaryIdx = SummaryIndex({ mentionable: index.mentionable });
+  const summaryIdx = SummaryIndex({});
   const doListItems = Writable.of<any[]>([]);
   const doList = DoList({ items: doListItems });
 

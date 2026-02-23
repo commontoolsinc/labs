@@ -1,24 +1,25 @@
 /// <cts-enable />
 import {
   computed,
-  lift,
+  type Default,
   NAME,
   pattern,
   patternTool,
   type PatternToolResult,
   UI,
+  wish,
 } from "commontools";
 import { type MentionablePiece } from "./backlinks-index.tsx";
 
+export type SummarizablePiece = MentionablePiece & { summary?: string };
+
 export type SummaryIndexEntry = {
-  piece: MentionablePiece;
+  piece: SummarizablePiece;
   summary: string;
   name: string;
 };
 
-type Input = {
-  mentionable: MentionablePiece[];
-};
+type Input = Record<string, never>;
 
 type Output = {
   entries: SummaryIndexEntry[];
@@ -37,26 +38,6 @@ function extractSummary(piece: any): string | undefined {
   return typeof summary === "string" && summary.trim() ? summary : undefined;
 }
 
-const buildIndex = lift<
-  { mentionable: MentionablePiece[] },
-  SummaryIndexEntry[]
->(({ mentionable }) => {
-  const entries: SummaryIndexEntry[] = [];
-
-  for (const piece of mentionable ?? []) {
-    if (!piece) continue;
-
-    const summary = extractSummary(piece);
-    if (!summary) continue;
-
-    const name = (piece[NAME] ?? "").toString();
-
-    entries.push({ piece, summary, name });
-  }
-
-  return entries;
-});
-
 const searchPattern = pattern<
   { query: string; entries: SummaryIndexEntry[] },
   SummaryIndexEntry[]
@@ -72,8 +53,22 @@ const searchPattern = pattern<
   });
 });
 
-const SummaryIndex = pattern<Input, Output>(({ mentionable }) => {
-  const entries = buildIndex({ mentionable });
+const SummaryIndex = pattern<Input, Output>(() => {
+  const mentionable = wish<Default<SummarizablePiece[], []>>({
+    query: "#mentionable",
+  }).result;
+
+  const entries = computed(() => {
+    const result: SummaryIndexEntry[] = [];
+    for (const piece of mentionable ?? []) {
+      if (!piece) continue;
+      const summary = extractSummary(piece);
+      if (!summary) continue;
+      const name = (piece[NAME] ?? "").toString();
+      result.push({ piece: piece as SummarizablePiece, summary, name });
+    }
+    return result;
+  });
 
   return {
     [NAME]: "SummaryIndex",
