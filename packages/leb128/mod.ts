@@ -10,14 +10,23 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+/** Maximum value encodable with 32-bit bitwise operations. */
+const MAX_UINT32 = 0xFFFFFFFF;
+
 /**
  * Encode a non-negative integer as unsigned LEB128. Returns a `Uint8Array`
- * containing the variable-length encoding. Throws if the value is negative.
+ * containing the variable-length encoding. Throws if the value is negative,
+ * non-integer, or exceeds 2^32 - 1 (JS bitwise operators are 32-bit).
  */
 export function encodeULEB128(value: number): Uint8Array {
   if (value < 0 || !Number.isInteger(value)) {
     throw new Error(
       `encodeULEB128: expected non-negative integer, got ${value}`,
+    );
+  }
+  if (value > MAX_UINT32) {
+    throw new Error(
+      `encodeULEB128: value ${value} exceeds 32-bit range (max ${MAX_UINT32})`,
     );
   }
 
@@ -51,7 +60,7 @@ export interface DecodeResult {
 /**
  * Decode an unsigned LEB128 value from a buffer at the given index.
  * Returns the decoded value and the index of the next byte after the
- * encoding.
+ * encoding. Throws if the encoded value exceeds 32 bits.
  */
 export function decodeULEB128(
   buffer: Uint8Array,
@@ -66,6 +75,14 @@ export function decodeULEB128(
       throw new Error("decodeULEB128: unexpected end of buffer");
     }
     byte = buffer[index];
+    // At shift 28, only 4 bits remain in a 32-bit value; reject if
+    // the payload bits would overflow.
+    if (shift >= 28 && (byte & 0x7f) > 0x0f) {
+      throw new Error("decodeULEB128: value exceeds 32-bit range");
+    }
+    if (shift >= 35) {
+      throw new Error("decodeULEB128: value exceeds 32-bit range");
+    }
     result |= (byte & 0x7f) << shift;
     shift += 7;
     index++;
@@ -74,13 +91,23 @@ export function decodeULEB128(
   return { value: result >>> 0, nextIndex: index };
 }
 
+/** Signed 32-bit integer bounds. */
+const MIN_INT32 = -0x80000000;
+const MAX_INT32 = 0x7FFFFFFF;
+
 /**
  * Encode a signed integer as signed LEB128. Returns a `Uint8Array`
- * containing the variable-length encoding.
+ * containing the variable-length encoding. Throws if the value is
+ * non-integer or outside the signed 32-bit range.
  */
 export function encodeSLEB128(value: number): Uint8Array {
   if (!Number.isInteger(value)) {
     throw new Error(`encodeSLEB128: expected integer, got ${value}`);
+  }
+  if (value < MIN_INT32 || value > MAX_INT32) {
+    throw new Error(
+      `encodeSLEB128: value ${value} exceeds signed 32-bit range (${MIN_INT32}..${MAX_INT32})`,
+    );
   }
 
   const bytes: number[] = [];
@@ -111,7 +138,7 @@ export function encodeSLEB128(value: number): Uint8Array {
 /**
  * Decode a signed LEB128 value from a buffer at the given index.
  * Returns the decoded value and the index of the next byte after the
- * encoding.
+ * encoding. Throws if the encoded value exceeds signed 32-bit range.
  */
 export function decodeSLEB128(
   buffer: Uint8Array,
@@ -126,6 +153,9 @@ export function decodeSLEB128(
       throw new Error("decodeSLEB128: unexpected end of buffer");
     }
     byte = buffer[index];
+    if (shift >= 35) {
+      throw new Error("decodeSLEB128: value exceeds signed 32-bit range");
+    }
     result |= (byte & 0x7f) << shift;
     shift += 7;
     index++;

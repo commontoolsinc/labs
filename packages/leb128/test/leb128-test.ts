@@ -46,12 +46,35 @@ Deno.test("encodeULEB128", async (t) => {
     );
   });
 
+  await t.step("encodes 0xFFFFFFFF (max 32-bit unsigned)", () => {
+    assertEquals(
+      encodeULEB128(0xFFFFFFFF),
+      new Uint8Array([0xff, 0xff, 0xff, 0xff, 0x0f]),
+    );
+  });
+
   await t.step("throws on negative", () => {
     assertThrows(() => encodeULEB128(-1), Error, "non-negative");
   });
 
   await t.step("throws on non-integer", () => {
     assertThrows(() => encodeULEB128(1.5), Error, "non-negative integer");
+  });
+
+  await t.step("throws on value exceeding 32-bit range", () => {
+    assertThrows(
+      () => encodeULEB128(0x100000000),
+      Error,
+      "exceeds 32-bit range",
+    );
+  });
+
+  await t.step("throws on large value", () => {
+    assertThrows(
+      () => encodeULEB128(Number.MAX_SAFE_INTEGER),
+      Error,
+      "exceeds 32-bit range",
+    );
   });
 });
 
@@ -92,6 +115,13 @@ Deno.test("decodeULEB128", async (t) => {
     );
   });
 
+  await t.step("decodes 0xFFFFFFFF (max 32-bit unsigned)", () => {
+    assertEquals(
+      decodeULEB128(new Uint8Array([0xff, 0xff, 0xff, 0xff, 0x0f])),
+      { value: 0xFFFFFFFF, nextIndex: 5 },
+    );
+  });
+
   await t.step("throws on truncated input", () => {
     assertThrows(
       () => decodeULEB128(new Uint8Array([0x80])),
@@ -100,8 +130,46 @@ Deno.test("decodeULEB128", async (t) => {
     );
   });
 
+  await t.step(
+    "throws on value exceeding 32-bit range (5th byte too large)",
+    () => {
+      // 5th byte at shift=28 with payload 0x10 (16) would need 33 bits
+      assertThrows(
+        () => decodeULEB128(new Uint8Array([0x80, 0x80, 0x80, 0x80, 0x10])),
+        Error,
+        "exceeds 32-bit range",
+      );
+    },
+  );
+
+  await t.step("throws on value exceeding 32-bit range (6+ bytes)", () => {
+    // 6 continuation bytes = shift reaches 35, which exceeds 32 bits
+    assertThrows(
+      () =>
+        decodeULEB128(
+          new Uint8Array([0x80, 0x80, 0x80, 0x80, 0x80, 0x01]),
+        ),
+      Error,
+      "exceeds 32-bit range",
+    );
+  });
+
   await t.step("roundtrip for various values", () => {
-    const values = [0, 1, 5, 63, 64, 127, 128, 255, 256, 16383, 16384, 65535];
+    const values = [
+      0,
+      1,
+      5,
+      63,
+      64,
+      127,
+      128,
+      255,
+      256,
+      16383,
+      16384,
+      65535,
+      0xFFFFFFFF,
+    ];
     for (const v of values) {
       const encoded = encodeULEB128(v);
       const decoded = decodeULEB128(encoded);
@@ -145,6 +213,22 @@ Deno.test("encodeSLEB128", async (t) => {
     assertEquals(
       encodeSLEB128(-123456),
       new Uint8Array([0xc0, 0xbb, 0x78]),
+    );
+  });
+
+  await t.step("throws on value exceeding signed 32-bit max", () => {
+    assertThrows(
+      () => encodeSLEB128(0x80000000),
+      Error,
+      "exceeds signed 32-bit range",
+    );
+  });
+
+  await t.step("throws on value below signed 32-bit min", () => {
+    assertThrows(
+      () => encodeSLEB128(-0x80000001),
+      Error,
+      "exceeds signed 32-bit range",
     );
   });
 });
