@@ -101,6 +101,8 @@ export type Email = {
   htmlContent: string;
   // Email content converted to Markdown format. Often best for processing email contents.
   markdownContent: string;
+  // Summary for search indexing
+  summary: Default<string, "">;
 };
 
 type Settings = {
@@ -124,8 +126,8 @@ interface Output {
   [UI]: VNode;
   /** Array of imported emails */
   emails: Email[];
-  /** Mentionables */
-  mentionable: { [NAME]: string; summary: string; [UI]: VNode }[];
+  /** Mentionables — real email cells for navigability and search indexing */
+  mentionable: Email[];
   /** Number of emails imported */
   emailCount: number;
   /** Auth UI component for managing Google OAuth connection */
@@ -692,6 +694,9 @@ async function messageToEmail(
           plainText,
           htmlContent,
           markdownContent,
+          summary: `${subject} from ${extractEmailAddress(from)}: ${
+            messageData.snippet || ""
+          }`,
         };
       } catch (error: any) {
         if (debugMode) {
@@ -717,11 +722,13 @@ export async function process(
     resolveInlineImages?: boolean;
   },
   debugMode: boolean = false,
-): Promise<{
-  newHistoryId?: string;
-  newEmails?: Email[];
-  deletedEmailIds?: string[];
-} | void> {
+): Promise<
+  {
+    newHistoryId?: string;
+    newEmails?: Email[];
+    deletedEmailIds?: string[];
+  } | void
+> {
   if (!auth.get()) {
     debugWarn(debugMode, "no token");
     return;
@@ -956,9 +963,11 @@ export async function process(
       const batchIds = messagesToFetch.slice(i, i + batchSize);
       debugLog(
         debugMode,
-        `Processing batch ${i / batchSize + 1} of ${Math.ceil(
-          messagesToFetch.length / batchSize,
-        )}`,
+        `Processing batch ${i / batchSize + 1} of ${
+          Math.ceil(
+            messagesToFetch.length / batchSize,
+          )
+        }`,
       );
 
       try {
@@ -1032,53 +1041,6 @@ const toggleResolveInlineImages = handler<
   const current = settings.get();
   settings.set({ ...current, resolveInlineImages: target.checked });
 });
-
-const EmailCard = pattern<
-  { email: Email },
-  { [NAME]: string; summary: string; [UI]: VNode }
->(({ email }) => ({
-  [NAME]: computed(() => email.subject),
-  summary: str`${email.subject} from ${email.from}: ${email.snippet}`,
-  [UI]: (
-    <div
-      style={{
-        padding: "12px",
-        border: "1px solid #e0e0e0",
-        borderRadius: "8px",
-        backgroundColor: "#fafafa",
-      }}
-    >
-      <div
-        style={{
-          fontSize: "16px",
-          fontWeight: "bold",
-          marginBottom: "4px",
-          color: "#333",
-        }}
-      >
-        {email.subject}
-      </div>
-      <div
-        style={{
-          fontSize: "14px",
-          color: "#666",
-          marginBottom: "8px",
-        }}
-      >
-        From: {email.from}
-      </div>
-      <div
-        style={{
-          fontSize: "14px",
-          color: "#555",
-          lineHeight: "1.4",
-        }}
-      >
-        {email.snippet}
-      </div>
-    </div>
-  ),
-}));
 
 export default pattern<
   {
@@ -1355,7 +1317,7 @@ export default pattern<
     ),
     authUI,
     emails,
-    mentionable: emails.map((e) => <EmailCard email={e} />),
+    mentionable: emails,
     emailCount: derive(emails, (list: Email[]) => list?.length || 0),
     bgUpdater: googleUpdaterStream,
     isReady,
@@ -1389,9 +1351,11 @@ export default pattern<
           return recent
             .map(
               (email) =>
-                `From: ${email.from}\nSubject: ${email.subject}\nDate: ${new Date(
-                  email.date,
-                ).toLocaleDateString()}`,
+                `From: ${email.from}\nSubject: ${email.subject}\nDate: ${
+                  new Date(
+                    email.date,
+                  ).toLocaleDateString()
+                }`,
             )
             .join("\n\n");
         });
