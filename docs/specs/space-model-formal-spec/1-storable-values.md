@@ -203,9 +203,10 @@ Because each wrapper genuinely implements `StorableInstance` (with real
 `[DECONSTRUCT]` and `[RECONSTRUCT]` methods), the serialization system
 processes them through the same uniform `StorableInstance` path — no special
 cases needed in the serializer. The hashing system also uses the standard
-`TAG_STORABLE` path for most wrappers, but optimizes `StorableDate` and
-`StorableUint8Array` with dedicated `TAG_DATE` and `TAG_BYTES` tags for
-content-level identity (see Section 6.3).
+`TAG_INSTANCE` path for most wrappers, but optimizes `StorableUint8Array`
+with a dedicated `TAG_BYTES` tag for content-level identity (see
+Section 6.3). `StorableDate` is hashed via `TAG_INSTANCE` through its
+`[DECONSTRUCT]` method, like other `StorableInstance`s.
 
 #### 1.4.1 Wrapper Class Summary
 
@@ -697,6 +698,15 @@ class Temperature implements StorableInstance {
   }
 }
 ```
+
+> **Runtime validation in `[RECONSTRUCT]`.** The `Temperature[RECONSTRUCT]`
+> example above uses `state as { value: number; unit: TemperatureUnit }` — a
+> bare type cast with no runtime validation. This is acceptable in a short
+> illustrative example, but **production `[RECONSTRUCT]` implementations must
+> validate the shape of `state` at runtime** before using it. The `state`
+> parameter has been through serialization and deserialization; it may not
+> conform to the expected TypeScript type. See Section 7.4 for the full
+> rationale.
 
 **Why the protocol matters.** Without `StorableInstance`, the serialization
 system would see a `Temperature` as an opaque object and either reject it or
@@ -1321,7 +1331,8 @@ round-trip correctly.
 > rather than throwing or silently producing garbage. This principle applies to
 > all type handlers, not just `BigInt@1`: `Date@1` should validate its ISO 8601
 > string, `Bytes@1` should validate its base64 string, and so on. Wire data is
-> untrusted input.
+> untrusted input. See Section 7.4 for the broader principle that applies to all
+> code consuming deserialized values.
 
 > **Sparse array encoding in JSON.** Even when an array contains holes, it is
 > serialized as a JSON array. Runs of consecutive holes are represented by
@@ -1454,7 +1465,50 @@ tree construction.
 - The hash reflects the logical content, not any particular encoding or
   intermediate representation.
 
-### 6.3 Hashing Algorithm
+### 6.3 Suggested Tag Bytes
+
+The following single-byte type tags are used by the canonical hash byte format
+and are recommended for any binary encoding of `StorableValue`s. They are
+organized into three categories by high nibble:
+
+**Meta tags (`0x0N`)** — structural markers that are not themselves value types:
+
+| Tag               | Hex    | Decimal | Used for                        |
+|:------------------|:-------|:--------|:--------------------------------|
+| `TAG_END`         | `0x00` | 0       | end-of-sequence sentinel         |
+| `TAG_HOLE`        | `0x01` | 1       | sparse array holes (run-length) |
+
+**Compound tags (`0x1N`)** — containers whose children are tagged values:
+
+| Tag               | Hex    | Decimal | Used for                        |
+|:------------------|:-------|:--------|:--------------------------------|
+| `TAG_ARRAY`       | `0x10` | 16      | plain arrays                    |
+| `TAG_OBJECT`      | `0x11` | 17      | plain objects                   |
+| `TAG_INSTANCE`    | `0x12` | 18      | `StorableInstance` (general)    |
+
+**Primitive tags (`0x2N`)** — leaf value types:
+
+| Tag               | Hex    | Decimal | Used for                        |
+|:------------------|:-------|:--------|:--------------------------------|
+| `TAG_NULL`        | `0x20` | 32      | `null`                          |
+| `TAG_BOOLEAN`     | `0x21` | 33      | `boolean`                       |
+| `TAG_NUMBER`      | `0x22` | 34      | `number` (finite, non-NaN)      |
+| `TAG_STRING`      | `0x23` | 35      | `string`                        |
+| `TAG_BIGINT`      | `0x24` | 36      | `bigint`                        |
+| `TAG_UNDEFINED`   | `0x25` | 37      | `undefined`                     |
+| `TAG_BYTES`       | `0x26` | 38      | `StorableUint8Array`            |
+
+All unassigned values are reserved for future use. The category structure
+(meta/compound/primitive) is a convention for readability and is not enforced by
+the encoding — a decoder should handle any tag byte it encounters regardless of
+nibble range.
+
+> **Scope.** These tag bytes are defined here for use by any wire format that
+> needs to distinguish `StorableValue` types at the byte level. The canonical
+> hash byte format (`2-canonical-hash-byte-format.md`) is the first consumer;
+> future binary serialization formats may reuse the same tag assignments.
+
+### 6.4 Hashing Algorithm
 
 ```typescript
 // file: packages/common/canonical-hash.ts (stub)
@@ -1482,48 +1536,34 @@ export function canonicalHash(
   value: StorableValue,
   algorithm?: 'sha256' | 'blake2b',
 ): string {
-  // Type tag bytes (single-byte prefixes to prevent cross-type collisions):
+  // Type tag bytes — see Section 6.3 for the full table.
+  // Tag categories: meta (0x0N), compound (0x1N), primitive (0x2N).
   //
-  // TAG_NULL       = 0x00
-  // TAG_BOOL       = 0x01
-  // TAG_NUMBER     = 0x02
-  // TAG_STRING     = 0x03
-  // TAG_BIGINT     = 0x04
-  // TAG_UNDEFINED  = 0x05
-  // TAG_BYTES      = 0x06
-  // TAG_DATE       = 0x07
-  // TAG_ARRAY      = 0x08
-  // TAG_OBJECT     = 0x09
-  // TAG_STORABLE   = 0x0A
-  // TAG_HOLE       = 0x0B
-  //
-  // Implementation feeds type-tagged data into the hasher:
+  // Implementation feeds type-tagged data into the hasher.
+  // Byte-length prefixes for raw payloads use unsigned LEB128.
+  // Compound types (array, object) use TAG_END instead of a count prefix.
   //
   // - `null`:              hash(TAG_NULL)
-  // - `boolean`:           hash(TAG_BOOL, boolByte)
+  // - `boolean`:           hash(TAG_BOOLEAN, boolByte)
   // - `number`:            hash(TAG_NUMBER, ieee754Float64Bytes)
-  // - `string`:            hash(TAG_STRING, utf16CodeUnits)
-  // - `bigint`:            hash(TAG_BIGINT, signedTwosComplementBytes)
+  // - `string`:            hash(TAG_STRING, leb128(utf8ByteLen), utf8Bytes)
+  // - `bigint`:            hash(TAG_BIGINT, leb128(byteLen), signedTwosComplementBytes)
   // - `undefined`:         hash(TAG_UNDEFINED)
-  // - `StorableUint8Array`: hash(TAG_BYTES, rawBytes)
+  // - `StorableUint8Array`: hash(TAG_BYTES, leb128(byteLen), rawBytes)
   //                        (hashes the underlying byte content)
-  // - `StorableDate`:      hash(TAG_DATE, int64MillisSinceEpoch)
-  //                        (hashes the underlying timestamp)
-  // - array:               hash(TAG_ARRAY, length, ...elementHash)
-  //                        where `length` is the logical array length
-  //                        (uint32 big-endian) and elements are hashed
-  //                        in order:
+  // - array:               hash(TAG_ARRAY, ...elements, TAG_END)
+  //                        Elements are hashed in index order:
   //                          if `i in array`: canonicalHash(array[i])
-  //                          else (hole run): hash(TAG_HOLE, uint32(N))
+  //                          else (hole run): hash(TAG_HOLE, leb128(N))
+  //                        TAG_END marks the end of the element sequence.
   //                        (order-preserving)
   //
   //                        Holes use run-length encoding in the hash
   //                        stream, matching the wire format: a maximal
   //                        run of N consecutive holes is hashed as a
-  //                        single `TAG_HOLE` followed by the run length.
-  //                        The run length is encoded as uint32
-  //                        big-endian (4 bytes). A single hole is
-  //                        `hash(TAG_HOLE, uint32(1))`.
+  //                        single `TAG_HOLE` followed by the run length
+  //                        (unsigned LEB128). A single hole is
+  //                        `hash(TAG_HOLE, leb128(1))`.
   //
   //                        Runs MUST be maximal — consecutive holes are
   //                        always coalesced into a single TAG_HOLE entry
@@ -1534,34 +1574,37 @@ export function canonicalHash(
   //
   //                        When hashing from the wire format, each
   //                        `hole` entry maps directly to one
-  //                        `TAG_HOLE + uint32(N)` in the hash (since
+  //                        `TAG_HOLE + leb128(N)` in the hash (since
   //                        the wire format also uses maximal runs).
   //                        When hashing from an in-memory array, the
   //                        implementation must count consecutive absent
   //                        indices to form maximal runs.
-  // - object:              hash(TAG_OBJECT, sortedKeys, ...canonicalHash(value))
-  //                        (keys sorted lexicographically by UTF-8)
-  // - `StorableInstance`:  hash(TAG_STORABLE, typeTag, canonicalHash(deconstructedState))
+  // - object:              hash(TAG_OBJECT, ...sortedKeyValuePairs, TAG_END)
+  //                        Keys sorted lexicographically by UTF-8.
+  //                        Each pair: TAG_STRING key + tagged value.
+  //                        TAG_END marks the end of the pair sequence.
+  // - `StorableInstance`:  hash(TAG_INSTANCE, leb128(typeTagLen), typeTag,
+  //                              canonicalHash(deconstructedState))
   //
   // The native object wrappers are hashed as follows:
   //
-  // - `StorableError`, `StorableMap`, `StorableSet`, and other
-  //   `StorableInstance`s with recursively-processable deconstructed state
-  //   are hashed via TAG_STORABLE:
-  //     hash(TAG_STORABLE, typeTag, canonicalHash(deconstructedState))
+  // - `StorableError`, `StorableMap`, `StorableSet`, `StorableDate`, and
+  //   other `StorableInstance`s with recursively-processable deconstructed
+  //   state are hashed via TAG_INSTANCE:
+  //     hash(TAG_INSTANCE, leb128(typeTagLen), typeTag,
+  //          canonicalHash(deconstructedState))
   //
-  // - `StorableDate` and `StorableUint8Array` are special-cased: they use
-  //   TAG_DATE and TAG_BYTES respectively, matching their logical content
-  //   type rather than going through TAG_STORABLE with a string payload.
+  // - `StorableUint8Array` is special-cased: it uses TAG_BYTES, matching
+  //   its logical content type rather than going through TAG_INSTANCE.
   //
   // Examples:
-  // - `StorableError`:      hash(TAG_STORABLE, "Error@1", canonicalHash(errorState))
-  // - `StorableMap`:        hash(TAG_STORABLE, "Map@1", canonicalHash(entries))
+  // - `StorableError`:      hash(TAG_INSTANCE, ..., "Error@1", canonicalHash(errorState))
+  // - `StorableMap`:        hash(TAG_INSTANCE, ..., "Map@1", canonicalHash(entries))
   //                         where entries are hashed in insertion order
-  // - `StorableSet`:        hash(TAG_STORABLE, "Set@1", canonicalHash(elements))
+  // - `StorableSet`:        hash(TAG_INSTANCE, ..., "Set@1", canonicalHash(elements))
   //                         where elements are hashed in insertion order
-  // - `StorableDate`:       hash(TAG_DATE, int64MillisSinceEpoch)
-  // - `StorableUint8Array`: hash(TAG_BYTES, rawBytes)
+  // - `StorableDate`:       hash(TAG_INSTANCE, ..., "Date@1", canonicalHash(dateState))
+  // - `StorableUint8Array`: hash(TAG_BYTES, leb128(byteLen), rawBytes)
   //
   // Each type is tagged to prevent collisions between types with
   // identical content representations. In particular, holes (TAG_HOLE),
@@ -1577,12 +1620,9 @@ export function canonicalHash(
 }
 ```
 
-> **String encoding for hashing.** Strings are hashed as a sequence of UTF-16
-> code units (two bytes per code unit, in platform byte order). This matches the
-> native string encoding in JavaScript contexts, which are often on one or both
-> sides of the serialization boundaries this spec defines. Future performance
-> characterization may lead to a switch to UTF-8 encoding if the overhead of
-> UTF-16 proves significant for non-BMP-heavy workloads.
+> **String encoding for hashing.** Strings are hashed as UTF-8 byte sequences,
+> prefixed by their byte length (unsigned LEB128). See the byte-level spec
+> (`2-canonical-hash-byte-format.md`, Section 4.4) for the precise encoding.
 
 > **Map/Set ordering in hashing.** Canonical hashing preserves insertion order
 > for `StorableMap` entries and `StorableSet` elements, matching the serialized
@@ -1593,7 +1633,7 @@ export function canonicalHash(
 > contrast, plain objects are hashed with sorted keys, matching the existing
 > convention that plain-object key order is not semantically significant.)
 
-### 6.4 Relationship to Late Serialization
+### 6.5 Relationship to Late Serialization
 
 Canonical hashing operates on `StorableValue` directly, using deconstructed
 state for `StorableInstance`s (including the native object wrappers) and
@@ -1601,7 +1641,7 @@ type-specific handling for primitives and containers. This makes identity
 hashing independent of any particular wire encoding — the same hash whether
 later serialized to JSON, CBOR, or Automerge.
 
-### 6.5 Use Cases
+### 6.6 Use Cases
 
 Canonical hashing is used for:
 - Pattern ID generation (derived from pattern definition)
@@ -1674,6 +1714,41 @@ The canonical hashing approach (Section 6) replaces `merkle-reference` /
 CID-based hashing. Since the system does not participate in the IPFS network,
 CID formatting adds overhead without interoperability benefit. The canonical
 hash operates on the logical data structure directly.
+
+### 7.4 Untrusted Deserialized Input
+
+**Deserialized values must not be trusted for type safety.** After
+serialization and deserialization, a value may not conform to the TypeScript
+type that code assumes — the wire format carries no type guarantees, and a
+round-trip through JSON (or any other encoding) can silently produce values
+whose runtime shape does not match their static type.
+
+This applies at every point where deserialized data is consumed:
+
+- **`[RECONSTRUCT]` implementations** (Section 2.4) receive `state:
+  StorableValue`. The state has been deserialized by the serialization system,
+  but its internal structure is determined by whatever was on the wire.
+  Implementations must validate the shape of `state` at runtime — checking
+  property existence, types, and constraints — rather than relying on a type
+  cast (e.g., `state as { value: number }`). See the note in Section 2.7 for a
+  concrete example.
+
+- **JSON type handlers** (Section 5.3) must validate the format of their state
+  before processing. Malformed input should produce a `ProblematicStorable`
+  rather than throwing or silently producing garbage.
+
+- **Canonical hashing** (Section 6.3) may operate on values that have been
+  through a deserialization round-trip. Code that extracts properties from
+  `StorableInstance` values (e.g., casting to `{ typeTag: string }`) must
+  validate those properties at runtime.
+
+- **Application code** that reads values from cells, IPC messages, or any other
+  boundary listed in Section 4.7 should treat the values as untrusted until
+  validated.
+
+The general principle: a type cast (`as T`) is a compile-time assertion with no
+runtime effect. After a serialization boundary, the only reliable way to
+confirm a value's shape is runtime checking.
 
 ---
 
@@ -2089,13 +2164,10 @@ spec from being implementable.
   deconstructed state. How does this integrate with the schema language?
   Currently out of scope (schemas are listed as out-of-scope for this spec).
 
-- **Exact canonical hash specification**: Precise byte-level specification of
-  the hash algorithm (type tags, encoding of each type, handling of special
-  cases like `-0` normalization). This should be specified as a separate
-  document or appendix before the hashing implementation begins. (Note:
-  `TAG_HOLE`'s run-length count encoding is now specified as uint32 big-endian;
-  see Section 6.3. Consider unsigned LEB128 as a future optimization once
-  measurement data is available to assess its impact.)
+- **Exact canonical hash specification**: The precise byte-level format is
+  defined in `2-canonical-hash-byte-format.md`. All lengths and counts use
+  unsigned LEB128 encoding; see that document for the complete specification
+  of type tags, encoding per type, and illustrative examples.
 
 - **Migration path**: Out of scope for this spec. The detailed migration plan
   (sequencing of flag introductions, criteria for graduating each flag to
