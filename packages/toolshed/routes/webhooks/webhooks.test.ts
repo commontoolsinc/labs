@@ -25,7 +25,9 @@ describe("Webhook Utilities", () => {
     });
 
     it("generates unique IDs", () => {
-      const ids = new Set(Array.from({ length: 100 }, () => generateWebhookId()));
+      const ids = new Set(
+        Array.from({ length: 100 }, () => generateWebhookId()),
+      );
       expect(ids.size).toBe(100);
     });
   });

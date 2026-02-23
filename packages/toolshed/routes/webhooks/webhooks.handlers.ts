@@ -14,8 +14,8 @@ import {
   rebuildIndex,
   saveWebhookRegistry,
   verifyWebhookSecret,
-  writeToCell,
   type WebhookRegistration,
+  writeToCell,
 } from "./webhooks.utils.ts";
 
 const MAX_PAYLOAD_SIZE = 1_000_000; // 1MB
