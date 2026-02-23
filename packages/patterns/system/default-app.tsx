@@ -242,6 +242,18 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
           <div slot="start">
             <h2 style={{ margin: 0, fontSize: "20px" }}>Patterns</h2>
           </div>
+          <ct-cell-link
+            $cell={summaryIdx}
+            slot="end"
+            style={{
+              fontSize: "14px",
+              padding: "6px 12px",
+              textDecoration: "none",
+              color: "var(--ct-color-text-secondary)",
+            }}
+          >
+            Search
+          </ct-cell-link>
           <div slot="end">
             <ct-button
               variant="ghost"

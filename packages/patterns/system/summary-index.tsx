@@ -8,6 +8,7 @@ import {
   type PatternToolResult,
   UI,
   wish,
+  Writable,
 } from "commontools";
 import { type MentionablePiece } from "./backlinks-index.tsx";
 
@@ -38,7 +39,8 @@ function extractSummary(piece: any): string | undefined {
   return typeof summary === "string" && summary.trim() ? summary : undefined;
 }
 
-const searchPattern = pattern<
+/** Search sub-pattern: filters entries by query matching summary or name. */
+export const searchPattern = pattern<
   { query: string; entries: SummaryIndexEntry[] },
   SummaryIndexEntry[]
 >(({ query, entries }) => {
@@ -58,6 +60,8 @@ const SummaryIndex = pattern<Input, Output>(() => {
     query: "#mentionable",
   }).result;
 
+  const query = Writable.of("");
+
   const entries = computed(() => {
     const result: SummaryIndexEntry[] = [];
     for (const piece of mentionable ?? []) {
@@ -70,9 +74,60 @@ const SummaryIndex = pattern<Input, Output>(() => {
     return result;
   });
 
+  const filtered = computed(() => {
+    const q = query.get().toLowerCase().trim();
+    if (!q) return entries;
+    return entries.filter(
+      (entry) =>
+        entry.summary.toLowerCase().includes(q) ||
+        entry.name.toLowerCase().includes(q),
+    );
+  });
+
+  const entryCount = computed(() => entries.length);
+  const filteredCount = computed(() => filtered.length);
+
   return {
     [NAME]: "SummaryIndex",
-    [UI]: undefined,
+    [UI]: (
+      <ct-screen>
+        <ct-toolbar slot="header" sticky>
+          <h2 style={{ margin: 0, fontSize: "18px" }}>Search</h2>
+        </ct-toolbar>
+
+        <ct-vstack gap="4" padding="6">
+          <ct-input $value={query} placeholder="Search summaries..." />
+          <span
+            style={{
+              fontSize: "13px",
+              color: "var(--ct-color-text-secondary)",
+            }}
+          >
+            {filteredCount} of {entryCount} pieces
+          </span>
+
+          <ct-table full-width>
+            <tbody>
+              {filtered.map((entry) => (
+                <tr>
+                  <td style={{ fontWeight: "500", whiteSpace: "nowrap" }}>
+                    <ct-cell-link $cell={entry.piece} />
+                  </td>
+                  <td
+                    style={{
+                      fontSize: "13px",
+                      color: "var(--ct-color-text-secondary)",
+                    }}
+                  >
+                    {entry.summary}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </ct-table>
+        </ct-vstack>
+      </ct-screen>
+    ),
     entries,
     search: patternTool(searchPattern, { entries }),
   };
