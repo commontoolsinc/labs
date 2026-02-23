@@ -6,7 +6,6 @@ import {
   NAME,
   pattern,
   UI,
-  wish,
   Writable,
 } from "commontools";
 
@@ -32,7 +31,9 @@ export type WritableBacklinks = {
   backlinks?: Writable<WritableBacklinks[]>;
 };
 
-type Input = Record<string, never>;
+type Input = {
+  allPieces: MentionablePiece[];
+};
 
 type Output = {
   mentionable: MentionablePiece[];
@@ -149,11 +150,7 @@ const EntryRow = pattern<Entry, { [UI]: any }>(({ piece, backlinks }) => {
   };
 });
 
-const BacklinksIndex = pattern<Input, Output>(() => {
-  const { allPieces } = wish<{ allPieces: MentionablePiece[] }>({
-    query: "#default",
-  }).result;
-
+const BacklinksIndex = pattern<Input, Output>(({ allPieces }) => {
   computeIndex({ allPieces } as { allPieces: WritableBacklinks[] });
 
   // Compute mentionable list from allPieces reactively
