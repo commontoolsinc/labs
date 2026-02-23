@@ -279,13 +279,37 @@ Deno.test("canonicalHash", async (t) => {
   // =========================================================================
 
   await t.step(
-    "StorableDate hashes via TAG_INSTANCE + typeTag + deconstructed state",
+    "StorableDate(epoch) matches hand-computed byte stream",
     () => {
-      const date = new StorableDate(new Date(0));
-      const hash = canonicalHash(date);
-      assertEquals(hash.length, 32);
-      // Consistency: same date -> same hash.
-      assertEquals(canonicalHash(new StorableDate(new Date(0))), hash);
+      // StorableDate(new Date(0)) deconstructs to 0 (milliseconds-since-epoch).
+      // TAG_INSTANCE (0x12)
+      // + LEB128(6) for typeTag "Date@1" (6 UTF-8 bytes)
+      // + "Date@1" in UTF-8: [0x44, 0x61, 0x74, 0x65, 0x40, 0x31]
+      // + recursive feedValue(0): TAG_NUMBER (0x22) + IEEE754 BE for 0.0
+      const expected = sha256([
+        // TAG_INSTANCE
+        0x12,
+        // LEB128(6) = typeTag byte length
+        0x06,
+        // "Date@1" UTF-8
+        0x44,
+        0x61,
+        0x74,
+        0x65,
+        0x40,
+        0x31,
+        // Deconstructed state: number 0
+        0x22,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+      ]);
+      assertEquals(canonicalHash(new StorableDate(new Date(0))), expected);
     },
   );
 
@@ -307,13 +331,65 @@ Deno.test("canonicalHash", async (t) => {
   // =========================================================================
 
   await t.step(
-    "StorableError hashes via TAG_INSTANCE + typeTag + state",
+    "StorableError matches byte stream built from DECONSTRUCT output",
     () => {
+      // Build the expected byte stream programmatically because the
+      // deconstructed state includes `stack` which is environment-dependent.
+      // We construct the stream the same way canonicalHash does, then SHA-256 it.
       const error = new StorableError(new Error("test"));
-      const hash = canonicalHash(error);
-      assertEquals(hash.length, 32);
-      // Consistency: same instance produces the same hash.
-      assertEquals(canonicalHash(error), hash);
+      const enc = new TextEncoder();
+
+      // TAG_INSTANCE (0x12) + LEB128(typeTagLen) + typeTag UTF-8
+      const typeTagUtf8 = enc.encode("Error@1"); // 7 bytes
+      const stream: number[] = [0x12, typeTagUtf8.length, ...typeTagUtf8];
+
+      // Deconstructed state is an object with sorted keys.
+      // StorableError.DECONSTRUCT() returns:
+      //   { type: "Error", name: null, message: "test", stack: <string> }
+      // Keys sorted by UTF-8: message, name, stack, type
+      stream.push(0x11); // TAG_OBJECT
+
+      // Key "message" + value "test"
+      const messageKey = enc.encode("message");
+      stream.push(0x23, messageKey.length, ...messageKey);
+      const messageVal = enc.encode("test");
+      stream.push(0x23, messageVal.length, ...messageVal);
+
+      // Key "name" + value null (name === type for Error, so null)
+      const nameKey = enc.encode("name");
+      stream.push(0x23, nameKey.length, ...nameKey);
+      stream.push(0x20); // TAG_NULL
+
+      // Key "stack" + value (the actual stack string)
+      const stackKey = enc.encode("stack");
+      stream.push(0x23, stackKey.length, ...stackKey);
+      const stackUtf8 = enc.encode(error.error.stack!);
+      // LEB128 encode the stack length
+      let stackLen = stackUtf8.length;
+      const stackLenBytes: number[] = [];
+      if (stackLen === 0) {
+        stackLenBytes.push(0);
+      } else {
+        while (stackLen > 0) {
+          let byte = stackLen & 0x7f;
+          stackLen >>>= 7;
+          if (stackLen > 0) byte |= 0x80;
+          stackLenBytes.push(byte);
+        }
+      }
+      stream.push(0x23, ...stackLenBytes, ...stackUtf8);
+
+      // Key "type" + value "Error"
+      const typeKey = enc.encode("type");
+      stream.push(0x23, typeKey.length, ...typeKey);
+      const typeVal = enc.encode("Error");
+      stream.push(0x23, typeVal.length, ...typeVal);
+
+      // TAG_END for the object
+      stream.push(0x00);
+
+      const expected = sha256(stream);
+      assertEquals(canonicalHash(error), expected);
     },
   );
 
