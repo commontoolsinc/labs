@@ -265,6 +265,37 @@ Deno.test("canonicalHash", async (t) => {
     },
   );
 
+  await t.step(
+    "-0x112233445566778899abcdefn matches hand-computed byte stream",
+    () => {
+      // Negative two's complement of 11 22 33 44 55 66 77 88 99 AB CD EF:
+      //   Invert: EE DD CC BB AA 99 88 77 66 54 32 10
+      //   Add 1:  EE DD CC BB AA 99 88 77 66 54 32 11
+      // High byte 0xEE has bit 7 set -- correctly negative, 12 bytes.
+      // TAG_BIGINT(0x24) + LEB128(12)=0x0c + big-endian two's complement
+      const expected = sha256([
+        0x24,
+        0x0c,
+        0xee,
+        0xdd,
+        0xcc,
+        0xbb,
+        0xaa,
+        0x99,
+        0x88,
+        0x77,
+        0x66,
+        0x54,
+        0x32,
+        0x11,
+      ]);
+      assertEquals(
+        hex(canonicalHash(-0x112233445566778899abcdefn)),
+        hex(expected),
+      );
+    },
+  );
+
   // --- undefined ---
 
   await t.step("undefined produces TAG_UNDEFINED", () => {
