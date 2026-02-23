@@ -1,0 +1,4 @@
+{
+  "name": "@commontools/fuse",
+  "exports": { ".": "./mod.ts" }
+}

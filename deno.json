@@ -29,7 +29,8 @@
     "./packages/ui",
     "./packages/utils",
     "./packages/vendor-astral",
-    "./packages/leb128"
+    "./packages/leb128",
+    "./packages/fuse"
   ],
   "tasks": {
     "check": "./tasks/check.sh",
