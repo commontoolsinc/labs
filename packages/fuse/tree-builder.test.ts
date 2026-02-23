@@ -1,7 +1,7 @@
 // tree-builder.test.ts — Unit tests for JSON-to-tree conversion
 import { assertEquals } from "@std/assert";
 import { FsTree } from "./tree.ts";
-import { buildJsonTree, safeStringify } from "./tree-builder.ts";
+import { buildJsonTree, isSigilLink, safeStringify } from "./tree-builder.ts";
 
 const decoder = new TextDecoder();
 
@@ -171,4 +171,113 @@ Deno.test("FsTree - addSymlink", () => {
   if (node?.kind === "symlink") {
     assertEquals(node.target, "../target/path");
   }
+});
+
+// --- Sigil link tests ---
+
+Deno.test("isSigilLink - detects valid sigil links", () => {
+  assertEquals(
+    isSigilLink({ "/": { "link@1": { id: "bafy123" } } }),
+    true,
+  );
+  assertEquals(
+    isSigilLink({ "/": { "link@1": { id: "bafy123", path: ["name"] } } }),
+    true,
+  );
+  assertEquals(
+    isSigilLink({
+      "/": { "link@1": { id: "bafy123", space: "other" } },
+    }),
+    true,
+  );
+  assertEquals(
+    isSigilLink({ "/": { "link@1": {} } }),
+    true,
+  );
+});
+
+Deno.test("isSigilLink - rejects non-sigil values", () => {
+  assertEquals(isSigilLink(null), false);
+  assertEquals(isSigilLink(42), false);
+  assertEquals(isSigilLink("hello"), false);
+  assertEquals(isSigilLink([1, 2]), false);
+  assertEquals(isSigilLink({ name: "Alice" }), false);
+  assertEquals(isSigilLink({ "/": "not-an-object" }), false);
+  assertEquals(isSigilLink({ "/": { other: 1 } }), false);
+  // Extra keys disqualify
+  assertEquals(isSigilLink({ "/": { "link@1": {} }, extra: true }), false);
+});
+
+Deno.test("buildJsonTree - sigil link becomes symlink via resolveLink", () => {
+  const tree = new FsTree();
+
+  const resolveLink = (_value: unknown, depth: number): string | null => {
+    return "../".repeat(depth + 2) + "entities/bafy123";
+  };
+
+  const data = {
+    ref: { "/": { "link@1": { id: "bafy123" } } },
+    name: "Alice",
+  };
+
+  buildJsonTree(tree, tree.rootIno, "result", data, undefined, resolveLink, 0);
+
+  const resultIno = tree.lookup(tree.rootIno, "result")!;
+
+  // "ref" should be a symlink
+  const refIno = tree.lookup(resultIno, "ref")!;
+  const refNode = tree.getNode(refIno);
+  assertEquals(refNode?.kind, "symlink");
+  if (refNode?.kind === "symlink") {
+    // depth=1 (inside "result"), so depth+2=3 ups
+    assertEquals(refNode.target, "../../../entities/bafy123");
+  }
+
+  // "name" should still be a normal file
+  assertEquals(getFileContent(tree, resultIno, "name"), "Alice");
+});
+
+Deno.test("buildJsonTree - sigil link in nested array gets correct depth", () => {
+  const tree = new FsTree();
+
+  const resolveLink = (_value: unknown, depth: number): string | null => {
+    return "../".repeat(depth + 2) + "entities/xyz";
+  };
+
+  const data = {
+    items: [
+      { "/": { "link@1": { id: "xyz" } } },
+    ],
+  };
+
+  buildJsonTree(tree, tree.rootIno, "result", data, undefined, resolveLink, 0);
+
+  const resultIno = tree.lookup(tree.rootIno, "result")!;
+  const itemsIno = tree.lookup(resultIno, "items")!;
+  const linkIno = tree.lookup(itemsIno, "0")!;
+  const linkNode = tree.getNode(linkIno);
+
+  assertEquals(linkNode?.kind, "symlink");
+  if (linkNode?.kind === "symlink") {
+    // depth=2 (result/items/0), so depth+2=4 ups
+    assertEquals(linkNode.target, "../../../../entities/xyz");
+  }
+});
+
+Deno.test("buildJsonTree - unresolvable sigil link falls through to object", () => {
+  const tree = new FsTree();
+
+  const resolveLink = (): string | null => null;
+
+  const data = {
+    ref: { "/": { "link@1": { id: "bafy123" } } },
+  };
+
+  buildJsonTree(tree, tree.rootIno, "result", data, undefined, resolveLink, 0);
+
+  const resultIno = tree.lookup(tree.rootIno, "result")!;
+  const refIno = tree.lookup(resultIno, "ref")!;
+  const refNode = tree.getNode(refIno);
+  // Falls through to directory since it's an object
+  assertEquals(refNode?.kind, "dir");
 });

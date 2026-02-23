@@ -3,6 +3,9 @@
 // Usage:
 //   deno run --unstable-ffi --allow-ffi --allow-read --allow-write --allow-env --allow-net \
 //     packages/fuse/mod.ts /tmp/ct-fuse [--api-url URL --space NAME --identity PATH]
+//
+// Supports multiple spaces. --space can be repeated or omitted (defaults to "home").
+// Unknown space names are resolved on-demand via lookup.
 
 import { parseArgs } from "@std/cli/parse-args";
 import { openFuse } from "./ffi.ts";
@@ -10,8 +13,10 @@ import {
   createFuseArgs,
   DIR_MODE,
   EISDIR,
+  ENODATA,
   ENOENT,
   ENTRY_PARAM_SIZE,
+  ERANGE,
   FILE_MODE,
   OPS_OFFSETS,
   OPS_SIZE,
@@ -28,9 +33,10 @@ const encoder = new TextEncoder();
 async function main() {
   const args = parseArgs(Deno.args, {
     string: ["api-url", "space", "identity"],
+    collect: ["space"],
     default: {
       "api-url": "",
-      space: "",
+      space: [] as string[],
       identity: "",
     },
   });
@@ -38,7 +44,7 @@ async function main() {
   const mountpoint = args._[0] as string;
   if (!mountpoint) {
     console.error(
-      "Usage: mod.ts <mountpoint> [--api-url URL --space NAME --identity PATH]",
+      "Usage: mod.ts <mountpoint> [--api-url URL] [--space NAME ...] [--identity PATH]",
     );
     Deno.exit(1);
   }
@@ -56,17 +62,28 @@ async function main() {
   // Create filesystem tree
   const tree = new FsTree();
 
+  const { CellBridge } = await import("./cell-bridge.ts");
+  // deno-lint-ignore no-explicit-any
+  let bridge: InstanceType<typeof CellBridge> | null = null;
+
   // Populate tree
-  if (args["api-url"] && args.space) {
+  const apiUrl = args["api-url"];
+  if (apiUrl) {
     const { CellBridge } = await import("./cell-bridge.ts");
-    const bridge = new CellBridge(tree);
+    bridge = new CellBridge(tree);
     await bridge.init({
-      apiUrl: args["api-url"],
-      space: args.space,
+      apiUrl,
       identity: args.identity || "",
     });
-    await bridge.buildSpaceTree(args.space);
-    console.log(`Loaded space: ${args.space}`);
+
+    // Connect initial spaces (default: "home")
+    const spaces = (args.space as string[]).length > 0
+      ? (args.space as string[])
+      : ["home"];
+    for (const spaceName of spaces) {
+      await bridge.connectSpace(spaceName);
+      console.log(`Connected space: ${spaceName}`);
+    }
   } else {
     tree.addFile(tree.rootIno, "hello.txt", "Hello from FUSE!\n", "string");
     console.log("Static mode: hello.txt");
@@ -88,10 +105,37 @@ async function main() {
 
   function nodeSize(node: ReturnType<typeof tree.getNode>) {
     if (!node) return 0;
-    return node.kind === "file" ? node.content.length : 0;
+    if (node.kind === "file") return node.content.length;
+    if (node.kind === "symlink") return node.target.length;
+    return 0;
+  }
+
+  function replyEntry(
+    req: Deno.PointerValue,
+    ino: bigint,
+    node: ReturnType<typeof tree.getNode>,
+  ) {
+    const entryBuf = new ArrayBuffer(ENTRY_PARAM_SIZE);
+    writeEntryParam(entryBuf, {
+      ino,
+      attr: {
+        ino,
+        mode: nodeMode(node),
+        nlink: node!.kind === "dir" ? 2 : 1,
+        size: nodeSize(node),
+      },
+      attrTimeout: 1.0,
+      entryTimeout: 1.0,
+    });
+    fuse.symbols.fuse_reply_entry(
+      req,
+      Deno.UnsafePointer.of(new Uint8Array(entryBuf)),
+    );
   }
 
   // lookup(req, parent_ino, name_ptr)
+  // This callback supports async space connection: if a name at root isn't found,
+  // we attempt connectSpace() before replying.
   const lookupCb = new Deno.UnsafeCallback(
     { parameters: ["pointer", "u64", "pointer"], result: "void" } as const,
     (
@@ -100,36 +144,37 @@ async function main() {
       namePtr: Deno.PointerValue,
     ) => {
       const name = readCString(namePtr);
-      const ino = tree.lookup(BigInt(parentIno), name);
+      const parent = BigInt(parentIno);
+      const ino = tree.lookup(parent, name);
 
-      if (ino === undefined) {
-        fuse.symbols.fuse_reply_err(req, ENOENT);
+      if (ino !== undefined) {
+        const node = tree.getNode(ino);
+        if (node) {
+          replyEntry(req, ino, node);
+          return;
+        }
+      }
+
+      // If at root and bridge is available, try async space connection
+      if (parent === tree.rootIno && bridge && !name.startsWith(".")) {
+        // Fire off async connection — FUSE req stays valid until replied
+        bridge.connectSpace(name).then(() => {
+          const newIno = tree.lookup(parent, name);
+          if (newIno !== undefined) {
+            const newNode = tree.getNode(newIno);
+            if (newNode) {
+              replyEntry(req, newIno, newNode);
+              return;
+            }
+          }
+          fuse.symbols.fuse_reply_err(req, ENOENT);
+        }).catch(() => {
+          fuse.symbols.fuse_reply_err(req, ENOENT);
+        });
         return;
       }
 
-      const node = tree.getNode(ino);
-      if (!node) {
-        fuse.symbols.fuse_reply_err(req, ENOENT);
-        return;
-      }
-
-      const entryBuf = new ArrayBuffer(ENTRY_PARAM_SIZE);
-      writeEntryParam(entryBuf, {
-        ino,
-        attr: {
-          ino,
-          mode: nodeMode(node),
-          nlink: node.kind === "dir" ? 2 : 1,
-          size: nodeSize(node),
-        },
-        attrTimeout: 1.0,
-        entryTimeout: 1.0,
-      });
-
-      fuse.symbols.fuse_reply_entry(
-        req,
-        Deno.UnsafePointer.of(new Uint8Array(entryBuf)),
-      );
+      fuse.symbols.fuse_reply_err(req, ENOENT);
     },
   );
   callbacks.push(lookupCb);
@@ -374,6 +419,109 @@ async function main() {
   );
   callbacks.push(releasedirCb);
 
+  // getxattr(req, ino, name_ptr, size, position)
+  // macOS FUSE has an extra `position` parameter (uint32_t) — always ignored for user attrs
+  const getxattrCb = new Deno.UnsafeCallback(
+    {
+      parameters: ["pointer", "u64", "pointer", "usize", "u32"],
+      result: "void",
+    } as const,
+    (
+      req: Deno.PointerValue,
+      ino: number | bigint,
+      namePtr: Deno.PointerValue,
+      size: number | bigint,
+      _position: number,
+    ) => {
+      const attrName = readCString(namePtr);
+      const node = tree.getNode(BigInt(ino));
+
+      // Determine the xattr value (if any)
+      let attrValue: Uint8Array | null = null;
+      if (attrName === "user.json.type" && node) {
+        const jsonType = node.kind === "file"
+          ? node.jsonType
+          : node.kind === "dir"
+          ? node.jsonType
+          : undefined;
+        if (jsonType) {
+          attrValue = encoder.encode(jsonType);
+        }
+      }
+
+      if (!attrValue) {
+        fuse.symbols.fuse_reply_err(req, ENODATA);
+        return;
+      }
+
+      const sz = Number(size);
+      if (sz === 0) {
+        // Size query: return the value length
+        fuse.symbols.fuse_reply_xattr(req, BigInt(attrValue.length));
+      } else if (sz >= attrValue.length) {
+        // Return the value
+        const valBuf = new Uint8Array(attrValue.length);
+        valBuf.set(attrValue);
+        fuse.symbols.fuse_reply_buf(
+          req,
+          Deno.UnsafePointer.of(valBuf),
+          BigInt(valBuf.length),
+        );
+      } else {
+        // Buffer too small
+        fuse.symbols.fuse_reply_err(req, ERANGE);
+      }
+    },
+  );
+  callbacks.push(getxattrCb);
+
+  // listxattr(req, ino, size)
+  const listxattrCb = new Deno.UnsafeCallback(
+    { parameters: ["pointer", "u64", "usize"], result: "void" } as const,
+    (
+      req: Deno.PointerValue,
+      ino: number | bigint,
+      size: number | bigint,
+    ) => {
+      const node = tree.getNode(BigInt(ino));
+
+      // Build null-separated list of xattr names
+      const jsonType = node?.kind === "file"
+        ? node.jsonType
+        : node?.kind === "dir"
+        ? node.jsonType
+        : undefined;
+
+      if (!jsonType) {
+        // No xattrs — empty list
+        const sz = Number(size);
+        if (sz === 0) {
+          fuse.symbols.fuse_reply_xattr(req, 0n);
+        } else {
+          fuse.symbols.fuse_reply_buf(req, null, 0n);
+        }
+        return;
+      }
+
+      // "user.json.type\0"
+      const listBuf = encoder.encode("user.json.type\0");
+      const sz = Number(size);
+
+      if (sz === 0) {
+        fuse.symbols.fuse_reply_xattr(req, BigInt(listBuf.length));
+      } else if (sz >= listBuf.length) {
+        fuse.symbols.fuse_reply_buf(
+          req,
+          Deno.UnsafePointer.of(listBuf),
+          BigInt(listBuf.length),
+        );
+      } else {
+        fuse.symbols.fuse_reply_err(req, ERANGE);
+      }
+    },
+  );
+  callbacks.push(listxattrCb);
+
   // --- Build ops struct ---
   const opsBuf = new ArrayBuffer(OPS_SIZE);
   const opsView = new DataView(opsBuf);
@@ -397,6 +545,8 @@ async function main() {
   setOp(OPS_OFFSETS.readdir, readdirCb);
   setOp(OPS_OFFSETS.release, releaseCb);
   setOp(OPS_OFFSETS.releasedir, releasedirCb);
+  setOp(OPS_OFFSETS.getxattr, getxattrCb);
+  setOp(OPS_OFFSETS.listxattr, listxattrCb);
 
   // --- Mount ---
   const { argsBuf, argv: _argv, encodedArgs: _ea } = createFuseArgs([
@@ -432,11 +582,37 @@ async function main() {
 
   fuse.symbols.fuse_session_add_chan(session, chan);
 
+  let unmounting = false;
+
+  // Wire up kernel cache invalidation for subscriptions
+  if (bridge) {
+    let notifySupported = true;
+    bridge.onInvalidate = (parentIno: bigint, names: string[]) => {
+      if (!notifySupported || unmounting) return;
+      for (const name of names) {
+        const nameBuf = encoder.encode(name + "\0");
+        const rc = fuse.symbols.fuse_lowlevel_notify_inval_entry(
+          chan,
+          parentIno,
+          nameBuf,
+          BigInt(name.length),
+        );
+        if (rc === -38) {
+          // ENOSYS — FUSE-T doesn't support notify_inval_entry
+          console.log(
+            "notify_inval_entry not supported (FUSE-T); relying on short timeouts",
+          );
+          notifySupported = false;
+          break;
+        }
+      }
+    };
+  }
+
   console.log(`Mounted at ${mountpoint}`);
   console.log("Press Ctrl+C to unmount");
 
   // Cleanup on signal
-  let unmounting = false;
   function unmount() {
     if (unmounting) return;
     unmounting = true;

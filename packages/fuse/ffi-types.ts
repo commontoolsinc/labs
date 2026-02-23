@@ -98,7 +98,9 @@ export const ENOENT = 2;
 export const EIO = 5;
 export const ENOTDIR = 20;
 export const EISDIR = 21;
+export const ERANGE = 34;
 export const ENOSYS = 78;
+export const ENODATA = 93; // macOS ENOATTR — no such xattr
 
 // File mode constants
 export const S_IFDIR = 0o40000;
@@ -139,6 +141,12 @@ export const SYMLINK_MODE = S_IFLNK | 0o777;
 // Slot 20: opendir      @ 160
 // Slot 21: readdir      @ 168
 // Slot 22: releasedir   @ 176
+// Slot 23: fsyncdir     @ 184
+// Slot 24: statfs       @ 192
+// Slot 25: setxattr     @ 200
+// Slot 26: getxattr     @ 208
+// Slot 27: listxattr    @ 216
+// Slot 28: removexattr  @ 224
 // ...more ops follow
 
 export const OPS_SIZE = 320; // allocate enough for all ops
@@ -167,6 +175,12 @@ export const OPS_OFFSETS = {
   opendir: 160,
   readdir: 168,
   releasedir: 176,
+  fsyncdir: 184,
+  statfs: 192,
+  setxattr: 200,
+  getxattr: 208,
+  listxattr: 216,
+  removexattr: 224,
 } as const;
 
 // Helper to read a C string from a pointer

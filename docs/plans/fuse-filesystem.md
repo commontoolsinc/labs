@@ -1,7 +1,7 @@
 # Implementation Plan: FUSE Filesystem for Common Tools
 
 **Spec:** [`docs/specs/fuse-filesystem/`](../specs/fuse-filesystem/README.md)
-**Status:** Draft
+**Status:** Phase 0 complete, Phase 1 complete
 
 ## Architecture Decision
 
@@ -30,70 +30,73 @@ compat), consider Rust FUSE daemon + IPC as an escape hatch, or try
 **Goal:** Mount a directory, `ls` shows hardcoded entries, `cat` reads a
 hardcoded file. Validates that Deno FFI to libfuse works at all.
 
-- [ ] **0.1 FFI spike** — Validate Deno FFI to libfuse
-  - [ ] `ffi.ts`: `Deno.dlopen()` for libfuse (`libfuse.dylib` / `libfuse3.so`)
-  - [ ] `ffi-types.ts`: C struct layouts (`fuse_lowlevel_ops`, `stat`,
+- [x] **0.1 FFI spike** — Validate Deno FFI to libfuse
+  - [x] `ffi.ts`: `Deno.dlopen()` for FUSE-T (primary) / macFUSE (fallback)
+  - [x] `ffi-types.ts`: C struct layouts (`fuse_lowlevel_ops`, `stat`,
     `fuse_entry_param`, `fuse_file_info`)
-  - [ ] Register `Deno.UnsafeCallback` for `lookup`, `getattr`, `readdir`,
+  - [x] Register `Deno.UnsafeCallback` for `lookup`, `getattr`, `readdir`,
     `read`, `open`, `release`
-  - [ ] Hardcode a static tree (one dir, one file), mount, verify `ls`+`cat`
-  - [ ] **Key risk:** Do callbacks work? Does single-threaded mode work?
-    Does `fuse_reply_*` work from within the callback?
-  - [ ] If spike fails: pivot to `npm:fuse-native` or Rust sidecar
-- [ ] **0.2 In-memory tree** — `tree.ts` module
-  - [ ] `FsTree` class: inode allocation, lookup by path, lookup by inode
-  - [ ] `FsNode` union type: `Directory | File | Symlink`
-  - [ ] Wire FUSE callbacks to read from tree instead of hardcoded values
-  - [ ] `tree-builder.ts`: convert JSON value to `FsTree` subtree
+  - [x] Hardcode a static tree (one dir, one file), mount, verify `ls`+`cat`
+  - [x] **Key risk:** Validated — callbacks work via `nonblocking: true` on
+    `fuse_session_loop()` + `UnsafeCallback.threadSafe()`
+  - [x] ~~If spike fails: pivot~~ — Not needed, FFI works
+- [x] **0.2 In-memory tree** — `tree.ts` module
+  - [x] `FsTree` class: inode allocation, lookup by path, lookup by inode
+  - [x] `FsNode` union type: `Directory | File | Symlink`
+  - [x] Wire FUSE callbacks to read from tree instead of hardcoded values
+  - [x] `tree-builder.ts`: convert JSON value to `FsTree` subtree
     (object->dir, scalar->file, array->dir with numeric entries)
-  - [ ] Mount a tree from a JSON literal, browse with `ls`/`cat`
-- [ ] **0.3 Connect to live cells** — `cell-bridge.ts`
-  - [ ] Reuse `loadManager()` from `packages/cli/lib/piece.ts`
-  - [ ] Fetch piece list, build tree under `<space>/pieces/`
-  - [ ] Lazy-load cell values on first access
-  - [ ] `result.json` / `input.json` serve serialized cell data
-  - [ ] `result/` / `input/` directories serve exploded JSON tree
-  - [ ] `ls home/pieces/` shows real pieces, `cat .../result.json` returns
+  - [x] Circular reference handling via `safeStringify()` / WeakSet
+  - [x] 11 unit tests passing (`tree-builder.test.ts`)
+  - [x] Mount a tree from a JSON literal, browse with `ls`/`cat`
+- [x] **0.3 Connect to live cells** — `cell-bridge.ts`
+  - [x] Reuse `loadManager()` from `packages/cli/lib/piece.ts`
+  - [x] Fetch piece list, build tree under `<space>/pieces/`
+  - [ ] Lazy-load cell values on first access (currently eager)
+  - [x] `result.json` / `input.json` serve serialized cell data
+  - [x] `result/` / `input/` directories serve exploded JSON tree
+  - [x] `ls <space>/pieces/` shows real pieces, `cat .../result.json` returns
     real data
 
 ## Phase 1: Full Read Support
 
 **Goal:** Complete read-only filesystem with subscriptions and multi-space.
 
-- [ ] **1.1 `.json` siblings**
-  - [ ] Synthesize `.json` file for every directory node
-  - [ ] Handle in `lookup`, `getattr`, `read`
-  - [ ] Nested: `result/items.json`, `result/items/0.json`, etc.
-- [ ] **1.2 Multi-space root**
-  - [ ] Mount root lists `home/` (always present)
-  - [ ] `lookup` resolves any space name via `createSession({ spaceName })`
+- [x] **1.1 `.json` siblings**
+  - [x] Synthesize `.json` file for every directory node
+  - [x] Handle in `lookup`, `getattr`, `read`
+  - [x] Nested: `result/items.json`, `result/items/0.json`, etc.
+- [x] **1.2 Multi-space root**
+  - [x] Mount root lists `home/` (always present)
+  - [x] `lookup` resolves any space name via `connectSpace()`
   - [ ] `lookup` resolves raw DIDs (`did:key:...`)
-  - [ ] Lazy session creation per space (connect on first access)
-  - [ ] `.spaces.json` at root: known name->DID mapping
-- [ ] **1.3 Subscriptions and cache invalidation**
-  - [ ] Subscribe to cell changes via WebSocket on first access
-  - [ ] On change, rebuild affected subtree in in-memory tree
-  - [ ] `fuse_lowlevel_notify_inval_inode` / `notify_inval_entry` for kernel
-    cache invalidation
+  - [x] Lazy session creation per space (connect on first access)
+  - [x] `.spaces.json` at root: known name->DID mapping
+- [x] **1.3 Subscriptions and cache invalidation**
+  - [x] Subscribe to cell changes via `cell.sink()` on load
+  - [x] On change, rebuild affected subtree in in-memory tree
+  - [x] `fuse_lowlevel_notify_inval_entry` for kernel cache invalidation
+  - [x] Fallback to short timeouts if FUSE-T doesn't support notify
   - [ ] Unsubscribe after inactivity timeout
-- [ ] **1.4 Extended attributes**
-  - [ ] `getxattr` callback for `user.json.type` per node
+- [x] **1.4 Extended attributes**
+  - [x] `getxattr` callback for `user.json.type` per node
     (`string`, `number`, `boolean`, `null`, `object`, `array`)
-- [ ] **1.5 Symlinks for cell references (read)**
-  - [ ] Detect sigil links (`{ "/": { "link@1": ... } }`) in cell values
-  - [ ] Map `id` + `path` + `space` to relative filesystem paths
-  - [ ] Handle same-space (relative to entity dir), cross-space (up to mount
+  - [x] `listxattr` callback lists available xattrs
+- [x] **1.5 Symlinks for cell references (read)**
+  - [x] Detect sigil links (`{ "/": { "link@1": ... } }`) in cell values
+  - [x] Map `id` + `path` + `space` to relative filesystem paths
+  - [x] Handle same-space (relative to entity dir), cross-space (up to mount
     root), and self-referencing (id omitted) cases
-  - [ ] Create symlink `FsNode`s in the in-memory tree
-  - [ ] `readlink` callback returns the computed target path
-- [ ] **1.6 Metadata files**
-  - [ ] `meta.json` per piece (read-only): ID, pattern name, connections
-  - [ ] `space.json` per space: DID, space name
-  - [ ] `pieces/.index.json`: name-to-ID mapping
-- [ ] **1.7 Event loop integration**
-  - [ ] Integrate FUSE session fd with Deno event loop (no busy-wait)
-  - [ ] `Deno.watchFd()` or poll-based approach
-  - [ ] WebSocket subscriptions + FUSE requests serviced concurrently
+  - [x] Create symlink `FsNode`s in the in-memory tree
+  - [x] `readlink` callback returns the computed target path
+- [x] **1.6 Metadata files**
+  - [x] `meta.json` per piece (read-only): ID, entityId, pattern name
+  - [x] `space.json` per space: DID, space name
+  - [x] `pieces/.index.json`: name-to-ID mapping
+  - [x] `entities/` reverse-lookup directory with symlinks
+- [x] **1.7 Event loop integration**
+  - [x] Already solved by `nonblocking: true` + `threadSafe` callbacks
+  - [x] WebSocket subscriptions + FUSE requests serviced concurrently
 
 ## Phase 2: Write Support
 

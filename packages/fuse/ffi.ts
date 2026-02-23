@@ -70,6 +70,10 @@ const symbols = {
     parameters: ["pointer", "buffer"],
     result: "i32",
   },
+  fuse_reply_xattr: {
+    parameters: ["pointer", "usize"],
+    result: "i32",
+  },
   fuse_reply_none: {
     parameters: ["pointer"],
     result: "void",
@@ -79,6 +83,19 @@ const symbols = {
   fuse_add_direntry: {
     parameters: ["pointer", "pointer", "usize", "buffer", "pointer", "i64"],
     result: "usize",
+  },
+
+  // Kernel cache invalidation (FUSE 2.8+)
+  // Note: FUSE-T (NFS-based) may not support these — check return value.
+  // invalidate a directory entry by name
+  fuse_lowlevel_notify_inval_entry: {
+    parameters: ["pointer", "u64", "buffer", "usize"],
+    result: "i32",
+  },
+  // invalidate cached attributes/data for an inode
+  fuse_lowlevel_notify_inval_inode: {
+    parameters: ["pointer", "u64", "i64", "i64"],
+    result: "i32",
   },
 } as const;
 
