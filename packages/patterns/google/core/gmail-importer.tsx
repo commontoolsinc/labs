@@ -126,8 +126,8 @@ interface Output {
   [UI]: VNode;
   /** Array of imported emails */
   emails: Email[];
-  /** Mentionables — real email cells for navigability and search indexing */
-  mentionable: Email[];
+  /** Mentionables — email cards with NAME and summary for search indexing */
+  mentionable: { [NAME]: string; summary: string; [UI]: VNode }[];
   /** Number of emails imported */
   emailCount: number;
   /** Auth UI component for managing Google OAuth connection */
@@ -1042,6 +1042,53 @@ const toggleResolveInlineImages = handler<
   settings.set({ ...current, resolveInlineImages: target.checked });
 });
 
+const EmailCard = pattern<
+  { email: Email },
+  { [NAME]: string; summary: string; [UI]: VNode }
+>(({ email }) => ({
+  [NAME]: computed(() => email.subject),
+  summary: str`${email.subject} from ${email.from}: ${email.snippet}`,
+  [UI]: (
+    <div
+      style={{
+        padding: "12px",
+        border: "1px solid #e0e0e0",
+        borderRadius: "8px",
+        backgroundColor: "#fafafa",
+      }}
+    >
+      <div
+        style={{
+          fontSize: "16px",
+          fontWeight: "bold",
+          marginBottom: "4px",
+          color: "#333",
+        }}
+      >
+        {email.subject}
+      </div>
+      <div
+        style={{
+          fontSize: "14px",
+          color: "#666",
+          marginBottom: "8px",
+        }}
+      >
+        From: {email.from}
+      </div>
+      <div
+        style={{
+          fontSize: "14px",
+          color: "#555",
+          lineHeight: "1.4",
+        }}
+      >
+        {email.snippet}
+      </div>
+    </div>
+  ),
+}));
+
 export default pattern<
   {
     settings: Default<
@@ -1073,7 +1120,7 @@ export default pattern<
   const authUI = authManager[UI];
 
   const auth = ifElse(overrideAuth.token, overrideAuth, wishedAuth);
-  const isReady = computed(() => authManager.isReady);
+  const isReady = computed(() => !!auth.token);
   const currentEmail = computed(() => auth.user?.email ?? "");
 
   const googleUpdaterStream = googleUpdater({
@@ -1317,7 +1364,7 @@ export default pattern<
     ),
     authUI,
     emails,
-    mentionable: emails,
+    mentionable: emails.map((e) => <EmailCard email={e} />),
     emailCount: derive(emails, (list: Email[]) => list?.length || 0),
     bgUpdater: googleUpdaterStream,
     isReady,
