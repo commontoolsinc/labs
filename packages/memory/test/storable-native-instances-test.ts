@@ -394,9 +394,10 @@ describe("storable-native-instances", () => {
       expect(sd.typeTag).toBe("Date@1");
     });
 
-    it("StorableDate [DECONSTRUCT] throws (stub)", () => {
-      const sd = new StorableDate(new Date());
-      expect(() => sd[DECONSTRUCT]()).toThrow("not yet implemented");
+    it("StorableDate [DECONSTRUCT] returns milliseconds-since-epoch", () => {
+      const date = new Date("2024-01-01T00:00:00.000Z");
+      const sd = new StorableDate(date);
+      expect(sd[DECONSTRUCT]()).toBe(date.getTime());
     });
 
     it("StorableDate.toNativeValue(true) returns FrozenDate", () => {

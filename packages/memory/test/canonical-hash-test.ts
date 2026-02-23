@@ -29,21 +29,21 @@ Deno.test("canonicalHash", async (t) => {
   // --- null ---
 
   await t.step("null produces TAG_NULL byte stream", () => {
-    // Spec Section 7.1: byte stream is [0x00]
+    // Byte stream: [0x00]
     const expected = sha256([0x00]);
     assertEquals(canonicalHash(null), expected);
   });
 
   // --- boolean ---
 
-  await t.step("true produces TAG_BOOL + 0x01", () => {
-    // Spec Section 7.2: [0x01, 0x01]
+  await t.step("true produces TAG_BOOLEAN + 0x01", () => {
+    // [0x01, 0x01]
     const expected = sha256([0x01, 0x01]);
     assertEquals(canonicalHash(true), expected);
   });
 
-  await t.step("false produces TAG_BOOL + 0x00", () => {
-    // Spec Section 7.3: [0x01, 0x00]
+  await t.step("false produces TAG_BOOLEAN + 0x00", () => {
+    // [0x01, 0x00]
     const expected = sha256([0x01, 0x00]);
     assertEquals(canonicalHash(false), expected);
   });
@@ -55,7 +55,6 @@ Deno.test("canonicalHash", async (t) => {
   // --- number ---
 
   await t.step("42 produces TAG_NUMBER + IEEE 754 float64 BE", () => {
-    // Spec Section 7.4: [0x02, 0x40, 0x45, ...]
     const expected = sha256([
       0x02,
       0x40,
@@ -71,7 +70,6 @@ Deno.test("canonicalHash", async (t) => {
   });
 
   await t.step("0 produces TAG_NUMBER + all zeros", () => {
-    // Spec Section 7.5
     const expected = sha256([
       0x02,
       0x00,
@@ -123,14 +121,12 @@ Deno.test("canonicalHash", async (t) => {
   // --- string ---
 
   await t.step(
-    "hello produces TAG_STRING + uint32 BE byte length + UTF-8",
+    "hello produces TAG_STRING + LEB128 byte length + UTF-8",
     () => {
       // UTF-8 for "hello": [0x68, 0x65, 0x6c, 0x6c, 0x6f], 5 bytes
+      // LEB128(5) = [0x05]
       const expected = sha256([
         0x03,
-        0x00,
-        0x00,
-        0x00,
         0x05,
         0x68,
         0x65,
@@ -143,8 +139,8 @@ Deno.test("canonicalHash", async (t) => {
   );
 
   await t.step("empty string produces TAG_STRING + zero length", () => {
-    // Spec Section 7.7: [0x03, 0x00, 0x00, 0x00, 0x00]
-    const expected = sha256([0x03, 0x00, 0x00, 0x00, 0x00]);
+    // LEB128(0) = [0x00]
+    const expected = sha256([0x03, 0x00]);
     assertEquals(canonicalHash(""), expected);
   });
 
@@ -166,12 +162,9 @@ Deno.test("canonicalHash", async (t) => {
     const enc = new TextEncoder();
     const utf8 = enc.encode(emoji);
     assertEquals(utf8.length, 4); // 4 bytes in UTF-8
-    // Build expected byte stream
+    // LEB128(4) = [0x04]
     const expected = sha256([
       0x03,
-      0x00,
-      0x00,
-      0x00,
       0x04,
       ...utf8,
     ]);
@@ -180,35 +173,36 @@ Deno.test("canonicalHash", async (t) => {
 
   // --- bigint ---
 
-  await t.step("0n encodes as TAG_BIGINT + length 1 + [0x00]", () => {
-    const expected = sha256([0x04, 0x00, 0x00, 0x00, 0x01, 0x00]);
+  await t.step("0n encodes as TAG_BIGINT + LEB128 length 1 + [0x00]", () => {
+    // LEB128(1) = [0x01]
+    const expected = sha256([0x04, 0x01, 0x00]);
     assertEquals(canonicalHash(0n), expected);
   });
 
   await t.step("127n encodes as 1 byte: 0x7F", () => {
-    const expected = sha256([0x04, 0x00, 0x00, 0x00, 0x01, 0x7f]);
+    const expected = sha256([0x04, 0x01, 0x7f]);
     assertEquals(canonicalHash(127n), expected);
   });
 
   await t.step("128n encodes as 2 bytes: 0x00, 0x80", () => {
     // 128 = 0x80, but high bit set means negative in two's complement,
-    // so we need a leading 0x00.
-    const expected = sha256([0x04, 0x00, 0x00, 0x00, 0x02, 0x00, 0x80]);
+    // so we need a leading 0x00. LEB128(2) = [0x02].
+    const expected = sha256([0x04, 0x02, 0x00, 0x80]);
     assertEquals(canonicalHash(128n), expected);
   });
 
   await t.step("-1n encodes as 1 byte: 0xFF", () => {
-    const expected = sha256([0x04, 0x00, 0x00, 0x00, 0x01, 0xff]);
+    const expected = sha256([0x04, 0x01, 0xff]);
     assertEquals(canonicalHash(-1n), expected);
   });
 
   await t.step("-128n encodes as 1 byte: 0x80", () => {
-    const expected = sha256([0x04, 0x00, 0x00, 0x00, 0x01, 0x80]);
+    const expected = sha256([0x04, 0x01, 0x80]);
     assertEquals(canonicalHash(-128n), expected);
   });
 
   await t.step("-129n encodes as 2 bytes: 0xFF, 0x7F", () => {
-    const expected = sha256([0x04, 0x00, 0x00, 0x00, 0x02, 0xff, 0x7f]);
+    const expected = sha256([0x04, 0x02, 0xff, 0x7f]);
     assertEquals(canonicalHash(-129n), expected);
   });
 
@@ -225,8 +219,8 @@ Deno.test("canonicalHash", async (t) => {
 
   // --- undefined ---
 
-  await t.step("undefined produces TAG_UNDEF", () => {
-    // Spec Section 7.8: [0x05]
+  await t.step("undefined produces TAG_UNDEFINED", () => {
+    // [0x05]
     const expected = sha256([0x05]);
     assertEquals(canonicalHash(undefined), expected);
   });
@@ -256,14 +250,12 @@ Deno.test("canonicalHash", async (t) => {
   // =========================================================================
 
   await t.step(
-    "StorableUint8Array produces TAG_BYTES + length + raw bytes",
+    "StorableUint8Array produces TAG_BYTES + LEB128 length + raw bytes",
     () => {
       const bytes = new StorableUint8Array(new Uint8Array([1, 2, 3]));
+      // LEB128(3) = [0x03]
       const expected = sha256([
         0x06,
-        0x00,
-        0x00,
-        0x00,
         0x03,
         0x01,
         0x02,
@@ -277,41 +269,30 @@ Deno.test("canonicalHash", async (t) => {
     "empty StorableUint8Array produces TAG_BYTES + zero length",
     () => {
       const bytes = new StorableUint8Array(new Uint8Array([]));
-      const expected = sha256([0x06, 0x00, 0x00, 0x00, 0x00]);
+      const expected = sha256([0x06, 0x00]);
       assertEquals(canonicalHash(bytes), expected);
     },
   );
 
   // =========================================================================
-  // StorableDate
+  // StorableDate (hashed via TAG_INSTANCE + DECONSTRUCT)
   // =========================================================================
 
-  await t.step("StorableDate(epoch) produces TAG_DATE + int64 BE zero", () => {
-    const date = new StorableDate(new Date(0));
-    const expected = sha256([
-      0x07,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-      0x00,
-    ]);
-    assertEquals(canonicalHash(date), expected);
-  });
+  await t.step(
+    "StorableDate hashes via TAG_INSTANCE + typeTag + deconstructed state",
+    () => {
+      const date = new StorableDate(new Date(0));
+      const hash = canonicalHash(date);
+      assertEquals(hash.length, 32);
+      // Consistency: same date -> same hash.
+      assertEquals(canonicalHash(new StorableDate(new Date(0))), hash);
+    },
+  );
 
-  await t.step("StorableDate with positive timestamp", () => {
-    // 2024-01-01T00:00:00.000Z = 1704067200000ms
-    const date = new StorableDate(new Date(1704067200000));
-    const hash = canonicalHash(date);
-    assertEquals(hash.length, 32);
-    // Different from epoch
-    assertNotEquals(
-      hex(hash),
-      hex(canonicalHash(new StorableDate(new Date(0)))),
-    );
+  await t.step("StorableDate with different timestamps differ", () => {
+    const d1 = new StorableDate(new Date(0));
+    const d2 = new StorableDate(new Date(1704067200000));
+    assertNotEquals(hex(canonicalHash(d1)), hex(canonicalHash(d2)));
   });
 
   await t.step("StorableDate with negative timestamp", () => {
@@ -325,13 +306,16 @@ Deno.test("canonicalHash", async (t) => {
   // StorableError (StorableInstance via DECONSTRUCT)
   // =========================================================================
 
-  await t.step("StorableError hashes via TAG_STOR + typeTag + state", () => {
-    const error = new StorableError(new Error("test"));
-    const hash = canonicalHash(error);
-    assertEquals(hash.length, 32);
-    // Consistency: same instance produces the same hash.
-    assertEquals(canonicalHash(error), hash);
-  });
+  await t.step(
+    "StorableError hashes via TAG_INSTANCE + typeTag + state",
+    () => {
+      const error = new StorableError(new Error("test"));
+      const hash = canonicalHash(error);
+      assertEquals(hash.length, 32);
+      // Consistency: same instance produces the same hash.
+      assertEquals(canonicalHash(error), hash);
+    },
+  );
 
   await t.step("different errors produce different hashes", () => {
     const e1 = new StorableError(new Error("hello"));
@@ -350,22 +334,19 @@ Deno.test("canonicalHash", async (t) => {
   // =========================================================================
 
   await t.step("empty array produces TAG_ARRAY + zero length", () => {
-    const expected = sha256([0x08, 0x00, 0x00, 0x00, 0x00]);
+    // LEB128(0) = [0x00]
+    const expected = sha256([0x08, 0x00]);
     assertEquals(canonicalHash([]), expected);
   });
 
   await t.step("sparse array [1, , 3] uses hole run-length encoding", () => {
-    // Spec Section 7.9
-    // TAG_ARRAY + length 3
+    // TAG_ARRAY + LEB128(3) = [0x08, 0x03]
     // + number 1 (TAG_NUMBER + IEEE754)
-    // + TAG_HOLE + run of 1
+    // + TAG_HOLE + LEB128(1)
     // + number 3 (TAG_NUMBER + IEEE754)
     const expected = sha256([
-      // TAG_ARRAY + length 3
+      // TAG_ARRAY + LEB128 length 3
       0x08,
-      0x00,
-      0x00,
-      0x00,
       0x03,
       // Element 0: number 1
       0x02,
@@ -379,9 +360,6 @@ Deno.test("canonicalHash", async (t) => {
       0x00,
       // Element 1: hole run of 1
       0x0b,
-      0x00,
-      0x00,
-      0x00,
       0x01,
       // Element 2: number 3
       0x02,
@@ -407,11 +385,8 @@ Deno.test("canonicalHash", async (t) => {
 
     // Verify by building the expected byte stream manually
     const expected = sha256([
-      // TAG_ARRAY + length 5
+      // TAG_ARRAY + LEB128 length 5
       0x08,
-      0x00,
-      0x00,
-      0x00,
       0x05,
       // Element 0: number 1
       0x02,
@@ -425,9 +400,6 @@ Deno.test("canonicalHash", async (t) => {
       0x00,
       // Elements 1-3: hole run of 3
       0x0b,
-      0x00,
-      0x00,
-      0x00,
       0x03,
       // Element 4: number 5
       0x02,
@@ -446,7 +418,6 @@ Deno.test("canonicalHash", async (t) => {
   await t.step(
     "[1, undefined, 3] vs [1, , 3] vs [1, null, 3] are all distinct",
     () => {
-      // Spec Section 7.11
       // deno-lint-ignore no-sparse-arrays
       const sparseH = hex(canonicalHash([1, , 3]));
       const undefH = hex(canonicalHash([1, undefined, 3]));
@@ -470,7 +441,7 @@ Deno.test("canonicalHash", async (t) => {
   // =========================================================================
 
   await t.step("empty object produces TAG_OBJECT + zero key count", () => {
-    const expected = sha256([0x09, 0x00, 0x00, 0x00, 0x00]);
+    const expected = sha256([0x09, 0x00]);
     assertEquals(canonicalHash({}), expected);
   });
 
@@ -483,20 +454,13 @@ Deno.test("canonicalHash", async (t) => {
 
   await t.step("{a: 1, b: 2} matches hand-computed byte stream", () => {
     // Keys sorted: "a" (0x61) < "b" (0x62)
-    // UTF-8 for "a" is [0x61], 1 byte
-    // UTF-8 for "b" is [0x62], 1 byte
+    // LEB128 lengths are single bytes for small values.
     const expected = sha256([
-      // TAG_OBJECT + 2 keys
+      // TAG_OBJECT + LEB128(2 keys)
       0x09,
-      0x00,
-      0x00,
-      0x00,
       0x02,
-      // Key "a": TAG_STRING + length 1 + UTF-8
+      // Key "a": TAG_STRING + LEB128(1) + UTF-8
       0x03,
-      0x00,
-      0x00,
-      0x00,
       0x01,
       0x61,
       // Value 1: TAG_NUMBER + IEEE754 for 1.0
@@ -509,11 +473,8 @@ Deno.test("canonicalHash", async (t) => {
       0x00,
       0x00,
       0x00,
-      // Key "b": TAG_STRING + length 1 + UTF-8
+      // Key "b": TAG_STRING + LEB128(1) + UTF-8
       0x03,
-      0x00,
-      0x00,
-      0x00,
       0x01,
       0x62,
       // Value 2: TAG_NUMBER + IEEE754 for 2.0
@@ -625,17 +586,11 @@ Deno.test("canonicalHash", async (t) => {
     const hash = canonicalHash(arr);
     assertEquals(hash.length, 32);
 
-    // Should be TAG_ARRAY + length 5 + TAG_HOLE + run 5
+    // TAG_ARRAY + LEB128(5) + TAG_HOLE + LEB128(5)
     const expected = sha256([
       0x08,
-      0x00,
-      0x00,
-      0x00,
       0x05,
       0x0b,
-      0x00,
-      0x00,
-      0x00,
       0x05,
     ]);
     assertEquals(hash, expected);
