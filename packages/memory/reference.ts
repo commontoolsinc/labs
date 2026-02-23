@@ -1,13 +1,8 @@
 import * as Reference from "merkle-reference";
 import { LRUCache } from "@commontools/utils/cache";
 import { canonicalHash } from "./canonical-hash.ts";
-import {
-  getHashImplementation,
-  type HashImplementation,
-  sha256,
-} from "./hash-impl.ts";
+import { sha256 } from "./hash-impl.ts";
 export * from "merkle-reference";
-export type { HashImplementation };
 
 /**
  * Module-level flag for canonical hashing mode, set by the `Runtime`
@@ -143,8 +138,3 @@ export const refer = <T>(source: T): Reference.View<T> => {
 
   return referImpl(source);
 };
-
-/**
- * Get the currently active SHA-256 implementation.
- */
-export { getHashImplementation };

@@ -13,11 +13,6 @@ import { createSHA256, type IHasher } from "hash-wasm";
 import { sha256 as nobleSha256 } from "merkle-reference";
 
 /**
- * Which SHA-256 implementation is currently in use.
- */
-export type HashImplementation = "node:crypto" | "hash-wasm" | "noble";
-
-/**
  * Incremental SHA-256 hasher. Feed data via `update()`, finalize with
  * `digest()`. A hasher must not be reused after `digest()` is called.
  */
@@ -31,7 +26,6 @@ export interface IncrementalHasher {
  */
 export type Sha256Fn = (payload: Uint8Array) => Uint8Array;
 
-let activeHashImpl: HashImplementation = "noble";
 let sha256Fn: Sha256Fn = nobleSha256;
 let createHasher: () => IncrementalHasher;
 
@@ -45,7 +39,6 @@ if (isDeno()) {
     sha256Fn = (payload: Uint8Array): Uint8Array => {
       return nodeCrypto.createHash("sha256").update(payload).digest();
     };
-    activeHashImpl = "node:crypto";
   } catch {
     // node:crypto not available
   }
@@ -62,7 +55,6 @@ if (!nodeCrypto) {
       wasmHasher!.update(payload);
       return wasmHasher!.digest("binary");
     };
-    activeHashImpl = "hash-wasm";
   } catch {
     // hash-wasm not available
   }
@@ -127,13 +119,6 @@ if (nodeCrypto) {
       },
     };
   };
-}
-
-/**
- * Get the currently active SHA-256 implementation.
- */
-export function getHashImplementation(): HashImplementation {
-  return activeHashImpl;
 }
 
 /**
