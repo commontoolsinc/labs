@@ -1,6 +1,5 @@
 import env from "@/env.ts";
 import type { AppRouteHandler } from "@/lib/types.ts";
-import { sha256 } from "@/lib/sha2.ts";
 import type {
   CreateRoute,
   IngestRoute,
@@ -21,6 +20,8 @@ import {
   writeConfidentialConfig,
   writeToCell,
 } from "./webhooks.utils.ts";
+
+const DUMMY_HASH = "0".repeat(64);
 
 export const create: AppRouteHandler<CreateRoute> = async (c) => {
   const logger = c.get("logger");
@@ -49,6 +50,13 @@ export const create: AppRouteHandler<CreateRoute> = async (c) => {
       space = extractSpaceFromCellLink(cellLink);
     } catch {
       return c.json({ error: "Invalid cellLink format" }, 400);
+    }
+
+    // Validate confidentialCellLink format
+    try {
+      extractSpaceFromCellLink(confidentialCellLink);
+    } catch {
+      return c.json({ error: "Invalid confidentialCellLink format" }, 400);
     }
 
     const id = generateWebhookId();
@@ -100,8 +108,8 @@ export const ingest: AppRouteHandler<IngestRoute> = async (c) => {
   const registration = await getRegistration(id);
 
   if (!registration || !registration.enabled) {
-    // Hash token against dummy to prevent timing oracle on missing webhooks
-    await sha256(token);
+    // Match the real verification path to prevent timing oracle on missing webhooks
+    await verifyWebhookSecret(token, DUMMY_HASH);
     return c.json({ error: "Invalid request" }, 401);
   }
 
@@ -171,9 +179,11 @@ export const remove: AppRouteHandler<RemoveRoute> = async (c) => {
     // Derive space from the stored registration's cellLink
     const space = extractSpaceFromCellLink(registration.cellLink);
 
-    // Remove from service index and null out the registration
-    await removeFromServiceIndex(space, id);
+    // Deactivate the webhook first so it can't accept payloads,
+    // then clean up the index. A ghost index entry is harmless;
+    // a ghost active webhook is not.
     await deleteRegistration(id);
+    await removeFromServiceIndex(space, id);
 
     logger.info({ id, space }, "Webhook deleted");
 

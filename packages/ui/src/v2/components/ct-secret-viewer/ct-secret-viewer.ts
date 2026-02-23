@@ -98,8 +98,7 @@ export class CTSecretViewer extends BaseElement {
   private _getMasked(): string {
     if (!this.value) return "";
     const trailing = Math.min(this.trailingChars, this.value.length);
-    const masked = "•".repeat(Math.max(this.value.length - trailing, 8));
-    return masked + this.value.slice(-trailing);
+    return "•".repeat(12) + this.value.slice(-trailing);
   }
 
   private _toggleReveal() {

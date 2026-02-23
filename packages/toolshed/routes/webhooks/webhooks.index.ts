@@ -4,11 +4,7 @@ import * as routes from "./webhooks.routes.ts";
 import { cors } from "@hono/hono/cors";
 import { bodyLimit } from "@hono/hono/body-limit";
 
-const router = createRouter()
-  .openapi(routes.create, handlers.create)
-  .openapi(routes.ingest, handlers.ingest)
-  .openapi(routes.list, handlers.list)
-  .openapi(routes.remove, handlers.remove);
+const router = createRouter();
 
 router.use(
   "/api/webhooks/:id",
@@ -30,4 +26,8 @@ router.use(
   }),
 );
 
-export default router;
+export default router
+  .openapi(routes.create, handlers.create)
+  .openapi(routes.ingest, handlers.ingest)
+  .openapi(routes.list, handlers.list)
+  .openapi(routes.remove, handlers.remove);
