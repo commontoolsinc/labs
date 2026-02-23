@@ -1308,6 +1308,7 @@ export default pattern<{
           return {
             ...e,
             [NAME]: e.subject,
+            summary: str`${e.subject} from ${e.from}: ${e.snippet}`,
             [UI]: (
               <div
                 style={{

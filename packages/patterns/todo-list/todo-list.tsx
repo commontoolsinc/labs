@@ -140,6 +140,7 @@ export default pattern<TodoListInput, TodoListOutput>(({ items }) => {
         return {
           ...e,
           [NAME]: e.title,
+          summary: e.title,
           [UI]: (
             <div
               style={{

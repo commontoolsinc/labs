@@ -40,6 +40,7 @@ interface ReadingItemDetailOutput {
   status: ItemStatus;
   rating: number | null;
   notes: string;
+  summary: string;
   addedAt: number;
   finishedAt: number | null;
   // Actions to update properties
@@ -185,6 +186,13 @@ export default pattern<ReadingItemDetailInput, ReadingItemDetailOutput>(
       status,
       rating,
       notes,
+      summary: computed(() => {
+        const parts = [title.get()];
+        if (author.get()) parts.push(`by ${author.get()}`);
+        parts.push(`(${status.get()})`);
+        if (notes.get()) parts.push(notes.get().slice(0, 150));
+        return parts.join(" ");
+      }),
       addedAt,
       finishedAt,
       setStatus,
