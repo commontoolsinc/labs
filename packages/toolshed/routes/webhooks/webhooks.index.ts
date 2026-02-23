@@ -2,12 +2,21 @@ import { createRouter } from "@/lib/create-app.ts";
 import * as handlers from "./webhooks.handlers.ts";
 import * as routes from "./webhooks.routes.ts";
 import { cors } from "@hono/hono/cors";
+import { bodyLimit } from "@hono/hono/body-limit";
 
 const router = createRouter()
   .openapi(routes.create, handlers.create)
   .openapi(routes.ingest, handlers.ingest)
   .openapi(routes.list, handlers.list)
   .openapi(routes.remove, handlers.remove);
+
+router.use(
+  "/api/webhooks/:id",
+  bodyLimit({
+    maxSize: 1_000_000,
+    onError: (c) => c.json({ error: "Payload too large (max 1MB)" }, 413),
+  }),
+);
 
 router.use(
   "/api/webhooks/*",

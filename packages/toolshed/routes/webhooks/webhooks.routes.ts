@@ -17,7 +17,14 @@ export const create = createRoute({
               name: z.string().describe("Human-readable label for the webhook"),
               cellLink: z
                 .string()
-                .describe("Serialized cell link JSON for the target cell"),
+                .describe(
+                  "Serialized cell link JSON for the inbox (payload destination) cell",
+                ),
+              confidentialCellLink: z
+                .string()
+                .describe(
+                  "Serialized cell link JSON for the confidential config cell (receives URL+secret)",
+                ),
               mode: z
                 .enum(["replace", "append"])
                 .default("replace")
@@ -28,6 +35,8 @@ export const create = createRoute({
                 name: "GitHub Push Events",
                 cellLink:
                   '{"/" : {"link-v0.1" : {"id" : "of:bafe...", "space" : "did:key:bafe...", "path" : ["webhooks", "github"]}}}',
+                confidentialCellLink:
+                  '{"/" : {"link-v0.1" : {"id" : "of:cafe...", "space" : "did:key:bafe...", "path" : ["webhooks", "github", "config"]}}}',
                 mode: "append",
               },
             }),
@@ -41,14 +50,13 @@ export const create = createRoute({
         "application/json": {
           schema: z.object({
             id: z.string(),
-            url: z.string(),
-            secret: z.string(),
             name: z.string(),
             mode: z.enum(["replace", "append"]),
           }),
         },
       },
-      description: "Webhook created successfully. Secret is shown only once.",
+      description:
+        "Webhook created. URL and secret written to confidential config cell.",
     },
     [HttpStatusCodes.BAD_REQUEST]: {
       content: {
@@ -85,15 +93,7 @@ export const ingest = createRoute({
           schema: z.object({ error: z.string() }),
         },
       },
-      description: "Invalid or missing bearer token",
-    },
-    [HttpStatusCodes.NOT_FOUND]: {
-      content: {
-        "application/json": {
-          schema: z.object({ error: z.string() }),
-        },
-      },
-      description: "Webhook not found",
+      description: "Invalid request",
     },
     [HttpStatusCodes.BAD_REQUEST]: {
       content: {
@@ -129,14 +129,12 @@ export const list = createRoute({
                 mode: z.enum(["replace", "append"]),
                 createdAt: z.string(),
                 createdBy: z.string(),
-                lastReceivedAt: z.string().optional(),
-                deliveryCount: z.number(),
               }),
             ),
           }),
         },
       },
-      description: "List of webhooks for the space",
+      description: "List of webhooks for the space (trusted admin endpoint)",
     },
     [HttpStatusCodes.BAD_REQUEST]: {
       content: {
@@ -156,9 +154,6 @@ export const remove = createRoute({
   request: {
     params: z.object({
       id: z.string().describe("Webhook ID to delete"),
-    }),
-    query: z.object({
-      space: z.string().describe("Space DID the webhook belongs to"),
     }),
   },
   responses: {
@@ -184,7 +179,7 @@ export const remove = createRoute({
           schema: z.object({ error: z.string() }),
         },
       },
-      description: "Missing space parameter",
+      description: "Failed to delete webhook",
     },
   },
 });

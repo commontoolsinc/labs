@@ -6,6 +6,7 @@ import {
   generateWebhookId,
   generateWebhookSecret,
   verifyWebhookSecret,
+  webhookEntityId,
 } from "./webhooks.utils.ts";
 
 if (env.ENV !== "test") {
@@ -111,6 +112,31 @@ describe("Webhook Utilities", () => {
       expect(() => extractSpaceFromCellLink(cellLink)).toThrow(
         "Cell link missing space",
       );
+    });
+  });
+
+  describe("webhookEntityId", () => {
+    it("produces deterministic entity IDs", async () => {
+      const id1 = await webhookEntityId("wh_test123");
+      const id2 = await webhookEntityId("wh_test123");
+      expect(id1).toBe(id2);
+    });
+
+    it("starts with of: prefix", async () => {
+      const id = await webhookEntityId("wh_test123");
+      expect(id.startsWith("of:")).toBe(true);
+    });
+
+    it("produces different IDs for different webhooks", async () => {
+      const id1 = await webhookEntityId("wh_abc");
+      const id2 = await webhookEntityId("wh_xyz");
+      expect(id1).not.toBe(id2);
+    });
+
+    it("contains a 64-char hex hash after prefix", async () => {
+      const id = await webhookEntityId("wh_test123");
+      const hash = id.slice(3); // strip "of:"
+      expect(hash).toMatch(/^[0-9a-f]{64}$/);
     });
   });
 });
