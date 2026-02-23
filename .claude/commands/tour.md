@@ -118,7 +118,7 @@ In the chat, type: "Please launch the counter pattern with an initial value of 5
 1. Use `fetchAndRunPattern` to compile and run the counter
 2. Use `navigateTo` to navigate to the new pattern
 
-The counter view shows: a heading "Simple Counter", a large number (5), text like "Counter is the 5th number", and "- Decrement" / "+ Increment" buttons. Take a screenshot.
+The counter view shows: a heading "Simple Counter", a large number (5), text like "Counter is the 5th number", and "- Decrement" / "+ Increment" buttons. Take a screenshot. Note: the counter pattern may not appear in `listPatternIndex`, but the LLM can still launch it via `fetchAndRunPattern` using the path `counter/counter.tsx`.
 
 **Testing interactivity:** The counter buttons are custom `ct-button` web components. Ref-based clicks (`agent-browser click @ref`) may hang on these elements. Use coordinate-based clicking instead:
 1. Use JS eval to walk the shadow DOM and find the button's bounding box
@@ -139,7 +139,9 @@ Open the Omnibot (click the FAB in the bottom-right). Send a message asking it t
 > 3. Budget for a home office upgrade — $500 to spend
 > 4. Clone the https://github.com/commontoolsinc/labs repo and summarize the readme in a note
 
-Wait ~15-25 seconds for the LLM to use the `addDoItem` or `addDoItems` tools. Verify the items appear in the do-list on the left side of the space home. Take a screenshot.
+Wait ~15-25 seconds for the LLM to use the `addDoItem` or `addDoItems` tools. The items appear in the do-list as soon as the tool executes — you don't need to wait for the LLM to finish its text summary. Once you see items in the list, click anywhere on the page to dismiss the omnibox and move on. Note: dismissing the omnibox eats the first click — it does NOT also interact with whatever is underneath. You'll need a second click to interact with elements like AI Suggestions disclosures.
+
+Verify the items appear in the do-list on the left side of the space home. Take a screenshot.
 
 ### Step 10: Watch AI Suggestions Generate
 
@@ -315,27 +317,11 @@ If the user chooses to explore more patterns, list the patterns from the index (
 
 ## Known Gotchas
 
-These were discovered during tour runs and should be expected:
+These are persistent platform/tooling quirks that affect multiple steps. Step-specific advice belongs in the steps themselves.
 
-1. **Note title is deep in shadow DOM.** The note title `<span>` is inside multiple nested shadow DOM layers and an iframe — it does NOT appear in accessibility snapshots. You must use JS eval to walk the shadow DOM (`x-root-view` > `x-app-view` > `x-body-view` > `ct-render` > iframe > content), get bounding box coordinates, and click at those coordinates. The same applies to the `ct-input` that appears after clicking.
+1. **Font warnings in console.** JetBrainsMono font OTS parsing warnings are cosmetic — not errors. Ignore them when reviewing console output.
 
-2. **`ct-button` clicks may hang.** Custom web component buttons (like the counter's increment/decrement) can cause `agent-browser click @ref` to hang indefinitely. Use coordinate-based clicking as a workaround: find the element's bounding box via JS eval, then use `mouse move` + `mouse down/up`.
-
-3. **Counter not in `listPatternIndex`.** The counter pattern may not appear in the index listing, but the LLM can still launch it via `fetchAndRunPattern` using the path `counter/counter.tsx`.
-
-4. **LLM response times.** Chat responses take 15-25 seconds, especially for tool-using responses. Use appropriate wait times.
-
-5. **Font warnings.** You may see JetBrainsMono font OTS parsing warnings in the console — these are cosmetic and not errors.
-
-6. **AI Suggestion generation takes time.** Each suggestion runs an LLM call (Claude Sonnet) that may take 10-30 seconds. Wait patiently and narrate the bead activity as it happens.
-
-7. **"AI Suggestions" `<details>` elements are in shadow DOM.** They do NOT appear in accessibility snapshots. You must use JS eval to recursively walk shadow roots, find `<details>` elements, get their `<summary>` bounding boxes, and click at those coordinates. See Step 10 for the exact JS snippet. After expanding one, re-run the JS to get updated positions since other items shift down.
-
-8. **Grid view is a separate piece, not an in-page toggle.** Click the `ct-cell-link` chip next to the "Recent" or "Pieces" heading to navigate to the PieceGrid view.
-
-9. **Suggestion refinement input requires clicking "+".** The "Refine suggestion..." input is hidden by default. To reveal it, click the **"+"** button on the `ct-message-beads` widget (the row of colored dots). This toggles the `ct-prompt-input` visible below the beads. The input has a Send button and a file upload (paperclip) icon.
-
-10. **Content area scrolling.** The space home content (do-list, pieces) is inside a scrollable container within shadow DOM. `window.scrollBy()` does NOT work. To scroll, use JS eval to find the scrollable container and call `scrollBy()` on it:
+2. **Content area scrolling requires shadow DOM traversal.** The space home content (do-list, pieces) is inside a scrollable container within shadow DOM. `window.scrollBy()` does NOT work. Use JS eval to find and scroll the container:
     ```js
     (() => {
       function findScrollable(node, depth) {
@@ -358,13 +344,7 @@ These were discovered during tour runs and should be expected:
     })()
     ```
 
-11. **Do-list indentation.** The Omnibot uses `indent` values (0=root, 1=subtask, 2=sub-subtask) when rearranging items. The visual indentation in the do-list reflects this hierarchy.
-
-12. **Newlines in `agent-browser type` trigger Enter/submit.** Never include newlines in typed text — the chat input interprets them as send. Write everything on one line.
-
-13. **Omnibox dismissal eats the first click.** After using the Omnibot to add items, clicking anywhere on the page first dismisses the omnibox panel — it does NOT also interact with whatever is underneath. You need a second click to actually interact with elements like AI Suggestions disclosures. Tip: once you see items appear in the do-list, you can immediately click the page to dismiss the omnibox rather than waiting for the LLM to finish its full response.
-
-14. **Don't wait for Omnibot "complete" to proceed.** When adding do-list items, the items appear in the list as soon as the `addDoItems` tool executes. The LLM may continue generating a text summary after that — you don't need to wait for it. Dismiss the omnibox and move on.
+3. **Newlines in `agent-browser type` trigger Enter/submit.** Never include newlines in typed text — the chat input interprets them as send. Write everything on one line.
 
 ## Rules
 
