@@ -681,4 +681,112 @@ Deno.test("canonicalHash", async (t) => {
     const h2 = canonicalHash({ "a": 2, "\u00e9": 1 });
     assertEquals(h1, h2);
   });
+
+  await t.step(
+    "object key sort is UTF-8, not UTF-16 (supplementary vs BMP)",
+    () => {
+      // U+F000 (private use area, BMP): UTF-8 = [EF 80 80] (3 bytes)
+      // U+10000 (supplementary plane):  UTF-8 = [F0 90 80 80] (4 bytes)
+      //
+      // UTF-16 order: U+10000 < U+F000 (surrogates 0xD800 < 0xF000)
+      // UTF-8 order:  U+F000 < U+10000 (0xEF < 0xF0)
+      //
+      // If sorting were naive JS string comparison (UTF-16), U+10000 would
+      // come first. Under correct UTF-8 byte sort, U+F000 comes first.
+      const keyA = "\uF000"; // UTF-8: EF 80 80
+      const keyB = "\u{10000}"; // UTF-8: F0 90 80 80
+
+      // Verify the JS string order is opposite to UTF-8 order.
+      assertEquals(keyB < keyA, true, "JS sorts U+10000 before U+F000");
+
+      const obj = { [keyA]: 1, [keyB]: 2 };
+
+      // Expected byte stream with UTF-8 sort order (keyA first):
+      // TAG_OBJECT (0x11)
+      // + keyA: TAG_STRING(0x23) + LEB128(3) + EF 80 80
+      // + value 1: TAG_NUMBER(0x22) + IEEE754 for 1.0
+      // + keyB: TAG_STRING(0x23) + LEB128(4) + F0 90 80 80
+      // + value 2: TAG_NUMBER(0x22) + IEEE754 for 2.0
+      // + TAG_END (0x00)
+      const expected = sha256([
+        // TAG_OBJECT
+        0x11,
+        // keyA: U+F000 (UTF-8 first)
+        0x23,
+        0x03,
+        0xef,
+        0x80,
+        0x80,
+        // value 1
+        0x22,
+        0x3f,
+        0xf0,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        // keyB: U+10000 (UTF-8 second)
+        0x23,
+        0x04,
+        0xf0,
+        0x90,
+        0x80,
+        0x80,
+        // value 2
+        0x22,
+        0x40,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        // TAG_END
+        0x00,
+      ]);
+      assertEquals(canonicalHash(obj), expected);
+
+      // Also verify the wrong (UTF-16) order produces a different hash.
+      const wrongOrder = sha256([
+        0x11,
+        // keyB first (wrong -- UTF-16 order)
+        0x23,
+        0x04,
+        0xf0,
+        0x90,
+        0x80,
+        0x80,
+        0x22,
+        0x40,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        // keyA second
+        0x23,
+        0x03,
+        0xef,
+        0x80,
+        0x80,
+        0x22,
+        0x3f,
+        0xf0,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        // TAG_END
+        0x00,
+      ]);
+      assertNotEquals(hex(canonicalHash(obj)), hex(wrongOrder));
+    },
+  );
 });
