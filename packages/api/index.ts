@@ -92,13 +92,13 @@ export interface IAnyCell<T> {
  * Readable cells can retrieve their current value.
  */
 export interface IReadable<T> {
-  get(options?: { traverseCells?: boolean }): Readonly<T>;
+  get(options?: { traverseCells?: boolean }): Readonly<StripDefaultBrand<T>>;
   /**
    * Read the cell's current value without creating a reactive dependency.
    * Unlike `get()`, calling `sample()` inside a lift won't cause the lift
    * to re-run when this cell's value changes.
    */
-  sample(): Readonly<T>;
+  sample(): Readonly<StripDefaultBrand<T>>;
 }
 
 /**
@@ -1395,17 +1395,23 @@ export interface BuiltInCompileAndRunState<T> {
 export interface PatternFunction {
   // Function-only overload: T and R inferred from function
   <T, R>(
-    fn: (input: OpaqueRef<T> & { [SELF]: OpaqueRef<R> }) => Opaque<R>,
+    fn: (
+      input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<R> },
+    ) => Opaque<R>,
   ): PatternFactory<StripCell<T>, StripCell<R>>;
 
   // Function-only overload: T explicit, R inferred
   <T>(
-    fn: (input: OpaqueRef<T> & { [SELF]: OpaqueRef<any> }) => any,
+    fn: (
+      input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<any> },
+    ) => any,
   ): PatternFactory<StripCell<T>, StripCell<ReturnType<typeof fn>>>;
 
   // Function + schema overload: T explicit, R inferred
   <T>(
-    fn: (input: OpaqueRef<T> & { [SELF]: OpaqueRef<any> }) => any,
+    fn: (
+      input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<any> },
+    ) => any,
     argumentSchema: JSONSchema,
     resultSchema?: JSONSchema,
   ): PatternFactory<StripCell<T>, StripCell<ReturnType<typeof fn>>>;
@@ -1413,7 +1419,7 @@ export interface PatternFunction {
   // Function + schema overload: T and R explicit
   <T, R>(
     fn: (
-      input: OpaqueRef<T> & { [SELF]: OpaqueRef<R> },
+      input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<R> },
     ) => Opaque<R>,
     argumentSchema: JSONSchema,
     resultSchema?: JSONSchema,
@@ -1663,8 +1669,71 @@ export type CreateNodeFactoryFunction = <T = any, R = any>(
   moduleSpec: Module,
 ) => ModuleFactory<T, R>;
 
-// Default type for specifying default values in type definitions
-export type Default<T, V extends T = T> = T;
+// Symbol used to brand Default<T,V> types so RequireDefaults<T> can detect them.
+// This is a compile-time-only brand; at runtime Default<> is just T.
+export declare const DEFAULT_MARKER: unique symbol;
+
+// Default type for specifying default values in type definitions.
+// The DEFAULT_MARKER brand enables RequireDefaults<T> to detect which fields
+// have runtime-provided defaults and make them non-optional in pattern bodies.
+// Detection uses conditional type inference (not keyof) for performance.
+export type Default<T, V extends T = T> =
+  | (T & { readonly [DEFAULT_MARKER]: T })
+  | T;
+
+/** Detect if T is `any` (used to avoid false positives in brand detection). */
+type IsAny<T> = 0 extends 1 & T ? true : false;
+
+/** Returns true if T is exactly the `boolean` type (i.e. `true | false`), and false for `true`, `false`, or any other type. */
+type IsBoolean<T> = [T] extends [boolean] ? [boolean] extends [T] ? true : false
+  : false;
+
+/**
+ * Inner helper for HasDefaultBrand. Distributes over union members of T —
+ * returning `true` for the branded member, `false` for the plain member,
+ * and therefore `boolean` when T is the full `Default<X, V>` union.
+ */
+type _HasDefaultBrand<T> = typeof DEFAULT_MARKER extends keyof T ? true : false;
+
+/** Returns true if T carries the DEFAULT_MARKER brand (i.e. is `Default<T, V>`), false otherwise. */
+type HasDefaultBrand<T> = IsAny<T> extends true ? false
+  : IsBoolean<_HasDefaultBrand<T>> extends true ? true
+  : _HasDefaultBrand<T>;
+
+/**
+ * Detect whether a type T is (or wraps) a Default<>-branded value.
+ * Handles both direct Default<T,V> and Cell-wrapped Default<T,V>.
+ */
+type IsDefaultField<T> = IsAny<T> extends true ? false
+  : HasDefaultBrand<NonNullable<T>> extends true ? true
+  : NonNullable<T> extends AnyBrandedCell<infer U>
+    ? IsAny<U> extends true ? false
+    : HasDefaultBrand<U> extends true ? true
+    : false
+  : false;
+
+/**
+ * Extract the default value type V from Default<T,V>.
+ * When T is nullable (e.g. number | null), TypeScript's intersection
+ * distributes null away: (number | null) & {[M]?: null} = number & {[M]?: null}.
+ * Extracting V and unioning it back recovers the lost null.
+ */
+type ExtractDefaultBrandValue<U> = U extends
+  { readonly [DEFAULT_MARKER]?: infer V } ? Exclude<V, undefined>
+  : never;
+
+/** Removes the DEFAULT_MARKER branded member from a `Default<T, V>` union, leaving plain `T`. */
+export type StripDefaultBrand<T> = Exclude<T, { readonly [DEFAULT_MARKER]: any }>;
+
+/**
+ * Maps a type T so that any fields carrying the DEFAULT_MARKER brand become required
+ * and have their brand stripped, while all other fields are left unchanged.
+ */
+export type RequireDefaults<T> = {
+  [K in keyof T]-?: IsDefaultField<T[K]> extends true
+    ? StripDefaultBrand<T[K]>
+    : T[K];
+};
 
 // Internal-only way to instantiate internal modules
 export type ByRefFunction = <T, R>(ref: string) => ModuleFactory<T, R>;
