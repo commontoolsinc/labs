@@ -14,11 +14,7 @@ import {
   StorableDate,
   StorableUint8Array,
 } from "./storable-native-instances.ts";
-import {
-  DECONSTRUCT,
-  isStorableInstance,
-  type StorableInstance,
-} from "./storable-protocol.ts";
+import { DECONSTRUCT, isStorableInstance } from "./storable-protocol.ts";
 
 // ---------------------------------------------------------------------------
 // Type tag bytes (Section 2 of the byte-level spec)
