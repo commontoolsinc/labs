@@ -1,0 +1,14 @@
+{
+  "name": "@commontools/leb128",
+  "exports": {
+    ".": "./mod.ts"
+  },
+  "tasks": {
+    "test": "deno test"
+  },
+  "test": {
+    "include": [
+      "test/*-test.ts"
+    ]
+  }
+}

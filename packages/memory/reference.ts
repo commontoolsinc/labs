@@ -118,9 +118,8 @@ const isUnclaimed = (
  */
 export const refer = <T>(source: T): Reference.View<T> => {
   if (canonicalHashingEnabled) {
-    // Stub: will be replaced with real canonical hash + Reference wrapper
-    canonicalHash(source);
-    // canonicalHash throws, so this is unreachable for now
+    const digest = canonicalHash(source);
+    return Reference.fromDigest(digest) as Reference.View<T>;
   }
 
   // Cache {the, of} patterns (unclaimed facts)

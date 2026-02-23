@@ -330,8 +330,12 @@ export class StorableDate extends StorableNativeWrapper<Date> {
     super();
   }
 
+  /**
+   * Deconstruct to milliseconds-since-epoch for hashing and serialization.
+   * The canonical hash uses this via the generic `TAG_INSTANCE` path.
+   */
   [DECONSTRUCT](): StorableValue {
-    throw new Error("StorableDate: not yet implemented");
+    return this.date.getTime();
   }
 
   protected get wrappedValue(): Date {

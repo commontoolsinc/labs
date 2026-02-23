@@ -28,7 +28,8 @@
     "./packages/toolshed",
     "./packages/ui",
     "./packages/utils",
-    "./packages/vendor-astral"
+    "./packages/vendor-astral",
+    "./packages/leb128"
   ],
   "tasks": {
     "check": "./tasks/check.sh",
