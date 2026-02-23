@@ -10,8 +10,7 @@ const WEBHOOK_SECRET_BYTES = 32;
 const MAX_APPEND_ITEMS = 1000;
 
 // Base62 alphabet for generating IDs and secrets
-const BASE62 =
-  "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+const BASE62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
 export interface WebhookRegistration {
   id: string;
@@ -230,8 +229,8 @@ export async function writeToCell(
       const items = Array.isArray(current)
         ? current
         : current != null
-          ? [current]
-          : [];
+        ? [current]
+        : [];
       const updated = [
         ...items.slice(-(MAX_APPEND_ITEMS - 1)),
         {
