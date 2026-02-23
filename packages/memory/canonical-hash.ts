@@ -202,8 +202,13 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
   // 9. StorableInstance (generic protocol path via DECONSTRUCT)
   if (isStorableInstance(value)) {
     hasher.update(new Uint8Array([TAG_STOR]));
-    const inst = value as StorableInstance & { typeTag: string };
-    const typeTagUtf8 = encoder.encode(inst.typeTag);
+    const typeTag = (value as { typeTag?: unknown }).typeTag;
+    if (typeof typeTag !== "string") {
+      throw new Error(
+        `canonicalHash: StorableInstance missing typeTag property`,
+      );
+    }
+    const typeTagUtf8 = encoder.encode(typeTag);
     feedUint32(hasher, typeTagUtf8.length);
     hasher.update(typeTagUtf8);
     const state = value[DECONSTRUCT]();
