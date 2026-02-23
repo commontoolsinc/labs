@@ -237,6 +237,34 @@ Deno.test("canonicalHash", async (t) => {
     assertEquals(canonicalHash(big), hash);
   });
 
+  await t.step(
+    "0x112233445566778899abcdefn matches hand-computed byte stream",
+    () => {
+      // 12-byte positive bigint, high nibble 0x1 so no sign-extension needed.
+      // TAG_BIGINT(0x24) + LEB128(12)=0x0c + big-endian bytes
+      const expected = sha256([
+        0x24,
+        0x0c,
+        0x11,
+        0x22,
+        0x33,
+        0x44,
+        0x55,
+        0x66,
+        0x77,
+        0x88,
+        0x99,
+        0xab,
+        0xcd,
+        0xef,
+      ]);
+      assertEquals(
+        hex(canonicalHash(0x112233445566778899abcdefn)),
+        hex(expected),
+      );
+    },
+  );
+
   // --- undefined ---
 
   await t.step("undefined produces TAG_UNDEFINED", () => {
