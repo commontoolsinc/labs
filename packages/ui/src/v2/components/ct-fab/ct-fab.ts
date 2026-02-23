@@ -41,8 +41,8 @@ export class CTFab extends BaseElement {
         (which lay out in the host context, not the shadow DOM)
         have a proper layout context */
       :host(:not([expanded])) {
-        width: 300px;
-        height: 40px;
+        width: 240px;
+        height: 32px;
       }
 
       *,
@@ -175,7 +175,8 @@ export class CTFab extends BaseElement {
       }
 
       :host([position="bottom-center"]) .fab-container {
-        bottom: 12px;
+        position: fixed;
+        bottom: 0;
         left: 50%;
         transform: translateX(-50%);
       }
@@ -183,10 +184,10 @@ export class CTFab extends BaseElement {
       /* Main morphing element */
       .fab {
         position: relative;
-        width: 300px;
-        height: 40px;
+        width: 240px;
+        height: 32px;
         background: var(--ct-theme-color-surface, #000);
-        border-radius: 20px;
+        border-radius: 16px;
         /*box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1),
           0 4px 16px rgba(0, 0, 0, 0.08);*/
         display: flex;
@@ -267,12 +268,6 @@ export class CTFab extends BaseElement {
             top: auto;
             left: auto;
           }
-
-          :host([position="bottom-center"]) .fab-container {
-            bottom: 12px;
-            left: 50%;
-            transform: translateX(-50%);
-          }
         }
 
         /* Collapsing state - triggers content fade-out */
@@ -285,9 +280,9 @@ export class CTFab extends BaseElement {
           display: flex;
           align-items: center;
           gap: 8px;
-          padding: 0 16px;
+          padding: 0 12px;
           width: 100%;
-          height: 40px;
+          height: 32px;
           pointer-events: none;
           opacity: 1;
           transform: scale(1);
@@ -339,7 +334,10 @@ export class CTFab extends BaseElement {
             bottom: 80px;
             left: 50%;
             transform: translateX(-50%);
+            min-width: 192px;
             max-width: 400px;
+            max-height: 100px;
+            overflow: hidden;
             background: none;
             padding: 0;
             z-index: 998;
@@ -526,16 +524,15 @@ export class CTFab extends BaseElement {
             ) {
               this._previewUnsubscribe = this.previewMessage
                 .asSchema<string>(stringSchema)
-                .subscribe(
-                  (value) => {
-                    this._resolvedPreviewMessage = value;
-                    if (this._resolvedPreviewMessage && !this.expanded) {
-                      this._showPreviewNotification();
-                    }
-                  },
-                );
+                .subscribe((value) => {
+                  this._resolvedPreviewMessage = value;
+                  if (this._resolvedPreviewMessage && !this.expanded) {
+                    this._showPreviewNotification();
+                  }
+                });
             } else if (
-              this.previewMessage && typeof this.previewMessage === "string"
+              this.previewMessage &&
+              typeof this.previewMessage === "string"
             ) {
               this._resolvedPreviewMessage = this.previewMessage;
               if (this.previewMessage && !this.expanded) {
@@ -545,9 +542,7 @@ export class CTFab extends BaseElement {
           }
 
           if (changedProperties.has("expanded")) {
-            if (
-              !this.expanded && changedProperties.get("expanded") === true
-            ) {
+            if (!this.expanded && changedProperties.get("expanded") === true) {
               // Started collapsing
               this.collapsing = true;
               this.toggleAttribute("collapsing", true);
