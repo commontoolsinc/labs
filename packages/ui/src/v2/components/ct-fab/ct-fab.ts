@@ -334,7 +334,10 @@ export class CTFab extends BaseElement {
             bottom: 80px;
             left: 50%;
             transform: translateX(-50%);
+            min-width: 192px;
             max-width: 400px;
+            max-height: 100px;
+            overflow: hidden;
             background: none;
             padding: 0;
             z-index: 998;
