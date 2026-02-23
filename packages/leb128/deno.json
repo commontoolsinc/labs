@@ -3,6 +3,9 @@
   "exports": {
     ".": "./mod.ts"
   },
+  "tasks": {
+    "test": "deno test"
+  },
   "test": {
     "include": [
       "test/*-test.ts"
