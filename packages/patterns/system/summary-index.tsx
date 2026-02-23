@@ -15,7 +15,7 @@ import { type MentionablePiece } from "./backlinks-index.tsx";
 export type SummarizablePiece = MentionablePiece & { summary?: string };
 
 export type SummaryIndexEntry = {
-  piece: SummarizablePiece;
+  piece: Writable<SummarizablePiece>;
   summary: string;
   name: string;
 };
@@ -56,7 +56,7 @@ export const searchPattern = pattern<
 });
 
 const SummaryIndex = pattern<Input, Output>(() => {
-  const mentionable = wish<Default<SummarizablePiece[], []>>({
+  const mentionable = wish<Default<Writable<SummarizablePiece>[], []>>({
     query: "#mentionable",
   }).result;
 
@@ -66,10 +66,11 @@ const SummaryIndex = pattern<Input, Output>(() => {
     const result: SummaryIndexEntry[] = [];
     for (const piece of mentionable ?? []) {
       if (!piece) continue;
-      const summary = extractSummary(piece);
+      const value = piece.get();
+      const summary = extractSummary(value);
       if (!summary) continue;
-      const name = (piece[NAME] ?? "").toString();
-      result.push({ piece: piece as SummarizablePiece, summary, name });
+      const name = (value[NAME] ?? "").toString();
+      result.push({ piece, summary, name });
     }
     return result;
   });

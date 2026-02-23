@@ -205,6 +205,13 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
   const doListItems = Writable.of<any[]>([]);
   const doList = DoList({ items: doListItems });
 
+  // Combine user-managed allPieces with system pieces (like doList) so
+  // BacklinksIndex picks up their mentionable items via the wish.
+  const allPiecesWithSystem = computed(() => [
+    ...allPieces.get(),
+    doList as any,
+  ]);
+
   const fab = OmniboxFAB({
     mentionable: index.mentionable,
     doListTools: {
@@ -425,8 +432,8 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
     sidebarUI: undefined,
     fabUI: fab[UI],
 
-    // Exported data
-    allPieces,
+    // Exported data — includes system pieces for BacklinksIndex
+    allPieces: allPiecesWithSystem,
     recentPieces,
 
     // Exported handlers (bound to state cells for external callers)
