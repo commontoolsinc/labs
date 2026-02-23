@@ -37,6 +37,24 @@ const TAG_UNDEFINED = 0x25;
 const TAG_BYTES = 0x26;
 
 // ---------------------------------------------------------------------------
+// Pre-allocated tag byte arrays (avoids per-call allocation)
+// ---------------------------------------------------------------------------
+
+const TAG_END_BYTES = new Uint8Array([TAG_END]);
+const TAG_HOLE_BYTES = new Uint8Array([TAG_HOLE]);
+const TAG_ARRAY_BYTES = new Uint8Array([TAG_ARRAY]);
+const TAG_OBJECT_BYTES = new Uint8Array([TAG_OBJECT]);
+const TAG_INSTANCE_BYTES = new Uint8Array([TAG_INSTANCE]);
+const TAG_NULL_BYTES = new Uint8Array([TAG_NULL]);
+const TAG_BOOLEAN_TRUE_BYTES = new Uint8Array([TAG_BOOLEAN, 0x01]);
+const TAG_BOOLEAN_FALSE_BYTES = new Uint8Array([TAG_BOOLEAN, 0x00]);
+const TAG_NUMBER_BYTES = new Uint8Array([TAG_NUMBER]);
+const TAG_STRING_BYTES = new Uint8Array([TAG_STRING]);
+const TAG_BIGINT_BYTES = new Uint8Array([TAG_BIGINT]);
+const TAG_UNDEFINED_BYTES = new Uint8Array([TAG_UNDEFINED]);
+const TAG_BYTES_BYTES = new Uint8Array([TAG_BYTES]);
+
+// ---------------------------------------------------------------------------
 // Shared scratch buffer (safe in single-threaded synchronous JS -- see
 // async safety analysis in PR #2856 review round 2)
 // ---------------------------------------------------------------------------
@@ -116,7 +134,7 @@ function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
 function feedValue(hasher: IncrementalHasher, value: unknown): void {
   switch (typeof value) {
     case "boolean":
-      hasher.update(new Uint8Array([TAG_BOOLEAN, value ? 0x01 : 0x00]));
+      hasher.update(value ? TAG_BOOLEAN_TRUE_BYTES : TAG_BOOLEAN_FALSE_BYTES);
       return;
 
     case "number":
@@ -125,14 +143,14 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
           `canonicalHash: non-finite number not allowed: ${value}`,
         );
       }
-      hasher.update(new Uint8Array([TAG_NUMBER]));
+      hasher.update(TAG_NUMBER_BYTES);
       // Normalize -0 to +0.
       f64View.setFloat64(0, value === 0 ? 0 : value, false); // big-endian
       hasher.update(f64Bytes);
       return;
 
     case "string": {
-      hasher.update(new Uint8Array([TAG_STRING]));
+      hasher.update(TAG_STRING_BYTES);
       const utf8 = encoder.encode(value);
       feedLength(hasher, utf8.length);
       hasher.update(utf8);
@@ -140,7 +158,7 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
     }
 
     case "bigint": {
-      hasher.update(new Uint8Array([TAG_BIGINT]));
+      hasher.update(TAG_BIGINT_BYTES);
       const bytes = bigintToMinimalTwosComplement(value);
       feedLength(hasher, bytes.length);
       hasher.update(bytes);
@@ -148,7 +166,7 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
     }
 
     case "undefined":
-      hasher.update(new Uint8Array([TAG_UNDEFINED]));
+      hasher.update(TAG_UNDEFINED_BYTES);
       return;
 
     case "object":
@@ -172,13 +190,13 @@ function feedObjectValue(
 ): void {
   // 1. null (typeof null === "object")
   if (value === null) {
-    hasher.update(new Uint8Array([TAG_NULL]));
+    hasher.update(TAG_NULL_BYTES);
     return;
   }
 
   // 2. StorableUint8Array (before generic StorableInstance check)
   if (value instanceof StorableUint8Array) {
-    hasher.update(new Uint8Array([TAG_BYTES]));
+    hasher.update(TAG_BYTES_BYTES);
     const bytes = value.bytes;
     feedLength(hasher, bytes.length);
     hasher.update(bytes);
@@ -188,7 +206,7 @@ function feedObjectValue(
   // 3. StorableInstance (generic protocol path via DECONSTRUCT).
   // StorableDate falls through to here (hashed via typeTag + DECONSTRUCT).
   if (isStorableInstance(value)) {
-    hasher.update(new Uint8Array([TAG_INSTANCE]));
+    hasher.update(TAG_INSTANCE_BYTES);
     const typeTag = (value as { typeTag?: unknown }).typeTag;
     if (typeof typeTag !== "string") {
       throw new Error(
@@ -205,7 +223,7 @@ function feedObjectValue(
 
   // 4. Array (with sparse hole handling, terminated by TAG_END)
   if (Array.isArray(value)) {
-    hasher.update(new Uint8Array([TAG_ARRAY]));
+    hasher.update(TAG_ARRAY_BYTES);
     let i = 0;
     while (i < value.length) {
       if (!(i in value)) {
@@ -215,14 +233,14 @@ function feedObjectValue(
           runLen++;
           i++;
         }
-        hasher.update(new Uint8Array([TAG_HOLE]));
+        hasher.update(TAG_HOLE_BYTES);
         feedLength(hasher, runLen);
       } else {
         feedValue(hasher, value[i]);
         i++;
       }
     }
-    hasher.update(new Uint8Array([TAG_END]));
+    hasher.update(TAG_END_BYTES);
     return;
   }
 
@@ -240,17 +258,17 @@ function feedObjectValue(
     return aBytes.length - bBytes.length;
   });
 
-  hasher.update(new Uint8Array([TAG_OBJECT]));
+  hasher.update(TAG_OBJECT_BYTES);
   for (const key of keys) {
     // Keys are encoded as TAG_STRING-style values (same format as strings).
-    hasher.update(new Uint8Array([TAG_STRING]));
+    hasher.update(TAG_STRING_BYTES);
     const keyUtf8 = encoder.encode(key);
     feedLength(hasher, keyUtf8.length);
     hasher.update(keyUtf8);
     // Value is hashed recursively.
     feedValue(hasher, obj[key]);
   }
-  hasher.update(new Uint8Array([TAG_END]));
+  hasher.update(TAG_END_BYTES);
 }
 
 // ---------------------------------------------------------------------------
