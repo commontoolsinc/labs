@@ -118,6 +118,26 @@ Deno.test("canonicalHash", async (t) => {
     assertNotEquals(hex(canonicalHash(-1)), hex(canonicalHash(1)));
   });
 
+  await t.step(
+    "Number.MAX_VALUE produces TAG_NUMBER + all-nonzero IEEE 754 bytes",
+    () => {
+      // IEEE 754 float64 big-endian for Number.MAX_VALUE:
+      // 7F EF FF FF FF FF FF FF  (all bytes non-zero)
+      const expected = sha256([
+        0x22,
+        0x7f,
+        0xef,
+        0xff,
+        0xff,
+        0xff,
+        0xff,
+        0xff,
+        0xff,
+      ]);
+      assertEquals(hex(canonicalHash(Number.MAX_VALUE)), hex(expected));
+    },
+  );
+
   // --- string ---
 
   await t.step(
