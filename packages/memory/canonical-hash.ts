@@ -135,7 +135,7 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
   switch (typeof value) {
     case "boolean":
       hasher.update(value ? TAG_BOOLEAN_TRUE_BYTES : TAG_BOOLEAN_FALSE_BYTES);
-      return;
+      break;
 
     case "number":
       if (!Number.isFinite(value)) {
@@ -147,14 +147,14 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
       // Normalize -0 to +0.
       f64View.setFloat64(0, value === 0 ? 0 : value, false); // big-endian
       hasher.update(f64Bytes);
-      return;
+      break;
 
     case "string": {
       hasher.update(TAG_STRING_BYTES);
       const utf8 = encoder.encode(value);
       feedLength(hasher, utf8.length);
       hasher.update(utf8);
-      return;
+      break;
     }
 
     case "bigint": {
@@ -162,16 +162,16 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
       const bytes = bigintToMinimalTwosComplement(value);
       feedLength(hasher, bytes.length);
       hasher.update(bytes);
-      return;
+      break;
     }
 
     case "undefined":
       hasher.update(TAG_UNDEFINED_BYTES);
-      return;
+      break;
 
     case "object":
       feedObjectValue(hasher, value);
-      return;
+      break;
 
     default:
       throw new Error(
