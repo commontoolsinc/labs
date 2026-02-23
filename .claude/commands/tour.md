@@ -376,3 +376,23 @@ These were discovered during tour runs and should be expected:
 - **Show the browser.** Use headed/visible mode so the user can watch the tour happen in real time.
 - **This is exploratory, not a snapshot test.** The descriptions are high-level guides. You are free to explore beyond the prescribed steps and adapt to what you find.
 - **Use coordinate-based clicks for custom web components.** When `agent-browser click @ref` hangs, fall back to finding the element via JS eval and clicking at its coordinates.
+
+## Self-Improvement
+
+This tour is designed to improve itself. When something goes wrong during a run:
+
+1. **Fix the source, not the footnotes.** Don't just add a new Known Gotcha — go back and rewrite the step that was wrong. The tour should always read as correct, up-to-date instructions, not a document with errata appended.
+   - If a step says to click element X but it's now element Y, **rewrite the step**.
+   - If timing assumptions are wrong, **update the numbers in the step**.
+   - If a UI flow has changed, **rewrite the flow description**.
+   - If a JS eval snippet no longer works, **fix the snippet**.
+
+2. **Known Gotchas are for structural workarounds, not corrections.** A gotcha belongs in the list only when it describes a persistent platform quirk that can't be fixed by rewriting a step (e.g., "shadow DOM elements don't appear in accessibility snapshots"). If a gotcha was added as a correction to a bad step, fold the fix into the step and remove the gotcha.
+
+3. **Keep the file from growing.** When updating:
+   - Remove gotchas that are now redundant because the step was fixed.
+   - Remove gotchas for bugs that have been fixed in the platform.
+   - Consolidate duplicate or overlapping gotchas.
+   - The file should get *better*, not *longer*.
+
+4. **Only document what you've actually hit.** Don't add speculative advice. Every change should come from a real failure in a real tour run.
