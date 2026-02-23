@@ -250,7 +250,7 @@ const colorHandlers = [
 
 // ============ PATTERN ============
 
-const Event = pattern<Required<Input>, Output>(
+const Event = pattern<Input, Output>(
   ({ title, date, startTime, endTime, color, notes, isHidden, eventId }) => {
     // State for inline title editing
     const isEditingTitle = Writable.of<boolean>(false);
