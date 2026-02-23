@@ -79,10 +79,13 @@ hardcoded file. Validates that Deno FFI to libfuse works at all.
 - [ ] **1.4 Extended attributes**
   - [ ] `getxattr` callback for `user.json.type` per node
     (`string`, `number`, `boolean`, `null`, `object`, `array`)
-- [ ] **1.5 Symlinks for cell references**
-  - [ ] Detect sigil links (`{ "/": { "link@1": ... } }`) in values
-  - [ ] Create symlink nodes to target entity path
-  - [ ] `readlink` callback
+- [ ] **1.5 Symlinks for cell references (read)**
+  - [ ] Detect sigil links (`{ "/": { "link@1": ... } }`) in cell values
+  - [ ] Map `id` + `path` + `space` to relative filesystem paths
+  - [ ] Handle same-space (relative to entity dir), cross-space (up to mount
+    root), and self-referencing (id omitted) cases
+  - [ ] Create symlink `FsNode`s in the in-memory tree
+  - [ ] `readlink` callback returns the computed target path
 - [ ] **1.6 Metadata files**
   - [ ] `meta.json` per piece (read-only): ID, pattern name, connections
   - [ ] `space.json` per space: DID, space name
@@ -112,7 +115,14 @@ hardcoded file. Validates that Deno FFI to libfuse works at all.
 - [ ] **2.4 Handler invocation**
   - [ ] `handlers/<name>` files: parse written JSON, call `stream.send()`
   - [ ] Fire-and-forget (return success after send)
-- [ ] **2.5 Create and delete**
+- [ ] **2.5 Symlink writes (sigil links)**
+  - [ ] `symlink` callback: parse target path to `(space, id, path)` tuple
+  - [ ] Construct `SigilLink` JSON: `{ "/": { "link@1": { id, path, space } } }`
+  - [ ] Write sigil link at symlink location in parent cell
+  - [ ] Omit fields matching current context (same space, no path, etc.)
+  - [ ] Return `EINVAL` for targets that don't resolve within mountpoint
+  - [ ] Writing sigil link JSON to `.json` files also produces symlinks
+- [ ] **2.6 Create and delete**
   - [ ] `create` (new file in object dir): add key to parent
   - [ ] `mkdir`: add key with `{}` value
   - [ ] `unlink`/`rmdir`: remove key; re-index for array parents

@@ -51,9 +51,26 @@ cells and lazily for others.
 ### `readlink`
 
 For symlinks (cell references), return the relative path to the target entity
-within the filesystem.
+within the filesystem. The target is constructed from the sigil link's `id`,
+`path`, and `space` fields (see
+[JSON Mapping](./3-json-mapping.md#reading-sigil-link---symlink)).
 
 ## Write Path
+
+### `symlink` (Create Symlink)
+
+Creating a symlink writes a sigil link into the parent cell:
+
+1. Parse the target path to extract `(space, id, path)` tuple.
+2. Construct a `SigilLink`: `{ "/": { "link@1": { id, path, space } } }`.
+3. Set the value at the symlink's location in the parent cell.
+4. The in-memory tree node at that path becomes a symlink.
+
+If the target path cannot be parsed (doesn't resolve to a valid entity
+path within the mountpoint), return `EINVAL`.
+
+See [JSON Mapping](./3-json-mapping.md#writing-symlink---sigil-link) for
+target path parsing rules and examples.
 
 ### `write` to Scalar File
 

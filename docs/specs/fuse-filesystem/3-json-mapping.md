@@ -150,20 +150,127 @@ On macOS, use `xattr -p` to read these. On Linux, use `getfattr`.
 
 ## Special Values
 
-### Cell References (Sigil Links)
+### Cell References (Sigil Links) as Symlinks
 
-When a cell value contains a reference to another cell (`{ "/": { "link@1": ... } }`),
-the filesystem represents it as a **symlink** pointing to the referenced
-entity's path within the filesystem:
+When a cell value contains a reference to another cell, the filesystem
+represents it as a **symlink**. This is bidirectional — reading a sigil link
+produces a symlink, and creating a symlink writes a sigil link.
 
+#### Sigil Link Structure
+
+A sigil link in cell data looks like:
+
+```json
+{ "/": { "link@1": { "id": "of:ba4j...", "path": ["items", "0"], "space": "did:key:z6Mkk..." } } }
+```
+
+The fields are:
+- `id` — target entity ID (optional; defaults to containing entity)
+- `path` — JSON path within the target entity (optional; defaults to root)
+- `space` — target space DID (optional; defaults to same space)
+
+#### Reading: Sigil Link -> Symlink
+
+The filesystem maps each sigil link field to a filesystem path component:
+
+```
+<mountpoint>/<space>/<view>/<entity-or-piece>/<path...>
+```
+
+**Same-space, entity-only** (most common):
+
+```json
+{ "/": { "link@1": { "id": "of:ba4jcbvpq3k5..." } } }
+```
 ```
 result/related -> ../../entities/ba4jcbvpq3k5.../
 ```
 
-If the reference includes a path, the symlink targets that subpath. If the
-target is in a different space, the symlink target includes the space prefix
-(which may not be mounted, resulting in a broken symlink — this is informative
-rather than an error).
+**Same-space, entity + path:**
+
+```json
+{ "/": { "link@1": { "id": "of:ba4jcbvpq3k5...", "path": ["items", "0", "text"] } } }
+```
+```
+result/related -> ../../entities/ba4jcbvpq3k5.../items/0/text
+```
+
+**Cross-space:**
+
+```json
+{ "/": { "link@1": { "id": "of:ba4j...", "space": "did:key:z7Nll..." } } }
+```
+```
+result/related -> ../../../did:key:z7Nll.../entities/ba4j.../
+```
+
+Cross-space symlinks may be broken if the target space hasn't been accessed
+yet. This is informative, not an error — `ls -l` shows the target, and
+accessing the symlink triggers lazy space resolution.
+
+**Self-referencing (id omitted):**
+
+When `id` is absent, the link refers to a path within the same entity. The
+symlink is relative within the same entity directory:
+
+```json
+{ "/": { "link@1": { "path": ["settings", "theme"] } } }
+```
+```
+result/config -> settings/theme
+```
+
+#### Writing: Symlink -> Sigil Link
+
+Creating a symlink (`ln -s`) writes a sigil link into the parent cell:
+
+```bash
+# Link a field to another entity
+ln -s ../../entities/ba4jcbvpq3k5.../ result/related
+
+# Link to a specific path in another entity
+ln -s ../../entities/ba4jcbvpq3k5.../items/0 result/source
+
+# Cross-space link
+ln -s ../../../other-space/entities/ba4j.../ result/external
+```
+
+The filesystem parses the symlink target path to extract `(space, id, path)`,
+then writes the corresponding sigil link:
+
+```json
+{ "/": { "link@1": { "id": "of:ba4jcbvpq3k5...", "path": ["items", "0"] } } }
+```
+
+**Parsing rules:**
+
+1. The target must be a relative path within the mountpoint (absolute paths
+   and paths escaping the mountpoint are rejected with `EINVAL`).
+2. The path is resolved relative to the symlink's parent directory to find
+   which space, entity, and JSON path it points to.
+3. Fields that match the current context are omitted: if the target is in
+   the same space, `space` is omitted. If no JSON path, `path` is omitted.
+
+**Overwriting existing values:** Creating a symlink at a path that already
+has a value (file or directory) replaces that value with the sigil link. The
+old value is lost — this is equivalent to `cell.set()` at that path.
+
+#### Symlink + `.json` Interaction
+
+Reading the `.json` sibling of a path that contains a symlink returns the
+raw sigil link JSON, not the resolved target value:
+
+```bash
+cat result/related.json
+# => {"/":{\"link@1\":{\"id\":\"of:ba4jcbvpq3k5...\"}}}
+```
+
+Writing a sigil link JSON to a `.json` file also works — this is an
+alternative to `ln -s` for programmatic use:
+
+```bash
+echo '{"/":{\"link@1\":{\"id\":\"of:ba4j...\"}}}' > result/related.json
+```
 
 ### Stream Markers
 
