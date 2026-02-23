@@ -18,17 +18,23 @@ import { encodeULEB128 } from "@commontools/leb128";
 // Type tag bytes (Section 2 of the byte-level spec)
 // ---------------------------------------------------------------------------
 
-const TAG_NULL = 0x00;
-const TAG_BOOLEAN = 0x01;
-const TAG_NUMBER = 0x02;
-const TAG_STRING = 0x03;
-const TAG_BIGINT = 0x04;
-const TAG_UNDEFINED = 0x05;
-const TAG_BYTES = 0x06;
-const TAG_ARRAY = 0x07;
-const TAG_OBJECT = 0x08;
-const TAG_INSTANCE = 0x09;
-const TAG_HOLE = 0x0a;
+// Meta (0x0N)
+const TAG_END = 0x00;
+const TAG_HOLE = 0x01;
+
+// Compound (0x1N)
+const TAG_ARRAY = 0x10;
+const TAG_OBJECT = 0x11;
+const TAG_INSTANCE = 0x12;
+
+// Primitive (0x2N)
+const TAG_NULL = 0x20;
+const TAG_BOOLEAN = 0x21;
+const TAG_NUMBER = 0x22;
+const TAG_STRING = 0x23;
+const TAG_BIGINT = 0x24;
+const TAG_UNDEFINED = 0x25;
+const TAG_BYTES = 0x26;
 
 // ---------------------------------------------------------------------------
 // Shared scratch buffer (safe in single-threaded synchronous JS -- see
@@ -193,10 +199,9 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
     return;
   }
 
-  // 9. Array (with sparse hole handling)
+  // 9. Array (with sparse hole handling, terminated by TAG_END)
   if (Array.isArray(value)) {
     hasher.update(new Uint8Array([TAG_ARRAY]));
-    feedLength(hasher, value.length);
     let i = 0;
     while (i < value.length) {
       if (!(i in value)) {
@@ -213,6 +218,7 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
         i++;
       }
     }
+    hasher.update(new Uint8Array([TAG_END]));
     return;
   }
 
@@ -231,7 +237,6 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
   });
 
   hasher.update(new Uint8Array([TAG_OBJECT]));
-  feedLength(hasher, keys.length);
   for (const key of keys) {
     // Keys are encoded as TAG_STRING-style values (same format as strings).
     hasher.update(new Uint8Array([TAG_STRING]));
@@ -241,6 +246,7 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
     // Value is hashed recursively.
     feedValue(hasher, obj[key]);
   }
+  hasher.update(new Uint8Array([TAG_END]));
 }
 
 // ---------------------------------------------------------------------------
