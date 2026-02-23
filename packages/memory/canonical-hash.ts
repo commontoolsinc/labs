@@ -114,65 +114,69 @@ function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
  * byte format from the byte-level spec.
  */
 function feedValue(hasher: IncrementalHasher, value: unknown): void {
-  // 1. null
+  switch (typeof value) {
+    case "boolean":
+      hasher.update(new Uint8Array([TAG_BOOLEAN, value ? 0x01 : 0x00]));
+      return;
+
+    case "number":
+      if (!Number.isFinite(value)) {
+        throw new Error(
+          `canonicalHash: non-finite number not allowed: ${value}`,
+        );
+      }
+      hasher.update(new Uint8Array([TAG_NUMBER]));
+      // Normalize -0 to +0.
+      f64View.setFloat64(0, value === 0 ? 0 : value, false); // big-endian
+      hasher.update(f64Bytes);
+      return;
+
+    case "string": {
+      hasher.update(new Uint8Array([TAG_STRING]));
+      const utf8 = encoder.encode(value);
+      feedLength(hasher, utf8.length);
+      hasher.update(utf8);
+      return;
+    }
+
+    case "bigint": {
+      hasher.update(new Uint8Array([TAG_BIGINT]));
+      const bytes = bigintToMinimalTwosComplement(value);
+      feedLength(hasher, bytes.length);
+      hasher.update(bytes);
+      return;
+    }
+
+    case "undefined":
+      hasher.update(new Uint8Array([TAG_UNDEFINED]));
+      return;
+
+    case "object":
+      feedObjectValue(hasher, value);
+      return;
+
+    default:
+      throw new Error(
+        `canonicalHash: unsupported type: ${typeof value}`,
+      );
+  }
+}
+
+/**
+ * Feed an object-typed value (null, StorableUint8Array, StorableInstance,
+ * Array, or plain object) into the hasher.
+ */
+function feedObjectValue(
+  hasher: IncrementalHasher,
+  value: object | null,
+): void {
+  // 1. null (typeof null === "object")
   if (value === null) {
     hasher.update(new Uint8Array([TAG_NULL]));
     return;
   }
 
-  // 2. boolean
-  if (typeof value === "boolean") {
-    hasher.update(new Uint8Array([TAG_BOOLEAN, value ? 0x01 : 0x00]));
-    return;
-  }
-
-  // 3. number
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) {
-      throw new Error(
-        `canonicalHash: non-finite number not allowed: ${value}`,
-      );
-    }
-    hasher.update(new Uint8Array([TAG_NUMBER]));
-    // Normalize -0 to +0.
-    const normalized = value === 0 ? 0 : value;
-    f64View.setFloat64(0, normalized, false); // big-endian
-    hasher.update(f64Bytes);
-    return;
-  }
-
-  // 4. string
-  if (typeof value === "string") {
-    hasher.update(new Uint8Array([TAG_STRING]));
-    const utf8 = encoder.encode(value);
-    feedLength(hasher, utf8.length);
-    hasher.update(utf8);
-    return;
-  }
-
-  // 5. bigint
-  if (typeof value === "bigint") {
-    hasher.update(new Uint8Array([TAG_BIGINT]));
-    const bytes = bigintToMinimalTwosComplement(value);
-    feedLength(hasher, bytes.length);
-    hasher.update(bytes);
-    return;
-  }
-
-  // 6. undefined
-  if (value === undefined) {
-    hasher.update(new Uint8Array([TAG_UNDEFINED]));
-    return;
-  }
-
-  // From here on, value is an object.
-  if (typeof value !== "object") {
-    throw new Error(
-      `canonicalHash: unsupported type: ${typeof value}`,
-    );
-  }
-
-  // 7. StorableUint8Array (before generic StorableInstance check)
+  // 2. StorableUint8Array (before generic StorableInstance check)
   if (value instanceof StorableUint8Array) {
     hasher.update(new Uint8Array([TAG_BYTES]));
     const bytes = value.bytes;
@@ -181,8 +185,8 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
     return;
   }
 
-  // 8. StorableInstance (generic protocol path via DECONSTRUCT).
-  // StorableDate now falls through to here (hashed via typeTag + DECONSTRUCT).
+  // 3. StorableInstance (generic protocol path via DECONSTRUCT).
+  // StorableDate falls through to here (hashed via typeTag + DECONSTRUCT).
   if (isStorableInstance(value)) {
     hasher.update(new Uint8Array([TAG_INSTANCE]));
     const typeTag = (value as { typeTag?: unknown }).typeTag;
@@ -199,7 +203,7 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
     return;
   }
 
-  // 9. Array (with sparse hole handling, terminated by TAG_END)
+  // 4. Array (with sparse hole handling, terminated by TAG_END)
   if (Array.isArray(value)) {
     hasher.update(new Uint8Array([TAG_ARRAY]));
     let i = 0;
@@ -222,7 +226,7 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
     return;
   }
 
-  // 10. Plain object
+  // 5. Plain object
   const obj = value as Record<string, unknown>;
   const keys = Object.keys(obj);
   // Sort keys by UTF-8 byte comparison.
