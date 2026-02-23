@@ -250,6 +250,18 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
             <h2 style={{ margin: 0, fontSize: "20px" }}>Patterns</h2>
           </div>
           <ct-cell-link
+            $cell={index}
+            slot="end"
+            style={{
+              fontSize: "14px",
+              padding: "6px 12px",
+              textDecoration: "none",
+              color: "var(--ct-color-text-secondary)",
+            }}
+          >
+            Mentions
+          </ct-cell-link>
+          <ct-cell-link
             $cell={summaryIdx}
             slot="end"
             style={{
