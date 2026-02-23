@@ -25,6 +25,10 @@ import {
   updateProfile,
 } from "./common-tools.tsx";
 import { MentionablePiece } from "./backlinks-index.tsx";
+import {
+  searchPattern as summarySearchPattern,
+  type SummaryIndexEntry,
+} from "./summary-index.tsx";
 
 interface DoListTools {
   addItem: Stream<{ title: string; indent?: number }>;
@@ -161,6 +165,9 @@ export default pattern<OmniboxFABInput>(
     const mentionable =
       wish<MentionablePiece[]>({ query: "#mentionable" }).result;
     const recentPieces = wish<MentionablePiece[]>({ query: "#recent" }).result;
+    const { entries: summaryEntries } = wish<{
+      entries: SummaryIndexEntry[];
+    }>({ query: "#summaryIndex" }).result;
 
     const sandboxId = Writable.of(
       `omnibot-${Math.random().toString(36).slice(2, 10)}`,
@@ -180,8 +187,9 @@ export default pattern<OmniboxFABInput>(
       return `You are a polite but efficient assistant. Think Star Trek computer - helpful and professional without unnecessary conversation. Let your actions speak for themselves.
 ${profileSection}
 Tool usage priority:
+- For finding content in the space: use searchSpace with a query to search across all piece summaries and names
 - For patterns: listPatternIndex first
-- For existing pages/notes/content: listRecent or listMentionable to identify what they're referencing
+- For existing pages/notes/content: searchSpace first, then listRecent or listMentionable to identify what they're referencing
 - Attach relevant items to conversation after instantiation/retrieval if they support ongoing tasks
 - Remove attachments when no longer relevant
 - Search web only as last resort when nothing exists in the space
@@ -238,6 +246,9 @@ Be matter-of-fact. Prefer action to explanation.`;
         },
         readDoList: patternTool(readDoList, {
           items: doListTools.items,
+        }),
+        searchSpace: patternTool(summarySearchPattern, {
+          entries: summaryEntries,
         }),
       },
     });

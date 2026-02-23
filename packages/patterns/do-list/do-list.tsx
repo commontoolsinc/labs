@@ -32,8 +32,10 @@ interface DoListOutput {
   [NAME]: string;
   [UI]: VNode;
   compactUI: VNode;
+  isHidden: true;
   items: DoItem[];
   itemCount: number;
+  mentionable: { [NAME]: string; summary: string; [UI]: VNode }[];
   // UI handlers (use cell references via equals())
   addItem: OpaqueRef<Stream<{ title: string; indent?: number }>>;
   removeItem: OpaqueRef<Stream<{ item: DoItem }>>;
@@ -188,10 +190,11 @@ const updateItemByTitleHandler = handler<
 
 const DoItemCard = pattern<
   { item: DoItem; removeItem: Stream<{ item: DoItem }> },
-  { [UI]: VNode; [NAME]: string }
+  { [UI]: VNode; [NAME]: string; summary: string }
 >(({ item, removeItem }) => {
   return {
-    [NAME]: "Do Item",
+    [NAME]: computed(() => item.title),
+    summary: computed(() => item.title),
     [UI]: (
       <ct-card style={`margin-left: ${(item.indent ?? 0) * 24}px;`}>
         <ct-hstack gap="2" align="center">
@@ -238,13 +241,16 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
   const removeItemByTitle = removeItemByTitleHandler({ items });
   const updateItemByTitle = updateItemByTitleHandler({ items });
 
+  // Map items to sub-pattern instances once — reused for UI and mentionable
+  const itemCards = items.map((item) => (
+    <DoItemCard item={item} removeItem={removeItem} />
+  ));
+
   // Compact UI - embeddable widget without ct-screen wrapper
   const compactUI = (
     <ct-vstack gap="2">
       <ct-vstack gap="2">
-        {items.map((item) => (
-          <DoItemCard item={item} removeItem={removeItem} />
-        ))}
+        {itemCards}
 
         {hasNoItems
           ? (
@@ -268,9 +274,7 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
   );
 
   return {
-    [NAME]: computed(() =>
-      `Do List (${items.get().length})`
-    ),
+    [NAME]: computed(() => `Do List (${items.get().length})`),
     [UI]: (
       <ct-screen>
         <ct-vstack slot="header" gap="1">
@@ -284,9 +288,7 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
 
         <ct-vscroll flex showScrollbar fadeEdges>
           <ct-vstack gap="2" style="padding: 1rem;">
-            {items.map((item) => (
-              <DoItemCard item={item} removeItem={removeItem} />
-            ))}
+            {itemCards}
 
             {hasNoItems
               ? (
@@ -313,8 +315,10 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
       </ct-screen>
     ),
     compactUI,
+    isHidden: true,
     items,
     itemCount,
+    mentionable: itemCards,
     addItem,
     removeItem,
     updateItem,

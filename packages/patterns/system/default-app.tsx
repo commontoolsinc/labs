@@ -21,6 +21,7 @@ const generateId = () =>
 const MAX_RECENT_CHARMS = 10;
 
 import BacklinksIndex, { type MentionablePiece } from "./backlinks-index.tsx";
+import SummaryIndex from "./summary-index.tsx";
 import OmniboxFAB from "./omnibox-fab.tsx";
 import DoList from "../do-list/do-list.tsx";
 import Notebook from "../notes/notebook.tsx";
@@ -199,9 +200,18 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
     })
   );
 
-  const index = BacklinksIndex({});
   const doListItems = Writable.of<any[]>([]);
   const doList = DoList({ items: doListItems });
+
+  // Combine user-managed allPieces with system pieces (like doList) so
+  // BacklinksIndex picks up their mentionable items.
+  const allPiecesWithSystem = computed(() => [
+    ...allPieces.get(),
+    doList as any,
+  ]);
+
+  const index = BacklinksIndex({ allPieces: allPiecesWithSystem });
+  const summaryIdx = SummaryIndex({});
 
   const fab = OmniboxFAB({
     mentionable: index.mentionable,
@@ -219,6 +229,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
 
   return {
     backlinksIndex: index,
+    summaryIndex: summaryIdx,
     [NAME]: computed(() => `Space Home (${visiblePieces.length})`),
     [UI]: (
       <ct-screen>
@@ -239,6 +250,30 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
           <div slot="start">
             <h2 style={{ margin: 0, fontSize: "20px" }}>Patterns</h2>
           </div>
+          <ct-cell-link
+            $cell={index}
+            slot="end"
+            style={{
+              fontSize: "14px",
+              padding: "6px 12px",
+              textDecoration: "none",
+              color: "var(--ct-color-text-secondary)",
+            }}
+          >
+            Mentions
+          </ct-cell-link>
+          <ct-cell-link
+            $cell={summaryIdx}
+            slot="end"
+            style={{
+              fontSize: "14px",
+              padding: "6px 12px",
+              textDecoration: "none",
+              color: "var(--ct-color-text-secondary)",
+            }}
+          >
+            Search
+          </ct-cell-link>
           <div slot="end">
             <ct-button
               variant="ghost"

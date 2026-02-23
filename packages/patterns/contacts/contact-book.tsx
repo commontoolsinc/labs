@@ -38,6 +38,7 @@ interface ContactBookInput {
 interface ContactBookOutput {
   contacts: Contact[];
   relationships: Relationship[];
+  mentionable: Contact[];
   onAddContact: Stream<void>;
 }
 
@@ -218,6 +219,7 @@ export default pattern<ContactBookInput, ContactBookOutput>(
       ),
       contacts,
       relationships,
+      mentionable: contacts,
       onAddContact,
     };
   },

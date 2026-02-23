@@ -19,6 +19,7 @@ interface ContactDetailInput {
 /** #contact #person */
 interface ContactDetailOutput {
   contact: Contact;
+  summary: string;
 }
 
 export default pattern<ContactDetailInput, ContactDetailOutput>(
@@ -73,6 +74,14 @@ export default pattern<ContactDetailInput, ContactDetailOutput>(
         </ct-card>
       ),
       contact,
+      summary: computed(() => {
+        const c = contact.get();
+        const parts = [c.name];
+        if (c.company) parts.push(c.company);
+        if (c.email) parts.push(c.email);
+        if (c.notes) parts.push(c.notes.slice(0, 100));
+        return parts.join(" - ");
+      }),
     };
   },
 );

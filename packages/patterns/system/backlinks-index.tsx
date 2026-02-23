@@ -1,5 +1,13 @@
 /// <cts-enable />
-import { equals, lift, NAME, pattern, UI, wish, Writable } from "commontools";
+import {
+  computed,
+  equals,
+  lift,
+  NAME,
+  pattern,
+  UI,
+  Writable,
+} from "commontools";
 
 /**
  * Type for pieces used in the mentionable/backlinks system.
@@ -23,16 +31,15 @@ export type WritableBacklinks = {
   backlinks?: Writable<WritableBacklinks[]>;
 };
 
-type Input = Record<string, never>;
+type Input = {
+  allPieces: MentionablePiece[];
+};
 
 type Output = {
   mentionable: MentionablePiece[];
 };
 
-const computeIndex = lift<
-  { allPieces: WritableBacklinks[] | undefined },
-  void
->(
+const computeIndex = lift<{ allPieces: WritableBacklinks[] | undefined }, void>(
   ({ allPieces }) => {
     const cs = allPieces ?? [];
 
@@ -113,18 +120,97 @@ const computeMentionable = lift<
   return out;
 });
 
-const BacklinksIndex = pattern<Input, Output>(() => {
-  const { allPieces } =
-    wish<{ allPieces: MentionablePiece[] }>({ query: "#default" }).result;
+type Entry = {
+  piece: any;
+  name: string;
+  backlinks: any[];
+};
 
+/** Sub-pattern to render a single entry row with its backlinks. */
+const EntryRow = pattern<Entry, { [UI]: any }>(({ piece, backlinks }) => {
+  return {
+    [UI]: (
+      <ct-card>
+        <ct-vstack gap="1">
+          <ct-cell-link $cell={piece} />
+          <ct-hstack gap="2" style={{ paddingLeft: "8px", flexWrap: "wrap" }}>
+            {backlinks.map((link) => (
+              <ct-cell-link
+                $cell={link}
+                style={{
+                  fontSize: "12px",
+                  color: "var(--ct-color-text-secondary)",
+                }}
+              />
+            ))}
+          </ct-hstack>
+        </ct-vstack>
+      </ct-card>
+    ),
+  };
+});
+
+const BacklinksIndex = pattern<Input, Output>(({ allPieces }) => {
   computeIndex({ allPieces } as { allPieces: WritableBacklinks[] });
 
   // Compute mentionable list from allPieces reactively
   const mentionable = computeMentionable({ allPieces });
 
+  const query = Writable.of("");
+
+  // Build resolved entries with backlinks materialized as plain arrays
+  const entries = computed(() => {
+    const items = mentionable ?? [];
+    const result: Entry[] = [];
+    for (const piece of items) {
+      if (!piece) continue;
+      const name = (piece[NAME] ?? "").toString();
+      const bl = Array.isArray(piece.backlinks) ? piece.backlinks : [];
+      result.push({ piece, name, backlinks: bl });
+    }
+    return result;
+  });
+
+  // Filter by name
+  const filtered = computed(() => {
+    const q = query.get().toLowerCase().trim();
+    if (!q) return entries;
+    return entries.filter((e) => e.name.toLowerCase().includes(q));
+  });
+
+  const totalCount = computed(() => entries.length);
+  const filteredCount = computed(() => filtered.length);
+
   return {
     [NAME]: "BacklinksIndex",
-    [UI]: undefined,
+    [UI]: (
+      <ct-screen>
+        <ct-toolbar slot="header" sticky>
+          <h2 style={{ margin: 0, fontSize: "18px" }}>Mentions</h2>
+        </ct-toolbar>
+
+        <ct-vstack gap="4" padding="6">
+          <ct-input $value={query} placeholder="Filter by name..." />
+          <span
+            style={{
+              fontSize: "13px",
+              color: "var(--ct-color-text-secondary)",
+            }}
+          >
+            {filteredCount} of {totalCount} pieces
+          </span>
+
+          {filtered.map((entry) => {
+            const row = EntryRow({
+              piece: entry.piece,
+              name: entry.name,
+              backlinks: entry.backlinks,
+            });
+            return row[UI];
+          })}
+        </ct-vstack>
+      </ct-screen>
+    ),
     mentionable,
   };
 });
