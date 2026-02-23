@@ -53,6 +53,26 @@ export class CellBridge {
   ): Promise<void> {
     const pieceIno = this.tree.addDir(parentIno, name);
 
+    // Create meta.json first so it's always present
+    let patternName = "";
+    try {
+      const meta = await piece.getPatternMeta();
+      patternName = meta?.patternName || "";
+    } catch {
+      // Pattern meta not always available
+    }
+
+    this.tree.addFile(
+      pieceIno,
+      "meta.json",
+      JSON.stringify(
+        { id: piece.id, name: piece.name() || "", patternName },
+        null,
+        2,
+      ),
+      "object",
+    );
+
     try {
       // Input data
       const input = await piece.input.get();
@@ -65,26 +85,6 @@ export class CellBridge {
       if (result !== undefined && result !== null) {
         buildJsonTree(this.tree, pieceIno, "result", result);
       }
-
-      // Meta info
-      let patternName = "";
-      try {
-        const meta = await piece.getPatternMeta();
-        patternName = meta?.patternName || "";
-      } catch {
-        // Pattern meta not always available
-      }
-
-      const metaJson = JSON.stringify(
-        {
-          id: piece.id,
-          name: piece.name() || "",
-          patternName,
-        },
-        null,
-        2,
-      );
-      this.tree.addFile(pieceIno, "meta.json", metaJson, "object");
     } catch (e) {
       console.error(`Error loading piece "${name}": ${e}`);
       this.tree.addFile(pieceIno, "error.txt", String(e), "string");

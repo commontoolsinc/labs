@@ -3,6 +3,24 @@
 import { FsTree } from "./tree.ts";
 
 /**
+ * JSON.stringify that replaces circular references with "[Circular]".
+ */
+export function safeStringify(value: unknown, indent = 2): string {
+  const seen = new WeakSet();
+  return JSON.stringify(
+    value,
+    (_key, val) => {
+      if (val !== null && typeof val === "object") {
+        if (seen.has(val)) return "[Circular]";
+        seen.add(val);
+      }
+      return val;
+    },
+    indent,
+  );
+}
+
+/**
  * Build a filesystem subtree from a JSON value.
  *
  * - null → empty file (jsonType "null")
@@ -12,6 +30,7 @@ import { FsTree } from "./tree.ts";
  * - object → directory, recurse for each key (jsonType "object")
  * - array → directory, recurse with numeric indices (jsonType "array")
  *
+ * Circular references are replaced with "[Circular]".
  * Also synthesizes `.json` sibling files for directory nodes.
  */
 export function buildJsonTree(
@@ -19,9 +38,19 @@ export function buildJsonTree(
   parentIno: bigint,
   name: string,
   value: unknown,
+  seen?: WeakSet<object>,
 ): bigint {
   if (value === null || value === undefined) {
     return tree.addFile(parentIno, name, "", "null");
+  }
+
+  // Detect circular references
+  if (typeof value === "object") {
+    if (!seen) seen = new WeakSet();
+    if (seen.has(value as object)) {
+      return tree.addFile(parentIno, name, "[Circular]", "string");
+    }
+    seen.add(value as object);
   }
 
   const type = typeof value;
@@ -60,13 +89,13 @@ export function buildJsonTree(
     tree.addFile(
       parentIno,
       `${name}.json`,
-      JSON.stringify(value, null, 2),
+      safeStringify(value),
       "array",
     );
 
     // Recurse for each element
     for (let i = 0; i < value.length; i++) {
-      buildJsonTree(tree, dirIno, String(i), value[i]);
+      buildJsonTree(tree, dirIno, String(i), value[i], seen);
     }
 
     return dirIno;
@@ -80,13 +109,13 @@ export function buildJsonTree(
     tree.addFile(
       parentIno,
       `${name}.json`,
-      JSON.stringify(value, null, 2),
+      safeStringify(value),
       "object",
     );
 
     // Recurse for each key
     for (const [key, val] of Object.entries(obj)) {
-      buildJsonTree(tree, dirIno, key, val);
+      buildJsonTree(tree, dirIno, key, val, seen);
     }
 
     return dirIno;

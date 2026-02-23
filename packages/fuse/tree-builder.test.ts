@@ -1,7 +1,7 @@
 // tree-builder.test.ts — Unit tests for JSON-to-tree conversion
 import { assertEquals } from "@std/assert";
 import { FsTree } from "./tree.ts";
-import { buildJsonTree } from "./tree-builder.ts";
+import { buildJsonTree, safeStringify } from "./tree-builder.ts";
 
 const decoder = new TextDecoder();
 
@@ -130,6 +130,34 @@ Deno.test("FsTree - clear removes subtree", () => {
 
   // 'd' should still exist
   assertEquals(getFileContent(tree, rootDirIno, "d"), "3");
+});
+
+Deno.test("buildJsonTree - circular references become [Circular]", () => {
+  const tree = new FsTree();
+  // deno-lint-ignore no-explicit-any
+  const obj: any = { name: "loop" };
+  obj.self = obj; // circular
+
+  buildJsonTree(tree, tree.rootIno, "circ", obj);
+
+  const dirIno = tree.lookup(tree.rootIno, "circ")!;
+  assertEquals(getFileContent(tree, dirIno, "name"), "loop");
+  assertEquals(getFileContent(tree, dirIno, "self"), "[Circular]");
+
+  // .json sibling should also handle circularity
+  const json = getFileContent(tree, tree.rootIno, "circ.json");
+  const parsed = JSON.parse(json);
+  assertEquals(parsed.name, "loop");
+  assertEquals(parsed.self, "[Circular]");
+});
+
+Deno.test("safeStringify - handles circular refs", () => {
+  // deno-lint-ignore no-explicit-any
+  const a: any = { x: 1 };
+  a.y = a;
+  const result = JSON.parse(safeStringify(a));
+  assertEquals(result.x, 1);
+  assertEquals(result.y, "[Circular]");
 });
 
 Deno.test("FsTree - addSymlink", () => {
