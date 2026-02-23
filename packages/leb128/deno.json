@@ -1,0 +1,11 @@
+{
+  "name": "@commontools/leb128",
+  "exports": {
+    ".": "./mod.ts"
+  },
+  "test": {
+    "include": [
+      "test/*-test.ts"
+    ]
+  }
+}
