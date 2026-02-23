@@ -269,6 +269,14 @@ Deno.test("decodeSLEB128", async (t) => {
     });
   });
 
+  await t.step("throws on truncated input", () => {
+    assertThrows(
+      () => decodeSLEB128(new Uint8Array([0x80])),
+      Error,
+      "unexpected end",
+    );
+  });
+
   await t.step("roundtrip for various signed values", () => {
     const values = [
       0,
