@@ -12,21 +12,34 @@ import { openFuse } from "./ffi.ts";
 import {
   createFuseArgs,
   DIR_MODE,
+  EACCES,
+  EINVAL,
+  EIO,
   EISDIR,
   ENODATA,
   ENOENT,
+  ENOTDIR,
   ENTRY_PARAM_SIZE,
   ERANGE,
+  EXDEV,
   FILE_MODE,
+  FILE_MODE_RW,
+  FUSE_SET_ATTR_SIZE,
+  O_RDWR,
+  O_TRUNC,
+  O_WRONLY,
   OPS_OFFSETS,
   OPS_SIZE,
   readCString,
+  readFileInfo,
   STAT_SIZE,
   SYMLINK_MODE,
   writeEntryParam,
+  writeFileInfo,
   writeStat,
 } from "./ffi-types.ts";
 import { FsTree } from "./tree.ts";
+import { HandleMap } from "./handles.ts";
 
 const encoder = new TextEncoder();
 
@@ -94,13 +107,18 @@ async function main() {
   // deno-lint-ignore no-explicit-any
   const callbacks: Deno.UnsafeCallback<any>[] = [];
 
-  function nodeMode(node: ReturnType<typeof tree.getNode>) {
+  // File handle tracking for write support
+  const handles = new HandleMap();
+
+  function nodeMode(node: ReturnType<typeof tree.getNode>, ino?: bigint) {
     if (!node) return 0;
-    return node.kind === "dir"
-      ? DIR_MODE
-      : node.kind === "symlink"
-      ? SYMLINK_MODE
-      : FILE_MODE;
+    if (node.kind === "dir") return DIR_MODE;
+    if (node.kind === "symlink") return SYMLINK_MODE;
+    // Files in writable piece data get 644, others stay 444
+    if (bridge && ino !== undefined && bridge.resolveWritePath(ino)) {
+      return FILE_MODE_RW;
+    }
+    return FILE_MODE;
   }
 
   function nodeSize(node: ReturnType<typeof tree.getNode>) {
@@ -120,7 +138,7 @@ async function main() {
       ino,
       attr: {
         ino,
-        mode: nodeMode(node),
+        mode: nodeMode(node, ino),
         nlink: node!.kind === "dir" ? 2 : 1,
         size: nodeSize(node),
       },
@@ -207,7 +225,7 @@ async function main() {
       const statBuf = new ArrayBuffer(STAT_SIZE);
       writeStat(statBuf, {
         ino: inode,
-        mode: nodeMode(node),
+        mode: nodeMode(node, inode),
         nlink: node.kind === "dir" ? 2 : 1,
         size: nodeSize(node),
       });
@@ -238,7 +256,7 @@ async function main() {
   );
   callbacks.push(readlinkCb);
 
-  // open(req, ino, fi_ptr)
+  // open(req, ino, fi_ptr) — write-aware
   const openCb = new Deno.UnsafeCallback(
     { parameters: ["pointer", "u64", "pointer"], result: "void" } as const,
     (
@@ -246,7 +264,8 @@ async function main() {
       ino: number | bigint,
       fi: Deno.PointerValue,
     ) => {
-      const node = tree.getNode(BigInt(ino));
+      const inode = BigInt(ino);
+      const node = tree.getNode(inode);
       if (!node) {
         fuse.symbols.fuse_reply_err(req, ENOENT);
         return;
@@ -255,6 +274,30 @@ async function main() {
         fuse.symbols.fuse_reply_err(req, EISDIR);
         return;
       }
+
+      const { flags } = readFileInfo(fi);
+      const isWriting = (flags & O_WRONLY) !== 0 || (flags & O_RDWR) !== 0;
+
+      if (isWriting && bridge) {
+        const writePath = bridge.resolveWritePath(inode);
+        if (!writePath) {
+          fuse.symbols.fuse_reply_err(req, EACCES);
+          return;
+        }
+      }
+
+      // Get current content for the handle buffer
+      const content = node.kind === "file" ? node.content : new Uint8Array(0);
+      const truncate = (flags & O_TRUNC) !== 0;
+      const fh = handles.open(
+        inode,
+        flags,
+        truncate ? new Uint8Array(0) : content,
+      );
+      if (truncate) {
+        handles.get(fh)!.dirty = true;
+      }
+      writeFileInfo(fi, fh);
       fuse.symbols.fuse_reply_open(req, fi);
     },
   );
@@ -271,9 +314,33 @@ async function main() {
       ino: number | bigint,
       size: number | bigint,
       offset: number | bigint,
-      _fi: Deno.PointerValue,
+      fi: Deno.PointerValue,
     ) => {
-      const node = tree.getNode(BigInt(ino));
+      const inode = BigInt(ino);
+
+      // If we have an open handle with a buffer, read from it
+      const { fh } = readFileInfo(fi);
+      const handle = handles.get(fh);
+      if (handle && handle.buffer.length > 0) {
+        const off = Number(offset);
+        const sz = Number(size);
+        const data = handle.buffer;
+        if (off >= data.length) {
+          fuse.symbols.fuse_reply_buf(req, null, 0n);
+          return;
+        }
+        const end = Math.min(off + sz, data.length);
+        const slice = new Uint8Array(end - off);
+        slice.set(data.subarray(off, end));
+        fuse.symbols.fuse_reply_buf(
+          req,
+          Deno.UnsafePointer.of(slice),
+          BigInt(slice.length),
+        );
+        return;
+      }
+
+      const node = tree.getNode(inode);
       if (!node || node.kind !== "file") {
         fuse.symbols.fuse_reply_err(req, ENOENT);
         return;
@@ -401,11 +468,206 @@ async function main() {
   );
   callbacks.push(readdirCb);
 
-  // release(req, ino, fi_ptr)
+  /**
+   * Process a dirty handle buffer: decode, parse, and write to cell.
+   * Returns 0 on success, errno on failure.
+   */
+  async function flushHandle(
+    handle: ReturnType<typeof handles.get>,
+  ): Promise<number> {
+    if (!handle || !handle.dirty || !bridge) return 0;
+
+    const writePath = bridge.resolveWritePath(handle.ino);
+    if (!writePath) return EACCES;
+
+    try {
+      const text = new TextDecoder().decode(handle.buffer);
+      let value: unknown;
+
+      if (writePath.isJsonFile) {
+        // .json file: parse as JSON
+        try {
+          value = JSON.parse(text);
+        } catch {
+          return EINVAL;
+        }
+      } else {
+        // Scalar file: try JSON parse first, then treat as string
+        const trimmed = text.replace(/\n$/, "");
+        try {
+          const parsed = JSON.parse(trimmed);
+          // Only accept JSON primitives (number, boolean, null, string)
+          if (
+            typeof parsed === "number" ||
+            typeof parsed === "boolean" ||
+            parsed === null ||
+            typeof parsed === "string"
+          ) {
+            value = parsed;
+          } else {
+            // It's an object/array — treat as string for scalar files
+            value = trimmed;
+          }
+        } catch {
+          // Not valid JSON — use as string
+          value = trimmed;
+        }
+      }
+
+      await bridge.writeValue(writePath, value);
+      handle.dirty = false;
+
+      // Optimistic tree update: update the file node content immediately
+      const node = tree.getNode(handle.ino);
+      if (node && node.kind === "file") {
+        tree.updateFile(handle.ino, text);
+      }
+
+      return 0;
+    } catch (e) {
+      console.error(`[fuse] flush error: ${e}`);
+      return EIO;
+    }
+  }
+
+  // write(req, ino, buf_ptr, size, offset, fi_ptr)
+  const writeCb = new Deno.UnsafeCallback(
+    {
+      parameters: ["pointer", "u64", "pointer", "usize", "i64", "pointer"],
+      result: "void",
+    } as const,
+    (
+      req: Deno.PointerValue,
+      _ino: number | bigint,
+      bufPtr: Deno.PointerValue,
+      size: number | bigint,
+      offset: number | bigint,
+      fi: Deno.PointerValue,
+    ) => {
+      const { fh } = readFileInfo(fi);
+      const handle = handles.get(fh);
+      if (!handle) {
+        fuse.symbols.fuse_reply_err(req, EIO);
+        return;
+      }
+
+      const sz = Number(size);
+      const off = Number(offset);
+
+      // Read data from the FUSE-provided buffer
+      const data = new Uint8Array(sz);
+      if (bufPtr) {
+        const view = new Deno.UnsafePointerView(bufPtr);
+        view.copyInto(data);
+      }
+
+      handles.write(fh, data, off);
+      fuse.symbols.fuse_reply_write(req, sz);
+    },
+  );
+  callbacks.push(writeCb);
+
+  // flush(req, ino, fi_ptr) — async: processes dirty buffer
+  const flushCb = new Deno.UnsafeCallback(
+    { parameters: ["pointer", "u64", "pointer"], result: "void" } as const,
+    (
+      req: Deno.PointerValue,
+      _ino: number | bigint,
+      fi: Deno.PointerValue,
+    ) => {
+      const { fh } = readFileInfo(fi);
+      const handle = handles.get(fh);
+
+      if (!handle || !handle.dirty) {
+        fuse.symbols.fuse_reply_err(req, 0);
+        return;
+      }
+
+      // Async flush — FUSE req stays valid until replied
+      flushHandle(handle).then((errno) => {
+        fuse.symbols.fuse_reply_err(req, errno);
+      }).catch((e) => {
+        console.error(`[fuse] flush callback error: ${e}`);
+        fuse.symbols.fuse_reply_err(req, EIO);
+      });
+    },
+  );
+  callbacks.push(flushCb);
+
+  // setattr(req, ino, attr_ptr, to_set, fi_ptr)
+  const setattrCb = new Deno.UnsafeCallback(
+    {
+      parameters: ["pointer", "u64", "pointer", "i32", "pointer"],
+      result: "void",
+    } as const,
+    (
+      req: Deno.PointerValue,
+      ino: number | bigint,
+      _attrPtr: Deno.PointerValue,
+      toSet: number,
+      fi: Deno.PointerValue,
+    ) => {
+      const inode = BigInt(ino);
+      const node = tree.getNode(inode);
+      if (!node) {
+        fuse.symbols.fuse_reply_err(req, ENOENT);
+        return;
+      }
+
+      // Handle truncate (O_TRUNC)
+      if (toSet & FUSE_SET_ATTR_SIZE) {
+        const { fh } = readFileInfo(fi);
+        const handle = handles.get(fh);
+        if (handle) {
+          // Read the new size from the attr struct
+          // st_size is at offset 96 in struct stat
+          // For simplicity, we just handle size=0 (truncate)
+          handles.truncate(fh, 0);
+        } else if (node.kind === "file") {
+          // No handle — update tree directly
+          tree.updateFile(inode, "");
+        }
+      }
+
+      // Reply with current attrs (silently accept chmod/chown/times)
+      const statBuf = new ArrayBuffer(STAT_SIZE);
+      writeStat(statBuf, {
+        ino: inode,
+        mode: nodeMode(node, inode),
+        nlink: node.kind === "dir" ? 2 : 1,
+        size: nodeSize(node),
+      });
+      fuse.symbols.fuse_reply_attr(
+        req,
+        Deno.UnsafePointer.of(new Uint8Array(statBuf)),
+        1.0,
+      );
+    },
+  );
+  callbacks.push(setattrCb);
+
+  // release(req, ino, fi_ptr) — flush dirty handles before closing
   const releaseCb = new Deno.UnsafeCallback(
     { parameters: ["pointer", "u64", "pointer"], result: "void" } as const,
-    (req: Deno.PointerValue, _ino: number | bigint, _fi: Deno.PointerValue) => {
-      fuse.symbols.fuse_reply_err(req, 0); // success
+    (req: Deno.PointerValue, _ino: number | bigint, fi: Deno.PointerValue) => {
+      const { fh } = readFileInfo(fi);
+      const handle = handles.get(fh);
+
+      if (handle && handle.dirty && bridge) {
+        // Async flush before release
+        flushHandle(handle).then(() => {
+          handles.close(fh);
+          fuse.symbols.fuse_reply_err(req, 0);
+        }).catch((e) => {
+          console.error(`[fuse] release flush error: ${e}`);
+          handles.close(fh);
+          fuse.symbols.fuse_reply_err(req, 0);
+        });
+        return;
+      }
+
+      handles.close(fh);
+      fuse.symbols.fuse_reply_err(req, 0);
     },
   );
   callbacks.push(releaseCb);
@@ -522,6 +784,393 @@ async function main() {
   );
   callbacks.push(listxattrCb);
 
+  // create(req, parent_ino, name_ptr, mode, fi_ptr)
+  const createCb = new Deno.UnsafeCallback(
+    {
+      parameters: ["pointer", "u64", "pointer", "u32", "pointer"],
+      result: "void",
+    } as const,
+    (
+      req: Deno.PointerValue,
+      parentIno: number | bigint,
+      namePtr: Deno.PointerValue,
+      _mode: number,
+      fi: Deno.PointerValue,
+    ) => {
+      if (!bridge) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+
+      const parent = BigInt(parentIno);
+      const name = readCString(namePtr);
+      const parentPath = bridge.resolveWritePath(parent);
+
+      if (!parentPath) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+
+      // Write empty string at the new key
+      const newPath = [...parentPath.jsonPath, name];
+      bridge.writeValue(
+        { ...parentPath, jsonPath: newPath },
+        "",
+      ).then(() => {
+        // Create file node in tree
+        const ino = tree.addFile(parent, name, "", "string");
+
+        // Allocate handle
+        const fh = handles.open(ino, O_RDWR, new Uint8Array(0));
+        writeFileInfo(fi, fh);
+
+        // Build entry_param
+        const entryBuf = new ArrayBuffer(ENTRY_PARAM_SIZE);
+        writeEntryParam(entryBuf, {
+          ino,
+          attr: {
+            ino,
+            mode: FILE_MODE_RW,
+            nlink: 1,
+            size: 0,
+          },
+          attrTimeout: 1.0,
+          entryTimeout: 1.0,
+        });
+
+        fuse.symbols.fuse_reply_create(
+          req,
+          Deno.UnsafePointer.of(new Uint8Array(entryBuf)),
+          fi,
+        );
+      }).catch((e) => {
+        console.error(`[fuse] create error: ${e}`);
+        fuse.symbols.fuse_reply_err(req, EIO);
+      });
+    },
+  );
+  callbacks.push(createCb);
+
+  // mkdir(req, parent_ino, name_ptr, mode)
+  const mkdirCb = new Deno.UnsafeCallback(
+    {
+      parameters: ["pointer", "u64", "pointer", "u32"],
+      result: "void",
+    } as const,
+    (
+      req: Deno.PointerValue,
+      parentIno: number | bigint,
+      namePtr: Deno.PointerValue,
+      _mode: number,
+    ) => {
+      if (!bridge) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+
+      const parent = BigInt(parentIno);
+      const name = readCString(namePtr);
+      const parentPath = bridge.resolveWritePath(parent);
+
+      if (!parentPath) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+
+      // Write empty object at the new key
+      const newPath = [...parentPath.jsonPath, name];
+      bridge.writeValue(
+        { ...parentPath, jsonPath: newPath },
+        {},
+      ).then(() => {
+        const ino = tree.addDir(parent, name, "object");
+        const node = tree.getNode(ino);
+        replyEntry(req, ino, node);
+      }).catch((e) => {
+        console.error(`[fuse] mkdir error: ${e}`);
+        fuse.symbols.fuse_reply_err(req, EIO);
+      });
+    },
+  );
+  callbacks.push(mkdirCb);
+
+  // unlink(req, parent_ino, name_ptr)
+  const unlinkCb = new Deno.UnsafeCallback(
+    { parameters: ["pointer", "u64", "pointer"], result: "void" } as const,
+    (
+      req: Deno.PointerValue,
+      parentIno: number | bigint,
+      namePtr: Deno.PointerValue,
+    ) => {
+      if (!bridge) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+
+      const parent = BigInt(parentIno);
+      const name = readCString(namePtr);
+      const childIno = tree.lookup(parent, name);
+      if (childIno === undefined) {
+        fuse.symbols.fuse_reply_err(req, ENOENT);
+        return;
+      }
+
+      const writePath = bridge.resolveWritePath(childIno);
+      if (!writePath) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+
+      // For array parents: read parent array, splice, write back
+      const parentNode = tree.getNode(parent);
+      const isArrayParent = parentNode?.kind === "dir" &&
+        parentNode.jsonType === "array";
+
+      const doUnlink = async () => {
+        if (isArrayParent) {
+          // Array element removal: read parent, splice, write whole array
+          const parentPath = bridge!.resolveWritePath(parent);
+          if (!parentPath) throw new Error("Parent not writable");
+          const currentValue = await writePath.piece[writePath.cell].get(
+            parentPath.jsonPath.length > 0 ? parentPath.jsonPath : undefined,
+          );
+          if (Array.isArray(currentValue)) {
+            const idx = Number(name);
+            if (!isNaN(idx) && idx >= 0 && idx < currentValue.length) {
+              currentValue.splice(idx, 1);
+              await bridge!.writeValue(parentPath, currentValue);
+            }
+          }
+        } else {
+          // Object key removal: read parent object, delete key, write back
+          const parentPath = bridge!.resolveWritePath(parent);
+          if (!parentPath) throw new Error("Parent not writable");
+          const currentValue = await writePath.piece[writePath.cell].get(
+            parentPath.jsonPath.length > 0 ? parentPath.jsonPath : undefined,
+          );
+          if (
+            currentValue && typeof currentValue === "object" &&
+            !Array.isArray(currentValue)
+          ) {
+            const obj = { ...(currentValue as Record<string, unknown>) };
+            delete obj[name];
+            await bridge!.writeValue(parentPath, obj);
+          }
+        }
+        tree.removeChild(parent, name);
+        // Also remove .json sibling if it exists
+        if (name.endsWith(".json")) {
+          // Removing a .json file — remove the corresponding directory too
+          const dirName = name.slice(0, -5);
+          const dirIno = tree.lookup(parent, dirName);
+          if (dirIno !== undefined) {
+            tree.removeChild(parent, dirName);
+          }
+        } else {
+          const jsonIno = tree.lookup(parent, `${name}.json`);
+          if (jsonIno !== undefined) {
+            tree.removeChild(parent, `${name}.json`);
+          }
+        }
+      };
+
+      doUnlink().then(() => {
+        fuse.symbols.fuse_reply_err(req, 0);
+      }).catch((e) => {
+        console.error(`[fuse] unlink error: ${e}`);
+        fuse.symbols.fuse_reply_err(req, EIO);
+      });
+    },
+  );
+  callbacks.push(unlinkCb);
+
+  // rmdir(req, parent_ino, name_ptr)
+  const rmdirCb = new Deno.UnsafeCallback(
+    { parameters: ["pointer", "u64", "pointer"], result: "void" } as const,
+    (
+      req: Deno.PointerValue,
+      parentIno: number | bigint,
+      namePtr: Deno.PointerValue,
+    ) => {
+      if (!bridge) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+
+      const parent = BigInt(parentIno);
+      const name = readCString(namePtr);
+      const childIno = tree.lookup(parent, name);
+      if (childIno === undefined) {
+        fuse.symbols.fuse_reply_err(req, ENOENT);
+        return;
+      }
+
+      const childNode = tree.getNode(childIno);
+      if (!childNode || childNode.kind !== "dir") {
+        fuse.symbols.fuse_reply_err(req, ENOTDIR);
+        return;
+      }
+
+      const writePath = bridge.resolveWritePath(childIno);
+      if (!writePath) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+
+      // Same removal logic as unlink but for a directory
+      const parentNode = tree.getNode(parent);
+      const isArrayParent = parentNode?.kind === "dir" &&
+        parentNode.jsonType === "array";
+
+      const doRmdir = async () => {
+        if (isArrayParent) {
+          const parentPath = bridge!.resolveWritePath(parent);
+          if (!parentPath) throw new Error("Parent not writable");
+          const currentValue = await writePath.piece[writePath.cell].get(
+            parentPath.jsonPath.length > 0 ? parentPath.jsonPath : undefined,
+          );
+          if (Array.isArray(currentValue)) {
+            const idx = Number(name);
+            if (!isNaN(idx) && idx >= 0 && idx < currentValue.length) {
+              currentValue.splice(idx, 1);
+              await bridge!.writeValue(parentPath, currentValue);
+            }
+          }
+        } else {
+          const parentPath = bridge!.resolveWritePath(parent);
+          if (!parentPath) throw new Error("Parent not writable");
+          const currentValue = await writePath.piece[writePath.cell].get(
+            parentPath.jsonPath.length > 0 ? parentPath.jsonPath : undefined,
+          );
+          if (
+            currentValue && typeof currentValue === "object" &&
+            !Array.isArray(currentValue)
+          ) {
+            const obj = { ...(currentValue as Record<string, unknown>) };
+            delete obj[name];
+            await bridge!.writeValue(parentPath, obj);
+          }
+        }
+        tree.removeChild(parent, name);
+        // Also remove .json sibling
+        const jsonIno = tree.lookup(parent, `${name}.json`);
+        if (jsonIno !== undefined) {
+          tree.removeChild(parent, `${name}.json`);
+        }
+      };
+
+      doRmdir().then(() => {
+        fuse.symbols.fuse_reply_err(req, 0);
+      }).catch((e) => {
+        console.error(`[fuse] rmdir error: ${e}`);
+        fuse.symbols.fuse_reply_err(req, EIO);
+      });
+    },
+  );
+  callbacks.push(rmdirCb);
+
+  // rename(req, parent_ino, name_ptr, newparent_ino, newname_ptr)
+  const renameCb = new Deno.UnsafeCallback(
+    {
+      parameters: ["pointer", "u64", "pointer", "u64", "pointer"],
+      result: "void",
+    } as const,
+    (
+      req: Deno.PointerValue,
+      parentIno: number | bigint,
+      namePtr: Deno.PointerValue,
+      newParentIno: number | bigint,
+      newNamePtr: Deno.PointerValue,
+    ) => {
+      if (!bridge) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+
+      const oldParent = BigInt(parentIno);
+      const oldName = readCString(namePtr);
+      const newParent = BigInt(newParentIno);
+      const newName = readCString(newNamePtr);
+
+      const childIno = tree.lookup(oldParent, oldName);
+      if (childIno === undefined) {
+        fuse.symbols.fuse_reply_err(req, ENOENT);
+        return;
+      }
+
+      const oldWritePath = bridge.resolveWritePath(childIno);
+      if (!oldWritePath) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+
+      // Check new parent is in the same cell
+      const newParentPath = bridge.resolveWritePath(newParent);
+      if (!newParentPath) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+
+      if (
+        oldWritePath.spaceName !== newParentPath.spaceName ||
+        oldWritePath.pieceName !== newParentPath.pieceName ||
+        oldWritePath.cell !== newParentPath.cell
+      ) {
+        fuse.symbols.fuse_reply_err(req, EXDEV);
+        return;
+      }
+
+      const doRename = async () => {
+        // Read value at old path
+        const value = await oldWritePath.piece[oldWritePath.cell].get(
+          oldWritePath.jsonPath.length > 0 ? oldWritePath.jsonPath : undefined,
+        );
+
+        // Write at new path
+        const destPath = [...newParentPath.jsonPath, newName];
+        await bridge!.writeValue(
+          { ...newParentPath, jsonPath: destPath },
+          value,
+        );
+
+        // Delete old path: read parent, delete key, write back
+        const oldParentWritePath = bridge!.resolveWritePath(oldParent);
+        if (oldParentWritePath) {
+          const parentValue = await oldWritePath.piece[oldWritePath.cell].get(
+            oldParentWritePath.jsonPath.length > 0
+              ? oldParentWritePath.jsonPath
+              : undefined,
+          );
+          if (
+            parentValue && typeof parentValue === "object" &&
+            !Array.isArray(parentValue)
+          ) {
+            const obj = { ...(parentValue as Record<string, unknown>) };
+            delete obj[oldName];
+            await bridge!.writeValue(oldParentWritePath, obj);
+          } else if (Array.isArray(parentValue)) {
+            const idx = Number(oldName);
+            if (!isNaN(idx)) {
+              parentValue.splice(idx, 1);
+              await bridge!.writeValue(oldParentWritePath, parentValue);
+            }
+          }
+        }
+
+        // Update tree
+        tree.rename(oldParent, oldName, newParent, newName);
+      };
+
+      doRename().then(() => {
+        fuse.symbols.fuse_reply_err(req, 0);
+      }).catch((e) => {
+        console.error(`[fuse] rename error: ${e}`);
+        fuse.symbols.fuse_reply_err(req, EIO);
+      });
+    },
+  );
+  callbacks.push(renameCb);
+
   // --- Build ops struct ---
   const opsBuf = new ArrayBuffer(OPS_SIZE);
   const opsView = new DataView(opsBuf);
@@ -538,15 +1187,23 @@ async function main() {
   setOp(OPS_OFFSETS.lookup, lookupCb);
   setOp(OPS_OFFSETS.forget, forgetCb);
   setOp(OPS_OFFSETS.getattr, getattrCb);
+  setOp(OPS_OFFSETS.setattr, setattrCb);
   setOp(OPS_OFFSETS.readlink, readlinkCb);
+  setOp(OPS_OFFSETS.mkdir, mkdirCb);
+  setOp(OPS_OFFSETS.unlink, unlinkCb);
+  setOp(OPS_OFFSETS.rmdir, rmdirCb);
+  setOp(OPS_OFFSETS.rename, renameCb);
   setOp(OPS_OFFSETS.open, openCb);
   setOp(OPS_OFFSETS.read, readFileCb);
+  setOp(OPS_OFFSETS.write, writeCb);
+  setOp(OPS_OFFSETS.flush, flushCb);
+  setOp(OPS_OFFSETS.release, releaseCb);
   setOp(OPS_OFFSETS.opendir, opendirCb);
   setOp(OPS_OFFSETS.readdir, readdirCb);
-  setOp(OPS_OFFSETS.release, releaseCb);
   setOp(OPS_OFFSETS.releasedir, releasedirCb);
   setOp(OPS_OFFSETS.getxattr, getxattrCb);
   setOp(OPS_OFFSETS.listxattr, listxattrCb);
+  setOp(OPS_OFFSETS.create, createCb);
 
   // --- Mount ---
   const { argsBuf, argv: _argv, encodedArgs: _ea } = createFuseArgs([

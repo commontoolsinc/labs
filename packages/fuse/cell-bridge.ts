@@ -16,6 +16,16 @@ function stripOfPrefix(id: string): string {
 
 type Cancel = () => void;
 
+/** Result of resolving an inode to a writable cell path. */
+export interface WritePath {
+  spaceName: string;
+  pieceName: string;
+  cell: "input" | "result";
+  jsonPath: (string | number)[];
+  isJsonFile: boolean;
+  piece: PieceController;
+}
+
 /** Callback to invalidate kernel cache entries. */
 export type InvalidateCallback = (parentIno: bigint, names: string[]) => void;
 
@@ -26,6 +36,7 @@ export interface SpaceState {
   piecesIno: bigint;
   entitiesIno: bigint;
   pieceMap: Map<string, string>; // name → entity ID
+  pieceControllers: Map<string, PieceController>; // name → controller
   did: string;
   unsubscribes: Cancel[];
 }
@@ -101,6 +112,92 @@ export class CellBridge {
     return this.connecting.has(spaceName);
   }
 
+  /**
+   * Resolve an inode to a writable cell path.
+   *
+   * Walks up from inode to root, collecting path segments.
+   * Returns null if the inode is read-only (meta.json, space.json, etc.).
+   *
+   * Path structure:
+   *   /<space>/pieces/<piece>/<cell>[/<json>/<path>]
+   *   /<space>/pieces/<piece>/<cell>.json
+   */
+  resolveWritePath(ino: bigint): WritePath | null {
+    // Walk up to root collecting segments
+    const segments: string[] = [];
+    let current = ino;
+    while (current !== this.tree.rootIno) {
+      const name = this.tree.getNameForIno(current);
+      if (name === undefined) return null;
+      segments.unshift(name);
+      const parentIno = this.tree.parents.get(current);
+      if (parentIno === undefined) return null;
+      current = parentIno;
+    }
+
+    // segments: [spaceName, "pieces", pieceName, cell, ...jsonPath]
+    // Minimum: spaceName/pieces/pieceName/cell = 4 segments
+    if (segments.length < 4) return null;
+
+    const spaceName = segments[0];
+    if (segments[1] !== "pieces") return null;
+    const pieceName = segments[2];
+
+    // Read-only files
+    const cellSegment = segments[3];
+    if (cellSegment === "meta.json") return null;
+
+    // Find the space and piece controller
+    const space = this.spaces.get(spaceName);
+    if (!space) return null;
+    const piece = space.pieceControllers.get(pieceName);
+    if (!piece) return null;
+
+    // Handle .json sibling files: result.json, input.json, result/items.json
+    let cell: "input" | "result";
+    let jsonPath: (string | number)[];
+    let isJsonFile = false;
+
+    if (cellSegment === "input.json" || cellSegment === "result.json") {
+      // Top-level .json file: replaces entire cell
+      cell = cellSegment.replace(".json", "") as "input" | "result";
+      jsonPath = [];
+      isJsonFile = true;
+    } else if (cellSegment === "input" || cellSegment === "result") {
+      cell = cellSegment;
+      // Remaining segments form the JSON path
+      const remaining = segments.slice(4);
+
+      // Check for .json suffix on the last segment
+      if (remaining.length > 0) {
+        const last = remaining[remaining.length - 1];
+        if (last.endsWith(".json")) {
+          remaining[remaining.length - 1] = last.slice(0, -5);
+          isJsonFile = true;
+        }
+      }
+
+      // Convert numeric segments to numbers for array indexing
+      jsonPath = remaining.map((s) => {
+        const n = Number(s);
+        return Number.isInteger(n) && n >= 0 && String(n) === s ? n : s;
+      });
+    } else {
+      // Not a recognized cell segment
+      return null;
+    }
+
+    return { spaceName, pieceName, cell, jsonPath, isJsonFile, piece };
+  }
+
+  /** Write a value via the piece controller. */
+  async writeValue(writePath: WritePath, value: unknown): Promise<void> {
+    await writePath.piece[writePath.cell].set(
+      value,
+      writePath.jsonPath.length > 0 ? writePath.jsonPath : undefined,
+    );
+  }
+
   /** Update the root .spaces.json file. */
   private updateSpacesJson(): void {
     const obj: Record<string, string> = {};
@@ -145,14 +242,16 @@ export class CellBridge {
     const allPieces = await pieces.getAllPieces();
     console.log(`[${spaceName}] Found ${allPieces.length} pieces`);
 
-    // Track name → entity ID and subscription cleanup
+    // Track name → entity ID, name → controller, and subscription cleanup
     const pieceMap = new Map<string, string>();
+    const pieceControllers = new Map<string, PieceController>();
     const unsubscribes: Cancel[] = [];
 
     for (const piece of allPieces) {
       const name = piece.name() || piece.id;
       const entityHash = stripOfPrefix(piece.id);
       pieceMap.set(name, piece.id);
+      pieceControllers.set(name, piece);
 
       const pieceIno = await this.loadPieceTree(
         piece,
@@ -192,6 +291,7 @@ export class CellBridge {
       piecesIno,
       entitiesIno,
       pieceMap,
+      pieceControllers,
       did: spaceDid,
       unsubscribes,
     };

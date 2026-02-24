@@ -70,6 +70,14 @@ const symbols = {
     parameters: ["pointer", "buffer"],
     result: "i32",
   },
+  fuse_reply_write: {
+    parameters: ["pointer", "u32"],
+    result: "i32",
+  },
+  fuse_reply_create: {
+    parameters: ["pointer", "pointer", "pointer"],
+    result: "i32",
+  },
   fuse_reply_xattr: {
     parameters: ["pointer", "usize"],
     result: "i32",

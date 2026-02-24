@@ -82,6 +82,8 @@ export interface FileInfo {
   fh: bigint;
 }
 
+export const FUSE_FILE_INFO_SIZE = 64;
+
 export function readFileInfo(ptr: Deno.PointerValue): FileInfo {
   if (!ptr) {
     return { flags: 0, fh: 0n };
@@ -93,12 +95,40 @@ export function readFileInfo(ptr: Deno.PointerValue): FileInfo {
   };
 }
 
+/** Write the fh field at offset 16 of a fuse_file_info struct. */
+export function writeFileInfo(ptr: Deno.PointerValue, fh: bigint): void {
+  if (!ptr) return;
+  // The fi pointer refers to FUSE's stack memory — get a writable view.
+  const fiArr = new BigUint64Array(
+    Deno.UnsafePointerView.getArrayBuffer(ptr, FUSE_FILE_INFO_SIZE),
+  );
+  fiArr[2] = fh; // offset 16 = index 2 of u64 array
+}
+
+// O_* flags (macOS)
+export const O_RDONLY = 0x0000;
+export const O_WRONLY = 0x0001;
+export const O_RDWR = 0x0002;
+export const O_CREAT = 0x0200;
+export const O_TRUNC = 0x0400;
+export const O_APPEND = 0x0008;
+
+// setattr to_set flags
+export const FUSE_SET_ATTR_SIZE = 1 << 3;
+
 // Errno constants (macOS)
 export const ENOENT = 2;
 export const EIO = 5;
+export const EACCES = 13;
+export const EEXIST = 17;
+export const EXDEV = 18;
 export const ENOTDIR = 20;
 export const EISDIR = 21;
+export const EINVAL = 22;
+export const ENOSPC = 28;
+export const EROFS = 30;
 export const ERANGE = 34;
+export const ENOTEMPTY = 66; // macOS
 export const ENOSYS = 78;
 export const ENODATA = 93; // macOS ENOATTR — no such xattr
 
@@ -113,6 +143,7 @@ export const S_IRWXO = 0o007;
 // Common modes
 export const DIR_MODE = S_IFDIR | 0o755;
 export const FILE_MODE = S_IFREG | 0o444;
+export const FILE_MODE_RW = S_IFREG | 0o644;
 export const SYMLINK_MODE = S_IFLNK | 0o777;
 
 // fuse_lowlevel_ops struct — function pointer offsets (8 bytes each)
@@ -147,6 +178,8 @@ export const SYMLINK_MODE = S_IFLNK | 0o777;
 // Slot 26: getxattr     @ 208
 // Slot 27: listxattr    @ 216
 // Slot 28: removexattr  @ 224
+// Slot 29: access       @ 232
+// Slot 30: create       @ 240
 // ...more ops follow
 
 export const OPS_SIZE = 320; // allocate enough for all ops
@@ -181,6 +214,8 @@ export const OPS_OFFSETS = {
   getxattr: 208,
   listxattr: 216,
   removexattr: 224,
+  access: 232,
+  create: 240,
 } as const;
 
 // Helper to read a C string from a pointer
