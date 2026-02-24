@@ -344,7 +344,7 @@ async function main() {
       // If we have an open handle with a buffer, read from it
       const { fh } = readFileInfo(fi);
       const handle = handles.get(fh);
-      if (handle && handle.buffer.length > 0) {
+      if (handle && (handle.buffer.length > 0 || handle.dirty)) {
         const off = Number(offset);
         const sz = Number(size);
         const data = handle.buffer;

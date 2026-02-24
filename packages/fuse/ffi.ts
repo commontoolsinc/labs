@@ -71,7 +71,7 @@ const symbols = {
     result: "i32",
   },
   fuse_reply_write: {
-    parameters: ["pointer", "u32"],
+    parameters: ["pointer", "usize"],
     result: "i32",
   },
   fuse_reply_create: {

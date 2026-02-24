@@ -220,9 +220,24 @@ export class FsTree {
     newParent.children.set(newName, childIno);
     this.parents.set(childIno, newParentIno);
 
-    // Update path tracking
-    this.untrackPath(childIno);
-    this.trackPath(childIno, newParentIno, newName);
+    // Update path tracking for moved node and all descendants
+    this.retrackSubtree(childIno, newParentIno, newName);
+  }
+
+  /** Recursively update path tracking for an inode and all its descendants. */
+  private retrackSubtree(
+    ino: bigint,
+    parentIno: bigint,
+    name: string,
+  ): void {
+    this.untrackPath(ino);
+    this.trackPath(ino, parentIno, name);
+    const node = this.inodes.get(ino);
+    if (node?.kind === "dir") {
+      for (const [childName, childIno] of node.children) {
+        this.retrackSubtree(childIno, ino, childName);
+      }
+    }
   }
 
   /** Get the child name for an inode by scanning its parent's children map. */

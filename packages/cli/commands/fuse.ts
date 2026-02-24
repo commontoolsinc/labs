@@ -150,13 +150,33 @@ export const fuse = new Command()
     const pidFile = await readPidFile(stateDir, absMountpoint);
 
     if (pidFile && isAlive(pidFile.entry.pid)) {
-      console.log(`Sending SIGTERM to PID ${pidFile.entry.pid}...`);
+      // Verify the PID belongs to a deno/fuse process before killing
+      let verified = false;
       try {
-        Deno.kill(pidFile.entry.pid, "SIGTERM");
-        // Wait briefly for graceful shutdown
-        await new Promise((r) => setTimeout(r, 1000));
+        const ps = new Deno.Command("ps", {
+          args: ["-p", String(pidFile.entry.pid), "-o", "command="],
+          stdout: "piped",
+        });
+        const out = await ps.output();
+        const cmd = new TextDecoder().decode(out.stdout).trim();
+        verified = cmd.includes("deno") && cmd.includes("fuse");
       } catch {
-        // Process may have already exited
+        // ps failed — proceed cautiously (skip kill)
+      }
+
+      if (verified) {
+        console.log(`Sending SIGTERM to PID ${pidFile.entry.pid}...`);
+        try {
+          Deno.kill(pidFile.entry.pid, "SIGTERM");
+          // Wait briefly for graceful shutdown
+          await new Promise((r) => setTimeout(r, 1000));
+        } catch {
+          // Process may have already exited
+        }
+      } else if (isAlive(pidFile.entry.pid)) {
+        console.log(
+          `PID ${pidFile.entry.pid} does not appear to be a FUSE process; skipping kill.`,
+        );
       }
     }
 
