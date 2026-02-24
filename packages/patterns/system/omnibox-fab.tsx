@@ -29,6 +29,11 @@ import {
   searchPattern as summarySearchPattern,
   type SummaryIndexEntry,
 } from "./summary-index.tsx";
+import {
+  findIncomingPattern,
+  findOutgoingPattern,
+  type GraphEdge,
+} from "./knowledge-graph.tsx";
 
 interface DoListTools {
   addItem: Stream<{ title: string; indent?: number }>;
@@ -168,6 +173,9 @@ export default pattern<OmniboxFABInput>(
     const { entries: summaryEntries } = wish<{
       entries: SummaryIndexEntry[];
     }>({ query: "#summaryIndex" }).result;
+    const { edges: graphEdges } = wish<{
+      edges: GraphEdge[];
+    }>({ query: "#knowledgeGraph" }).result;
 
     const sandboxId = Writable.of(
       `omnibot-${Math.random().toString(36).slice(2, 10)}`,
@@ -188,6 +196,7 @@ export default pattern<OmniboxFABInput>(
 ${profileSection}
 Tool usage priority:
 - For finding content in the space: use searchSpace with a query to search across all piece summaries and names
+- For finding relationships between pieces: use findIncomingLinks/findOutgoingLinks with an entity reference, or searchGraph with a text query
 - For patterns: listPatternIndex first
 - For existing pages/notes/content: searchSpace first, then listRecent or listMentionable to identify what they're referencing
 - Attach relevant items to conversation after instantiation/retrieval if they support ongoing tasks
@@ -249,6 +258,12 @@ Be matter-of-fact. Prefer action to explanation.`;
         }),
         searchSpace: patternTool(summarySearchPattern, {
           entries: summaryEntries,
+        }),
+        findIncomingLinks: patternTool(findIncomingPattern, {
+          edges: graphEdges,
+        }),
+        findOutgoingLinks: patternTool(findOutgoingPattern, {
+          edges: graphEdges,
         }),
       },
     });
