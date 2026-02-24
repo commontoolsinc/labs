@@ -303,75 +303,6 @@ export function createCell<T>(
   ) as unknown as Cell<T>; // Cast to set brand
 }
 
-function maybeConvertArrayPathToDataURILink(
-  tx: IExtendedStorageTransaction,
-  link: NormalizedFullLink,
-): NormalizedFullLink {
-  if (link.path.length === 0) {
-    return link;
-  }
-
-  let rootValue: unknown;
-  try {
-    rootValue = tx.readValueOrThrow({ ...link, path: [] });
-  } catch {
-    return link;
-  }
-
-  let current: unknown = rootValue;
-  const prefix: string[] = [];
-  let candidate:
-    | {
-      value: unknown;
-      path: string[];
-      remainingPath: string[];
-    }
-    | undefined;
-
-  for (let i = 0; i < link.path.length; i++) {
-    if (!isRecord(current)) {
-      break;
-    }
-
-    const segment = link.path[i];
-    let next: unknown;
-
-    if (Array.isArray(current)) {
-      if (!isArrayIndexPropertyName(segment)) {
-        break;
-      }
-      next = (current as unknown as Record<string, unknown>)[segment];
-      if (isRecord(next) && !isCellLink(next)) {
-        candidate = {
-          value: next,
-          path: [...prefix, segment],
-          remainingPath: link.path.slice(i + 1),
-        };
-      }
-    } else {
-      next = (current as Record<string, unknown>)[segment];
-    }
-
-    prefix.push(segment);
-    current = next;
-  }
-
-  if (candidate === undefined) {
-    return link;
-  }
-
-  const baseLink: NormalizedFullLink = {
-    ...link,
-    path: candidate.path,
-  };
-
-  return {
-    ...link,
-    id: createDataCellURI(candidate.value, baseLink),
-    path: candidate.remainingPath,
-  };
-}
-
 /**
  * Shared container for entity ID and cause information across sibling cells.
  * When cells are created via .asSchema(), .withTx(), they share the same
@@ -1657,6 +1588,77 @@ function deepTraverse(value: unknown, seen = new WeakSet<object>()): void {
     // Ignore errors from traversal (e.g., link cycles)
     // We've already registered the dependencies we can access
   }
+}
+
+function maybeConvertArrayPathToDataURILink(
+  tx: IExtendedStorageTransaction,
+  link: NormalizedFullLink,
+): NormalizedFullLink {
+  if (link.path.length === 0) {
+    return link;
+  }
+
+  let rootValue: unknown;
+  try {
+    rootValue = tx.readValueOrThrow({ ...link, path: [] }, {
+      meta: ignoreReadForScheduling,
+    });
+  } catch {
+    return link;
+  }
+
+  let current: unknown = rootValue;
+  const prefix: string[] = [];
+  let candidate:
+    | {
+      value: unknown;
+      path: string[];
+      remainingPath: string[];
+    }
+    | undefined;
+
+  for (let i = 0; i < link.path.length; i++) {
+    if (!isRecord(current)) {
+      break;
+    }
+
+    const segment = link.path[i];
+    let next: unknown;
+
+    if (Array.isArray(current)) {
+      if (!isArrayIndexPropertyName(segment)) {
+        break;
+      }
+      next = (current as unknown as Record<string, unknown>)[segment];
+      if (isRecord(next) && !isCellLink(next)) {
+        candidate = {
+          value: next,
+          path: [...prefix, segment],
+          remainingPath: link.path.slice(i + 1),
+        };
+      }
+    } else {
+      next = (current as Record<string, unknown>)[segment];
+    }
+
+    prefix.push(segment);
+    current = next;
+  }
+
+  if (candidate === undefined) {
+    return link;
+  }
+
+  const baseLink: NormalizedFullLink = {
+    ...link,
+    path: candidate.path,
+  };
+
+  return {
+    ...link,
+    id: createDataCellURI(candidate.value, baseLink),
+    path: candidate.remainingPath,
+  };
 }
 
 /**
