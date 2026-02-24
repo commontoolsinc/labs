@@ -49,7 +49,7 @@ interface Input {
   title?: Default<string, "All Notes">;
   importMarkdown?: Default<string, "">;
   /** Pass allPieces directly from default-app for proper cell sharing */
-  allPieces?: Writable<NotePiece[]>;
+  allPieces?: Writable<Default<NotePiece[], []>>;
 }
 
 /** Manages all notes and notebooks in the space. #allNotes */
@@ -395,7 +395,7 @@ export type DetectedDuplicate = {
 
 function performImport(
   parsedNotes: ParsedNote[],
-  allPieces: Writable<NotePiece[]>,
+  allPieces: Writable<Default<NotePiece[], []>>,
   notebooks: NotebookPiece[],
   skipTitles: Set<string>,
   skipNotebookTitles: Set<string>,
@@ -665,7 +665,7 @@ type ImportAnalysisResult = {
  * Passed from pattern body to allow module-scope function to update state.
  */
 type ImportProcessingContext = {
-  allPieces: Writable<NotePiece[]>;
+  allPieces: Writable<Default<NotePiece[], []>>;
   notebooks: NotebookPiece[];
   pendingImportData: Writable<string>;
   detectedDuplicates: Writable<DetectedDuplicate[]>;
@@ -1132,17 +1132,18 @@ const NotesImportExport = pattern<Input, Output>(
 
       // notes is a computed filter of allPieces, so we need to find the actual index in allPieces
       const notesList = notes;
-      const allPiecesList = allPieces.get();
+      const allPiecesList = allPieces?.get();
 
       notesList.forEach((note: any) => {
         const noteId = note?.noteId;
         if (!noteId) return;
+        if (!allPiecesList) return;
 
         const allPiecesIdx = allPiecesList.findIndex((p: any) =>
           p?.noteId === noteId
         );
         if (allPiecesIdx >= 0) {
-          allPieces.key(allPiecesIdx).key("isHidden").set(newHiddenState);
+          allPieces?.key(allPiecesIdx).key("isHidden").set(newHiddenState);
         }
       });
     });
@@ -1155,17 +1156,18 @@ const NotesImportExport = pattern<Input, Output>(
 
       // notebooks is a computed filter of allPieces, find indices in allPieces
       const notebooksList = notebooks;
-      const allPiecesList = allPieces.get();
+      const allPiecesList = allPieces?.get();
 
       notebooksList.forEach((nb: any) => {
         const nbName = (nb as any)?.[NAME];
         if (!nbName) return;
+        if (!allPiecesList) return;
 
         const allPiecesIdx = allPiecesList.findIndex((p: any) =>
           (p as any)?.[NAME] === nbName
         );
         if (allPiecesIdx >= 0) {
-          allPieces.key(allPiecesIdx).key("isHidden").set(newHiddenState);
+          allPieces?.key(allPiecesIdx).key("isHidden").set(newHiddenState);
         }
       });
     });

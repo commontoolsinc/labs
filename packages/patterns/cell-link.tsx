@@ -11,7 +11,10 @@ export default pattern<{ title: Default<string, "Suggestion Tester"> }>(
     const note = Note({
       title: "Demo",
       content: "hello",
+      isHidden: false,
       noteId: generateId(),
+      linkPattern: "",
+      parentNotebook: null,
     });
 
     return {

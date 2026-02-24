@@ -11,7 +11,11 @@ import type {
   TypeFormatter,
 } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
-import { detectWrapperViaNode, resolveWrapperNode } from "../type-utils.ts";
+import {
+  detectWrapperViaNode,
+  resolveWrapperNode,
+  type TypeWithInternals,
+} from "../type-utils.ts";
 
 type WrapperKind = CellWrapperKind;
 
@@ -37,6 +41,13 @@ export class CommonToolsFormatter implements TypeFormatter {
       context.typeChecker,
     );
     if (wrapperViaNode === "Default") {
+      return true;
+    }
+
+    // Fallback: check via aliasSymbol for Default<T> when typeToTypeNode expanded the alias.
+    // typeToTypeNode expands Default<T,V> to its branded union representation, losing the
+    // "Default" type node. The type object itself still carries aliasSymbol = Default.
+    if ((type as TypeWithInternals).aliasSymbol?.name === "Default") {
       return true;
     }
 
@@ -105,6 +116,39 @@ export class CommonToolsFormatter implements TypeFormatter {
       if (nodeForDefault && ts.isTypeReferenceNode(nodeForDefault)) {
         return this.formatDefaultType(nodeForDefault, context);
       }
+    }
+
+    // Fallback: handle Default<T> detected via aliasSymbol when no type node is available.
+    // When typeToTypeNode expands Default<T,V), the node no longer says "Default" but
+    // the type object still carries aliasSymbol. Extract T from aliasTypeArguments[0]
+    // and V from aliasTypeArguments[1] so the default value is preserved in the schema.
+    const typeWithAlias = type as TypeWithInternals;
+    if (
+      typeWithAlias.aliasSymbol?.name === "Default" &&
+      typeWithAlias.aliasTypeArguments &&
+      typeWithAlias.aliasTypeArguments.length >= 1
+    ) {
+      const innerType = typeWithAlias.aliasTypeArguments[0]!;
+      const valueSchema = this.schemaGenerator.formatChildType(
+        innerType,
+        context,
+        undefined,
+      );
+
+      if (typeWithAlias.aliasTypeArguments.length >= 2) {
+        const defaultType = typeWithAlias.aliasTypeArguments[1]!;
+        const defaultValue = this.extractDefaultValue(defaultType, context);
+        if (defaultValue !== undefined) {
+          if (typeof valueSchema === "boolean") {
+            return (valueSchema === false
+              ? { not: true, default: defaultValue }
+              : { default: defaultValue }) as SchemaDefinition;
+          }
+          (valueSchema as Record<string, unknown>).default = defaultValue;
+        }
+      }
+
+      return valueSchema;
     }
 
     const wrapperInfo = getCellWrapperInfo(type, context.typeChecker);

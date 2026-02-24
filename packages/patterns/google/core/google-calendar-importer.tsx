@@ -599,7 +599,11 @@ const toggleShowEvents = handler<unknown, { showEvents: Writable<boolean> }>(
   },
 );
 
-const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
+// Settings is not optional - we provide it with a default
+const GoogleCalendarImporter = pattern<
+  GoogleCalendarImporterInput & { settings: Settings },
+  Output
+>(
   ({ settings, overrideAuth }) => {
     const events = Writable.of<Confidential<CalendarEvent[]>>([]);
     const calendars = Writable.of<Calendar[]>([]);

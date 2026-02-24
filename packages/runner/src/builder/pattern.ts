@@ -12,6 +12,7 @@ import {
   type OpaqueRef,
   type Pattern,
   type PatternFactory,
+  type RequireDefaults,
   type SchemaWithoutCell,
   SELF,
   type toJSON,
@@ -53,10 +54,14 @@ import {
 
 // Function-only overloads (most common)
 export function pattern<T>(
-  fn: (input: OpaqueRef<T> & { [SELF]: OpaqueRef<any> }) => any,
+  fn: (
+    input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<any> },
+  ) => any,
 ): PatternFactory<T, ReturnType<typeof fn>>;
 export function pattern<T, R>(
-  fn: (input: OpaqueRef<T> & { [SELF]: OpaqueRef<R> }) => Opaque<R>,
+  fn: (
+    input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<R> },
+  ) => Opaque<R>,
 ): PatternFactory<T, R>;
 // Function + schemas overloads
 export function pattern<S extends JSONSchema>(
@@ -84,13 +89,15 @@ export function pattern<S extends JSONSchema, RS extends JSONSchema>(
 ): PatternFactory<SchemaWithoutCell<S>, SchemaWithoutCell<RS>>;
 // Explicit T with optional schemas (e.g. pattern<{ x: number }>(fn, schema))
 export function pattern<T>(
-  fn: (input: OpaqueRef<T> & { [SELF]: OpaqueRef<any> }) => any,
+  fn: (
+    input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<any> },
+  ) => any,
   argumentSchema: JSONSchema,
   resultSchema?: JSONSchema,
 ): PatternFactory<T, ReturnType<typeof fn>>;
 export function pattern<T, R>(
   fn: (
-    input: OpaqueRef<T> & { [SELF]: OpaqueRef<R> },
+    input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<R> },
   ) => Opaque<R>,
   argumentSchema: JSONSchema,
   resultSchema?: JSONSchema,

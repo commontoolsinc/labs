@@ -19,6 +19,7 @@ import {
   type CellKind,
   type CellTypeConstructor,
   type Frame,
+  type StripDefaultBrand,
   type HKT,
   type ICell,
   ID,
@@ -543,7 +544,7 @@ export class CellImpl<T extends StorableValue>
     return isStreamValue(value);
   }
 
-  get(options?: { traverseCells?: boolean }): Readonly<T> {
+  get(options?: { traverseCells?: boolean }): Readonly<StripDefaultBrand<T>> {
     if (!this.synced) this.sync(); // No await, just kicking this off
     logger.timeStart("cell", "get");
     const value = validateAndTransform(
@@ -572,7 +573,7 @@ export class CellImpl<T extends StorableValue>
    * Use this when you need to read a value but don't want changes to that value
    * to trigger re-execution of the current reactive context.
    */
-  sample(): Readonly<T> {
+  sample(): Readonly<StripDefaultBrand<T>> {
     if (!this.synced) this.sync(); // No await, just kicking this off
 
     // Wrap the transaction to make all reads non-reactive. Child cells created

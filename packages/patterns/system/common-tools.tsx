@@ -204,13 +204,25 @@ type BashResult = {
 
 export const bash = pattern<BashRequest, BashResult | { error: string }>(
   ({ command, workingDirectory, timeout, environment, sandboxId }) => {
+    // Since some of our input fields should not be included if they are
+    // undefined, we use computed to conditionally construct the body object.
+    const body = computed(() => {
+      return {
+        sandboxId,
+        command,
+        // optional parameters - only include if provided
+        ...(workingDirectory !== undefined && { workingDirectory }),
+        ...(timeout !== undefined && { timeout }),
+        ...(environment !== undefined && { environment }),
+      };
+    });
     const { result, error } = fetchData<BashResult>({
       url: "/api/sandbox/exec",
       mode: "json",
       options: {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: { sandboxId, command, workingDirectory, timeout, environment },
+        body,
       },
     });
     return ifElse(error, { error }, result);

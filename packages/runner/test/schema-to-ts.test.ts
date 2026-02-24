@@ -786,7 +786,7 @@ describe("Schema-to-TS Type Conversion", () => {
           result: str`Processed ${name}`,
           processedCount: count,
           status: {
-            success: enabled,
+            success: enabled ?? false,
           },
         };
       },
