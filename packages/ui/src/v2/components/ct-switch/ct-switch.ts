@@ -266,6 +266,12 @@ export class CTSwitch extends BaseElement {
       const oldChecked = this.getChecked();
       this.setChecked(!oldChecked);
 
+      // For plain boolean usage (no Cell), update the property directly
+      // so Lit re-renders and reflects the attribute
+      if (!this._checkedCellController.hasCell()) {
+        this.checked = !oldChecked;
+      }
+
       // Note: ct-change event is emitted by the cell controller's onChange callback
     }
 
