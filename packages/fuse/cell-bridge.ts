@@ -8,7 +8,9 @@ import { FsTree } from "./tree.ts";
 import { buildJsonTree, isSigilLink, isStreamValue } from "./tree-builder.ts";
 import type { PieceManager } from "@commontools/piece";
 import { type PieceController, PiecesController } from "@commontools/piece/ops";
-import { loadManager } from "../cli/lib/piece.ts";
+// Lazy-imported in connectSpace() to avoid pulling in heavy CLI deps at import
+// time (breaks tests that only use CellBridge for tree/symlink logic).
+// import { loadManager } from "../cli/lib/piece.ts";
 
 /** Strip "of:" prefix from entity IDs if present. */
 function stripOfPrefix(id: string): string {
@@ -84,6 +86,7 @@ export class CellBridge {
 
     this.connecting.add(spaceName);
     try {
+      const { loadManager } = await import("../cli/lib/piece.ts");
       const manager = await loadManager({
         apiUrl: this.apiUrl,
         space: spaceName,
