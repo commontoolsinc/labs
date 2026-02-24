@@ -21,10 +21,10 @@ FILESYSTEM LAYOUT:
       pieces/
         <piece-name>/           # each piece gets a directory
           result/               # exploded JSON tree (dirs, files, symlinks)
+          result/*.handler      # write-only files for stream cells
           result.json           # full JSON blob
           input/
           input.json
-          handlers/             # write-only: echo JSON to invoke
           meta.json             # piece ID, entity, pattern name
         .index.json             # name-to-entity-ID mapping
       entities/                 # entity-hash symlinks -> ../pieces/<name>
@@ -40,7 +40,7 @@ READING:
 WRITING:
   echo '"new title"' > result/title      # write scalar (auto-detects type)
   echo '{"a":1}' > result.json           # replace entire cell
-  echo '{"msg":"hi"}' > handlers/chat    # invoke a stream handler
+  echo '{"msg":"hi"}' > result/chat.handler  # invoke a stream handler
   touch result/newkey                    # create key (empty string)
   rm result/oldkey                       # delete key
   ln -s ../entities/<hash> result/ref    # create a sigil link
