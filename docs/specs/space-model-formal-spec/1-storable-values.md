@@ -163,7 +163,7 @@ member of `StorableValue` or `StorableDatum`.
 | `number` | Must be finite | `-0` normalized to `0`; `NaN`/`Infinity` rejected |
 | `string` | None | Unicode text |
 | `undefined` | None | First-class storable; see note below |
-| `bigint` | None | Large integers; see Section 5.3 for JSON encoding |
+| `bigint` | None | Large integers; JSON-encoded as base64 of two's complement big-endian bytes (Section 5.3) |
 
 > **`undefined` as a first-class storable.** `undefined` is a first-class
 > storable value that round-trips faithfully through serialization. Because most
@@ -216,7 +216,7 @@ Section 6.3). `StorableDate` is hashed via `TAG_INSTANCE` through its
 | `StorableMap` | `Map` | `Map@1` | `[[key, value], ...]` | Entry pairs as an array of two-element arrays. Insertion order is preserved. Keys and values are recursively processed. |
 | `StorableSet` | `Set` | `Set@1` | `[value, ...]` | Elements as an array. Iteration order is preserved. Values are recursively processed. |
 | `StorableDate` | `Date` | `Date@1` | `string` (ISO 8601 UTC) | Deconstructed state is a string — the serializer recurses into it and finds a primitive. |
-| `StorableUint8Array` | `Uint8Array` | `Bytes@1` | `string` (base64-encoded) | Deconstructed state is a string. |
+| `StorableUint8Array` | `Uint8Array` | `Bytes@1` | `string` (unpadded base64; see Section 5.3) | Deconstructed state is a string. |
 
 Each wrapper class:
 
@@ -991,8 +991,11 @@ export function serialize(
   // --- `bigint` ---
   // A primitive that rides through `StorableValue` without wrapping (like
   // `undefined`). Needs a dedicated handler since JSON has no native bigint.
+  // The state is the unpadded base64 encoding of the value's minimal two's
+  // complement representation in big-endian byte order — the same byte format
+  // used by the canonical hash (Section 6.4).
   if (typeof value === 'bigint') {
-    return context.encode('BigInt@1', value.toString());
+    return context.encode('BigInt@1', base64Encode(bigintToTwosComplement(value)));
   }
 
   // --- `undefined` ---
@@ -1099,8 +1102,9 @@ export function deserialize(
     }
 
     // `BigInt@1`: validate and reconstruct a `bigint` primitive.
-    // Deserialization cannot assume type safety from the wire — the state
-    // must be validated before use. See Section 5.3 deserialization
+    // The state is unpadded base64 of minimal two's complement big-endian
+    // bytes. Deserialization cannot assume type safety from the wire — the
+    // state must be validated before use. See Section 5.3 deserialization
     // validation note.
     if (tag === 'BigInt@1') {
       if (typeof state !== 'string') {
@@ -1108,10 +1112,11 @@ export function deserialize(
           'BigInt@1 state must be a string');
       }
       try {
-        return BigInt(state);
+        const bytes = base64Decode(state);
+        return twosComplementToBigint(bytes);
       } catch {
         return new ProblematicStorable('BigInt@1', state as StorableValue,
-          'BigInt@1 state is not a valid integer representation');
+          'BigInt@1 state is not valid base64 or not a valid integer representation');
       }
     }
 
@@ -1269,6 +1274,12 @@ round-trip correctly.
 
 ### 5.3 Standard Type Encodings
 
+> **Base64 encoding convention.** All base64-encoded values in the JSON wire
+> format use the standard alphabet (`A-Za-z0-9+/`) and **must omit** trailing
+> `=` padding characters. Encoders must not emit padding; decoders must accept
+> input with or without padding for robustness. This convention applies to
+> `Bytes@1` and `BigInt@1` state values.
+
 ```typescript
 // file: packages/common/json-encoding.ts (illustrative -- tag-to-format map)
 
@@ -1309,7 +1320,7 @@ round-trip correctly.
 // Tag: "Set@1"
 // { "/Set@1": [value, ...] }
 
-// Binary data (base64-encoded)
+// Binary data (base64-encoded per the base64 convention above)
 // Tag: "Bytes@1"
 // { "/Bytes@1": string }
 
@@ -1317,22 +1328,32 @@ round-trip correctly.
 // Tag: "Date@1"
 // { "/Date@1": string }
 
-// BigInts (decimal string representation)
+// BigInts (base64 of two's complement big-endian bytes; see convention above)
 // Tag: "BigInt@1"
 // { "/BigInt@1": string }
+//
+// The state is the base64 encoding of the value's minimal two's complement
+// representation in big-endian byte order:
+//   - `0n`  → single byte 0x00 → "AA"
+//   - `1n`  → 0x01             → "AQ"
+//   - `-1n` → 0xFF             → "/w"
+//   - `128n` → 0x00 0x80       → "AIA"  (sign-extension: 0x80 alone = -128)
+//   - `-128n` → 0x80           → "gA"
+// This matches the canonical hash byte format (Section 6.4), which already
+// uses two's complement big-endian for BigInt payloads.
 ```
 
 > **Deserialization validation.** Deserialization cannot assume type safety from
 > the wire. Each type handler must validate the format of its state before
 > processing. For example, the `BigInt@1` handler must validate that its state
-> is a `string` (and a valid decimal integer representation) before calling
-> `BigInt(state)`. On malformed input — wrong type, invalid format, or missing
-> fields — the handler should produce a `ProblematicStorable` (Section 3.4)
-> rather than throwing or silently producing garbage. This principle applies to
-> all type handlers, not just `BigInt@1`: `Date@1` should validate its ISO 8601
-> string, `Bytes@1` should validate its base64 string, and so on. Wire data is
-> untrusted input. See Section 7.4 for the broader principle that applies to all
-> code consuming deserialized values.
+> is a `string` containing valid base64 before decoding and interpreting the
+> bytes as a two's complement big-endian integer. On malformed input — wrong
+> type, invalid format, or missing fields — the handler should produce a
+> `ProblematicStorable` (Section 3.4) rather than throwing or silently producing
+> garbage. This principle applies to all type handlers, not just `BigInt@1`:
+> `Date@1` should validate its ISO 8601 string, `Bytes@1` should validate its
+> base64 string, and so on. Wire data is untrusted input. See Section 7.4 for
+> the broader principle that applies to all code consuming deserialized values.
 
 > **Sparse array encoding in JSON.** Even when an array contains holes, it is
 > serialized as a JSON array. Runs of consecutive holes are represented by
@@ -1528,9 +1549,9 @@ nibble range.
  * deduplication) specify which algorithm is used in that context.
  *
  * Output format depends on context. When a string representation is needed,
- * base64 with the standard alphabet (`A-Za-z0-9+/`) is recommended; padding
- * (`=`) may be omitted unless required for unambiguity in a given context.
- * When no stringification is needed, raw hash bytes are perfectly acceptable.
+ * base64 with the standard alphabet (`A-Za-z0-9+/`) and no `=` padding is
+ * the standard encoding (see Section 5.3, base64 convention). When no
+ * stringification is needed, raw hash bytes are perfectly acceptable.
  */
 export function canonicalHash(
   value: StorableValue,
