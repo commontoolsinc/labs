@@ -375,12 +375,14 @@ describe("serialization", () => {
       expect(serializedNum).not.toEqual(serializedBig);
     });
 
-    it("deserializes padded base64 input (permissive)", () => {
+    it("rejects padded base64 input (ProblematicStorable)", () => {
       const { context, runtime } = makeTestContext();
-      // "Kg==" is the padded form of "Kg" (42n)
+      // "Kg==" is the padded form of "Kg" (42n) -- padding is now rejected.
       const data = { "/BigInt@1": "Kg==" } as SerializedForm;
       const result = deserialize(data, context, runtime);
-      expect(result).toBe(42n);
+      expect(result).toBeInstanceOf(ProblematicStorable);
+      const prob = result as unknown as ProblematicStorable;
+      expect(prob.typeTag).toBe("BigInt@1");
     });
 
     it("deserializes non-string state to ProblematicStorable", () => {

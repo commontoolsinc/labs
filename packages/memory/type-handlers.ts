@@ -208,9 +208,9 @@ export const BigIntHandler: TypeHandler = {
 /**
  * Handler for `StorableEpochNsec`. Serializes to a flat base64 string encoding
  * the underlying bigint's two's-complement big-endian byte representation.
- * Wire format: `{ "/EpochNsec@1": "<base64>" }`. This bypasses the generic
- * DECONSTRUCT -> recurse path used by `StorableInstanceHandler`, producing
- * a flat wire format instead of a nested `{ "/EpochNsec@1": { "/BigInt@1": ... } }`.
+ * Wire format: `{ "/EpochNsec@1": "<base64>" }`. StorableEpochNsec is a direct
+ * member of StorableDatum (not a StorableInstance), so this handler uses
+ * `instanceof` directly.
  * See Section 5.3 of the formal spec.
  */
 export const EpochNsecHandler: TypeHandler = {
@@ -261,8 +261,9 @@ export const EpochNsecHandler: TypeHandler = {
 /**
  * Handler for `StorableEpochDays`. Serializes to a flat base64 string encoding
  * the underlying bigint's two's-complement big-endian byte representation.
- * Wire format: `{ "/EpochDays@1": "<base64>" }`. Same flat encoding approach
- * as `EpochNsecHandler`.
+ * Wire format: `{ "/EpochDays@1": "<base64>" }`. StorableEpochDays is a direct
+ * member of StorableDatum (not a StorableInstance), so this handler uses
+ * `instanceof` directly. Same flat encoding approach as `EpochNsecHandler`.
  * See Section 5.3 of the formal spec.
  */
 export const EpochDaysHandler: TypeHandler = {
@@ -367,18 +368,16 @@ export const StorableInstanceHandler: TypeHandler = {
 
 /**
  * Create a registry with the built-in type handlers. The order matters for
- * serialization: `EpochNsec` and `EpochDays` are checked first (most
- * specific -- they are `StorableInstance` subtypes that need flat wire
- * encoding), then `StorableInstance` (generic protocol types), then `bigint`
- * and `undefined`. Primitives (null, boolean, number, string), arrays, and
- * plain objects are handled as fallthrough in the serializer after no handler
- * matches.
+ * serialization: `EpochNsec` and `EpochDays` are checked first (direct
+ * StorableDatum members that need `instanceof`-based matching), then
+ * `StorableInstance` (generic protocol types), then `bigint` and `undefined`.
+ * Primitives (null, boolean, number, string), arrays, and plain objects are
+ * handled as fallthrough in the serializer after no handler matches.
  */
 export function createDefaultRegistry(): TypeHandlerRegistry {
   const registry = new TypeHandlerRegistry();
-  // EpochNsec/EpochDays first -- they are StorableInstance subtypes that need
-  // dedicated flat-format encoding, so they must be checked before the generic
-  // StorableInstanceHandler.
+  // EpochNsec/EpochDays first -- they are direct StorableDatum members matched
+  // by instanceof, and must be checked before the generic StorableInstanceHandler.
   registry.register(EpochNsecHandler);
   registry.register(EpochDaysHandler);
   // StorableInstance (generic -- checked via isStorableInstance brand).

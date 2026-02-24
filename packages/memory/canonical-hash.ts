@@ -10,7 +10,11 @@
  * Gated behind `ExperimentalOptions.canonicalHashing`.
  */
 import { createHasher, type IncrementalHasher } from "./hash-impl.ts";
-import { StorableUint8Array } from "./storable-native-instances.ts";
+import {
+  StorableEpochDays,
+  StorableEpochNsec,
+  StorableUint8Array,
+} from "./storable-native-instances.ts";
 import { DECONSTRUCT, isStorableInstance } from "./storable-protocol.ts";
 import { encodeULEB128 } from "@commontools/leb128";
 import { bigintToMinimalTwosComplement } from "./bigint-encoding.ts";
@@ -36,6 +40,8 @@ const TAG_STRING = 0x23;
 const TAG_BIGINT = 0x24;
 const TAG_UNDEFINED = 0x25;
 const TAG_BYTES = 0x26;
+const TAG_EPOCH_NSEC = 0x27;
+const TAG_EPOCH_DAYS = 0x28;
 
 // ---------------------------------------------------------------------------
 // Pre-allocated tag byte arrays (avoids per-call allocation)
@@ -54,6 +60,8 @@ const TAG_STRING_BYTES = new Uint8Array([TAG_STRING]);
 const TAG_BIGINT_BYTES = new Uint8Array([TAG_BIGINT]);
 const TAG_UNDEFINED_BYTES = new Uint8Array([TAG_UNDEFINED]);
 const TAG_BYTES_BYTES = new Uint8Array([TAG_BYTES]);
+const TAG_EPOCH_NSEC_BYTES = new Uint8Array([TAG_EPOCH_NSEC]);
+const TAG_EPOCH_DAYS_BYTES = new Uint8Array([TAG_EPOCH_DAYS]);
 
 // ---------------------------------------------------------------------------
 // Shared scratch buffer (safe in single-threaded synchronous JS -- see
@@ -156,9 +164,25 @@ function feedObjectValue(
     return;
   }
 
-  // 3. StorableInstance (generic protocol path via DECONSTRUCT).
-  // Temporal types (StorableEpochNsec, StorableEpochDays) and other instances
-  // fall through to here (hashed via typeTag + DECONSTRUCT).
+  // 3a. StorableEpochNsec (dedicated primitive tag)
+  if (value instanceof StorableEpochNsec) {
+    hasher.update(TAG_EPOCH_NSEC_BYTES);
+    const bytes = bigintToMinimalTwosComplement(value.value);
+    feedLength(hasher, bytes.length);
+    hasher.update(bytes);
+    return;
+  }
+
+  // 3b. StorableEpochDays (dedicated primitive tag)
+  if (value instanceof StorableEpochDays) {
+    hasher.update(TAG_EPOCH_DAYS_BYTES);
+    const bytes = bigintToMinimalTwosComplement(value.value);
+    feedLength(hasher, bytes.length);
+    hasher.update(bytes);
+    return;
+  }
+
+  // 4. StorableInstance (generic protocol path via DECONSTRUCT).
   if (isStorableInstance(value)) {
     hasher.update(TAG_INSTANCE_BYTES);
     const typeTag = (value as { typeTag?: unknown }).typeTag;
@@ -175,7 +199,7 @@ function feedObjectValue(
     return;
   }
 
-  // 4. Array (with sparse hole handling, terminated by TAG_END)
+  // 5. Array (with sparse hole handling, terminated by TAG_END)
   if (Array.isArray(value)) {
     hasher.update(TAG_ARRAY_BYTES);
     let i = 0;
@@ -198,7 +222,7 @@ function feedObjectValue(
     return;
   }
 
-  // 5. Plain object
+  // 6. Plain object
   const obj = value as Record<string, unknown>;
   const keys = Object.keys(obj);
   // Sort keys by UTF-8 byte comparison.

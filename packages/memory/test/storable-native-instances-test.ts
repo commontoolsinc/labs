@@ -427,14 +427,13 @@ describe("storable-native-instances", () => {
   });
 
   // --------------------------------------------------------------------------
-  // StorableEpochNsec
+  // StorableEpochNsec (direct StorableDatum member, not StorableInstance)
   // --------------------------------------------------------------------------
 
   describe("StorableEpochNsec", () => {
-    it("implements StorableInstance", () => {
+    it("is NOT a StorableInstance (no DECONSTRUCT)", () => {
       const sn = new StorableEpochNsec(0n);
-      expect(isStorableInstance(sn)).toBe(true);
-      expect(sn.typeTag).toBe("EpochNsec@1");
+      expect(isStorableInstance(sn)).toBe(false);
     });
 
     it("wraps a bigint value", () => {
@@ -442,133 +441,56 @@ describe("storable-native-instances", () => {
       expect(sn.value).toBe(1234567890000000000n);
     });
 
-    it("[DECONSTRUCT] returns the bigint value", () => {
-      const sn = new StorableEpochNsec(42n);
-      expect(sn[DECONSTRUCT]()).toBe(42n);
-    });
-
-    it("[DECONSTRUCT] returns negative values", () => {
-      const sn = new StorableEpochNsec(-1000000000n);
-      expect(sn[DECONSTRUCT]()).toBe(-1000000000n);
-    });
-
-    it("[DECONSTRUCT] returns zero", () => {
+    it("wraps zero", () => {
       const sn = new StorableEpochNsec(0n);
-      expect(sn[DECONSTRUCT]()).toBe(0n);
+      expect(sn.value).toBe(0n);
     });
 
-    it("[RECONSTRUCT] creates from bigint state", () => {
-      const result = StorableEpochNsec[RECONSTRUCT](42n, dummyContext);
-      expect(result).toBeInstanceOf(StorableEpochNsec);
-      expect(result.value).toBe(42n);
-    });
-
-    it("[RECONSTRUCT] handles zero", () => {
-      const result = StorableEpochNsec[RECONSTRUCT](0n, dummyContext);
-      expect(result.value).toBe(0n);
-    });
-
-    it("[RECONSTRUCT] handles negative", () => {
-      const result = StorableEpochNsec[RECONSTRUCT](-999n, dummyContext);
-      expect(result.value).toBe(-999n);
-    });
-
-    it("[RECONSTRUCT] throws on non-bigint state", () => {
-      expect(() => StorableEpochNsec[RECONSTRUCT](42, dummyContext)).toThrow(
-        "expected bigint",
-      );
-      expect(() => StorableEpochNsec[RECONSTRUCT]("42", dummyContext)).toThrow(
-        "expected bigint",
-      );
-      expect(() => StorableEpochNsec[RECONSTRUCT](null, dummyContext)).toThrow(
-        "expected bigint",
-      );
-    });
-
-    it("round-trips through DECONSTRUCT/RECONSTRUCT", () => {
-      const original = new StorableEpochNsec(1704067200000000000n);
-      const state = original[DECONSTRUCT]();
-      const restored = StorableEpochNsec[RECONSTRUCT](state, dummyContext);
-      expect(restored.value).toBe(original.value);
+    it("wraps negative values (pre-epoch)", () => {
+      const sn = new StorableEpochNsec(-1000000000n);
+      expect(sn.value).toBe(-1000000000n);
     });
 
     it("handles large future date (year 3000)", () => {
-      // ~32503680000 seconds * 1e9 nsec
       const nsec = 32503680000000000000n;
       const sn = new StorableEpochNsec(nsec);
-      expect(sn[DECONSTRUCT]()).toBe(nsec);
-      const restored = StorableEpochNsec[RECONSTRUCT](
-        sn[DECONSTRUCT](),
-        dummyContext,
-      );
-      expect(restored.value).toBe(nsec);
+      expect(sn.value).toBe(nsec);
+    });
+
+    it("is instanceof StorableEpochNsec", () => {
+      const sn = new StorableEpochNsec(42n);
+      expect(sn instanceof StorableEpochNsec).toBe(true);
     });
   });
 
   // --------------------------------------------------------------------------
-  // StorableEpochDays
+  // StorableEpochDays (direct StorableDatum member, not StorableInstance)
   // --------------------------------------------------------------------------
 
   describe("StorableEpochDays", () => {
-    it("implements StorableInstance", () => {
+    it("is NOT a StorableInstance (no DECONSTRUCT)", () => {
       const sd = new StorableEpochDays(0n);
-      expect(isStorableInstance(sd)).toBe(true);
-      expect(sd.typeTag).toBe("EpochDays@1");
+      expect(isStorableInstance(sd)).toBe(false);
     });
 
     it("wraps a bigint value", () => {
-      const sd = new StorableEpochDays(19723n); // ~2024-01-01
+      const sd = new StorableEpochDays(19723n);
       expect(sd.value).toBe(19723n);
     });
 
-    it("[DECONSTRUCT] returns the bigint value", () => {
-      const sd = new StorableEpochDays(100n);
-      expect(sd[DECONSTRUCT]()).toBe(100n);
-    });
-
-    it("[DECONSTRUCT] returns negative values (pre-epoch)", () => {
-      const sd = new StorableEpochDays(-365n);
-      expect(sd[DECONSTRUCT]()).toBe(-365n);
-    });
-
-    it("[DECONSTRUCT] returns zero (epoch day)", () => {
+    it("wraps zero (epoch day)", () => {
       const sd = new StorableEpochDays(0n);
-      expect(sd[DECONSTRUCT]()).toBe(0n);
+      expect(sd.value).toBe(0n);
     });
 
-    it("[RECONSTRUCT] creates from bigint state", () => {
-      const result = StorableEpochDays[RECONSTRUCT](100n, dummyContext);
-      expect(result).toBeInstanceOf(StorableEpochDays);
-      expect(result.value).toBe(100n);
+    it("wraps negative values (pre-epoch)", () => {
+      const sd = new StorableEpochDays(-365n);
+      expect(sd.value).toBe(-365n);
     });
 
-    it("[RECONSTRUCT] handles zero", () => {
-      const result = StorableEpochDays[RECONSTRUCT](0n, dummyContext);
-      expect(result.value).toBe(0n);
-    });
-
-    it("[RECONSTRUCT] handles negative", () => {
-      const result = StorableEpochDays[RECONSTRUCT](-365n, dummyContext);
-      expect(result.value).toBe(-365n);
-    });
-
-    it("[RECONSTRUCT] throws on non-bigint state", () => {
-      expect(() => StorableEpochDays[RECONSTRUCT](42, dummyContext)).toThrow(
-        "expected bigint",
-      );
-      expect(() => StorableEpochDays[RECONSTRUCT]("42", dummyContext)).toThrow(
-        "expected bigint",
-      );
-      expect(() => StorableEpochDays[RECONSTRUCT](null, dummyContext)).toThrow(
-        "expected bigint",
-      );
-    });
-
-    it("round-trips through DECONSTRUCT/RECONSTRUCT", () => {
-      const original = new StorableEpochDays(19723n);
-      const state = original[DECONSTRUCT]();
-      const restored = StorableEpochDays[RECONSTRUCT](state, dummyContext);
-      expect(restored.value).toBe(original.value);
+    it("is instanceof StorableEpochDays", () => {
+      const sd = new StorableEpochDays(100n);
+      expect(sd instanceof StorableEpochDays).toBe(true);
     });
   });
 

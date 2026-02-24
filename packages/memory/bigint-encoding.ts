@@ -209,15 +209,12 @@ for (let i = 0; i < B64_CHARS.length; i++) {
 }
 
 /**
- * Decode a base64 string to `Uint8Array`. Accepts both padded and unpadded
- * input (trailing `=` characters are stripped before decoding).
+ * Decode an unpadded base64 string to `Uint8Array`. Rejects padded input
+ * (trailing `=` characters are invalid per the spec's base64 convention).
  */
 export function fromBase64(encoded: string): Uint8Array {
-  // Strip trailing padding.
-  let s = encoded;
-  while (s.endsWith("=")) s = s.slice(0, -1);
-
   // Compute output byte count from the number of base64 characters.
+  const s = encoded;
   const outLen = (s.length * 3) >>> 2;
   const result = new Uint8Array(outLen);
 

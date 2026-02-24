@@ -7,10 +7,20 @@ import type {
 import { isStorableInstance } from "./storable-protocol.ts";
 import {
   isConvertibleNativeInstance,
+  StorableEpochDays,
   StorableEpochNsec,
   StorableError,
   UNSAFE_KEYS,
 } from "./storable-native-instances.ts";
+
+/** Reject native objects with extra enumerable properties. */
+function rejectExtraProperties(value: object, typeName: string): void {
+  if (Object.keys(value).length > 0) {
+    throw new Error(
+      `Cannot store ${typeName} with extra enumerable properties`,
+    );
+  }
+}
 
 /**
  * Shallow conversion from JS values to `StorableValue`. Wraps `Error`
@@ -32,6 +42,15 @@ export function toRichStorableValue(
   value: unknown,
   freeze = true,
 ): StorableValueLayer {
+  // Temporal types (StorableEpochNsec, StorableEpochDays) are direct
+  // StorableDatum members -- pass through as-is.
+  if (
+    value instanceof StorableEpochNsec || value instanceof StorableEpochDays
+  ) {
+    if (freeze) Object.freeze(value);
+    return value as StorableValueLayer;
+  }
+
   // StorableInstance values (including StorableError, UnknownStorable, etc.)
   // pass through as-is -- they are already valid StorableValue members.
   if (isStorableInstance(value)) {
@@ -49,11 +68,7 @@ export function toRichStorableValue(
   // Date instances are converted to StorableEpochNsec (nanoseconds from epoch).
   // Extra enumerable properties cause rejection ("death before confusion").
   if (value instanceof Date) {
-    if (Object.keys(value).length > 0) {
-      throw new Error(
-        "Cannot store Date with extra enumerable properties",
-      );
-    }
+    rejectExtraProperties(value, "Date");
     const nsec = BigInt(value.getTime()) * 1_000_000n;
     const wrapped = new StorableEpochNsec(nsec);
     if (freeze) Object.freeze(wrapped);
@@ -211,6 +226,13 @@ function isDeepFrozenStorableValue(value: unknown): boolean {
     return true;
   }
 
+  // Temporal types are simple frozen value wrappers.
+  if (
+    value instanceof StorableEpochNsec || value instanceof StorableEpochDays
+  ) {
+    return true;
+  }
+
   // StorableInstance -- check if frozen; don't recurse into its properties
   // (it's a protocol type, not a plain data container).
   if (isStorableInstance(value)) return true;
@@ -288,6 +310,17 @@ function toDeepRichStorableValueInternal(
       converted.set(original, result);
     }
     return result as StorableValue;
+  }
+
+  // Temporal types are direct StorableDatum members -- pass through.
+  if (
+    value instanceof StorableEpochNsec || value instanceof StorableEpochDays
+  ) {
+    if (freeze) Object.freeze(value);
+    if (isOriginalRecord) {
+      converted.set(original, value);
+    }
+    return value as StorableValue;
   }
 
   // Other StorableInstance values (Cell, Stream, UnknownStorable, etc.)
@@ -423,6 +456,13 @@ export function isRichStorableValue(
 
     case "object": {
       if (value === null) {
+        return true;
+      }
+      // Temporal types are direct StorableDatum members.
+      if (
+        value instanceof StorableEpochNsec ||
+        value instanceof StorableEpochDays
+      ) {
         return true;
       }
       // StorableInstance values (including StorableError, UnknownStorable,

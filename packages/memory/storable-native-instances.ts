@@ -321,64 +321,28 @@ export class StorableSet extends StorableNativeWrapper<Set<StorableValue>> {
 
 /**
  * Temporal type representing nanoseconds from the POSIX Epoch (1970-01-01T00:00:00Z).
- * Wraps a `bigint` value. Used for high-precision timestamps.
- * See Section 1.4.1 of the formal spec.
+ * Wraps a `bigint` value. Used for high-precision timestamps. Direct member of
+ * `StorableDatum` (not a `StorableInstance`).
+ * See Section 1.4.5 of the formal spec.
  */
-export class StorableEpochNsec implements StorableInstance {
-  readonly typeTag = TAGS.EpochNsec;
+export class StorableEpochNsec {
   constructor(
     /** Nanoseconds from POSIX Epoch. Negative values represent pre-epoch timestamps. */
     readonly value: bigint,
   ) {}
-
-  /** Deconstruct to the underlying bigint for serialization and hashing. */
-  [DECONSTRUCT](): StorableValue {
-    return this.value;
-  }
-
-  /** Reconstruct from a bigint value. */
-  static [RECONSTRUCT](
-    state: StorableValue,
-    _context: ReconstructionContext,
-  ): StorableEpochNsec {
-    if (typeof state !== "bigint") {
-      throw new Error(
-        `StorableEpochNsec: expected bigint state, got ${typeof state}`,
-      );
-    }
-    return new StorableEpochNsec(state);
-  }
 }
 
 /**
  * Temporal type representing days from the POSIX Epoch (1970-01-01).
- * Wraps a `bigint` value. Used for date-only (no time) values.
- * See Section 1.4.1 of the formal spec.
+ * Wraps a `bigint` value. Used for date-only (no time) values. Direct member of
+ * `StorableDatum` (not a `StorableInstance`).
+ * See Section 1.4.6 of the formal spec.
  */
-export class StorableEpochDays implements StorableInstance {
-  readonly typeTag = TAGS.EpochDays;
+export class StorableEpochDays {
   constructor(
     /** Days from POSIX Epoch. Negative values represent pre-epoch dates. */
     readonly value: bigint,
   ) {}
-
-  /** Deconstruct to the underlying bigint for serialization and hashing. */
-  [DECONSTRUCT](): StorableValue {
-    return this.value;
-  }
-
-  /** Reconstruct from a bigint value. */
-  static [RECONSTRUCT](
-    state: StorableValue,
-    _context: ReconstructionContext,
-  ): StorableEpochDays {
-    if (typeof state !== "bigint") {
-      throw new Error(
-        `StorableEpochDays: expected bigint state, got ${typeof state}`,
-      );
-    }
-    return new StorableEpochDays(state);
-  }
 }
 
 /**
@@ -448,6 +412,14 @@ export function nativeValueFromStorableValue(
     return value.toNativeValue(frozen);
   }
 
+  // Temporal types (StorableEpochNsec, StorableEpochDays) are simple value
+  // wrappers -- pass through as-is.
+  if (
+    value instanceof StorableEpochNsec || value instanceof StorableEpochDays
+  ) {
+    return value;
+  }
+
   // Primitives (null, undefined, boolean, number, string, bigint) are
   // inherently immutable -- no freeze adjustment needed.
   if (value === null || value === undefined || typeof value !== "object") {
@@ -514,6 +486,14 @@ export function deepNativeValueFromStorableValue(
   // Other native wrappers (Map, Set, Uint8Array) -> native types.
   if (value instanceof StorableNativeWrapper) {
     return value.toNativeValue(frozen);
+  }
+
+  // Temporal types (StorableEpochNsec, StorableEpochDays) are simple value
+  // wrappers -- pass through as-is.
+  if (
+    value instanceof StorableEpochNsec || value instanceof StorableEpochDays
+  ) {
+    return value;
   }
 
   // Other StorableInstance (Cell, Stream, UnknownStorable, etc.) -- pass through.

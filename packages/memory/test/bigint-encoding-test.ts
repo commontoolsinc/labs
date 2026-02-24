@@ -210,12 +210,12 @@ describe("fromBase64", () => {
     expect(fromBase64("/w")).toEqual(new Uint8Array([0xff]));
   });
 
-  it("accepts padded input ('AA==')", () => {
-    expect(fromBase64("AA==")).toEqual(new Uint8Array([0x00]));
+  it("rejects padded input ('AA==')", () => {
+    expect(() => fromBase64("AA==")).toThrow("invalid character");
   });
 
-  it("accepts padded input ('/w==')", () => {
-    expect(fromBase64("/w==")).toEqual(new Uint8Array([0xff]));
+  it("rejects padded input ('/w==')", () => {
+    expect(() => fromBase64("/w==")).toThrow("invalid character");
   });
 });
 

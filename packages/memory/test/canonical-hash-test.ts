@@ -355,28 +355,15 @@ Deno.test("canonicalHash", async (t) => {
   );
 
   // =========================================================================
-  // StorableEpochNsec (hashed via TAG_INSTANCE + DECONSTRUCT -> bigint)
+  // StorableEpochNsec (dedicated TAG_EPOCH_NSEC primitive tag)
   // =========================================================================
 
   await t.step(
     "StorableEpochNsec(0n) matches hand-computed byte stream",
     () => {
-      // StorableEpochNsec(0n) deconstructs to 0n (bigint).
-      // TAG_INSTANCE (0x12)
-      // + LEB128(12) for typeTag "EpochNsec@1" (12 UTF-8 bytes)
-      // + "EpochNsec@1" in UTF-8
-      // + recursive feedValue(0n): TAG_BIGINT (0x24) + LEB128(1) + [0x00]
-      const enc = new TextEncoder();
-      const typeTagUtf8 = enc.encode("EpochNsec@1");
+      // TAG_EPOCH_NSEC (0x27) + LEB128(1) + [0x00]
       const expected = sha256([
-        // TAG_INSTANCE
-        0x12,
-        // LEB128(12) = typeTag byte length
-        typeTagUtf8.length,
-        // "EpochNsec@1" UTF-8
-        ...typeTagUtf8,
-        // Deconstructed state: bigint 0n
-        0x24,
+        0x27,
         0x01,
         0x00,
       ]);
@@ -397,23 +384,15 @@ Deno.test("canonicalHash", async (t) => {
   });
 
   // =========================================================================
-  // StorableEpochDays (hashed via TAG_INSTANCE + DECONSTRUCT -> bigint)
+  // StorableEpochDays (dedicated TAG_EPOCH_DAYS primitive tag)
   // =========================================================================
 
   await t.step(
     "StorableEpochDays(0n) matches hand-computed byte stream",
     () => {
-      const enc = new TextEncoder();
-      const typeTagUtf8 = enc.encode("EpochDays@1");
+      // TAG_EPOCH_DAYS (0x28) + LEB128(1) + [0x00]
       const expected = sha256([
-        // TAG_INSTANCE
-        0x12,
-        // LEB128 typeTag byte length
-        typeTagUtf8.length,
-        // "EpochDays@1" UTF-8
-        ...typeTagUtf8,
-        // Deconstructed state: bigint 0n
-        0x24,
+        0x28,
         0x01,
         0x00,
       ]);
@@ -436,7 +415,7 @@ Deno.test("canonicalHash", async (t) => {
   await t.step(
     "StorableEpochNsec and StorableEpochDays with same bigint differ",
     () => {
-      // Same underlying value, different typeTag -> different hash
+      // Same underlying value, different tag -> different hash
       const nsec = new StorableEpochNsec(100n);
       const days = new StorableEpochDays(100n);
       assertNotEquals(hex(canonicalHash(nsec)), hex(canonicalHash(days)));
