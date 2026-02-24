@@ -22,6 +22,7 @@ const MAX_RECENT_CHARMS = 10;
 
 import BacklinksIndex, { type MentionablePiece } from "./backlinks-index.tsx";
 import SummaryIndex from "./summary-index.tsx";
+import KnowledgeGraph from "./knowledge-graph.tsx";
 import OmniboxFAB from "./omnibox-fab.tsx";
 import DoList from "../do-list/do-list.tsx";
 import Notebook from "../notes/notebook.tsx";
@@ -212,6 +213,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
 
   const index = BacklinksIndex({ allPieces: allPiecesWithSystem });
   const summaryIdx = SummaryIndex({});
+  const knowledgeGraph = KnowledgeGraph({});
 
   const fab = OmniboxFAB({
     mentionable: index.mentionable,
@@ -230,6 +232,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
   return {
     backlinksIndex: index,
     summaryIndex: summaryIdx,
+    knowledgeGraph,
     [NAME]: computed(() => `Space Home (${visiblePieces.length})`),
     [UI]: (
       <ct-screen>
@@ -273,6 +276,18 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
             }}
           >
             Search
+          </ct-cell-link>
+          <ct-cell-link
+            $cell={knowledgeGraph}
+            slot="end"
+            style={{
+              fontSize: "14px",
+              padding: "6px 12px",
+              textDecoration: "none",
+              color: "var(--ct-color-text-secondary)",
+            }}
+          >
+            Graph
           </ct-cell-link>
           <div slot="end">
             <ct-button
