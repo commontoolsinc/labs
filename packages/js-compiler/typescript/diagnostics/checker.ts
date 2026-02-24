@@ -48,7 +48,8 @@ export class Checker {
           ? diagnostic.messageText
           : diagnostic.messageText.messageText;
         const isKnownSymbol = KNOWN_EXPORTED_SYMBOLS.some((sym) =>
-          message.includes(`name '${sym}'`)
+          message.includes(`private name '${sym}'`) ||
+          message.includes(`name '${sym}' from external module`)
         );
         if (!isKnownSymbol) {
           output.push({ diagnostic, source: sourceFile.text });
