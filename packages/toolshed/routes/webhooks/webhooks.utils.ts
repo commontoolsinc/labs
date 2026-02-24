@@ -83,7 +83,7 @@ async function spaceIndexEntityId(space: string): Promise<string> {
 function serviceCellLink(entityId: string) {
   return {
     "/": {
-      "link-v0.1": {
+      "link@1": {
         id: entityId,
         space: identity.did(),
         path: ["webhooks"],
@@ -255,7 +255,7 @@ export function extractSpaceFromCellLink(cellLink: string): string {
   const link = parsed["/"];
   if (!link) throw new Error("Invalid cell link format");
 
-  const linkData = link["link-v0.1"];
+  const linkData = link["link@1"] ?? link["link-v0.1"];
   if (!linkData?.space) throw new Error("Cell link missing space");
 
   return linkData.space;

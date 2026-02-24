@@ -55,6 +55,8 @@ export class CTWebhook extends BaseElement {
   declare _error: string;
   declare _webhookId: string;
 
+  private _configUnsub?: () => void;
+
   constructor() {
     super();
     this.name = "";
@@ -62,6 +64,29 @@ export class CTWebhook extends BaseElement {
     this._isLoading = false;
     this._error = "";
     this._webhookId = "";
+  }
+
+  override updated(changedProperties: Map<string | number | symbol, unknown>) {
+    super.updated(changedProperties);
+    if (changedProperties.has("config")) {
+      this._subscribeToConfig();
+    }
+  }
+
+  private _subscribeToConfig() {
+    this._configUnsub?.();
+    this._configUnsub = undefined;
+    if (this.config?.subscribe) {
+      this._configUnsub = this.config.subscribe(() => {
+        this.requestUpdate();
+      });
+    }
+  }
+
+  override disconnectedCallback() {
+    super.disconnectedCallback();
+    this._configUnsub?.();
+    this._configUnsub = undefined;
   }
 
   private _getConfig(): WebhookConfig | null {
@@ -82,8 +107,8 @@ export class CTWebhook extends BaseElement {
     this._error = "";
 
     try {
-      const cellLink = JSON.stringify(this.inbox.ref());
-      const confidentialCellLink = JSON.stringify(this.config.ref());
+      const cellLink = JSON.stringify(this.inbox);
+      const confidentialCellLink = JSON.stringify(this.config);
 
       const response = await fetch("/api/webhooks", {
         method: "POST",

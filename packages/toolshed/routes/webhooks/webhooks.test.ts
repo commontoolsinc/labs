@@ -77,7 +77,21 @@ describe("Webhook Utilities", () => {
   });
 
   describe("extractSpaceFromCellLink", () => {
-    it("extracts space from valid cell link", () => {
+    it("extracts space from link@1 cell link", () => {
+      const cellLink = JSON.stringify({
+        "/": {
+          "link@1": {
+            id: "of:bafe123",
+            space: "did:key:z6Mktest123",
+            path: ["webhooks", "github"],
+          },
+        },
+      });
+      const space = extractSpaceFromCellLink(cellLink);
+      expect(space).toBe("did:key:z6Mktest123");
+    });
+
+    it("extracts space from legacy link-v0.1 cell link", () => {
       const cellLink = JSON.stringify({
         "/": {
           "link-v0.1": {
@@ -104,7 +118,7 @@ describe("Webhook Utilities", () => {
     it("throws for missing space", () => {
       const cellLink = JSON.stringify({
         "/": {
-          "link-v0.1": {
+          "link@1": {
             id: "of:bafe123",
           },
         },

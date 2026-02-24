@@ -89,8 +89,10 @@ export const create: AppRouteHandler<CreateRoute> = async (c) => {
 
     return c.json({ id, name, mode }, 200);
   } catch (error) {
-    logger.error({ error }, "Failed to create webhook");
-    return c.json({ error: "Failed to create webhook" }, 400);
+    const msg = error instanceof Error ? error.message : String(error);
+    const stack = error instanceof Error ? error.stack : undefined;
+    logger.error({ error: msg, stack }, "Failed to create webhook");
+    return c.json({ error: msg || "Failed to create webhook" }, 400);
   }
 };
 
