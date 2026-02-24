@@ -418,11 +418,16 @@ export class RuntimeProcessor {
     const cell = getCell(this.runtime, request.cell);
 
     const cancel = cell.sink((value) => {
-      // If the value is a CellResult proxy (e.g. cell with no schema),
+      // If the value is a CellResult proxy (from a cell with no/empty schema),
       // convert it to a link immediately rather than walking into it.
       // This prevents deep proxy traversal that can exceed
       // MAX_RECURSION_DEPTH when VNode trees reference other pieces.
-      if (isCellResult(value)) {
+      // Only apply this for cells without a meaningful schema — cells with
+      // schemas produce resolved plain objects from validateAndTransform.
+      const hasSchema = request.cell.schema &&
+        typeof request.cell.schema === "object" &&
+        Object.keys(request.cell.schema).length > 0;
+      if (!hasSchema && isCellResult(value)) {
         const converted = getCellOrThrow(value).getAsLink({
           includeSchema: true,
           keepAsCell: true,
