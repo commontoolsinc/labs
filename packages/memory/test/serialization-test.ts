@@ -422,7 +422,7 @@ describe("serialization", () => {
   // --------------------------------------------------------------------------
 
   describe("StorableEpochNsec", () => {
-    it("serializes to /EpochNsec@1 with nested bigint", () => {
+    it("serializes to /EpochNsec@1 with flat base64", () => {
       const { context } = makeTestContext();
       const sn = new StorableEpochNsec(0n);
       const result = serialize(sn as StorableValue, context) as Record<
@@ -430,9 +430,8 @@ describe("serialization", () => {
         unknown
       >;
       expect(Object.keys(result)).toEqual(["/EpochNsec@1"]);
-      // The inner state is a serialized bigint: {"/BigInt@1": "AA"} for 0n
-      const inner = result["/EpochNsec@1"] as Record<string, unknown>;
-      expect(inner["/BigInt@1"]).toBe("AA");
+      // Flat format: base64 string directly, not nested {"/BigInt@1": ...}
+      expect(result["/EpochNsec@1"]).toBe("AA");
     });
 
     it("round-trips at top level (epoch zero)", () => {
@@ -493,7 +492,7 @@ describe("serialization", () => {
   // --------------------------------------------------------------------------
 
   describe("StorableEpochDays", () => {
-    it("serializes to /EpochDays@1 with nested bigint", () => {
+    it("serializes to /EpochDays@1 with flat base64", () => {
       const { context } = makeTestContext();
       const sd = new StorableEpochDays(0n);
       const result = serialize(sd as StorableValue, context) as Record<
@@ -501,8 +500,8 @@ describe("serialization", () => {
         unknown
       >;
       expect(Object.keys(result)).toEqual(["/EpochDays@1"]);
-      const inner = result["/EpochDays@1"] as Record<string, unknown>;
-      expect(inner["/BigInt@1"]).toBe("AA");
+      // Flat format: base64 string directly, not nested {"/BigInt@1": ...}
+      expect(result["/EpochDays@1"]).toBe("AA");
     });
 
     it("round-trips at top level (epoch zero)", () => {
