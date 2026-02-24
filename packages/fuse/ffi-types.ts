@@ -231,21 +231,6 @@ export function readCString(ptr: Deno.PointerValue): string {
 
 // fuse_args struct (for fuse_mount)
 // struct fuse_args { int argc; char **argv; int allocated; }
-export const FUSE_ARGS_SIZE = 16; // 4 + padding + 8 + 4
-
-export function writeFuseArgs(
-  buf: ArrayBuffer,
-  argc: number,
-  argvPtr: Deno.PointerValue,
-): void {
-  const view = new DataView(buf);
-  view.setInt32(0, argc, true);
-  // argv pointer at offset 8 (after 4 bytes padding on 64-bit)
-  view.setBigUint64(8, BigInt(Deno.UnsafePointer.value(argvPtr)), true);
-  view.setInt32(16, 0, true); // allocated = 0
-}
-
-// Actually fuse_args is { int argc; char **argv; int allocated; }
 // On arm64: int(4) + padding(4) + pointer(8) + int(4) + padding(4) = 24 bytes
 export const FUSE_ARGS_STRUCT_SIZE = 24;
 

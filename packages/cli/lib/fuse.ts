@@ -63,7 +63,9 @@ export async function readAllPidFiles(
 
 export function isAlive(pid: number): boolean {
   try {
-    Deno.kill(pid, "SIGCONT");
+    // SIGURG is benign (no default handler) — unlike SIGCONT which resumes
+    // stopped processes. We just need to check if the process exists.
+    Deno.kill(pid, "SIGURG");
     return true;
   } catch {
     return false;

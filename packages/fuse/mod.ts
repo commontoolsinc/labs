@@ -8,6 +8,7 @@
 // Unknown space names are resolved on-demand via lookup.
 
 import { parseArgs } from "@std/cli/parse-args";
+import { CellBridge } from "./cell-bridge.ts";
 import { openFuse } from "./ffi.ts";
 import {
   createFuseArgs,
@@ -76,16 +77,13 @@ async function main() {
   // Create filesystem tree
   const tree = new FsTree();
 
-  const { CellBridge } = await import("./cell-bridge.ts");
-  // deno-lint-ignore no-explicit-any
-  let bridge: InstanceType<typeof CellBridge> | null = null;
+  let bridge: CellBridge | null = null;
 
   // Populate tree
   const apiUrl = args["api-url"];
   if (apiUrl) {
-    const { CellBridge } = await import("./cell-bridge.ts");
     bridge = new CellBridge(tree);
-    await bridge.init({
+    bridge.init({
       apiUrl,
       identity: args.identity || "",
     });

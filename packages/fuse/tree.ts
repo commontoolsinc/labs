@@ -9,12 +9,15 @@ export class FsTree {
   inodes: Map<bigint, FsNode> = new Map();
   parents: Map<bigint, bigint> = new Map();
   paths: Map<string, bigint> = new Map();
+  /** Reverse map: inode → path string (O(1) lookup). */
+  private inoPaths: Map<bigint, string> = new Map();
   private nextIno = 2n;
 
   constructor() {
     // Create root directory (inode 1)
     this.inodes.set(ROOT_INO, { kind: "dir", children: new Map() });
     this.paths.set("/", ROOT_INO);
+    this.inoPaths.set(ROOT_INO, "/");
   }
 
   get rootIno(): bigint {
@@ -23,6 +26,21 @@ export class FsTree {
 
   allocInode(): bigint {
     return this.nextIno++;
+  }
+
+  private trackPath(ino: bigint, parentIno: bigint, name: string): void {
+    const parentPath = this.getPath(parentIno);
+    const path = parentPath === "/" ? `/${name}` : `${parentPath}/${name}`;
+    this.paths.set(path, ino);
+    this.inoPaths.set(ino, path);
+  }
+
+  private untrackPath(ino: bigint): void {
+    const path = this.inoPaths.get(ino);
+    if (path !== undefined) {
+      this.paths.delete(path);
+      this.inoPaths.delete(ino);
+    }
   }
 
   addDir(
@@ -40,11 +58,7 @@ export class FsTree {
     this.inodes.set(ino, node);
     parent.children.set(name, ino);
     this.parents.set(ino, parentIno);
-
-    // Track path
-    const parentPath = this.getPath(parentIno);
-    const path = parentPath === "/" ? `/${name}` : `${parentPath}/${name}`;
-    this.paths.set(path, ino);
+    this.trackPath(ino, parentIno, name);
 
     return ino;
   }
@@ -68,11 +82,7 @@ export class FsTree {
     this.inodes.set(ino, node);
     parent.children.set(name, ino);
     this.parents.set(ino, parentIno);
-
-    // Track path
-    const parentPath = this.getPath(parentIno);
-    const path = parentPath === "/" ? `/${name}` : `${parentPath}/${name}`;
-    this.paths.set(path, ino);
+    this.trackPath(ino, parentIno, name);
 
     return ino;
   }
@@ -93,11 +103,7 @@ export class FsTree {
     this.inodes.set(ino, node);
     parent.children.set(name, ino);
     this.parents.set(ino, parentIno);
-
-    // Track path
-    const parentPath = this.getPath(parentIno);
-    const path = parentPath === "/" ? `/${name}` : `${parentPath}/${name}`;
-    this.paths.set(path, ino);
+    this.trackPath(ino, parentIno, name);
 
     return ino;
   }
@@ -113,11 +119,7 @@ export class FsTree {
     this.inodes.set(ino, node);
     parent.children.set(name, ino);
     this.parents.set(ino, parentIno);
-
-    // Track path
-    const parentPath = this.getPath(parentIno);
-    const path = parentPath === "/" ? `/${name}` : `${parentPath}/${name}`;
-    this.paths.set(path, ino);
+    this.trackPath(ino, parentIno, name);
 
     return ino;
   }
@@ -139,10 +141,7 @@ export class FsTree {
   }
 
   getPath(ino: bigint): string {
-    for (const [path, pathIno] of this.paths) {
-      if (pathIno === ino) return path;
-    }
-    return "/";
+    return this.inoPaths.get(ino) ?? "/";
   }
 
   /** Update a file node's content and optionally its jsonType. */
@@ -186,12 +185,7 @@ export class FsTree {
     }
     this.inodes.delete(ino);
     this.parents.delete(ino);
-    for (const [path, pathIno] of this.paths) {
-      if (pathIno === ino) {
-        this.paths.delete(path);
-        break;
-      }
-    }
+    this.untrackPath(ino);
   }
 
   /** Move a node between parents (or rename within same parent). */
@@ -227,15 +221,8 @@ export class FsTree {
     this.parents.set(childIno, newParentIno);
 
     // Update path tracking
-    const oldPath = this.getPath(childIno);
-    if (oldPath !== "/") {
-      this.paths.delete(oldPath);
-    }
-    const newParentPath = this.getPath(newParentIno);
-    const newPath = newParentPath === "/"
-      ? `/${newName}`
-      : `${newParentPath}/${newName}`;
-    this.paths.set(newPath, childIno);
+    this.untrackPath(childIno);
+    this.trackPath(childIno, newParentIno, newName);
   }
 
   /** Get the child name for an inode by scanning its parent's children map. */
@@ -279,11 +266,6 @@ export class FsTree {
     // Remove from tracking maps
     this.inodes.delete(ino);
     this.parents.delete(ino);
-    for (const [path, pathIno] of this.paths) {
-      if (pathIno === ino) {
-        this.paths.delete(path);
-        break;
-      }
-    }
+    this.untrackPath(ino);
   }
 }

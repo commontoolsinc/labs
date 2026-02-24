@@ -8,6 +8,7 @@ import { FsTree } from "./tree.ts";
 import { buildJsonTree, isSigilLink, isStreamValue } from "./tree-builder.ts";
 import type { PieceManager } from "@commontools/piece";
 import { type PieceController, PiecesController } from "@commontools/piece/ops";
+import { loadManager } from "../cli/lib/piece.ts";
 
 /** Strip "of:" prefix from entity IDs if present. */
 function stripOfPrefix(id: string): string {
@@ -51,22 +52,17 @@ export class CellBridge {
   private identity: string = "";
   private apiUrl: string = "";
   private connecting: Set<string> = new Set();
-  // deno-lint-ignore no-explicit-any
-  private loadManager: ((config: any) => Promise<PieceManager>) | null = null;
 
   constructor(tree: FsTree) {
     this.tree = tree;
   }
 
-  async init(config: {
+  init(config: {
     apiUrl: string;
     identity: string;
-  }): Promise<void> {
+  }): void {
     this.apiUrl = config.apiUrl;
     this.identity = config.identity;
-    // Dynamic import — CLI lib isn't a published export, use relative path
-    const mod = await import("../cli/lib/piece.ts");
-    this.loadManager = mod.loadManager;
   }
 
   /** Connect to a space and populate its tree. */
@@ -88,11 +84,7 @@ export class CellBridge {
 
     this.connecting.add(spaceName);
     try {
-      if (!this.loadManager) {
-        throw new Error("CellBridge not initialized");
-      }
-
-      const manager = await this.loadManager({
+      const manager = await loadManager({
         apiUrl: this.apiUrl,
         space: spaceName,
         identity: this.identity,
@@ -358,8 +350,18 @@ export class CellBridge {
     const pieceControllers = new Map<string, PieceController>();
     const unsubscribes: Cancel[] = [];
 
+    // Track used names to resolve collisions (e.g., todo-app, todo-app-2)
+    const usedNames = new Set<string>();
+
     for (const piece of allPieces) {
-      const name = piece.name() || piece.id;
+      let name = piece.name() || piece.id;
+      if (usedNames.has(name)) {
+        let suffix = 2;
+        while (usedNames.has(`${name}-${suffix}`)) suffix++;
+        name = `${name}-${suffix}`;
+      }
+      usedNames.add(name);
+
       const entityHash = stripOfPrefix(piece.id);
       pieceMap.set(name, piece.id);
       pieceControllers.set(name, piece);
