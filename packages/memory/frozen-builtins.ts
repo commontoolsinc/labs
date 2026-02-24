@@ -101,6 +101,10 @@ export class FrozenSet<T> extends Set<T> {
  * `instanceof Date` checks still pass, but all `set*()` mutation methods
  * throw. `Object.freeze()` alone cannot protect Date because the mutators
  * modify the internal `[[DateValue]]` slot, not own properties.
+ *
+ * Note: No longer used by the temporal StorableInstance types
+ * (`StorableEpochNsec`, `StorableEpochDays`), which wrap bigint values
+ * instead of Date objects. Retained for potential external use.
  */
 export class FrozenDate extends Date {
   constructor(value: number | string | Date) {

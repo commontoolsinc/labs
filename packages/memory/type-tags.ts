@@ -15,7 +15,8 @@ export const TAGS = Object.freeze(
     Error: "Error@1",
     Map: "Map@1",
     Set: "Set@1",
-    Date: "Date@1",
+    EpochNsec: "EpochNsec@1",
+    EpochDays: "EpochDays@1",
     Bytes: "Bytes@1",
 
     // -- Primitive type handlers --

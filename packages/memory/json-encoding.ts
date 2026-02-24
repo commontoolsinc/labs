@@ -7,7 +7,8 @@ import type {
 import { UnknownStorable } from "./unknown-storable.ts";
 import { ProblematicStorable } from "./problematic-storable.ts";
 import {
-  StorableDate,
+  StorableEpochDays,
+  StorableEpochNsec,
   StorableError,
   StorableMap,
   StorableSet,
@@ -42,7 +43,8 @@ export class JsonEncodingContext
     this.registry.set(TAGS.Error, StorableError);
     this.registry.set(TAGS.Map, StorableMap);
     this.registry.set(TAGS.Set, StorableSet);
-    this.registry.set(TAGS.Date, StorableDate);
+    this.registry.set(TAGS.EpochNsec, StorableEpochNsec);
+    this.registry.set(TAGS.EpochDays, StorableEpochDays);
     // Note: TAGS.BigInt is NOT registered here -- bigint is a primitive in
     // StorableDatum and is handled by a TypeHandler (like UndefinedHandler),
     // not a StorableInstance wrapper.

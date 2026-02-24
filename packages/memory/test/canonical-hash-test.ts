@@ -1,7 +1,8 @@
 import { assertEquals, assertNotEquals, assertThrows } from "@std/assert";
 import { canonicalHash } from "../canonical-hash.ts";
 import {
-  StorableDate,
+  StorableEpochDays,
+  StorableEpochNsec,
   StorableError,
   StorableUint8Array,
 } from "../storable-native-instances.ts";
@@ -354,56 +355,93 @@ Deno.test("canonicalHash", async (t) => {
   );
 
   // =========================================================================
-  // StorableDate (hashed via TAG_INSTANCE + DECONSTRUCT)
+  // StorableEpochNsec (hashed via TAG_INSTANCE + DECONSTRUCT -> bigint)
   // =========================================================================
 
   await t.step(
-    "StorableDate(epoch) matches hand-computed byte stream",
+    "StorableEpochNsec(0n) matches hand-computed byte stream",
     () => {
-      // StorableDate(new Date(0)) deconstructs to 0 (milliseconds-since-epoch).
+      // StorableEpochNsec(0n) deconstructs to 0n (bigint).
       // TAG_INSTANCE (0x12)
-      // + LEB128(6) for typeTag "Date@1" (6 UTF-8 bytes)
-      // + "Date@1" in UTF-8: [0x44, 0x61, 0x74, 0x65, 0x40, 0x31]
-      // + recursive feedValue(0): TAG_NUMBER (0x22) + IEEE754 BE for 0.0
+      // + LEB128(12) for typeTag "EpochNsec@1" (12 UTF-8 bytes)
+      // + "EpochNsec@1" in UTF-8
+      // + recursive feedValue(0n): TAG_BIGINT (0x24) + LEB128(1) + [0x00]
+      const enc = new TextEncoder();
+      const typeTagUtf8 = enc.encode("EpochNsec@1");
       const expected = sha256([
         // TAG_INSTANCE
         0x12,
-        // LEB128(6) = typeTag byte length
-        0x06,
-        // "Date@1" UTF-8
-        0x44,
-        0x61,
-        0x74,
-        0x65,
-        0x40,
-        0x31,
-        // Deconstructed state: number 0
-        0x22,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
+        // LEB128(12) = typeTag byte length
+        typeTagUtf8.length,
+        // "EpochNsec@1" UTF-8
+        ...typeTagUtf8,
+        // Deconstructed state: bigint 0n
+        0x24,
+        0x01,
         0x00,
       ]);
-      assertEquals(canonicalHash(new StorableDate(new Date(0))), expected);
+      assertEquals(canonicalHash(new StorableEpochNsec(0n)), expected);
     },
   );
 
-  await t.step("StorableDate with different timestamps differ", () => {
-    const d1 = new StorableDate(new Date(0));
-    const d2 = new StorableDate(new Date(1704067200000));
+  await t.step("StorableEpochNsec with different values differ", () => {
+    const d1 = new StorableEpochNsec(0n);
+    const d2 = new StorableEpochNsec(1704067200000000000n);
     assertNotEquals(hex(canonicalHash(d1)), hex(canonicalHash(d2)));
   });
 
-  await t.step("StorableDate with negative timestamp", () => {
-    // Before epoch
-    const date = new StorableDate(new Date(-1000));
-    const hash = canonicalHash(date);
+  await t.step("StorableEpochNsec with negative value (pre-epoch)", () => {
+    const nsec = new StorableEpochNsec(-1000000000n);
+    const hash = canonicalHash(nsec);
     assertEquals(hash.length, 32);
   });
+
+  // =========================================================================
+  // StorableEpochDays (hashed via TAG_INSTANCE + DECONSTRUCT -> bigint)
+  // =========================================================================
+
+  await t.step(
+    "StorableEpochDays(0n) matches hand-computed byte stream",
+    () => {
+      const enc = new TextEncoder();
+      const typeTagUtf8 = enc.encode("EpochDays@1");
+      const expected = sha256([
+        // TAG_INSTANCE
+        0x12,
+        // LEB128 typeTag byte length
+        typeTagUtf8.length,
+        // "EpochDays@1" UTF-8
+        ...typeTagUtf8,
+        // Deconstructed state: bigint 0n
+        0x24,
+        0x01,
+        0x00,
+      ]);
+      assertEquals(canonicalHash(new StorableEpochDays(0n)), expected);
+    },
+  );
+
+  await t.step("StorableEpochDays with different values differ", () => {
+    const d1 = new StorableEpochDays(0n);
+    const d2 = new StorableEpochDays(19723n);
+    assertNotEquals(hex(canonicalHash(d1)), hex(canonicalHash(d2)));
+  });
+
+  await t.step("StorableEpochDays with negative value (pre-epoch)", () => {
+    const days = new StorableEpochDays(-365n);
+    const hash = canonicalHash(days);
+    assertEquals(hash.length, 32);
+  });
+
+  await t.step(
+    "StorableEpochNsec and StorableEpochDays with same bigint differ",
+    () => {
+      // Same underlying value, different typeTag -> different hash
+      const nsec = new StorableEpochNsec(100n);
+      const days = new StorableEpochDays(100n);
+      assertNotEquals(hex(canonicalHash(nsec)), hex(canonicalHash(days)));
+    },
+  );
 
   // =========================================================================
   // StorableError (StorableInstance via DECONSTRUCT)
@@ -700,7 +738,8 @@ Deno.test("canonicalHash", async (t) => {
       [1, 2],
       {},
       { a: 1 },
-      new StorableDate(new Date(0)),
+      new StorableEpochNsec(0n),
+      new StorableEpochDays(0n),
       new StorableUint8Array(new Uint8Array([1])),
       new StorableError(new Error("x")),
     ];
