@@ -145,8 +145,13 @@ export class CTWebhook extends BaseElement {
     const configData = this._getConfig();
     if (!configData?.url) return;
 
-    // Extract webhook ID from the config URL format: /api/webhooks/{id}
-    const webhookId = new URL(configData.url).pathname.split("/").pop();
+    // Extract webhook ID from the config URL (format: .../api/webhooks/{id})
+    let webhookId: string | undefined;
+    try {
+      webhookId = new URL(configData.url).pathname.split("/").pop();
+    } catch {
+      webhookId = configData.url.split("/").pop();
+    }
     if (!webhookId) return;
 
     this._isLoading = true;
