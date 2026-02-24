@@ -38,8 +38,8 @@ export interface WebhookConfig {
 export class CTWebhook extends BaseElement {
   static override properties = {
     name: { type: String },
-    inbox: { type: Object },
-    config: { type: Object },
+    inbox: { type: Object, attribute: false },
+    config: { type: Object, attribute: false },
     mode: { type: String },
     _isLoading: { type: Boolean, state: true },
     _error: { type: String, state: true },
@@ -103,6 +103,11 @@ export class CTWebhook extends BaseElement {
       return;
     }
 
+    if (this.mode !== "replace" && this.mode !== "append") {
+      this._error = "Invalid mode: must be 'replace' or 'append'";
+      return;
+    }
+
     this._isLoading = true;
     this._error = "";
 
@@ -145,9 +150,17 @@ export class CTWebhook extends BaseElement {
     this._error = "";
 
     try {
-      const response = await fetch(`/api/webhooks/${this._webhookId}`, {
-        method: "DELETE",
-      });
+      // Extract space DID from inbox cell link for ownership verification
+      const inboxLink = this.inbox?.toJSON?.();
+      const linkData = inboxLink?.["/"]?.["link@1"] ??
+        inboxLink?.["/"]?.["link-v0.1"];
+      const space = linkData?.space ?? "";
+      const params = new URLSearchParams({ space });
+
+      const response = await fetch(
+        `/api/webhooks/${this._webhookId}?${params}`,
+        { method: "DELETE" },
+      );
 
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
@@ -182,7 +195,7 @@ export class CTWebhook extends BaseElement {
           </ct-button>
           ${this._error
             ? html`
-              <div class="error">${this._error}</div>
+              <div class="error" role="alert">${this._error}</div>
             `
             : ""}
         </div>
@@ -214,7 +227,7 @@ export class CTWebhook extends BaseElement {
         ></ct-secret-viewer>
         ${this._error
           ? html`
-            <div class="error">${this._error}</div>
+            <div class="error" role="alert">${this._error}</div>
           `
           : ""}
       </div>

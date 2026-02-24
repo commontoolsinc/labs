@@ -34,9 +34,9 @@ export const create = createRoute({
               example: {
                 name: "GitHub Push Events",
                 cellLink:
-                  '{"/" : {"link-v0.1" : {"id" : "of:bafe...", "space" : "did:key:bafe...", "path" : ["webhooks", "github"]}}}',
+                  '{"/" : {"link@1" : {"id" : "of:bafe...", "space" : "did:key:bafe...", "path" : ["webhooks", "github"]}}}',
                 confidentialCellLink:
-                  '{"/" : {"link-v0.1" : {"id" : "of:cafe...", "space" : "did:key:bafe...", "path" : ["webhooks", "github", "config"]}}}',
+                  '{"/" : {"link@1" : {"id" : "of:cafe...", "space" : "did:key:bafe...", "path" : ["webhooks", "github", "config"]}}}',
                 mode: "append",
               },
             }),
@@ -65,6 +65,14 @@ export const create = createRoute({
         },
       },
       description: "Invalid request parameters",
+    },
+    [HttpStatusCodes.INTERNAL_SERVER_ERROR]: {
+      content: {
+        "application/json": {
+          schema: z.object({ error: z.string() }),
+        },
+      },
+      description: "Internal server error",
     },
   },
 });
@@ -152,6 +160,14 @@ export const list = createRoute({
       },
       description: "Missing space parameter",
     },
+    [HttpStatusCodes.INTERNAL_SERVER_ERROR]: {
+      content: {
+        "application/json": {
+          schema: z.object({ error: z.string() }),
+        },
+      },
+      description: "Internal server error",
+    },
   },
 });
 
@@ -162,6 +178,11 @@ export const remove = createRoute({
   request: {
     params: z.object({
       id: z.string().describe("Webhook ID to delete"),
+    }),
+    query: z.object({
+      space: z
+        .string()
+        .describe("Space DID of the webhook owner (ownership check)"),
     }),
   },
   responses: {
@@ -187,7 +208,15 @@ export const remove = createRoute({
           schema: z.object({ error: z.string() }),
         },
       },
-      description: "Failed to delete webhook",
+      description: "Missing required parameters",
+    },
+    [HttpStatusCodes.INTERNAL_SERVER_ERROR]: {
+      content: {
+        "application/json": {
+          schema: z.object({ error: z.string() }),
+        },
+      },
+      description: "Internal server error",
     },
   },
 });

@@ -45,6 +45,10 @@ export const create: AppRouteHandler<CreateRoute> = async (c) => {
       );
     }
 
+    if (mode !== "replace" && mode !== "append") {
+      return c.json({ error: "Invalid mode: must be 'replace' or 'append'" }, 400);
+    }
+
     // Validate cellLink format and extract space
     let space: string;
     try {
@@ -92,7 +96,7 @@ export const create: AppRouteHandler<CreateRoute> = async (c) => {
     const msg = error instanceof Error ? error.message : String(error);
     const stack = error instanceof Error ? error.stack : undefined;
     logger.error({ error: msg, stack }, "Failed to create webhook");
-    return c.json({ error: msg || "Failed to create webhook" }, 400);
+    return c.json({ error: "Failed to create webhook" }, 500);
   }
 };
 
@@ -162,18 +166,28 @@ export const list: AppRouteHandler<ListRoute> = async (c) => {
     return c.json({ webhooks }, 200);
   } catch (error) {
     logger.error({ error }, "Failed to list webhooks");
-    return c.json({ error: "Failed to list webhooks" }, 400);
+    return c.json({ error: "Failed to list webhooks" }, 500);
   }
 };
 
 export const remove: AppRouteHandler<RemoveRoute> = async (c) => {
   const logger = c.get("logger");
   const { id } = c.req.param();
+  const space = c.req.query("space");
+
+  if (!space) {
+    return c.json({ error: "Missing required query parameter: space" }, 400);
+  }
 
   try {
     const registration = await getRegistration(id);
 
     if (!registration) {
+      return c.json({ error: "Webhook not found" }, 404);
+    }
+
+    // Verify the caller owns this webhook
+    if (registration.createdBy !== space) {
       return c.json({ error: "Webhook not found" }, 404);
     }
 
@@ -198,6 +212,6 @@ export const remove: AppRouteHandler<RemoveRoute> = async (c) => {
     return c.json({ deleted: true }, 200);
   } catch (error) {
     logger.error({ error, id }, "Failed to delete webhook");
-    return c.json({ error: "Failed to delete webhook" }, 400);
+    return c.json({ error: "Failed to delete webhook" }, 500);
   }
 };
