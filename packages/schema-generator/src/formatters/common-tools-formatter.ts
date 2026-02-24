@@ -119,8 +119,9 @@ export class CommonToolsFormatter implements TypeFormatter {
     }
 
     // Fallback: handle Default<T> detected via aliasSymbol when no type node is available.
-    // When typeToTypeNode expands Default<T,V>, the node no longer says "Default" but
-    // the type object still carries aliasSymbol. Extract T from aliasTypeArguments[0].
+    // When typeToTypeNode expands Default<T,V), the node no longer says "Default" but
+    // the type object still carries aliasSymbol. Extract T from aliasTypeArguments[0]
+    // and V from aliasTypeArguments[1] so the default value is preserved in the schema.
     const typeWithAlias = type as TypeWithInternals;
     if (
       typeWithAlias.aliasSymbol?.name === "Default" &&
@@ -128,7 +129,26 @@ export class CommonToolsFormatter implements TypeFormatter {
       typeWithAlias.aliasTypeArguments.length >= 1
     ) {
       const innerType = typeWithAlias.aliasTypeArguments[0]!;
-      return this.schemaGenerator.formatChildType(innerType, context, undefined);
+      const valueSchema = this.schemaGenerator.formatChildType(
+        innerType,
+        context,
+        undefined,
+      );
+
+      if (typeWithAlias.aliasTypeArguments.length >= 2) {
+        const defaultType = typeWithAlias.aliasTypeArguments[1]!;
+        const defaultValue = this.extractDefaultValue(defaultType, context);
+        if (defaultValue !== undefined) {
+          if (typeof valueSchema === "boolean") {
+            return (valueSchema === false
+              ? { not: true, default: defaultValue }
+              : { default: defaultValue }) as SchemaDefinition;
+          }
+          (valueSchema as Record<string, unknown>).default = defaultValue;
+        }
+      }
+
+      return valueSchema;
     }
 
     const wrapperInfo = getCellWrapperInfo(type, context.typeChecker);
