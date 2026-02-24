@@ -272,6 +272,7 @@ export class CTSwitch extends BaseElement {
 
       // For plain boolean usage (no Cell), update the property directly
       this.checked = !oldChecked;
+      this.emit("ct-change", { checked: this.checked });
     }
 
     private _handleKeydown(event: KeyboardEvent) {
