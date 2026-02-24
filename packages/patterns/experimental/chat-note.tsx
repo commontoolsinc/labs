@@ -349,7 +349,7 @@ const ChatNote = pattern<Input, Output>(
     [SELF]: self,
   }) => {
     const { allPieces } =
-      wish<{ allPieces: MinimalPiece[] }>({ query: "/" }).result;
+      wish<{ allPieces: Default<MinimalPiece[], []> }>({ query: "/" }).result;
     const { result: mentionable } = wish<Default<MentionablePiece[], []>>({
       query: "#mentionable",
     });

@@ -49,7 +49,7 @@ interface Input {
   title?: Default<string, "All Notes">;
   importMarkdown?: Default<string, "">;
   /** Pass allPieces directly from default-app for proper cell sharing */
-  allPieces?: Writable<NotePiece[]>;
+  allPieces?: Writable<Default<NotePiece[], []>>;
 }
 
 /** Manages all notes and notebooks in the space. #allNotes */
@@ -395,7 +395,7 @@ export type DetectedDuplicate = {
 
 function performImport(
   parsedNotes: ParsedNote[],
-  allPieces: Writable<NotePiece[]>,
+  allPieces: Writable<Default<NotePiece[], []>>,
   notebooks: NotebookPiece[],
   skipTitles: Set<string>,
   skipNotebookTitles: Set<string>,
@@ -665,7 +665,7 @@ type ImportAnalysisResult = {
  * Passed from pattern body to allow module-scope function to update state.
  */
 type ImportProcessingContext = {
-  allPieces: Writable<NotePiece[]>;
+  allPieces: Writable<Default<NotePiece[], []>>;
   notebooks: NotebookPiece[];
   pendingImportData: Writable<string>;
   detectedDuplicates: Writable<DetectedDuplicate[]>;

@@ -20,6 +20,7 @@
  */
 import {
   computed,
+  Default,
   derive,
   generateObject,
   handler,
@@ -271,7 +272,7 @@ const executeCreateNote = handler<
     taskCurrentLabelId: Writable<string>;
     hiddenTasks: Writable<string[]>;
     processingTasks: Writable<string[]>;
-    allPieces: Writable<NotePiece[]>;
+    allPieces: Writable<Default<NotePiece[], []>>;
   }
 >(
   (

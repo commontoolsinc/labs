@@ -1692,8 +1692,14 @@ type IsBoolean<T> = [T] extends [boolean] ? [boolean] extends [T] ? true : false
  * Inner helper for HasDefaultBrand. Distributes over union members of T —
  * returning `true` for the branded member, `false` for the plain member,
  * and therefore `boolean` when T is the full `Default<X, V>` union.
+ *
+ * IMPORTANT: uses `T extends { readonly [DEFAULT_MARKER]: any }` (T is the naked
+ * type parameter on the LEFT of extends) so TypeScript distributes over union
+ * members. The previous form `typeof DEFAULT_MARKER extends keyof T` was
+ * non-distributive — for union T, `keyof T` is the intersection of member keys,
+ * which drops DEFAULT_MARKER (it only appears in the branded member).
  */
-type _HasDefaultBrand<T> = typeof DEFAULT_MARKER extends keyof T ? true : false;
+type _HasDefaultBrand<T> = T extends { readonly [DEFAULT_MARKER]: any } ? true : false;
 
 /** Returns true if T carries the DEFAULT_MARKER brand (i.e. is `Default<T, V>`), false otherwise. */
 type HasDefaultBrand<T> = IsAny<T> extends true ? false
@@ -1727,13 +1733,30 @@ export type StripDefaultBrand<T> = Exclude<T, { readonly [DEFAULT_MARKER]: any }
 
 /**
  * Maps a type T so that any fields carrying the DEFAULT_MARKER brand become required
- * and have their brand stripped, while all other fields are left unchanged.
+ * (removing `?`) and have their brand stripped, while all other fields are left
+ * unchanged — including preservation of their optional modifier `?`.
+ *
+ * Implementation note: uses an intersection of two mapped types:
+ * 1. A homomorphic map (so TypeScript can infer `T` from the result) that strips
+ *    Default brands and preserves the original optional modifier for every key.
+ * 2. A `-?` refinement that makes only the Default-branded keys required.
+ * TypeScript infers `T` from the homomorphic first part; the second part is then
+ * evaluated with the resolved `T` to enforce requiredness on Default fields.
  */
-export type RequireDefaults<T> = {
-  [K in keyof T]-?: IsDefaultField<T[K]> extends true
-    ? StripDefaultBrand<T[K]>
-    : T[K];
-};
+export type RequireDefaults<T> =
+  // Homomorphic: strip Default brands, preserve `?` for every key (TypeScript can infer T from this)
+  // Use `true extends IsDefaultField<T[K]>` (reversed) rather than `IsDefaultField<T[K]> extends true`
+  // because IsDefaultField can return `boolean` (= `true | false`) when T[K] is a union like
+  // `Default<X,V> | undefined`. In a non-distributive conditional context, `boolean extends true`
+  // is `false`, but `true extends boolean` is `true` — correctly triggering the true branch.
+  & { [K in keyof T]: true extends IsDefaultField<T[K]> ? StripDefaultBrand<T[K]> : T[K] }
+  // Refinement: remove `?` from keys that carry the Default brand.
+  // Use NonNullable<T[K]> to strip the `| undefined` that TypeScript adds for
+  // optional fields (T[K] of `a?: X` includes `X | undefined`). Without this,
+  // the required field's value type would still include `| undefined`, which
+  // propagates through OpaqueRef and makes the field possibly-undefined in the
+  // pattern body despite being required.
+  & { [K in keyof T as true extends IsDefaultField<T[K]> ? K : never]-?: StripDefaultBrand<NonNullable<T[K]>> };
 
 // Internal-only way to instantiate internal modules
 export type ByRefFunction = <T, R>(ref: string) => ModuleFactory<T, R>;

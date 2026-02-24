@@ -41,7 +41,26 @@ export class IntersectionFormatter implements TypeFormatter {
       );
     }
 
-    const failureReason = this.validateIntersectionParts(parts, checker);
+    // Filter out "brand-only" and empty object parts before validation.
+    // These arise from:
+    //   1. RequireDefaults<T> applied to non-Default types (e.g. number[] & {})
+    //   2. Default<T,V> brand constituents in a union (e.g. boolean & { [DEFAULT_MARKER]: T })
+    // Brand-only parts are object types with no string-keyed properties and no
+    // index signatures — they carry only symbol-keyed brand markers.
+    const effectiveParts = parts.filter(
+      (p) => !this.isBrandOnlyOrEmpty(p, checker),
+    );
+
+    // If all parts were brand markers / empty, fall back to the full set
+    // (shouldn't happen in practice, but be defensive).
+    const partsToProcess = effectiveParts.length > 0 ? effectiveParts : parts;
+
+    // If filtering reduced us to a single substantive part, delegate directly.
+    if (partsToProcess.length === 1) {
+      return this.schemaGenerator.formatChildType(partsToProcess[0]!, context);
+    }
+
+    const failureReason = this.validateIntersectionParts(partsToProcess, checker);
     if (failureReason) {
       return {
         type: "object",
@@ -50,8 +69,47 @@ export class IntersectionFormatter implements TypeFormatter {
       };
     }
 
-    const merged = this.mergeIntersectionParts(parts, context);
+    const merged = this.mergeIntersectionParts(partsToProcess, context);
     return this.applyIntersectionDocs(merged);
+  }
+
+  /**
+   * Returns true if the type is "brand-only" or an empty object — i.e. it carries
+   * no string-keyed data properties and no index signatures.
+   *
+   * These parts can be safely dropped from an intersection for schema purposes:
+   *   - `{}` (empty object) — e.g. the second part of RequireDefaults<number[]>
+   *   - `{ readonly [DEFAULT_MARKER]: T }` — the brand object inside Default<T,V>
+   */
+  private isBrandOnlyOrEmpty(part: ts.Type, checker: ts.TypeChecker): boolean {
+    if ((part.flags & ts.TypeFlags.Object) === 0) return false;
+
+    try {
+      const stringIndex = checker.getIndexTypeOfType(
+        part,
+        ts.IndexKind.String,
+      );
+      const numberIndex = checker.getIndexTypeOfType(
+        part,
+        ts.IndexKind.Number,
+      );
+      if (stringIndex || numberIndex) return false;
+    } catch {
+      return false;
+    }
+
+    const properties = checker.getPropertiesOfType(part);
+    for (const prop of properties) {
+      // TypeScript encodes unique-symbol property names as "__@..." internally.
+      // Any property whose escapedName does NOT start with "__@" is a regular
+      // string-keyed property — making this a real data type, not a brand.
+      const escaped = prop.escapedName as string;
+      if (!String(escaped).startsWith("__@")) {
+        return false;
+      }
+    }
+
+    return true;
   }
 
   private validateIntersectionParts(

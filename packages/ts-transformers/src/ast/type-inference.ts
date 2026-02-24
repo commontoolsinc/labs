@@ -574,8 +574,33 @@ export function inferArrayElementType(
           };
         }
       } else {
-        // It's already T
-        elementType = innerType;
+        // Check for Default<T[]> brand union: aliasSymbol = "Default", aliasTypeArguments[0] = T[]
+        // Default<T,V> expands to a branded union at the type level; the type object
+        // retains aliasSymbol so we can detect and unwrap it here.
+        const innerAlias = innerType as {
+          aliasSymbol?: ts.Symbol;
+          aliasTypeArguments?: readonly ts.Type[];
+        };
+        if (
+          innerAlias.aliasSymbol?.name === "Default" &&
+          innerAlias.aliasTypeArguments?.[0] &&
+          checker.isArrayType(innerAlias.aliasTypeArguments[0])
+        ) {
+          const baseArrayType = innerAlias.aliasTypeArguments[0];
+          const extracted = extractElementFromArrayType(baseArrayType, checker);
+          if (extracted) {
+            elementType = extracted;
+          } else {
+            return {
+              typeNode: factory.createKeywordTypeNode(
+                ts.SyntaxKind.UnknownKeyword,
+              ),
+            };
+          }
+        } else {
+          // It's already T
+          elementType = innerType;
+        }
       }
 
       // Convert Type to TypeNode
@@ -647,6 +672,22 @@ export function hasArrayTypeArgument(
         // Check if inner type is an array or tuple
         if (checker.isArrayType(innerType) || checker.isTupleType(innerType)) {
           return true;
+        }
+        // Handle Default<T[]> brand union: aliasSymbol is "Default" and first
+        // aliasTypeArgument is T[]. typeToTypeNode expands Default<T[],V> to a
+        // branded union, but the type object retains aliasSymbol = Default.
+        const innerAlias = innerType as {
+          aliasSymbol?: ts.Symbol;
+          aliasTypeArguments?: readonly ts.Type[];
+        };
+        if (
+          innerAlias.aliasSymbol?.name === "Default" &&
+          innerAlias.aliasTypeArguments?.[0]
+        ) {
+          const baseT = innerAlias.aliasTypeArguments[0];
+          if (checker.isArrayType(baseT) || checker.isTupleType(baseT)) {
+            return true;
+          }
         }
         // Handle T[] | undefined (from optional WishState properties):
         // strip undefined from the union and check if the remainder is an array
