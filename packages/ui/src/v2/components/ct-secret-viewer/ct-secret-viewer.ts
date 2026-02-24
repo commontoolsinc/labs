@@ -97,8 +97,13 @@ export class CTSecretViewer extends BaseElement {
 
   private _getMasked(): string {
     if (!this.value) return "";
-    const trailing = Math.min(this.trailingChars, this.value.length);
-    return "•".repeat(12) + this.value.slice(-trailing);
+    const trailing = Math.max(
+      0,
+      Math.min(this.trailingChars || 0, this.value.length),
+    );
+    return trailing > 0
+      ? "•".repeat(12) + this.value.slice(-trailing)
+      : "•".repeat(12);
   }
 
   private _toggleReveal() {

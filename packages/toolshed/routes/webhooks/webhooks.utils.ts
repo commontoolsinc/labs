@@ -25,10 +25,20 @@ export interface WebhookRegistration {
 }
 
 function randomBase62(length: number): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(length));
+  // Use rejection sampling to avoid modulo bias (256 % 62 != 0).
+  // Discard bytes >= 248 (largest multiple of 62 <= 256) and redraw.
+  const LIMIT = 248; // 62 * 4
   let result = "";
-  for (const byte of bytes) {
-    result += BASE62[byte % 62];
+  while (result.length < length) {
+    const bytes = crypto.getRandomValues(
+      new Uint8Array((length - result.length) * 2),
+    );
+    for (const byte of bytes) {
+      if (byte < LIMIT) {
+        result += BASE62[byte % 62];
+        if (result.length === length) break;
+      }
+    }
   }
   return result;
 }
@@ -41,11 +51,7 @@ export function generateWebhookSecret(): {
   secret: string;
   hashPromise: Promise<string>;
 } {
-  const bytes = crypto.getRandomValues(new Uint8Array(WEBHOOK_SECRET_BYTES));
-  let encoded = "";
-  for (const byte of bytes) {
-    encoded += BASE62[byte % 62];
-  }
+  const encoded = randomBase62(WEBHOOK_SECRET_BYTES);
   const secret = `whsec_${encoded}`;
   const hashPromise = sha256(secret);
   return { secret, hashPromise };

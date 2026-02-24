@@ -95,6 +95,8 @@ export class CTWebhook extends BaseElement {
   }
 
   private async _handleCreate() {
+    if (this._isLoading) return;
+
     if (!this.inbox || !this.config || !this.name) {
       this._error = "Missing required properties: name, inbox, config";
       return;

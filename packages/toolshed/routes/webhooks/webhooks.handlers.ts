@@ -59,6 +59,11 @@ export const create: AppRouteHandler<CreateRoute> = async (c) => {
     const { secret, hashPromise } = generateWebhookSecret();
     const secretHash = await hashPromise;
 
+    // Write URL+secret to the pattern's config cell FIRST.
+    // If this fails, no registration is persisted (no orphaned webhook).
+    const url = `${env.API_URL}/api/webhooks/${id}`;
+    await writeConfidentialConfig(confidentialCellLink, url, secret);
+
     const registration = {
       id,
       name,
@@ -75,10 +80,6 @@ export const create: AppRouteHandler<CreateRoute> = async (c) => {
 
     // Update the per-space index
     await addToServiceIndex(space, id);
-
-    // Write URL+secret to the pattern's confidential config cell
-    const url = `${env.API_URL}/api/webhooks/${id}`;
-    await writeConfidentialConfig(confidentialCellLink, url, secret);
 
     logger.info({ id, name, mode, space }, "Webhook created");
 
