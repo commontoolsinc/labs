@@ -5,6 +5,7 @@ import {
   isRecord,
 } from "@commontools/utils/types";
 import {
+  isArrayIndexPropertyName,
   toDeepStorableValue,
   toStorableValue,
 } from "@commontools/memory/storable-value";
@@ -71,6 +72,7 @@ import {
 import type { Runtime } from "./runtime.ts";
 import {
   areLinksSame,
+  createDataCellURI,
   createSigilLinkFromParsedLink,
   findAndInlineDataURILinks,
   isCellLink,
@@ -299,6 +301,75 @@ export function createCell<T>(
     undefined, // No shared causeContainer
     kind,
   ) as unknown as Cell<T>; // Cast to set brand
+}
+
+function maybeConvertArrayPathToDataURILink(
+  tx: IExtendedStorageTransaction,
+  link: NormalizedFullLink,
+): NormalizedFullLink {
+  if (link.path.length === 0) {
+    return link;
+  }
+
+  let rootValue: unknown;
+  try {
+    rootValue = tx.readValueOrThrow({ ...link, path: [] });
+  } catch {
+    return link;
+  }
+
+  let current: unknown = rootValue;
+  const prefix: string[] = [];
+  let candidate:
+    | {
+      value: unknown;
+      path: string[];
+      remainingPath: string[];
+    }
+    | undefined;
+
+  for (let i = 0; i < link.path.length; i++) {
+    if (!isRecord(current)) {
+      break;
+    }
+
+    const segment = link.path[i];
+    let next: unknown;
+
+    if (Array.isArray(current)) {
+      if (!isArrayIndexPropertyName(segment)) {
+        break;
+      }
+      next = (current as unknown as Record<string, unknown>)[segment];
+      if (isRecord(next) && !isCellLink(next)) {
+        candidate = {
+          value: next,
+          path: [...prefix, segment],
+          remainingPath: link.path.slice(i + 1),
+        };
+      }
+    } else {
+      next = (current as Record<string, unknown>)[segment];
+    }
+
+    prefix.push(segment);
+    current = next;
+  }
+
+  if (candidate === undefined) {
+    return link;
+  }
+
+  const baseLink: NormalizedFullLink = {
+    ...link,
+    path: candidate.path,
+  };
+
+  return {
+    ...link,
+    id: createDataCellURI(candidate.value, baseLink),
+    path: candidate.remainingPath,
+  };
 }
 
 /**
@@ -1090,11 +1161,14 @@ export class CellImpl<T extends StorableValue>
   }
 
   resolveAsCell(): Cell<T> {
-    const link = resolveLink(
+    const readTx = this.runtime.readTx(this.tx);
+    let link: NormalizedFullLink = resolveLink(
       this.runtime,
-      this.runtime.readTx(this.tx),
+      readTx,
       this.link,
     );
+    const nonReactiveTx = createNonReactiveTransaction(readTx);
+    link = maybeConvertArrayPathToDataURILink(nonReactiveTx, link);
     return createCell(this.runtime, link, this.tx, this.synced);
   }
 
