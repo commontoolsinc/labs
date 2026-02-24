@@ -48,6 +48,7 @@ interface Input {
 /** Shopping list with AI-powered aisle sorting. #shoppingList */
 interface Output {
   items: ShoppingItem[];
+  summary: string;
   totalCount: number;
   doneCount: number;
   remainingCount: number;
@@ -707,6 +708,12 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
       </ct-screen>
     ),
     items,
+    summary: computed(() => {
+      const remaining = items.get().filter((i) => !i.done);
+      const names = remaining.slice(0, 10).map((i) => i.title);
+      return names.join(", ") +
+        (remaining.length > 10 ? ` (+${remaining.length - 10} more)` : "");
+    }),
     totalCount,
     doneCount,
     remainingCount,

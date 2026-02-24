@@ -11,6 +11,8 @@ import {
   Writable,
 } from "commontools";
 
+import Suggestion from "../system/suggestion.tsx";
+
 // ===== Types =====
 
 /** A #todo item */
@@ -27,7 +29,7 @@ interface TodoListOutput {
   [NAME]: string;
   [UI]: VNode;
   items: TodoItem[];
-  mentionable: TodoItem[];
+  mentionable: { [NAME]: string; summary: string; [UI]: VNode }[];
   itemCount: number;
   addItem: Stream<{ title: string }>;
   removeItem: Stream<{ item: TodoItem }>;
@@ -40,10 +42,11 @@ export const TodoItemPiece = pattern<
     item: TodoItem;
     removeItem: Stream<{ item: TodoItem }>;
   },
-  { [UI]: VNode; [NAME]: string }
+  { [UI]: VNode; [NAME]: string; summary: string }
 >(({ item, removeItem }) => {
   return {
-    [NAME]: "Todo Item",
+    [NAME]: computed(() => item.title),
+    summary: computed(() => item.title),
     [UI]: (
       <ct-card>
         <ct-hstack gap="2" align="center">
@@ -57,6 +60,15 @@ export const TodoItemPiece = pattern<
             x
           </ct-button>
         </ct-hstack>
+
+        <details>
+          <summary>AI Suggestions</summary>
+          <Suggestion
+            situation="Help the user complete this todo"
+            context={{ title: item.title }}
+            initialResults={[]}
+          />
+        </details>
       </ct-card>
     ),
   };
@@ -80,6 +92,11 @@ export default pattern<TodoListInput, TodoListOutput>(({ items }) => {
   const itemCount = computed(() => items.get().length);
   const hasNoItems = computed(() => items.get().length === 0);
 
+  // Map items to sub-pattern instances once — reused for UI and mentionable
+  const itemCards = items.map((item) => (
+    <TodoItemPiece item={item} removeItem={removeItem} />
+  ));
+
   return {
     [NAME]: computed(() => `Todo List (${items.get().length})`),
     [UI]: (
@@ -95,9 +112,7 @@ export default pattern<TodoListInput, TodoListOutput>(({ items }) => {
 
         <ct-vscroll flex showScrollbar fadeEdges>
           <ct-vstack gap="2" style="padding: 1rem;">
-            {items.map((item) => (
-              <TodoItemPiece item={item} removeItem={removeItem} />
-            ))}
+            {itemCards}
 
             {hasNoItems
               ? (
@@ -124,39 +139,7 @@ export default pattern<TodoListInput, TodoListOutput>(({ items }) => {
       </ct-screen>
     ),
     items,
-    mentionable: computed(() =>
-      items.map((e) => {
-        return {
-          ...e,
-          [NAME]: e.title,
-          [UI]: (
-            <div
-              style={{
-                padding: "12px",
-                border: "1px solid #e0e0e0",
-                borderRadius: "8px",
-                backgroundColor: "#fafafa",
-              }}
-            >
-              <div
-                style={{ display: "flex", alignItems: "center", gap: "8px" }}
-              >
-                <ct-checkbox $checked={e.done} />
-                <div
-                  style={{
-                    fontSize: "16px",
-                    fontWeight: "bold",
-                    color: "#333",
-                  }}
-                >
-                  {e.title}
-                </div>
-              </div>
-            </div>
-          ),
-        } as TodoItem;
-      })
-    ),
+    mentionable: itemCards,
     itemCount,
     addItem,
     removeItem,

@@ -1,4 +1,4 @@
-#!/usr/bin/env -S deno run --allow-read --allow-run
+#!/usr/bin/env -S deno run --allow-read --allow-run --allow-env
 /**
  * .claude/scripts/pre-commit.ts
  *
@@ -8,6 +8,9 @@
  * - Exits 2 to block the commit if checks fail.
  * - Tests are skipped (CI will run them).
  */
+
+import { guardProjectDir } from "./common/guard.ts";
+guardProjectDir();
 
 const rawInput = await new Response(Deno.stdin.readable).text();
 
@@ -71,8 +74,12 @@ if (!checkResult.success) {
 }
 
 if (!lintResult.success) {
-  errors.push("Lint errors found:");
-  errors.push(new TextDecoder().decode(lintResult.stdout));
+  const lintStderr = new TextDecoder().decode(lintResult.stderr);
+  // "No target files found" is not a real lint error — just means no .ts/.tsx files exist
+  if (!lintStderr.includes("No target files found")) {
+    errors.push("Lint errors found:");
+    errors.push(new TextDecoder().decode(lintResult.stdout));
+  }
 }
 
 if (errors.length > 0) {

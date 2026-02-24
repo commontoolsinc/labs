@@ -113,7 +113,7 @@ export class VDomRenderer {
     logger.timeStart("mount", String(this.mountId));
     try {
       const response = await this.connection.mountVDom(this.mountId, cellRef);
-      this.rootNodeId = response.rootId;
+      this.rootNodeId = response.rootId > 0 ? response.rootId : null;
 
       const elapsed = logger.timeEnd("mount", String(this.mountId));
       logger.debug("render-mount", () => [
@@ -152,7 +152,11 @@ export class VDomRenderer {
     // Remove the root node from DOM
     if (this.rootNodeId !== null) {
       const rootNode = this.applicator.getNode(this.rootNodeId);
-      if (rootNode?.parentNode) {
+      if (
+        rootNode &&
+        rootNode !== this.containerElement &&
+        rootNode.parentNode
+      ) {
         rootNode.parentNode.removeChild(rootNode);
       }
       this.rootNodeId = null;
@@ -187,6 +191,20 @@ export class VDomRenderer {
       : null;
   }
 
+  /**
+   * Get the underlying DomApplicator for debug inspection.
+   */
+  getApplicator(): DomApplicator {
+    return this.applicator;
+  }
+
+  /**
+   * Get the current mount ID, or null if not mounted.
+   */
+  getMountId(): number | null {
+    return this.mountId;
+  }
+
   // ============== Private Methods ==============
 
   private handleVDomBatch = (notification: VDomBatchNotification): void => {
@@ -212,7 +230,7 @@ export class VDomRenderer {
 
       // Track root node ID if provided (for cleanup)
       if (notification.rootId !== undefined) {
-        this.rootNodeId = notification.rootId;
+        this.rootNodeId = notification.rootId > 0 ? notification.rootId : null;
       }
 
       const elapsed = logger.timeEnd("batch", String(notification.batchId));

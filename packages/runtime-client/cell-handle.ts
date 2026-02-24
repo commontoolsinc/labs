@@ -8,6 +8,7 @@ import {
   isSigilLink,
   type JSONSchema,
   LINK_V1_TAG,
+  type SigilLink,
   type URI,
 } from "@commontools/runner/shared";
 import { $conn, type RuntimeClient } from "./runtime-client.ts";
@@ -266,7 +267,7 @@ export class CellHandle<T = unknown> {
     };
   }
 
-  toJSON() {
+  toJSON(): SigilLink {
     // Wrap in sigil link format so the runtime recognizes this as a link
     // and dereferences it (e.g., when passed through event.detail.sourceCell)
     return {

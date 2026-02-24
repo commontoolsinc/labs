@@ -17,27 +17,27 @@
         "hooks": [
           {
             "type": "command",
-            "command": "deno run --allow-read \"$CLAUDE_PROJECT_DIR/.claude/scripts/block-git-amend.ts\""
+            "command": "deno run --allow-read --allow-env \"$CLAUDE_PROJECT_DIR/.claude/scripts/block-git-amend.ts\""
           },
           {
             "type": "command",
-            "command": "deno run --allow-read \"$CLAUDE_PROJECT_DIR/.claude/scripts/block-node.ts\""
+            "command": "deno run --allow-read --allow-env \"$CLAUDE_PROJECT_DIR/.claude/scripts/block-node.ts\""
           },
           {
             "type": "command",
-            "command": "deno run --allow-read \"$CLAUDE_PROJECT_DIR/.claude/scripts/block-ct.ts\""
+            "command": "deno run --allow-read --allow-env \"$CLAUDE_PROJECT_DIR/.claude/scripts/block-ct.ts\""
           },
           {
             "type": "command",
-            "command": "deno run --allow-read --allow-run \"$CLAUDE_PROJECT_DIR/.claude/scripts/pre-commit.ts\""
+            "command": "deno run --allow-read --allow-run --allow-env \"$CLAUDE_PROJECT_DIR/.claude/scripts/pre-commit.ts\""
           },
           {
             "type": "command",
-            "command": "deno run --allow-read \"$CLAUDE_PROJECT_DIR/.claude/scripts/deno-test-filter.ts\""
+            "command": "deno run --allow-read --allow-env \"$CLAUDE_PROJECT_DIR/.claude/scripts/deno-test-filter.ts\""
           },
           {
             "type": "command",
-            "command": "deno run --allow-read \"$CLAUDE_PROJECT_DIR/.claude/scripts/ask-before-delete-spaces.ts\""
+            "command": "deno run --allow-read --allow-env \"$CLAUDE_PROJECT_DIR/.claude/scripts/ask-before-delete-spaces.ts\""
           }
         ]
       },

@@ -27,6 +27,7 @@ interface CalendarOutput {
   [UI]: VNode;
   events: EventPiece[];
   sortedEvents: EventPiece[];
+  mentionable: EventPiece[];
   todayDate: string;
   addEvent: Stream<{ title: string; date: string; time: string }>;
   removeEvent: Stream<{ event: EventPiece }>;
@@ -215,6 +216,7 @@ export default pattern<CalendarInput, CalendarOutput>(({ events }) => {
     ),
     events,
     sortedEvents,
+    mentionable: events,
     todayDate,
     addEvent,
     removeEvent,

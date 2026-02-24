@@ -59,6 +59,7 @@ These issues compile without errors but fail at runtime.
 
 - [Logger System](logger-system.md) - Structured logging, levels, counts, timing, flags
 - [Console Commands](console-commands.md) - `globalThis.commontools.*` browser console reference
+- [VDOM Debug Helpers](vdom-debug.md) - `commontools.vdom.*` VDOM tree inspection
 
 ### Workflows
 

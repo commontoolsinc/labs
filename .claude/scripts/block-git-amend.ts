@@ -1,4 +1,4 @@
-#!/usr/bin/env -S deno run --allow-read
+#!/usr/bin/env -S deno run --allow-read --allow-env
 /**
  * .claude/scripts/block-git-amend.ts
  *
@@ -6,6 +6,9 @@
  * - Blocks `git commit --amend` commands
  * - Allows all other commands through
  */
+
+import { guardProjectDir } from "./common/guard.ts";
+guardProjectDir();
 
 const rawInput = await new Response(Deno.stdin.readable).text();
 

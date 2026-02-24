@@ -3,13 +3,44 @@ import { type Action } from "../scheduler.ts";
 import type { Runtime } from "../runtime.ts";
 import { getPatternEnvironment } from "../builder/env.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import type { Schema } from "../builder/types.ts";
+import type { JSONSchema, Schema } from "../builder/types.ts";
 import {
   computeInputHash,
   internalSchema,
   tryClaimMutex,
   tryWriteResult,
 } from "./fetch-utils.ts";
+
+/** The shape of fetchData's input cell. */
+type FetchDataInputs = {
+  url: string;
+  mode?: "text" | "json";
+  options?: { body?: any; method?: string; headers?: Record<string, string> };
+};
+
+/**
+ * Schema for fetchData inputs. Fully specifying the structure (except body,
+ * which is `any`) lets cell.asSchema(schema).get() materialize nested
+ * properties like options.headers as plain objects instead of proxies.
+ */
+const fetchDataInputSchema = {
+  type: "object",
+  properties: {
+    url: { type: "string" },
+    mode: { type: "string" },
+    options: {
+      type: "object",
+      properties: {
+        body: {},
+        method: { type: "string" },
+        headers: {
+          type: "object",
+          additionalProperties: { type: "string" },
+        },
+      },
+    },
+  },
+} as const satisfies JSONSchema;
 
 /**
  * Fetch data from a URL.
@@ -22,12 +53,7 @@ import {
  * @returns { pending: boolean, result: any, error: any } - As individual docs, representing `pending` state, final `result`, and any `error`.
  */
 export function fetchData(
-  inputsCell: Cell<{
-    url: string;
-    mode?: "text" | "json";
-    options?: { body?: any; method?: string; headers?: Record<string, string> };
-    result?: any;
-  }>,
+  inputsCell: Cell<FetchDataInputs>,
   sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
   addCancel: (cancel: () => void) => void,
   cause: Cell<any>[],
@@ -194,6 +220,25 @@ export function fetchData(
         error,
         internal,
         newRequestId,
+        // Materialize inputs via the schema system and preprocess body.
+        // asSchema().get() returns a frozen plain snapshot with nested
+        // properties (like options.headers) fully resolved, safe to use
+        // after commit.
+        (cell) => {
+          const snapshot = cell.asSchema(fetchDataInputSchema).get();
+          // Stringify non-string bodies so startFetch receives ready-to-send
+          // options. Since .get() returns a frozen object, build a new one.
+          const body = snapshot.options?.body;
+          const options = snapshot.options
+            ? {
+              ...snapshot.options,
+              body: body !== undefined && typeof body !== "string"
+                ? JSON.stringify(body)
+                : body,
+            }
+            : undefined;
+          return { ...snapshot, options } as FetchDataInputs;
+        },
       ).then(
         ({ claimed, inputs, inputHash }) => {
           if (!claimed) {
@@ -252,16 +297,10 @@ export function fetchData(
 
 async function startFetch(
   runtime: Runtime,
-  inputsCell: Cell<{
-    url: string;
-    mode?: "text" | "json";
-    options?: { body?: any; method?: string; headers?: Record<string, string> };
-  }>,
+  inputsCell: Cell<FetchDataInputs>,
   url: string,
   mode: "text" | "json" | undefined,
-  options:
-    | { body?: any; method?: string; headers?: Record<string, string> }
-    | undefined,
+  options: FetchDataInputs["options"],
   inputHash: string,
   pending: Cell<boolean>,
   result: Cell<any | undefined>,
@@ -276,19 +315,14 @@ async function startFetch(
     return (mode || "json") === "json" ? await r.json() : await r.text();
   };
 
-  const fetchOptions = { ...options };
-  if (
-    fetchOptions.body !== undefined && typeof fetchOptions.body !== "string"
-  ) {
-    fetchOptions.body = JSON.stringify(fetchOptions.body);
-  }
-
+  // Body preprocessing (stringify non-string bodies) is handled by the
+  // snapshotInputs callback in tryClaimMutex, so options is ready to use.
   try {
     const response = await fetch(
       new URL(url, getPatternEnvironment().apiUrl),
       {
         signal: abortSignal,
-        ...fetchOptions,
+        ...options,
       },
     );
 

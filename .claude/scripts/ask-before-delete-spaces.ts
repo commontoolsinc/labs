@@ -1,4 +1,4 @@
-#!/usr/bin/env -S deno run --allow-read
+#!/usr/bin/env -S deno run --allow-read --allow-env
 /**
  * .claude/scripts/ask-before-delete-spaces.ts
  *
@@ -6,6 +6,9 @@
  * - Forces user confirmation when `--dangerously-clear-all-spaces` is detected
  * - Allows all other commands through
  */
+
+import { guardProjectDir } from "./common/guard.ts";
+guardProjectDir();
 
 const rawInput = await new Response(Deno.stdin.readable).text();
 

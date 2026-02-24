@@ -236,6 +236,34 @@ export class DomApplicator {
     ]);
   }
 
+  /**
+   * Return a snapshot of internal state for debugging.
+   * Returns live maps directly (no clone cost, fine for debug).
+   */
+  getDebugInfo(): {
+    nodeCount: number;
+    listenerCount: number;
+    totalListeners: number;
+    rootNodeId: number | null;
+    nodes: Map<number, Node>;
+    nodeParents: Map<number, number>;
+    nodeChildren: Map<number, Set<number>>;
+  } {
+    let totalListeners = 0;
+    for (const listeners of this.eventListeners.values()) {
+      totalListeners += listeners.size;
+    }
+    return {
+      nodeCount: this.nodes.size,
+      listenerCount: this.eventListeners.size,
+      totalListeners,
+      rootNodeId: this.rootNodeId,
+      nodes: this.nodes,
+      nodeParents: this.nodeParents,
+      nodeChildren: this.nodeChildren,
+    };
+  }
+
   // ============== Operation Implementations ==============
 
   private createElement(nodeId: number, tagName: string): void {
@@ -267,7 +295,11 @@ export class DomApplicator {
     const node = this.nodes.get(nodeId);
     if (!(node instanceof HTMLElement)) return;
 
-    if (key.startsWith("data-")) {
+    if (key.startsWith("on") && key.length > 2) {
+      this.removeEvent(nodeId, key.slice(2).toLowerCase());
+    } else if (key.startsWith("$") && key.length > 1) {
+      (node as any)[key.slice(1)] = undefined;
+    } else if (key.startsWith("data-")) {
       node.removeAttribute(key);
     } else if (key === "style") {
       node.removeAttribute("style");

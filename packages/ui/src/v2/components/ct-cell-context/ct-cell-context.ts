@@ -273,10 +273,32 @@ export class CTCellContext extends BaseElement {
           >
             ${this._isWatching ? "unwatch" : "watch"}
           </button>
+          <button
+            @click="${this._handlePinClick}"
+            title="Pin to Omnibot (Shift+click to add)"
+          >
+            pin
+          </button>
         </div>
         <slot></slot>
       </div>
     `;
+  }
+
+  private _handlePinClick(e: MouseEvent) {
+    if (!this.cell) {
+      console.log("[ct-cell-context] No cell available for pinning");
+      return;
+    }
+
+    const accumulate = e.shiftKey; // Shift+click = add to existing pins
+
+    // Use the inherited emit() from BaseElement which sets bubbles: true, composed: true
+    this.emit("ct-cell-pin", {
+      cell: this.cell,
+      label: this.label,
+      accumulate,
+    });
   }
 }
 

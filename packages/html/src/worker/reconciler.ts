@@ -131,7 +131,6 @@ export class WorkerReconciler {
       addCancel(
         vnode.sink((resolvedVnode: unknown) => {
           logger.debug("root-cell-update", () => ({ resolvedVnode }));
-          if (!resolvedVnode) return;
           // Validate that the resolved value is a valid render node
           if (!this.isValidRenderNode(resolvedVnode)) {
             this.onError?.(
@@ -423,6 +422,8 @@ export class WorkerReconciler {
         op: "remove-node",
         nodeId: wrapper.currentChild.nodeId,
       }]);
+      wrapper.currentChild = null;
+      wrapper.cancel = () => {};
     }
 
     // Render new node - renderNode handles all render node types
@@ -440,6 +441,9 @@ export class WorkerReconciler {
       wrapper.currentChild = state;
       // Use the state's cancel function directly - it owns all child subscriptions
       wrapper.cancel = state.cancel;
+    } else {
+      wrapper.currentChild = null;
+      wrapper.cancel = () => {};
     }
   }
 
@@ -452,7 +456,7 @@ export class WorkerReconciler {
   private updatePropsInPlace(
     ctx: ReconcileContext,
     state: NodeState,
-    newProps: WorkerProps | Cell<WorkerProps> | null,
+    newProps: WorkerProps | Cell<WorkerProps> | null | undefined,
   ): void {
     // Handle Cell<Props> - if same cell, do nothing; otherwise re-subscribe
     if (isCell(newProps)) {
@@ -514,17 +518,31 @@ export class WorkerReconciler {
         // Prop removed - cancel subscription and remove from DOM
         propState.cancel();
         state.propSubscriptions.delete(key);
-        // Unregister event handler if it was an event
-        if (state.eventHandlers.has(key)) {
-          ctx.unregisterHandler(state.eventHandlers.get(key)!);
-          state.eventHandlers.delete(key);
+        if (isEventProp(key)) {
+          const eventType = getEventType(key);
+          const handlerId = state.eventHandlers.get(eventType);
+          if (handlerId !== undefined) {
+            ctx.unregisterHandler(handlerId);
+            state.eventHandlers.delete(eventType);
+          }
+          this.queueOps([{
+            op: "remove-event",
+            nodeId: state.nodeId,
+            eventType,
+          }]);
+        } else if (isBindingProp(key)) {
+          this.queueOps([{
+            op: "remove-prop",
+            nodeId: state.nodeId,
+            key: getBindingPropName(key),
+          }]);
+        } else {
+          this.queueOps([{
+            op: "remove-prop",
+            nodeId: state.nodeId,
+            key,
+          }]);
         }
-        // Send remove op
-        this.queueOps([{
-          op: "remove-prop",
-          nodeId: state.nodeId,
-          key,
-        }]);
       }
     }
 
@@ -592,11 +610,29 @@ export class WorkerReconciler {
   private removeAllProps(ctx: ReconcileContext, state: NodeState): void {
     for (const [key, propState] of state.propSubscriptions) {
       propState.cancel();
-      if (state.eventHandlers.has(key)) {
-        ctx.unregisterHandler(state.eventHandlers.get(key)!);
-        state.eventHandlers.delete(key);
+      if (key === "__cellProps__") {
+        continue;
       }
-      if (key !== "__cellProps__") {
+
+      if (isEventProp(key)) {
+        const eventType = getEventType(key);
+        const handlerId = state.eventHandlers.get(eventType);
+        if (handlerId !== undefined) {
+          ctx.unregisterHandler(handlerId);
+          state.eventHandlers.delete(eventType);
+        }
+        this.queueOps([{
+          op: "remove-event",
+          nodeId: state.nodeId,
+          eventType,
+        }]);
+      } else if (isBindingProp(key)) {
+        this.queueOps([{
+          op: "remove-prop",
+          nodeId: state.nodeId,
+          key: getBindingPropName(key),
+        }]);
+      } else {
         this.queueOps([{
           op: "remove-prop",
           nodeId: state.nodeId,
@@ -679,10 +715,17 @@ export class WorkerReconciler {
       existingState.cancel();
     }
 
-    // Unregister old handler
+    // Unregister old handler and remove listener from DOM.
+    // We always emit remove-event here so transitions to null/undefined
+    // correctly clear the listener in the main-thread applicator.
     if (state.eventHandlers.has(eventType)) {
       ctx.unregisterHandler(state.eventHandlers.get(eventType)!);
       state.eventHandlers.delete(eventType);
+      this.queueOps([{
+        op: "remove-event",
+        nodeId: state.nodeId,
+        eventType,
+      }]);
     }
 
     if (isStream(value)) {
@@ -723,6 +766,17 @@ export class WorkerReconciler {
 
       const cancel = (value as Cell<(event: unknown) => void>).sink(
         (handler) => {
+          const previousHandlerId = state.eventHandlers.get(eventType);
+          if (previousHandlerId !== undefined) {
+            ctx.unregisterHandler(previousHandlerId);
+            state.eventHandlers.delete(eventType);
+            this.queueOps([{
+              op: "remove-event",
+              nodeId: state.nodeId,
+              eventType,
+            }]);
+          }
+
           if (handler) {
             const handlerId = ctx.registerHandler(
               handler as (event: unknown) => void,
@@ -1072,7 +1126,7 @@ export class WorkerReconciler {
   private bindProps(
     ctx: ReconcileContext,
     state: NodeState,
-    props: WorkerProps | Cell<WorkerProps> | null,
+    props: WorkerProps | Cell<WorkerProps> | null | undefined,
   ): Cancel {
     if (!props) return () => {};
 
@@ -1151,6 +1205,17 @@ export class WorkerReconciler {
           const eventType = getEventType(key);
           const sinkCancel = (value as Cell<(event: unknown) => void>).sink(
             (handler) => {
+              const previousHandlerId = state.eventHandlers.get(eventType);
+              if (previousHandlerId !== undefined) {
+                ctx.unregisterHandler(previousHandlerId);
+                state.eventHandlers.delete(eventType);
+                this.queueOps([{
+                  op: "remove-event",
+                  nodeId: state.nodeId,
+                  eventType,
+                }]);
+              }
+
               if (handler) {
                 // Cast handler to mutable function type for registration
                 const handlerId = ctx.registerHandler(
@@ -1377,9 +1442,9 @@ export class WorkerReconciler {
     // Normalize to array
     const newChildren = Array.isArray(childrenValue)
       ? childrenValue
-      : childrenValue
-      ? [childrenValue]
-      : [];
+      : (childrenValue === null || childrenValue === undefined)
+      ? []
+      : [childrenValue];
 
     // Generate keys for new children
     const newKeys = generateChildKeys(newChildren);

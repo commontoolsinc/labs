@@ -1291,6 +1291,12 @@ export interface BuiltInLLMParams {
    * These cells appear in the system prompt with their schemas and current values.
    */
   context?: Record<string, AnyCell<any>>;
+  /**
+   * When provided, injects a `presentResult` built-in tool that the LLM can call
+   * to present a structured result matching this schema. The result is stored on the
+   * dialog state's `result` field. Can be called multiple times (overwrites previous).
+   */
+  resultSchema?: JSONSchema;
 }
 
 export interface BuiltInLLMState {
@@ -1311,9 +1317,12 @@ export interface BuiltInLLMGenerateObjectState<T> {
 
 export interface BuiltInLLMDialogState {
   pending: boolean;
+  result?: any;
   error?: unknown;
   cancelGeneration: Stream<void>;
   addMessage: Stream<BuiltInLLMMessage>;
+  pinCell: Stream<{ path: string; name: string }>;
+  unpinAllCells: Stream<void>;
   flattenedTools: Record<string, any>;
   pinnedCells: Array<{ path: string; name: string }>;
 }
@@ -1863,6 +1872,7 @@ export type Props = {
     | object
     | Array<any>
     | null
+    | undefined
     | Cell<any>
     | Stream<any>;
 };
@@ -1902,7 +1912,7 @@ export type JSXElement =
 export type VNode = {
   type: "vnode";
   name: string;
-  props: Props;
-  children?: RenderNode;
+  props: Props | undefined;
+  children?: RenderNode | undefined;
   [UI]?: VNode;
 };

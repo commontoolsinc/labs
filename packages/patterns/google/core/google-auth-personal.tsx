@@ -19,13 +19,13 @@ import GoogleAuth, {
 interface Input {
   selectedScopes: Default<SelectedScopes, {
     gmail: true;
-    gmailSend: false;
-    gmailModify: false;
+    gmailSend: true;
+    gmailModify: true;
     calendar: true;
-    calendarWrite: false;
-    drive: false;
-    docs: false;
-    contacts: false;
+    calendarWrite: true;
+    drive: true;
+    docs: true;
+    contacts: true;
   }>;
   auth: Default<
     Auth,

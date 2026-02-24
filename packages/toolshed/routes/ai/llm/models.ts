@@ -19,6 +19,31 @@ export type Capabilities = {
   reasoning: boolean;
 };
 
+// Gateway /v1/models response types
+type GatewayModelCapabilities = {
+  type?: string;
+  contextWindow?: number;
+  maxOutputTokens?: number;
+  streaming?: boolean;
+  systemPrompt?: boolean;
+  stopSequences?: boolean;
+  prefill?: boolean;
+  images?: boolean;
+  reasoning?: boolean;
+};
+
+type GatewayModel = {
+  id: string;
+  object: string;
+  owned_by: string;
+  capabilities: GatewayModelCapabilities;
+};
+
+type GatewayModelsResponse = {
+  object: string;
+  data: GatewayModel[];
+};
+
 type ModelConfig = {
   model: LanguageModel;
   name: string;
@@ -67,7 +92,7 @@ const addModel = ({
     modelName = name;
   }
 
-  if (name.includes("-thinking")) {
+  if (name.includes("-thinking") && !name.startsWith("gateway:")) {
     modelName = modelName.split("-thinking")[0];
   }
 
@@ -389,6 +414,86 @@ if (env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS) {
   });
 }
 
+async function loadGatewayModels() {
+  const url = env.CTTS_AI_GATEWAY_URL.replace(/\/+$/, "");
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10_000);
+    const res = await fetch(`${url}/v1/models`, {
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (!res.ok) {
+      console.error(
+        `[gateway] Failed to fetch models: ${res.status} ${res.statusText}`,
+      );
+      return;
+    }
+
+    const body: GatewayModelsResponse = await res.json();
+    // Force HTTP/1.1 to avoid Deno HTTP/2 SSE streaming bug
+    const http1Client = Deno.createHttpClient({ http2: false });
+    const gatewayFetch: typeof fetch = (input, init) => {
+      return fetch(input, { ...init, client: http1Client } as RequestInit);
+    };
+    const gatewayProvider = createOpenAI({
+      baseURL: `${url}/v1`,
+      apiKey: "gateway-internal",
+      name: "gateway",
+      fetch: gatewayFetch,
+    });
+
+    let count = 0;
+    for (const m of body.data) {
+      // Skip image-generation models
+      if (m.capabilities.type === "image-generation") continue;
+
+      const primaryName = `gateway:${m.id}`;
+      const capabilities: Capabilities = {
+        contextWindow: m.capabilities.contextWindow ?? 128_000,
+        maxOutputTokens: m.capabilities.maxOutputTokens ?? 4_096,
+        streaming: m.capabilities.streaming ?? true,
+        systemPrompt: m.capabilities.systemPrompt ?? true,
+        stopSequences: m.capabilities.stopSequences ?? true,
+        prefill: m.capabilities.prefill ?? false,
+        images: m.capabilities.images ?? false,
+        reasoning: m.capabilities.reasoning ?? false,
+      };
+
+      // Build aliases: bare model id + owned_by:model-id
+      const aliases: string[] = [];
+      if (!MODELS[m.id]) {
+        aliases.push(m.id);
+      }
+      const ownerAlias = `${m.owned_by}:${m.id}`;
+      if (!MODELS[ownerAlias]) {
+        aliases.push(ownerAlias);
+      }
+
+      // Use .chat() to force /v1/chat/completions (not /v1/responses)
+      addModel({
+        provider: gatewayProvider.chat as typeof openai,
+        name: primaryName,
+        aliases,
+        capabilities,
+      });
+      count++;
+    }
+    console.log(` Adding 🤖 gateway (${count} models from ${url})`);
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      console.error(`[gateway] Timeout fetching models from ${url}`);
+    } else {
+      console.error(`[gateway] Error loading models:`, err);
+    }
+  }
+}
+
 export const findModel = (name: string) => {
   return MODELS[name];
 };
+
+if (env.CTTS_AI_GATEWAY_URL) {
+  await loadGatewayModels();
+}

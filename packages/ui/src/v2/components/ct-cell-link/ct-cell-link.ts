@@ -13,18 +13,29 @@ import {
 import type { DID } from "@commontools/identity";
 import { runtimeContext, spaceContext } from "../../runtime-context.ts";
 import { appViewToUrlPath, navigate } from "@commontools/shell/shared";
+import {
+  createDragPreview,
+  endDrag,
+  startDrag,
+  updateDragPointer,
+} from "../../core/drag-state.ts";
 
 /**
- * CTCellLink - Renders a link or cell as a clickable pill
+ * CTCellLink - Renders a link or cell as a clickable, draggable pill
+ *
+ * Every cell link is a drag source by default. Set `static` to suppress
+ * drag behavior (used in drag previews to avoid recursion).
  *
  * @element ct-cell-link
  *
  * @property {string} link - The serialized path to a cell (e.g. /of:bafy.../path)
- * @property {Cell} cell - The live Cell reference
+ * @property {CellHandle} cell - The live Cell reference
+ * @property {boolean} static - Suppress drag behavior
  *
  * @example
  * <ct-cell-link .link=${"/of:bafy.../path"}></ct-cell-link>
  * <ct-cell-link .cell=${myCell}></ct-cell-link>
+ * <ct-cell-link .cell=${myCell} static></ct-cell-link>
  */
 export class CTCellLink extends BaseElement {
   static override styles = [
@@ -39,6 +50,11 @@ export class CTCellLink extends BaseElement {
         cursor: pointer;
         max-width: 100%;
       }
+
+      :host(.dragging) ct-chip {
+        cursor: grabbing;
+        opacity: 0.5;
+      }
     `,
   ];
 
@@ -50,6 +66,9 @@ export class CTCellLink extends BaseElement {
 
   @property({ attribute: false })
   cell?: CellHandle;
+
+  @property({ type: Boolean, reflect: true, attribute: "static" })
+  isStatic?: boolean;
 
   @consume({ context: runtimeContext, subscribe: true })
   @property({ attribute: false })
@@ -70,9 +89,20 @@ export class CTCellLink extends BaseElement {
 
   private _unsubscribe?: () => void;
 
+  // Drag state
+  private _isDragging = false;
+  private _isTracking = false;
+  private _dragStartX = 0;
+  private _dragStartY = 0;
+  private _pointerId?: number;
+  private _preview?: HTMLElement;
+  private _boundPointerMove = this._onPointerMove.bind(this);
+  private _boundPointerUp = this._onPointerUp.bind(this);
+
   override disconnectedCallback() {
     super.disconnectedCallback();
     this._cleanupSubscription();
+    this._endDrag();
   }
 
   private _cleanupSubscription() {
@@ -80,6 +110,22 @@ export class CTCellLink extends BaseElement {
       this._unsubscribe();
       this._unsubscribe = undefined;
     }
+  }
+
+  private _endDrag() {
+    document.removeEventListener("pointermove", this._boundPointerMove);
+    document.removeEventListener("pointerup", this._boundPointerUp);
+    document.removeEventListener("pointercancel", this._boundPointerUp);
+
+    if (this._isDragging) {
+      endDrag();
+      this.classList.remove("dragging");
+    }
+
+    this._isDragging = false;
+    this._isTracking = false;
+    this._pointerId = undefined;
+    this._preview = undefined;
   }
 
   protected override willUpdate(changedProperties: PropertyValues) {
@@ -174,7 +220,69 @@ export class CTCellLink extends BaseElement {
     }
   }
 
+  private _onPointerDown(e: PointerEvent) {
+    if (this.isStatic || !this._resolvedCell) return;
+
+    // Prevent parent ct-drag-source elements from also starting a drag
+    e.stopPropagation();
+
+    this._dragStartX = e.clientX;
+    this._dragStartY = e.clientY;
+    this._pointerId = e.pointerId;
+    this._isTracking = true;
+
+    document.addEventListener("pointermove", this._boundPointerMove);
+    document.addEventListener("pointerup", this._boundPointerUp);
+    document.addEventListener("pointercancel", this._boundPointerUp);
+  }
+
+  private _onPointerMove(e: PointerEvent) {
+    if (!this._isTracking || e.pointerId !== this._pointerId) return;
+
+    const dx = e.clientX - this._dragStartX;
+    const dy = e.clientY - this._dragStartY;
+
+    if (!this._isDragging && Math.sqrt(dx * dx + dy * dy) > 5) {
+      this._isDragging = true;
+      this._beginDrag(e);
+    }
+
+    if (this._isDragging && this._preview) {
+      this._preview.style.left = `${e.clientX + 10}px`;
+      this._preview.style.top = `${e.clientY + 10}px`;
+      updateDragPointer(e.clientX, e.clientY);
+    }
+  }
+
+  private _onPointerUp(e: PointerEvent) {
+    if (e.pointerId !== this._pointerId) return;
+    this._endDrag();
+  }
+
+  private _beginDrag(e: PointerEvent) {
+    if (!this._resolvedCell) return;
+
+    this.classList.add("dragging");
+
+    const preview = createDragPreview(this._resolvedCell);
+    document.body.appendChild(preview);
+
+    preview.style.left = `${e.clientX + 10}px`;
+    preview.style.top = `${e.clientY + 10}px`;
+    this._preview = preview;
+
+    startDrag({
+      cell: this._resolvedCell,
+      type: "cell-link",
+      sourceElement: this,
+      preview,
+      pointerX: e.clientX,
+      pointerY: e.clientY,
+    });
+  }
+
   private _handleClick(e: MouseEvent) {
+    if (this._isDragging) return;
     e.stopPropagation();
     if (this._resolvedCell) {
       if (this._resolvedCell.ref().path.length > 0) {
@@ -211,6 +319,7 @@ export class CTCellLink extends BaseElement {
       <ct-chip
         variant="primary"
         interactive
+        @pointerdown="${this._onPointerDown}"
         @click="${this._handleClick}"
       >
         ${displayText}

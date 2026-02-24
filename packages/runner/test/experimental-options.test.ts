@@ -11,6 +11,7 @@ import {
   toDeepStorableValue,
   toStorableValue,
 } from "@commontools/memory/storable-value";
+import { StorableError } from "@commontools/memory/storable-native-instances";
 import {
   refer,
   resetCanonicalHashConfig,
@@ -53,13 +54,16 @@ describe("ExperimentalOptions", () => {
       const runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager: sm,
-        experimental: { richStorableValues: true },
+        experimental: {
+          richStorableValues: true,
+          canonicalHashing: true,
+        },
       });
       expect(runtime.experimental).toEqual({
         richStorableValues: true,
         storableProtocol: false,
         unifiedJsonEncoding: false,
-        canonicalHashing: false,
+        canonicalHashing: true,
       });
       await runtime.dispose();
       await sm.close();
@@ -93,11 +97,12 @@ describe("ExperimentalOptions", () => {
       expect(result).toEqual([1, null, 3]);
     });
 
-    it("preserves Error as-is when flag is ON", () => {
+    it("wraps Error in StorableError when flag is ON", () => {
       setExperimentalStorableConfig({ richStorableValues: true });
       const err = new Error("test error");
       const result = toStorableValue(err);
-      expect(result).toBe(err);
+      expect(result).toBeInstanceOf(StorableError);
+      expect((result as StorableError).error.message).toBe("test error");
     });
 
     it("preserves undefined in arrays when flag is ON", () => {
@@ -142,14 +147,15 @@ describe("ExperimentalOptions", () => {
       expect(result).toEqual({ a: 1, c: 3 });
     });
 
-    it("preserves nested Error as-is when flag is ON", () => {
+    it("wraps nested Error in StorableError when flag is ON", () => {
       setExperimentalStorableConfig({ richStorableValues: true });
       const err = new Error("nested");
       const result = toDeepStorableValue({ data: err }) as Record<
         string,
         unknown
       >;
-      expect(result.data).toBe(err);
+      expect(result.data).toBeInstanceOf(StorableError);
+      expect((result.data as StorableError).error.message).toBe("nested");
     });
 
     it("preserves undefined-valued object properties when flag is ON", () => {
@@ -159,11 +165,12 @@ describe("ExperimentalOptions", () => {
       expect(Object.hasOwn(result as object, "b")).toBe(true);
     });
 
-    it("preserves Error in array when flag is ON", () => {
+    it("wraps Error in array in StorableError when flag is ON", () => {
       setExperimentalStorableConfig({ richStorableValues: true });
       const err = new Error("in array");
       const result = toDeepStorableValue([1, err, 3]) as unknown[];
-      expect(result[1]).toBe(err);
+      expect(result[1]).toBeInstanceOf(StorableError);
+      expect((result[1] as StorableError).error.message).toBe("in array");
     });
 
     it("preserves sparse array holes when flag is ON", () => {
@@ -216,9 +223,9 @@ describe("ExperimentalOptions", () => {
       expect(isStorableValue([undefined])).toBe(false);
     });
 
-    it("accepts Error when flag is ON", () => {
+    it("rejects Error even when flag is ON (needs conversion to StorableError)", () => {
       setExperimentalStorableConfig({ richStorableValues: true });
-      expect(isStorableValue(new Error("test"))).toBe(true);
+      expect(isStorableValue(new Error("test"))).toBe(false);
     });
 
     it("accepts [undefined] when flag is ON", () => {
@@ -253,7 +260,10 @@ describe("ExperimentalOptions", () => {
       const runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager: sm,
-        experimental: { richStorableValues: true },
+        experimental: {
+          richStorableValues: true,
+          canonicalHashing: true,
+        },
       });
 
       const config = getExperimentalStorableConfig();
@@ -282,7 +292,10 @@ describe("ExperimentalOptions", () => {
       const runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager: sm,
-        experimental: { richStorableValues: true },
+        experimental: {
+          richStorableValues: true,
+          canonicalHashing: true,
+        },
       });
 
       expect(getExperimentalStorableConfig().richStorableValues).toBe(true);
@@ -301,11 +314,11 @@ describe("ExperimentalOptions", () => {
       expect(typeof ref.toString()).toBe("string");
     });
 
-    it("throws when canonicalHashing is true", () => {
+    it("produces a valid reference when canonicalHashing is true", () => {
       setCanonicalHashConfig(true);
-      expect(() => {
-        refer("hello");
-      }).toThrow("canonicalHashing not yet implemented");
+      const ref = refer("hello");
+      expect(ref).toBeDefined();
+      expect(typeof ref.toString()).toBe("string");
     });
 
     it("works again after reset", () => {
@@ -317,7 +330,7 @@ describe("ExperimentalOptions", () => {
   });
 
   describe("Runtime sets and resets canonicalHashing config", () => {
-    it("constructing Runtime with canonicalHashing causes refer() to throw", async () => {
+    it("constructing Runtime with canonicalHashing enables canonical refer()", async () => {
       const sm = StorageManager.emulate({ as: signer });
       const runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
@@ -325,15 +338,15 @@ describe("ExperimentalOptions", () => {
         experimental: { canonicalHashing: true },
       });
 
-      expect(() => {
-        refer("test");
-      }).toThrow("canonicalHashing not yet implemented");
+      const ref = refer("test");
+      expect(ref).toBeDefined();
+      expect(typeof ref.toString()).toBe("string");
 
       await runtime.dispose();
       await sm.close();
     });
 
-    it("disposing Runtime resets canonicalHashing so refer() works again", async () => {
+    it("disposing Runtime resets canonicalHashing so refer() uses default path", async () => {
       const sm = StorageManager.emulate({ as: signer });
       const runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
@@ -341,15 +354,14 @@ describe("ExperimentalOptions", () => {
         experimental: { canonicalHashing: true },
       });
 
-      expect(() => refer("test")).toThrow(
-        "canonicalHashing not yet implemented",
-      );
+      const canonicalRef = refer("test");
+      expect(canonicalRef).toBeDefined();
 
       await runtime.dispose();
       await sm.close();
 
-      const ref = refer("test");
-      expect(ref).toBeDefined();
+      const defaultRef = refer("test");
+      expect(defaultRef).toBeDefined();
     });
   });
 });

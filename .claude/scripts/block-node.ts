@@ -1,4 +1,4 @@
-#!/usr/bin/env -S deno run --allow-read
+#!/usr/bin/env -S deno run --allow-read --allow-env
 /**
  * .claude/scripts/block-node.ts
  *
@@ -8,15 +8,14 @@
  * - Exits 2 so Claude blocks the tool call and shows the message.
  */
 
-const rawInput = await new Response(Deno.stdin.readable).text();
+import { guardProjectDir, isGitCommit, parseCommand } from "./common/guard.ts";
+guardProjectDir();
 
-let cmd = "";
-try {
-  const payload = JSON.parse(rawInput);
-  cmd = payload?.tool_input?.command ?? "";
-} catch {
-  // If the JSON is malformed we allow the call rather than choke the hook.
-}
+const cmd = await parseCommand();
+if (!cmd) Deno.exit(0);
+
+// Don't inspect git commit message content for command patterns
+if (isGitCommit(cmd)) Deno.exit(0);
 
 // Remove quoted strings before checking for node commands
 const cmdWithoutQuotes = cmd.replace(/(['"`])[^'"`]*?\1/g, "");

@@ -21,9 +21,13 @@ const generateId = () =>
 const MAX_RECENT_CHARMS = 10;
 
 import BacklinksIndex, { type MentionablePiece } from "./backlinks-index.tsx";
+import SummaryIndex from "./summary-index.tsx";
+import KnowledgeGraph from "./knowledge-graph.tsx";
 import OmniboxFAB from "./omnibox-fab.tsx";
+import DoList from "../do-list/do-list.tsx";
 import Notebook from "../notes/notebook.tsx";
 import NotesImportExport from "../notes/notes-import-export.tsx";
+import PieceGrid from "./piece-grid.tsx";
 
 type MinimalPiece = {
   [NAME]?: string;
@@ -45,9 +49,12 @@ interface PiecesListOutput {
 const _visit = handler<
   Record<string, never>,
   { piece: Writable<MinimalPiece> }
->((_, state) => {
-  return navigateTo(state.piece);
-}, { proxy: true });
+>(
+  (_, state) => {
+    return navigateTo(state.piece);
+  },
+  { proxy: true },
+);
 
 const removePiece = handler<
   Record<string, never>,
@@ -57,8 +64,8 @@ const removePiece = handler<
   }
 >((_, state) => {
   const allPiecesValue = state.allPieces.get();
-  const index = allPiecesValue.findIndex((c: any) =>
-    c && state.piece.equals(c)
+  const index = allPiecesValue.findIndex(
+    (c: any) => c && state.piece.equals(c),
   );
 
   if (index !== -1) {
@@ -110,11 +117,13 @@ const closeMenu = handler<void, { menuOpen: Writable<boolean> }>(
 const menuNewNote = handler<void, { menuOpen: Writable<boolean> }>(
   (_, { menuOpen }) => {
     menuOpen.set(false);
-    return navigateTo(Note({
-      title: "New Note",
-      content: "",
-      noteId: generateId(),
-    }));
+    return navigateTo(
+      Note({
+        title: "New Note",
+        content: "",
+        noteId: generateId(),
+      }),
+    );
   },
 );
 
@@ -192,14 +201,38 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
     })
   );
 
-  const index = BacklinksIndex({});
+  const doListItems = Writable.of<any[]>([]);
+  const doList = DoList({ items: doListItems });
+
+  // Combine user-managed allPieces with system pieces (like doList) so
+  // BacklinksIndex picks up their mentionable items.
+  const allPiecesWithSystem = computed(() => [
+    ...allPieces.get(),
+    doList as any,
+  ]);
+
+  const index = BacklinksIndex({ allPieces: allPiecesWithSystem });
+  const summaryIdx = SummaryIndex({});
+  const knowledgeGraph = KnowledgeGraph({});
 
   const fab = OmniboxFAB({
     mentionable: index.mentionable,
+    doListTools: {
+      addItem: doList.addItem,
+      addItems: doList.addItems,
+      removeItemByTitle: doList.removeItemByTitle,
+      updateItemByTitle: doList.updateItemByTitle,
+      items: doList.items,
+    },
   });
+
+  const gridView = PieceGrid({ pieces: visiblePieces });
+  const recentGridView = PieceGrid({ pieces: recentPieces });
 
   return {
     backlinksIndex: index,
+    summaryIndex: summaryIdx,
+    knowledgeGraph,
     [NAME]: computed(() => `Space Home (${visiblePieces.length})`),
     [UI]: (
       <ct-screen>
@@ -220,6 +253,42 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
           <div slot="start">
             <h2 style={{ margin: 0, fontSize: "20px" }}>Patterns</h2>
           </div>
+          <ct-cell-link
+            $cell={index}
+            slot="end"
+            style={{
+              fontSize: "14px",
+              padding: "6px 12px",
+              textDecoration: "none",
+              color: "var(--ct-color-text-secondary)",
+            }}
+          >
+            Mentions
+          </ct-cell-link>
+          <ct-cell-link
+            $cell={summaryIdx}
+            slot="end"
+            style={{
+              fontSize: "14px",
+              padding: "6px 12px",
+              textDecoration: "none",
+              color: "var(--ct-color-text-secondary)",
+            }}
+          >
+            Search
+          </ct-cell-link>
+          <ct-cell-link
+            $cell={knowledgeGraph}
+            slot="end"
+            style={{
+              fontSize: "14px",
+              padding: "6px 12px",
+              textDecoration: "none",
+              color: "var(--ct-color-text-secondary)",
+            }}
+          >
+            Graph
+          </ct-cell-link>
           <div slot="end">
             <ct-button
               variant="ghost"
@@ -294,70 +363,97 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
         </ct-toolbar>
 
         <ct-vscroll flex showScrollbar>
-          <ct-vstack gap="4" padding="6">
-            <style>
-              {`
-                .pattern-link {
-                  cursor: pointer;
-                  color: inherit;
-                  text-decoration: none;
-                }
-                .pattern-link:hover {
-                  text-decoration: underline;
-                }
-              `}
-            </style>
+          <ct-hstack gap="6" padding="6" align="start">
+            <div style={{ flex: "1", minWidth: "0" }}>
+              <ct-vstack gap="4">
+                <h3 style={{ margin: "0", fontSize: "16px" }}>Do List</h3>
+                <ct-cell-link $cell={doList} />
+                {doList.compactUI}
+              </ct-vstack>
+            </div>
 
-            <ct-table full-width hover>
-              <tbody>
-                {visiblePieces.map((piece) => {
-                  // Check if piece is a notebook by NAME prefix (isNotebook prop not reliable through proxy)
-                  const isNotebook = computed(() => {
-                    const name = piece?.[NAME];
-                    const result = typeof name === "string" &&
-                      name.startsWith("📓");
-                    return result;
-                  });
+            <div style={{ flex: "1", minWidth: "0" }}>
+              {ifElse(
+                computed(() => recentPieces.get().length > 0),
+                <ct-vstack gap="4" style={{ marginBottom: "16px" }}>
+                  <ct-hstack gap="2" align="center">
+                    <h3 style={{ margin: "0", fontSize: "16px" }}>Recent</h3>
+                    <ct-cell-link $cell={recentGridView} />
+                  </ct-hstack>
+                  <ct-table full-width hover>
+                    <tbody>
+                      {recentPieces.map((piece: any) => (
+                        <tr>
+                          <td>
+                            <ct-cell-context $cell={piece}>
+                              <ct-cell-link $cell={piece} />
+                            </ct-cell-context>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </ct-table>
+                </ct-vstack>,
+                undefined,
+              )}
 
-                  const link = (
-                    <ct-drag-source $cell={piece} type="note">
-                      <ct-cell-context $cell={piece}>
-                        <ct-cell-link $cell={piece} />
-                      </ct-cell-context>
-                    </ct-drag-source>
-                  );
+              <ct-vstack gap="4">
+                <ct-hstack gap="2" align="center">
+                  <h3 style={{ margin: "0", fontSize: "16px" }}>Pieces</h3>
+                  <ct-cell-link $cell={gridView} />
+                </ct-hstack>
 
-                  return (
-                    <tr>
-                      <td>
-                        {ifElse(
-                          isNotebook,
-                          <ct-drop-zone
-                            accept="note"
-                            onct-drop={dropOntoNotebook({
-                              notebook: piece as any,
-                            })}
-                          >
-                            {link}
-                          </ct-drop-zone>,
-                          link,
-                        )}
-                      </td>
-                      <td>
-                        <ct-button
-                          size="sm"
-                          variant="ghost"
-                          onClick={removePiece({ piece, allPieces })}
-                        >
-                          🗑️
-                        </ct-button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </ct-table>
-          </ct-vstack>
+                <ct-table full-width hover>
+                  <tbody>
+                    {visiblePieces.map((piece) => {
+                      const isNotebook = computed(() => {
+                        const name = piece?.[NAME];
+                        const result = typeof name === "string" &&
+                          name.startsWith("📓");
+                        return result;
+                      });
+
+                      const link = (
+                        <ct-drag-source $cell={piece} type="note">
+                          <ct-cell-context $cell={piece}>
+                            <ct-cell-link $cell={piece} />
+                          </ct-cell-context>
+                        </ct-drag-source>
+                      );
+
+                      return (
+                        <tr>
+                          <td>
+                            {ifElse(
+                              isNotebook,
+                              <ct-drop-zone
+                                accept="note"
+                                onct-drop={dropOntoNotebook({
+                                  notebook: piece as any,
+                                })}
+                              >
+                                {link}
+                              </ct-drop-zone>,
+                              link,
+                            )}
+                          </td>
+                          <td>
+                            <ct-button
+                              size="sm"
+                              variant="ghost"
+                              onClick={removePiece({ piece, allPieces })}
+                            >
+                              🗑️
+                            </ct-button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </ct-table>
+              </ct-vstack>
+            </div>
+          </ct-hstack>
         </ct-vscroll>
       </ct-screen>
     ),
@@ -371,5 +467,6 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
     // Exported handlers (bound to state cells for external callers)
     addPiece: addPiece({ allPieces }),
     trackRecent: trackRecent({ recentPieces }),
+    pinToChat: fab.pinToChat,
   };
 });

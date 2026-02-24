@@ -68,6 +68,7 @@ interface Input {
 interface Output {
   title: string;
   events: EventPiece[];
+  mentionable: EventPiece[];
   eventCount: number;
   isCalendar: boolean;
   isHidden: boolean;
@@ -1265,6 +1266,7 @@ const WeeklyCalendar = pattern<Input, Output>(
       ),
       title,
       events,
+      mentionable: events,
       eventCount,
       isCalendar,
       isHidden,

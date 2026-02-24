@@ -15,6 +15,7 @@ export type Props = {
     | object
     | Array<any>
     | null
+    | undefined
     | CellHandle<any>;
 };
 
@@ -33,7 +34,7 @@ export type InnerRenderNode =
 export type VNode = {
   type: "vnode";
   name: string;
-  props: Props;
-  children?: RenderNode;
+  props: Props | undefined;
+  children?: RenderNode | undefined;
   [UI]?: VNode;
 };

@@ -59,6 +59,7 @@ interface Output {
   endTime: string;
   color: string;
   notes: string;
+  summary: string;
   isHidden: boolean;
   eventId: string;
   backlinks: MentionablePiece[];
@@ -448,6 +449,16 @@ const Event = pattern<Input, Output>(
       endTime,
       color,
       notes,
+      summary: computed(() => {
+        const t = title.get();
+        const d = date.get() ? formatDateDisplay(date.get()) : "";
+        const st = startTime.get() ? formatTime12h(startTime.get()) : "";
+        const et = endTime.get() ? formatTime12h(endTime.get()) : "";
+        const n = notes.get();
+        return `${t}${d ? ` on ${d}` : ""}${st ? ` ${st}` : ""}${
+          et ? `-${et}` : ""
+        }${n ? `: ${n.slice(0, 150)}` : ""}`;
+      }),
       isHidden,
       eventId,
       backlinks,

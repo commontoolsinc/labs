@@ -53,6 +53,7 @@ const EnvSchema = z.object({
   CTTS_AI_LLM_GOOGLE_VERTEX_PROJECT: z.string().default(""),
   CTTS_AI_LLM_GOOGLE_VERTEX_LOCATION: z.string().default(""),
   CTTS_AI_LLM_XAI_API_KEY: z.string().default(""),
+  CTTS_AI_GATEWAY_URL: z.string().default(""),
 
   // LLM Observability Tool
   CTTS_AI_LLM_PHOENIX_PROJECT: z.string().default(""),
@@ -157,6 +158,10 @@ const EnvSchema = z.object({
   SANDBOX_SERVICE_URL: z.string().default(
     "https://sandbox.stage.commontools.dev",
   ),
+
+  // URL that sandboxes should use to reach the toolshed API (injected as
+  // CT_API_URL into every sandbox exec). Defaults to API_URL if not set.
+  SANDBOX_TOOLSHED_URL: z.string().optional(),
 });
 
 export type env = z.infer<typeof EnvSchema>;

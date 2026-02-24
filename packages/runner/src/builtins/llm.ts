@@ -13,7 +13,6 @@ import {
   BuiltInGenerateTextParams,
   BuiltInLLMMessage,
   BuiltInLLMParams,
-  JSONSchema,
 } from "@commontools/api";
 import type { Schema } from "@commontools/api/schema";
 import { refer } from "merkle-reference/json";
@@ -23,8 +22,12 @@ import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { llmToolExecutionHelpers } from "./llm-dialog.ts";
 import {
-  LLMMessageSchema,
+  GenerateObjectParamsSchema,
+  GenerateObjectResultSchema,
+  GenerateTextParamsSchema,
+  GenerateTextResultSchema,
   LLMParamsSchema,
+  LLMResultSchema,
   LLMToolSchema,
 } from "./llm-schemas.ts";
 import { isObject } from "@commontools/utils/types";
@@ -38,85 +41,6 @@ const client = new LLMClient();
 
 // TODO(ja): investigate if generateText should be replaced by
 // fetchData with streaming support
-
-const GenerateTextParamsSchema = {
-  type: "object",
-  properties: {
-    prompt: { type: "string" },
-    messages: { type: "array", items: LLMMessageSchema },
-    context: {
-      type: "object",
-      additionalProperties: { asCell: true },
-      default: {},
-    },
-    system: { type: "string" },
-    model: { type: "string" },
-    maxTokens: { type: "number" },
-    tools: { type: "object", additionalProperties: LLMToolSchema, default: {} },
-  },
-} as const satisfies JSONSchema;
-
-const GenerateObjectParamsSchema = {
-  type: "object",
-  properties: {
-    prompt: { type: "string" },
-    messages: { type: "array", items: LLMMessageSchema },
-    context: {
-      type: "object",
-      additionalProperties: { asCell: true },
-      default: {},
-    },
-    schema: { type: "object" },
-    system: { type: "string" },
-    model: { type: "string" },
-    maxTokens: { type: "number" },
-    cache: { type: "boolean" },
-    metadata: { type: "object" },
-    tools: { type: "object", additionalProperties: LLMToolSchema },
-  },
-  required: ["schema"],
-} as const satisfies JSONSchema;
-
-const LLMResultSchema = {
-  type: "object",
-  properties: {
-    pending: { type: "boolean", default: false },
-    result: {
-      anyOf: [
-        { type: "string" },
-        { type: "array", items: { type: "object" } },
-      ],
-    },
-    error: {},
-    partial: { type: "string" },
-    requestHash: { type: "string" },
-  },
-  required: ["pending"],
-} as const satisfies JSONSchema;
-
-const GenerateTextResultSchema = {
-  type: "object",
-  properties: {
-    pending: { type: "boolean", default: false },
-    result: { type: "string" },
-    error: {},
-    partial: { type: "string" },
-    requestHash: { type: "string" },
-  },
-  required: ["pending"],
-} as const satisfies JSONSchema;
-
-const GenerateObjectResultSchema = {
-  type: "object",
-  properties: {
-    pending: { type: "boolean", default: false },
-    result: { type: "object" },
-    error: {},
-    partial: { type: "string" },
-    requestHash: { type: "string" },
-  },
-  required: ["pending"],
-} as const satisfies JSONSchema;
 
 /** Batch interval for partial streaming updates (~15fps). */
 const PARTIAL_BATCH_MS = 66;
@@ -580,7 +504,8 @@ export function generateText(
       .get();
 
     // If neither prompt nor messages is provided, don't make a request
-    if (!prompt && !messages) {
+    const hasPrompt = Array.isArray(prompt) ? prompt.length > 0 : !!prompt;
+    if (!hasPrompt && !messages) {
       resultWithLog.set(undefined);
       errorWithLog.set(undefined);
       partialWithLog.set(undefined);
@@ -779,7 +704,8 @@ export function generateObject<T extends Record<string, unknown>>(
       metadata,
     } = inputs.withTx(tx).get() ?? {};
 
-    if ((!prompt && (!messages || messages.length === 0)) || !schema) {
+    const hasPrompt = Array.isArray(prompt) ? prompt.length > 0 : !!prompt;
+    if ((!hasPrompt && (!messages || messages.length === 0)) || !schema) {
       resultWithLog.set(undefined);
       errorWithLog.set(undefined);
       partialWithLog.set(undefined);
@@ -806,7 +732,7 @@ export function generateObject<T extends Record<string, unknown>>(
     const hasTools = isObject(tools) && Object.keys(tools).length > 0;
 
     if (hasTools) {
-      // Use tool-calling path with finalResult builtin tool
+      // Use tool-calling path with presentResult builtin tool
       const llmParams: LLMRequest = {
         system: (system ?? "") + contextDocs,
         messages: requestMessages,
@@ -859,7 +785,7 @@ export function generateObject<T extends Record<string, unknown>>(
           thisRun,
         );
 
-      // Build tool catalog with finalResult tool
+      // Build tool catalog with presentResult tool
       const resultPromise = (async () => {
         try {
           const toolsCell = inputs.key("tools").asSchema({
@@ -870,12 +796,12 @@ export function generateObject<T extends Record<string, unknown>>(
             toolsCell,
           );
 
-          // Add finalResult builtin tool
+          // Add presentResult builtin tool
           const toolCatalog = {
             ...baseCatalog,
             llmTools: {
               ...baseCatalog.llmTools,
-              [llmToolExecutionHelpers.FINAL_RESULT_TOOL_NAME]: {
+              [llmToolExecutionHelpers.PRESENT_RESULT_TOOL_NAME]: {
                 description:
                   "Call this tool with the final structured result matching the required schema. This should be your last action.",
                 inputSchema: JSON.parse(JSON.stringify(schema)),
@@ -883,10 +809,10 @@ export function generateObject<T extends Record<string, unknown>>(
             },
           };
 
-          // Execute with tools - capture finalResult when called
+          // Execute with tools - capture presentResult when called
           let finalResult: T | undefined;
 
-          // Custom execution loop for generateObject with finalResult extraction
+          // Custom execution loop for generateObject with presentResult extraction
           const executeRecursive = async (
             currentMessages: readonly BuiltInLLMMessage[],
           ): Promise<void> => {
@@ -925,15 +851,20 @@ export function generateObject<T extends Record<string, unknown>>(
                   toolCallParts,
                 );
 
-              // Check if finalResult was called and grab the result.
-              // It's post de-serialization so might contain cells
-              // (unlike the input to the tool)
-              const finalResultCall = toolResults.find(
+              // Check if presentResult was called. Cellify from the raw
+              // tool call input to get live Cell references (the tool result
+              // itself is serialized with @link for the conversation).
+              const presentResultPart = toolCallParts.find(
                 (p) =>
-                  p.toolName === llmToolExecutionHelpers.FINAL_RESULT_TOOL_NAME,
+                  p.toolName ===
+                    llmToolExecutionHelpers.PRESENT_RESULT_TOOL_NAME,
               );
-              if (finalResultCall) {
-                finalResult = finalResultCall.result as T;
+              if (presentResultPart) {
+                finalResult = llmToolExecutionHelpers.traverseAndCellify(
+                  runtime,
+                  parentCell.space,
+                  presentResultPart.input,
+                ) as T;
               }
 
               const toolResultMessages = llmToolExecutionHelpers
@@ -945,13 +876,13 @@ export function generateObject<T extends Record<string, unknown>>(
                 ...toolResultMessages,
               ];
 
-              // Continue if finalResult wasn't called yet
-              if (!finalResultCall) {
+              // Continue if presentResult wasn't called yet
+              if (!presentResultPart) {
                 await executeRecursive(updatedMessages);
               }
             } else {
               throw new Error(
-                "LLM did not call finalResult tool with structured data",
+                "LLM did not call presentResult tool with structured data",
               );
             }
           };
@@ -959,7 +890,7 @@ export function generateObject<T extends Record<string, unknown>>(
           await executeRecursive(requestMessages);
 
           if (finalResult === undefined) {
-            throw new Error("finalResult was never called");
+            throw new Error("presentResult was never called");
           }
 
           return finalResult;

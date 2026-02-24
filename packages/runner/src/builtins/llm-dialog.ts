@@ -416,8 +416,19 @@ const resultSchema = {
   type: "object",
   properties: {
     pending: { type: "boolean", default: false },
+    result: {},
     addMessage: { ...LLMMessageSchema, asStream: true },
     cancelGeneration: { asStream: true },
+    pinCell: {
+      type: "object",
+      properties: {
+        path: { type: "string" },
+        name: { type: "string" },
+      },
+      required: ["path", "name"],
+      asStream: true,
+    },
+    unpinAllCells: { asStream: true },
     flattenedTools: { type: "object", default: {} },
     pinnedCells: {
       type: "array",
@@ -498,7 +509,7 @@ const INVOKE_TOOL_NAME = "invoke";
 const SCHEMA_TOOL_NAME = "schema";
 const PIN_TOOL_NAME = "pin";
 const UNPIN_TOOL_NAME = "unpin";
-const FINAL_RESULT_TOOL_NAME = "finalResult";
+const PRESENT_RESULT_TOOL_NAME = "presentResult";
 const UPDATE_ARGUMENT_TOOL_NAME = "updateArgument";
 
 const READ_INPUT_SCHEMA: JSONSchema = {
@@ -1048,7 +1059,7 @@ type ResolvedToolCall =
   | { type: "unpin"; call: LLMToolCall; path: string }
   | { type: "schema"; call: LLMToolCall; cellRef: Cell<any> }
   | { type: "read"; call: LLMToolCall; cellRef: Cell<any> }
-  | { type: "finalResult"; call: LLMToolCall; result: unknown }
+  | { type: "presentResult"; call: LLMToolCall; result: unknown }
   | {
     type: "updateArgument";
     call: LLMToolCall;
@@ -1085,7 +1096,7 @@ function resolveToolCall(
   if (
     name === READ_TOOL_NAME || name === INVOKE_TOOL_NAME ||
     name === SCHEMA_TOOL_NAME || name === PIN_TOOL_NAME ||
-    name === UNPIN_TOOL_NAME || name === FINAL_RESULT_TOOL_NAME ||
+    name === UNPIN_TOOL_NAME || name === PRESENT_RESULT_TOOL_NAME ||
     name === UPDATE_ARGUMENT_TOOL_NAME
   ) {
     // Handle pin
@@ -1122,10 +1133,10 @@ function resolveToolCall(
       };
     }
 
-    // Handle finalResult (builtin tool for generateObject)
-    if (name === FINAL_RESULT_TOOL_NAME) {
+    // Handle presentResult (builtin tool for generateObject)
+    if (name === PRESENT_RESULT_TOOL_NAME) {
       return {
-        type: "finalResult",
+        type: "presentResult",
         call: { id, name, input: toolCallPart.input },
         result: toolCallPart.input,
       };
@@ -1364,7 +1375,7 @@ export const llmDialogTestHelpers = {
   buildAssistantMessage,
   createToolResultMessages,
   hasValidContent,
-  FINAL_RESULT_TOOL_NAME,
+  PRESENT_RESULT_TOOL_NAME,
   simplifySchemaForContext,
 };
 
@@ -1373,7 +1384,7 @@ export const llmDialogTestHelpers = {
  * These functions handle tool catalog building, tool call resolution, and execution.
  */
 export const llmToolExecutionHelpers = {
-  FINAL_RESULT_TOOL_NAME,
+  PRESENT_RESULT_TOOL_NAME,
   buildToolCatalog,
   executeToolCalls,
   extractToolCallParts,
@@ -1381,6 +1392,7 @@ export const llmToolExecutionHelpers = {
   createToolResultMessages,
   hasValidContent,
   buildAvailableCellsDocumentation,
+  traverseAndCellify,
 };
 
 /**
@@ -1732,9 +1744,15 @@ async function invokeToolCall(
     return handleRead(resolved, space);
   }
 
-  if (resolved.type === "finalResult") {
-    // Return the structured result directly
-    return traverseAndCellify(runtime, space, resolved.result);
+  if (resolved.type === "presentResult") {
+    // Cellify to get live references, then serialize back to @link for the
+    // conversation message. The caller (startRequest) cellifies separately
+    // from the raw tool call input to store on the dialog's result cell.
+    const cellified = traverseAndCellify(runtime, space, resolved.result);
+    return {
+      type: "json",
+      value: traverseAndSerialize(cellified, undefined, new Set(), space),
+    };
   }
 
   // Handle run-type tools (external, run with pattern/handler)
@@ -1862,6 +1880,8 @@ export function llmDialog(
         ...result.getRaw(),
         addMessage: { $stream: true },
         cancelGeneration: { $stream: true },
+        pinCell: { $stream: true },
+        unpinAllCells: { $stream: true },
         pinnedCells: [],
       });
 
@@ -1930,6 +1950,72 @@ export function llmDialog(
           // Cancel request by setting pending to false. This will trigger the
           // code below to be executed in all tabs.
           pending.withTx(tx).set(false);
+        },
+      );
+
+      // Declare `pinCell` handler and register
+      createHandler<{ path: string; name: string }>(
+        result.key("pinCell") as unknown as Stream<
+          { path: string; name: string }
+        >,
+        (
+          tx: IExtendedStorageTransaction,
+          event: { path: string; name: string },
+        ) => {
+          const current = pinnedCells.withTx(tx).get() || [];
+
+          // Check if already pinned
+          if (current.some((p) => p.path === event.path)) {
+            return;
+          }
+
+          // Add new pinned cell
+          const updated = [
+            ...current,
+            { path: event.path, name: event.name },
+          ];
+          pinnedCells.withTx(tx).set(updated);
+          // Merge with existing result pins (which include context-derived
+          // pins) so we don't clobber them. Deduplicate by path.
+          const existingResult = result.withTx(tx).key("pinnedCells").get() ||
+            [];
+          const existingPaths = new Set(
+            existingResult.map((p: any) => p.path),
+          );
+          if (!existingPaths.has(event.path)) {
+            result
+              .withTx(tx)
+              .key("pinnedCells")
+              .set([
+                ...existingResult,
+                { path: event.path, name: event.name },
+              ] as any);
+          }
+        },
+      );
+
+      // Declare `unpinAllCells` handler and register
+      createHandler<void>(
+        result.key("unpinAllCells") as unknown as Stream<void>,
+        (tx: IExtendedStorageTransaction, _event: void) => {
+          // Clear user-pinned cells
+          const userPaths = new Set(
+            (pinnedCells.withTx(tx).get() || []).map(
+              (p: PinnedCell) => p.path,
+            ),
+          );
+          pinnedCells.withTx(tx).set([]);
+          // Keep context-derived pins in result, remove only user pins
+          const existingResult = result.withTx(tx).key("pinnedCells").get() ||
+            [];
+          result
+            .withTx(tx)
+            .key("pinnedCells")
+            .set(
+              existingResult.filter(
+                (p: any) => !userPaths.has(p.path),
+              ) as any,
+            );
         },
       );
 
@@ -2040,6 +2126,16 @@ async function startRequest(
   });
 
   const toolCatalog = buildToolCatalog(toolsCell);
+
+  // If resultSchema is provided, inject presentResult built-in tool
+  const userResultSchema = inputs.key("resultSchema").get();
+  if (userResultSchema) {
+    toolCatalog.llmTools[PRESENT_RESULT_TOOL_NAME] = {
+      description:
+        "Call this tool to present a structured result. This stores the result for the caller.",
+      inputSchema: JSON.parse(JSON.stringify(userResultSchema)),
+    };
+  }
 
   // Build available cells documentation (both context and pinned cells)
   const context = inputs.key("context").get();
@@ -2185,6 +2281,22 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
             pinnedCells,
           );
 
+          // If presentResult was called, cellify the raw input so we can
+          // store it on the dialog's result cell (guarded by requestId below).
+          let cellifiedResult: unknown | undefined;
+          if (userResultSchema) {
+            const presentResultPart = toolCallParts.find(
+              (p) => p.toolName === PRESENT_RESULT_TOOL_NAME,
+            );
+            if (presentResultPart) {
+              cellifiedResult = traverseAndCellify(
+                runtime,
+                space,
+                presentResultPart.input,
+              );
+            }
+          }
+
           // Validate that we have a result for every tool call with matching IDs
           const toolCallIds = new Set(toolCallParts.map((p) => p.toolCallId));
           const resultIds = new Set(toolResults.map((r) => r.id));
@@ -2235,6 +2347,11 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
             internal,
             requestId,
             (tx) => {
+              // Write presentResult atomically with tool result messages,
+              // guarded by requestId to prevent stale writes from canceled requests.
+              if (cellifiedResult !== undefined) {
+                result.withTx(tx).key("result").set(cellifiedResult);
+              }
               messagesCell.withTx(tx).push(
                 ...(toolResultMessages as Schema<typeof LLMMessageSchema>[]),
               );

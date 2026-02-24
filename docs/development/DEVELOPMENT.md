@@ -359,12 +359,46 @@ sudo update-ca-certificates
 
 ### Running Tests
 
+> **Note:** CI enforces that `main` always type-checks and all tests pass, so
+> you don't need to verify the baseline against a clean tree before testing your
+> changes.
+
 - Check typings with `deno task check`.
 - Run linter with `deno lint`.
 - Run all tests using `deno task test` (NOT `deno test`)
 - To run a single test file use `deno test path/to/test.ts`.
 - To test a specific package, `cd` into the package directory and run
   `deno task test`.
+
+### Adding New Workspace Packages
+
+Every workspace package must be registered and configured correctly, or the test
+suite will break.
+
+1. **Register the package.** Add its path (e.g., `./packages/my-package`) to the
+   `"workspace"` array in the root `deno.json`.
+
+2. **Include a test task.** The package's `deno.json` **must** have a `"tasks"`
+   object with a `"test"` entry. The root test runner (`tasks/test.ts`) iterates
+   all workspace members and runs `deno task test` in each package directory. If
+   a package lacks a test task, Deno resolves the task name against the root
+   workspace instead, which re-runs the entire test suite recursively. This
+   causes exponential process spawning and will time out CI.
+
+   Use `"deno test"` for packages with tests, or `"echo 'No tests defined.'"` as
+   a stub for packages that don't have tests yet.
+
+3. **Minimal `deno.json` example:**
+
+   ```json
+   {
+     "name": "@commontools/my-package",
+     "exports": { ".": "./mod.ts" },
+     "tasks": { "test": "deno test" }
+   }
+   ```
+
+See `packages/utils` and `packages/leb128` for real examples.
 
 ### Running Integration Tests
 

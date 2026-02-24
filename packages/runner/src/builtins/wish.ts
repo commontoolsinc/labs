@@ -401,6 +401,8 @@ function resolveSpaceTarget(
     "/": [],
     "#default": ["defaultPattern"],
     "#mentionable": ["defaultPattern", "backlinksIndex", "mentionable"],
+    "#summaryIndex": ["defaultPattern", "summaryIndex"],
+    "#knowledgeGraph": ["defaultPattern", "knowledgeGraph"],
     "#allPieces": ["defaultPattern", "allPieces"],
     "#recent": ["defaultPattern", "recentPieces"],
   };

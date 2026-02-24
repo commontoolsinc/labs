@@ -129,10 +129,48 @@ most runtime code runs in a web worker, so its loggers are in a separate
 
 - **Debugger UI**: Open the debugger panel and use the Logger and Scheduler tabs
   to view worker counts, timing, and flags.
-- **IPC via RuntimeClient**: If you have a `RuntimeClient` reference, use
-  `rt.getLoggerCounts()` to fetch worker counts/timing/flags, or
-  `rt.setLoggerLevel()` / `rt.setLoggerEnabled()` to control worker loggers
-  programmatically.
+- **IPC via `commontools.rt`**: The `RuntimeClient` is exposed on
+  `commontools.rt` for console access:
+
+```javascript
+// Fetch worker counts, timing, and flags
+await commontools.rt.getLoggerCounts()
+
+// Control worker loggers
+await commontools.rt.setLoggerLevel("debug")         // all loggers
+await commontools.rt.setLoggerLevel("debug", "runner") // specific logger
+await commontools.rt.setLoggerEnabled(true)            // enable all
+await commontools.rt.setLoggerEnabled(false, "runner") // disable one
+```
+
+## VDOM Debug Helpers
+
+Inspect the VDOM tree structure and applicator state. See
+[VDOM Debug Helpers](vdom-debug.md) for full documentation.
+
+```javascript
+// List all active renderings
+commontools.vdom.renders()
+
+// Pretty-print the VDOM tree
+await commontools.vdom.dump()
+
+// Get the raw VDOM tree object (children expanded, props as CellHandles)
+await commontools.vdom.tree()
+
+// Node/listener counts per renderer
+commontools.vdom.stats()
+
+// Look up a DOM node by applicator node ID
+commontools.vdom.nodeForId(1)
+
+// Target a specific render by index or container element
+await commontools.vdom.dump(0)
+await commontools.vdom.dump(document.querySelector('#my-container'))
+
+// Raw access to the active renders registry
+commontools.vdom.registry
+```
 
 ## Quick Reference
 
@@ -154,3 +192,13 @@ most runtime code runs in a web worker, so its loggers are in a separate
 | `commontools.resetAllTimingStats()` | Reset all timing |
 | `commontools.resetAllCountBaselines()` | Set count baselines |
 | `commontools.resetAllTimingBaselines()` | Set timing baselines |
+| `commontools.rt` | RuntimeClient for worker IPC |
+| `commontools.rt.setLoggerLevel(lvl, name?)` | Set worker logger level |
+| `commontools.rt.setLoggerEnabled(on, name?)` | Enable/disable worker logger |
+| `commontools.rt.getLoggerCounts()` | Get worker logger counts/timing/flags |
+| `commontools.vdom.renders()` | List active renderings |
+| `commontools.vdom.tree(el?)` | Raw VDOM tree object |
+| `commontools.vdom.dump(el?)` | Pretty-print VDOM tree |
+| `commontools.vdom.stats()` | Node/listener counts per renderer |
+| `commontools.vdom.nodeForId(id, el?)` | Look up DOM node by ID |
+| `commontools.vdom.registry` | Raw active renders registry |

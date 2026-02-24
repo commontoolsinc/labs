@@ -30,6 +30,7 @@ interface EventDetailOutput {
   date: string;
   time: string;
   notes: string;
+  summary: string;
   setTitle: Stream<{ title: string }>;
   setDate: Stream<{ date: string }>;
   setTime: Stream<{ time: string }>;
@@ -114,6 +115,14 @@ export default pattern<EventDetailInput, EventDetailOutput>(
       date,
       time,
       notes,
+      summary: computed(() => {
+        const t = title.get();
+        const d = date.get();
+        const tm = time.get();
+        return `${t}${d ? ` on ${d}` : ""}${tm ? ` at ${tm}` : ""}${
+          notes.get() ? `: ${notes.get().slice(0, 150)}` : ""
+        }`;
+      }),
       setTitle,
       setDate,
       setTime,

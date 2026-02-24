@@ -54,24 +54,25 @@ you track call volume even for silent loggers.
 
 ### Controlling Loggers from the Shell (IPC)
 
-The shell's `RuntimeClient` exposes methods that reach into the worker:
+The shell's `RuntimeClient` exposes methods that reach into the worker. The
+client is available on `globalThis.commontools.rt` for browser console access:
 
-```typescript
+```javascript
 // Set log level for a specific logger in the worker
-await rt.setLoggerLevel("debug", "runner");
+await commontools.rt.setLoggerLevel("debug", "runner");
 
 // Set log level for ALL loggers in the worker
-await rt.setLoggerLevel("debug");
+await commontools.rt.setLoggerLevel("debug");
 
 // Disable a specific logger in the worker
-await rt.setLoggerEnabled(false, "runner");
+await commontools.rt.setLoggerEnabled(false, "runner");
 
 // Enable all loggers in the worker
-await rt.setLoggerEnabled(true);
+await commontools.rt.setLoggerEnabled(true);
 ```
 
-These are used by the debugger UI but can also be called from application code
-when you have a `RuntimeClient` reference.
+These are used by the debugger UI but can also be called from the browser console
+or application code when you have a `RuntimeClient` reference.
 
 ## Call Counts
 

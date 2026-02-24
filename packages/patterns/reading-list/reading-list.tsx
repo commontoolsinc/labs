@@ -30,6 +30,7 @@ interface ReadingListOutput {
   [NAME]: string;
   [UI]: VNode;
   items: ReadingItemPiece[];
+  mentionable: ReadingItemPiece[];
   totalCount: number;
   currentFilter: ItemStatus | "all";
   filteredItems: ReadingItemPiece[];
@@ -261,6 +262,7 @@ export default pattern<ReadingListInput, ReadingListOutput>(({ items }) => {
       </ct-screen>
     ),
     items,
+    mentionable: items,
     totalCount,
     currentFilter,
     filteredItems,

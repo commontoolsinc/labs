@@ -9,6 +9,20 @@ import { JSONSchema, NAME, type Schema, TYPE, UI } from "./shared.ts";
 export const rendererVDOMSchema = {
   $id: "https://commonfabric.org/schemas/vdom.json",
   $defs: {
+    vdomRenderNode: {
+      anyOf: [
+        { $ref: "#/$defs/vdomNode" },
+        { type: "string" },
+        { type: "number" },
+        { type: "boolean" },
+        { type: "null" },
+        { type: "undefined" },
+        {
+          type: "array",
+          items: { $ref: "#/$defs/vdomRenderNode", asCell: true },
+        },
+      ],
+    },
     vdomNode: {
       type: "object",
       properties: {
@@ -20,21 +34,50 @@ export const rendererVDOMSchema = {
         },
         children: {
           type: "array",
-          items: {
-            anyOf: [
-              { $ref: "#/$defs/vdomNode" },
-              { type: "string" },
-              { type: "number" },
-              { type: "boolean" },
-              { type: "null" },
-              {
-                type: "array",
-                items: { $ref: "#/$defs/vdomNode", asCell: true },
-              },
-            ],
-            asCell: true,
-          },
+          items: { $ref: "#/$defs/vdomRenderNode", asCell: true },
           asCell: true,
+        },
+        [UI]: { $ref: "#/$defs/vdomNode" },
+      },
+    },
+  },
+  $ref: "#/$defs/vdomNode",
+} as const satisfies JSONSchema;
+
+/**
+ * Debug variant of rendererVDOMSchema.
+ * Children expand inline (no asCell) so the full tree is readable in one .get().
+ * Props keep asCell since prop values can be large and aren't needed for structural debugging.
+ */
+export const debugVDOMSchema = {
+  $id: "https://commonfabric.org/schemas/vdom-debug.json",
+  $defs: {
+    vdomRenderNode: {
+      anyOf: [
+        { $ref: "#/$defs/vdomNode" },
+        { type: "string" },
+        { type: "number" },
+        { type: "boolean" },
+        { type: "null" },
+        { type: "undefined" },
+        {
+          type: "array",
+          items: { $ref: "#/$defs/vdomRenderNode" },
+        },
+      ],
+    },
+    vdomNode: {
+      type: "object",
+      properties: {
+        type: { type: "string" },
+        name: { type: "string" },
+        props: {
+          type: "object",
+          additionalProperties: { asCell: true },
+        },
+        children: {
+          type: "array",
+          items: { $ref: "#/$defs/vdomRenderNode" },
         },
         [UI]: { $ref: "#/$defs/vdomNode" },
       },
@@ -107,6 +150,8 @@ export const vnodeSchema = {
         },
       }, {
         type: "null",
+      }, {
+        type: "undefined",
       }],
     },
     Props: {
@@ -135,6 +180,8 @@ export const vnodeSchema = {
           asStream: true,
         }, {
           type: "null",
+        }, {
+          type: "undefined",
         }],
       },
     },

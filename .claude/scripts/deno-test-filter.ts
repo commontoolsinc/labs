@@ -1,4 +1,4 @@
-#!/usr/bin/env -S deno run --allow-read
+#!/usr/bin/env -S deno run --allow-read --allow-env
 /**
  * .claude/scripts/deno-test-filter.ts
  *
@@ -6,6 +6,9 @@
  * - Catches `deno task test --filter` which doesn't work as expected.
  * - Explains the correct pattern: run `deno test` directly in a package.
  */
+
+import { guardProjectDir } from "./common/guard.ts";
+guardProjectDir();
 
 const rawInput = await new Response(Deno.stdin.readable).text();
 

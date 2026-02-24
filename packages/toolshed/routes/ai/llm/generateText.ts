@@ -67,7 +67,9 @@ export function configureJsonMode(
 
     // Remove standard mode parameter as Groq doesn't support it
     delete streamParams.mode;
-  } else if (modelName?.startsWith("openai:")) {
+  } else if (
+    modelName?.startsWith("openai:") || modelName?.startsWith("gateway:")
+  ) {
     // OpenAI uses response_format parameter
     streamParams.response_format = { type: "json_object" };
 

@@ -172,6 +172,17 @@ export class Runtime {
       canonicalHashing: false,
       ...options.experimental,
     };
+
+    if (
+      this.experimental.richStorableValues &&
+      !this.experimental.canonicalHashing
+    ) {
+      throw new Error(
+        "ExperimentalOptions: `richStorableValues` requires " +
+          "`canonicalHashing` to be enabled",
+      );
+    }
+
     // Propagate experimental flags to the memory layer's ambient config.
     setExperimentalStorableConfig(this.experimental);
     setCanonicalHashConfig(this.experimental.canonicalHashing);

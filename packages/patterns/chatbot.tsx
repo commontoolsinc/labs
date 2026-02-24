@@ -78,6 +78,19 @@ type PromptAttachment = {
   removable?: boolean; // Whether this attachment can be removed
 };
 
+const handlePinToChat = handler<
+  { path: string; name: string; accumulate: boolean },
+  {
+    pinCell: Stream<{ path: string; name: string }>;
+    unpinAllCells: Stream<void>;
+  }
+>((event, { pinCell, unpinAllCells }) => {
+  if (!event.accumulate) {
+    unpinAllCells.send(undefined);
+  }
+  pinCell.send({ path: event.path, name: event.name });
+});
+
 type ChatOutput = {
   messages: Array<BuiltInLLMMessage>;
   pending: boolean | undefined;
@@ -86,6 +99,9 @@ type ChatOutput = {
   cancelGeneration: Stream<void>;
   title?: string;
   pinnedCells: Array<{ path: string; name: string }>;
+  pinCell: Stream<{ path: string; name: string }>;
+  unpinAllCells: Stream<void>;
+  pinToChat: Stream<{ path: string; name: string; accumulate: boolean }>;
   tools: any;
   ui: {
     chatLog: VNode;
@@ -148,6 +164,8 @@ export default pattern<ChatInput, ChatOutput>(
       pending,
       flattenedTools,
       pinnedCells,
+      pinCell,
+      unpinAllCells,
     } = llmDialog(
       {
         system: computed(() => {
@@ -251,6 +269,9 @@ export default pattern<ChatInput, ChatOutput>(
       cancelGeneration,
       title,
       pinnedCells,
+      pinCell,
+      unpinAllCells,
+      pinToChat: handlePinToChat({ pinCell, unpinAllCells }),
       tools: flattenedTools,
       ui: {
         chatLog,
