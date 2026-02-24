@@ -56,6 +56,10 @@ export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
   const negative = value < 0n;
 
   if (!negative) {
+    // We use toString(16).length to determine byte count because V8 has no
+    // BigInt bit-length API. The TC39 BigInt Math proposal (Stage 1) includes
+    // BigInt.bitLength() which would eliminate this string round-trip.
+    // See: https://github.com/tc39/proposal-bigint-math
     const hex = value.toString(16);
     // Determine minimal byte length from hex digit count.
     let byteLen = (hex.length + 1) >> 1; // ceil(hex.length / 2)
@@ -189,8 +193,8 @@ export function toUnpaddedBase64(bytes: Uint8Array): string {
   return result;
 }
 
-/** Reverse lookup: base64 char -> 6-bit value. */
-const B64_DECODE = new Uint8Array(128);
+/** Reverse lookup: base64 char -> 6-bit value. 0xFF = invalid. */
+const B64_DECODE = new Uint8Array(128).fill(0xff);
 for (let i = 0; i < B64_CHARS.length; i++) {
   B64_DECODE[B64_CHARS.charCodeAt(i)] = i;
 }
@@ -214,7 +218,7 @@ export function fromBase64(encoded: string): Uint8Array {
 
   for (let i = 0; i < s.length; i++) {
     const code = s.charCodeAt(i);
-    if (code >= 128) {
+    if (code >= 128 || B64_DECODE[code] === 0xff) {
       throw new Error(`fromBase64: invalid character at index ${i}`);
     }
     bitBuf = (bitBuf << 6) | B64_DECODE[code];

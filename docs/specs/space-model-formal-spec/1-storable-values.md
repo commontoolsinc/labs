@@ -1398,7 +1398,7 @@ round-trip correctly.
 //   - `0n`  → single byte 0x00 → "AA"
 //   - `1n`  → 0x01             → "AQ"
 //   - `-1n` → 0xFF             → "/w"
-//   - `128n` → 0x00 0x80       → "AIA"  (sign-extension: 0x80 alone = -128)
+//   - `128n` → 0x00 0x80       → "AIA"  (leading 0x00 needed: 0x80 alone would decode as -128)
 //   - `-128n` → 0x80           → "gA"
 // This matches the canonical hash byte format (Section 6.4), which already
 // uses two's complement big-endian for BigInt payloads.
