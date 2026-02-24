@@ -14,7 +14,7 @@ Every path must resolve to a valid `stat` result:
 | Scalar value file | `-rw-rw-r--` (0664) | byte length of string repr |
 | `.json` file | `-rw-rw-r--` (0664) | byte length of JSON |
 | `meta.json` | `-r--r--r--` (0444) | byte length |
-| Handler file | `--w--w----` (0220) | 0 |
+| `.handler` file | `--w--w----` (0220) | 0 |
 | Symlink (cell ref) | `lrwxrwxrwx` | target path length |
 
 **Timestamps**: `mtime` reflects the cell's last modification time (from the
@@ -35,7 +35,7 @@ For object values: keys become entries, plus any `.json` siblings.
 For array values: indices become entries, plus `.json` sibling.
 
 Piece directories always contain: `input.json`, `input/`, `result.json`,
-`result/`, `handlers/` (if any streams exist), `meta.json`.
+`result/`, `meta.json`. Stream cells appear as `*.handler` files in `result/`.
 
 ### `read`
 
@@ -90,7 +90,7 @@ target path parsing rules and examples.
 4. If the path is `result/items/0.json`, replace just that subtree.
 5. Execute via `cell.set()` at the appropriate path.
 
-### `write` to Handler File
+### `write` to `.handler` File
 
 1. Buffer writes until `flush` or `release`.
 2. On flush: parse the buffer as JSON (the event payload).

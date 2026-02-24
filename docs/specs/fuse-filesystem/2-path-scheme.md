@@ -33,8 +33,7 @@ The mount root contains spaces. Each space contains pieces and entities.
         result.json                   # Full result cell as JSON
         result/                       # Result cell fields as directory tree
           <field>/...
-        handlers/                     # Stream cells (write-only)
-          <handler-name>              # Write JSON here to trigger
+        result/*.handler               # Stream cells (write-only, .handler suffix)
         meta.json                     # Read-only piece metadata
     entities/                         # Raw entity view (advanced)
       <entity-id>/
@@ -133,9 +132,8 @@ home/pieces/todo-app/
         text          # ...
         done          # ...
     count             # file containing: 3
-  handlers/
-    addItem           # write-only: echo '{"text":"new"}' > addItem
-    removeItem        # write-only
+    addItem.handler   # write-only: echo '{"text":"new"}' > addItem.handler
+    removeItem.handler # write-only
   meta.json           # {"id": "of:ba4j...", "patternName": "todo-app", ...}
 ```
 

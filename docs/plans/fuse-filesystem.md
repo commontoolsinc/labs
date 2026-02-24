@@ -116,7 +116,7 @@ hardcoded file. Validates that Deno FFI to libfuse works at all.
   - [x] Validate JSON before writing; `EINVAL` on parse failure
   - [x] Rebuild affected tree nodes
 - [x] **2.4 Handler invocation**
-  - [x] `handlers/<name>` files: parse written JSON, call `stream.send()`
+  - [x] `result/<name>.handler` files: parse written JSON, call `stream.send()`
   - [x] Fire-and-forget (return success after send)
 - [x] **2.5 Symlink writes (sigil links)**
   - [x] `symlink` callback: parse target path to `(space, id, path)` tuple

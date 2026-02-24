@@ -274,9 +274,9 @@ echo '{"/":{\"link@1\":{\"id\":\"of:ba4j...\"}}}' > result/related.json
 
 ### Stream Markers
 
-Stream cells (`{ $stream: true }`) appear as write-only files in the
-`handlers/` directory. Reading them returns empty content. Writing sends an
-event.
+Stream cells (`{ $stream: true }`) appear as write-only `.handler` files
+alongside their sibling fields in `result/` (e.g., `result/addItem.handler`).
+Reading them returns empty content. Writing sends an event.
 
 ---
 

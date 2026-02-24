@@ -72,7 +72,7 @@ echo '{"items":[{"text":"Buy oat milk","done":true}],"title":"Todos"}' \
   > ~/mnt/ct/home/pieces/todo-app/result.json
 
 # Trigger a handler
-echo '{"item":"New task"}' > ~/mnt/ct/home/pieces/todo-app/handlers/addItem
+echo '{"item":"New task"}' > ~/mnt/ct/home/pieces/todo-app/result/addItem.handler
 
 # Unmount
 ct fuse unmount ~/mnt/ct
