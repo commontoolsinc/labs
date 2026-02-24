@@ -43,7 +43,7 @@ WRITING:
   echo '{"msg":"hi"}' > result/chat.handler  # invoke a stream handler
   touch result/newkey                    # create key (empty string)
   rm result/oldkey                       # delete key
-  ln -s ../entities/<hash> result/ref    # create a sigil link
+  ln -s ../../other-piece/result result/ref  # create a sigil link
 
 Requires FUSE-T (preferred) or macFUSE on macOS.`;
 
