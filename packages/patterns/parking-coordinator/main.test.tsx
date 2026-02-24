@@ -403,7 +403,6 @@ export default pattern(() => {
 
   // --- Alice duplicate request blocked ---
 
-
   // --- Alice requests tomorrow: succeeds ---
   const assert_5_requests = computed(() => len(subject.requests) === 5);
   const assert_alice_tomorrow_allocated = computed(() => {
