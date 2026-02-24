@@ -15,7 +15,11 @@ export interface CheckerOptions {
 // Note: TypeScript emits different phrasings for the same underlying issue:
 //   - "private name 'X'" (TS4053/4054) for symbols used as property keys
 //   - "name 'X' from external module" (TS4055) when the symbol type leaks into inferred declarations
-const KNOWN_EXPORTED_SYMBOLS = ["CELL_BRAND", "CELL_INNER_TYPE", "DEFAULT_MARKER"];
+const KNOWN_EXPORTED_SYMBOLS = [
+  "CELL_BRAND",
+  "CELL_INNER_TYPE",
+  "DEFAULT_MARKER",
+];
 
 export class Checker {
   private program: Program;

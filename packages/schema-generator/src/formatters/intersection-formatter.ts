@@ -60,7 +60,10 @@ export class IntersectionFormatter implements TypeFormatter {
       return this.schemaGenerator.formatChildType(partsToProcess[0]!, context);
     }
 
-    const failureReason = this.validateIntersectionParts(partsToProcess, checker);
+    const failureReason = this.validateIntersectionParts(
+      partsToProcess,
+      checker,
+    );
     if (failureReason) {
       return {
         type: "object",

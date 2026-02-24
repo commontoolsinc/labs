@@ -1708,7 +1708,8 @@ type IsBoolean<T> = [T] extends [boolean] ? [boolean] extends [T] ? true : false
  * non-distributive — for union T, `keyof T` is the intersection of member keys,
  * which drops DEFAULT_MARKER (it only appears in the branded member).
  */
-type _HasDefaultBrand<T> = T extends { readonly [DEFAULT_MARKER]: any } ? true : false;
+type _HasDefaultBrand<T> = T extends { readonly [DEFAULT_MARKER]: any } ? true
+  : false;
 
 /** Returns true if T carries the DEFAULT_MARKER brand (i.e. is `Default<T, V>`), false otherwise. */
 type HasDefaultBrand<T> = IsAny<T> extends true ? false
@@ -1738,7 +1739,10 @@ type ExtractDefaultBrandValue<U> = U extends
   : never;
 
 /** Removes the DEFAULT_MARKER branded member from a `Default<T, V>` union, leaving plain `T`. */
-export type StripDefaultBrand<T> = Exclude<T, { readonly [DEFAULT_MARKER]: any }>;
+export type StripDefaultBrand<T> = Exclude<
+  T,
+  { readonly [DEFAULT_MARKER]: any }
+>;
 
 /**
  * Maps a type T so that any fields carrying the DEFAULT_MARKER brand become required
@@ -1758,14 +1762,20 @@ export type RequireDefaults<T> =
   // because IsDefaultField can return `boolean` (= `true | false`) when T[K] is a union like
   // `Default<X,V> | undefined`. In a non-distributive conditional context, `boolean extends true`
   // is `false`, but `true extends boolean` is `true` — correctly triggering the true branch.
-  & { [K in keyof T]: true extends IsDefaultField<T[K]> ? StripDefaultBrand<T[K]> : T[K] }
+  & {
+    [K in keyof T]: true extends IsDefaultField<T[K]> ? StripDefaultBrand<T[K]>
+      : T[K];
+  }
   // Refinement: remove `?` from keys that carry the Default brand.
   // Use NonNullable<T[K]> to strip the `| undefined` that TypeScript adds for
   // optional fields (T[K] of `a?: X` includes `X | undefined`). Without this,
   // the required field's value type would still include `| undefined`, which
   // propagates through OpaqueRef and makes the field possibly-undefined in the
   // pattern body despite being required.
-  & { [K in keyof T as true extends IsDefaultField<T[K]> ? K : never]-?: StripDefaultBrand<NonNullable<T[K]>> };
+  & {
+    [K in keyof T as true extends IsDefaultField<T[K]> ? K : never]-?:
+      StripDefaultBrand<NonNullable<T[K]>>;
+  };
 
 // Internal-only way to instantiate internal modules
 export type ByRefFunction = <T, R>(ref: string) => ModuleFactory<T, R>;

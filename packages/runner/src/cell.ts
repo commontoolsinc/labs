@@ -19,7 +19,6 @@ import {
   type CellKind,
   type CellTypeConstructor,
   type Frame,
-  type StripDefaultBrand,
   type HKT,
   type ICell,
   ID,
@@ -38,6 +37,7 @@ import {
   type Schema,
   SELF,
   type Stream,
+  type StripDefaultBrand,
   TYPE,
 } from "./builder/types.ts";
 import { toCell } from "./back-to-cell.ts";
