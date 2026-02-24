@@ -82,23 +82,10 @@ export function createQueryResultProxy<T>(
   depth: number = 0,
   writable: boolean = false,
 ): T {
-  // Check recursion depth — with path recording to diagnose cycles
-  // deno-lint-ignore no-explicit-any
-  const _g = globalThis as any;
-  if (!_g.__proxyDepthTrace) _g.__proxyDepthTrace = [];
-  // Record every step where depth increments (deduplicate consecutive same-depth)
-  const entry = { depth, id: link.id.slice(-20), path: link.path.join("/") };
-  const prev = _g.__proxyDepthTrace[_g.__proxyDepthTrace.length - 1];
-  if (!prev || prev.depth !== depth || prev.path !== entry.path) {
-    _g.__proxyDepthTrace.push(entry);
-    if (_g.__proxyDepthTrace.length > 500) _g.__proxyDepthTrace.shift();
-  }
+  // Check recursion depth
   if (depth > MAX_RECURSION_DEPTH) {
-    const trace = JSON.stringify(_g.__proxyDepthTrace, null, 2);
-    _g.__proxyDepthTrace = [];
     throw new Error(
-      `Maximum recursion depth of ${MAX_RECURSION_DEPTH} exceeded.\n` +
-        `Last ~30 steps (depth > 80):\n${trace}`,
+      `Maximum recursion depth of ${MAX_RECURSION_DEPTH} exceeded`,
     );
   }
 

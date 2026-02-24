@@ -418,6 +418,24 @@ export class RuntimeProcessor {
     const cell = getCell(this.runtime, request.cell);
 
     const cancel = cell.sink((value) => {
+      // If the value is a CellResult proxy (e.g. cell with no schema),
+      // convert it to a link immediately rather than walking into it.
+      // This prevents deep proxy traversal that can exceed
+      // MAX_RECURSION_DEPTH when VNode trees reference other pieces.
+      if (isCellResult(value)) {
+        const converted = getCellOrThrow(value).getAsLink({
+          includeSchema: true,
+          keepAsCell: true,
+        });
+        queueMicrotask(() =>
+          self.postMessage({
+            type: NotificationType.CellUpdate,
+            cell: request.cell,
+            value: converted,
+          })
+        );
+        return;
+      }
       const converted = convertCellsToLinks(value, {
         includeSchema: true,
         keepAsCell: true,
