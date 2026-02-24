@@ -240,9 +240,11 @@ Bytes: TAG_INSTANCE  TYPE_TAG_LEN_LEB128  TYPE_TAG_UTF8  STATE_HASH
 > its raw byte content directly (see Section 4.7). This reflects its nature as
 > a fundamental data type rather than a general storable instance.
 >
-> **Note on `StorableDate`.** `StorableDate` does not have a dedicated type tag.
-> It is hashed via `TAG_INSTANCE` through its `[DECONSTRUCT]` method, like any
-> other `StorableInstance`.
+> **Note on temporal wrappers.** `StorableEpochNsec` and `StorableEpochDays` do
+> not have dedicated type tags. They are hashed via `TAG_INSTANCE` through
+> their `[DECONSTRUCT]` methods, like any other `StorableInstance`. Their
+> deconstructed state is a `bigint`, so the recursive hash for the state
+> uses the existing `TAG_BIGINT` encoding (Section 4.5).
 
 ### 4.11 Holes (sparse array elements)
 
