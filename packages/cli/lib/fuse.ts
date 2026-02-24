@@ -87,7 +87,6 @@ export function buildDenoArgs(opts: {
   mountpoint: string;
   apiUrl: string;
   identity: string;
-  spaces: string[];
 }): string[] {
   const args = [
     "run",
@@ -103,9 +102,6 @@ export function buildDenoArgs(opts: {
 
   if (opts.apiUrl) args.push("--api-url", opts.apiUrl);
   if (opts.identity) args.push("--identity", opts.identity);
-  for (const s of opts.spaces) {
-    args.push("--space", s);
-  }
 
   return args;
 }

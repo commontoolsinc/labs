@@ -170,7 +170,6 @@ describe("buildDenoArgs", () => {
       mountpoint: "/mnt",
       apiUrl: "",
       identity: "",
-      spaces: [],
     });
     expect(args).toEqual([
       "run",
@@ -191,7 +190,6 @@ describe("buildDenoArgs", () => {
       mountpoint: "/mnt",
       apiUrl: "http://localhost:8000",
       identity: "./key.pem",
-      spaces: [],
     });
     expect(args).toContain("--api-url");
     expect(args).toContain("http://localhost:8000");
@@ -199,20 +197,14 @@ describe("buildDenoArgs", () => {
     expect(args).toContain("./key.pem");
   });
 
-  it("includes multiple spaces", () => {
+  it("omits api-url and identity when empty", () => {
     const args = buildDenoArgs({
       modPath: "/mod.ts",
       mountpoint: "/mnt",
       apiUrl: "",
       identity: "",
-      spaces: ["home", "work"],
     });
-    const spaceIndices = args.reduce<number[]>((acc, v, i) => {
-      if (v === "--space") acc.push(i);
-      return acc;
-    }, []);
-    expect(spaceIndices.length).toBe(2);
-    expect(args[spaceIndices[0] + 1]).toBe("home");
-    expect(args[spaceIndices[1] + 1]).toBe("work");
+    expect(args).not.toContain("--api-url");
+    expect(args).not.toContain("--identity");
   });
 });

@@ -27,9 +27,6 @@ export const fuse = new Command()
     "mount <mountpoint:string>",
     "Mount a FUSE filesystem at the given directory.",
   )
-  .option("-s,--space <space:string>", "Space(s) to connect.", {
-    collect: true,
-  })
   .option("--background", "Run in the background (detached).")
   .option("--debug", "Enable FUSE debug output.")
   .example(
@@ -37,8 +34,8 @@ export const fuse = new Command()
     "Mount with settings from CT_API_URL / CT_IDENTITY env vars.",
   )
   .example(
-    "ct fuse mount /tmp/ct-fuse --api-url http://localhost:8000 --space home",
-    "Mount a specific space.",
+    "ct fuse mount /tmp/ct-fuse --api-url http://localhost:8000",
+    "Mount with explicit API URL.",
   )
   .example(
     "ct fuse mount /tmp/ct-fuse --background",
@@ -63,7 +60,6 @@ export const fuse = new Command()
       mountpoint: absMountpoint,
       apiUrl,
       identity,
-      spaces: (options.space as string[] | undefined) ?? [],
     });
 
     if (options.background) {
