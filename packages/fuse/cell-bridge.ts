@@ -427,39 +427,49 @@ export class CellBridge {
       try {
         const cell = await piece[propName].getCell();
         const cancel = cell.sink((newValue: unknown) => {
-          // Clear existing subtree for this prop
-          const existingIno = this.tree.lookup(pieceIno, propName);
-          if (existingIno !== undefined) {
-            this.tree.clear(existingIno);
-          }
-          // Also clear the .json sibling
-          const jsonIno = this.tree.lookup(pieceIno, `${propName}.json`);
-          if (jsonIno !== undefined) {
-            this.tree.clear(jsonIno);
-          }
-
-          // Rebuild
-          if (newValue !== undefined && newValue !== null) {
-            const propIno = buildJsonTree(
-              this.tree,
+          // Defer the tree rebuild out of the current execution context.
+          // cell.sink fires synchronously during cell.set(), which may be
+          // called from within a FUSE callback (e.g. flush). Rebuilding
+          // the tree and calling notify_inval_entry from inside a FUSE
+          // callback crashes FUSE-T and invalidates inodes mid-operation.
+          setTimeout(() => {
+            // Clear existing subtree for this prop
+            const existingIno = this.tree.lookup(pieceIno, propName);
+            if (existingIno !== undefined) {
+              this.tree.clear(existingIno);
+            }
+            // Also clear the .json sibling
+            const jsonIno = this.tree.lookup(
               pieceIno,
-              propName,
-              newValue,
-              undefined,
-              resolveLink,
-              0,
+              `${propName}.json`,
             );
-            this.addHandlerFiles(propIno, newValue, propName);
-          }
+            if (jsonIno !== undefined) {
+              this.tree.clear(jsonIno);
+            }
 
-          // Invalidate kernel cache
-          if (this.onInvalidate) {
-            this.onInvalidate(pieceIno, [propName, `${propName}.json`]);
-          }
+            // Rebuild
+            if (newValue !== undefined && newValue !== null) {
+              const propIno = buildJsonTree(
+                this.tree,
+                pieceIno,
+                propName,
+                newValue,
+                undefined,
+                resolveLink,
+                0,
+              );
+              this.addHandlerFiles(propIno, newValue, propName);
+            }
 
-          console.log(
-            `[${spaceName}] Updated ${pieceName}/${propName}`,
-          );
+            // Invalidate kernel cache
+            if (this.onInvalidate) {
+              this.onInvalidate(pieceIno, [propName, `${propName}.json`]);
+            }
+
+            console.log(
+              `[${spaceName}] Updated ${pieceName}/${propName}`,
+            );
+          }, 0);
         });
         cancels.push(cancel);
       } catch (e) {

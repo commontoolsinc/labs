@@ -558,10 +558,17 @@ async function main() {
       await bridge.writeValue(writePath, value);
       handle.dirty = false;
 
-      // Optimistic tree update: update the file node content immediately
-      const node = tree.getNode(handle.ino);
-      if (node && node.kind === "file") {
-        tree.updateFile(handle.ino, text);
+      // Optimistic tree update: update the file node content immediately.
+      // The inode may have been invalidated by the subscription rebuild
+      // triggered during writeValue — ignore stale references.
+      try {
+        const node = tree.getNode(handle.ino);
+        if (node && node.kind === "file") {
+          tree.updateFile(handle.ino, text);
+        }
+      } catch {
+        // Stale inode after subscription rebuild — subscription already
+        // rebuilt the tree with the correct data.
       }
 
       return 0;
@@ -624,12 +631,14 @@ async function main() {
         return;
       }
 
-      // Async flush — FUSE req stays valid until replied
-      flushHandle(handle).then((errno) => {
-        fuse.symbols.fuse_reply_err(req, errno);
-      }).catch((e) => {
-        console.error(`[fuse] flush callback error: ${e}`);
-        fuse.symbols.fuse_reply_err(req, EIO);
+      // Reply immediately — the subscription rebuild triggered by writeValue
+      // must not run while a FUSE reply is still pending (it invalidates
+      // inodes via notify_inval_entry which crashes FUSE-T mid-callback).
+      fuse.symbols.fuse_reply_err(req, 0);
+
+      // Fire-and-forget the actual write to the cell
+      flushHandle(handle).catch((e) => {
+        console.error(`[fuse] flush write error: ${e}`);
       });
     },
   );
@@ -655,18 +664,25 @@ async function main() {
         return;
       }
 
-      // Handle truncate (O_TRUNC)
+      // Handle truncate / size change
       if (toSet & FUSE_SET_ATTR_SIZE) {
+        // Read new size from attr struct (st_size @ offset 96)
+        const attrView = new Deno.UnsafePointerView(_attrPtr!);
+        const newSize = Number(attrView.getBigInt64(96));
         const { fh } = readFileInfo(fi);
         const handle = handles.get(fh);
         if (handle) {
-          // Read the new size from the attr struct
-          // st_size is at offset 96 in struct stat
-          // For simplicity, we just handle size=0 (truncate)
-          handles.truncate(fh, 0);
-        } else if (node.kind === "file") {
-          // No handle — update tree directly
-          tree.updateFile(inode, "");
+          handles.truncate(fh, newSize);
+        } else {
+          // No valid fh — NFS/FUSE-T calls setattr(size=0) separately.
+          // Truncate all open handles for this inode and the tree node.
+          handles.truncateByIno(inode, newSize);
+          if (node.kind === "file") {
+            tree.updateFile(
+              inode,
+              newSize === 0 ? "" : node.content.slice(0, newSize),
+            );
+          }
         }
       }
 
@@ -694,19 +710,13 @@ async function main() {
       const { fh } = readFileInfo(fi);
       const handle = handles.get(fh);
 
+      // Reply immediately and close the handle.
+      // Fire-and-forget the write if dirty.
       if (handle && handle.dirty && bridge) {
-        // Async flush before release
-        flushHandle(handle).then(() => {
-          handles.close(fh);
-          fuse.symbols.fuse_reply_err(req, 0);
-        }).catch((e) => {
+        flushHandle(handle).catch((e) => {
           console.error(`[fuse] release flush error: ${e}`);
-          handles.close(fh);
-          fuse.symbols.fuse_reply_err(req, 0);
         });
-        return;
       }
-
       handles.close(fh);
       fuse.symbols.fuse_reply_err(req, 0);
     },
@@ -845,6 +855,13 @@ async function main() {
 
       const parent = BigInt(parentIno);
       const name = readCString(namePtr);
+
+      // Reject macOS resource fork / metadata files
+      if (name.startsWith("._")) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+
       const parentPath = bridge.resolveWritePath(parent);
 
       if (!parentPath) {
@@ -852,41 +869,37 @@ async function main() {
         return;
       }
 
-      // Write empty string at the new key
+      // Optimistic: create file node and reply immediately, then write to cell.
+      const ino = tree.addFile(parent, name, "", "string");
+      const fh = handles.open(ino, O_RDWR, new Uint8Array(0));
+      writeFileInfo(fi, fh);
+
+      const entryBuf = new ArrayBuffer(ENTRY_PARAM_SIZE);
+      writeEntryParam(entryBuf, {
+        ino,
+        attr: {
+          ino,
+          mode: FILE_MODE_RW,
+          nlink: 1,
+          size: 0,
+        },
+        attrTimeout: 1.0,
+        entryTimeout: 1.0,
+      });
+
+      fuse.symbols.fuse_reply_create(
+        req,
+        Deno.UnsafePointer.of(new Uint8Array(entryBuf)),
+        fi,
+      );
+
+      // Fire-and-forget write to cell
       const newPath = [...parentPath.jsonPath, name];
       bridge.writeValue(
         { ...parentPath, jsonPath: newPath },
         "",
-      ).then(() => {
-        // Create file node in tree
-        const ino = tree.addFile(parent, name, "", "string");
-
-        // Allocate handle
-        const fh = handles.open(ino, O_RDWR, new Uint8Array(0));
-        writeFileInfo(fi, fh);
-
-        // Build entry_param
-        const entryBuf = new ArrayBuffer(ENTRY_PARAM_SIZE);
-        writeEntryParam(entryBuf, {
-          ino,
-          attr: {
-            ino,
-            mode: FILE_MODE_RW,
-            nlink: 1,
-            size: 0,
-          },
-          attrTimeout: 1.0,
-          entryTimeout: 1.0,
-        });
-
-        fuse.symbols.fuse_reply_create(
-          req,
-          Deno.UnsafePointer.of(new Uint8Array(entryBuf)),
-          fi,
-        );
-      }).catch((e) => {
-        console.error(`[fuse] create error: ${e}`);
-        fuse.symbols.fuse_reply_err(req, EIO);
+      ).catch((e) => {
+        console.error(`[fuse] create write error: ${e}`);
       });
     },
   );
@@ -918,18 +931,18 @@ async function main() {
         return;
       }
 
-      // Write empty object at the new key
+      // Optimistic: create dir and reply immediately, then write to cell.
+      const ino = tree.addDir(parent, name, "object");
+      const node = tree.getNode(ino);
+      replyEntry(req, ino, node);
+
+      // Fire-and-forget write to cell
       const newPath = [...parentPath.jsonPath, name];
       bridge.writeValue(
         { ...parentPath, jsonPath: newPath },
         {},
-      ).then(() => {
-        const ino = tree.addDir(parent, name, "object");
-        const node = tree.getNode(ino);
-        replyEntry(req, ino, node);
-      }).catch((e) => {
-        console.error(`[fuse] mkdir error: ${e}`);
-        fuse.symbols.fuse_reply_err(req, EIO);
+      ).catch((e) => {
+        console.error(`[fuse] mkdir write error: ${e}`);
       });
     },
   );
@@ -967,11 +980,24 @@ async function main() {
       const isArrayParent = parentNode?.kind === "dir" &&
         parentNode.jsonType === "array";
 
-      const doUnlink = async () => {
+      // Optimistic: remove from tree and reply immediately
+      tree.removeChild(parent, name);
+      if (name.endsWith(".json")) {
+        const dirName = name.slice(0, -5);
+        const dirIno = tree.lookup(parent, dirName);
+        if (dirIno !== undefined) tree.removeChild(parent, dirName);
+      } else {
+        const jsonIno = tree.lookup(parent, `${name}.json`);
+        if (jsonIno !== undefined) tree.removeChild(parent, `${name}.json`);
+      }
+      fuse.symbols.fuse_reply_err(req, 0);
+
+      // Fire-and-forget the cell write (skip the tree updates in doUnlink
+      // since we already did them above)
+      (async () => {
         if (isArrayParent) {
-          // Array element removal: read parent, splice, write whole array
           const parentPath = bridge!.resolveWritePath(parent);
-          if (!parentPath) throw new Error("Parent not writable");
+          if (!parentPath) return;
           const currentValue = await writePath.piece[writePath.cell].get(
             parentPath.jsonPath.length > 0 ? parentPath.jsonPath : undefined,
           );
@@ -983,9 +1009,8 @@ async function main() {
             }
           }
         } else {
-          // Object key removal: read parent object, delete key, write back
           const parentPath = bridge!.resolveWritePath(parent);
-          if (!parentPath) throw new Error("Parent not writable");
+          if (!parentPath) return;
           const currentValue = await writePath.piece[writePath.cell].get(
             parentPath.jsonPath.length > 0 ? parentPath.jsonPath : undefined,
           );
@@ -998,28 +1023,8 @@ async function main() {
             await bridge!.writeValue(parentPath, obj);
           }
         }
-        tree.removeChild(parent, name);
-        // Also remove .json sibling if it exists
-        if (name.endsWith(".json")) {
-          // Removing a .json file — remove the corresponding directory too
-          const dirName = name.slice(0, -5);
-          const dirIno = tree.lookup(parent, dirName);
-          if (dirIno !== undefined) {
-            tree.removeChild(parent, dirName);
-          }
-        } else {
-          const jsonIno = tree.lookup(parent, `${name}.json`);
-          if (jsonIno !== undefined) {
-            tree.removeChild(parent, `${name}.json`);
-          }
-        }
-      };
-
-      doUnlink().then(() => {
-        fuse.symbols.fuse_reply_err(req, 0);
-      }).catch((e) => {
-        console.error(`[fuse] unlink error: ${e}`);
-        fuse.symbols.fuse_reply_err(req, EIO);
+      })().catch((e) => {
+        console.error(`[fuse] unlink write error: ${e}`);
       });
     },
   );
@@ -1063,10 +1068,17 @@ async function main() {
       const isArrayParent = parentNode?.kind === "dir" &&
         parentNode.jsonType === "array";
 
-      const doRmdir = async () => {
+      // Optimistic: remove from tree and reply immediately
+      tree.removeChild(parent, name);
+      const jsonIno = tree.lookup(parent, `${name}.json`);
+      if (jsonIno !== undefined) tree.removeChild(parent, `${name}.json`);
+      fuse.symbols.fuse_reply_err(req, 0);
+
+      // Fire-and-forget the cell write
+      (async () => {
         if (isArrayParent) {
           const parentPath = bridge!.resolveWritePath(parent);
-          if (!parentPath) throw new Error("Parent not writable");
+          if (!parentPath) return;
           const currentValue = await writePath.piece[writePath.cell].get(
             parentPath.jsonPath.length > 0 ? parentPath.jsonPath : undefined,
           );
@@ -1079,7 +1091,7 @@ async function main() {
           }
         } else {
           const parentPath = bridge!.resolveWritePath(parent);
-          if (!parentPath) throw new Error("Parent not writable");
+          if (!parentPath) return;
           const currentValue = await writePath.piece[writePath.cell].get(
             parentPath.jsonPath.length > 0 ? parentPath.jsonPath : undefined,
           );
@@ -1092,19 +1104,8 @@ async function main() {
             await bridge!.writeValue(parentPath, obj);
           }
         }
-        tree.removeChild(parent, name);
-        // Also remove .json sibling
-        const jsonIno = tree.lookup(parent, `${name}.json`);
-        if (jsonIno !== undefined) {
-          tree.removeChild(parent, `${name}.json`);
-        }
-      };
-
-      doRmdir().then(() => {
-        fuse.symbols.fuse_reply_err(req, 0);
-      }).catch((e) => {
-        console.error(`[fuse] rmdir error: ${e}`);
-        fuse.symbols.fuse_reply_err(req, EIO);
+      })().catch((e) => {
+        console.error(`[fuse] rmdir write error: ${e}`);
       });
     },
   );
@@ -1197,16 +1198,15 @@ async function main() {
             }
           }
         }
-
-        // Update tree
-        tree.rename(oldParent, oldName, newParent, newName);
       };
 
-      doRename().then(() => {
-        fuse.symbols.fuse_reply_err(req, 0);
-      }).catch((e) => {
-        console.error(`[fuse] rename error: ${e}`);
-        fuse.symbols.fuse_reply_err(req, EIO);
+      // Optimistic: rename in tree and reply immediately
+      tree.rename(oldParent, oldName, newParent, newName);
+      fuse.symbols.fuse_reply_err(req, 0);
+
+      // Fire-and-forget the cell writes
+      doRename().catch((e) => {
+        console.error(`[fuse] rename write error: ${e}`);
       });
     },
   );
@@ -1232,7 +1232,6 @@ async function main() {
       const target = readCString(targetPtr);
       const name = readCString(namePtr);
       const parent = BigInt(parentIno);
-
       // Check parent is writable
       const parentPath = bridge.resolveWritePath(parent);
       if (!parentPath) {
@@ -1254,14 +1253,15 @@ async function main() {
         jsonPath: [...parentPath.jsonPath, name],
       };
 
-      bridge.writeValue(writePath, sigilValue).then(() => {
-        // Add symlink to tree
-        const ino = tree.addSymlink(parent, name, target);
-        const node = tree.getNode(ino);
-        replyEntry(req, ino, node);
-      }).catch((e) => {
-        console.error(`[fuse] symlink error: ${e}`);
-        fuse.symbols.fuse_reply_err(req, EIO);
+      // Optimistic: add to tree and reply immediately, then write to cell.
+      // The subscription rebuild will eventually replace this node.
+      const ino = tree.addSymlink(parent, name, target);
+      const node = tree.getNode(ino);
+      replyEntry(req, ino, node);
+
+      // Fire-and-forget write to cell
+      bridge.writeValue(writePath, sigilValue).catch((e) => {
+        console.error(`[fuse] symlink write error: ${e}`);
       });
     },
   );

@@ -55,6 +55,22 @@ export class HandleMap {
     return true;
   }
 
+  /** Truncate all handles for a given inode to the specified size. */
+  truncateByIno(ino: bigint, size: number): void {
+    for (const [, state] of this.handles) {
+      if (state.ino === ino) {
+        if (size < state.buffer.length) {
+          state.buffer = state.buffer.slice(0, size);
+        } else if (size > state.buffer.length) {
+          const newBuf = new Uint8Array(size);
+          newBuf.set(state.buffer);
+          state.buffer = newBuf;
+        }
+        state.dirty = true;
+      }
+    }
+  }
+
   /** Truncate the handle's buffer to the given size. */
   truncate(fh: bigint, size: number): boolean {
     const state = this.handles.get(fh);

@@ -130,6 +130,17 @@ hardcoded file. Validates that Deno FFI to libfuse works at all.
   - [x] `mkdir`: add key with `{}` value
   - [x] `unlink`/`rmdir`: remove key; re-index for array parents
   - [x] `rename`: remove old key + set new key; `EXDEV` for cross-cell
+- [x] **2.7 Write reliability (bug fixes)**
+  - [x] Fix `fuse_file_info.fh` offset: 24 bytes, not 16 (macOS 64-bit struct)
+  - [x] Fix setattr truncation: NFS/FUSE-T sends `setattr(size=0)` without fh;
+    truncate all open handles by inode
+  - [x] Reject `._*` macOS resource fork files in `create` callback
+  - [x] Defer subscription rebuilds via `setTimeout(0)` to prevent FUSE-T crash
+    from `notify_inval_entry` during callbacks
+  - [x] Fire-and-forget writes: reply to FUSE before `writeValue()` completes,
+    so subscription rebuilds don't block the callback chain
+  - [x] Optimistic tree updates: create/mkdir/symlink add nodes to tree before
+    writing to cell; unlink/rmdir/rename remove from tree before cell write
 
 ## Phase 3: CLI Integration
 

@@ -71,18 +71,21 @@ export function writeEntryParam(buf: ArrayBuffer, opts: EntryParamOpts): void {
   view.setFloat64(168, opts.entryTimeout ?? 1.0, true); // entry_timeout
 }
 
-// fuse_file_info (partial read — we only need flags and fh)
-// Layout:
-//   int flags     @ 0  (i32)
-//   ...
-//   uint64_t fh   @ 16 (u64)
+// fuse_file_info — partial read for flags and fh.
+// Layout (macOS 64-bit, verified with offsetof):
+//   int flags            @  0  (i32)
+//   unsigned long fh_old @  8  (u64, deprecated)
+//   int writepage        @ 16  (i32)
+//   bitfield             @ 20  (u32)
+//   uint64_t fh          @ 24  (u64)
+//   uint64_t lock_owner  @ 32  (u64)
 
 export interface FileInfo {
   flags: number;
   fh: bigint;
 }
 
-export const FUSE_FILE_INFO_SIZE = 64;
+export const FUSE_FILE_INFO_SIZE = 40;
 
 export function readFileInfo(ptr: Deno.PointerValue): FileInfo {
   if (!ptr) {
@@ -91,18 +94,18 @@ export function readFileInfo(ptr: Deno.PointerValue): FileInfo {
   const view = new Deno.UnsafePointerView(ptr);
   return {
     flags: view.getInt32(0),
-    fh: view.getBigUint64(16),
+    fh: view.getBigUint64(24),
   };
 }
 
-/** Write the fh field at offset 16 of a fuse_file_info struct. */
+/** Write the fh field at offset 24 of a fuse_file_info struct. */
 export function writeFileInfo(ptr: Deno.PointerValue, fh: bigint): void {
   if (!ptr) return;
   // The fi pointer refers to FUSE's stack memory — get a writable view.
   const fiArr = new BigUint64Array(
     Deno.UnsafePointerView.getArrayBuffer(ptr, FUSE_FILE_INFO_SIZE),
   );
-  fiArr[2] = fh; // offset 16 = index 2 of u64 array
+  fiArr[3] = fh; // offset 24 = index 3 of u64 array
 }
 
 // O_* flags (macOS)
