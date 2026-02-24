@@ -192,8 +192,7 @@ member of `StorableValue` or `StorableDatum`.
 
 ### 1.4 Native Object Wrapper Classes
 
-Certain built-in JS types (`Error`, `Map`, `Set`, `Uint8Array`) and temporal
-concepts (`Date`, epoch timestamps) cannot
+Certain built-in JS types (`Error`, `Map`, `Set`, `Uint8Array`) cannot
 have `Symbol`-keyed methods added via prototype patching in a reliable,
 cross-realm way. Rather than handling them with special-case logic in the
 serializer, the system defines **wrapper classes** — one per native type — that
@@ -206,10 +205,15 @@ Because each wrapper genuinely implements `StorableInstance` (with real
 processes them through the same uniform `StorableInstance` path — no special
 cases needed in the serializer. The hashing system also uses the standard
 `TAG_INSTANCE` path for most wrappers, but optimizes `StorableUint8Array`
-with a dedicated `TAG_BYTES` tag for content-level identity (see
-Section 6.3). The temporal wrappers (`StorableEpochNsec`, `StorableEpochDays`)
-are hashed via `TAG_INSTANCE` through their `[DECONSTRUCT]` methods, like
-other `StorableInstance`s.
+with a dedicated `TAG_BYTES` tag for content-level identity (see Section 6.3).
+
+The temporal types (`StorableEpochNsec`, `StorableEpochDays`) are **not**
+`StorableInstance`s — they are direct members of `StorableDatum`, like `bigint`.
+They are simple value wrappers (constructor + `readonly value: bigint`) that the
+conversion layer creates from native `Date` objects. They have dedicated
+canonical hash tags (`TAG_EPOCH_NSEC`, `TAG_EPOCH_DAYS`) and dedicated
+`TypeHandler`s for wire format serialization, but they do not implement
+`[DECONSTRUCT]`, `[RECONSTRUCT]`, or carry a `typeTag` property.
 
 #### 1.4.1 Wrapper Class Summary
 
@@ -218,11 +222,9 @@ other `StorableInstance`s.
 | `StorableError` | `Error` | `Error@1` | `{ type, name, message, stack?, cause?, ...custom }` | `type` is the constructor name (e.g. `"TypeError"`). `name` is the `.name` property if it differs from `type`, or `null` if it matches (the common case). Includes `message`, `stack` (if present), `cause` (if present), and custom enumerable properties. The conversion layer (Section 8.2) recursively converts nested values (including `cause` and custom properties) before wrapping, ensuring all values are `StorableValue` when `[DECONSTRUCT]` runs. |
 | `StorableMap` | `Map` | `Map@1` | `[[key, value], ...]` | Entry pairs as an array of two-element arrays. Insertion order is preserved. Keys and values are recursively processed. |
 | `StorableSet` | `Set` | `Set@1` | `[value, ...]` | Elements as an array. Iteration order is preserved. Values are recursively processed. |
-| `StorableEpochNsec` | `Date` | `EpochNsec@1` | `bigint` (signed nanoseconds from POSIX Epoch) | Primary temporal type. JS `Date` has only millisecond precision; conversion from `Date` multiplies by 10^6. When `Temporal` is available, `Temporal.Instant` maps naturally (it uses nanoseconds from epoch internally). |
-| `StorableEpochDays` | _(nascent)_ | `EpochDays@1` | `bigint` (signed days from POSIX Epoch) | Day-precision temporal type. Anticipates `Temporal.PlainDate`. Mostly nascent — class and spec entry are defined, but full integration (Temporal types, calendar concerns) is deferred. |
 | `StorableUint8Array` | `Uint8Array` | `Bytes@1` | `string` (unpadded base64; see Section 5.3) | Deconstructed state is a string. |
 
-Each wrapper class:
+Each wrapper class above:
 
 - **Implements `StorableInstance`** with a `[DECONSTRUCT]` method that extracts
   essential state from the wrapped native object.
@@ -234,6 +236,16 @@ Each wrapper class:
   serialization context for tag resolution, following the pattern established
   by `UnknownStorable` and `ProblematicStorable`.
 
+Unlike the wrappers above, `StorableEpochNsec` and `StorableEpochDays` are
+**direct members of `StorableDatum`** and do not implement `StorableInstance`.
+They are simple value wrappers with a constructor and a `readonly value: bigint`
+property. See Sections 1.4.5 and 1.4.6.
+
+| Direct Datum Type | Wraps | Wire Tag | Stored Value | Notes |
+|-------------------|-------|----------|--------------|-------|
+| `StorableEpochNsec` | `Date` | `EpochNsec@1` | `bigint` (signed nanoseconds from POSIX Epoch) | Primary temporal type. JS `Date` has only millisecond precision; conversion from `Date` multiplies by 10^6. When `Temporal` is available, `Temporal.Instant` maps naturally (it uses nanoseconds from epoch internally). |
+| `StorableEpochDays` | _(nascent)_ | `EpochDays@1` | `bigint` (signed days from POSIX Epoch) | Day-precision temporal type. Anticipates `Temporal.PlainDate`. Mostly nascent — class and spec entry are defined, but full integration (Temporal types, calendar concerns) is deferred. |
+
 #### Extra Enumerable Properties
 
 **`StorableError`** MAY carry extra enumerable properties beyond the standard
@@ -244,7 +256,7 @@ and `[RECONSTRUCT]` restores them on the reconstructed `Error`.
 
 **`StorableMap`, `StorableSet`, `StorableEpochNsec`, `StorableEpochDays`,
 `StorableUint8Array`** must NOT carry extra enumerable properties. Their
-`[DECONSTRUCT]` output contains only the essential native data (entries, items,
+stored value contains only the essential native data (entries, items,
 epoch value, bytes respectively). Extra enumerable properties on the source
 native object cause **rejection** — the conversion function throws. This follows
 the principle "Death before confusion!" (Mark Miller): it is better to fail
@@ -385,33 +397,21 @@ export class StorableSet implements StorableInstance {
 
 ```typescript
 /**
- * Wrapper for temporal instants, stored as signed nanoseconds from the POSIX
- * Epoch (1970-01-01T00:00:00Z). This is the primary temporal type.
+ * Temporal type representing nanoseconds from the POSIX Epoch
+ * (1970-01-01T00:00:00Z). Direct member of `StorableDatum` (not a
+ * `StorableInstance`). This is the primary temporal type.
  *
  * JS `Date` has only millisecond precision, so conversion from `Date`
  * multiplies by 10^6 (losing sub-millisecond information). When `Temporal`
  * is available, `Temporal.Instant` maps naturally — it uses nanoseconds
  * from epoch internally.
  *
- * The deconstructed state is a `bigint`, not a string. This avoids baking
+ * The underlying value is a `bigint`, not a string. This avoids baking
  * in any particular string representation (ISO 8601, etc.) and lets the
  * serialization layer use the same bigint encoding as `BigInt@1`.
  */
-export class StorableEpochNsec implements StorableInstance {
-  readonly typeTag = 'EpochNsec@1';
-
-  constructor(readonly epochNsec: bigint) {}
-
-  [DECONSTRUCT](): StorableValue {
-    return this.epochNsec;
-  }
-
-  static [RECONSTRUCT](
-    state: StorableValue,
-    _context: ReconstructionContext,
-  ): StorableEpochNsec {
-    return new StorableEpochNsec(state as bigint);
-  }
+export class StorableEpochNsec {
+  constructor(readonly value: bigint) {}
 }
 ```
 
@@ -419,29 +419,17 @@ export class StorableEpochNsec implements StorableInstance {
 
 ```typescript
 /**
- * Wrapper for day-precision temporal values, stored as signed days from the
- * POSIX Epoch (1970-01-01). Anticipates `Temporal.PlainDate`.
+ * Temporal type representing days from the POSIX Epoch (1970-01-01).
+ * Direct member of `StorableDatum` (not a `StorableInstance`).
+ * Anticipates `Temporal.PlainDate`.
  *
  * Mostly nascent — the class and spec entry are defined, but full
  * integration with Temporal types and calendar concerns is deferred.
  *
- * The deconstructed state is a `bigint`.
+ * The underlying value is a `bigint`.
  */
-export class StorableEpochDays implements StorableInstance {
-  readonly typeTag = 'EpochDays@1';
-
-  constructor(readonly epochDays: bigint) {}
-
-  [DECONSTRUCT](): StorableValue {
-    return this.epochDays;
-  }
-
-  static [RECONSTRUCT](
-    state: StorableValue,
-    _context: ReconstructionContext,
-  ): StorableEpochDays {
-    return new StorableEpochDays(state as bigint);
-  }
+export class StorableEpochDays {
+  constructor(readonly value: bigint) {}
 }
 ```
 
@@ -1325,9 +1313,9 @@ round-trip correctly.
 
 > **Base64 encoding convention.** All base64-encoded values in the JSON wire
 > format use the standard alphabet (`A-Za-z0-9+/`) and **must omit** trailing
-> `=` padding characters. Encoders must not emit padding; decoders must accept
-> input with or without padding for robustness. This convention applies to
-> `Bytes@1`, `BigInt@1`, `EpochNsec@1`, and `EpochDays@1` state values.
+> `=` padding characters. Encoders must not emit padding; decoders must
+> **reject** input containing `=` padding characters. This convention applies
+> to `Bytes@1`, `BigInt@1`, `EpochNsec@1`, and `EpochDays@1` state values.
 
 ```typescript
 // file: packages/common/json-encoding.ts (illustrative -- tag-to-format map)
@@ -1406,16 +1394,14 @@ round-trip correctly.
 
 > **Deserialization validation.** Deserialization cannot assume type safety from
 > the wire. Each type handler must validate the format of its state before
-> processing. For example, the `BigInt@1` handler must validate that its state
-> is a `string` containing valid base64 before decoding and interpreting the
-> bytes as a two's complement big-endian integer. On malformed input — wrong
-> type, invalid format, or missing fields — the handler should produce a
-> `ProblematicStorable` (Section 3.4) rather than throwing or silently producing
-> garbage. This principle applies to all type handlers, not just `BigInt@1`:
-> `EpochNsec@1` and `EpochDays@1` should validate their base64 strings,
-> `Bytes@1` should validate its
-> base64 string, and so on. Wire data is untrusted input. See Section 7.4 for
-> the broader principle that applies to all code consuming deserialized values.
+> processing. For example, a handler whose state is a base64 string (such as
+> `BigInt@1`, `EpochNsec@1`, `EpochDays@1`, or `Bytes@1`) must validate that
+> its state is a `string` containing valid unpadded base64 before decoding. On
+> malformed input — wrong type, invalid format, or missing fields — the handler
+> should produce a `ProblematicStorable` (Section 3.4) rather than throwing or
+> silently producing garbage. This principle applies to all type handlers. Wire
+> data is untrusted input. See Section 7.4 for the broader principle that
+> applies to all code consuming deserialized values.
 
 > **Sparse array encoding in JSON.** Even when an array contains holes, it is
 > serialized as a JSON array. Runs of consecutive holes are represented by
@@ -1580,6 +1566,8 @@ organized into three categories by high nibble:
 | `TAG_BIGINT`      | `0x24` | 36      | `bigint`                        |
 | `TAG_UNDEFINED`   | `0x25` | 37      | `undefined`                     |
 | `TAG_BYTES`       | `0x26` | 38      | `StorableUint8Array`            |
+| `TAG_EPOCH_NSEC`  | `0x27` | 39      | `StorableEpochNsec`             |
+| `TAG_EPOCH_DAYS`  | `0x28` | 40      | `StorableEpochDays`             |
 
 All unassigned values are reserved for future use. The category structure
 (meta/compound/primitive) is a convention for readability and is not enforced by
@@ -1634,6 +1622,10 @@ export function canonicalHash(
   // - `undefined`:         hash(TAG_UNDEFINED)
   // - `StorableUint8Array`: hash(TAG_BYTES, leb128(byteLen), rawBytes)
   //                        (hashes the underlying byte content)
+  // - `StorableEpochNsec`: hash(TAG_EPOCH_NSEC, leb128(byteLen), twosComplementBytes)
+  //                        (same payload format as TAG_BIGINT but distinct tag)
+  // - `StorableEpochDays`: hash(TAG_EPOCH_DAYS, leb128(byteLen), twosComplementBytes)
+  //                        (same payload format as TAG_BIGINT but distinct tag)
   // - array:               hash(TAG_ARRAY, ...elements, TAG_END)
   //                        Elements are hashed in index order:
   //                          if `i in array`: canonicalHash(array[i])
@@ -1669,17 +1661,17 @@ export function canonicalHash(
   // - `StorableInstance`:  hash(TAG_INSTANCE, leb128(typeTagLen), typeTag,
   //                              canonicalHash(deconstructedState))
   //
-  // The native object wrappers are hashed as follows:
+  // The native object wrappers and temporal types are hashed as follows:
   //
-  // - `StorableError`, `StorableMap`, `StorableSet`, `StorableEpochNsec`,
-  //   `StorableEpochDays`, and other `StorableInstance`s with
-  //   recursively-processable deconstructed
+  // - `StorableError`, `StorableMap`, `StorableSet`, and other
+  //   `StorableInstance`s with recursively-processable deconstructed
   //   state are hashed via TAG_INSTANCE:
   //     hash(TAG_INSTANCE, leb128(typeTagLen), typeTag,
   //          canonicalHash(deconstructedState))
   //
-  // - `StorableUint8Array` is special-cased: it uses TAG_BYTES, matching
-  //   its logical content type rather than going through TAG_INSTANCE.
+  // - `StorableUint8Array` uses TAG_BYTES (dedicated primitive tag).
+  // - `StorableEpochNsec` uses TAG_EPOCH_NSEC (dedicated primitive tag).
+  // - `StorableEpochDays` uses TAG_EPOCH_DAYS (dedicated primitive tag).
   //
   // Examples:
   // - `StorableError`:      hash(TAG_INSTANCE, ..., "Error@1", canonicalHash(errorState))
@@ -1687,8 +1679,8 @@ export function canonicalHash(
   //                         where entries are hashed in insertion order
   // - `StorableSet`:        hash(TAG_INSTANCE, ..., "Set@1", canonicalHash(elements))
   //                         where elements are hashed in insertion order
-  // - `StorableEpochNsec`:  hash(TAG_INSTANCE, ..., "EpochNsec@1", canonicalHash(epochNsec))
-  // - `StorableEpochDays`:  hash(TAG_INSTANCE, ..., "EpochDays@1", canonicalHash(epochDays))
+  // - `StorableEpochNsec`:  hash(TAG_EPOCH_NSEC, leb128(byteLen), twosComplementBytes)
+  // - `StorableEpochDays`:  hash(TAG_EPOCH_DAYS, leb128(byteLen), twosComplementBytes)
   // - `StorableUint8Array`: hash(TAG_BYTES, leb128(byteLen), rawBytes)
   //
   // Each type is tagged to prevent collisions between types with
