@@ -1212,6 +1212,61 @@ async function main() {
   );
   callbacks.push(renameCb);
 
+  // symlink(req, target_ptr, parent_ino, name_ptr)
+  const symlinkCb = new Deno.UnsafeCallback(
+    {
+      parameters: ["pointer", "pointer", "u64", "pointer"],
+      result: "void",
+    } as const,
+    (
+      req: Deno.PointerValue,
+      targetPtr: Deno.PointerValue,
+      parentIno: number | bigint,
+      namePtr: Deno.PointerValue,
+    ) => {
+      if (!bridge) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+
+      const target = readCString(targetPtr);
+      const name = readCString(namePtr);
+      const parent = BigInt(parentIno);
+
+      // Check parent is writable
+      const parentPath = bridge.resolveWritePath(parent);
+      if (!parentPath) {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
+
+      // Parse target into sigil link components
+      const sigil = bridge.parseSymlinkTarget(parent, target);
+      if (!sigil) {
+        fuse.symbols.fuse_reply_err(req, EINVAL);
+        return;
+      }
+
+      // Construct sigil link value and write to cell
+      const sigilValue = { "/": { "link@1": sigil } };
+      const writePath = {
+        ...parentPath,
+        jsonPath: [...parentPath.jsonPath, name],
+      };
+
+      bridge.writeValue(writePath, sigilValue).then(() => {
+        // Add symlink to tree
+        const ino = tree.addSymlink(parent, name, target);
+        const node = tree.getNode(ino);
+        replyEntry(req, ino, node);
+      }).catch((e) => {
+        console.error(`[fuse] symlink error: ${e}`);
+        fuse.symbols.fuse_reply_err(req, EIO);
+      });
+    },
+  );
+  callbacks.push(symlinkCb);
+
   // --- Build ops struct ---
   const opsBuf = new ArrayBuffer(OPS_SIZE);
   const opsView = new DataView(opsBuf);
@@ -1230,6 +1285,7 @@ async function main() {
   setOp(OPS_OFFSETS.getattr, getattrCb);
   setOp(OPS_OFFSETS.setattr, setattrCb);
   setOp(OPS_OFFSETS.readlink, readlinkCb);
+  setOp(OPS_OFFSETS.symlink, symlinkCb);
   setOp(OPS_OFFSETS.mkdir, mkdirCb);
   setOp(OPS_OFFSETS.unlink, unlinkCb);
   setOp(OPS_OFFSETS.rmdir, rmdirCb);

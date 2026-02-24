@@ -1,4 +1,4 @@
-// tree-builder.test.ts — Unit tests for JSON-to-tree conversion
+// tree-builder.test.ts — Unit tests for JSON-to-tree conversion and symlink parsing
 import { assertEquals } from "@std/assert";
 import { FsTree } from "./tree.ts";
 import {
@@ -8,6 +8,7 @@ import {
   safeStringify,
   transformStreamValues,
 } from "./tree-builder.ts";
+import { CellBridge } from "./cell-bridge.ts";
 
 const decoder = new TextDecoder();
 
@@ -411,4 +412,132 @@ Deno.test("FsTree - clear removes handler nodes", () => {
 
   assertEquals(tree.getNode(handlerIno), undefined);
   assertEquals(tree.lookup(tree.rootIno, "result"), undefined);
+});
+
+// --- parseSymlinkTarget tests ---
+
+/** Helper: build a minimal tree mimicking a space with pieces. */
+function buildTestTree(): {
+  tree: FsTree;
+  bridge: CellBridge;
+  resultIno: bigint;
+} {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree);
+
+  // Build: /myspace/pieces/mypiece/result/
+  const spaceIno = tree.addDir(tree.rootIno, "myspace");
+  tree.addDir(spaceIno, "entities");
+  const piecesIno = tree.addDir(spaceIno, "pieces");
+  const pieceIno = tree.addDir(piecesIno, "mypiece");
+  const resultIno = tree.addDir(pieceIno, "result", "object");
+
+  // Register known space
+  bridge.knownSpaces.set("myspace", "did:key:z6MkMySpace");
+
+  return { tree, bridge, resultIno };
+}
+
+Deno.test("parseSymlinkTarget - same-space entity ref", () => {
+  const { bridge, resultIno } = buildTestTree();
+
+  const result = bridge.parseSymlinkTarget(
+    resultIno,
+    "../../../entities/ba4jcbvpq3k5",
+  );
+
+  assertEquals(result, { id: "of:ba4jcbvpq3k5" });
+});
+
+Deno.test("parseSymlinkTarget - same-space entity ref with path", () => {
+  const { bridge, resultIno } = buildTestTree();
+
+  const result = bridge.parseSymlinkTarget(
+    resultIno,
+    "../../../entities/ba4jcbvpq3k5/items/0",
+  );
+
+  assertEquals(result, { id: "of:ba4jcbvpq3k5", path: ["items", "0"] });
+});
+
+Deno.test("parseSymlinkTarget - cross-space entity ref", () => {
+  const { tree, bridge, resultIno } = buildTestTree();
+
+  // Add another space
+  const otherIno = tree.addDir(tree.rootIno, "other");
+  tree.addDir(otherIno, "entities");
+  bridge.knownSpaces.set("other", "did:key:z6MkOther");
+
+  const result = bridge.parseSymlinkTarget(
+    resultIno,
+    "../../../../other/entities/xyz123",
+  );
+
+  assertEquals(result, { id: "of:xyz123", space: "did:key:z6MkOther" });
+});
+
+Deno.test("parseSymlinkTarget - cross-space entity ref with path", () => {
+  const { tree, bridge, resultIno } = buildTestTree();
+
+  const otherIno = tree.addDir(tree.rootIno, "other");
+  tree.addDir(otherIno, "entities");
+  bridge.knownSpaces.set("other", "did:key:z6MkOther");
+
+  const result = bridge.parseSymlinkTarget(
+    resultIno,
+    "../../../../other/entities/xyz123/name",
+  );
+
+  assertEquals(result, {
+    id: "of:xyz123",
+    space: "did:key:z6MkOther",
+    path: ["name"],
+  });
+});
+
+Deno.test("parseSymlinkTarget - self-reference within piece", () => {
+  const { bridge, resultIno } = buildTestTree();
+
+  // Target points to input/items/0 within the same piece
+  const result = bridge.parseSymlinkTarget(
+    resultIno,
+    "../input/items/0",
+  );
+
+  assertEquals(result, { path: ["items", "0"] });
+});
+
+Deno.test("parseSymlinkTarget - escapes mount root returns null", () => {
+  const { bridge, resultIno } = buildTestTree();
+
+  const result = bridge.parseSymlinkTarget(
+    resultIno,
+    "../../../../../escape",
+  );
+
+  assertEquals(result, null);
+});
+
+Deno.test("parseSymlinkTarget - unresolvable target returns null", () => {
+  const { bridge, resultIno } = buildTestTree();
+
+  // Resolves to mount root (no entities/ or pieces/ pattern)
+  const result = bridge.parseSymlinkTarget(
+    resultIno,
+    "../../../..",
+  );
+
+  assertEquals(result, null);
+});
+
+Deno.test("parseSymlinkTarget - unknown cross-space uses name as fallback", () => {
+  const { bridge, resultIno } = buildTestTree();
+
+  // "unknown" space isn't in knownSpaces
+  const result = bridge.parseSymlinkTarget(
+    resultIno,
+    "../../../../unknown/entities/abc",
+  );
+
+  assertEquals(result, { id: "of:abc", space: "unknown" });
 });

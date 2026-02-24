@@ -1,7 +1,7 @@
 # Implementation Plan: FUSE Filesystem for Common Tools
 
 **Spec:** [`docs/specs/fuse-filesystem/`](../specs/fuse-filesystem/README.md)
-**Status:** Phase 0 complete, Phase 1 complete
+**Status:** Phase 0–2 complete
 
 ## Architecture Decision
 
@@ -52,7 +52,7 @@ hardcoded file. Validates that Deno FFI to libfuse works at all.
 - [x] **0.3 Connect to live cells** — `cell-bridge.ts`
   - [x] Reuse `loadManager()` from `packages/cli/lib/piece.ts`
   - [x] Fetch piece list, build tree under `<space>/pieces/`
-  - [ ] Lazy-load cell values on first access (currently eager)
+  - [ ] Lazy-load cell values on first access (deferred — currently eager)
   - [x] `result.json` / `input.json` serve serialized cell data
   - [x] `result/` / `input/` directories serve exploded JSON tree
   - [x] `ls <space>/pieces/` shows real pieces, `cat .../result.json` returns
@@ -69,7 +69,7 @@ hardcoded file. Validates that Deno FFI to libfuse works at all.
 - [x] **1.2 Multi-space root**
   - [x] Mount root lists `home/` (always present)
   - [x] `lookup` resolves any space name via `connectSpace()`
-  - [ ] `lookup` resolves raw DIDs (`did:key:...`)
+  - [x] `lookup` resolves raw DIDs (`did:key:...`) — works via `connectSpace()` + `loadManager`
   - [x] Lazy session creation per space (connect on first access)
   - [x] `.spaces.json` at root: known name->DID mapping
 - [x] **1.3 Subscriptions and cache invalidation**
@@ -77,7 +77,7 @@ hardcoded file. Validates that Deno FFI to libfuse works at all.
   - [x] On change, rebuild affected subtree in in-memory tree
   - [x] `fuse_lowlevel_notify_inval_entry` for kernel cache invalidation
   - [x] Fallback to short timeouts if FUSE-T doesn't support notify
-  - [ ] Unsubscribe after inactivity timeout
+  - [ ] Unsubscribe after inactivity timeout (deferred)
 - [x] **1.4 Extended attributes**
   - [x] `getxattr` callback for `user.json.type` per node
     (`string`, `number`, `boolean`, `null`, `object`, `array`)
@@ -102,34 +102,34 @@ hardcoded file. Validates that Deno FFI to libfuse works at all.
 
 **Goal:** Write to files, create/delete entries. Full read-write filesystem.
 
-- [ ] **2.1 Write buffering**
-  - [ ] Track open file handles with per-handle write buffers
-  - [ ] `write` callback: append to buffer
-  - [ ] `flush`/`release`: process buffer, send cell write
-- [ ] **2.2 Scalar writes**
-  - [ ] Infer JSON type from written bytes (`true`->bool, `42`->number, etc.)
-  - [ ] Construct cell write at appropriate JSON path
-  - [ ] `cell.set()` / `cell.update()` via PieceManager
-  - [ ] Update in-memory tree optimistically
-- [ ] **2.3 JSON writes**
-  - [ ] `.json` file writes: parse as JSON, replace entire subtree
-  - [ ] Validate JSON before writing; `EINVAL` on parse failure
-  - [ ] Rebuild affected tree nodes
-- [ ] **2.4 Handler invocation**
-  - [ ] `handlers/<name>` files: parse written JSON, call `stream.send()`
-  - [ ] Fire-and-forget (return success after send)
-- [ ] **2.5 Symlink writes (sigil links)**
-  - [ ] `symlink` callback: parse target path to `(space, id, path)` tuple
-  - [ ] Construct `SigilLink` JSON: `{ "/": { "link@1": { id, path, space } } }`
-  - [ ] Write sigil link at symlink location in parent cell
-  - [ ] Omit fields matching current context (same space, no path, etc.)
-  - [ ] Return `EINVAL` for targets that don't resolve within mountpoint
+- [x] **2.1 Write buffering**
+  - [x] Track open file handles with per-handle write buffers
+  - [x] `write` callback: append to buffer
+  - [x] `flush`/`release`: process buffer, send cell write
+- [x] **2.2 Scalar writes**
+  - [x] Infer JSON type from written bytes (`true`->bool, `42`->number, etc.)
+  - [x] Construct cell write at appropriate JSON path
+  - [x] `cell.set()` / `cell.update()` via PieceManager
+  - [x] Update in-memory tree optimistically
+- [x] **2.3 JSON writes**
+  - [x] `.json` file writes: parse as JSON, replace entire subtree
+  - [x] Validate JSON before writing; `EINVAL` on parse failure
+  - [x] Rebuild affected tree nodes
+- [x] **2.4 Handler invocation**
+  - [x] `handlers/<name>` files: parse written JSON, call `stream.send()`
+  - [x] Fire-and-forget (return success after send)
+- [x] **2.5 Symlink writes (sigil links)**
+  - [x] `symlink` callback: parse target path to `(space, id, path)` tuple
+  - [x] Construct `SigilLink` JSON: `{ "/": { "link@1": { id, path, space } } }`
+  - [x] Write sigil link at symlink location in parent cell
+  - [x] Omit fields matching current context (same space, no path, etc.)
+  - [x] Return `EINVAL` for targets that don't resolve within mountpoint
   - [ ] Writing sigil link JSON to `.json` files also produces symlinks
-- [ ] **2.6 Create and delete**
-  - [ ] `create` (new file in object dir): add key to parent
-  - [ ] `mkdir`: add key with `{}` value
-  - [ ] `unlink`/`rmdir`: remove key; re-index for array parents
-  - [ ] `rename`: remove old key + set new key; `EXDEV` for cross-cell
+- [x] **2.6 Create and delete**
+  - [x] `create` (new file in object dir): add key to parent
+  - [x] `mkdir`: add key with `{}` value
+  - [x] `unlink`/`rmdir`: remove key; re-index for array parents
+  - [x] `rename`: remove old key + set new key; `EXDEV` for cross-cell
 
 ## Phase 3: CLI Integration
 

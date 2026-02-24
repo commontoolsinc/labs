@@ -226,6 +226,81 @@ export class CellBridge {
     await piece[node.cellProp].set(value, [node.cellKey]);
   }
 
+  /**
+   * Parse a symlink target path relative to parentIno and extract
+   * sigil link components (id, path, space).
+   *
+   * Returns null if the target escapes the mount root or can't be
+   * mapped to a sigil link.
+   */
+  parseSymlinkTarget(
+    parentIno: bigint,
+    target: string,
+  ): { id?: string; path?: string[]; space?: string } | null {
+    // Get parent's absolute path segments from mount root
+    const parentSegments: string[] = [];
+    let current = parentIno;
+    while (current !== this.tree.rootIno) {
+      const name = this.tree.getNameForIno(current);
+      if (name === undefined) return null;
+      parentSegments.unshift(name);
+      const parent = this.tree.parents.get(current);
+      if (parent === undefined) return null;
+      current = parent;
+    }
+
+    // Resolve target relative to parent path
+    const resolved = [...parentSegments];
+    for (const part of target.split("/")) {
+      if (part === "" || part === ".") continue;
+      if (part === "..") {
+        if (resolved.length === 0) return null; // escapes mount root
+        resolved.pop();
+      } else {
+        resolved.push(part);
+      }
+    }
+
+    // Determine current space from parent's path
+    const currentSpace = parentSegments.length > 0
+      ? parentSegments[0]
+      : undefined;
+
+    // Match: /<space>/entities/<hash>[/<path...>]
+    if (resolved.length >= 3 && resolved[1] === "entities") {
+      const targetSpace = resolved[0];
+      const hash = resolved[2];
+      const pathParts = resolved.slice(3);
+
+      const result: { id?: string; path?: string[]; space?: string } = {
+        id: `of:${hash}`,
+      };
+
+      if (pathParts.length > 0) {
+        result.path = pathParts;
+      }
+
+      // Omit space if same as current
+      if (targetSpace !== currentSpace) {
+        const did = this.knownSpaces.get(targetSpace);
+        result.space = did || targetSpace;
+      }
+
+      return result;
+    }
+
+    // Self-reference: target within same piece, no entities/ segment
+    // Resolved path: [space, "pieces", pieceName, cell, ...subpath]
+    if (resolved.length >= 4 && resolved[1] === "pieces") {
+      const subpath = resolved.slice(4);
+      if (subpath.length > 0) {
+        return { path: subpath };
+      }
+    }
+
+    return null;
+  }
+
   /** Write a value via the piece controller. */
   async writeValue(writePath: WritePath, value: unknown): Promise<void> {
     await writePath.piece[writePath.cell].set(
