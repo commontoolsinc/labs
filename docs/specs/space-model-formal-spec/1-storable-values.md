@@ -1021,9 +1021,7 @@ export function serialize(
   // This arm handles all storable instances uniformly: user-defined types
   // (Cell, Stream), system types (UnknownStorable, ProblematicStorable),
   // and native object wrappers (StorableError, StorableMap, StorableSet,
-  // StorableUint8Array). Note: StorableEpochNsec and StorableEpochDays
-  // are direct StorableDatum members and are handled by their own
-  // TypeHandlers, not through this generic path.
+  // StorableUint8Array).
   if (isStorableInstance(value)) {
     const state = value[DECONSTRUCT]();
     const tag = context.getTagFor(value);
@@ -1039,6 +1037,21 @@ export function serialize(
   // used by the canonical hash (Section 6.4).
   if (typeof value === 'bigint') {
     return context.encode('BigInt@1', base64Encode(bigintToTwosComplement(value)));
+  }
+
+  // --- StorableEpochNsec ---
+  // Direct StorableDatum member (not a StorableInstance). Encoded as flat
+  // base64 of the underlying bigint's minimal two's complement representation,
+  // same byte format as BigInt@1.
+  if (value instanceof StorableEpochNsec) {
+    return context.encode('EpochNsec@1', base64Encode(bigintToTwosComplement(value.value)));
+  }
+
+  // --- StorableEpochDays ---
+  // Direct StorableDatum member (not a StorableInstance). Same encoding as
+  // StorableEpochNsec but with a distinct wire tag.
+  if (value instanceof StorableEpochDays) {
+    return context.encode('EpochDays@1', base64Encode(bigintToTwosComplement(value.value)));
   }
 
   // --- `undefined` ---
