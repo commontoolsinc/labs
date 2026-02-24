@@ -24,6 +24,7 @@ import {
   EXDEV,
   FILE_MODE,
   FILE_MODE_RW,
+  FILE_MODE_WO,
   FUSE_SET_ATTR_SIZE,
   O_RDWR,
   O_TRUNC,
@@ -114,6 +115,7 @@ async function main() {
     if (!node) return 0;
     if (node.kind === "dir") return DIR_MODE;
     if (node.kind === "symlink") return SYMLINK_MODE;
+    if (node.kind === "handler") return FILE_MODE_WO;
     // Files in writable piece data get 644, others stay 444
     if (bridge && ino !== undefined && bridge.resolveWritePath(ino)) {
       return FILE_MODE_RW;
@@ -125,6 +127,7 @@ async function main() {
     if (!node) return 0;
     if (node.kind === "file") return node.content.length;
     if (node.kind === "symlink") return node.target.length;
+    if (node.kind === "handler") return 0;
     return 0;
   }
 
@@ -275,6 +278,21 @@ async function main() {
         return;
       }
 
+      // Handler files: write-only, no read
+      if (node.kind === "handler") {
+        const { flags: hFlags } = readFileInfo(fi);
+        const isWriting = (hFlags & O_WRONLY) !== 0 ||
+          (hFlags & O_RDWR) !== 0;
+        if (!isWriting) {
+          fuse.symbols.fuse_reply_err(req, EACCES);
+          return;
+        }
+        const fh = handles.open(inode, hFlags, new Uint8Array(0));
+        writeFileInfo(fi, fh);
+        fuse.symbols.fuse_reply_open(req, fi);
+        return;
+      }
+
       const { flags } = readFileInfo(fi);
       const isWriting = (flags & O_WRONLY) !== 0 || (flags & O_RDWR) !== 0;
 
@@ -317,6 +335,13 @@ async function main() {
       fi: Deno.PointerValue,
     ) => {
       const inode = BigInt(ino);
+
+      // Handler files are write-only
+      const handlerNode = tree.getNode(inode);
+      if (handlerNode?.kind === "handler") {
+        fuse.symbols.fuse_reply_err(req, EACCES);
+        return;
+      }
 
       // If we have an open handle with a buffer, read from it
       const { fh } = readFileInfo(fi);
@@ -476,6 +501,22 @@ async function main() {
     handle: ReturnType<typeof handles.get>,
   ): Promise<number> {
     if (!handle || !handle.dirty || !bridge) return 0;
+
+    // Handler files: parse JSON and send to stream cell
+    const handlerNode = tree.getNode(handle.ino);
+    if (handlerNode?.kind === "handler") {
+      try {
+        const text = new TextDecoder().decode(handle.buffer);
+        const value = JSON.parse(text.trim());
+        await bridge.sendToHandler(handle.ino, value);
+        handle.dirty = false;
+        handle.buffer = new Uint8Array(0); // fire-and-forget
+        return 0;
+      } catch (e) {
+        console.error(`[fuse] handler flush error: ${e}`);
+        return EIO;
+      }
+    }
 
     const writePath = bridge.resolveWritePath(handle.ino);
     if (!writePath) return EACCES;

@@ -11,4 +11,5 @@ export type JsonType =
 export type FsNode =
   | { kind: "dir"; children: Map<string, bigint>; jsonType?: JsonType }
   | { kind: "file"; content: Uint8Array; jsonType: JsonType }
-  | { kind: "symlink"; target: string };
+  | { kind: "symlink"; target: string }
+  | { kind: "handler"; cellKey: string; cellProp: "input" | "result" };

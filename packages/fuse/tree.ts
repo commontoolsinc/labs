@@ -77,6 +77,31 @@ export class FsTree {
     return ino;
   }
 
+  addHandler(
+    parentIno: bigint,
+    name: string,
+    cellKey: string,
+    cellProp: "input" | "result",
+  ): bigint {
+    const parent = this.inodes.get(parentIno);
+    if (!parent || parent.kind !== "dir") {
+      throw new Error(`Parent inode ${parentIno} is not a directory`);
+    }
+
+    const ino = this.allocInode();
+    const node: FsNode = { kind: "handler", cellKey, cellProp };
+    this.inodes.set(ino, node);
+    parent.children.set(name, ino);
+    this.parents.set(ino, parentIno);
+
+    // Track path
+    const parentPath = this.getPath(parentIno);
+    const path = parentPath === "/" ? `/${name}` : `${parentPath}/${name}`;
+    this.paths.set(path, ino);
+
+    return ino;
+  }
+
   addSymlink(parentIno: bigint, name: string, target: string): bigint {
     const parent = this.inodes.get(parentIno);
     if (!parent || parent.kind !== "dir") {

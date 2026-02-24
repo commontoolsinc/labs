@@ -21,6 +21,38 @@ export function safeStringify(value: unknown, indent = 2): string {
 }
 
 /**
+ * Detect stream marker values: { $stream: true }
+ *
+ * Inline implementation to avoid importing @commontools/runner.
+ */
+export function isStreamValue(v: unknown): boolean {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
+  const obj = v as Record<string, unknown>;
+  return "$stream" in obj && obj.$stream === true;
+}
+
+/**
+ * Replace stream markers with handler sigils for JSON serialization.
+ * { $stream: true } → { "/handler": "<key>" }
+ */
+export function transformStreamValues(value: unknown): unknown {
+  if (typeof value !== "object" || value === null) return value;
+  if (Array.isArray(value)) {
+    return value.map(transformStreamValues);
+  }
+  const obj = value as Record<string, unknown>;
+  const result: Record<string, unknown> = {};
+  for (const [key, val] of Object.entries(obj)) {
+    if (isStreamValue(val)) {
+      result[key] = { "/handler": key };
+    } else {
+      result[key] = transformStreamValues(val);
+    }
+  }
+  return result;
+}
+
+/**
  * Detect sigil link values: { "/": { "link@1": { ... } } }
  *
  * Inline implementation to avoid importing @commontools/runner.
@@ -150,16 +182,17 @@ export function buildJsonTree(
     const obj = value as Record<string, unknown>;
     const dirIno = tree.addDir(parentIno, name, "object");
 
-    // Add .json sibling for the whole object
+    // Add .json sibling, replacing stream markers with handler sigils
     tree.addFile(
       parentIno,
       `${name}.json`,
-      safeStringify(value),
+      safeStringify(transformStreamValues(value)),
       "object",
     );
 
-    // Recurse for each key
+    // Recurse for each key, skipping stream values (handler files created separately)
     for (const [key, val] of Object.entries(obj)) {
+      if (isStreamValue(val)) continue;
       buildJsonTree(tree, dirIno, key, val, seen, resolveLink, d + 1);
     }
 

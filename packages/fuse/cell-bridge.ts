@@ -5,7 +5,7 @@
 // Subscribes to cell changes and rebuilds subtrees on updates.
 
 import { FsTree } from "./tree.ts";
-import { buildJsonTree, isSigilLink } from "./tree-builder.ts";
+import { buildJsonTree, isSigilLink, isStreamValue } from "./tree-builder.ts";
 import type { PieceManager } from "@commontools/piece";
 import { type PieceController, PiecesController } from "@commontools/piece/ops";
 
@@ -190,6 +190,42 @@ export class CellBridge {
     return { spaceName, pieceName, cell, jsonPath, isJsonFile, piece };
   }
 
+  /** Send a value to a handler (stream) cell. */
+  async sendToHandler(ino: bigint, value: unknown): Promise<void> {
+    const node = this.tree.getNode(ino);
+    if (!node || node.kind !== "handler") throw new Error("Not a handler node");
+
+    // Walk up to collect path segments
+    const segments: string[] = [];
+    let current = ino;
+    while (current !== this.tree.rootIno) {
+      const name = this.tree.getNameForIno(current);
+      if (name === undefined) throw new Error("Cannot resolve handler path");
+      segments.unshift(name);
+      const parentIno = this.tree.parents.get(current);
+      if (parentIno === undefined) {
+        throw new Error("Cannot resolve handler path");
+      }
+      current = parentIno;
+    }
+
+    // segments: [spaceName, "pieces", pieceName, cellProp, "key.handler"]
+    if (segments.length < 5 || segments[1] !== "pieces") {
+      throw new Error("Invalid handler path");
+    }
+
+    const spaceName = segments[0];
+    const pieceName = segments[2];
+
+    const space = this.spaces.get(spaceName);
+    if (!space) throw new Error(`Space "${spaceName}" not found`);
+
+    const piece = space.pieceControllers.get(pieceName);
+    if (!piece) throw new Error(`Piece "${pieceName}" not found`);
+
+    await piece[node.cellProp].set(value, [node.cellKey]);
+  }
+
   /** Write a value via the piece controller. */
   async writeValue(writePath: WritePath, value: unknown): Promise<void> {
     await writePath.piece[writePath.cell].set(
@@ -329,7 +365,7 @@ export class CellBridge {
 
           // Rebuild
           if (newValue !== undefined && newValue !== null) {
-            buildJsonTree(
+            const propIno = buildJsonTree(
               this.tree,
               pieceIno,
               propName,
@@ -338,6 +374,7 @@ export class CellBridge {
               resolveLink,
               0,
             );
+            this.addHandlerFiles(propIno, newValue, propName);
           }
 
           // Invalidate kernel cache
@@ -453,7 +490,7 @@ export class CellBridge {
       // Input data
       const input = await piece.input.get();
       if (input !== undefined && input !== null) {
-        buildJsonTree(
+        const inputIno = buildJsonTree(
           this.tree,
           pieceIno,
           "input",
@@ -462,12 +499,13 @@ export class CellBridge {
           resolveLink,
           0,
         );
+        this.addHandlerFiles(inputIno, input, "input");
       }
 
       // Result data
       const result = await piece.result.get();
       if (result !== undefined && result !== null) {
-        buildJsonTree(
+        const resultIno = buildJsonTree(
           this.tree,
           pieceIno,
           "result",
@@ -476,6 +514,7 @@ export class CellBridge {
           resolveLink,
           0,
         );
+        this.addHandlerFiles(resultIno, result, "result");
       }
     } catch (e) {
       console.error(`Error loading piece "${name}": ${e}`);
@@ -483,5 +522,25 @@ export class CellBridge {
     }
 
     return pieceIno;
+  }
+
+  /**
+   * Add .handler files for stream values within a prop directory.
+   * Called from both loadPieceTree() and subscription rebuilds.
+   */
+  private addHandlerFiles(
+    propIno: bigint,
+    value: unknown,
+    cellProp: "input" | "result",
+  ): void {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      return;
+    }
+    const obj = value as Record<string, unknown>;
+    for (const [key, val] of Object.entries(obj)) {
+      if (isStreamValue(val)) {
+        this.tree.addHandler(propIno, `${key}.handler`, key, cellProp);
+      }
+    }
   }
 }
