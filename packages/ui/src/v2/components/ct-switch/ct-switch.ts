@@ -1,13 +1,16 @@
 import { css, html } from "lit";
 import { ifDefined } from "lit/directives/if-defined.js";
 import { BaseElement } from "../../core/base-element.ts";
+import { type CellHandle } from "@commontools/runtime-client";
+import { booleanSchema } from "@commontools/runner/schemas";
+import { createBooleanCellController } from "../../core/cell-controller.ts";
 
 /**
  * CTSwitch - Toggle switch component for binary on/off states
  *
  * @element ct-switch
  *
- * @attr {boolean} checked - Whether the switch is checked/on
+ * @attr {boolean|CellHandle<boolean>} checked - Whether the switch is checked/on (supports both plain boolean and CellHandle<boolean>)
  * @attr {boolean} disabled - Whether the switch is disabled
  * @attr {string} name - Name attribute for form submission
  * @attr {string} value - Value attribute for form submission (default: "on")
@@ -16,6 +19,10 @@ import { BaseElement } from "../../core/base-element.ts";
  *
  * @example
  * <ct-switch checked>Enable notifications</ct-switch>
+ *
+ * @example
+ * <!-- Reactive Cell binding -->
+ * <ct-switch $checked={enabledCell}>Enable feature</ct-switch>
  */
 
 export class CTSwitch extends BaseElement {
@@ -133,10 +140,20 @@ export class CTSwitch extends BaseElement {
       value: { type: String },
     };
 
-    declare checked: boolean;
+    declare checked: CellHandle<boolean> | boolean;
     declare disabled: boolean;
     declare name: string;
     declare value: string;
+
+    private _checkedCellController = createBooleanCellController(this, {
+      timing: {
+        strategy: "immediate",
+        delay: 0,
+      },
+      onChange: (newValue: boolean, _oldValue: boolean) => {
+        this.emit("ct-change", { checked: newValue });
+      },
+    });
 
     constructor() {
       super();
@@ -146,12 +163,41 @@ export class CTSwitch extends BaseElement {
       this.value = "on";
     }
 
+    private getChecked(): boolean {
+      return this._checkedCellController.getValue();
+    }
+
+    private setChecked(newValue: boolean): void {
+      this._checkedCellController.setValue(newValue);
+    }
+
     override connectedCallback() {
       super.connectedCallback();
       // Make the element focusable
       this.tabIndex = this.disabled ? -1 : 0;
       this.setAttribute("role", "switch");
       this._updateAriaAttributes();
+      // Bind initial checked value
+      this._checkedCellController.bind(this.checked, booleanSchema);
+      // Add event listeners to the host element
+      this.addEventListener("click", this._handleClick);
+      this.addEventListener("keydown", this._handleKeydown);
+    }
+
+    override disconnectedCallback() {
+      super.disconnectedCallback();
+      this.removeEventListener("click", this._handleClick);
+      this.removeEventListener("keydown", this._handleKeydown);
+    }
+
+    override willUpdate(
+      changedProperties: Map<string | number | symbol, unknown>,
+    ) {
+      super.willUpdate(changedProperties);
+
+      if (changedProperties.has("checked")) {
+        this._checkedCellController.bind(this.checked, booleanSchema);
+      }
     }
 
     override updated(
@@ -171,9 +217,10 @@ export class CTSwitch extends BaseElement {
     }
 
     override render() {
+      const isChecked = this.getChecked();
       const switchClasses = {
         "switch": true,
-        "checked": this.checked,
+        "checked": isChecked,
         "disabled": this.disabled,
       };
 
@@ -186,15 +233,13 @@ export class CTSwitch extends BaseElement {
         <div
           class="${classString}"
           part="switch"
-          @click="${this._handleClick}"
-          @keydown="${this._handleKeydown}"
         >
           <span class="thumb" part="thumb"></span>
         </div>
         <input
           type="checkbox"
           class="sr-only"
-          ?checked="${this.checked}"
+          ?checked="${isChecked}"
           ?disabled="${this.disabled}"
           name="${ifDefined(this.name || undefined)}"
           value="${this.value}"
@@ -205,7 +250,8 @@ export class CTSwitch extends BaseElement {
     }
 
     private _updateAriaAttributes() {
-      this.setAttribute("aria-checked", String(this.checked));
+      const isChecked = this.getChecked();
+      this.setAttribute("aria-checked", String(isChecked));
       this.setAttribute("aria-disabled", String(this.disabled));
     }
 
@@ -216,11 +262,11 @@ export class CTSwitch extends BaseElement {
         return;
       }
 
-      // Toggle checked state
-      this.checked = !this.checked;
+      // Toggle checked state via cell controller
+      const oldChecked = this.getChecked();
+      this.setChecked(!oldChecked);
 
-      // Emit change event
-      this.emit("ct-change", { checked: this.checked });
+      // Note: ct-change event is emitted by the cell controller's onChange callback
     }
 
     private _handleKeydown(event: KeyboardEvent) {
