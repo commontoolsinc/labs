@@ -59,7 +59,7 @@ const wishTool = pattern<WishToolParameters>(
     const wishParams = computed(() => {
       return { query, ...(context && { context }) };
     });
-    const wishResult = wish<any>(wishParams).result;
+    const wishResult = wish<any>(wishParams);
 
     // Navigate to wishResult.result (the actual cell), not the entire wish state object
     return when(wishResult.result, navigateTo(wishResult.result));
