@@ -7,7 +7,7 @@ import {
 } from "./storable-protocol.ts";
 import type { SerializationContext } from "./serialization-context.ts";
 import type { SerializedForm } from "./json-serialization-context.ts";
-import { UnknownStorable } from "./unknown-storable.ts";
+import { ExplicitTagStorable } from "./explicit-tag-storable.ts";
 import { ProblematicStorable } from "./problematic-storable.ts";
 import {
   StorableEpochDays,
@@ -313,8 +313,8 @@ export const EpochDaysHandler: TypeHandler = {
 
 /**
  * Handler for `StorableInstance` values (custom protocol types, including
- * `StorableError`, `UnknownStorable`, and `ProblematicStorable`). Serializes
- * via `[DECONSTRUCT]` and the context's tag/encode methods. Deserialization
+ * `StorableError` and `ExplicitTagStorable` subtypes). Serializes via
+ * `[DECONSTRUCT]` and the context's tag/encode methods. Deserialization
  * is not dispatched via this handler's tag (since each instance type has its
  * own tag like `TAGS.Error`); instead, the serializer falls back to the
  * class registry for those tags.
@@ -336,13 +336,9 @@ export const StorableInstanceHandler: TypeHandler = {
   ): SerializedForm {
     const inst = value as StorableInstance;
 
-    // UnknownStorable and ProblematicStorable: use preserved typeTag
-    // and re-serialize their stored state.
-    if (inst instanceof UnknownStorable) {
-      const serializedState = recurse(inst.state);
-      return context.encode(inst.typeTag, serializedState);
-    }
-    if (inst instanceof ProblematicStorable) {
+    // ExplicitTagStorable (UnknownStorable, ProblematicStorable): use
+    // preserved typeTag and re-serialize their stored state.
+    if (inst instanceof ExplicitTagStorable) {
       const serializedState = recurse(inst.state);
       return context.encode(inst.typeTag, serializedState);
     }

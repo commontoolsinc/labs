@@ -4,8 +4,7 @@ import type {
   JsonWireValue,
   SerializedForm,
 } from "./json-serialization-context.ts";
-import { UnknownStorable } from "./unknown-storable.ts";
-import { ProblematicStorable } from "./problematic-storable.ts";
+import { ExplicitTagStorable } from "./explicit-tag-storable.ts";
 import {
   StorableError,
   StorableMap,
@@ -52,10 +51,7 @@ export class JsonEncodingContext
 
   /** Get the wire format tag for a storable instance's type. */
   getTagFor(value: StorableInstance): string {
-    if (value instanceof UnknownStorable) {
-      return value.typeTag;
-    }
-    if (value instanceof ProblematicStorable) {
+    if (value instanceof ExplicitTagStorable) {
       return value.typeTag;
     }
     // Check for typeTag property (used by native-wrapping StorableInstance classes).
