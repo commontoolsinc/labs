@@ -1,7 +1,13 @@
 // tree-builder.test.ts — Unit tests for JSON-to-tree conversion
 import { assertEquals } from "@std/assert";
 import { FsTree } from "./tree.ts";
-import { buildJsonTree, isSigilLink, safeStringify } from "./tree-builder.ts";
+import {
+  buildJsonTree,
+  isSigilLink,
+  isStreamValue,
+  safeStringify,
+  transformStreamValues,
+} from "./tree-builder.ts";
 
 const decoder = new TextDecoder();
 
@@ -280,4 +286,129 @@ Deno.test("buildJsonTree - unresolvable sigil link falls through to object", () 
   const refNode = tree.getNode(refIno);
   // Falls through to directory since it's an object
   assertEquals(refNode?.kind, "dir");
+});
+
+// --- Stream / handler tests ---
+
+Deno.test("isStreamValue - detects stream markers", () => {
+  assertEquals(isStreamValue({ $stream: true }), true);
+  assertEquals(isStreamValue({ $stream: true, extra: 1 }), true);
+});
+
+Deno.test("isStreamValue - rejects non-stream values", () => {
+  assertEquals(isStreamValue(null), false);
+  assertEquals(isStreamValue(42), false);
+  assertEquals(isStreamValue("hello"), false);
+  assertEquals(isStreamValue([1, 2]), false);
+  assertEquals(isStreamValue({ name: "Alice" }), false);
+  assertEquals(isStreamValue({ $stream: false }), false);
+  assertEquals(isStreamValue({}), false);
+});
+
+Deno.test("transformStreamValues - replaces stream markers with handler sigils", () => {
+  const input = {
+    items: [1, 2, 3],
+    count: 3,
+    addItem: { $stream: true },
+  };
+  const result = transformStreamValues(input) as Record<string, unknown>;
+  assertEquals(result.items, [1, 2, 3]);
+  assertEquals(result.count, 3);
+  assertEquals(result.addItem, { "/handler": "addItem" });
+});
+
+Deno.test("transformStreamValues - returns original when no streams", () => {
+  const input = { name: "Alice", age: 30 };
+  const result = transformStreamValues(input);
+  // Should be the exact same reference
+  assertEquals(result === input, true);
+});
+
+Deno.test("transformStreamValues - passes through non-objects", () => {
+  assertEquals(transformStreamValues(null), null);
+  assertEquals(transformStreamValues(42), 42);
+  assertEquals(transformStreamValues("hello"), "hello");
+  assertEquals(transformStreamValues([1, 2]), [1, 2]);
+});
+
+Deno.test("buildJsonTree - stream values are skipped in object directories", () => {
+  const tree = new FsTree();
+  const data = {
+    items: ["a", "b"],
+    count: 2,
+    addItem: { $stream: true },
+    reset: { $stream: true },
+  };
+  buildJsonTree(tree, tree.rootIno, "result", data);
+
+  const resultIno = tree.lookup(tree.rootIno, "result")!;
+  const resultNode = tree.getNode(resultIno);
+  assertEquals(resultNode?.kind, "dir");
+
+  // Regular keys should exist
+  const itemsIno = tree.lookup(resultIno, "items");
+  assertEquals(itemsIno !== undefined, true);
+  assertEquals(getFileContent(tree, resultIno, "count"), "2");
+
+  // Stream keys should NOT exist as files or dirs
+  assertEquals(tree.lookup(resultIno, "addItem"), undefined);
+  assertEquals(tree.lookup(resultIno, "reset"), undefined);
+});
+
+Deno.test("buildJsonTree - .json sibling replaces streams with handler sigils", () => {
+  const tree = new FsTree();
+  const data = {
+    items: ["a"],
+    addItem: { $stream: true },
+  };
+  buildJsonTree(tree, tree.rootIno, "result", data);
+
+  const json = getFileContent(tree, tree.rootIno, "result.json");
+  const parsed = JSON.parse(json);
+  assertEquals(parsed.items, ["a"]);
+  assertEquals(parsed.addItem, { "/handler": "addItem" });
+});
+
+Deno.test("FsTree - addHandler creates handler node", () => {
+  const tree = new FsTree();
+  const dirIno = tree.addDir(tree.rootIno, "result", "object");
+  const handlerIno = tree.addHandler(
+    dirIno,
+    "addItem.handler",
+    "addItem",
+    "result",
+  );
+
+  const node = tree.getNode(handlerIno);
+  assertEquals(node?.kind, "handler");
+  if (node?.kind === "handler") {
+    assertEquals(node.cellKey, "addItem");
+    assertEquals(node.cellProp, "result");
+  }
+
+  // Should be findable via lookup
+  assertEquals(tree.lookup(dirIno, "addItem.handler"), handlerIno);
+});
+
+Deno.test("FsTree - handler nodes coexist with regular files", () => {
+  const tree = new FsTree();
+  const dirIno = tree.addDir(tree.rootIno, "result", "object");
+  tree.addFile(dirIno, "count", "3", "number");
+  tree.addHandler(dirIno, "addItem.handler", "addItem", "result");
+  tree.addHandler(dirIno, "reset.handler", "reset", "result");
+
+  const children = tree.getChildren(dirIno);
+  const names = children.map(([name]) => name).sort();
+  assertEquals(names, ["addItem.handler", "count", "reset.handler"]);
+});
+
+Deno.test("FsTree - clear removes handler nodes", () => {
+  const tree = new FsTree();
+  const dirIno = tree.addDir(tree.rootIno, "result", "object");
+  const handlerIno = tree.addHandler(dirIno, "add.handler", "add", "result");
+
+  tree.clear(dirIno);
+
+  assertEquals(tree.getNode(handlerIno), undefined);
+  assertEquals(tree.lookup(tree.rootIno, "result"), undefined);
 });

@@ -34,19 +34,31 @@ export function isStreamValue(v: unknown): boolean {
 /**
  * Replace stream markers with handler sigils for JSON serialization.
  * { $stream: true } → { "/handler": "<key>" }
+ *
+ * Only creates a new object when stream markers are present.
+ * Returns the original reference otherwise, preserving circular-ref
+ * identity for safeStringify's WeakSet-based detection.
  */
 export function transformStreamValues(value: unknown): unknown {
-  if (typeof value !== "object" || value === null) return value;
-  if (Array.isArray(value)) {
-    return value.map(transformStreamValues);
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return value;
   }
   const obj = value as Record<string, unknown>;
+  // Only allocate a new object if there are stream markers to replace
+  let hasStreams = false;
+  for (const val of Object.values(obj)) {
+    if (isStreamValue(val)) {
+      hasStreams = true;
+      break;
+    }
+  }
+  if (!hasStreams) return value;
   const result: Record<string, unknown> = {};
   for (const [key, val] of Object.entries(obj)) {
     if (isStreamValue(val)) {
       result[key] = { "/handler": key };
     } else {
-      result[key] = transformStreamValues(val);
+      result[key] = val;
     }
   }
   return result;
