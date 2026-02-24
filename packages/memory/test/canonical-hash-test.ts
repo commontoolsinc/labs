@@ -38,14 +38,14 @@ Deno.test("canonicalHash", async (t) => {
   // --- boolean ---
 
   await t.step("true produces TAG_BOOLEAN + 0x01", () => {
-    // [0x21, 0x01]
-    const expected = sha256([0x21, 0x01]);
+    // [0x22, 0x01]
+    const expected = sha256([0x22, 0x01]);
     assertEquals(canonicalHash(true), expected);
   });
 
   await t.step("false produces TAG_BOOLEAN + 0x00", () => {
-    // [0x21, 0x00]
-    const expected = sha256([0x21, 0x00]);
+    // [0x22, 0x00]
+    const expected = sha256([0x22, 0x00]);
     assertEquals(canonicalHash(false), expected);
   });
 
@@ -57,7 +57,7 @@ Deno.test("canonicalHash", async (t) => {
 
   await t.step("42 produces TAG_NUMBER + IEEE 754 float64 BE", () => {
     const expected = sha256([
-      0x22,
+      0x23,
       0x40,
       0x45,
       0x00,
@@ -72,7 +72,7 @@ Deno.test("canonicalHash", async (t) => {
 
   await t.step("0 produces TAG_NUMBER + all zeros", () => {
     const expected = sha256([
-      0x22,
+      0x23,
       0x00,
       0x00,
       0x00,
@@ -125,7 +125,7 @@ Deno.test("canonicalHash", async (t) => {
       // IEEE 754 float64 big-endian for Number.MAX_VALUE:
       // 7F EF FF FF FF FF FF FF  (all bytes non-zero)
       const expected = sha256([
-        0x22,
+        0x23,
         0x7f,
         0xef,
         0xff,
@@ -147,7 +147,7 @@ Deno.test("canonicalHash", async (t) => {
       // UTF-8 for "hello": [0x68, 0x65, 0x6c, 0x6c, 0x6f], 5 bytes
       // LEB128(5) = [0x05]
       const expected = sha256([
-        0x23,
+        0x24,
         0x05,
         0x68,
         0x65,
@@ -161,7 +161,7 @@ Deno.test("canonicalHash", async (t) => {
 
   await t.step("empty string produces TAG_STRING + zero length", () => {
     // LEB128(0) = [0x00]
-    const expected = sha256([0x23, 0x00]);
+    const expected = sha256([0x24, 0x00]);
     assertEquals(canonicalHash(""), expected);
   });
 
@@ -185,7 +185,7 @@ Deno.test("canonicalHash", async (t) => {
     assertEquals(utf8.length, 4); // 4 bytes in UTF-8
     // LEB128(4) = [0x04]
     const expected = sha256([
-      0x23,
+      0x24,
       0x04,
       ...utf8,
     ]);
@@ -196,34 +196,34 @@ Deno.test("canonicalHash", async (t) => {
 
   await t.step("0n encodes as TAG_BIGINT + LEB128 length 1 + [0x00]", () => {
     // LEB128(1) = [0x01]
-    const expected = sha256([0x24, 0x01, 0x00]);
+    const expected = sha256([0x26, 0x01, 0x00]);
     assertEquals(canonicalHash(0n), expected);
   });
 
   await t.step("127n encodes as 1 byte: 0x7F", () => {
-    const expected = sha256([0x24, 0x01, 0x7f]);
+    const expected = sha256([0x26, 0x01, 0x7f]);
     assertEquals(canonicalHash(127n), expected);
   });
 
   await t.step("128n encodes as 2 bytes: 0x00, 0x80", () => {
     // 128 = 0x80, but high bit set means negative in two's complement,
     // so we need a leading 0x00. LEB128(2) = [0x02].
-    const expected = sha256([0x24, 0x02, 0x00, 0x80]);
+    const expected = sha256([0x26, 0x02, 0x00, 0x80]);
     assertEquals(canonicalHash(128n), expected);
   });
 
   await t.step("-1n encodes as 1 byte: 0xFF", () => {
-    const expected = sha256([0x24, 0x01, 0xff]);
+    const expected = sha256([0x26, 0x01, 0xff]);
     assertEquals(canonicalHash(-1n), expected);
   });
 
   await t.step("-128n encodes as 1 byte: 0x80", () => {
-    const expected = sha256([0x24, 0x01, 0x80]);
+    const expected = sha256([0x26, 0x01, 0x80]);
     assertEquals(canonicalHash(-128n), expected);
   });
 
   await t.step("-129n encodes as 2 bytes: 0xFF, 0x7F", () => {
-    const expected = sha256([0x24, 0x02, 0xff, 0x7f]);
+    const expected = sha256([0x26, 0x02, 0xff, 0x7f]);
     assertEquals(canonicalHash(-129n), expected);
   });
 
@@ -242,9 +242,9 @@ Deno.test("canonicalHash", async (t) => {
     "0x112233445566778899abcdefn matches hand-computed byte stream",
     () => {
       // 12-byte positive bigint, high nibble 0x1 so no sign-extension needed.
-      // TAG_BIGINT(0x24) + LEB128(12)=0x0c + big-endian bytes
+      // TAG_BIGINT(0x26) + LEB128(12)=0x0c + big-endian bytes
       const expected = sha256([
-        0x24,
+        0x26,
         0x0c,
         0x11,
         0x22,
@@ -273,9 +273,9 @@ Deno.test("canonicalHash", async (t) => {
       //   Invert: EE DD CC BB AA 99 88 77 66 54 32 10
       //   Add 1:  EE DD CC BB AA 99 88 77 66 54 32 11
       // High byte 0xEE has bit 7 set -- correctly negative, 12 bytes.
-      // TAG_BIGINT(0x24) + LEB128(12)=0x0c + big-endian two's complement
+      // TAG_BIGINT(0x26) + LEB128(12)=0x0c + big-endian two's complement
       const expected = sha256([
-        0x24,
+        0x26,
         0x0c,
         0xee,
         0xdd,
@@ -300,8 +300,8 @@ Deno.test("canonicalHash", async (t) => {
   // --- undefined ---
 
   await t.step("undefined produces TAG_UNDEFINED", () => {
-    // [0x25]
-    const expected = sha256([0x25]);
+    // [0x21]
+    const expected = sha256([0x21]);
     assertEquals(canonicalHash(undefined), expected);
   });
 
@@ -335,7 +335,7 @@ Deno.test("canonicalHash", async (t) => {
       const bytes = new StorableUint8Array(new Uint8Array([1, 2, 3]));
       // LEB128(3) = [0x03]
       const expected = sha256([
-        0x26,
+        0x25,
         0x03,
         0x01,
         0x02,
@@ -349,7 +349,7 @@ Deno.test("canonicalHash", async (t) => {
     "empty StorableUint8Array produces TAG_BYTES + zero length",
     () => {
       const bytes = new StorableUint8Array(new Uint8Array([]));
-      const expected = sha256([0x26, 0x00]);
+      const expected = sha256([0x25, 0x00]);
       assertEquals(canonicalHash(bytes), expected);
     },
   );
@@ -447,18 +447,18 @@ Deno.test("canonicalHash", async (t) => {
 
       // Key "message" + value "test"
       const messageKey = enc.encode("message");
-      stream.push(0x23, messageKey.length, ...messageKey);
+      stream.push(0x24, messageKey.length, ...messageKey);
       const messageVal = enc.encode("test");
-      stream.push(0x23, messageVal.length, ...messageVal);
+      stream.push(0x24, messageVal.length, ...messageVal);
 
       // Key "name" + value null (name === type for Error, so null)
       const nameKey = enc.encode("name");
-      stream.push(0x23, nameKey.length, ...nameKey);
+      stream.push(0x24, nameKey.length, ...nameKey);
       stream.push(0x20); // TAG_NULL
 
       // Key "stack" + value (the actual stack string)
       const stackKey = enc.encode("stack");
-      stream.push(0x23, stackKey.length, ...stackKey);
+      stream.push(0x24, stackKey.length, ...stackKey);
       const stackUtf8 = enc.encode(error.error.stack!);
       // LEB128 encode the stack length
       let stackLen = stackUtf8.length;
@@ -473,13 +473,13 @@ Deno.test("canonicalHash", async (t) => {
           stackLenBytes.push(byte);
         }
       }
-      stream.push(0x23, ...stackLenBytes, ...stackUtf8);
+      stream.push(0x24, ...stackLenBytes, ...stackUtf8);
 
       // Key "type" + value "Error"
       const typeKey = enc.encode("type");
-      stream.push(0x23, typeKey.length, ...typeKey);
+      stream.push(0x24, typeKey.length, ...typeKey);
       const typeVal = enc.encode("Error");
-      stream.push(0x23, typeVal.length, ...typeVal);
+      stream.push(0x24, typeVal.length, ...typeVal);
 
       // TAG_END for the object
       stream.push(0x00);
@@ -520,7 +520,7 @@ Deno.test("canonicalHash", async (t) => {
       // TAG_ARRAY
       0x10,
       // Element 0: number 1
-      0x22,
+      0x23,
       0x3f,
       0xf0,
       0x00,
@@ -533,7 +533,7 @@ Deno.test("canonicalHash", async (t) => {
       0x01,
       0x01,
       // Element 2: number 3
-      0x22,
+      0x23,
       0x40,
       0x08,
       0x00,
@@ -561,7 +561,7 @@ Deno.test("canonicalHash", async (t) => {
       // TAG_ARRAY
       0x10,
       // Element 0: number 1
-      0x22,
+      0x23,
       0x3f,
       0xf0,
       0x00,
@@ -574,7 +574,7 @@ Deno.test("canonicalHash", async (t) => {
       0x01,
       0x03,
       // Element 4: number 5
-      0x22,
+      0x23,
       0x40,
       0x14,
       0x00,
@@ -633,11 +633,11 @@ Deno.test("canonicalHash", async (t) => {
       // TAG_OBJECT
       0x11,
       // Key "a": TAG_STRING + LEB128(1) + UTF-8
-      0x23,
+      0x24,
       0x01,
       0x61,
       // Value 1: TAG_NUMBER + IEEE754 for 1.0
-      0x22,
+      0x23,
       0x3f,
       0xf0,
       0x00,
@@ -647,11 +647,11 @@ Deno.test("canonicalHash", async (t) => {
       0x00,
       0x00,
       // Key "b": TAG_STRING + LEB128(1) + UTF-8
-      0x23,
+      0x24,
       0x01,
       0x62,
       // Value 2: TAG_NUMBER + IEEE754 for 2.0
-      0x22,
+      0x23,
       0x40,
       0x00,
       0x00,
@@ -800,22 +800,22 @@ Deno.test("canonicalHash", async (t) => {
 
       // Expected byte stream with UTF-8 sort order (keyA first):
       // TAG_OBJECT (0x11)
-      // + keyA: TAG_STRING(0x23) + LEB128(3) + EF 80 80
-      // + value 1: TAG_NUMBER(0x22) + IEEE754 for 1.0
-      // + keyB: TAG_STRING(0x23) + LEB128(4) + F0 90 80 80
-      // + value 2: TAG_NUMBER(0x22) + IEEE754 for 2.0
+      // + keyA: TAG_STRING(0x24) + LEB128(3) + EF 80 80
+      // + value 1: TAG_NUMBER(0x23) + IEEE754 for 1.0
+      // + keyB: TAG_STRING(0x24) + LEB128(4) + F0 90 80 80
+      // + value 2: TAG_NUMBER(0x23) + IEEE754 for 2.0
       // + TAG_END (0x00)
       const expected = sha256([
         // TAG_OBJECT
         0x11,
         // keyA: U+F000 (UTF-8 first)
-        0x23,
+        0x24,
         0x03,
         0xef,
         0x80,
         0x80,
         // value 1
-        0x22,
+        0x23,
         0x3f,
         0xf0,
         0x00,
@@ -825,14 +825,14 @@ Deno.test("canonicalHash", async (t) => {
         0x00,
         0x00,
         // keyB: U+10000 (UTF-8 second)
-        0x23,
+        0x24,
         0x04,
         0xf0,
         0x90,
         0x80,
         0x80,
         // value 2
-        0x22,
+        0x23,
         0x40,
         0x00,
         0x00,
@@ -850,13 +850,13 @@ Deno.test("canonicalHash", async (t) => {
       const wrongOrder = sha256([
         0x11,
         // keyB first (wrong -- UTF-16 order)
-        0x23,
+        0x24,
         0x04,
         0xf0,
         0x90,
         0x80,
         0x80,
-        0x22,
+        0x23,
         0x40,
         0x00,
         0x00,
@@ -866,12 +866,12 @@ Deno.test("canonicalHash", async (t) => {
         0x00,
         0x00,
         // keyA second
-        0x23,
+        0x24,
         0x03,
         0xef,
         0x80,
         0x80,
-        0x22,
+        0x23,
         0x3f,
         0xf0,
         0x00,

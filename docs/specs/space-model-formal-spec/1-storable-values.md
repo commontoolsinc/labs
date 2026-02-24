@@ -1579,12 +1579,12 @@ organized into three categories by high nibble:
 | Tag               | Hex    | Decimal | Used for                        |
 |:------------------|:-------|:--------|:--------------------------------|
 | `TAG_NULL`        | `0x20` | 32      | `null`                          |
-| `TAG_BOOLEAN`     | `0x21` | 33      | `boolean`                       |
-| `TAG_NUMBER`      | `0x22` | 34      | `number` (finite, non-NaN)      |
-| `TAG_STRING`      | `0x23` | 35      | `string`                        |
-| `TAG_BIGINT`      | `0x24` | 36      | `bigint`                        |
-| `TAG_UNDEFINED`   | `0x25` | 37      | `undefined`                     |
-| `TAG_BYTES`       | `0x26` | 38      | `StorableUint8Array`            |
+| `TAG_UNDEFINED`   | `0x21` | 33      | `undefined`                     |
+| `TAG_BOOLEAN`     | `0x22` | 34      | `boolean`                       |
+| `TAG_NUMBER`      | `0x23` | 35      | `number` (finite, non-NaN)      |
+| `TAG_STRING`      | `0x24` | 36      | `string`                        |
+| `TAG_BYTES`       | `0x25` | 37      | `StorableUint8Array`            |
+| `TAG_BIGINT`      | `0x26` | 38      | `bigint`                        |
 | `TAG_EPOCH_NSEC`  | `0x27` | 39      | `StorableEpochNsec`             |
 | `TAG_EPOCH_DAYS`  | `0x28` | 40      | `StorableEpochDays`             |
 
