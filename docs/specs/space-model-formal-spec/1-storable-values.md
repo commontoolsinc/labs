@@ -85,16 +85,19 @@ type StorableValue =
   | undefined // first-class storable; requires tagged representation in formats lacking native `undefined`
   | bigint    // large integers; rides through without wrapping (like `undefined`)
 
-  // (b) Branded storables (custom types implementing the storable protocol)
+  // (b) Temporal primitives (direct datum members, not StorableInstance)
+  | StorableEpochNsec
+  | StorableEpochDays
+
+  // (c) Branded storables (custom types implementing the storable protocol)
   //     This arm covers:
   //       - Native object wrappers: `StorableError`, `StorableMap`,
-  //         `StorableSet`, `StorableEpochNsec`, `StorableEpochDays`,
-  //         `StorableUint8Array` (Section 1.4)
+  //         `StorableSet`, `StorableUint8Array` (Section 1.4)
   //       - User-defined types: `Cell`, `Stream`, etc.
   //       - System types: `UnknownStorable`, `ProblematicStorable`
   | StorableInstance
 
-  // (c) Recursive containers
+  // (d) Recursive containers
   | StorableValue[]
   | { [key: string]: StorableValue };
 ```
@@ -584,10 +587,12 @@ export const RECONSTRUCT = Symbol.for('common.reconstruct');
  * no separate marker is needed.
  *
  * The native object wrapper classes (`StorableError`, `StorableMap`,
- * `StorableSet`, `StorableEpochNsec`, `StorableEpochDays`,
- * `StorableUint8Array`) implement this
- * interface, as do user-defined types (`Cell`, `Stream`) and system
- * types (`UnknownStorable`, `ProblematicStorable`).
+ * `StorableSet`, `StorableUint8Array`) implement this interface, as do
+ * user-defined types (`Cell`, `Stream`) and system types
+ * (`UnknownStorable`, `ProblematicStorable`).
+ *
+ * Note: `StorableEpochNsec` and `StorableEpochDays` are direct
+ * `StorableDatum` members and do NOT implement this interface.
  */
 export interface StorableInstance {
   /**
@@ -1013,11 +1018,12 @@ export function serialize(
   context: SerializationContext,
 ): SerializedForm {
   // --- StorableInstance ---
-  // This arm handles ALL storable instances uniformly: user-defined types
+  // This arm handles all storable instances uniformly: user-defined types
   // (Cell, Stream), system types (UnknownStorable, ProblematicStorable),
-  // AND native object wrappers (StorableError, StorableMap, StorableSet,
-  // StorableEpochNsec, StorableEpochDays, StorableUint8Array). No per-type
-  // branches needed.
+  // and native object wrappers (StorableError, StorableMap, StorableSet,
+  // StorableUint8Array). Note: StorableEpochNsec and StorableEpochDays
+  // are direct StorableDatum members and are handled by their own
+  // TypeHandlers, not through this generic path.
   if (isStorableInstance(value)) {
     const state = value[DECONSTRUCT]();
     const tag = context.getTagFor(value);

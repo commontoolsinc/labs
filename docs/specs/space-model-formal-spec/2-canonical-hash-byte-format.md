@@ -294,7 +294,7 @@ Bytes: TAG_HOLE  RUN_COUNT_LEB128
 
 Total: 1 + len(LEB128) bytes per run (typically 2 bytes for small runs).
 
-Holes appear only within array encodings (Section 4.8). Consecutive holes are
+Holes appear only within array encodings (Section 4.10). Consecutive holes are
 **always coalesced** into maximal runs:
 
 - A single hole at index `i` with present elements at `i-1` and `i+1` is
