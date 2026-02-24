@@ -1439,12 +1439,12 @@ describe("serialization", () => {
   describe("ExplicitTagStorable", () => {
     it("UnknownStorable is an instance of ExplicitTagStorable", () => {
       const us = new UnknownStorable("Test@1", "state");
-      expect(us).toBeInstanceOf(ExplicitTagStorable);
+      expect(us instanceof ExplicitTagStorable).toBe(true);
     });
 
     it("ProblematicStorable is an instance of ExplicitTagStorable", () => {
       const ps = new ProblematicStorable("Test@1", "state", "oops");
-      expect(ps).toBeInstanceOf(ExplicitTagStorable);
+      expect(ps instanceof ExplicitTagStorable).toBe(true);
     });
 
     it("ExplicitTagStorable provides access to typeTag and state", () => {

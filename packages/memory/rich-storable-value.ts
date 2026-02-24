@@ -12,6 +12,7 @@ import {
   StorableError,
   UNSAFE_KEYS,
 } from "./storable-native-instances.ts";
+import { NATIVE_TAGS, tagFromNativeValue } from "./type-tags.ts";
 
 /** Reject native objects with extra enumerable properties. */
 function rejectExtraProperties(value: object, typeName: string): void {
@@ -58,21 +59,26 @@ export function toRichStorableValue(
     return value as StorableValueLayer;
   }
 
-  // Error instances are wrapped into StorableError.
-  if (Error.isError(value)) {
-    const wrapped = new StorableError(value);
-    if (freeze) Object.freeze(wrapped);
-    return wrapped;
-  }
-
-  // Date instances are converted to StorableEpochNsec (nanoseconds from epoch).
-  // Extra enumerable properties cause rejection ("death before confusion").
-  if (value instanceof Date) {
-    rejectExtraProperties(value, "Date");
-    const nsec = BigInt(value.getTime()) * 1_000_000n;
-    const wrapped = new StorableEpochNsec(nsec);
-    if (freeze) Object.freeze(wrapped);
-    return wrapped;
+  // Native convertible instances: dispatch via tagFromNativeValue() which uses
+  // a constructor switch (O(1)) with Error.isError() fallback for exotic
+  // Error subclasses.
+  if (typeof value === "object" && value !== null) {
+    const nativeTag = tagFromNativeValue(value);
+    if (nativeTag === NATIVE_TAGS.Error) {
+      const wrapped = new StorableError(value as Error);
+      if (freeze) Object.freeze(wrapped);
+      return wrapped;
+    }
+    if (nativeTag === NATIVE_TAGS.Date) {
+      // Date instances are converted to StorableEpochNsec (nanoseconds from
+      // epoch). Extra enumerable properties cause rejection ("death before
+      // confusion").
+      rejectExtraProperties(value, "Date");
+      const nsec = BigInt((value as Date).getTime()) * 1_000_000n;
+      const wrapped = new StorableEpochNsec(nsec);
+      if (freeze) Object.freeze(wrapped);
+      return wrapped;
+    }
   }
 
   // `undefined` passes through as-is.
