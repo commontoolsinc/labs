@@ -136,7 +136,16 @@ export function bigintFromMinimalTwosComplement(bytes: Uint8Array): bigint {
   // Determine sign from the high bit of the first byte.
   const negative = (bytes[0] & 0x80) !== 0;
 
-  // Build the unsigned magnitude from the bytes.
+  // Fast path: use DataView.getBigUint64() for values that fit in 8 bytes.
+  if (bytes.length <= 8) {
+    dv64Bytes.fill(0);
+    dv64Bytes.set(bytes, 8 - bytes.length);
+    const raw = dv64View.getBigUint64(0, false); // big-endian
+    if (!negative) return raw;
+    return raw - (1n << BigInt(bytes.length * 8));
+  }
+
+  // Fallback: per-byte shift loop for larger values.
   let result = 0n;
   for (let i = 0; i < bytes.length; i++) {
     result = (result << 8n) | BigInt(bytes[i]);
@@ -218,10 +227,11 @@ export function fromBase64(encoded: string): Uint8Array {
 
   for (let i = 0; i < s.length; i++) {
     const code = s.charCodeAt(i);
-    if (code >= 128 || B64_DECODE[code] === 0xff) {
+    const val = B64_DECODE[code];
+    if (code >= 128 || val === 0xff) {
       throw new Error(`fromBase64: invalid character at index ${i}`);
     }
-    bitBuf = (bitBuf << 6) | B64_DECODE[code];
+    bitBuf = (bitBuf << 6) | val;
     bitCount += 6;
     if (bitCount >= 8) {
       bitCount -= 8;

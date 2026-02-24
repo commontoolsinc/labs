@@ -1394,7 +1394,8 @@ round-trip correctly.
 // { "/BigInt@1": string }
 //
 // The state is the base64 encoding of the value's minimal two's complement
-// representation in big-endian byte order:
+// representation in big-endian byte order. The minimum byte length is 1 —
+// even `0n` produces a single `0x00` byte. Examples:
 //   - `0n`  → single byte 0x00 → "AA"
 //   - `1n`  → 0x01             → "AQ"
 //   - `-1n` → 0xFF             → "/w"
@@ -1908,7 +1909,7 @@ export function toDeepStorableValue(
 | `Error` | Wrapped into `StorableError`. Before wrapping, `cause` and custom enumerable properties are recursively converted to `StorableValue` (deep variant) or left as-is (shallow variant). Extra enumerable properties are preserved (see Section 1.4.1). This ensures that by the time `StorableError.[DECONSTRUCT]` runs, all nested values are already valid `StorableValue`. |
 | `Map` | Wrapped into `StorableMap`. Keys and values are recursively converted (deep variant only). Extra enumerable properties on the `Map` object are silently dropped (see Section 1.4.1). |
 | `Set` | Wrapped into `StorableSet`. Elements are recursively converted (deep variant only). Extra enumerable properties on the `Set` object are silently dropped (see Section 1.4.1). |
-| `Date` | Wrapped into `StorableEpochNsec`. The `Date`'s millisecond timestamp is converted to nanoseconds: `BigInt(date.getTime()) * 1_000_000n`. Note the millisecond precision limitation — sub-millisecond information is not available from `Date`. Extra enumerable properties on the `Date` object are silently dropped (see Section 1.4.1). |
+| `Date` | Wrapped into `StorableEpochNsec`. The `Date`'s millisecond timestamp is converted to nanoseconds: `BigInt(date.getTime()) * 1_000_000n`. Note the millisecond precision limitation — sub-millisecond information is not available from `Date`. Extra enumerable properties on the `Date` object cause **rejection** (throw) — it is better to fail loudly than silently lose data. |
 | `Uint8Array` | Wrapped into `StorableUint8Array`. Extra enumerable properties on the `Uint8Array` object are silently dropped (see Section 1.4.1). |
 | `Blob` | **Throws.** `Blob` content is only accessible via asynchronous methods (`arrayBuffer()`, `stream()`), so the synchronous conversion path cannot extract its bytes. Callers must convert a `Blob` to `Uint8Array` before passing it to `toStorableValue()`. A future async conversion path may accept `Blob` directly. |
 | `StorableValue[]` | Shallow: returned as-is (frozen if `freeze` is true). Deep: elements recursively converted (frozen at each level if `freeze` is true). |
@@ -2181,8 +2182,7 @@ with no storable wrappers at any depth. Without this recursion, an Error's
 > `StorableEpochDays` unwrap to their raw `bigint` values rather than to
 > `Date` objects. This avoids precision loss (JS `Date` has only millisecond
 > precision, while epoch nanoseconds can represent sub-millisecond instants)
-> and avoids the mutability problems that previously required `FrozenDate`.
-> Bigint is an immutable primitive, so no freeze/thaw action is needed.
+> and bigint is an immutable primitive, so no freeze/thaw action is needed.
 > Callers who need a `Date` for interop can construct one from the nanosecond
 > value: `new Date(Number(epochNsec / 1_000_000n))` (with the caveat that
 > sub-millisecond precision is lost).

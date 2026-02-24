@@ -47,7 +47,13 @@ export function toRichStorableValue(
   }
 
   // Date instances are converted to StorableEpochNsec (nanoseconds from epoch).
+  // Extra enumerable properties cause rejection ("death before confusion").
   if (value instanceof Date) {
+    if (Object.keys(value).length > 0) {
+      throw new Error(
+        "Cannot store Date with extra enumerable properties",
+      );
+    }
     const nsec = BigInt(value.getTime()) * 1_000_000n;
     const wrapped = new StorableEpochNsec(nsec);
     if (freeze) Object.freeze(wrapped);
