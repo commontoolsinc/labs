@@ -5,7 +5,7 @@
  * This file contains types shared across note.tsx, notebook.tsx, and note-md.tsx.
  */
 
-import { type Default, NAME, type Writable } from "commontools";
+import { type Default, NAME, type Stream, type Writable } from "commontools";
 
 // ===== Core Entity Types =====
 
@@ -52,6 +52,15 @@ export interface NotebookPiece {
   notes?: NotePiece[];
   isNotebook?: boolean;
   isHidden?: boolean;
+  backlinks?: MentionablePiece[];
+
+  createNote: Stream<{ title: string; content: string }>;
+  createNotes: Stream<{ notesData: Array<{ title: string; content: string }> }>;
+  setTitle: Stream<{ newTitle: string }>;
+  createNotebook: Stream<{
+    title: string;
+    notesData?: Array<{ title: string; content: string }>;
+  }>;
 }
 
 /**
@@ -72,7 +81,6 @@ export interface NoteInput {
   title?: Writable<Default<string, "Untitled Note">>;
   content?: Writable<Default<string, "">>;
   isHidden?: Default<boolean, false>;
-  noteId?: Default<string, "">;
   /** Pattern JSON for [[wiki-links]]. Defaults to creating new Notes. */
   linkPattern?: Writable<Default<string, "">>;
   /** Parent notebook reference. Set at creation, can be updated for moves. */

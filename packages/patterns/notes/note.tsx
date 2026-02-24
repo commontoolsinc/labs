@@ -3,6 +3,7 @@ import {
   action,
   computed,
   type Default,
+  equals,
   generateText,
   handler,
   NAME,
@@ -19,7 +20,6 @@ import {
 } from "commontools";
 import NoteMd from "./note-md.tsx";
 import {
-  generateId,
   type MentionablePiece,
   type MinimalPiece,
   type NotebookPiece,
@@ -39,7 +39,6 @@ interface NoteOutput {
   mentioned: Default<MentionablePiece[], []>;
   backlinks: MentionablePiece[];
   isHidden: boolean;
-  noteId: string;
   grep: PatternToolResult<{ content: string }>;
   translate: PatternToolResult<{ content: string }>;
   editContent: Stream<{ detail: { value: string } }>;
@@ -65,8 +64,6 @@ interface NoteOutput {
 const handleNewBacklink = handler<
   {
     detail: {
-      text: string;
-      pieceId: unknown;
       piece: Writable<MentionablePiece>;
       navigate: boolean;
     };
@@ -126,7 +123,7 @@ const translatePattern = pattern<
   });
 
   return computed(() => {
-    if (genResult.pending) return undefined;
+    if (genResult.pending !== false) return undefined;
     if (genResult.result == null) return "Error occurred";
     return genResult.result;
   });
@@ -139,7 +136,6 @@ const Note = pattern<NoteInput, NoteOutput>(
     title,
     content,
     isHidden,
-    noteId,
     linkPattern,
     parentNotebook,
     [SELF]: self,
@@ -219,7 +215,6 @@ const Note = pattern<NoteInput, NoteOutput>(
             title,
             content,
             backlinks,
-            noteId,
           },
           sourceNoteRef: self as NotePiece,
           content,
@@ -231,27 +226,18 @@ const Note = pattern<NoteInput, NoteOutput>(
     const createNewNote = action(() => {
       const notebook = parentNotebook.get();
 
-      const note = Note({
-        title: "New Note",
-        content: "",
-        noteId: generateId(),
-        isHidden: !!notebook,
-        parentNotebook: notebook,
-      });
-      allPieces.push(note as any); // Required for persistence
-
-      // Add to parent notebook if we can find it in mentionable
       if (notebook) {
-        const nbName = notebook[NAME];
-        const found = mentionable.find((c) => c?.[NAME] === nbName) as
-          | NotebookPiece
-          | undefined;
-        if (found?.isNotebook && found?.notes) {
-          (found.notes as NotePiece[]).push(note);
-        }
+        notebook.createNote.send({ title: "New Note", content: "" });
+      } else {
+        const note = Note({
+          title: "New Note",
+          content: "",
+          isHidden: !!notebook,
+          parentNotebook: notebook,
+        });
+        allPieces.push(note as any);
+        return navigateTo(note);
       }
-
-      return navigateTo(note);
     });
 
     const menuAllNotebooks = action(() => {
@@ -285,18 +271,14 @@ const Note = pattern<NoteInput, NoteOutput>(
     );
 
     // LAZY: Only compute which notebooks contain this note when menu is open
-    const containingNotebookNames = computed(() => {
+    const containingNotebooks = computed(() => {
       if (!menuOpen.get()) return [];
 
-      const myId = noteId;
-      if (!myId) return [];
-      const result: string[] = [];
+      const result: NotebookPiece[] = [];
       for (const nb of notebooks) {
-        const nbNotes = (nb as any)?.notes ?? [];
-        const nbName = (nb as any)?.[NAME] ?? "";
-        for (const n of nbNotes) {
-          if (n?.noteId && n.noteId === myId) {
-            result.push(nbName);
+        for (const n of nb?.notes ?? []) {
+          if (equals(n, self)) {
+            result.push(nb);
             break;
           }
         }
@@ -498,8 +480,8 @@ const Note = pattern<NoteInput, NoteOutput>(
                     {"  "}
                     {notebook?.[NAME] ?? "Untitled"}
                     {computed(() => {
-                      const nbName = (notebook as any)?.[NAME] ?? "";
-                      return containingNotebookNames.includes(nbName)
+                      return containingNotebooks
+                          .find((nb) => equals(nb, notebook))
                         ? " ✓"
                         : "";
                     })}
@@ -547,7 +529,6 @@ const Note = pattern<NoteInput, NoteOutput>(
       mentioned,
       backlinks,
       isHidden,
-      noteId,
       parentNotebook,
       grep: patternTool(grepPattern, { content }),
       translate: patternTool(translatePattern, { content }),
