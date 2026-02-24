@@ -2,6 +2,7 @@ import { getLogger } from "@commontools/utils/logger";
 import { sha256 } from "@/lib/sha2.ts";
 import { runtime } from "@/index.ts";
 import { identity } from "@/lib/identity.ts";
+import { WebhookConfigSchema } from "@commontools/runner";
 
 const logger = getLogger("webhooks.utils");
 
@@ -151,7 +152,8 @@ export async function writeConfidentialConfig(
   secret: string,
 ): Promise<void> {
   const parsedCellLink = JSON.parse(cellLink);
-  const cell = runtime.getCellFromLink(parsedCellLink);
+  let cell = runtime.getCellFromLink(parsedCellLink);
+  if (!cell.schema) cell = cell.asSchema(WebhookConfigSchema);
   await cell.sync();
   await runtime.storageManager.synced();
 

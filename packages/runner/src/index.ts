@@ -115,6 +115,7 @@ export {
   unsafe_parentPattern,
   type UnsafeBinding,
   type VNode,
+  WebhookConfigSchema,
 } from "./builder/types.ts";
 export { createNodeFactory } from "./builder/module.ts";
 export { opaqueRef as cell } from "./builder/opaque-ref.ts";

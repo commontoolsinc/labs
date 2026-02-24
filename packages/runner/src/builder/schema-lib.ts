@@ -51,3 +51,20 @@ export const OAuth2TokenSchema = {
   },
   required: ["accessToken", "tokenType"],
 } as const satisfies JSONSchema;
+
+// Webhook confidential config: URL and bearer token written by toolshed
+export const WebhookConfigSchema = {
+  type: "object",
+  properties: {
+    url: {
+      type: "string",
+      default: "",
+      ifc: { classification: [ClassificationSecret] },
+    },
+    secret: {
+      type: "string",
+      default: "",
+      ifc: { classification: [ClassificationSecret] },
+    },
+  },
+} as const satisfies JSONSchema;
