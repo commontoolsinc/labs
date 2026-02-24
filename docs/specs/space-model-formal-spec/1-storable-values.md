@@ -245,15 +245,12 @@ and `[RECONSTRUCT]` restores them on the reconstructed `Error`.
 **`StorableMap`, `StorableSet`, `StorableEpochNsec`, `StorableEpochDays`,
 `StorableUint8Array`** must NOT carry extra enumerable properties. Their
 `[DECONSTRUCT]` output contains only the essential native data (entries, items,
-epoch value, bytes respectively). For `Map`, `Set`, and `Date` (converted to
-`StorableEpochNsec`/`StorableEpochDays`), extra enumerable properties on the
-source native object cause **rejection** — the conversion function throws rather
-than silently losing data ("death before confusion"). For `Uint8Array`, extra
-enumerable properties are silently dropped during conversion (Section 8.2) — the
-conversion layer does not copy them onto the wrapper. This matches the treatment
-of arrays, where extra non-index properties cause rejection (Section 1.5). The
-rationale is that unlike `Error`, these native types have no established
-convention for custom properties.
+epoch value, bytes respectively). Extra enumerable properties on the source
+native object cause **rejection** — the conversion function throws. This follows
+the principle "Death before confusion!" (Mark Miller): it is better to fail
+loudly than to silently lose data. This matches the treatment of arrays, where
+extra non-index properties also cause rejection (Section 1.5). Unlike `Error`,
+these native types have no established convention for custom properties.
 
 #### 1.4.2 `StorableError`
 
@@ -1912,7 +1909,7 @@ export function toDeepStorableValue(
 | `Map` | Wrapped into `StorableMap`. Keys and values are recursively converted (deep variant only). Extra enumerable properties on the `Map` object cause **rejection** (throw) — it is better to fail loudly than silently lose data. |
 | `Set` | Wrapped into `StorableSet`. Elements are recursively converted (deep variant only). Extra enumerable properties on the `Set` object cause **rejection** (throw) — it is better to fail loudly than silently lose data. |
 | `Date` | Wrapped into `StorableEpochNsec`. The `Date`'s millisecond timestamp is converted to nanoseconds: `BigInt(date.getTime()) * 1_000_000n`. Note the millisecond precision limitation — sub-millisecond information is not available from `Date`. Extra enumerable properties on the `Date` object cause **rejection** (throw) — it is better to fail loudly than silently lose data. |
-| `Uint8Array` | Wrapped into `StorableUint8Array`. Extra enumerable properties on the `Uint8Array` object are silently dropped (see Section 1.4.1). |
+| `Uint8Array` | Wrapped into `StorableUint8Array`. Extra enumerable properties on the `Uint8Array` object cause **rejection** (throw) — it is better to fail loudly than silently lose data. |
 | `Blob` | **Throws.** `Blob` content is only accessible via asynchronous methods (`arrayBuffer()`, `stream()`), so the synchronous conversion path cannot extract its bytes. Callers must convert a `Blob` to `Uint8Array` before passing it to `toStorableValue()`. A future async conversion path may accept `Blob` directly. |
 | `StorableValue[]` | Shallow: returned as-is (frozen if `freeze` is true). Deep: elements recursively converted (frozen at each level if `freeze` is true). |
 | `{ [key: string]: StorableValue }` | Shallow: returned as-is (frozen if `freeze` is true). Deep: values recursively converted (frozen at each level if `freeze` is true). |
