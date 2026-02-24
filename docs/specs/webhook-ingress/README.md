@@ -87,6 +87,8 @@ Stored in **user's space** (pattern-created, plain cell):
 - Written on each webhook delivery
 - Mode "replace": overwrites with latest payload
 - Mode "append": maintains array of recent payloads (max 1000)
+  - Each item has `_receivedAt: string` (ISO timestamp) injected by toolshed
+  - Non-object payloads are wrapped as `{ data: payload, _receivedAt }`
 
 ### Per-space webhook index
 
@@ -136,7 +138,11 @@ Called by external services to deliver webhook payloads.
 
 **Response (200):** `{ "received": true }`
 
+**Response (400):** Invalid JSON payload
+
 **Response (401):** `{ "error": "Invalid request" }` — uniform for missing webhook, disabled webhook, wrong token
+
+**Response (502):** Downstream write failed (retry safe)
 
 ### `GET /api/webhooks?space=...` — List webhooks (trusted admin)
 
@@ -167,6 +173,10 @@ Removes a webhook registration. Space is derived from the stored registration's 
 
 **Response (200):** `{ "deleted": true }`
 
+**Response (404):** Webhook not found
+
+**Response (400):** Failed to delete webhook
+
 ## Security Properties
 
 ### Bearer token hashing
@@ -179,10 +189,13 @@ Token comparison uses constant-time byte comparison to prevent timing attacks.
 The ingest endpoint returns the same `{ "error": "Invalid request" }` for missing webhooks, disabled webhooks, and wrong tokens. When a webhook is not found, the token is hashed against a dummy value to prevent timing oracles.
 
 ### Body limit
-A 1MB body limit is enforced on the ingest endpoint via Hono middleware.
+A 1MB body limit is enforced on all webhook routes (create and ingest) via Hono middleware.
 
 ### CFC confidentiality labels
 The config cell is CFC-labeled as confidential by the pattern that creates it. This prevents untrusted code from reading the secret.
+
+### CORS
+All webhook routes have permissive CORS (`origin: *`) to support both browser-based pattern handlers and server-to-server webhook delivery.
 
 ### Scoped writes
 Each webhook writes to exactly one cell. A compromised bearer token can only affect that single cell.

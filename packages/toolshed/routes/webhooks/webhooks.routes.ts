@@ -103,6 +103,14 @@ export const ingest = createRoute({
       },
       description: "Invalid payload",
     },
+    [HttpStatusCodes.BAD_GATEWAY]: {
+      content: {
+        "application/json": {
+          schema: z.object({ error: z.string() }),
+        },
+      },
+      description: "Downstream write failed",
+    },
   },
 });
 

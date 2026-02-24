@@ -233,10 +233,13 @@ export async function writeToCell(
         : [];
       const updated = [
         ...items.slice(-(MAX_APPEND_ITEMS - 1)),
-        {
-          ...(payload as Record<string, unknown>),
-          _receivedAt: new Date().toISOString(),
-        },
+        typeof payload === "object" && payload !== null &&
+          !Array.isArray(payload)
+          ? {
+            ...(payload as Record<string, unknown>),
+            _receivedAt: new Date().toISOString(),
+          }
+          : { data: payload, _receivedAt: new Date().toISOString() },
       ];
       cell.withTx(tx).set(updated);
     });

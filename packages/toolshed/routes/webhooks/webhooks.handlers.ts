@@ -132,7 +132,7 @@ export const ingest: AppRouteHandler<IngestRoute> = async (c) => {
     return c.json({ received: true }, 200);
   } catch (error) {
     logger.error({ error, id }, "Failed to write webhook payload to cell");
-    return c.json({ error: "Failed to write payload" }, 400);
+    return c.json({ error: "Failed to write payload" }, 502);
   }
 };
 
@@ -149,14 +149,12 @@ export const list: AppRouteHandler<ListRoute> = async (c) => {
     const webhookIds = await getServiceIndex(space);
 
     // Fetch each registration and strip secretHash
-    const webhooks = [];
-    for (const webhookId of webhookIds) {
-      const reg = await getRegistration(webhookId);
-      if (reg) {
-        const { secretHash: _, ...rest } = reg;
-        webhooks.push(rest);
-      }
-    }
+    const registrations = await Promise.all(
+      webhookIds.map((webhookId) => getRegistration(webhookId)),
+    );
+    const webhooks = registrations
+      .filter((reg): reg is NonNullable<typeof reg> => reg !== null)
+      .map(({ secretHash: _, ...rest }) => rest);
 
     return c.json({ webhooks }, 200);
   } catch (error) {
@@ -176,16 +174,23 @@ export const remove: AppRouteHandler<RemoveRoute> = async (c) => {
       return c.json({ error: "Webhook not found" }, 404);
     }
 
-    // Derive space from the stored registration's cellLink
-    const space = extractSpaceFromCellLink(registration.cellLink);
-
     // Deactivate the webhook first so it can't accept payloads,
     // then clean up the index. A ghost index entry is harmless;
     // a ghost active webhook is not.
     await deleteRegistration(id);
-    await removeFromServiceIndex(space, id);
 
-    logger.info({ id, space }, "Webhook deleted");
+    // Try to clean up the service index, but don't fail if cellLink is corrupted
+    try {
+      const space = extractSpaceFromCellLink(registration.cellLink);
+      await removeFromServiceIndex(space, id);
+    } catch {
+      logger.warn(
+        { id },
+        "Could not derive space from cellLink; index entry may be orphaned",
+      );
+    }
+
+    logger.info({ id }, "Webhook deleted");
 
     return c.json({ deleted: true }, 200);
   } catch (error) {
