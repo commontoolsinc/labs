@@ -1757,14 +1757,14 @@ export type RequireDefaults<T> =
       : T[K];
   }
   // Refinement: remove `?` from keys that carry the Default brand.
-  // Use NonNullable<T[K]> to strip the `| undefined` that TypeScript adds for
-  // optional fields (T[K] of `a?: X` includes `X | undefined`). Without this,
-  // the required field's value type would still include `| undefined`, which
-  // propagates through OpaqueRef and makes the field possibly-undefined in the
-  // pattern body despite being required.
+  // Use Exclude<T[K], undefined> to strip the `| undefined` that TypeScript
+  // adds for optional fields (T[K] of `a?: X` includes `X | undefined`).
+  // Without this, the required field's value type would still include
+  // `| undefined`, which propagates through OpaqueRef and makes the field
+  // possibly-undefined in the pattern body despite being required.
   & {
     [K in keyof T as true extends IsDefaultField<T[K]> ? K : never]-?:
-      StripDefaultBrand<NonNullable<T[K]>>;
+      StripDefaultBrand<Exclude<T[K], undefined>>;
   };
 
 // Internal-only way to instantiate internal modules
