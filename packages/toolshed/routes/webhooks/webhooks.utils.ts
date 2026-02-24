@@ -226,6 +226,7 @@ export async function writeToCell(
     if (error) throw error;
   } else {
     // append mode
+    const receivedAt = new Date().toISOString();
     const { error } = await cell.runtime.editWithRetry((tx) => {
       const current = cell.get();
       const items = Array.isArray(current)
@@ -239,9 +240,9 @@ export async function writeToCell(
           !Array.isArray(payload)
           ? {
             ...(payload as Record<string, unknown>),
-            _receivedAt: new Date().toISOString(),
+            _receivedAt: receivedAt,
           }
-          : { data: payload, _receivedAt: new Date().toISOString() },
+          : { data: payload, _receivedAt: receivedAt },
       ];
       cell.withTx(tx).set(updated);
     });

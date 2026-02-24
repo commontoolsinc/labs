@@ -43,7 +43,6 @@ export class CTWebhook extends BaseElement {
     mode: { type: String },
     _isLoading: { type: Boolean, state: true },
     _error: { type: String, state: true },
-    _webhookId: { type: String, state: true },
   };
 
   declare name: string;
@@ -53,7 +52,6 @@ export class CTWebhook extends BaseElement {
 
   declare _isLoading: boolean;
   declare _error: string;
-  declare _webhookId: string;
 
   private _configUnsub?: () => void;
 
@@ -63,7 +61,6 @@ export class CTWebhook extends BaseElement {
     this.mode = "replace";
     this._isLoading = false;
     this._error = "";
-    this._webhookId = "";
   }
 
   override updated(changedProperties: Map<string | number | symbol, unknown>) {
@@ -131,8 +128,7 @@ export class CTWebhook extends BaseElement {
         throw new Error(data.error || `HTTP ${response.status}`);
       }
 
-      const result = await response.json();
-      this._webhookId = result.id;
+      await response.json();
       this._isLoading = false;
       this.requestUpdate();
     } catch (error) {
@@ -144,21 +140,28 @@ export class CTWebhook extends BaseElement {
   }
 
   private async _handleDelete() {
-    if (!this._webhookId) return;
+    if (this._isLoading) return;
+
+    const configData = this._getConfig();
+    if (!configData?.url) return;
+
+    // Extract webhook ID from the config URL format: /api/webhooks/{id}
+    const webhookId = new URL(configData.url).pathname.split("/").pop();
+    if (!webhookId) return;
 
     this._isLoading = true;
     this._error = "";
 
     try {
       // Extract space DID from inbox cell link for ownership verification
-      const inboxLink = this.inbox?.toJSON?.();
+      const inboxLink = this.inbox?.toJSON?.() as any;
       const linkData = inboxLink?.["/"]?.["link@1"] ??
         inboxLink?.["/"]?.["link-v0.1"];
       const space = linkData?.space ?? "";
       const params = new URLSearchParams({ space });
 
       const response = await fetch(
-        `/api/webhooks/${this._webhookId}?${params}`,
+        `/api/webhooks/${webhookId}?${params}`,
         { method: "DELETE" },
       );
 
@@ -169,7 +172,6 @@ export class CTWebhook extends BaseElement {
 
       // Clear the config cell
       await this.config.set(null);
-      this._webhookId = "";
       this._isLoading = false;
     } catch (error) {
       this._error = error instanceof Error

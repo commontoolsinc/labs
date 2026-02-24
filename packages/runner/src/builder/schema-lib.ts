@@ -67,4 +67,5 @@ export const WebhookConfigSchema = {
       ifc: { classification: [ClassificationSecret] },
     },
   },
+  required: ["url", "secret"],
 } as const satisfies JSONSchema;

@@ -1,4 +1,9 @@
 // Design spec: docs/specs/webhook-ingress/README.md
+//
+// Auth note: The list and create endpoints are intentionally unauthed,
+// consistent with all other toolshed admin endpoints (google-oauth, plaid,
+// discord, patterns, etc.). When the platform adds HTTP-level auth
+// infrastructure, these endpoints should adopt it.
 import env from "@/env.ts";
 import type { AppRouteHandler } from "@/lib/types.ts";
 import type {
@@ -32,22 +37,8 @@ export const create: AppRouteHandler<CreateRoute> = async (c) => {
       name,
       cellLink,
       confidentialCellLink,
-      mode = "replace",
-    } = await c.req.json();
-
-    if (!name || !cellLink || !confidentialCellLink) {
-      return c.json(
-        {
-          error:
-            "Missing required fields: name, cellLink, confidentialCellLink",
-        },
-        400,
-      );
-    }
-
-    if (mode !== "replace" && mode !== "append") {
-      return c.json({ error: "Invalid mode: must be 'replace' or 'append'" }, 400);
-    }
+      mode,
+    } = c.req.valid("json");
 
     // Validate cellLink format and extract space
     let space: string;
@@ -198,8 +189,8 @@ export const remove: AppRouteHandler<RemoveRoute> = async (c) => {
 
     // Try to clean up the service index, but don't fail if cellLink is corrupted
     try {
-      const space = extractSpaceFromCellLink(registration.cellLink);
-      await removeFromServiceIndex(space, id);
+      const indexSpace = extractSpaceFromCellLink(registration.cellLink);
+      await removeFromServiceIndex(indexSpace, id);
     } catch {
       logger.warn(
         { id },
