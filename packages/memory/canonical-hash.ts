@@ -157,7 +157,8 @@ function feedObjectValue(
   }
 
   // 3. StorableInstance (generic protocol path via DECONSTRUCT).
-  // StorableDate falls through to here (hashed via typeTag + DECONSTRUCT).
+  // Temporal types (StorableEpochNsec, StorableEpochDays) and other instances
+  // fall through to here (hashed via typeTag + DECONSTRUCT).
   if (isStorableInstance(value)) {
     hasher.update(TAG_INSTANCE_BYTES);
     const typeTag = (value as { typeTag?: unknown }).typeTag;

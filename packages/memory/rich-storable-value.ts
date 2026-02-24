@@ -7,6 +7,7 @@ import type {
 import { isStorableInstance } from "./storable-protocol.ts";
 import {
   isConvertibleNativeInstance,
+  StorableEpochNsec,
   StorableError,
   UNSAFE_KEYS,
 } from "./storable-native-instances.ts";
@@ -41,6 +42,14 @@ export function toRichStorableValue(
   // Error instances are wrapped into StorableError.
   if (Error.isError(value)) {
     const wrapped = new StorableError(value);
+    if (freeze) Object.freeze(wrapped);
+    return wrapped;
+  }
+
+  // Date instances are converted to StorableEpochNsec (nanoseconds from epoch).
+  if (value instanceof Date) {
+    const nsec = BigInt(value.getTime()) * 1_000_000n;
+    const wrapped = new StorableEpochNsec(nsec);
     if (freeze) Object.freeze(wrapped);
     return wrapped;
   }

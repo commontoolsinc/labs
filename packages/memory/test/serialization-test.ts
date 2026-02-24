@@ -21,12 +21,18 @@ import { ProblematicStorable } from "../problematic-storable.ts";
 import {
   deepNativeValueFromStorableValue,
   nativeValueFromStorableValue,
+  StorableEpochDays,
+  StorableEpochNsec,
   StorableError,
   StorableMap,
   StorableSet,
 } from "../storable-native-instances.ts";
 import { FrozenMap, FrozenSet } from "../frozen-builtins.ts";
-import { canBeStored } from "../rich-storable-value.ts";
+import { canBeStored, toRichStorableValue } from "../rich-storable-value.ts";
+import {
+  resetExperimentalStorableConfig,
+  setExperimentalStorableConfig,
+} from "../storable-value.ts";
 
 /** Creates a standard test context (non-lenient) and a mock runtime. */
 function makeTestContext() {
@@ -408,6 +414,185 @@ describe("serialization", () => {
       expect(result).toBeInstanceOf(ProblematicStorable);
       const prob = result as unknown as ProblematicStorable;
       expect(prob.typeTag).toBe("BigInt@1");
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // StorableEpochNsec
+  // --------------------------------------------------------------------------
+
+  describe("StorableEpochNsec", () => {
+    it("serializes to /EpochNsec@1 with nested bigint", () => {
+      const { context } = makeTestContext();
+      const sn = new StorableEpochNsec(0n);
+      const result = serialize(sn as StorableValue, context) as Record<
+        string,
+        unknown
+      >;
+      expect(Object.keys(result)).toEqual(["/EpochNsec@1"]);
+      // The inner state is a serialized bigint: {"/BigInt@1": "AA"} for 0n
+      const inner = result["/EpochNsec@1"] as Record<string, unknown>;
+      expect(inner["/BigInt@1"]).toBe("AA");
+    });
+
+    it("round-trips at top level (epoch zero)", () => {
+      const sn = new StorableEpochNsec(0n);
+      const result = roundTrip(
+        sn as StorableValue,
+      ) as unknown as StorableEpochNsec;
+      expect(result).toBeInstanceOf(StorableEpochNsec);
+      expect(result.value).toBe(0n);
+    });
+
+    it("round-trips positive nanosecond timestamp", () => {
+      // 2024-01-01T00:00:00Z = 1704067200 seconds = 1704067200000000000 nsec
+      const nsec = 1704067200000000000n;
+      const sn = new StorableEpochNsec(nsec);
+      const result = roundTrip(
+        sn as StorableValue,
+      ) as unknown as StorableEpochNsec;
+      expect(result).toBeInstanceOf(StorableEpochNsec);
+      expect(result.value).toBe(nsec);
+    });
+
+    it("round-trips negative nanosecond timestamp (pre-epoch)", () => {
+      const nsec = -86400000000000n; // -1 day in nanoseconds
+      const sn = new StorableEpochNsec(nsec);
+      const result = roundTrip(
+        sn as StorableValue,
+      ) as unknown as StorableEpochNsec;
+      expect(result).toBeInstanceOf(StorableEpochNsec);
+      expect(result.value).toBe(nsec);
+    });
+
+    it("round-trips large future date", () => {
+      // Year 3000-ish
+      const nsec = 32503680000000000000n;
+      const sn = new StorableEpochNsec(nsec);
+      const result = roundTrip(
+        sn as StorableValue,
+      ) as unknown as StorableEpochNsec;
+      expect(result.value).toBe(nsec);
+    });
+
+    it("round-trips in nested structure", () => {
+      const obj = {
+        timestamp: new StorableEpochNsec(42000000000n),
+        label: "test",
+      } as unknown as StorableValue;
+      const result = roundTrip(obj) as Record<string, StorableValue>;
+      expect(result.label).toBe("test");
+      const ts = result.timestamp as unknown as StorableEpochNsec;
+      expect(ts).toBeInstanceOf(StorableEpochNsec);
+      expect(ts.value).toBe(42000000000n);
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // StorableEpochDays
+  // --------------------------------------------------------------------------
+
+  describe("StorableEpochDays", () => {
+    it("serializes to /EpochDays@1 with nested bigint", () => {
+      const { context } = makeTestContext();
+      const sd = new StorableEpochDays(0n);
+      const result = serialize(sd as StorableValue, context) as Record<
+        string,
+        unknown
+      >;
+      expect(Object.keys(result)).toEqual(["/EpochDays@1"]);
+      const inner = result["/EpochDays@1"] as Record<string, unknown>;
+      expect(inner["/BigInt@1"]).toBe("AA");
+    });
+
+    it("round-trips at top level (epoch zero)", () => {
+      const sd = new StorableEpochDays(0n);
+      const result = roundTrip(
+        sd as StorableValue,
+      ) as unknown as StorableEpochDays;
+      expect(result).toBeInstanceOf(StorableEpochDays);
+      expect(result.value).toBe(0n);
+    });
+
+    it("round-trips positive day count", () => {
+      const days = 19723n; // ~2024-01-01
+      const sd = new StorableEpochDays(days);
+      const result = roundTrip(
+        sd as StorableValue,
+      ) as unknown as StorableEpochDays;
+      expect(result).toBeInstanceOf(StorableEpochDays);
+      expect(result.value).toBe(days);
+    });
+
+    it("round-trips negative day count (pre-epoch)", () => {
+      const days = -365n;
+      const sd = new StorableEpochDays(days);
+      const result = roundTrip(
+        sd as StorableValue,
+      ) as unknown as StorableEpochDays;
+      expect(result).toBeInstanceOf(StorableEpochDays);
+      expect(result.value).toBe(days);
+    });
+
+    it("round-trips in nested structure", () => {
+      const obj = {
+        date: new StorableEpochDays(19723n),
+        label: "birthday",
+      } as unknown as StorableValue;
+      const result = roundTrip(obj) as Record<string, StorableValue>;
+      expect(result.label).toBe("birthday");
+      const d = result.date as unknown as StorableEpochDays;
+      expect(d).toBeInstanceOf(StorableEpochDays);
+      expect(d.value).toBe(19723n);
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Date -> StorableEpochNsec conversion
+  // --------------------------------------------------------------------------
+
+  describe("Date -> StorableEpochNsec conversion", () => {
+    it("converts Date(0) to StorableEpochNsec(0n)", () => {
+      setExperimentalStorableConfig({ richStorableValues: true });
+      try {
+        const date = new Date(0);
+        const result = toRichStorableValue(
+          date,
+        ) as unknown as StorableEpochNsec;
+        expect(result).toBeInstanceOf(StorableEpochNsec);
+        expect(result.value).toBe(0n);
+      } finally {
+        resetExperimentalStorableConfig();
+      }
+    });
+
+    it("converts Date to nanoseconds (msec * 1_000_000)", () => {
+      setExperimentalStorableConfig({ richStorableValues: true });
+      try {
+        const date = new Date("2024-01-01T00:00:00.000Z");
+        const result = toRichStorableValue(
+          date,
+        ) as unknown as StorableEpochNsec;
+        expect(result).toBeInstanceOf(StorableEpochNsec);
+        const expectedNsec = BigInt(date.getTime()) * 1_000_000n;
+        expect(result.value).toBe(expectedNsec);
+      } finally {
+        resetExperimentalStorableConfig();
+      }
+    });
+
+    it("converts negative Date to negative nanoseconds", () => {
+      setExperimentalStorableConfig({ richStorableValues: true });
+      try {
+        const date = new Date(-86400000); // -1 day
+        const result = toRichStorableValue(
+          date,
+        ) as unknown as StorableEpochNsec;
+        expect(result).toBeInstanceOf(StorableEpochNsec);
+        expect(result.value).toBe(-86400000000000n);
+      } finally {
+        resetExperimentalStorableConfig();
+      }
     });
   });
 
