@@ -10,9 +10,46 @@ import {
   writePidFile,
 } from "../lib/fuse.ts";
 
+const fuseDescription = `Mount Common Tools spaces as a FUSE filesystem.
+
+Spaces appear as directories at the mount root. Any space name you \`cd\`
+into is connected on demand — no need to specify spaces up front.
+
+FILESYSTEM LAYOUT:
+  <mountpoint>/
+    <space>/                    # one per connected space
+      pieces/
+        <piece-name>/           # each piece gets a directory
+          result/               # exploded JSON tree (dirs, files, symlinks)
+          result.json           # full JSON blob
+          input/
+          input.json
+          handlers/             # write-only: echo JSON to invoke
+          meta.json             # piece ID, entity, pattern name
+        .index.json             # name-to-entity-ID mapping
+      entities/                 # entity-hash symlinks -> ../pieces/<name>
+      space.json                # { did, name }
+    .spaces.json                # known space-name -> DID mapping
+
+READING:
+  ls <space>/pieces/                     # list pieces
+  cat <piece>/result.json                # full cell value as JSON
+  cat <piece>/result/title               # single scalar field
+  cat <piece>/result/items/0/name        # nested access
+
+WRITING:
+  echo '"new title"' > result/title      # write scalar (auto-detects type)
+  echo '{"a":1}' > result.json           # replace entire cell
+  echo '{"msg":"hi"}' > handlers/chat    # invoke a stream handler
+  touch result/newkey                    # create key (empty string)
+  rm result/oldkey                       # delete key
+  ln -s ../entities/<hash> result/ref    # create a sigil link
+
+Requires FUSE-T (preferred) or macFUSE on macOS.`;
+
 export const fuse = new Command()
   .name("fuse")
-  .description("Mount Common Tools spaces as a FUSE filesystem.")
+  .description(fuseDescription)
   .default("help")
   .globalEnv("CT_API_URL=<url:string>", "URL of the fabric instance.", {
     prefix: "CT_",
