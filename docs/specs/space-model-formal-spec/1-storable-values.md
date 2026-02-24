@@ -85,15 +85,19 @@ type StorableValue =
   | undefined // first-class storable; requires tagged representation in formats lacking native `undefined`
   | bigint    // large integers; rides through without wrapping (like `undefined`)
 
-  // (b) Branded storables (custom types implementing the storable protocol)
+  // (b) Temporal primitives (direct datum members, not StorableInstance)
+  | StorableEpochNsec
+  | StorableEpochDays
+
+  // (c) Branded storables (custom types implementing the storable protocol)
   //     This arm covers:
   //       - Native object wrappers: `StorableError`, `StorableMap`,
-  //         `StorableSet`, `StorableDate`, `StorableUint8Array` (Section 1.4)
+  //         `StorableSet`, `StorableUint8Array` (Section 1.4)
   //       - User-defined types: `Cell`, `Stream`, etc.
   //       - System types: `UnknownStorable`, `ProblematicStorable`
   | StorableInstance
 
-  // (c) Recursive containers
+  // (d) Recursive containers
   | StorableValue[]
   | { [key: string]: StorableValue };
 ```
@@ -163,7 +167,7 @@ member of `StorableValue` or `StorableDatum`.
 | `number` | Must be finite | `-0` normalized to `0`; `NaN`/`Infinity` rejected |
 | `string` | None | Unicode text |
 | `undefined` | None | First-class storable; see note below |
-| `bigint` | None | Large integers; see Section 5.3 for JSON encoding |
+| `bigint` | None | Large integers; JSON-encoded as base64 of two's complement big-endian bytes (Section 5.3) |
 
 > **`undefined` as a first-class storable.** `undefined` is a first-class
 > storable value that round-trips faithfully through serialization. Because most
@@ -191,7 +195,7 @@ member of `StorableValue` or `StorableDatum`.
 
 ### 1.4 Native Object Wrapper Classes
 
-Certain built-in JS types (`Error`, `Map`, `Set`, `Date`, `Uint8Array`) cannot
+Certain built-in JS types (`Error`, `Map`, `Set`, `Uint8Array`) cannot
 have `Symbol`-keyed methods added via prototype patching in a reliable,
 cross-realm way. Rather than handling them with special-case logic in the
 serializer, the system defines **wrapper classes** — one per native type — that
@@ -204,9 +208,15 @@ Because each wrapper genuinely implements `StorableInstance` (with real
 processes them through the same uniform `StorableInstance` path — no special
 cases needed in the serializer. The hashing system also uses the standard
 `TAG_INSTANCE` path for most wrappers, but optimizes `StorableUint8Array`
-with a dedicated `TAG_BYTES` tag for content-level identity (see
-Section 6.3). `StorableDate` is hashed via `TAG_INSTANCE` through its
-`[DECONSTRUCT]` method, like other `StorableInstance`s.
+with a dedicated `TAG_BYTES` tag for content-level identity (see Section 6.3).
+
+The temporal types (`StorableEpochNsec`, `StorableEpochDays`) are **not**
+`StorableInstance`s — they are direct members of `StorableDatum`, like `bigint`.
+They are simple value wrappers (constructor + `readonly value: bigint`) that the
+conversion layer creates from native `Date` objects. They have dedicated
+canonical hash tags (`TAG_EPOCH_NSEC`, `TAG_EPOCH_DAYS`) and dedicated
+`TypeHandler`s for wire format serialization, but they do not implement
+`[DECONSTRUCT]`, `[RECONSTRUCT]`, or carry a `typeTag` property.
 
 #### 1.4.1 Wrapper Class Summary
 
@@ -215,10 +225,9 @@ Section 6.3). `StorableDate` is hashed via `TAG_INSTANCE` through its
 | `StorableError` | `Error` | `Error@1` | `{ type, name, message, stack?, cause?, ...custom }` | `type` is the constructor name (e.g. `"TypeError"`). `name` is the `.name` property if it differs from `type`, or `null` if it matches (the common case). Includes `message`, `stack` (if present), `cause` (if present), and custom enumerable properties. The conversion layer (Section 8.2) recursively converts nested values (including `cause` and custom properties) before wrapping, ensuring all values are `StorableValue` when `[DECONSTRUCT]` runs. |
 | `StorableMap` | `Map` | `Map@1` | `[[key, value], ...]` | Entry pairs as an array of two-element arrays. Insertion order is preserved. Keys and values are recursively processed. |
 | `StorableSet` | `Set` | `Set@1` | `[value, ...]` | Elements as an array. Iteration order is preserved. Values are recursively processed. |
-| `StorableDate` | `Date` | `Date@1` | `string` (ISO 8601 UTC) | Deconstructed state is a string — the serializer recurses into it and finds a primitive. |
-| `StorableUint8Array` | `Uint8Array` | `Bytes@1` | `string` (base64-encoded) | Deconstructed state is a string. |
+| `StorableUint8Array` | `Uint8Array` | `Bytes@1` | `string` (unpadded base64; see Section 5.3) | Deconstructed state is a string. |
 
-Each wrapper class:
+Each wrapper class above:
 
 - **Implements `StorableInstance`** with a `[DECONSTRUCT]` method that extracts
   essential state from the wrapped native object.
@@ -230,6 +239,16 @@ Each wrapper class:
   serialization context for tag resolution, following the pattern established
   by `UnknownStorable` and `ProblematicStorable`.
 
+Unlike the wrappers above, `StorableEpochNsec` and `StorableEpochDays` are
+**direct members of `StorableDatum`** and do not implement `StorableInstance`.
+They are simple value wrappers with a constructor and a `readonly value: bigint`
+property. See Sections 1.4.5 and 1.4.6.
+
+| Direct Datum Type | Wraps | Wire Tag | Stored Value | Notes |
+|-------------------|-------|----------|--------------|-------|
+| `StorableEpochNsec` | `Date` | `EpochNsec@1` | `bigint` (signed nanoseconds from POSIX Epoch) | Primary temporal type. JS `Date` has only millisecond precision; conversion from `Date` multiplies by 10^6. When `Temporal` is available, `Temporal.Instant` maps naturally (it uses nanoseconds from epoch internally). |
+| `StorableEpochDays` | _(nascent)_ | `EpochDays@1` | `bigint` (signed days from POSIX Epoch) | Day-precision temporal type. Anticipates `Temporal.PlainDate`. Mostly nascent — class and spec entry are defined, but full integration (Temporal types, calendar concerns) is deferred. |
+
 #### Extra Enumerable Properties
 
 **`StorableError`** MAY carry extra enumerable properties beyond the standard
@@ -238,15 +257,15 @@ objects are common JavaScript practice (e.g., `error.code`, `error.statusCode`),
 so `StorableError` preserves them: `[DECONSTRUCT]` includes them in its output,
 and `[RECONSTRUCT]` restores them on the reconstructed `Error`.
 
-**`StorableMap`, `StorableSet`, `StorableDate`, `StorableUint8Array`** must NOT
-carry extra enumerable properties. Their `[DECONSTRUCT]` output contains only the
-essential native data (entries, items, timestamp, bytes respectively). Any extra
-enumerable properties on the source native object are **silently dropped** during
-conversion (Section 8.2) — the conversion layer does not copy them onto the
-wrapper. This matches the treatment of arrays, where extra non-index properties
-cause rejection (Section 1.5). The rationale is that unlike `Error`, the other
-native types have no established convention for custom properties, and preserving
-them would add complexity without clear use cases.
+**`StorableMap`, `StorableSet`, `StorableEpochNsec`, `StorableEpochDays`,
+`StorableUint8Array`** must NOT carry extra enumerable properties. Their
+stored value contains only the essential native data (entries, items,
+epoch value, bytes respectively). Extra enumerable properties on the source
+native object cause **rejection** — the conversion function throws. This follows
+the principle "Death before confusion!" (Mark Miller): it is better to fail
+loudly than to silently lose data. This matches the treatment of arrays, where
+extra non-index properties also cause rejection (Section 1.5). Unlike `Error`,
+these native types have no established convention for custom properties.
 
 #### 1.4.2 `StorableError`
 
@@ -377,28 +396,47 @@ export class StorableSet implements StorableInstance {
 }
 ```
 
-#### 1.4.5 `StorableDate`
+#### 1.4.5 `StorableEpochNsec`
 
 ```typescript
-export class StorableDate implements StorableInstance {
-  readonly typeTag = 'Date@1';
-
-  constructor(readonly date: Date) {}
-
-  [DECONSTRUCT](): StorableValue {
-    return this.date.toISOString();
-  }
-
-  static [RECONSTRUCT](
-    state: StorableValue,
-    _context: ReconstructionContext,
-  ): StorableDate {
-    return new StorableDate(new Date(state as string));
-  }
+/**
+ * Temporal type representing nanoseconds from the POSIX Epoch
+ * (1970-01-01T00:00:00Z). Direct member of `StorableDatum` (not a
+ * `StorableInstance`). This is the primary temporal type.
+ *
+ * JS `Date` has only millisecond precision, so conversion from `Date`
+ * multiplies by 10^6 (losing sub-millisecond information). When `Temporal`
+ * is available, `Temporal.Instant` maps naturally — it uses nanoseconds
+ * from epoch internally.
+ *
+ * The underlying value is a `bigint`, not a string. This avoids baking
+ * in any particular string representation (ISO 8601, etc.) and lets the
+ * serialization layer use the same bigint encoding as `BigInt@1`.
+ */
+export class StorableEpochNsec {
+  constructor(readonly value: bigint) {}
 }
 ```
 
-#### 1.4.6 `StorableUint8Array`
+#### 1.4.6 `StorableEpochDays`
+
+```typescript
+/**
+ * Temporal type representing days from the POSIX Epoch (1970-01-01).
+ * Direct member of `StorableDatum` (not a `StorableInstance`).
+ * Anticipates `Temporal.PlainDate`.
+ *
+ * Mostly nascent — the class and spec entry are defined, but full
+ * integration with Temporal types and calendar concerns is deferred.
+ *
+ * The underlying value is a `bigint`.
+ */
+export class StorableEpochDays {
+  constructor(readonly value: bigint) {}
+}
+```
+
+#### 1.4.7 `StorableUint8Array`
 
 ```typescript
 export class StorableUint8Array implements StorableInstance {
@@ -419,7 +457,7 @@ export class StorableUint8Array implements StorableInstance {
 }
 ```
 
-#### 1.4.7 `bigint` — Not Wrapped
+#### 1.4.8 `bigint` — Not Wrapped
 
 `bigint` is a JavaScript primitive (`typeof x === 'bigint'`), not an object. It
 rides through the `StorableValue` layer directly, like `undefined`. No
@@ -427,7 +465,7 @@ rides through the `StorableValue` layer directly, like `undefined`. No
 `bigint` with a dedicated handler (analogous to `UndefinedHandler`); see
 Section 4.5.
 
-#### 1.4.8 Design Notes
+#### 1.4.9 Design Notes
 
 > **Why wrapper classes instead of inline serializer branches?** Each wrapper
 > genuinely implements `StorableInstance`, so `isStorableInstance()` returns `true` for
@@ -443,7 +481,7 @@ Section 4.5.
 > native objects. Code that needs the underlying native type uses
 > `nativeValueFromStorableValue()` (Section 8) as a separate step.
 >
-> **File organization.** All five wrapper classes are expected to live in a
+> **File organization.** All six wrapper classes are expected to live in a
 > single file (e.g., `storable-native-wrappers.ts`), since each is small
 > (~30 lines) and they share the same imports.
 
@@ -549,9 +587,12 @@ export const RECONSTRUCT = Symbol.for('common.reconstruct');
  * no separate marker is needed.
  *
  * The native object wrapper classes (`StorableError`, `StorableMap`,
- * `StorableSet`, `StorableDate`, `StorableUint8Array`) implement this
- * interface, as do user-defined types (`Cell`, `Stream`) and system
- * types (`UnknownStorable`, `ProblematicStorable`).
+ * `StorableSet`, `StorableUint8Array`) implement this interface, as do
+ * user-defined types (`Cell`, `Stream`) and system types
+ * (`UnknownStorable`, `ProblematicStorable`).
+ *
+ * Note: `StorableEpochNsec` and `StorableEpochDays` are direct
+ * `StorableDatum` members and do NOT implement this interface.
  */
 export interface StorableInstance {
   /**
@@ -977,10 +1018,10 @@ export function serialize(
   context: SerializationContext,
 ): SerializedForm {
   // --- StorableInstance ---
-  // This arm handles ALL storable instances uniformly: user-defined types
+  // This arm handles all storable instances uniformly: user-defined types
   // (Cell, Stream), system types (UnknownStorable, ProblematicStorable),
-  // AND native object wrappers (StorableError, StorableMap, StorableSet,
-  // StorableDate, StorableUint8Array). No per-type branches needed.
+  // and native object wrappers (StorableError, StorableMap, StorableSet,
+  // StorableUint8Array).
   if (isStorableInstance(value)) {
     const state = value[DECONSTRUCT]();
     const tag = context.getTagFor(value);
@@ -991,8 +1032,26 @@ export function serialize(
   // --- `bigint` ---
   // A primitive that rides through `StorableValue` without wrapping (like
   // `undefined`). Needs a dedicated handler since JSON has no native bigint.
+  // The state is the unpadded base64 encoding of the value's minimal two's
+  // complement representation in big-endian byte order — the same byte format
+  // used by the canonical hash (Section 6.4).
   if (typeof value === 'bigint') {
-    return context.encode('BigInt@1', value.toString());
+    return context.encode('BigInt@1', base64Encode(bigintToTwosComplement(value)));
+  }
+
+  // --- StorableEpochNsec ---
+  // Direct StorableDatum member (not a StorableInstance). Encoded as flat
+  // base64 of the underlying bigint's minimal two's complement representation,
+  // same byte format as BigInt@1.
+  if (value instanceof StorableEpochNsec) {
+    return context.encode('EpochNsec@1', base64Encode(bigintToTwosComplement(value.value)));
+  }
+
+  // --- StorableEpochDays ---
+  // Direct StorableDatum member (not a StorableInstance). Same encoding as
+  // StorableEpochNsec but with a distinct wire tag.
+  if (value instanceof StorableEpochDays) {
+    return context.encode('EpochDays@1', base64Encode(bigintToTwosComplement(value.value)));
   }
 
   // --- `undefined` ---
@@ -1099,8 +1158,9 @@ export function deserialize(
     }
 
     // `BigInt@1`: validate and reconstruct a `bigint` primitive.
-    // Deserialization cannot assume type safety from the wire — the state
-    // must be validated before use. See Section 5.3 deserialization
+    // The state is unpadded base64 of minimal two's complement big-endian
+    // bytes. Deserialization cannot assume type safety from the wire — the
+    // state must be validated before use. See Section 5.3 deserialization
     // validation note.
     if (tag === 'BigInt@1') {
       if (typeof state !== 'string') {
@@ -1108,10 +1168,11 @@ export function deserialize(
           'BigInt@1 state must be a string');
       }
       try {
-        return BigInt(state);
+        const bytes = base64Decode(state);
+        return twosComplementToBigint(bytes);
       } catch {
         return new ProblematicStorable('BigInt@1', state as StorableValue,
-          'BigInt@1 state is not a valid integer representation');
+          'BigInt@1 state is not valid base64 or not a valid integer representation');
       }
     }
 
@@ -1269,6 +1330,12 @@ round-trip correctly.
 
 ### 5.3 Standard Type Encodings
 
+> **Base64 encoding convention.** All base64-encoded values in the JSON wire
+> format use the standard alphabet (`A-Za-z0-9+/`) and **must omit** trailing
+> `=` padding characters. Encoders must not emit padding; decoders must
+> **reject** input containing `=` padding characters. This convention applies
+> to `Bytes@1`, `BigInt@1`, `EpochNsec@1`, and `EpochDays@1` state values.
+
 ```typescript
 // file: packages/common/json-encoding.ts (illustrative -- tag-to-format map)
 
@@ -1309,30 +1376,51 @@ round-trip correctly.
 // Tag: "Set@1"
 // { "/Set@1": [value, ...] }
 
-// Binary data (base64-encoded)
+// Binary data (base64-encoded per the base64 convention above)
 // Tag: "Bytes@1"
 // { "/Bytes@1": string }
 
-// Dates (ISO 8601 UTC)
-// Tag: "Date@1"
-// { "/Date@1": string }
+// Epoch nanoseconds (bigint, encoded per BigInt@1 conventions)
+// Tag: "EpochNsec@1"
+// { "/EpochNsec@1": string }
+//
+// The state is the base64 encoding of the bigint value's minimal two's
+// complement representation in big-endian byte order — the same encoding
+// as BigInt@1.
 
-// BigInts (decimal string representation)
+// Epoch days (bigint, encoded per BigInt@1 conventions)
+// Tag: "EpochDays@1"
+// { "/EpochDays@1": string }
+//
+// Same encoding convention as EpochNsec@1 (base64 of two's complement
+// big-endian bytes).
+
+// BigInts (base64 of two's complement big-endian bytes; see convention above)
 // Tag: "BigInt@1"
 // { "/BigInt@1": string }
+//
+// The state is the base64 encoding of the value's minimal two's complement
+// representation in big-endian byte order. The minimum byte length is 1 —
+// even `0n` produces a single `0x00` byte. Examples:
+//   - `0n`  → single byte 0x00 → "AA"
+//   - `1n`  → 0x01             → "AQ"
+//   - `-1n` → 0xFF             → "/w"
+//   - `128n` → 0x00 0x80       → "AIA"  (leading 0x00 needed: 0x80 alone would decode as -128)
+//   - `-128n` → 0x80           → "gA"
+// This matches the canonical hash byte format (Section 6.4), which already
+// uses two's complement big-endian for BigInt payloads.
 ```
 
 > **Deserialization validation.** Deserialization cannot assume type safety from
 > the wire. Each type handler must validate the format of its state before
-> processing. For example, the `BigInt@1` handler must validate that its state
-> is a `string` (and a valid decimal integer representation) before calling
-> `BigInt(state)`. On malformed input — wrong type, invalid format, or missing
-> fields — the handler should produce a `ProblematicStorable` (Section 3.4)
-> rather than throwing or silently producing garbage. This principle applies to
-> all type handlers, not just `BigInt@1`: `Date@1` should validate its ISO 8601
-> string, `Bytes@1` should validate its base64 string, and so on. Wire data is
-> untrusted input. See Section 7.4 for the broader principle that applies to all
-> code consuming deserialized values.
+> processing. For example, a handler whose state is a base64 string (such as
+> `BigInt@1`, `EpochNsec@1`, `EpochDays@1`, or `Bytes@1`) must validate that
+> its state is a `string` containing valid unpadded base64 before decoding. On
+> malformed input — wrong type, invalid format, or missing fields — the handler
+> should produce a `ProblematicStorable` (Section 3.4) rather than throwing or
+> silently producing garbage. This principle applies to all type handlers. Wire
+> data is untrusted input. See Section 7.4 for the broader principle that
+> applies to all code consuming deserialized values.
 
 > **Sparse array encoding in JSON.** Even when an array contains holes, it is
 > serialized as a JSON array. Runs of consecutive holes are represented by
@@ -1497,6 +1585,8 @@ organized into three categories by high nibble:
 | `TAG_BIGINT`      | `0x24` | 36      | `bigint`                        |
 | `TAG_UNDEFINED`   | `0x25` | 37      | `undefined`                     |
 | `TAG_BYTES`       | `0x26` | 38      | `StorableUint8Array`            |
+| `TAG_EPOCH_NSEC`  | `0x27` | 39      | `StorableEpochNsec`             |
+| `TAG_EPOCH_DAYS`  | `0x28` | 40      | `StorableEpochDays`             |
 
 All unassigned values are reserved for future use. The category structure
 (meta/compound/primitive) is a convention for readability and is not enforced by
@@ -1528,9 +1618,9 @@ nibble range.
  * deduplication) specify which algorithm is used in that context.
  *
  * Output format depends on context. When a string representation is needed,
- * base64 with the standard alphabet (`A-Za-z0-9+/`) is recommended; padding
- * (`=`) may be omitted unless required for unambiguity in a given context.
- * When no stringification is needed, raw hash bytes are perfectly acceptable.
+ * base64 with the standard alphabet (`A-Za-z0-9+/`) and no `=` padding is
+ * the standard encoding (see Section 5.3, base64 convention). When no
+ * stringification is needed, raw hash bytes are perfectly acceptable.
  */
 export function canonicalHash(
   value: StorableValue,
@@ -1551,6 +1641,10 @@ export function canonicalHash(
   // - `undefined`:         hash(TAG_UNDEFINED)
   // - `StorableUint8Array`: hash(TAG_BYTES, leb128(byteLen), rawBytes)
   //                        (hashes the underlying byte content)
+  // - `StorableEpochNsec`: hash(TAG_EPOCH_NSEC, leb128(byteLen), twosComplementBytes)
+  //                        (same payload format as TAG_BIGINT but distinct tag)
+  // - `StorableEpochDays`: hash(TAG_EPOCH_DAYS, leb128(byteLen), twosComplementBytes)
+  //                        (same payload format as TAG_BIGINT but distinct tag)
   // - array:               hash(TAG_ARRAY, ...elements, TAG_END)
   //                        Elements are hashed in index order:
   //                          if `i in array`: canonicalHash(array[i])
@@ -1586,16 +1680,17 @@ export function canonicalHash(
   // - `StorableInstance`:  hash(TAG_INSTANCE, leb128(typeTagLen), typeTag,
   //                              canonicalHash(deconstructedState))
   //
-  // The native object wrappers are hashed as follows:
+  // The native object wrappers and temporal types are hashed as follows:
   //
-  // - `StorableError`, `StorableMap`, `StorableSet`, `StorableDate`, and
-  //   other `StorableInstance`s with recursively-processable deconstructed
+  // - `StorableError`, `StorableMap`, `StorableSet`, and other
+  //   `StorableInstance`s with recursively-processable deconstructed
   //   state are hashed via TAG_INSTANCE:
   //     hash(TAG_INSTANCE, leb128(typeTagLen), typeTag,
   //          canonicalHash(deconstructedState))
   //
-  // - `StorableUint8Array` is special-cased: it uses TAG_BYTES, matching
-  //   its logical content type rather than going through TAG_INSTANCE.
+  // - `StorableUint8Array` uses TAG_BYTES (dedicated primitive tag).
+  // - `StorableEpochNsec` uses TAG_EPOCH_NSEC (dedicated primitive tag).
+  // - `StorableEpochDays` uses TAG_EPOCH_DAYS (dedicated primitive tag).
   //
   // Examples:
   // - `StorableError`:      hash(TAG_INSTANCE, ..., "Error@1", canonicalHash(errorState))
@@ -1603,7 +1698,8 @@ export function canonicalHash(
   //                         where entries are hashed in insertion order
   // - `StorableSet`:        hash(TAG_INSTANCE, ..., "Set@1", canonicalHash(elements))
   //                         where elements are hashed in insertion order
-  // - `StorableDate`:       hash(TAG_INSTANCE, ..., "Date@1", canonicalHash(dateState))
+  // - `StorableEpochNsec`:  hash(TAG_EPOCH_NSEC, leb128(byteLen), twosComplementBytes)
+  // - `StorableEpochDays`:  hash(TAG_EPOCH_DAYS, leb128(byteLen), twosComplementBytes)
   // - `StorableUint8Array`: hash(TAG_BYTES, leb128(byteLen), rawBytes)
   //
   // Each type is tagged to prevent collisions between types with
@@ -1821,10 +1917,10 @@ export function toDeepStorableValue(
 | `null`, `boolean`, `number`, `string`, `undefined`, `bigint` | Returned as-is (primitives are `StorableValue` directly). `-0` is normalized to `0`. Non-finite numbers (`NaN`, `Infinity`) cause rejection. |
 | `StorableInstance` (including wrapper classes) | Returned as-is (already `StorableValue`). |
 | `Error` | Wrapped into `StorableError`. Before wrapping, `cause` and custom enumerable properties are recursively converted to `StorableValue` (deep variant) or left as-is (shallow variant). Extra enumerable properties are preserved (see Section 1.4.1). This ensures that by the time `StorableError.[DECONSTRUCT]` runs, all nested values are already valid `StorableValue`. |
-| `Map` | Wrapped into `StorableMap`. Keys and values are recursively converted (deep variant only). Extra enumerable properties on the `Map` object are silently dropped (see Section 1.4.1). |
-| `Set` | Wrapped into `StorableSet`. Elements are recursively converted (deep variant only). Extra enumerable properties on the `Set` object are silently dropped (see Section 1.4.1). |
-| `Date` | Wrapped into `StorableDate`. Extra enumerable properties on the `Date` object are silently dropped (see Section 1.4.1). |
-| `Uint8Array` | Wrapped into `StorableUint8Array`. Extra enumerable properties on the `Uint8Array` object are silently dropped (see Section 1.4.1). |
+| `Map` | Wrapped into `StorableMap`. Keys and values are recursively converted (deep variant only). Extra enumerable properties on the `Map` object cause **rejection** (throw) — it is better to fail loudly than silently lose data. |
+| `Set` | Wrapped into `StorableSet`. Elements are recursively converted (deep variant only). Extra enumerable properties on the `Set` object cause **rejection** (throw) — it is better to fail loudly than silently lose data. |
+| `Date` | Wrapped into `StorableEpochNsec`. The `Date`'s millisecond timestamp is converted to nanoseconds: `BigInt(date.getTime()) * 1_000_000n`. Note the millisecond precision limitation — sub-millisecond information is not available from `Date`. Extra enumerable properties on the `Date` object cause **rejection** (throw) — it is better to fail loudly than silently lose data. |
+| `Uint8Array` | Wrapped into `StorableUint8Array`. Extra enumerable properties on the `Uint8Array` object cause **rejection** (throw) — it is better to fail loudly than silently lose data. |
 | `Blob` | **Throws.** `Blob` content is only accessible via asynchronous methods (`arrayBuffer()`, `stream()`), so the synchronous conversion path cannot extract its bytes. Callers must convert a `Blob` to `Uint8Array` before passing it to `toStorableValue()`. A future async conversion path may accept `Blob` directly. |
 | `StorableValue[]` | Shallow: returned as-is (frozen if `freeze` is true). Deep: elements recursively converted (frozen at each level if `freeze` is true). |
 | `{ [key: string]: StorableValue }` | Shallow: returned as-is (frozen if `freeze` is true). Deep: values recursively converted (frozen at each level if `freeze` is true). |
@@ -1987,7 +2083,8 @@ etc.).
  * - `StorableError`      -> `Error` (original if freeze state matches; copy otherwise)
  * - `StorableMap`        -> `FrozenMap` / `Map` (original if freeze state matches; copy otherwise)
  * - `StorableSet`        -> `FrozenSet` / `Set` (original if freeze state matches; copy otherwise)
- * - `StorableDate`       -> `FrozenDate` / `Date` (original if freeze state matches; copy otherwise)
+ * - `StorableEpochNsec`  -> the bigint value (nanoseconds from POSIX Epoch)
+ * - `StorableEpochDays`  -> the bigint value (days from POSIX Epoch)
  * - `StorableUint8Array` -> `Blob` (when frozen) or original `Uint8Array` (when not)
  *
  * Non-wrapper `StorableInstance` values (`Cell`, `Stream`, `UnknownStorable`,
@@ -2003,9 +2100,10 @@ etc.).
  * value in the output matches the `frozen` argument. When `freeze` is `true`
  * (the default), `StorableMap` and `StorableSet` unwrap to `FrozenMap` and
  * `FrozenSet` respectively — effectively-immutable wrappers that expose
- * read-only interfaces and throw on mutation attempts. `StorableDate` unwraps
- * to `FrozenDate` — a `Date` subclass that overrides all `set*()` methods to
- * throw `TypeError`. `StorableUint8Array` unwraps to `Blob`, which is
+ * read-only interfaces and throw on mutation attempts. The temporal wrappers
+ * (`StorableEpochNsec`, `StorableEpochDays`) unwrap to their bigint values,
+ * which are inherently immutable primitives.
+ * `StorableUint8Array` unwraps to `Blob`, which is
  * inherently immutable (see rationale below). `StorableError` unwraps to a
  * frozen `Error`. This preserves the immutable-forward guarantee even in the
  * "JS wild west" layer. When `freeze` is `false`, mutable native types are
@@ -2014,8 +2112,8 @@ etc.).
  * **No defensive copying.** Wrappers return their internal reference directly
  * when the freeze state already matches. A new object is constructed only
  * when the type must change to satisfy the `frozen` argument (e.g., wrapping
- * a plain `Map` in `FrozenMap`, or copying a `FrozenDate` to a mutable
- * `Date`). The wrapper's purpose is to provide the storable interface, not to
+ * a plain `Map` in `FrozenMap`). The wrapper's purpose is to provide the
+ * storable interface, not to
  * act as a data firewall.
  */
 export function nativeValueFromStorableValue(
@@ -2041,7 +2139,8 @@ export function deepNativeValueFromStorableValue(
 | `StorableError` | `Error` (original if already frozen; frozen copy otherwise) | `Error` (original if already unfrozen; mutable copy otherwise) |
 | `StorableMap` | `FrozenMap` (original if already `FrozenMap`; new wrapper otherwise) | `Map` (original if already plain `Map`; mutable copy otherwise) |
 | `StorableSet` | `FrozenSet` (original if already `FrozenSet`; new wrapper otherwise) | `Set` (original if already plain `Set`; mutable copy otherwise) |
-| `StorableDate` | `FrozenDate` (original if already `FrozenDate`; new wrapper otherwise) | `Date` (original if already plain `Date`; mutable copy otherwise) |
+| `StorableEpochNsec` | `bigint` (the nanosecond value; inherently immutable) | `bigint` (same — primitives have no mutable/immutable distinction) |
+| `StorableEpochDays` | `bigint` (the day value; inherently immutable) | `bigint` (same) |
 | `StorableUint8Array` | `Blob` (inherently immutable; always new) | `Uint8Array` (original reference) |
 | Other `StorableInstance` | Passed through unchanged | Passed through unchanged |
 | Primitives | Passed through unchanged | Passed through unchanged |
@@ -2089,13 +2188,14 @@ with no storable wrappers at any depth. Without this recursion, an Error's
 > storable layer remains effectively immutable even after unwrapping. The exact
 > API of `FrozenMap` and `FrozenSet` is an implementation decision.
 
-> **Why `FrozenDate`?** `Object.freeze()` does not prevent mutation of `Date`
-> via its internal-slot methods — `setTime()`, `setFullYear()`, `setMonth()`,
-> etc. remain callable on a frozen instance. `FrozenDate` extends `Date` and
-> overrides all `set*()` methods to throw `TypeError`, making mutation
-> impossible while preserving the full read-only `Date` API (`getTime()`,
-> `toISOString()`, etc.). When `freeze` is `false`, a regular mutable `Date`
-> is returned instead.
+> **Why bigint for temporal unwrapping?** `StorableEpochNsec` and
+> `StorableEpochDays` unwrap to their raw `bigint` values rather than to
+> `Date` objects. This avoids precision loss (JS `Date` has only millisecond
+> precision, while epoch nanoseconds can represent sub-millisecond instants)
+> and bigint is an immutable primitive, so no freeze/thaw action is needed.
+> Callers who need a `Date` for interop can construct one from the nanosecond
+> value: `new Date(Number(epochNsec / 1_000_000n))` (with the caveat that
+> sub-millisecond precision is lost).
 
 > **Why `Blob` for frozen `Uint8Array`?** `Object.freeze()` does not prevent
 > mutation of typed array contents — the indexed elements of a `Uint8Array`
@@ -2127,7 +2227,8 @@ directly; when it differs, a new object is constructed. The **freeze state of
 the output always matches the `frozen` argument**: when `frozen` is `true` (the
 default), the output tree is fully frozen — arrays and plain objects are frozen
 via `Object.freeze()`, a mutable `Map` becomes a `FrozenMap`, a mutable `Set`
-becomes a `FrozenSet`, a `Date` becomes a `FrozenDate`, a `Uint8Array` becomes
+becomes a `FrozenSet`, temporal wrappers unwrap to their bigint values, a
+`Uint8Array` becomes
 a `Blob`, and `Error`s are frozen. When `frozen` is `false`, the output tree is
 fully mutable. The data content is preserved; the mutability matches the `frozen`
 argument.

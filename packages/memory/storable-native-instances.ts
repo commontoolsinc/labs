@@ -7,7 +7,7 @@ import {
   type StorableInstance,
 } from "./storable-protocol.ts";
 import { TAGS } from "./type-tags.ts";
-import { FrozenDate, FrozenMap, FrozenSet } from "./frozen-builtins.ts";
+import { FrozenMap, FrozenSet } from "./frozen-builtins.ts";
 
 // ---------------------------------------------------------------------------
 // Utility: native-instance type guard
@@ -17,7 +17,7 @@ import { FrozenDate, FrozenMap, FrozenSet } from "./frozen-builtins.ts";
  * Returns `true` if the value is a native JS object type that the storable
  * system knows how to wrap (Error, Map, Set, Date, Uint8Array). These are
  * the "wild-west" instances that get converted into `StorableNativeWrapper`
- * subclasses by the conversion layer.
+ * subclasses or `StorableInstance` types by the conversion layer.
  */
 export function isConvertibleNativeInstance(value: object): boolean {
   return (
@@ -102,7 +102,7 @@ function errorClassFromType(type: string): ErrorConstructor {
 
 /**
  * Abstract base class for `StorableInstance` wrappers that bridge native JS
- * objects (Error, Map, Set, Date, Uint8Array) into the `StorableValue` layer.
+ * objects (Error, Map, Set, Uint8Array) into the `StorableValue` layer.
  * Provides a common `toNativeValue()` method used by both the shallow and
  * deep unwrap functions, replacing their `instanceof` cascades with a single
  * `instanceof StorableNativeWrapper` check.
@@ -320,42 +320,29 @@ export class StorableSet extends StorableNativeWrapper<Set<StorableValue>> {
 }
 
 /**
- * Wrapper for `Date` instances. Stub -- `[DECONSTRUCT]` and `[RECONSTRUCT]`
- * throw until Date support is fully implemented. Extra properties beyond the
- * wrapped value are not supported on non-Error wrappers.
+ * Temporal type representing nanoseconds from the POSIX Epoch (1970-01-01T00:00:00Z).
+ * Wraps a `bigint` value. Used for high-precision timestamps. Direct member of
+ * `StorableDatum` (not a `StorableInstance`).
+ * See Section 1.4.5 of the formal spec.
  */
-export class StorableDate extends StorableNativeWrapper<Date> {
-  readonly typeTag = TAGS.Date;
-  constructor(readonly date: Date) {
-    super();
-  }
+export class StorableEpochNsec {
+  constructor(
+    /** Nanoseconds from POSIX Epoch. Negative values represent pre-epoch timestamps. */
+    readonly value: bigint,
+  ) {}
+}
 
-  /**
-   * Deconstruct to milliseconds-since-epoch for hashing and serialization.
-   * The canonical hash uses this via the generic `TAG_INSTANCE` path.
-   */
-  [DECONSTRUCT](): StorableValue {
-    return this.date.getTime();
-  }
-
-  protected get wrappedValue(): Date {
-    return this.date;
-  }
-
-  protected toNativeFrozen(): FrozenDate {
-    return new FrozenDate(this.date);
-  }
-
-  protected toNativeThawed(): Date {
-    return new Date(this.date.getTime());
-  }
-
-  static [RECONSTRUCT](
-    _state: StorableValue,
-    _context: ReconstructionContext,
-  ): StorableDate {
-    throw new Error("StorableDate: not yet implemented");
-  }
+/**
+ * Temporal type representing days from the POSIX Epoch (1970-01-01).
+ * Wraps a `bigint` value. Used for date-only (no time) values. Direct member of
+ * `StorableDatum` (not a `StorableInstance`).
+ * See Section 1.4.6 of the formal spec.
+ */
+export class StorableEpochDays {
+  constructor(
+    /** Days from POSIX Epoch. Negative values represent pre-epoch dates. */
+    readonly value: bigint,
+  ) {}
 }
 
 /**
@@ -425,6 +412,14 @@ export function nativeValueFromStorableValue(
     return value.toNativeValue(frozen);
   }
 
+  // Temporal types (StorableEpochNsec, StorableEpochDays) are simple value
+  // wrappers -- pass through as-is.
+  if (
+    value instanceof StorableEpochNsec || value instanceof StorableEpochDays
+  ) {
+    return value;
+  }
+
   // Primitives (null, undefined, boolean, number, string, bigint) are
   // inherently immutable -- no freeze adjustment needed.
   if (value === null || value === undefined || typeof value !== "object") {
@@ -488,9 +483,17 @@ export function deepNativeValueFromStorableValue(
     return deepUnwrapError(value.error, frozen);
   }
 
-  // Other native wrappers (Map, Set, Date, Uint8Array) -> native types.
+  // Other native wrappers (Map, Set, Uint8Array) -> native types.
   if (value instanceof StorableNativeWrapper) {
     return value.toNativeValue(frozen);
+  }
+
+  // Temporal types (StorableEpochNsec, StorableEpochDays) are simple value
+  // wrappers -- pass through as-is.
+  if (
+    value instanceof StorableEpochNsec || value instanceof StorableEpochDays
+  ) {
+    return value;
   }
 
   // Other StorableInstance (Cell, Stream, UnknownStorable, etc.) -- pass through.

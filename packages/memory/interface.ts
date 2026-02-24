@@ -1,6 +1,10 @@
 import type { Reference } from "merkle-reference";
 import type { JSONSchema, JSONValue } from "@commontools/api";
 import type { StorableInstance } from "./storable-protocol.ts";
+import type {
+  StorableEpochDays,
+  StorableEpochNsec,
+} from "./storable-native-instances.ts";
 
 export type SchemaPathSelector = {
   path: readonly string[];
@@ -27,10 +31,11 @@ export type StorableValue = StorableDatum | undefined;
  *
  *   JavaScript "wild west" (unknown) <-> StorableValue <-> Serialized (Uint8Array)
  *
- * Native JS object types (`Error`, `Map`, `Set`, `Date`, `Uint8Array`) are
- * NOT direct members. They enter the storable layer via wrapper classes
- * (e.g. `StorableError`) that implement `StorableInstance`. However, `bigint`
- * is a primitive and belongs directly in `StorableDatum` without wrapping.
+ * Most native JS object types (`Error`, `Map`, `Set`, `Uint8Array`) enter the
+ * storable layer via wrapper classes that implement `StorableInstance`. However,
+ * temporal types (`StorableEpochNsec`, `StorableEpochDays`) and `bigint` are
+ * direct members of `StorableDatum` without implementing `StorableInstance`.
+ * Native `Date` is converted to `StorableEpochNsec` during conversion.
  *
  * `undefined` is preserved when the `richStorableValues` flag is ON. When the
  * flag is OFF, `undefined` in arrays is converted to `null` and `undefined`
@@ -43,6 +48,9 @@ export type StorableDatum =
   | number
   | string
   | bigint
+  // -- Temporal primitives --
+  | StorableEpochNsec
+  | StorableEpochDays
   // -- Containers --
   | StorableArray
   | StorableObject
