@@ -13,6 +13,16 @@
 // ---------------------------------------------------------------------------
 
 /**
+ * Convert a hex digit char code to its 4-bit numeric value. Handles '0'-'9'
+ * (0x30-0x39) and 'a'-'f' (0x61-0x66). Used instead of `parseInt` for ~2x
+ * faster hex-to-byte conversion (see bigint-hashing-performance.md).
+ */
+function hexToNibble(c: number): number {
+  // '0'-'9' = 0x30-0x39, 'a'-'f' = 0x61-0x66
+  return c < 0x3a ? c - 0x30 : c - 0x57;
+}
+
+/**
  * Convert a bigint to its minimal two's-complement big-endian byte
  * representation. The encoding is the same one used by the canonical hash
  * byte-level spec (Section 3.7).
@@ -37,7 +47,7 @@ export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
     // Pad to even length.
     if (hex.length % 2 !== 0) hex = "0" + hex;
     // If high bit is set, prepend a zero byte to keep it positive.
-    if (parseInt(hex[0], 16) >= 8) hex = "00" + hex;
+    if (hexToNibble(hex.charCodeAt(0)) >= 8) hex = "00" + hex;
   } else {
     // For negative numbers, compute two's complement.
     const abs = -value;
@@ -49,8 +59,8 @@ export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
     // Two's complement of -abs is 2^n - abs where n is the byte-aligned size.
     let twos = (1n << BigInt(byteLen * 8)) - abs;
     // Verify the high bit is set (value must look negative).
-    const highNibble = parseInt(twos.toString(16)[0] || "0", 16);
-    if (highNibble < 8) {
+    const twosHex = twos.toString(16);
+    if (hexToNibble(twosHex.charCodeAt(0)) < 8) {
       // High bit not set -- need one more byte.
       byteLen++;
       twos = (1n << BigInt(byteLen * 8)) - abs;
@@ -62,7 +72,9 @@ export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
 
   const bytes = new Uint8Array(hex.length / 2);
   for (let i = 0; i < bytes.length; i++) {
-    bytes[i] = parseInt(hex.substring(i * 2, i * 2 + 2), 16);
+    const j = i * 2;
+    bytes[i] = (hexToNibble(hex.charCodeAt(j)) << 4) |
+      hexToNibble(hex.charCodeAt(j + 1));
   }
   return bytes;
 }
