@@ -60,8 +60,10 @@ export type NativeTag = typeof NATIVE_TAGS[keyof typeof NATIVE_TAGS];
  * type, or `null` otherwise.
  *
  * Uses a `switch` on the constructor identity for O(1) dispatch (instead of
- * sequential `instanceof` checks). Falls back to `Error.isError()` on the
- * constructor's prototype to catch exotic Error subclasses.
+ * sequential `instanceof` checks). Falls back to `instanceof Error` on the
+ * constructor's prototype to catch exotic Error subclasses. (Note:
+ * `Error.isError()` doesn't work on prototype objects -- it only recognizes
+ * actual Error instances, not the prototype chain -- so we use `instanceof`.)
  */
 export function tagFromNativeClass(
   constructorFn: Function,
@@ -87,9 +89,9 @@ export function tagFromNativeClass(
       return NATIVE_TAGS.Uint8Array;
 
     default:
-      // Catch exotic Error subclasses (e.g. DOMException, custom subclasses
-      // with non-standard constructors).
-      if (Error.isError(constructorFn.prototype)) return NATIVE_TAGS.Error;
+      // Catch exotic Error subclasses (e.g. custom subclasses with
+      // non-standard constructors).
+      if (constructorFn.prototype instanceof Error) return NATIVE_TAGS.Error;
       return null;
   }
 }

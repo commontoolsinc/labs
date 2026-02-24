@@ -9,6 +9,7 @@ import type { ReconstructionContext } from "../storable-protocol.ts";
 import type { StorableValue } from "../interface.ts";
 import {
   deepNativeValueFromStorableValue,
+  isConvertibleNativeInstance,
   nativeValueFromStorableValue,
   StorableEpochDays,
   StorableEpochNsec,
@@ -19,6 +20,11 @@ import {
   StorableUint8Array,
 } from "../storable-native-instances.ts";
 import { FrozenMap, FrozenSet } from "../frozen-builtins.ts";
+import {
+  NATIVE_TAGS,
+  tagFromNativeClass,
+  tagFromNativeValue,
+} from "../type-tags.ts";
 
 /** Dummy reconstruction context for tests. */
 const dummyContext: ReconstructionContext = {
@@ -690,6 +696,130 @@ describe("storable-native-instances", () => {
       };
       expect(result.outer.inner).toBeInstanceOf(Error);
       expect(result.outer.inner.message).toBe("nested");
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // tagFromNativeValue / tagFromNativeClass / isConvertibleNativeInstance
+  // --------------------------------------------------------------------------
+
+  describe("tagFromNativeValue", () => {
+    it("returns Error tag for standard Error subclasses", () => {
+      const cases: [string, Error][] = [
+        ["Error", new Error("test")],
+        ["TypeError", new TypeError("test")],
+        ["RangeError", new RangeError("test")],
+        ["SyntaxError", new SyntaxError("test")],
+        ["ReferenceError", new ReferenceError("test")],
+        ["URIError", new URIError("test")],
+        ["EvalError", new EvalError("test")],
+      ];
+      for (const [name, value] of cases) {
+        expect(tagFromNativeValue(value)).toBe(NATIVE_TAGS.Error);
+      }
+    });
+
+    it("returns Error tag for exotic Error subclass (custom class)", () => {
+      class MyFancyError extends Error {
+        constructor(msg: string) {
+          super(msg);
+          this.name = "MyFancyError";
+        }
+      }
+      const exotic = new MyFancyError("exotic");
+      // Constructor is MyFancyError, not in the switch -- falls back to
+      // Error.isError().
+      expect(tagFromNativeValue(exotic)).toBe(NATIVE_TAGS.Error);
+    });
+
+    it("returns Map tag for Map instances", () => {
+      expect(tagFromNativeValue(new Map())).toBe(NATIVE_TAGS.Map);
+    });
+
+    it("returns Set tag for Set instances", () => {
+      expect(tagFromNativeValue(new Set())).toBe(NATIVE_TAGS.Set);
+    });
+
+    it("returns Date tag for Date instances", () => {
+      expect(tagFromNativeValue(new Date())).toBe(NATIVE_TAGS.Date);
+    });
+
+    it("returns Uint8Array tag for Uint8Array instances", () => {
+      expect(tagFromNativeValue(new Uint8Array())).toBe(
+        NATIVE_TAGS.Uint8Array,
+      );
+    });
+
+    it("returns null for plain objects", () => {
+      expect(tagFromNativeValue({})).toBe(null);
+    });
+
+    it("returns null for arrays", () => {
+      expect(tagFromNativeValue([])).toBe(null);
+    });
+
+    it("returns null for RegExp", () => {
+      expect(tagFromNativeValue(/abc/)).toBe(null);
+    });
+  });
+
+  describe("tagFromNativeClass", () => {
+    it("returns Error tag for standard Error constructors", () => {
+      const constructors = [
+        Error,
+        TypeError,
+        RangeError,
+        SyntaxError,
+        ReferenceError,
+        URIError,
+        EvalError,
+      ];
+      for (const ctor of constructors) {
+        expect(tagFromNativeClass(ctor)).toBe(NATIVE_TAGS.Error);
+      }
+    });
+
+    it("returns Error tag for exotic Error subclass constructor", () => {
+      class ExoticError extends Error {}
+      // Constructor is ExoticError, not in the switch -- falls back to
+      // Error.isError(prototype) check.
+      expect(tagFromNativeClass(ExoticError)).toBe(NATIVE_TAGS.Error);
+    });
+
+    it("returns correct tags for Map, Set, Date, Uint8Array", () => {
+      expect(tagFromNativeClass(Map)).toBe(NATIVE_TAGS.Map);
+      expect(tagFromNativeClass(Set)).toBe(NATIVE_TAGS.Set);
+      expect(tagFromNativeClass(Date)).toBe(NATIVE_TAGS.Date);
+      expect(tagFromNativeClass(Uint8Array)).toBe(NATIVE_TAGS.Uint8Array);
+    });
+
+    it("returns null for unrecognized constructors", () => {
+      expect(tagFromNativeClass(RegExp)).toBe(null);
+      expect(tagFromNativeClass(WeakMap)).toBe(null);
+      expect(tagFromNativeClass(Promise)).toBe(null);
+    });
+  });
+
+  describe("isConvertibleNativeInstance", () => {
+    it("returns true for all convertible types", () => {
+      expect(isConvertibleNativeInstance(new Error("e"))).toBe(true);
+      expect(isConvertibleNativeInstance(new TypeError("e"))).toBe(true);
+      expect(isConvertibleNativeInstance(new Map())).toBe(true);
+      expect(isConvertibleNativeInstance(new Set())).toBe(true);
+      expect(isConvertibleNativeInstance(new Date())).toBe(true);
+      expect(isConvertibleNativeInstance(new Uint8Array())).toBe(true);
+    });
+
+    it("returns true for exotic Error subclass", () => {
+      class WeirdError extends RangeError {}
+      expect(isConvertibleNativeInstance(new WeirdError("weird"))).toBe(true);
+    });
+
+    it("returns false for non-convertible types", () => {
+      expect(isConvertibleNativeInstance({})).toBe(false);
+      expect(isConvertibleNativeInstance([])).toBe(false);
+      expect(isConvertibleNativeInstance(/abc/)).toBe(false);
+      expect(isConvertibleNativeInstance(new WeakMap())).toBe(false);
     });
   });
 });
