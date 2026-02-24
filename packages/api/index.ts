@@ -1728,16 +1728,6 @@ type IsDefaultField<T> = IsAny<T> extends true ? false
     : false
   : false;
 
-/**
- * Extract the default value type V from Default<T,V>.
- * When T is nullable (e.g. number | null), TypeScript's intersection
- * distributes null away: (number | null) & {[M]?: null} = number & {[M]?: null}.
- * Extracting V and unioning it back recovers the lost null.
- */
-type ExtractDefaultBrandValue<U> = U extends
-  { readonly [DEFAULT_MARKER]?: infer V } ? Exclude<V, undefined>
-  : never;
-
 /** Removes the DEFAULT_MARKER branded member from a `Default<T, V>` union, leaving plain `T`. */
 export type StripDefaultBrand<T> = Exclude<
   T,
