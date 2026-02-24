@@ -13,6 +13,7 @@ import { createHasher, type IncrementalHasher } from "./hash-impl.ts";
 import { StorableUint8Array } from "./storable-native-instances.ts";
 import { DECONSTRUCT, isStorableInstance } from "./storable-protocol.ts";
 import { encodeULEB128 } from "@commontools/leb128";
+import { bigintToMinimalTwosComplement } from "./bigint-encoding.ts";
 
 // ---------------------------------------------------------------------------
 // Type tag bytes (Section 2 of the byte-level spec)
@@ -73,54 +74,6 @@ const encoder = new TextEncoder();
 
 function feedLength(hasher: IncrementalHasher, value: number): void {
   hasher.update(encodeULEB128(value));
-}
-
-// ---------------------------------------------------------------------------
-// Helper: bigint to minimal two's-complement big-endian bytes
-// ---------------------------------------------------------------------------
-
-function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
-  if (value === 0n) {
-    return new Uint8Array([0]);
-  }
-
-  // Determine if negative.
-  const negative = value < 0n;
-
-  let hex: string;
-  if (!negative) {
-    hex = value.toString(16);
-    // Pad to even length.
-    if (hex.length % 2 !== 0) hex = "0" + hex;
-    // If high bit is set, prepend a zero byte to keep it positive.
-    if (parseInt(hex[0], 16) >= 8) hex = "00" + hex;
-  } else {
-    // For negative numbers, compute two's complement.
-    const abs = -value;
-    const absHex = abs.toString(16);
-    // Number of bits for the magnitude.
-    const bitLen = absHex.length * 4;
-    // We need enough bytes to represent the value, rounded up.
-    let byteLen = Math.ceil(bitLen / 8);
-    // Two's complement of -abs is 2^n - abs where n is the byte-aligned size.
-    let twos = (1n << BigInt(byteLen * 8)) - abs;
-    // Verify the high bit is set (value must look negative).
-    const highNibble = parseInt(twos.toString(16)[0] || "0", 16);
-    if (highNibble < 8) {
-      // High bit not set -- need one more byte.
-      byteLen++;
-      twos = (1n << BigInt(byteLen * 8)) - abs;
-    }
-    hex = twos.toString(16);
-    // Pad to exact byte length.
-    while (hex.length < byteLen * 2) hex = "0" + hex;
-  }
-
-  const bytes = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < bytes.length; i++) {
-    bytes[i] = parseInt(hex.substring(i * 2, i * 2 + 2), 16);
-  }
-  return bytes;
 }
 
 // ---------------------------------------------------------------------------

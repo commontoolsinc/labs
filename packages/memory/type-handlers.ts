@@ -10,6 +10,12 @@ import type { SerializedForm } from "./json-serialization-context.ts";
 import { UnknownStorable } from "./unknown-storable.ts";
 import { ProblematicStorable } from "./problematic-storable.ts";
 import { TAGS } from "./type-tags.ts";
+import {
+  bigintFromMinimalTwosComplement,
+  bigintToMinimalTwosComplement,
+  fromBase64,
+  toUnpaddedBase64,
+} from "./bigint-encoding.ts";
 
 /**
  * Interface for per-type serialize/deserialize handlers. Each handler knows
@@ -144,9 +150,13 @@ export const UndefinedHandler: TypeHandler = {
 };
 
 /**
- * Handler for `bigint`. Serializes to `TAGS.BigInt` tag with the string
- * representation as state (since JSON has no native bigint type).
- * Wire format: `{ "/BigInt@1": "12345" }`.
+ * Handler for `bigint`. Serializes to `TAGS.BigInt` tag with an unpadded
+ * base64 string encoding the bigint's two's-complement big-endian byte
+ * representation. Wire format: `{ "/BigInt@1": "<base64>" }`.
+ *
+ * The byte encoding is the same one used by the canonical hash (Section 3.7
+ * of the byte-level spec): minimal two's-complement big-endian, with sign
+ * extension as needed.
  */
 export const BigIntHandler: TypeHandler = {
   tag: TAGS.BigInt,
@@ -160,7 +170,9 @@ export const BigIntHandler: TypeHandler = {
     context: SerializationContext<SerializedForm>,
     _recurse: (v: StorableValue) => SerializedForm,
   ): SerializedForm {
-    return context.encode(TAGS.BigInt, String(value) as SerializedForm);
+    const bytes = bigintToMinimalTwosComplement(value as bigint);
+    const b64 = toUnpaddedBase64(bytes);
+    return context.encode(TAGS.BigInt, b64 as SerializedForm);
   },
 
   deserialize(
@@ -177,12 +189,13 @@ export const BigIntHandler: TypeHandler = {
       );
     }
     try {
-      return BigInt(state);
+      const bytes = fromBase64(state);
+      return bigintFromMinimalTwosComplement(bytes);
     } catch {
       return makeProblematic(
         TAGS.BigInt,
         state,
-        `bigint: invalid string: ${state}`,
+        `bigint: invalid base64: ${state}`,
       );
     }
   },
