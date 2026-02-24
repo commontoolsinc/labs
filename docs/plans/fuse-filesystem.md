@@ -146,16 +146,17 @@ hardcoded file. Validates that Deno FFI to libfuse works at all.
 
 **Goal:** `ct fuse mount/unmount/status` commands.
 
-- [ ] **3.1 CLI commands** — `packages/cli/commands/fuse.ts`
-  - [ ] `ct fuse mount <mountpoint> [--api-url, --identity, --foreground,
-    --debug, --read-only]`
-  - [ ] `ct fuse unmount <mountpoint>`
-  - [ ] `ct fuse status` (list active mounts)
-- [ ] **3.2 Process management**
-  - [ ] `--foreground`: run in current process (default for now)
-  - [ ] Background: spawn detached Deno process, PID file in
-    `~/.ct/fuse/<hash>.pid`
-  - [ ] `unmount`: SIGTERM + `fusermount -u` + cleanup
+- [x] **3.1 CLI commands** — `packages/cli/commands/fuse.ts`
+  - [x] `ct fuse mount <mountpoint> [--api-url, --identity, --space,
+    --background, --debug]`
+  - [x] `ct fuse unmount <mountpoint>`
+  - [x] `ct fuse status` (list active mounts)
+- [x] **3.2 Process management**
+  - [x] Foreground: run in current process (default), Ctrl+C propagates
+  - [x] Background (`--background`): spawn detached Deno process, PID file in
+    `~/.ct/fuse/<hash>.json`
+  - [x] `unmount`: SIGTERM + `umount`/`fusermount -u` fallback + cleanup
+  - [x] `mod.ts` reads `CT_API_URL`/`CT_IDENTITY` env var fallbacks
 
 ## Phase 4: Polish
 

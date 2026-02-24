@@ -49,9 +49,9 @@ async function main() {
     string: ["api-url", "space", "identity"],
     collect: ["space"],
     default: {
-      "api-url": "",
+      "api-url": Deno.env.get("CT_API_URL") ?? "",
       space: [] as string[],
-      identity: "",
+      identity: Deno.env.get("CT_IDENTITY") ?? "",
     },
   });
 
