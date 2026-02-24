@@ -241,13 +241,54 @@ describe("serialization", () => {
   // --------------------------------------------------------------------------
 
   describe("bigint", () => {
-    it("serializes to { '/BigInt@1': '<string>' }", () => {
+    it("serializes 42n to base64 of two's complement bytes", () => {
       const { context } = makeTestContext();
       const result = serialize(
         42n as StorableValue,
         context,
       );
-      expect(result).toEqual({ "/BigInt@1": "42" });
+      // 42n -> [0x2a] -> base64 "Kg"
+      expect(result).toEqual({ "/BigInt@1": "Kg" });
+    });
+
+    it("serializes 0n to base64 'AA'", () => {
+      const { context } = makeTestContext();
+      const result = serialize(0n as StorableValue, context);
+      // 0n -> [0x00] -> base64 "AA"
+      expect(result).toEqual({ "/BigInt@1": "AA" });
+    });
+
+    it("serializes -1n to base64 '/w'", () => {
+      const { context } = makeTestContext();
+      const result = serialize(-1n as StorableValue, context);
+      // -1n -> [0xFF] -> base64 "/w"
+      expect(result).toEqual({ "/BigInt@1": "/w" });
+    });
+
+    it("serializes 1n to base64 'AQ'", () => {
+      const { context } = makeTestContext();
+      const result = serialize(1n as StorableValue, context);
+      // 1n -> [0x01] -> base64 "AQ"
+      expect(result).toEqual({ "/BigInt@1": "AQ" });
+    });
+
+    it("serializes 128n with sign-extension byte", () => {
+      const { context } = makeTestContext();
+      const result = serialize(128n as StorableValue, context);
+      // 128n -> [0x00, 0x80] -> base64 "AIA"
+      expect(result).toEqual({ "/BigInt@1": "AIA" });
+    });
+
+    it("base64 output is unpadded (no trailing =)", () => {
+      const { context } = makeTestContext();
+      // 42n produces 1 byte -> 2 base64 chars (would be "Kg==" with padding)
+      const result = serialize(42n as StorableValue, context) as Record<
+        string,
+        string
+      >;
+      const b64 = result["/BigInt@1"];
+      expect(b64).toBe("Kg");
+      expect(b64).not.toContain("=");
     });
 
     it("round-trips at top level", () => {
@@ -265,10 +306,42 @@ describe("serialization", () => {
       expect(result).toBe(0n);
     });
 
+    it("round-trips 1n", () => {
+      const result = roundTrip(1n as StorableValue);
+      expect(result).toBe(1n);
+    });
+
+    it("round-trips -1n", () => {
+      const result = roundTrip(-1n as StorableValue);
+      expect(result).toBe(-1n);
+    });
+
     it("round-trips large bigint", () => {
       const big = 2n ** 64n;
       const result = roundTrip(big as StorableValue);
       expect(result).toBe(big);
+    });
+
+    it("round-trips large negative bigint", () => {
+      const big = -(2n ** 64n);
+      const result = roundTrip(big as StorableValue);
+      expect(result).toBe(big);
+    });
+
+    it("round-trips boundary value 127n", () => {
+      expect(roundTrip(127n as StorableValue)).toBe(127n);
+    });
+
+    it("round-trips boundary value 128n", () => {
+      expect(roundTrip(128n as StorableValue)).toBe(128n);
+    });
+
+    it("round-trips boundary value -128n", () => {
+      expect(roundTrip(-128n as StorableValue)).toBe(-128n);
+    });
+
+    it("round-trips boundary value -129n", () => {
+      expect(roundTrip(-129n as StorableValue)).toBe(-129n);
     });
 
     it("round-trips in arrays", () => {
@@ -296,9 +369,16 @@ describe("serialization", () => {
       expect(serializedNum).not.toEqual(serializedBig);
     });
 
+    it("deserializes padded base64 input (permissive)", () => {
+      const { context, runtime } = makeTestContext();
+      // "Kg==" is the padded form of "Kg" (42n)
+      const data = { "/BigInt@1": "Kg==" } as SerializedForm;
+      const result = deserialize(data, context, runtime);
+      expect(result).toBe(42n);
+    });
+
     it("deserializes non-string state to ProblematicStorable", () => {
       const { context, runtime } = makeTestContext();
-      // Manually construct a wire value with a non-string BigInt@1 state.
       const data = { "/BigInt@1": 42 } as SerializedForm;
       const result = deserialize(data, context, runtime);
       expect(result).toBeInstanceOf(ProblematicStorable);
@@ -321,14 +401,13 @@ describe("serialization", () => {
       expect(result).toBeInstanceOf(ProblematicStorable);
     });
 
-    it("deserializes invalid string state to ProblematicStorable", () => {
+    it("deserializes empty base64 string to ProblematicStorable", () => {
       const { context, runtime } = makeTestContext();
-      const data = { "/BigInt@1": "hello" } as SerializedForm;
+      const data = { "/BigInt@1": "" } as SerializedForm;
       const result = deserialize(data, context, runtime);
       expect(result).toBeInstanceOf(ProblematicStorable);
       const prob = result as unknown as ProblematicStorable;
       expect(prob.typeTag).toBe("BigInt@1");
-      expect(prob.state).toBe("hello");
     });
   });
 
