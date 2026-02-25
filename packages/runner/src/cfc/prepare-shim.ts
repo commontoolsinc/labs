@@ -1,5 +1,5 @@
-import { computeCfcActivityDigest } from "./activity-digest.ts";
 import { hasWriteActivity } from "./canonical-activity.ts";
+import { prepareBoundaryCommit } from "./prepare-engine.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 
 export function isCommitBearingAttempt(
@@ -17,6 +17,5 @@ export async function prepareCfcCommitIfNeeded(
   if (!tx.cfcRelevant) {
     return;
   }
-  const digest = await computeCfcActivityDigest(tx.journal.activity());
-  tx.markCfcPrepared(digest);
+  await prepareBoundaryCommit(tx);
 }

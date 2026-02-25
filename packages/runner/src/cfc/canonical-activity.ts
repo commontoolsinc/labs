@@ -1,4 +1,5 @@
 import type { Activity, Metadata } from "../storage/interface.ts";
+import { hasInternalVerifierReadMarker } from "./internal-markers.ts";
 
 export interface CanonicalBoundaryRead {
   readonly space: string;
@@ -79,7 +80,7 @@ export function canonicalizeBoundaryActivity(
         type: read.type,
         path: canonicalizeStoragePath(read.path),
         meta: read.meta ?? {},
-        internalVerifierRead: Boolean(read.meta?.internalVerifierRead),
+        internalVerifierRead: hasInternalVerifierReadMarker(read.meta),
       });
       continue;
     }
@@ -94,7 +95,10 @@ export function canonicalizeBoundaryActivity(
         changed: activityWriteChangedFlag(write),
       };
       attemptedWrites.push(canonicalWrite);
-      finalWriteByKey.set(finalAttemptedWriteKey(canonicalWrite), canonicalWrite);
+      finalWriteByKey.set(
+        finalAttemptedWriteKey(canonicalWrite),
+        canonicalWrite,
+      );
     }
   }
 

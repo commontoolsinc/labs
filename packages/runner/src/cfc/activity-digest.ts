@@ -1,5 +1,6 @@
 import type { Activity } from "../storage/interface.ts";
 import { canonicalizeStoragePath } from "./canonical-activity.ts";
+import { hasInternalVerifierReadMarker } from "./internal-markers.ts";
 
 type NormalizedEntry = {
   keyType: "string" | "symbol";
@@ -232,7 +233,7 @@ function normalizeActivity(
         type: read.type,
         path: canonicalizeStoragePath(read.path),
         meta: normalizeUnknown(read.meta ?? {}, state),
-        internalVerifierRead: Boolean(read.meta?.internalVerifierRead),
+        internalVerifierRead: hasInternalVerifierReadMarker(read.meta),
       });
       continue;
     }

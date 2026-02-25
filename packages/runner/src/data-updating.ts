@@ -33,6 +33,7 @@ import { type Runtime } from "./runtime.ts";
 import { toURI } from "./uri-utils.ts";
 import { markReadAsPotentialWrite } from "./scheduler.ts";
 import { markCfcRelevantForSchema } from "./cfc/relevance.ts";
+import { recordCfcWriteSchemaContext } from "./cfc/schema-context.ts";
 
 const diffLogger = getLogger("normalizeAndDiff", {
   enabled: false,
@@ -65,6 +66,8 @@ export function diffAndUpdate(
   context?: unknown,
   options?: IReadOptions,
 ): boolean {
+  recordCfcWriteSchemaContext(tx, link, link.schema);
+
   const readOptions: IReadOptions = {
     ...options,
     meta: { ...options?.meta, ...markReadAsPotentialWrite },
