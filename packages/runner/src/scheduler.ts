@@ -26,12 +26,16 @@ import {
 } from "./link-utils.ts";
 import type {
   ChangeGroup,
+  CommitError,
   IExtendedStorageTransaction,
+  IStorageTransactionAborted,
   IMemorySpaceAddress,
   IStorageSubscription,
   MediaType,
   MemoryAddressPathComponent,
   Metadata,
+  Result,
+  Unit,
 } from "./storage/interface.ts";
 import {
   addressesToPathByEntity,
@@ -41,6 +45,11 @@ import {
   type SortedAndCompactPaths,
 } from "./reactive-dependencies.ts";
 import { ensurePieceRunning } from "./ensure-piece-running.ts";
+import {
+  isCommitBearingAttempt,
+  prepareCfcCommitIfNeeded,
+} from "./cfc/prepare-shim.ts";
+import { markCfcHandlerTransaction } from "./cfc/handler-transaction.ts";
 import type {
   ActionStats,
   SchedulerActionInfo,
@@ -720,7 +729,7 @@ export class Scheduler {
           // retry logic below will have re-scheduled this action, so
           // topological sorting should move it before the dependencies.
           logger.timeStart("scheduler", "run", "commit");
-          const commitPromise = tx.commit();
+          const commitPromise = commitWithCfcPrepare(tx);
           logger.timeEnd("scheduler", "run", "commit");
           commitPromise.then(({ error }) => {
             // On error, retry up to MAX_RETRIES_FOR_REACTIVE times. Note that
@@ -2093,60 +2102,60 @@ export class Scheduler {
         // Continue to process pending actions
         // The event will be processed in the next execute() cycle
       } else {
-        const finalize = (error?: unknown) => {
+        const finalize = async (error?: unknown): Promise<void> => {
           try {
             if (error) this.handleError(error as Error, action);
           } finally {
-            tx.commit().then(({ error }) => {
-              // If the transaction failed, and we have retries left, queue the
-              // event again at the beginning of the queue. This isn't guaranteed
-              // to be the same order as the original event, but it's close
-              // enough, especially for a series of event that act on the same
-              // conflicting data.
-              if (error && retriesLeft > 0) {
-                logger.warn(
-                  "scheduler",
-                  `Event handler transaction failed, retrying (${retriesLeft} retries left)`,
-                  { error, handlerId },
+            const { error: commitError } = await commitWithCfcPrepare(tx);
+            // If the transaction failed, and we have retries left, queue the
+            // event again at the beginning of the queue. This isn't guaranteed
+            // to be the same order as the original event, but it's close
+            // enough, especially for a series of event that act on the same
+            // conflicting data.
+            if (commitError && retriesLeft > 0) {
+              logger.warn(
+                "scheduler",
+                `Event handler transaction failed, retrying (${retriesLeft} retries left)`,
+                { error: commitError, handlerId },
+              );
+              this.eventQueue.unshift({
+                action,
+                handler,
+                event: eventValue,
+                retriesLeft: retriesLeft - 1,
+                onCommit,
+              });
+              // Ensure the re-queued event gets processed even if the scheduler
+              // finished this cycle before the commit completed.
+              this.queueExecution();
+            } else {
+              if (commitError) {
+                logger.error(
+                  "schedule-error",
+                  "Event handler transaction failed after exhausting all retries",
+                  { error: commitError, handlerId },
                 );
-                this.eventQueue.unshift({
-                  action,
-                  handler,
-                  event: eventValue,
-                  retriesLeft: retriesLeft - 1,
-                  onCommit,
-                });
-                // Ensure the re-queued event gets processed even if the scheduler
-                // finished this cycle before the commit completed.
-                this.queueExecution();
-              } else {
-                if (error) {
+              }
+              if (onCommit) {
+                // Call commit callback when:
+                // - Commit succeeds (!commitError), OR
+                // - Commit fails but we're out of retries (retriesLeft === 0)
+                try {
+                  onCommit(tx);
+                } catch (callbackError) {
                   logger.error(
                     "schedule-error",
-                    "Event handler transaction failed after exhausting all retries",
-                    { error, handlerId },
+                    "Error in event commit callback:",
+                    callbackError,
                   );
                 }
-                if (onCommit) {
-                  // Call commit callback when:
-                  // - Commit succeeds (!error), OR
-                  // - Commit fails but we're out of retries (retriesLeft === 0)
-                  try {
-                    onCommit(tx);
-                  } catch (callbackError) {
-                    logger.error(
-                      "schedule-error",
-                      "Error in event commit callback:",
-                      callbackError,
-                    );
-                  }
-                }
               }
-            });
+            }
           }
         };
         const tx = this.runtime.edit();
         tx.tx.immediate = true;
+        markCfcHandlerTransaction(tx);
         const actionId = this.getActionId(action);
 
         try {
@@ -2163,11 +2172,11 @@ export class Scheduler {
                 `Action ${actionId} completed in ${duration.toFixed(3)}s`,
               ];
             });
-            finalize();
+            return finalize();
           }).catch((error) => finalize(error));
           await this.runningPromise;
         } catch (error) {
-          finalize(error);
+          await finalize(error);
         }
       } // Close else block for shouldSkipEvent
     }
@@ -2661,6 +2670,35 @@ export function txToReactivityLog(
     }
   }
   return log;
+}
+
+function transactionAbortedFromError(
+  error: unknown,
+): IStorageTransactionAborted {
+  return {
+    name: "StorageTransactionAborted",
+    message: "Transaction was aborted",
+    reason: error,
+  };
+}
+
+function commitWithCfcPrepare(
+  tx: IExtendedStorageTransaction,
+): Promise<Result<Unit, CommitError>> {
+  if (!tx.cfcRelevant || !isCommitBearingAttempt(tx)) {
+    return tx.commit();
+  }
+
+  return prepareCfcCommitIfNeeded(tx)
+    .then(() => tx.commit())
+    .catch((error) => {
+      tx.abort(error);
+      const status = tx.status();
+      if (status.status === "error") {
+        return { error: status.error as CommitError };
+      }
+      return { error: transactionAbortedFromError(error) };
+    });
 }
 
 function getPieceMetadataFromFrame(frame?: Frame): {

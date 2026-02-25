@@ -546,6 +546,11 @@ export interface IStorageTransaction {
 
 export interface IExtendedStorageTransaction extends IStorageTransaction {
   tx: IStorageTransaction;
+  readonly cfcRelevant: boolean;
+  readonly cfcPrepared: boolean;
+  readonly preparedActivityDigest?: string;
+  readonly cfcReasons: readonly string[];
+  readonly cfcOutboxSize: number;
 
   /**
    * Add a callback to be called when the transaction commit completes.
@@ -610,6 +615,14 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
     address: IMemorySpaceAddress,
     value: StorableValue,
   ): void;
+
+  markCfcRelevant(reason: string): void;
+
+  markCfcPrepared(digest: string): void;
+
+  invalidateCfcPreparation(): void;
+
+  enqueueCfcSideEffect(effect: () => void): void;
 }
 
 export interface ITransactionReader {
@@ -707,6 +720,16 @@ export interface IStorageTransactionInconsistent extends IStorageError {
   from(space: MemorySpace): IStorageTransactionInconsistent;
 }
 
+export interface ICfcPrepareRequiredError extends IStorageError {
+  readonly name: "CfcPrepareRequiredError";
+}
+
+export interface ICfcPreparedDigestMismatchError extends IStorageError {
+  readonly name: "CfcPreparedDigestMismatchError";
+  readonly expectedDigest: string;
+  readonly actualDigest: string;
+}
+
 /**
  * Error that indicating that no change could be made to a transaction is it is
  * no longer active.
@@ -729,7 +752,9 @@ export type StorageTransactionRejected =
 
 export type CommitError =
   | InactiveTransactionError
-  | StorageTransactionRejected;
+  | StorageTransactionRejected
+  | ICfcPrepareRequiredError
+  | ICfcPreparedDigestMismatchError;
 
 /**
  * Error returned when a read or write operation fails because the intra-value

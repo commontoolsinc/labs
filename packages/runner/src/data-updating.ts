@@ -32,6 +32,7 @@ import type {
 import { type Runtime } from "./runtime.ts";
 import { toURI } from "./uri-utils.ts";
 import { markReadAsPotentialWrite } from "./scheduler.ts";
+import { markCfcRelevantForSchema } from "./cfc/relevance.ts";
 
 const diffLogger = getLogger("normalizeAndDiff", {
   enabled: false,
@@ -125,6 +126,7 @@ export function normalizeAndDiff(
   // Log entry with value type and symbol presence
   const valueType = Array.isArray(newValue) ? "array" : typeof newValue;
   const pathStr = link.path.join(".");
+  markCfcRelevantForSchema(tx, link.schema, "ifc-write-schema");
   diffLogger.debug(
     "diff",
     () =>

@@ -17,6 +17,7 @@ import {
   isCellResultForDereferencing,
 } from "./query-result-proxy.ts";
 import { toCell } from "./back-to-cell.ts";
+import { markCfcRelevantForSchema } from "./cfc/relevance.ts";
 import {
   combineSchema,
   IObjectCreator,
@@ -414,6 +415,7 @@ export function validateAndTransform(
   // We'll use this for the value, and potentially merge the schema
   // This gets me the result of following all the links, so I can get the value
   const ref = resolveLink(runtime, tx, link);
+  markCfcRelevantForSchema(tx, ref.schema ?? link.schema, "ifc-read-schema");
   const objectCreator = new TransformObjectCreator(
     runtime,
     tx!,
