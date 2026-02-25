@@ -16,7 +16,18 @@ import {
   type WishState,
   Writable,
 } from "commontools";
-import { bash, fetchAndRunPattern, listPatternIndex } from "./common-tools.tsx";
+import {
+  bash,
+  fetchAndRunPattern,
+  listMentionable,
+  listPatternIndex,
+  listRecent,
+} from "./common-tools.tsx";
+import {
+  searchPattern as summarySearchPattern,
+  type SummaryIndexEntry,
+} from "./summary-index.tsx";
+import { type MentionablePiece } from "./backlinks-index.tsx";
 
 const triggerGeneration = handler<
   unknown,
@@ -77,6 +88,13 @@ export default pattern<
   // --- LLM state (freeform query path) ---
   const profile = wish<string>({ query: "#profile" });
 
+  const mentionable =
+    wish<MentionablePiece[]>({ query: "#mentionable" }).result;
+  const recentPieces = wish<MentionablePiece[]>({ query: "#recent" }).result;
+  const { entries: summaryEntries } = wish<{
+    entries: SummaryIndexEntry[];
+  }>({ query: "#summaryIndex" }).result;
+
   const profileContext = computed(() => {
     const profileText = profile.result;
     return profileText ? `\n\n--- User Context ---\n${profileText}\n---` : "";
@@ -88,9 +106,16 @@ export default pattern<
 
   const systemPrompt = computed(() => {
     const profileCtx = profileContext;
-    return `Find a useful pattern, run it, then call presentResult with the cell link.${profileCtx}
+    return `You help users by finding relevant content and patterns.${profileCtx}
 
-    Your textual responses are invisible to the user, they can only see the presented result.
+Your textual responses are invisible to the user — they can only see the presented result.
+
+Strategy:
+1. First, search the space for existing relevant content using searchSpace
+2. If you find something useful, call presentResult with it directly
+3. If nothing exists, check listPatternIndex for patterns that could help
+4. Use fetchAndRunPattern to instantiate a pattern, optionally with existing data as context
+5. Call presentResult with the final cell link
 
 Use the user context above to personalize your suggestions when relevant.`;
   });
@@ -109,6 +134,11 @@ Use the user context above to personalize your suggestions when relevant.`;
       fetchAndRunPattern: patternTool(fetchAndRunPattern),
       listPatternIndex: patternTool(listPatternIndex),
       bash: patternTool(bash, { sandboxId }),
+      searchSpace: patternTool(summarySearchPattern, {
+        entries: summaryEntries,
+      }),
+      listMentionable: patternTool(listMentionable, { mentionable }),
+      listRecent: patternTool(listRecent, { recentPieces }),
     },
     model: "anthropic:claude-sonnet-4-5",
     context,
