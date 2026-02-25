@@ -44,6 +44,7 @@ export class PatternContextValidationTransformer extends Transformer {
   transform(context: TransformationContext): ts.SourceFile {
     const checker = context.checker;
     const analyze = createDataFlowAnalyzer(checker);
+    const useLegacy = context.options.useLegacyOpaqueRefSemantics ?? false;
 
     const visit = (node: ts.Node): ts.Node => {
       // Skip JSX - OpaqueRefJSXTransformer handles those
@@ -69,7 +70,11 @@ export class PatternContextValidationTransformer extends Transformer {
       // Note: isInRestrictedReactiveContext returns false for JSX expressions
       // (they are handled by OpaqueRefJSXTransformer), so this won't flag
       // optional chaining inside JSX like <div>{user?.name}</div>
-      if (ts.isPropertyAccessExpression(node) && node.questionDotToken) {
+      if (
+        useLegacy &&
+        ts.isPropertyAccessExpression(node) &&
+        node.questionDotToken
+      ) {
         if (isInRestrictedReactiveContext(node, checker)) {
           context.reportDiagnostic({
             severity: "error",
@@ -114,7 +119,7 @@ export class PatternContextValidationTransformer extends Transformer {
 
       // Check for property access used in computation (not just pass-through)
       // This applies to expressions in binary operators, conditionals, etc.
-      if (this.isComputationExpression(node)) {
+      if (useLegacy && this.isComputationExpression(node)) {
         this.validateComputationExpression(node, context, checker, analyze);
       }
 

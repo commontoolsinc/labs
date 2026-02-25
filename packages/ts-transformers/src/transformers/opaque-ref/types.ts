@@ -1,6 +1,7 @@
 import ts from "typescript";
 
 import type { DataFlowAnalysis, NormalizedDataFlowSet } from "../../ast/mod.ts";
+import type { ReactiveContextKind } from "../../ast/mod.ts";
 import { TransformationContext } from "../../core/mod.ts";
 
 export type OpaqueRefHelperName =
@@ -17,6 +18,10 @@ export interface RewriteParams {
   readonly context: TransformationContext;
   readonly analyze: AnalyzeFn;
   /**
+   * Effective reactive context at the rewrite site.
+   */
+  readonly reactiveContextKind?: ReactiveContextKind;
+  /**
    * True when inside a safe callback wrapper (action, handler, computed, etc.)
    * where opaque reading is allowed. In safe contexts, we still need to apply
    * semantic transformations (&&->when, ||->unless) but NOT derive() wrappers.
@@ -27,6 +32,7 @@ export interface RewriteParams {
 export interface EmitterContext extends RewriteParams {
   readonly dataFlows: NormalizedDataFlowSet;
   readonly inSafeContext: boolean;
+  readonly reactiveContextKind: ReactiveContextKind;
   rewriteChildren(node: ts.Expression): ts.Expression;
 }
 

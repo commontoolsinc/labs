@@ -1,7 +1,12 @@
 export { type CallKind, detectCallKind } from "./call-kind.ts";
 export * from "./dataflow.ts";
 export {
+  classifyReactiveContext,
   findEnclosingCallbackContext,
+  type ReactiveContextInfo,
+  type ReactiveContextKind,
+  type ReactiveContextLookup,
+  type ReactiveContextOwner,
   isInRestrictedReactiveContext,
   isInsideRestrictedContext,
   isInsideSafeCallbackWrapper,

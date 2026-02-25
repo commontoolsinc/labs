@@ -12,6 +12,7 @@ import {
   selectDataFlowsReferencedIn,
 } from "../../../ast/mod.ts";
 import { isOpaqueRefType, isSimpleOpaqueRefAccess } from "../opaque-ref.ts";
+import { shouldLowerLogicalInJsx } from "../../../policy/mod.ts";
 
 /**
  * Check if an expression is JSX (element, fragment, or self-closing).
@@ -34,8 +35,13 @@ export const emitBinaryExpression: Emitter = ({
   context,
   rewriteChildren,
   inSafeContext,
+  reactiveContextKind,
 }) => {
   if (!ts.isBinaryExpression(expression)) return undefined;
+  const operator = expression.operatorToken.kind;
+  const useLegacySemantics = context.options.useLegacyOpaqueRefSemantics;
+  const shouldLowerByContextPolicy = !useLegacySemantics &&
+    shouldLowerLogicalInJsx(reactiveContextKind, operator);
 
   // Check if the left side of && or || has an OpaqueRef type.
   // This is important for cases like `computed(() => plainValue) && <JSX>`
@@ -45,7 +51,13 @@ export const emitBinaryExpression: Emitter = ({
   const leftIsOpaqueRef = isOpaqueRefType(leftType, context.checker);
 
   // Skip if no dataflows AND left side isn't an OpaqueRef type
-  if (dataFlows.all.length === 0 && !leftIsOpaqueRef) return undefined;
+  if (
+    dataFlows.all.length === 0 &&
+    !leftIsOpaqueRef &&
+    !shouldLowerByContextPolicy
+  ) {
+    return undefined;
+  }
 
   // Optimize && operator: convert to when instead of wrapping entire expression in derive
   // Example: showPanel && <Panel/>
@@ -57,7 +69,12 @@ export const emitBinaryExpression: Emitter = ({
   //
   // If the right side is simple (not JSX, no reactive deps), using when/unless is just
   // overhead - better to wrap the whole expression in derive.
-  if (expression.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken) {
+  if (operator === ts.SyntaxKind.AmpersandAmpersandToken) {
+    if (!useLegacySemantics && !shouldLowerByContextPolicy) {
+      // New policy: outside pattern context we do not lower && in JSX.
+      if (inSafeContext) return undefined;
+    }
+
     const leftDataFlows = selectDataFlowsReferencedIn(
       dataFlows,
       expression.left,
@@ -72,12 +89,10 @@ export const emitBinaryExpression: Emitter = ({
     const rightNeedsDerive = rightDataFlows.length > 0 &&
       !isSimpleOpaqueRefAccess(expression.right, context.checker);
     const rightIsExpensive = rightIsJsx || rightNeedsDerive;
+    const shouldLower = shouldLowerByContextPolicy ||
+      (useLegacySemantics && (rightIsExpensive || leftIsOpaqueRef));
 
-    // Use when() transformation if:
-    // 1. Right side is expensive (JSX or needs derive) - original optimization
-    // 2. OR left side is an OpaqueRef type - needed because OpaqueRefs are always truthy objects
-    //    so `computed(...) && <JSX>` would always render without when()
-    if (rightIsExpensive || leftIsOpaqueRef) {
+    if (shouldLower) {
       // Process left side - derive if it has reactive deps, otherwise pass as-is
       let condition: ts.Expression = expression.left;
       if (leftDataFlows.length > 0) {
@@ -128,7 +143,12 @@ export const emitBinaryExpression: Emitter = ({
   // Becomes: unless(value, <Fallback/>) or unless(derive(condition), <Fallback/>)
   //
   // Same rationale as &&: only beneficial when right side is expensive.
-  if (expression.operatorToken.kind === ts.SyntaxKind.BarBarToken) {
+  if (operator === ts.SyntaxKind.BarBarToken) {
+    if (!useLegacySemantics && !shouldLowerByContextPolicy) {
+      // New policy: outside pattern context we do not lower || in JSX.
+      if (inSafeContext) return undefined;
+    }
+
     const leftDataFlows = selectDataFlowsReferencedIn(
       dataFlows,
       expression.left,
@@ -143,12 +163,14 @@ export const emitBinaryExpression: Emitter = ({
     const rightNeedsDerive = rightDataFlows.length > 0 &&
       !isSimpleOpaqueRefAccess(expression.right, context.checker);
     const rightIsExpensive = rightIsJsx || rightNeedsDerive;
+    const shouldLower = shouldLowerByContextPolicy ||
+      (useLegacySemantics && (rightIsExpensive || leftIsOpaqueRef));
 
     // Use unless() transformation if:
     // 1. Right side is expensive (JSX or needs derive) - original optimization
     // 2. OR left side is an OpaqueRef type - needed because OpaqueRefs are always truthy objects
     //    so `computed(...) || <Fallback>` would never render fallback without unless()
-    if (rightIsExpensive || leftIsOpaqueRef) {
+    if (shouldLower) {
       // Process left side - derive if it has reactive deps, otherwise pass as-is
       let condition: ts.Expression = expression.left;
       if (leftDataFlows.length > 0) {

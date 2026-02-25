@@ -1,7 +1,11 @@
 export { TransformationContext } from "./context.ts";
 export type {
+  CapabilityParamSummary,
+  CapabilitySummaryRegistry,
   DiagnosticInput,
   DiagnosticSeverity,
+  FunctionCapabilitySummary,
+  ReactiveCapability,
   SchemaHint,
   SchemaHints,
   TransformationDiagnostic,

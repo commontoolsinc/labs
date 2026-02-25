@@ -1,9 +1,9 @@
 import ts from "typescript";
 import { TransformationContext, Transformer } from "../core/mod.ts";
 import {
+  classifyReactiveContext,
   createDataFlowAnalyzer,
   isEventHandlerJsxAttribute,
-  isInsideSafeCallbackWrapper,
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
 import { rewriteExpression } from "./opaque-ref/mod.ts";
@@ -60,15 +60,19 @@ function transform(context: TransformationContext): ts.SourceFile {
         return visitEachChildWithJsx(node, visit, context.tsContext);
       }
 
-      // Detect if we're in a safe context (action, handler, computed, etc.)
-      // In safe contexts, we still need to transform && -> when() and || -> unless()
-      // but we don't need to wrap expressions in derive().
-      const inSafeContext = isInsideSafeCallbackWrapper(node, checker);
+      const contextInfo = classifyReactiveContext(node, checker, context);
+      const inSafeContext = contextInfo.kind === "compute";
+      const isLegacy = context.options.useLegacyOpaqueRefSemantics;
 
       const analysis = analyze(node.expression);
 
       // Check if expression contains && or || that may need when/unless transformation
       const hasLogicalOps = containsLogicalBinaryOperator(node.expression);
+
+      if (!isLegacy && contextInfo.kind === "compute") {
+        // New policy: compute JSX does not lower && / || and does not add wrappers.
+        return visitEachChildWithJsx(node, visit, context.tsContext);
+      }
 
       // Skip if doesn't require rewriting AND no logical operators that might need transformation
       // We need to proceed even with requiresRewrite=false if there are && or || operators
@@ -102,6 +106,7 @@ function transform(context: TransformationContext): ts.SourceFile {
         analysis,
         context,
         analyze,
+        reactiveContextKind: contextInfo.kind,
         inSafeContext,
       });
 

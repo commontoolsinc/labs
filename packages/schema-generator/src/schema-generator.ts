@@ -232,7 +232,13 @@ export class SchemaGenerator implements ISchemaGenerator {
         // Create a more specific key that includes type argument info to
         // avoid false cycles
         const argTexts = typeNode.typeArguments
-          ? typeNode.typeArguments.map((arg) => arg.getText()).join(",")
+          ? typeNode.typeArguments.map((arg) => {
+            try {
+              return arg.getText();
+            } catch {
+              return "";
+            }
+          }).join(",")
           : "";
         // Include a source location hash to further distinguish instances
         const locationHash = typeNode.getSourceFile?.()?.fileName || "";
@@ -251,7 +257,13 @@ export class SchemaGenerator implements ISchemaGenerator {
         const wrapperKind = detectWrapperViaNode(typeNode, checker);
         if (wrapperKind) {
           const argTexts = typeNode.typeArguments
-            ? typeNode.typeArguments.map((arg) => arg.getText()).join(",")
+            ? typeNode.typeArguments.map((arg) => {
+              try {
+                return arg.getText();
+              } catch {
+                return "";
+              }
+            }).join(",")
             : "";
           const locationHash = typeNode.getSourceFile?.()?.fileName || "";
           const position = typeNode.pos || 0;

@@ -2,17 +2,17 @@ import ts from "typescript";
 import type { TransformationContext } from "../../core/mod.ts";
 import type { ClosureTransformationStrategy } from "./strategy.ts";
 import {
-  getCellKind,
-  isOpaqueRefType,
-} from "../../transformers/opaque-ref/opaque-ref.ts";
-import {
+  classifyReactiveContext,
   getTypeAtLocationWithFallback,
   isDeriveCall,
   isFunctionLikeExpression,
-  isInsideSafeCallbackWrapper,
   isReactiveArrayMapCall,
   registerSyntheticCallType,
 } from "../../ast/mod.ts";
+import {
+  classifyReactiveReceiverKind,
+  shouldRewriteCollectionMethod,
+} from "../../policy/mod.ts";
 import { buildHierarchicalParamsValue } from "../../utils/capture-tree.ts";
 import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
 import {
@@ -108,6 +108,44 @@ function shouldTransformMap(
 ): boolean {
   if (!ts.isPropertyAccessExpression(mapCall.expression)) return false;
 
+  const methodName = mapCall.expression.name.text;
+  if (methodName !== "map") {
+    return false;
+  }
+
+  if (context.options.useLegacyOpaqueRefSemantics) {
+    return shouldTransformMapLegacy(mapCall, context);
+  }
+
+  const mapTarget = mapCall.expression.expression;
+  const contextInfo = classifyReactiveContext(mapCall, context.checker, context);
+
+  // derive() returns an opaque value at runtime, but checker fallback may see the
+  // unwrapped callback result type. Preserve policy by context.
+  if (isDeriveCall(mapTarget)) {
+    return contextInfo.kind === "pattern";
+  }
+
+  const targetType = getTypeAtLocationWithFallback(
+    mapTarget,
+    context.checker,
+    context.options.typeRegistry,
+    context.options.logger,
+  );
+  const receiverKind = classifyReactiveReceiverKind(targetType, context.checker);
+  return shouldRewriteCollectionMethod(
+    contextInfo.kind,
+    methodName,
+    receiverKind,
+  );
+}
+
+function shouldTransformMapLegacy(
+  mapCall: ts.CallExpression,
+  context: TransformationContext,
+): boolean {
+  if (!ts.isPropertyAccessExpression(mapCall.expression)) return false;
+
   const mapTarget = mapCall.expression.expression;
 
   // Special case: derive() always returns OpaqueRef at runtime
@@ -115,7 +153,6 @@ function shouldTransformMap(
     return true;
   }
 
-  // Get the type of the map target from registry (preferred) or checker
   const targetType = getTypeAtLocationWithFallback(
     mapTarget,
     context.checker,
@@ -125,21 +162,16 @@ function shouldTransformMap(
 
   if (!targetType) return false;
 
-  // Check if this is a cell-like type at all
-  if (!isOpaqueRefType(targetType, context.checker)) {
+  const receiverKind = classifyReactiveReceiverKind(targetType, context.checker);
+  if (receiverKind === "plain") {
     return false;
   }
 
-  // Inside safe wrappers (computed, derive, action, lift, handler),
-  // OpaqueRef gets auto-unwrapped to plain values, so we should NOT transform.
-  // Cell and Stream do NOT get auto-unwrapped, so we still transform those.
-  if (isInsideSafeCallbackWrapper(mapCall, context.checker)) {
-    // Only transform Cell and Stream (not auto-unwrapped), not OpaqueRef (auto-unwrapped)
-    const cellKind = getCellKind(targetType, context.checker);
-    return cellKind === "cell" || cellKind === "stream";
+  const contextInfo = classifyReactiveContext(mapCall, context.checker, context);
+  if (contextInfo.kind === "compute") {
+    return receiverKind === "celllike_requires_rewrite";
   }
 
-  // Outside safe wrappers, transform all cell-like types
   return true;
 }
 

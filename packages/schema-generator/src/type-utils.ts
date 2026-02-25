@@ -7,7 +7,17 @@ import { NativeTypeFormatter } from "./formatters/native-type-formatter.ts";
  * Names that should be treated as Cell-like wrapper types.
  * "Writable" is an alias for "Cell" that better expresses semantic meaning.
  */
-const CELL_LIKE_WRAPPER_NAMES = new Set(["Cell", "Writable"]);
+const CELL_LIKE_WRAPPER_NAMES = new Set([
+  "Cell",
+  "Writable",
+  "ReadonlyCell",
+  "WriteonlyCell",
+]);
+const OPAQUE_WRAPPER_NAMES = new Set(["OpaqueRef", "OpaqueCell"]);
+
+function getEntityNameText(name: ts.EntityName): string {
+  return ts.isIdentifier(name) ? name.text : name.right.text;
+}
 
 /**
  * Safe wrapper for TypeScript checker APIs that may throw in reduced environments
@@ -321,14 +331,11 @@ export function getNamedTypeKey(
 ): string | undefined {
   // Check if the TypeNode indicates this is a wrapper type (Default/Cell/Stream/OpaqueRef)
   // Even if the type symbol says it's the inner type, if it's wrapped we shouldn't hoist it
-  if (
-    typeNode && ts.isTypeReferenceNode(typeNode) &&
-    ts.isIdentifier(typeNode.typeName)
-  ) {
-    const nodeTypeName = typeNode.typeName.text;
+  if (typeNode && ts.isTypeReferenceNode(typeNode)) {
+    const nodeTypeName = getEntityNameText(typeNode.typeName);
     if (
       nodeTypeName === "Default" || CELL_LIKE_WRAPPER_NAMES.has(nodeTypeName) ||
-      nodeTypeName === "Stream" || nodeTypeName === "OpaqueRef"
+      nodeTypeName === "Stream" || OPAQUE_WRAPPER_NAMES.has(nodeTypeName)
     ) {
       return undefined;
     }
@@ -706,23 +713,22 @@ export function resolveWrapperNode(
   kind: "Default" | "Cell" | "Stream" | "OpaqueRef";
   node: ts.TypeReferenceNode;
 } | undefined {
-  if (
-    !typeNode || !ts.isTypeReferenceNode(typeNode) ||
-    !ts.isIdentifier(typeNode.typeName)
-  ) {
+  if (!typeNode || !ts.isTypeReferenceNode(typeNode)) {
     return undefined;
   }
 
-  const literalName = typeNode.typeName.text;
+  const literalName = getEntityNameText(typeNode.typeName);
 
   // Fast path: direct wrapper reference
   if (
     literalName === "Default" || CELL_LIKE_WRAPPER_NAMES.has(literalName) ||
-    literalName === "Stream" || literalName === "OpaqueRef"
+    literalName === "Stream" || OPAQUE_WRAPPER_NAMES.has(literalName)
   ) {
     // Normalize "Writable" to "Cell" for internal processing
     const kind = CELL_LIKE_WRAPPER_NAMES.has(literalName)
       ? "Cell"
+      : OPAQUE_WRAPPER_NAMES.has(literalName)
+      ? "OpaqueRef"
       : literalName;
     return {
       kind: kind as "Default" | "Cell" | "Stream" | "OpaqueRef",
@@ -731,6 +737,9 @@ export function resolveWrapperNode(
   }
 
   // Follow alias chain
+  if (!ts.isIdentifier(typeNode.typeName)) {
+    return undefined;
+  }
   return followAliasToWrapperNode(typeNode, typeChecker, new Set());
 }
 
@@ -764,10 +773,14 @@ function followAliasToWrapperNode(
   // Check if we've reached a wrapper type
   if (
     typeName === "Default" || CELL_LIKE_WRAPPER_NAMES.has(typeName) ||
-    typeName === "Stream" || typeName === "OpaqueRef"
+    typeName === "Stream" || OPAQUE_WRAPPER_NAMES.has(typeName)
   ) {
     // Normalize "Writable" to "Cell" for internal processing
-    const kind = CELL_LIKE_WRAPPER_NAMES.has(typeName) ? "Cell" : typeName;
+    const kind = CELL_LIKE_WRAPPER_NAMES.has(typeName)
+      ? "Cell"
+      : OPAQUE_WRAPPER_NAMES.has(typeName)
+      ? "OpaqueRef"
+      : typeName;
     return {
       kind: kind as "Default" | "Cell" | "Stream" | "OpaqueRef",
       node: typeNode,
