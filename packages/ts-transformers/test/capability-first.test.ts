@@ -429,3 +429,117 @@ const fn = lift((input: Writable<{ foo: string; bar: string }>) => {
     assertStringIncludes(output, '"bar"');
   },
 );
+
+Deno.test(
+  "Legacy opt-out parity: explicit legacy mode matches default transform output",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern } from "commontools";
+const p = pattern(({ foo, bar }) => <div>{foo && bar}</div>);
+`;
+
+    const defaultOutput = await transformSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const explicitLegacyOutput = await transformSource(source, {
+      useLegacyOpaqueRefSemantics: true,
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertEquals(explicitLegacyOutput, defaultOutput);
+  },
+);
+
+Deno.test(
+  "Legacy opt-out parity: explicit legacy mode matches default diagnostics",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern } from "commontools";
+const p = pattern((input) => input.get());
+`;
+
+    const defaultResult = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const explicitLegacyResult = await validateSource(source, {
+      useLegacyOpaqueRefSemantics: true,
+      types: COMMONTOOLS_TYPES,
+    });
+
+    const toComparable = (diagnostics: readonly {
+      type: string;
+      severity: string;
+      message: string;
+    }[]) =>
+      diagnostics.map(({ type, severity, message }) => ({
+        type,
+        severity,
+        message,
+      }));
+
+    assertEquals(
+      toComparable(explicitLegacyResult.diagnostics),
+      toComparable(defaultResult.diagnostics),
+    );
+  },
+);
+
+Deno.test(
+  "Legacy opt-out parity: legacy mode keeps full-shape action state schema",
+  async () => {
+    const source = `/// <cts-enable />
+import { action, pattern, type Writable } from "commontools";
+const p = pattern((input: Writable<{ foo: string; bar: string }>) => {
+  const a = action(() => input.key("foo").get());
+  return a;
+});
+`;
+
+    const output = await transformSource(source, {
+      useLegacyOpaqueRefSemantics: true,
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, '"foo"');
+    assertStringIncludes(output, '"bar"');
+  },
+);
+
+Deno.test(
+  "Capability-first: compute context rewrites map on Cell receiver",
+  async () => {
+    const source = `/// <cts-enable />
+import { Cell, lift } from "commontools";
+const items = Cell.of<string[]>([]);
+const fn = lift(() => items.map((item) => item));
+`;
+
+    const output = await transformSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, ".mapWithPattern(");
+  },
+);
+
+Deno.test(
+  "Capability-first: pattern context does not rewrite plain array map",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern } from "commontools";
+const p = pattern(() => {
+  const local = ["a", "b"];
+  return local.map((item) => item);
+});
+`;
+
+    const output = await transformSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, "local.map((item) => item)");
+    assert(!output.includes(".mapWithPattern("));
+  },
+);
