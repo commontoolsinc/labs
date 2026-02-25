@@ -164,7 +164,7 @@ use or when piece names are ambiguous:
 
 ```
 entities/
-  ba4jcbvpq3k5soo.../
+  of:ba4jcbvpq3k5soo.../
     .json             # Full entity value
     items/
       0/

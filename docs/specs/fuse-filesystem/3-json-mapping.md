@@ -183,7 +183,7 @@ The filesystem maps each sigil link field to a filesystem path component:
 { "/": { "link@1": { "id": "of:ba4jcbvpq3k5..." } } }
 ```
 ```
-result/related -> ../../entities/ba4jcbvpq3k5.../
+result/related -> ../../entities/of:ba4jcbvpq3k5.../
 ```
 
 **Same-space, entity + path:**
@@ -192,7 +192,7 @@ result/related -> ../../entities/ba4jcbvpq3k5.../
 { "/": { "link@1": { "id": "of:ba4jcbvpq3k5...", "path": ["items", "0", "text"] } } }
 ```
 ```
-result/related -> ../../entities/ba4jcbvpq3k5.../items/0/text
+result/related -> ../../entities/of:ba4jcbvpq3k5.../items/0/text
 ```
 
 **Cross-space:**
@@ -201,7 +201,7 @@ result/related -> ../../entities/ba4jcbvpq3k5.../items/0/text
 { "/": { "link@1": { "id": "of:ba4j...", "space": "did:key:z7Nll..." } } }
 ```
 ```
-result/related -> ../../../did:key:z7Nll.../entities/ba4j.../
+result/related -> ../../../did:key:z7Nll.../entities/of:ba4j.../
 ```
 
 Cross-space symlinks may be broken if the target space hasn't been accessed
@@ -226,13 +226,13 @@ Creating a symlink (`ln -s`) writes a sigil link into the parent cell:
 
 ```bash
 # Link a field to another entity
-ln -s ../../entities/ba4jcbvpq3k5.../ result/related
+ln -s ../../entities/of:ba4jcbvpq3k5.../ result/related
 
 # Link to a specific path in another entity
-ln -s ../../entities/ba4jcbvpq3k5.../items/0 result/source
+ln -s ../../entities/of:ba4jcbvpq3k5.../items/0 result/source
 
 # Cross-space link
-ln -s ../../../other-space/entities/ba4j.../ result/external
+ln -s ../../../other-space/entities/of:ba4j.../ result/external
 ```
 
 The filesystem parses the symlink target path to extract `(space, id, path)`,
