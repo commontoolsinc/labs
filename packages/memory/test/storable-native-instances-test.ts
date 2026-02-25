@@ -792,6 +792,18 @@ describe("storable-native-instances", () => {
     it("returns Date tag for Date (not HasToJSON despite Date.toJSON)", () => {
       expect(tagFromNativeValue(new Date())).toBe(NATIVE_TAGS.Date);
     });
+
+    // Functions with toJSON() return HasToJSON from tagFromNativeValue when
+    // called directly. In practice, the typeof === "object" guard in
+    // toRichStorableValue prevents functions from reaching tagFromNativeValue;
+    // they are handled separately in toRichStorableValueBase.
+    it("returns HasToJSON for functions with toJSON() (if called directly)", () => {
+      const fn = () => {};
+      (fn as unknown as { toJSON: () => string }).toJSON = () => "converted";
+      expect(tagFromNativeValue(fn as unknown as object)).toBe(
+        NATIVE_TAGS.HasToJSON,
+      );
+    });
   });
 
   describe("tagFromNativeClass", () => {
