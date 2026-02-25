@@ -64,7 +64,8 @@ export type NativeTag = typeof NATIVE_TAGS[keyof typeof NATIVE_TAGS];
  *
  * Uses a `switch` on the constructor identity for O(1) dispatch (instead of
  * sequential `instanceof` checks). Falls back to `instanceof Error` on the
- * constructor's prototype to catch exotic Error subclasses. (Note:
+ * constructor's prototype to catch exotic Error subclasses, and checks for
+ * `toJSON()` on the prototype for unrecognized classes. (Note:
  * `Error.isError()` doesn't work on prototype objects -- it only recognizes
  * actual Error instances, not the prototype chain -- so we use `instanceof`.)
  */
@@ -104,6 +105,14 @@ export function tagFromNativeClass(
         constructorFn.prototype instanceof Error
       ) {
         return NATIVE_TAGS.Error;
+      }
+      // Unrecognized class whose prototype has a toJSON() method.
+      if (
+        constructorFn.prototype !== null &&
+        constructorFn.prototype !== undefined &&
+        hasToJSON(constructorFn.prototype as object)
+      ) {
+        return NATIVE_TAGS.HasToJSON;
       }
       return null;
   }
