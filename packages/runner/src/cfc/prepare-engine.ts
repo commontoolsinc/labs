@@ -1,9 +1,11 @@
 import type { JSONSchema } from "../builder/types.ts";
+import { ContextualFlowControl } from "../cfc.ts";
 import type {
   ICfcPrepareSchemaUnavailableError,
   ICfcSchemaHashMismatchError,
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
+  Labels,
 } from "../storage/interface.ts";
 import { computeCfcActivityDigest } from "./activity-digest.ts";
 import { canonicalizeBoundaryActivity } from "./canonical-activity.ts";
@@ -78,6 +80,28 @@ function schemaHashAddress(entity: EntityAddress): IMemorySpaceAddress {
   };
 }
 
+function labelsAddress(entity: EntityAddress): IMemorySpaceAddress {
+  return {
+    space: entity.space,
+    id: entity.id,
+    type: entity.type,
+    path: ["cfc", "labels"],
+  };
+}
+
+function computePreparedLabels(schema: JSONSchema): Record<string, Labels> {
+  const cfc = new ContextualFlowControl();
+  const rootClassification = cfc.lubSchema(schema);
+  if (!rootClassification) {
+    return {};
+  }
+  return {
+    "/": {
+      classification: [rootClassification],
+    },
+  };
+}
+
 function verifyInputRequirementsForAttempt(
   tx: IExtendedStorageTransaction,
 ): void {
@@ -109,12 +133,14 @@ export async function prepareBoundaryCommit(
 
       const actualSchemaHash = await resolvePreparedSchemaHash(schema);
       const address = schemaHashAddress(entity);
+      const labels = computePreparedLabels(schema);
       const existingSchemaHash = tx.readOrThrow(address, {
         meta: internalVerifierReadMeta,
       });
 
       if (existingSchemaHash === undefined) {
         tx.writeOrThrow(address, actualSchemaHash);
+        tx.writeOrThrow(labelsAddress(entity), labels);
         continue;
       }
 
@@ -128,6 +154,8 @@ export async function prepareBoundaryCommit(
           actualSchemaHash,
         );
       }
+
+      tx.writeOrThrow(labelsAddress(entity), labels);
     }
 
     if (writtenEntities.length > 0 && enforcedSchemaHashCount === 0) {
