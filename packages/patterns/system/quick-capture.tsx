@@ -26,9 +26,7 @@ import { type MentionablePiece } from "./backlinks-index.tsx";
 
 // ===== Input/Output Types =====
 
-interface QuickCaptureInput {
-  allPieces: Writable<MentionablePiece[]>;
-}
+type QuickCaptureInput = Record<string, never>;
 
 interface QuickCaptureOutput {
   [NAME]: string;
@@ -36,33 +34,6 @@ interface QuickCaptureOutput {
   summary: string;
   capture: Stream<{ text: string; attachments?: Writable<any>[] }>;
 }
-
-// ===== Module-scope Handlers =====
-
-const createNoteHandler = handler<
-  { title: string; content: string },
-  { allPieces: Writable<MentionablePiece[]> }
->(({ title, content }, { allPieces }) => {
-  const note = Note({
-    title,
-    content,
-    noteId: generateId(),
-  });
-  allPieces.push(note as any);
-  return note;
-});
-
-const createNotebookHandler = handler<
-  { title: string; notesData?: Array<{ title: string; content: string }> },
-  { allPieces: Writable<MentionablePiece[]> }
->(({ title, notesData }, { allPieces }) => {
-  const notebook = Notebook({ title });
-  allPieces.push(notebook as any);
-  if (notesData && notesData.length > 0) {
-    notebook.createNotes.send({ notesData });
-  }
-  return { created: title };
-});
 
 type PromptAttachment = {
   id: string;
@@ -116,10 +87,29 @@ const captureHandler = handler<
   });
 });
 
+// ===== Wrapper pattern: create a notebook pre-populated with notes =====
+
+const createNotebookWithNotes = handler<
+  { title: string; notesData?: Array<{ title: string; content: string }> },
+  Record<string, never>
+>(({ title, notesData }) => {
+  const notes = (notesData ?? []).map(
+    (data: { title: string; content: string }) =>
+      Note({
+        title: data.title,
+        content: data.content,
+        isHidden: true,
+        noteId: generateId(),
+      }),
+  );
+  const notebook = Notebook({ title, notes });
+  return { created: title, noteCount: notes.length, notebook };
+});
+
 // ===== Main Pattern =====
 
 export default pattern<QuickCaptureInput, QuickCaptureOutput>(
-  ({ allPieces }) => {
+  () => {
     // Wishes for space data
     const mentionable = wish<MentionablePiece[]>({
       query: "#mentionable",
@@ -142,22 +132,24 @@ export default pattern<QuickCaptureInput, QuickCaptureOutput>(
       return `You are a quick capture assistant. The user will paste freeform text — voice memo transcripts, meeting notes, ideas, research, brain dumps. Your job is to turn this into well-linked notes in their knowledge base.
 
 Process:
-1. SEARCH FIRST — before creating anything, use searchSpace to understand what already exists. Look for topics, people, projects, and themes mentioned in the input. This is critical so you can link new notes to existing ones.
-2. Break the input into discrete, atomic notes — one idea, concept, decision, or action per note.
-3. Give each note a clear, concise title.
-4. Write note content in markdown. Use [[Title]] wiki-link syntax to link to:
+1. SAVE THE RAW INPUT FIRST — immediately create a verbatim transcript note using createNote. Title it something like "Transcript: [brief topic] — [date]". The content should be the exact, unedited input text in a blockquote. Do this before anything else.
+2. SEARCH — use searchSpace to understand what already exists in the space. Look for topics, people, projects, and themes mentioned in the input. This is critical so you can link new notes to existing ones.
+3. Break the input into discrete, atomic notes — one idea, concept, decision, or action per note.
+4. Give each note a clear, concise title.
+5. Write note content in markdown. Use [[Title]] wiki-link syntax to link to:
    - Other notes you're creating in this batch
    - Existing notes you found via searchSpace
+   - The transcript note you created in step 1
    IMPORTANT: Backlinks work on EXACT title matches. All pieces have an emoji prefix in their display title:
    - Notes: "📝 " (📝 + space) — e.g. a note titled "Meeting with Alice" displays as "📝 Meeting with Alice"
    - Notebooks: "📓 " (📓 + space) — e.g. "📓 Capture Log (3)"
    When creating wiki-links, you MUST include the emoji prefix for the link to resolve. Example: [[📝 Meeting with Alice]], NOT [[Meeting with Alice]]. Always match the exact title format you see in searchSpace results for existing content.
-5. Use createNote to create each note individually. Each call returns the note cell with its address, so you can reference it precisely in subsequent notes and the capture log.
-6. After creating content notes, create a capture log entry: a final note titled something like "Capture: [brief topic summary] — [date]" that contains:
-   - The original raw transcript/text (preserved verbatim in a blockquote or code block)
-   - A list of all notes created from it, with [[Title]] links to each
-   - Brief reflection on how the content was organized
-   Put this capture log note in the "Capture Log" notebook using createNotebook (create the notebook if it doesn't exist, or just create the note if the notebook already exists — check searchSpace first).
+6. Use createNote to create each note individually. Each call returns the note cell with its address, so you can reference it precisely in subsequent notes.
+7. After creating all content notes, create a reflection note titled something like "Capture Summary: [brief topic] — [date]" that contains:
+   - A link to the transcript note from step 1
+   - A list of all notes created, with [[Title]] links to each
+   - Brief reflection on how the content was organized and why
+   Put both the transcript note and this reflection note in the "Capture Log" notebook using createNotebook (create the notebook if it doesn't exist, or just create the note if it already exists — check searchSpace first).
 
 Guidelines:
 - Prefer several small atomic notes over one large note
@@ -177,15 +169,11 @@ ${profileSection}`;
       }),
       listMentionable: patternTool(listMentionable, { mentionable }),
       listRecent: patternTool(listRecent, { recentPieces }),
-      createNote: {
-        handler: createNoteHandler({ allPieces }),
-        description:
-          "Create a single note with a title and markdown content. Returns the created note cell with its address. Call once per note.",
-      },
+      createNote: patternTool(Note),
       createNotebook: {
-        handler: createNotebookHandler({ allPieces }),
+        handler: createNotebookWithNotes({}),
         description:
-          "Create a notebook, optionally with initial notes. Use sparingly — only when there's a clear reason to group notes (e.g. multi-part project, course chapters). Always use for the 'Capture Log' notebook for capture log entries.",
+          "Create a notebook with optional initial notes. Pass title and notesData array. Use for grouping related notes.",
       },
     };
     const dialogParams = {
