@@ -131,7 +131,11 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
       break;
 
     case "object":
-      feedObjectValue(hasher, value);
+      if (value === null) {
+        hasher.update(TAG_NULL_BYTES);
+      } else {
+        feedObjectValue(hasher, value);
+      }
       break;
 
     default:
@@ -142,20 +146,15 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
 }
 
 /**
- * Feed an object-typed value (null, special primitives, StorableInstance,
- * Array, or plain object) into the hasher. Dispatches via
- * `tagFromNativeValue()` / `NATIVE_TAGS` for recognized types.
+ * Feed an object-typed value (special primitives, StorableInstance, Array,
+ * or plain object) into the hasher. Dispatches via `tagFromNativeValue()` /
+ * `NATIVE_TAGS` for recognized types. The `null` case is handled by the
+ * caller (`feedValue()`).
  */
 function feedObjectValue(
   hasher: IncrementalHasher,
-  value: object | null,
+  value: object,
 ): void {
-  // null (typeof null === "object")
-  if (value === null) {
-    hasher.update(TAG_NULL_BYTES);
-    return;
-  }
-
   // StorableUint8Array has a dedicated hash encoding (TAG_BYTES) but is a
   // StorableInstance wrapper, not a native Uint8Array. Handle before the
   // tagFromNativeValue switch.
