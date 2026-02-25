@@ -106,6 +106,9 @@ export class IntersectionFormatter implements TypeFormatter {
       // TypeScript encodes unique-symbol property names as "__@..." internally.
       // Any property whose escapedName does NOT start with "__@" is a regular
       // string-keyed property — making this a real data type, not a brand.
+      // There is no public TypeScript API to distinguish symbol-keyed from
+      // string-keyed properties, so we rely on this internal naming convention
+      // intentionally.
       const escaped = prop.escapedName as string;
       if (!String(escaped).startsWith("__@")) {
         return false;

@@ -29,6 +29,8 @@ export class UnionFormatter implements TypeFormatter {
 
     // Detect presence of null
     const hasNull = members.some((m) => (m.flags & ts.TypeFlags.Null) !== 0);
+    // nonNull excludes only null; undefined members are kept because undefined is
+    // now represented explicitly as { type: "undefined" } rather than being stripped.
     const nonNull = members.filter((m) => (m.flags & ts.TypeFlags.Null) === 0);
 
     const generate = (t: ts.Type, typeNode?: ts.TypeNode): SchemaDefinition => {
@@ -39,17 +41,22 @@ export class UnionFormatter implements TypeFormatter {
       return this.schemaGenerator.formatChildType(t, context, typeNode);
     };
 
-    // Case: exactly one non-null member + null => anyOf (nullable type)
+    // Case: exactly one non-null member + null => anyOf (nullable type).
     // Note: We use anyOf instead of oneOf for better consumer compatibility.
     // For nullable types (T | null), both work identically since a value is either
     // null OR the other type, never both. anyOf is more easily supported.
+    // Note: if undefined is also present (T | null | undefined), nonNull.length > 1,
+    // so we fall through to the anyOf path which emits { type: "undefined" } explicitly.
     if (hasNull && nonNull.length === 1) {
       const item = generate(nonNull[0]!);
       return { anyOf: [item, { type: "null" }] };
     }
 
-    // Case: all non-null members are string/number/boolean literals -> enum
-    // Include null in the enum if present (unlike undefined which is handled via required array)
+    // Case: all non-null members are literals -> enum.
+    // Note: undefined prevents this path since it doesn't match any literal flag,
+    // intentionally falling through to the anyOf path which emits { type: "undefined" }.
+    // Include null in the enum if present (null is a runtime value; undefined is
+    // represented as a separate { type: "undefined" } schema member instead).
     const allLiteral = nonNull.length > 0 &&
       nonNull.every((m) =>
         (m.flags & ts.TypeFlags.StringLiteral) !== 0 ||
@@ -167,13 +174,14 @@ export class UnionFormatter implements TypeFormatter {
     }
     const primitiveSchemaKeys = new Set(["type", "enum"]);
     // See if we can merge into one of the anyOf options
-    const primitiveSchemas = anyOf.filter((schema) =>
-      typeof schema === "boolean" ||
-      primitiveSchemaKeys.isSupersetOf(new Set(Object.keys(schema)))
+    const matchingTypeIdx = anyOf.findIndex((option) =>
+      isObject(option) &&
+      primitiveSchemaKeys.isSupersetOf(new Set(Object.keys(option))) &&
+      "type" in option && option.type === cur.type
     );
-    const matchingType = primitiveSchemas.find((option) =>
-      isObject(option) && "type" in option && option.type === cur.type
-    );
+    const matchingType = matchingTypeIdx !== -1
+      ? anyOf[matchingTypeIdx]
+      : undefined;
     const isCurPrimitive = primitiveSchemaKeys.isSupersetOf(
       new Set(Object.keys(cur)),
     );
@@ -191,32 +199,43 @@ export class UnionFormatter implements TypeFormatter {
         cur.type === "boolean" && mergedEnum.has(true) &&
         mergedEnum.has(false)
       ) {
-        delete matchingType.enum;
         // this collapse may allow us to combine with other options that have only a type,
         // but I'm not doing that currently.
+        const { enum: _dropped, ...rest } = matchingType;
+        anyOf[matchingTypeIdx] = rest;
       } else {
-        matchingType.enum = [...mergedEnum].toSorted();
+        anyOf[matchingTypeIdx] = {
+          ...matchingType,
+          enum: [...mergedEnum].toSorted(),
+        };
       }
     } else if (isRecord(matchingType)) {
       // If either entry is missing an enum, we can have any value of that type, so clear enum
-      delete matchingType.enum;
+      const { enum: _dropped, ...rest } = matchingType;
+      anyOf[matchingTypeIdx] = rest;
     } else if (
       isCurPrimitive && cur.enum === undefined && cur.type !== undefined
     ) {
       // If cur is a primitive non-enum with a known type, we can merge with any existing non-enum primitive
-      const matchingNonEnum = primitiveSchemas.find((option) =>
-        isRecord(option) && option.enum === undefined
+      const matchingNonEnumIdx = anyOf.findIndex((option) =>
+        isRecord(option) &&
+        primitiveSchemaKeys.isSupersetOf(new Set(Object.keys(option))) &&
+        option.enum === undefined
       );
-      if (isObject(matchingNonEnum)) {
+      const matchingNonEnum = matchingNonEnumIdx !== -1
+        ? anyOf[matchingNonEnumIdx]
+        : undefined;
+      if (isObject(matchingNonEnum) && matchingNonEnumIdx !== -1) {
         const curTypes = Array.isArray(cur.type) ? cur.type : [cur.type];
         const matchingNonEnumTypes = matchingNonEnum.type === undefined
           ? []
           : Array.isArray(matchingNonEnum.type)
           ? matchingNonEnum.type
           : [matchingNonEnum.type];
-        matchingNonEnum.type = [
-          ...new Set([...curTypes, ...matchingNonEnumTypes]),
-        ].toSorted();
+        anyOf[matchingNonEnumIdx] = {
+          ...matchingNonEnum,
+          type: [...new Set([...curTypes, ...matchingNonEnumTypes])].toSorted(),
+        };
       } else {
         anyOf.push(cur);
       }
