@@ -7,6 +7,7 @@ import {
   fetchProgram,
   handler,
   ifElse,
+  NAME,
   navigateTo,
   pattern,
   wish,
@@ -14,6 +15,8 @@ import {
 } from "commontools";
 
 ///// COMMON TOOLS (get it?) ////
+
+import { type MentionablePiece } from "./backlinks-index.tsx";
 
 /**
  * Calculate the result of a mathematical expression.
@@ -352,4 +355,26 @@ export const updateProfile = pattern<
   });
 
   return result;
+});
+
+export const listMentionable = pattern<
+  { mentionable: Array<MentionablePiece> },
+  { result: Array<{ label: string; piece: MentionablePiece }> }
+>(({ mentionable }) => {
+  const result = mentionable.map((c) => ({
+    label: c[NAME]!,
+    piece: c,
+  }));
+  return { result };
+});
+
+export const listRecent = pattern<
+  { recentPieces: Array<MentionablePiece> },
+  { result: Array<{ label: string; piece: MentionablePiece }> }
+>(({ recentPieces }) => {
+  const namesList = recentPieces.map((c) => ({
+    label: c[NAME]!,
+    piece: c,
+  }));
+  return { result: namesList };
 });

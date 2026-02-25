@@ -35,6 +35,7 @@ interface ReadingListOutput {
   currentFilter: ItemStatus | "all";
   filteredItems: ReadingItemPiece[];
   filteredCount: number;
+  summary: string;
   addItem: Stream<{ title: string; author: string; type: ItemType }>;
   removeItem: Stream<{ item: ReadingItemPiece }>;
   setFilter: Stream<{ status: ItemStatus | "all" }>;
@@ -136,6 +137,12 @@ export default pattern<ReadingListInput, ReadingListOutput>(({ items }) => {
   });
 
   const filteredCount = computed(() => filteredItems.length);
+
+  const summary = computed(() => {
+    return items.get()
+      .map((item) => `${item.title} (${item.status})`)
+      .join(", ");
+  });
 
   // For empty state display
   const hasNoFilteredItems = computed(() => filteredCount === 0);
@@ -267,6 +274,7 @@ export default pattern<ReadingListInput, ReadingListOutput>(({ items }) => {
     currentFilter,
     filteredItems,
     filteredCount,
+    summary,
     addItem,
     removeItem,
     setFilter,

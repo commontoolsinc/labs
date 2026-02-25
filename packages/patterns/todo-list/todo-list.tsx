@@ -31,6 +31,7 @@ interface TodoListOutput {
   items: TodoItem[];
   mentionable: { [NAME]: string; summary: string; [UI]: VNode }[];
   itemCount: number;
+  summary: string;
   addItem: Stream<{ title: string }>;
   removeItem: Stream<{ item: TodoItem }>;
 }
@@ -92,6 +93,12 @@ export default pattern<TodoListInput, TodoListOutput>(({ items }) => {
   const itemCount = computed(() => items.get().length);
   const hasNoItems = computed(() => items.get().length === 0);
 
+  const summary = computed(() => {
+    return items.get()
+      .map((item) => `${item.done ? "✓" : "○"} ${item.title}`)
+      .join(", ");
+  });
+
   // Map items to sub-pattern instances once — reused for UI and mentionable
   const itemCards = items.map((item) => (
     <TodoItemPiece item={item} removeItem={removeItem} />
@@ -141,6 +148,7 @@ export default pattern<TodoListInput, TodoListOutput>(({ items }) => {
     items,
     mentionable: itemCards,
     itemCount,
+    summary,
     addItem,
     removeItem,
   };

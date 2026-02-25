@@ -4,6 +4,7 @@ import {
   Default,
   equals,
   handler,
+  ifElse,
   NAME,
   OpaqueRef,
   pattern,
@@ -22,6 +23,7 @@ export interface DoItem {
   done: Default<boolean, false>;
   indent: Default<number, 0>; // 0 = root, 1 = child, 2 = grandchild...
   aiEnabled: Default<boolean, false>; // future: flag for AI auto-completion
+  attachments: Default<Writable<any>[], []>;
 }
 
 interface DoListInput {
@@ -35,31 +37,45 @@ interface DoListOutput {
   isHidden: true;
   items: DoItem[];
   itemCount: number;
+  summary: string;
   mentionable: { [NAME]: string; summary: string; [UI]: VNode }[];
   // UI handlers (use cell references via equals())
-  addItem: OpaqueRef<Stream<{ title: string; indent?: number }>>;
+  addItem: OpaqueRef<
+    Stream<{ title: string; indent?: number; attachments?: Writable<any>[] }>
+  >;
   removeItem: OpaqueRef<Stream<{ item: DoItem }>>;
   updateItem: OpaqueRef<
     Stream<{ item: DoItem; title?: string; done?: boolean }>
   >;
   addItems: OpaqueRef<
-    Stream<{ items: Array<{ title: string; indent?: number }> }>
+    Stream<{
+      items: Array<{
+        title: string;
+        indent?: number;
+        attachments?: Writable<any>[];
+      }>;
+    }>
   >;
   // LLM-friendly handlers (use title matching)
   /** Remove a task and its subtasks by title */
   removeItemByTitle: OpaqueRef<Stream<{ title: string }>>;
-  /** Update a task by title. Set done to mark complete, newTitle to rename. */
+  /** Update a task by title. Set done to mark complete, newTitle to rename, attachments to add references. */
   updateItemByTitle: OpaqueRef<
-    Stream<{ title: string; newTitle?: string; done?: boolean }>
+    Stream<{
+      title: string;
+      newTitle?: string;
+      done?: boolean;
+      attachments?: Writable<any>[];
+    }>
   >;
 }
 
 // ===== Module-scope Handlers =====
 
 const addItemHandler = handler<
-  { title: string; indent?: number },
+  { title: string; indent?: number; attachments?: Writable<any>[] },
   { items: Writable<DoItem[]> }
->(({ title, indent }, { items }) => {
+>(({ title, indent, attachments }, { items }) => {
   const trimmed = title.trim();
   if (!trimmed) return;
 
@@ -68,6 +84,7 @@ const addItemHandler = handler<
     done: false,
     indent: indent ?? 0,
     aiEnabled: false,
+    attachments: attachments ?? [],
   });
 });
 
@@ -119,10 +136,16 @@ const updateItemHandler = handler<
 });
 
 const addItemsHandler = handler<
-  { items: Array<{ title: string; indent?: number }> },
+  {
+    items: Array<{
+      title: string;
+      indent?: number;
+      attachments?: Writable<any>[];
+    }>;
+  },
   { items: Writable<DoItem[]> }
 >(({ items: newItems }, { items }) => {
-  newItems.forEach(({ title, indent }) => {
+  newItems.forEach(({ title, indent, attachments }) => {
     const trimmed = title.trim();
     if (trimmed) {
       items.push({
@@ -130,6 +153,7 @@ const addItemsHandler = handler<
         done: false,
         indent: indent ?? 0,
         aiEnabled: false,
+        attachments: attachments ?? [],
       });
     }
   });
@@ -167,11 +191,16 @@ const removeItemByTitleHandler = handler<
   items.set(newItems);
 });
 
-/** Update a task by title. Set done to mark complete, newTitle to rename. */
+/** Update a task by title. Set done to mark complete, newTitle to rename, attachments to add references. */
 const updateItemByTitleHandler = handler<
-  { title: string; newTitle?: string; done?: boolean },
+  {
+    title: string;
+    newTitle?: string;
+    done?: boolean;
+    attachments?: Writable<any>[];
+  },
   { items: Writable<DoItem[]> }
->(({ title, newTitle, done }, { items }) => {
+>(({ title, newTitle, done, attachments }, { items }) => {
   const currentItems = items.get();
   const newItems = currentItems.map((i) => {
     if (i.title?.toLowerCase() !== title.toLowerCase()) return i;
@@ -180,48 +209,120 @@ const updateItemByTitleHandler = handler<
       ...i,
       ...(newTitle !== undefined ? { title: newTitle } : {}),
       ...(done !== undefined ? { done } : {}),
+      ...(attachments !== undefined
+        ? { attachments: [...(i.attachments ?? []), ...attachments] }
+        : {}),
     };
   });
 
   items.set(newItems);
 });
 
+const addAttachment = handler<
+  { detail: { sourceCell: Writable<any> } },
+  { item: DoItem; items: Writable<DoItem[]> }
+>((e, { item, items }) => {
+  const cell = e.detail?.sourceCell;
+  if (!cell) return;
+  const currentItems = items.get();
+  const idx = currentItems.findIndex((i) => equals(i, item));
+  if (idx >= 0) {
+    items.key(idx).key("attachments").push(cell);
+  }
+});
+
+const removeAttachment = handler<
+  unknown,
+  { item: DoItem; attachment: Writable<any>; items: Writable<DoItem[]> }
+>((_, { item, attachment, items }) => {
+  const currentItems = items.get();
+  const idx = currentItems.findIndex((i) => equals(i, item));
+  if (idx >= 0) {
+    const attachments = items.key(idx).key("attachments");
+    const currentAttachments = attachments.get();
+    const attIdx = currentAttachments.findIndex((a: any) =>
+      equals(a, attachment)
+    );
+    if (attIdx >= 0) {
+      attachments.set(currentAttachments.toSpliced(attIdx, 1));
+    }
+  }
+});
+
 // ===== Sub-pattern for item rendering =====
 
 const DoItemCard = pattern<
-  { item: DoItem; removeItem: Stream<{ item: DoItem }> },
+  {
+    item: DoItem;
+    removeItem: Stream<{ item: DoItem }>;
+    items: Writable<DoItem[]>;
+  },
   { [UI]: VNode; [NAME]: string; summary: string }
->(({ item, removeItem }) => {
+>(({ item, removeItem, items }) => {
+  const attachments = computed(() => item.attachments ?? []);
+  const hasAttachments = computed(() => attachments.length > 0);
+
   return {
     [NAME]: computed(() => item.title),
     summary: computed(() => item.title),
     [UI]: (
-      <ct-card style={`margin-left: ${(item.indent ?? 0) * 24}px;`}>
-        <ct-hstack gap="2" align="center">
-          <ct-checkbox $checked={item.done} />
-          <ct-input
-            $value={item.title}
-            style="flex: 1;"
-            placeholder="Item..."
-          />
-          <ct-button variant="ghost" onClick={() => removeItem.send({ item })}>
-            x
-          </ct-button>
-        </ct-hstack>
+      <ct-drop-zone
+        accept="cell-link"
+        onct-drop={addAttachment({ item, items })}
+      >
+        <ct-card style={`margin-left: ${(item.indent ?? 0) * 24}px;`}>
+          <ct-hstack gap="2" align="center">
+            <ct-checkbox $checked={item.done} />
+            <ct-input
+              $value={item.title}
+              style="flex: 1;"
+              placeholder="Item..."
+            />
+            <ct-button
+              variant="ghost"
+              onClick={() => removeItem.send({ item })}
+            >
+              x
+            </ct-button>
+          </ct-hstack>
 
-        <details style="margin-top: 8px; margin-left: 24px;">
-          <summary style="cursor: pointer; font-size: 0.8rem; color: var(--ct-color-gray-500);">
-            AI Suggestions
-          </summary>
-          <Suggestion
-            situation={computed(
-              () => `Help the user complete this task: "${item.title}"`,
-            )}
-            context={{ title: item.title }}
-            initialResults={[]}
-          />
-        </details>
-      </ct-card>
+          {ifElse(
+            hasAttachments,
+            <ct-hstack
+              gap="1"
+              style="margin-top: 4px; margin-left: 24px; flex-wrap: wrap;"
+            >
+              {attachments.map((att: any) => (
+                <ct-hstack gap="0" align="center">
+                  <ct-cell-link $cell={att} />
+                  <ct-button
+                    variant="ghost"
+                    size="sm"
+                    style="font-size: 0.7rem; padding: 0 2px;"
+                    onClick={removeAttachment({ item, attachment: att, items })}
+                  >
+                    ×
+                  </ct-button>
+                </ct-hstack>
+              ))}
+            </ct-hstack>,
+            null,
+          )}
+
+          <details style="margin-top: 8px; margin-left: 24px;">
+            <summary style="cursor: pointer; font-size: 0.8rem; color: var(--ct-color-gray-500);">
+              AI Suggestions
+            </summary>
+            <Suggestion
+              situation={computed(
+                () => `Help the user complete this task: "${item.title}"`,
+              )}
+              context={{ title: item.title, attachments: attachments }}
+              initialResults={[]}
+            />
+          </details>
+        </ct-card>
+      </ct-drop-zone>
     ),
   };
 });
@@ -233,6 +334,12 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
   const itemCount = computed(() => items.get().length);
   const hasNoItems = computed(() => items.get().length === 0);
 
+  const summary = computed(() => {
+    return items.get()
+      .map((item) => `${item.done ? "✓" : "○"} ${item.title}`)
+      .join(", ");
+  });
+
   // Bind handlers
   const addItem = addItemHandler({ items });
   const removeItem = removeItemHandler({ items });
@@ -243,7 +350,7 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
 
   // Map items to sub-pattern instances once — reused for UI and mentionable
   const itemCards = items.map((item) => (
-    <DoItemCard item={item} removeItem={removeItem} />
+    <DoItemCard item={item} removeItem={removeItem} items={items} />
   ));
 
   // Compact UI - embeddable widget without ct-screen wrapper
@@ -318,6 +425,7 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
     isHidden: true,
     items,
     itemCount,
+    summary,
     mentionable: itemCards,
     addItem,
     removeItem,

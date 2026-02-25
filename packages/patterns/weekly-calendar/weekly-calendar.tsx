@@ -70,6 +70,7 @@ interface Output {
   events: EventPiece[];
   mentionable: EventPiece[];
   eventCount: number;
+  summary: string;
   isCalendar: boolean;
   isHidden: boolean;
   backlinks: MentionablePiece[];
@@ -399,6 +400,11 @@ const WeeklyCalendar = pattern<Input, Output>(
 
     // Computed Values
     const eventCount = computed(() => events.get().length);
+    const summary = computed(() => {
+      return events.get()
+        .map((e) => `${e.date || ""} ${e.title || ""}`.trim())
+        .join(", ");
+    });
     const weekDates = computed(() => getWeekDates(startDate.get(), 7));
     const todayDate = getTodayDate();
 
@@ -1268,6 +1274,7 @@ const WeeklyCalendar = pattern<Input, Output>(
       events,
       mentionable: events,
       eventCount,
+      summary,
       isCalendar,
       isHidden,
       backlinks,

@@ -31,6 +31,12 @@ export default pattern<HabitTrackerInput, HabitTrackerOutput>(
     const habitCount = computed(() => habits.get().length);
     const hasNoHabits = computed(() => habits.get().length === 0);
 
+    const summary = computed(() => {
+      return habits.get()
+        .map((h) => `${h.icon} ${h.name}`)
+        .join(", ");
+    });
+
     // Actions close over pattern state directly
     const toggleHabit = action<{ habitName: string }>(({ habitName }) => {
       // Only toggle if habit exists
@@ -225,6 +231,7 @@ export default pattern<HabitTrackerInput, HabitTrackerOutput>(
       habits,
       logs,
       todayDate,
+      summary,
       toggleHabit,
       addHabit,
       deleteHabit,
