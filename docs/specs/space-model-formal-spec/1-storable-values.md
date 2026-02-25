@@ -416,7 +416,7 @@ the type hierarchy:
   `StorableContentId`).
 
 ```typescript
-// file: packages/common/special-primitive-value.ts
+// file: packages/memory/special-primitive-value.ts
 
 /**
  * Abstract base class for storable datum types that behave like primitives
@@ -437,7 +437,7 @@ export abstract class SpecialPrimitiveValue {}
 ```
 
 Subclasses define their own state (e.g., `readonly value: bigint` for temporal
-types, `readonly hashBytes: Uint8Array` + `readonly algorithmTag: string` for
+types, `readonly hash: Uint8Array` + `readonly algorithmTag: string` for
 content IDs). The base class holds no state — its purpose is to provide a single
 `instanceof SpecialPrimitiveValue` check where code needs to identify these
 types uniformly (e.g., the conversion functions' freeze-bypass logic).
@@ -489,7 +489,7 @@ export class StorableEpochDays extends SpecialPrimitiveValue {
 #### 1.4.8 `StorableContentId`
 
 ```typescript
-// file: packages/common/storable-content-id.ts
+// file: packages/memory/storable-content-id.ts
 
 /**
  * A content identifier — a hash that identifies a storable value by its
@@ -509,7 +509,7 @@ export class StorableEpochDays extends SpecialPrimitiveValue {
 export class StorableContentId extends SpecialPrimitiveValue {
   constructor(
     /** The raw hash bytes (e.g., 32 bytes for SHA-256). */
-    readonly hashBytes: Uint8Array,
+    readonly hash: Uint8Array,
     /** The algorithm tag identifying the hash algorithm and version. */
     readonly algorithmTag: string,
   ) {
@@ -518,7 +518,7 @@ export class StorableContentId extends SpecialPrimitiveValue {
 
   /** Returns `<algorithmTag>:<base64hash>` (unpadded base64). */
   toString(): string {
-    return `${this.algorithmTag}:${base64EncodeUnpadded(this.hashBytes)}`;
+    return `${this.algorithmTag}:${base64EncodeUnpadded(this.hash)}`;
   }
 }
 ```
@@ -1194,7 +1194,7 @@ export function serialize(
   // the standard alphabet with no padding, matching the stringification
   // format.
   if (value instanceof StorableContentId) {
-    return context.encode('ContentId@1', [value.algorithmTag, base64Encode(value.hashBytes)]);
+    return context.encode('ContentId@1', [value.algorithmTag, base64Encode(value.hash)]);
   }
 
   // --- `undefined` ---
