@@ -35,6 +35,7 @@ interface DoListOutput {
   isHidden: true;
   items: DoItem[];
   itemCount: number;
+  summary: string;
   mentionable: { [NAME]: string; summary: string; [UI]: VNode }[];
   // UI handlers (use cell references via equals())
   addItem: OpaqueRef<Stream<{ title: string; indent?: number }>>;
@@ -233,6 +234,12 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
   const itemCount = computed(() => items.get().length);
   const hasNoItems = computed(() => items.get().length === 0);
 
+  const summary = computed(() => {
+    return items.get()
+      .map((item) => `${item.done ? "✓" : "○"} ${item.title}`)
+      .join(", ");
+  });
+
   // Bind handlers
   const addItem = addItemHandler({ items });
   const removeItem = removeItemHandler({ items });
@@ -318,6 +325,7 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
     isHidden: true,
     items,
     itemCount,
+    summary,
     mentionable: itemCards,
     addItem,
     removeItem,
