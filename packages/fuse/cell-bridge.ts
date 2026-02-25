@@ -5,7 +5,12 @@
 // Subscribes to cell changes and rebuilds subtrees on updates.
 
 import { FsTree } from "./tree.ts";
-import { buildJsonTree, isSigilLink, isStreamValue } from "./tree-builder.ts";
+import {
+  buildJsonTree,
+  isHandlerCell,
+  isSigilLink,
+  isStreamValue,
+} from "./tree-builder.ts";
 import type { PieceManager } from "@commontools/piece";
 import { type PieceController, PiecesController } from "@commontools/piece/ops";
 // Lazy-imported in connectSpace() to avoid pulling in heavy CLI deps at import
@@ -528,6 +533,7 @@ export class CellBridge {
   ): Promise<Cancel[]> {
     const cancels: Cancel[] = [];
     const resolveLink = this.makeLinkResolver(spaceName);
+    const skipEntry = (val: unknown) => isHandlerCell(val);
 
     const subscribeProp = async (
       propName: "input" | "result",
@@ -565,6 +571,7 @@ export class CellBridge {
                 undefined,
                 resolveLink,
                 0,
+                skipEntry,
               );
               this.addHandlerFiles(propIno, newValue, propName);
             }
@@ -608,6 +615,9 @@ export class CellBridge {
   ): (value: unknown, depth: number) => string | null {
     return (value: unknown, depth: number): string | null => {
       if (!isSigilLink(value)) return null;
+
+      // Handler links (internal/*) are rendered as .handler files, not symlinks.
+      if (isHandlerCell(value)) return null;
 
       const inner = (value as Record<string, unknown>)["/"] as Record<
         string,
@@ -678,6 +688,7 @@ export class CellBridge {
     );
 
     const resolveLink = this.makeLinkResolver(spaceName);
+    const skipEntry = (val: unknown) => isHandlerCell(val);
 
     try {
       // Input data
@@ -691,6 +702,7 @@ export class CellBridge {
           undefined,
           resolveLink,
           0,
+          skipEntry,
         );
         this.addHandlerFiles(inputIno, input, "input");
       }
@@ -706,6 +718,7 @@ export class CellBridge {
           undefined,
           resolveLink,
           0,
+          skipEntry,
         );
         this.addHandlerFiles(resultIno, result, "result");
       }
@@ -718,7 +731,7 @@ export class CellBridge {
   }
 
   /**
-   * Add .handler files for stream values within a prop directory.
+   * Add .handler files for stream values and handler sigil links.
    * Called from both loadPieceTree() and subscription rebuilds.
    */
   private addHandlerFiles(
@@ -731,7 +744,7 @@ export class CellBridge {
     }
     const obj = value as Record<string, unknown>;
     for (const [key, val] of Object.entries(obj)) {
-      if (isStreamValue(val)) {
+      if (isStreamValue(val) || isHandlerCell(val)) {
         this.tree.addHandler(propIno, `${key}.handler`, key, cellProp);
       }
     }

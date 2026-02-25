@@ -32,10 +32,11 @@ export function isStreamValue(v: unknown): boolean {
 }
 
 /**
- * Replace stream markers with handler sigils for JSON serialization.
+ * Replace stream markers and handler sigil links with handler sigils for JSON.
  * { $stream: true } → { "/handler": "<key>" }
+ * { "/": { "link@1": { path: ["internal", ...] } } } → { "/handler": "<key>" }
  *
- * Only creates a new object when stream markers are present.
+ * Only creates a new object when replacements are present.
  * Returns the original reference otherwise, preserving circular-ref
  * identity for safeStringify's WeakSet-based detection.
  */
@@ -44,18 +45,19 @@ export function transformStreamValues(value: unknown): unknown {
     return value;
   }
   const obj = value as Record<string, unknown>;
-  // Only allocate a new object if there are stream markers to replace
-  let hasStreams = false;
+  const isHandler = (val: unknown) => isStreamValue(val) || isHandlerCell(val);
+  // Only allocate a new object if there are entries to replace
+  let hasHandlers = false;
   for (const val of Object.values(obj)) {
-    if (isStreamValue(val)) {
-      hasStreams = true;
+    if (isHandler(val)) {
+      hasHandlers = true;
       break;
     }
   }
-  if (!hasStreams) return value;
+  if (!hasHandlers) return value;
   const result: Record<string, unknown> = {};
   for (const [key, val] of Object.entries(obj)) {
-    if (isStreamValue(val)) {
+    if (isHandler(val)) {
       result[key] = { "/handler": key };
     } else {
       result[key] = val;
@@ -78,6 +80,35 @@ export function isSigilLink(v: unknown): boolean {
     return false;
   }
   return "link@1" in (inner as Record<string, unknown>);
+}
+
+/**
+ * Detect handler Cell references: live Cell objects whose `_link.path` starts
+ * with `internal/`. These represent stream handlers (increment, decrement, etc.)
+ * and should be rendered as `.handler` files, not expanded as directories
+ * full of Cell runtime internals.
+ *
+ * Also matches serialized sigil links (`{"/": {"link@1": {path: ["internal", ...]}}}`)
+ * for robustness.
+ */
+export function isHandlerCell(v: unknown): boolean {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
+  const obj = v as Record<string, unknown>;
+
+  // Live Cell object: has _kind === "cell" and _link.path[0] === "internal"
+  if (obj._kind === "cell" && typeof obj._link === "object" && obj._link) {
+    const link = obj._link as { path?: readonly string[] };
+    return Array.isArray(link.path) && link.path[0] === "internal";
+  }
+
+  // Serialized sigil link form: {"/": {"link@1": {path: ["internal", ...]}}}
+  if (isSigilLink(v)) {
+    const inner = obj["/"] as Record<string, unknown>;
+    const linkData = inner["link@1"] as { path?: readonly string[] };
+    return Array.isArray(linkData.path) && linkData.path[0] === "internal";
+  }
+
+  return false;
 }
 
 /** Options for buildJsonTree beyond the required params. */
@@ -109,6 +140,7 @@ export function buildJsonTree(
   seen?: WeakSet<object>,
   resolveLink?: (value: unknown, depth: number) => string | null,
   depth?: number,
+  skipEntry?: (value: unknown) => boolean,
 ): bigint {
   const d = depth ?? 0;
 
@@ -184,6 +216,7 @@ export function buildJsonTree(
         seen,
         resolveLink,
         d + 1,
+        skipEntry,
       );
     }
 
@@ -194,7 +227,7 @@ export function buildJsonTree(
     const obj = value as Record<string, unknown>;
     const dirIno = tree.addDir(parentIno, name, "object");
 
-    // Add .json sibling, replacing stream markers with handler sigils
+    // Add .json sibling, replacing stream/handler values with handler sigils
     tree.addFile(
       parentIno,
       `${name}.json`,
@@ -202,10 +235,20 @@ export function buildJsonTree(
       "object",
     );
 
-    // Recurse for each key, skipping stream values (handler files created separately)
+    // Recurse for each key, skipping stream/handler values (handler files created separately)
     for (const [key, val] of Object.entries(obj)) {
       if (isStreamValue(val)) continue;
-      buildJsonTree(tree, dirIno, key, val, seen, resolveLink, d + 1);
+      if (skipEntry?.(val)) continue;
+      buildJsonTree(
+        tree,
+        dirIno,
+        key,
+        val,
+        seen,
+        resolveLink,
+        d + 1,
+        skipEntry,
+      );
     }
 
     return dirIno;

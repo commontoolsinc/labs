@@ -3,6 +3,7 @@ import { assertEquals } from "@std/assert";
 import { FsTree } from "./tree.ts";
 import {
   buildJsonTree,
+  isHandlerCell,
   isSigilLink,
   isStreamValue,
   safeStringify,
@@ -213,6 +214,111 @@ Deno.test("isSigilLink - rejects non-sigil values", () => {
   assertEquals(isSigilLink({ "/": { other: 1 } }), false);
   // Extra keys disqualify
   assertEquals(isSigilLink({ "/": { "link@1": {} }, extra: true }), false);
+});
+
+Deno.test("isHandlerCell - detects handler cells and sigil links to internal/*", () => {
+  // Live Cell object with _kind="cell" and _link.path starting with "internal"
+  assertEquals(
+    isHandlerCell({
+      _kind: "cell",
+      _link: { path: ["internal", "increment"], id: "of:abc" },
+      runtime: {},
+      tx: 0,
+    }),
+    true,
+  );
+  // Live Cell but path is not internal/* — not a handler
+  assertEquals(
+    isHandlerCell({
+      _kind: "cell",
+      _link: { path: ["result", "value"], id: "of:abc" },
+    }),
+    false,
+  );
+  // Serialized sigil link with path starting with "internal"
+  assertEquals(
+    isHandlerCell(
+      { "/": { "link@1": { id: "of:abc", path: ["internal", "increment"] } } },
+    ),
+    true,
+  );
+  // Serialized sigil link, path is not internal/* — not a handler
+  assertEquals(
+    isHandlerCell(
+      { "/": { "link@1": { id: "of:abc", path: ["result", "value"] } } },
+    ),
+    false,
+  );
+  // Not a Cell or sigil link at all
+  assertEquals(isHandlerCell({ $stream: true }), false);
+  assertEquals(isHandlerCell(42), false);
+  assertEquals(isHandlerCell(null), false);
+});
+
+Deno.test("buildJsonTree - handler cells skipped via skipEntry", () => {
+  const tree = new FsTree();
+
+  // Simulate live Cell objects (as returned by piece.result.get())
+  const data = {
+    value: 10,
+    increment: {
+      _kind: "cell",
+      _link: { path: ["internal", "increment"], id: "of:abc" },
+      runtime: {},
+      toJSON() {
+        return {
+          "/": {
+            "link@1": { id: "of:abc", path: ["internal", "increment"] },
+          },
+        };
+      },
+    },
+    decrement: {
+      _kind: "cell",
+      _link: { path: ["internal", "decrement"], id: "of:abc" },
+      runtime: {},
+      toJSON() {
+        return {
+          "/": {
+            "link@1": { id: "of:abc", path: ["internal", "decrement"] },
+          },
+        };
+      },
+    },
+  };
+
+  const resolveLink = (_value: unknown, depth: number): string | null => {
+    return "../".repeat(depth + 2) + "entities/test";
+  };
+  const skipEntry = (val: unknown) => isHandlerCell(val);
+
+  const resultIno = buildJsonTree(
+    tree,
+    tree.rootIno,
+    "result",
+    data,
+    undefined,
+    resolveLink,
+    0,
+    skipEntry,
+  );
+
+  // "value" should exist as a file
+  const valueIno = tree.lookup(resultIno, "value");
+  assertEquals(valueIno !== undefined, true);
+
+  // "increment" and "decrement" should be skipped (not in tree)
+  assertEquals(tree.lookup(resultIno, "increment"), undefined);
+  assertEquals(tree.lookup(resultIno, "decrement"), undefined);
+
+  // The .json sibling should have handler sigils
+  const jsonIno = tree.lookup(tree.rootIno, "result.json");
+  assertEquals(jsonIno !== undefined, true);
+  const jsonContent = getFileContent(tree, tree.rootIno, "result.json");
+  const parsed = JSON.parse(jsonContent);
+  assertEquals(parsed.increment, { "/handler": "increment" });
+  assertEquals(parsed.decrement, { "/handler": "decrement" });
+  assertEquals(parsed.value, 10);
 });
 
 Deno.test("buildJsonTree - sigil link becomes symlink via resolveLink", () => {
