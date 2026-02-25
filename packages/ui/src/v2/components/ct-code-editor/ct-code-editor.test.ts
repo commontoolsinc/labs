@@ -1,14 +1,13 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { EditorState } from "@codemirror/state";
+import { CTCodeEditor, MimeType } from "./ct-code-editor.ts";
 import {
   backlinkEditFilter,
   backlinkField,
   type BacklinkInfo,
-  CTCodeEditor,
-  MimeType,
   parseBacklinks,
-} from "./ct-code-editor.ts";
+} from "./features/backlinks.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
