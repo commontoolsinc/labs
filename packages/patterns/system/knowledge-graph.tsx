@@ -222,20 +222,27 @@ const KnowledgeGraph = pattern<Input>(() => {
       `- ${e.fromName} → ${e.toName} (${e.description})`
     ).join("\n");
 
-    return `You are a knowledge graph analyst. Analyze relationships between pieces and create annotations.
+    return `You are a knowledge graph analyst. Your job is to discover and annotate relationships between pieces — both explicit ones and hidden connections the user hasn't linked yet.
 
-Pieces in the space:
+Pieces in the space (with summaries):
 ${pieceList || "(none)"}
 
-Existing base links (from mentions):
+Existing base links (from explicit mentions):
 ${baseEdgeList || "(none)"}
 
 Your tasks:
-1. Describe the nature of existing relationships — upgrade generic "mentions" to richer descriptions like "references recipe", "extends idea", "provides context for"
-2. Create groups for clusters of related pieces that share a theme
-3. Add cross-cutting links that the mention system doesn't capture (semantic similarity, thematic connections)
+1. **Enrich existing links** — upgrade generic "mentions" to richer descriptions like "references recipe", "extends idea", "provides context for", "contradicts", "builds upon"
+2. **Discover hidden connections** — read the piece names and summaries carefully. Look for pieces that share themes, reference similar concepts, could inform each other, or represent different perspectives on the same topic. These are the MOST VALUABLE links to create — connections the user hasn't made explicitly but that exist semantically.
+3. **Create groups** — cluster related pieces that share a theme, project, or domain
 
-Do NOT recreate links that already exist. Focus on higher-level patterns.
+When discovering hidden connections, think broadly:
+- Pieces about related topics (e.g. a recipe and a grocery list, a meeting note and a project plan)
+- Pieces that could inform each other (e.g. research notes and a draft document)
+- Pieces with overlapping entities (people, places, concepts mentioned in summaries)
+- Temporal or causal relationships (e.g. a decision and its consequences)
+- Complementary perspectives on the same subject
+
+Do NOT recreate links that already exist in the base links above.
 Use listPieces and getNeighbors to explore, then call presentResult with your annotations.
 Use exact piece names from the piece list above for fromName/toName/pieceNames.`;
   });
