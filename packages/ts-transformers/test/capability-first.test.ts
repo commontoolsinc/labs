@@ -301,3 +301,131 @@ const p = pattern((input: Writable<{ foo: string; bar: string }>) => {
     assert(!output.includes('"bar"'));
   },
 );
+
+Deno.test(
+  "Capability-first diagnostics: pattern spread traversal emits computation code",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern } from "commontools";
+const p = pattern((input) => ({ ...input }));
+`;
+
+    const { diagnostics } = await validateSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+    });
+    const computationDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-context:computation"
+    );
+
+    assert(computationDiagnostics.length >= 1);
+  },
+);
+
+Deno.test(
+  "Capability-first diagnostics: pattern Object.keys/values/entries emit computation code",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern } from "commontools";
+const p = pattern((input) => {
+  Object.keys(input);
+  Object.values(input);
+  Object.entries(input);
+  return input;
+});
+`;
+
+    const { diagnostics } = await validateSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+    });
+    const computationDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-context:computation"
+    );
+
+    assert(computationDiagnostics.length >= 3);
+  },
+);
+
+Deno.test(
+  "Capability-first diagnostics: pattern dynamic key access emits computation code",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern } from "commontools";
+const p = pattern((input, key: string) => input[key]);
+`;
+
+    const { diagnostics } = await validateSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+    });
+    const computationDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-context:computation"
+    );
+
+    assert(computationDiagnostics.length >= 1);
+  },
+);
+
+Deno.test(
+  "Capability-first diagnostics: pattern for..in emits computation code",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern } from "commontools";
+const p = pattern((input) => {
+  for (const key in input) {
+    key;
+  }
+  return input;
+});
+`;
+
+    const { diagnostics } = await validateSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+    });
+    const computationDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-context:computation"
+    );
+
+    assert(computationDiagnostics.length >= 1);
+  },
+);
+
+Deno.test(
+  "Capability-first diagnostics: pattern JSON.stringify emits computation code",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern } from "commontools";
+const p = pattern((input) => JSON.stringify(input));
+`;
+
+    const { diagnostics } = await validateSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+    });
+    const computationDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-context:computation"
+    );
+
+    assert(computationDiagnostics.length >= 1);
+  },
+);
+
+Deno.test(
+  "Capability-first: compute wildcard usage keeps conservative full-shape input schema",
+  async () => {
+    const source = `/// <cts-enable />
+import { lift, type Writable } from "commontools";
+const fn = lift((input: Writable<{ foo: string; bar: string }>) => {
+  const foo = input.key("foo").get();
+  Object.keys(input.get());
+  return foo;
+});
+`;
+
+    const output = await transformSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, "asCell: true");
+    assertStringIncludes(output, '"foo"');
+    assertStringIncludes(output, '"bar"');
+  },
+);

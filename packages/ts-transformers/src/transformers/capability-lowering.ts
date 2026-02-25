@@ -400,10 +400,6 @@ function rewritePatternBody(
 
     const visited = visitEachChildWithJsx(node, visit, context.tsContext);
 
-    if (!ts.isExpression(visited)) {
-      return visited;
-    }
-
     const contextInfo = classifyReactiveContext(visited, context.checker, context);
     if (contextInfo.kind !== "pattern") {
       return visited;
@@ -481,6 +477,25 @@ function rewritePatternBody(
         ts.isIdentifier(visited.expression.expression) &&
         visited.expression.expression.text === "Object" &&
         WILDCARD_OBJECT_METHODS.has(visited.expression.name.text)
+      ) {
+        const firstArg = visited.arguments[0];
+        if (firstArg) {
+          const info = getAccessInfo(firstArg);
+          if (info.root && opaqueRoots.has(info.root)) {
+            reportOnce(
+              firstArg,
+              "computation",
+              "Wildcard object traversal is not lowerable in pattern context. Move this expression into computed().",
+            );
+          }
+        }
+      }
+
+      if (
+        ts.isPropertyAccessExpression(visited.expression) &&
+        ts.isIdentifier(visited.expression.expression) &&
+        visited.expression.expression.text === "JSON" &&
+        visited.expression.name.text === "stringify"
       ) {
         const firstArg = visited.arguments[0];
         if (firstArg) {
