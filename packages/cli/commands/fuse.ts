@@ -27,7 +27,7 @@ FILESYSTEM LAYOUT:
           input.json
           meta.json             # piece ID, entity, pattern name
         .index.json             # name-to-entity-ID mapping
-      entities/                 # entity-hash symlinks -> ../pieces/<name>
+      entities/                 # access cells by entity ID
       space.json                # { did, name }
     .spaces.json                # known space-name -> DID mapping
 

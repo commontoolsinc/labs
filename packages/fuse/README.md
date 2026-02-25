@@ -48,7 +48,7 @@ ct fuse unmount /tmp/ct
         input/                        # exploded input tree
         meta.json                     # piece ID, entity, pattern name
       .index.json                     # piece name → entity ID mapping
-    entities/                         # entity hash → ../pieces/<name> symlinks
+    entities/                         # access cells by entity ID
     space.json                        # { did, name }
   .spaces.json                        # known space name → DID mapping
 ```

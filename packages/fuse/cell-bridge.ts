@@ -365,7 +365,6 @@ export class CellBridge {
       }
       usedNames.add(name);
 
-      const entityHash = stripOfPrefix(piece.id);
       pieceMap.set(name, piece.id);
       pieceControllers.set(name, piece);
 
@@ -376,8 +375,8 @@ export class CellBridge {
         spaceName,
       );
 
-      // entities/<entity-hash> → ../pieces/<name>
-      this.tree.addSymlink(entitiesIno, entityHash, `../pieces/${name}`);
+      // entities/<entity-hash>/ — direct cell access by entity ID
+      // (populated on demand, not symlinked to pieces/)
 
       // Subscribe to cell changes
       const subs = await this.subscribePiece(
