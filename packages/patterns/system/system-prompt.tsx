@@ -13,6 +13,7 @@ interface Input {
   text?: Writable<Default<string, "">>;
 }
 
+/** #system prompt */
 interface Output {
   [NAME]: string;
   [UI]: VNode;
