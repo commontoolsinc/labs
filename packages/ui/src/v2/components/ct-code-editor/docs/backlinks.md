@@ -35,12 +35,6 @@ one looks at any proposed change and asks: _does it touch the `(id)]]` portion
 of a backlink?_ If so, it either blocks the change entirely (edit starts inside
 the ID) or truncates it to the name boundary (edit spans from name into ID).
 
-> **Known bug:** The truncation path has a defect. The filter detects a spanning
-> edit (`needsModification = true`) and computes truncated specs, but only
-> applies them when `blocked` is also `true`. A span-only edit therefore passes
-> through unmodified and corrupts the backlink ID. See the test
-> `"does NOT truncate edits spanning from name into ID (known bug)"` in
-> `ct-code-editor.test.ts`.
 
 ### 3. `atomicRanges` — cursor skipping (`atomicBacklinkRanges`)
 
@@ -94,12 +88,10 @@ than doing their own parsing.
    `atomicBacklinkRanges`, `backlinkEditFilter`, `BacklinkInfo`) were added
    specifically to make that extraction safe.
 
-2. **Truncation bug** in `backlinkEditFilter` (described above).
-
-3. **The `ViewPlugin` re-runs on every selection change** across the whole
+2. **The `ViewPlugin` re-runs on every selection change** across the whole
    document. For documents with many backlinks this is fine, but it could bail
    early when the cursor has not moved relative to any backlink boundary.
 
-4. **`atomicRanges` and the `ViewPlugin` both iterate all backlinks
+3. **`atomicRanges` and the `ViewPlugin` both iterate all backlinks
    independently.** They could share a single pass, though this is a minor
    concern in practice.
