@@ -282,48 +282,41 @@ export class CycleTracker<K> {
  * This will not work correctly if the key is modified after being added.
  */
 export class CompoundCycleTracker<EqualKey, DeepEqualKey, Value = unknown> {
-  private partial: Map<EqualKey, [DeepEqualKey, Value?][]>;
+  // partialKey (identity) → Map<hash(extraKey), Value?>
+  private partial: Map<EqualKey, Map<string, Value | undefined>>;
   constructor() {
-    this.partial = new Map<EqualKey, [DeepEqualKey, Value?][]>();
+    this.partial = new Map();
   }
 
   /**
-   * This will do an identity check on the `partialKey` and a deepEqual check on
-   * the `extraKey`.
+   * Identity check on `partialKey`, hash-based check on `extraKey`.
+   * Uses stableStringify (with WeakMap identity cache) so schema objects
+   * hash in O(1) amortized after the first stringify.
    */
   include(
     partialKey: EqualKey,
     extraKey: DeepEqualKey,
     value?: Value,
-    context?: unknown,
+    _context?: unknown,
   ): Disposable | null {
     let existing = this.partial.get(partialKey);
     if (existing === undefined) {
-      existing = [];
+      existing = new Map();
       this.partial.set(partialKey, existing);
     }
-    if (existing.some(([item, _value]) => deepEqual(item, extraKey))) {
+    const hash = stableStringify(extraKey);
+    if (existing.has(hash)) {
       return null;
     }
-    existing.push([extraKey, value]);
+    existing.set(hash, value);
     return {
       [Symbol.dispose]: () => {
-        const entries = this.partial.get(partialKey)!;
-        const index = entries.findIndex(([item, _value]) =>
-          deepEqual(item, extraKey)
-        );
-        if (index === -1) {
-          logger.error("traverse-error", () => [
-            "Failed to dispose of missing key",
-            extraKey,
-            context,
-          ]);
-          return;
-        }
-        if (entries.length === 0) {
-          this.partial.delete(partialKey);
-        } else {
-          entries.splice(index, 1);
+        const entries = this.partial.get(partialKey);
+        if (entries) {
+          entries.delete(hash);
+          if (entries.size === 0) {
+            this.partial.delete(partialKey);
+          }
         }
       },
     };
@@ -333,14 +326,10 @@ export class CompoundCycleTracker<EqualKey, DeepEqualKey, Value = unknown> {
   getExisting(partialKey: EqualKey, extraKey: DeepEqualKey): Value | undefined {
     const existing = this.partial.get(partialKey);
     if (existing === undefined) {
-      return undefined; // no match for partialKey
+      return undefined;
     }
-    const match = existing.find(([item, _value]) => deepEqual(item, extraKey));
-    if (match === undefined) {
-      return undefined; // no match for extraKey
-    }
-    const [_key, value] = match;
-    return value;
+    const hash = stableStringify(extraKey);
+    return existing.get(hash);
   }
 }
 

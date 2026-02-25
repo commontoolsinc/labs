@@ -155,6 +155,10 @@ export class ServerObjectManager implements ObjectStorageManager {
     return null;
   }
 
+  get readDocCount(): number {
+    return this.readValues.size;
+  }
+
   getReadDocs(): Iterable<IAttestation> {
     return this.readValues.values();
   }
@@ -340,13 +344,14 @@ export const selectSchema = <Space extends MemorySpace>(
   }
   const endTime = performance.timeOrigin + performance.now();
   const selectElapsed = endTime - startTime;
-  const factCount = [...iterate(includedFacts)].length;
+  let factCount = 0;
+  for (const _ of iterate(includedFacts)) factCount++;
   const stats: SelectSchemaStats = {
     elapsedMs: selectElapsed,
     factCount,
     trackerKeys: schemaTracker.size,
     trackerVals: schemaTracker.totalValues,
-    docsLoaded: [...manager.getReadDocs()].length,
+    docsLoaded: manager.readDocCount,
     sqliteReads: manager.sqliteReads,
     sqliteMs: manager.sqliteTotalMs,
     sqliteCacheHits: manager.sqliteCacheHits,
