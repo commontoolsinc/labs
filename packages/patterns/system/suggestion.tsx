@@ -87,8 +87,6 @@ export default pattern<
 
   // --- LLM state (freeform query path) ---
   const profile = wish<string>({ query: "#profile" });
-  const systemWish = wish<{ text: string }>({ query: "#system" });
-  const customSystemText = computed(() => systemWish.result?.text ?? "");
 
   const mentionable =
     wish<MentionablePiece[]>({ query: "#mentionable" }).result;
@@ -108,11 +106,7 @@ export default pattern<
 
   const systemPrompt = computed(() => {
     const profileCtx = profileContext;
-    const customSystem = customSystemText;
-    const customSection = customSystem
-      ? `\n\n--- Custom Instructions ---\n${customSystem}\n---`
-      : "";
-    return `You help users by finding relevant content and patterns.${profileCtx}${customSection}
+    return `You help users by finding relevant content and patterns.${profileCtx}
 
 Your textual responses are invisible to the user — they can only see the presented result.
 

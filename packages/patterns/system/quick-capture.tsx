@@ -140,20 +140,12 @@ export default pattern<QuickCaptureInput, QuickCaptureOutput>(
       query: "#summaryIndex",
     }).result;
 
-    // Optional wishes — these may not resolve (e.g. no #system piece yet).
-    // Extract into their own computeds so a failed wish can't kill the base prompt.
-    const systemWish = wish<{ text: string }>({ query: "#system" });
+    // TODO(#1269): Add wish<{ text: string }>({ query: "#system" }) once #system wish resolution is stable.
     const profileWish = wish<string>({ query: "#profile" });
-
-    const customSystemText = computed(() => systemWish.result?.text ?? "");
     const profileText = computed(() => profileWish.result ?? "");
 
     const systemPrompt = computed(() => {
-      const customSystem = customSystemText;
       const profile = profileText;
-      const systemSection = customSystem
-        ? `\n\n--- Custom Instructions ---\n${customSystem}\n---`
-        : "";
       const profileSection = profile
         ? `\n\n--- User Context ---\n${profile}\n---`
         : "";
@@ -185,7 +177,7 @@ Guidelines:
 - If the input is a single quick thought, one note is fine (still create the capture log entry)
 - Do NOT create notebooks by default. Only create a notebook when there's a clear, obvious reason (e.g. the input covers a multi-part project, a course with chapters, etc.). Individual notes are the default.
 - The "Capture Log" notebook is the one exception — always use it for capture log entries.
-${systemSection}${profileSection}`;
+${profileSection}`;
     });
 
     const messages = Writable.of<BuiltInLLMMessage[]>([]);

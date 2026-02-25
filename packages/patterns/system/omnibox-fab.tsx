@@ -160,8 +160,6 @@ export default pattern<OmniboxFABInput>(
     );
 
     const profile = wish<string>({ query: "#profile" });
-    const systemWish = wish<{ text: string }>({ query: "#system" });
-    const customSystemText = computed(() => systemWish.result?.text ?? "");
 
     const profileContext = computed(() => {
       const profileText = profile.result;
@@ -172,12 +170,8 @@ export default pattern<OmniboxFABInput>(
 
     const systemPrompt = computed(() => {
       const profileSection = profileContext;
-      const customSystem = customSystemText;
-      const customSection = customSystem
-        ? `\n\n--- Custom Instructions ---\n${customSystem}\n---`
-        : "";
       return `You are a polite but efficient assistant. Think Star Trek computer - helpful and professional without unnecessary conversation. Let your actions speak for themselves.
-${profileSection}${customSection}
+${profileSection}
 Tool usage priority:
 - For finding content in the space: use searchSpace with a query to search across all piece summaries and names
 - For finding relationships between pieces: use getNeighbors with an entity reference to get all incoming/outgoing links, or searchAnnotations to search agent-created annotations by text
