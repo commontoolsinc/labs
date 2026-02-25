@@ -446,7 +446,7 @@ Deno.test("parseSymlinkTarget - same-space entity ref", () => {
     "../../../entities/ba4jcbvpq3k5",
   );
 
-  assertEquals(result, { id: "of:ba4jcbvpq3k5" });
+  assertEquals(result, { id: "ba4jcbvpq3k5" });
 });
 
 Deno.test("parseSymlinkTarget - same-space entity ref with path", () => {
@@ -457,7 +457,7 @@ Deno.test("parseSymlinkTarget - same-space entity ref with path", () => {
     "../../../entities/ba4jcbvpq3k5/items/0",
   );
 
-  assertEquals(result, { id: "of:ba4jcbvpq3k5", path: ["items", "0"] });
+  assertEquals(result, { id: "ba4jcbvpq3k5", path: ["items", "0"] });
 });
 
 Deno.test("parseSymlinkTarget - cross-space entity ref", () => {
@@ -473,7 +473,7 @@ Deno.test("parseSymlinkTarget - cross-space entity ref", () => {
     "../../../../other/entities/xyz123",
   );
 
-  assertEquals(result, { id: "of:xyz123", space: "did:key:z6MkOther" });
+  assertEquals(result, { id: "xyz123", space: "did:key:z6MkOther" });
 });
 
 Deno.test("parseSymlinkTarget - cross-space entity ref with path", () => {
@@ -489,7 +489,7 @@ Deno.test("parseSymlinkTarget - cross-space entity ref with path", () => {
   );
 
   assertEquals(result, {
-    id: "of:xyz123",
+    id: "xyz123",
     space: "did:key:z6MkOther",
     path: ["name"],
   });
@@ -539,5 +539,5 @@ Deno.test("parseSymlinkTarget - unknown cross-space uses name as fallback", () =
     "../../../../unknown/entities/abc",
   );
 
-  assertEquals(result, { id: "of:abc", space: "unknown" });
+  assertEquals(result, { id: "abc", space: "unknown" });
 });

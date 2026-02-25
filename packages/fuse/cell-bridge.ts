@@ -12,11 +12,6 @@ import { type PieceController, PiecesController } from "@commontools/piece/ops";
 // time (breaks tests that only use CellBridge for tree/symlink logic).
 // import { loadManager } from "../cli/lib/piece.ts";
 
-/** Strip "of:" prefix from entity IDs if present. */
-function stripOfPrefix(id: string): string {
-  return id.startsWith("of:") ? id.slice(3) : id;
-}
-
 type Cancel = () => void;
 
 /** Result of resolving an inode to a writable cell path. */
@@ -268,7 +263,7 @@ export class CellBridge {
       const pathParts = resolved.slice(3);
 
       const result: { id?: string; path?: string[]; space?: string } = {
-        id: `of:${hash}`,
+        id: hash,
       };
 
       if (pathParts.length > 0) {
@@ -524,7 +519,7 @@ export class CellBridge {
         return linkData.path?.length ? linkData.path.join("/") : null;
       }
 
-      const entityHash = stripOfPrefix(linkData.id);
+      const entityHash = linkData.id;
       // depth is relative to the piece dir (input/ or result/ adds 1)
       // We need to go up to the space dir: up from current depth + up past piece name + up past "pieces"
       const upToSpace = "../".repeat(depth + 2);
@@ -563,7 +558,7 @@ export class CellBridge {
       JSON.stringify(
         {
           id: piece.id,
-          entityId: stripOfPrefix(piece.id),
+          entityId: piece.id,
           name: piece.name() || "",
           patternName,
         },
