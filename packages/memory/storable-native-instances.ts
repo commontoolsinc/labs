@@ -7,7 +7,6 @@ import {
   type StorableInstance,
 } from "./storable-protocol.ts";
 import { SpecialPrimitiveValue } from "./special-primitive-value.ts";
-export { SpecialPrimitiveValue } from "./special-primitive-value.ts";
 import { NATIVE_TAGS, tagFromNativeValue, TAGS } from "./type-tags.ts";
 import { FrozenMap, FrozenSet } from "./frozen-builtins.ts";
 

@@ -7,11 +7,11 @@ import {
 } from "../storable-protocol.ts";
 import type { ReconstructionContext } from "../storable-protocol.ts";
 import type { StorableValue } from "../interface.ts";
+import { SpecialPrimitiveValue } from "../special-primitive-value.ts";
 import {
   deepNativeValueFromStorableValue,
   isConvertibleNativeInstance,
   nativeValueFromStorableValue,
-  SpecialPrimitiveValue,
   StorableEpochDays,
   StorableEpochNsec,
   StorableError,

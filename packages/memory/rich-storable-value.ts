@@ -5,9 +5,9 @@ import type {
   StorableValueLayer,
 } from "./interface.ts";
 import { isStorableInstance } from "./storable-protocol.ts";
+import { SpecialPrimitiveValue } from "./special-primitive-value.ts";
 import {
   isConvertibleNativeInstance,
-  SpecialPrimitiveValue,
   StorableEpochNsec,
   StorableError,
   UNSAFE_KEYS,
