@@ -164,8 +164,12 @@ export class UnionFormatter implements TypeFormatter {
     cur: SchemaDefinition,
   ): boolean {
     if (cur === true) {
+      // One of our anyOf values was true, so return true to let our caller
+      // know that they can skip the anyOf and just use `true` for the schema.
       return true;
     } else if (cur === false) {
+      // One of our anyOf values was false. This has no effect on the anyOf,
+      // so we don't need to add it to the list, and we can just return.
       return false;
     }
     const curStr = JSON.stringify(cur);
