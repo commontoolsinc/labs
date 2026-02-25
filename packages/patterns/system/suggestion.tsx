@@ -88,6 +88,7 @@ export default pattern<
   // --- LLM state (freeform query path) ---
   const profile = wish<string>({ query: "#profile" });
   const systemWish = wish<{ text: string }>({ query: "#system" });
+  const customSystemText = computed(() => systemWish.result?.text ?? "");
 
   const mentionable =
     wish<MentionablePiece[]>({ query: "#mentionable" }).result;
@@ -107,7 +108,7 @@ export default pattern<
 
   const systemPrompt = computed(() => {
     const profileCtx = profileContext;
-    const customSystem = systemWish.result?.text ?? "";
+    const customSystem = customSystemText;
     const customSection = customSystem
       ? `\n\n--- Custom Instructions ---\n${customSystem}\n---`
       : "";

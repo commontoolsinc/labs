@@ -132,19 +132,25 @@ const captureHandler = handler<
 export default pattern<QuickCaptureInput, QuickCaptureOutput>(
   ({ allPieces }) => {
     // Wishes for space data
-    const mentionable =
-      wish<MentionablePiece[]>({ query: "#mentionable" }).result;
+    const mentionable = wish<MentionablePiece[]>({
+      query: "#mentionable",
+    }).result;
     const recentPieces = wish<MentionablePiece[]>({ query: "#recent" }).result;
-    const { entries: summaryEntries } =
-      wish<{ entries: SummaryIndexEntry[] }>({ query: "#summaryIndex" }).result;
+    const { entries: summaryEntries } = wish<{ entries: SummaryIndexEntry[] }>({
+      query: "#summaryIndex",
+    }).result;
 
-    // System prompt from #system wish + #profile wish
+    // Optional wishes — these may not resolve (e.g. no #system piece yet).
+    // Extract into their own computeds so a failed wish can't kill the base prompt.
     const systemWish = wish<{ text: string }>({ query: "#system" });
     const profileWish = wish<string>({ query: "#profile" });
 
+    const customSystemText = computed(() => systemWish.result?.text ?? "");
+    const profileText = computed(() => profileWish.result ?? "");
+
     const systemPrompt = computed(() => {
-      const customSystem = systemWish.result?.text ?? "";
-      const profile = profileWish.result ?? "";
+      const customSystem = customSystemText;
+      const profile = profileText;
       const systemSection = customSystem
         ? `\n\n--- Custom Instructions ---\n${customSystem}\n---`
         : "";
@@ -174,38 +180,39 @@ ${systemSection}${profileSection}`;
 
     const messages = Writable.of<BuiltInLLMMessage[]>([]);
 
-    const dialogOptions = {
+    const llmTools = {
+      searchSpace: patternTool(summarySearchPattern, {
+        entries: summaryEntries,
+      }),
+      listMentionable: patternTool(listMentionable, { mentionable }),
+      listRecent: patternTool(listRecent, { recentPieces }),
+      listPatternIndex: patternTool(listPatternIndex),
+      fetchAndRunPattern: patternTool(fetchAndRunPattern),
+      createNote: {
+        handler: createNoteHandler({ allPieces }),
+        description:
+          "Create a single note with a title and markdown content. Returns the created note.",
+      },
+      createNotes: {
+        handler: createNotesHandler({ allPieces }),
+        description:
+          "Create multiple notes at once. Each note has a title and content. More efficient than calling createNote repeatedly.",
+      },
+      createNotebook: {
+        handler: createNotebookHandler({ allPieces }),
+        description:
+          "Create a notebook to group related notes. Optionally provide initial notes. Use when the input covers a coherent topic.",
+      },
+    };
+    const dialogParams = {
       system: systemPrompt,
       messages,
-      tools: {
-        searchSpace: patternTool(summarySearchPattern, {
-          entries: summaryEntries,
-        }),
-        listMentionable: patternTool(listMentionable, { mentionable }),
-        listRecent: patternTool(listRecent, { recentPieces }),
-        listPatternIndex: patternTool(listPatternIndex),
-        fetchAndRunPattern: patternTool(fetchAndRunPattern),
-        createNote: {
-          handler: createNoteHandler({ allPieces }),
-          description:
-            "Create a single note with a title and markdown content. Returns the created note.",
-        },
-        createNotes: {
-          handler: createNotesHandler({ allPieces }),
-          description:
-            "Create multiple notes at once. Each note has a title and content. More efficient than calling createNote repeatedly.",
-        },
-        createNotebook: {
-          handler: createNotebookHandler({ allPieces }),
-          description:
-            "Create a notebook to group related notes. Optionally provide initial notes. Use when the input covers a coherent topic.",
-        },
-      },
+      tools: llmTools,
       model: "anthropic:claude-sonnet-4-5" as const,
       builtinTools: false,
     };
 
-    const { addMessage, pending } = llmDialog(dialogOptions);
+    const { addMessage, pending } = llmDialog(dialogParams);
 
     const hasMessages = computed(() => messages.get().length > 0);
 
@@ -234,10 +241,7 @@ ${systemSection}${profileSection}`;
               />
               {ifElse(
                 hasMessages,
-                <ct-chat
-                  $messages={messages}
-                  pending={pending}
-                />,
+                <ct-chat $messages={messages} pending={pending} />,
                 <div style="text-align: center; color: var(--ct-color-gray-500); padding: 2rem;">
                   Paste text, meeting notes, or ideas below. The agent will
                   break them into linked notes.
