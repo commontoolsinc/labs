@@ -200,3 +200,104 @@ const fn = lift((input: Writable<{ foo: string; bar: string }>) => input.get().f
     assertStringIncludes(output, '"foo"');
   },
 );
+
+Deno.test(
+  "Capability-first: pattern input shrinks to observed key paths",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern, type Writable } from "commontools";
+const p = pattern((input: Writable<{ foo: string; bar: string }>) => input.key("foo").get());
+`;
+
+    const output = await transformSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, "asCell: true");
+    assertStringIncludes(output, '"foo"');
+    assert(!output.includes('"bar"'));
+  },
+);
+
+Deno.test(
+  "Capability-first: derive input shrinks to observed key paths",
+  async () => {
+    const source = `/// <cts-enable />
+import { derive, type Writable } from "commontools";
+const state = {} as Writable<{ foo: string; bar: string }>;
+const d = derive(state, (input: Writable<{ foo: string; bar: string }>) => input.key("foo").get());
+`;
+
+    const output = await transformSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, "asCell: true");
+    assertStringIncludes(output, '"foo"');
+    assert(!output.includes('"bar"'));
+  },
+);
+
+Deno.test(
+  "Capability-first: handler state shrinks to observed key paths",
+  async () => {
+    const source = `/// <cts-enable />
+import { handler, type Writable } from "commontools";
+const h = handler((event: { id: string }, state: Writable<{ foo: string; bar: string }>) => {
+  state.key("foo").get();
+});
+`;
+
+    const output = await transformSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, "asCell: true");
+    assertStringIncludes(output, '"foo"');
+    assert(!output.includes('"bar"'));
+  },
+);
+
+Deno.test(
+  "Capability-first: lift passthrough degrades wrapped input to opaque capability",
+  async () => {
+    const source = `/// <cts-enable />
+import { lift, type Writable } from "commontools";
+const fn = lift((input: Writable<{ foo: string; bar: string }>) => input);
+`;
+
+    const output = await transformSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, "asOpaque: true");
+    assertStringIncludes(output, '"foo"');
+    assertStringIncludes(output, '"bar"');
+  },
+);
+
+Deno.test(
+  "Capability-first: action state shrinks to observed key paths",
+  async () => {
+    const source = `/// <cts-enable />
+import { action, pattern, type Writable } from "commontools";
+const p = pattern((input: Writable<{ foo: string; bar: string }>) => {
+  const a = action(() => input.key("foo").get());
+  return a;
+});
+`;
+
+    const output = await transformSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, "asCell: true");
+    assertStringIncludes(output, '"foo"');
+    assert(!output.includes('"bar"'));
+  },
+);

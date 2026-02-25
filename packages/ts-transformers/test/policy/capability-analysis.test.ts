@@ -120,3 +120,15 @@ Deno.test("Capability analysis does not record method names as read paths", () =
   assert(input.readPaths.includes(""));
   assert(!input.readPaths.includes("get"));
 });
+
+Deno.test("Capability analysis tracks destructured parameter paths", () => {
+  const fn = parseFirstCallback(
+    `const fn = (_, { input }) => input.key("foo").get();`,
+  );
+  const summary = analyzeFunctionCapabilities(fn);
+  const params = getPaths(summary, "__param1");
+
+  assertEquals(params.capability, "readonly");
+  assert(params.readPaths.includes("input.foo"));
+  assertEquals(params.wildcard, false);
+});

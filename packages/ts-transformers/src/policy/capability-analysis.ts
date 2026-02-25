@@ -25,6 +25,8 @@ interface SourceRef {
   readonly dynamic: boolean;
 }
 
+const PARAMETER_SUMMARY_PREFIX = "__param";
+
 const WRITER_METHODS = new Set(["set", "update"]);
 const READER_METHODS = new Set(["get"]);
 const WILDCARD_OBJECT_METHODS = new Set(["keys", "values", "entries"]);
@@ -207,6 +209,74 @@ function clearBindingAliases(
   }
 }
 
+function assignParameterBindingAlias(
+  name: ts.BindingName,
+  source: SourceRef | undefined,
+  aliases: Map<string, SourceRef>,
+  markWildcard: (name: string) => void,
+): void {
+  if (ts.isIdentifier(name)) {
+    if (source) {
+      aliases.set(name.text, source);
+    } else {
+      aliases.delete(name.text);
+    }
+    return;
+  }
+
+  if (!source) {
+    clearBindingAliases(name, aliases);
+    return;
+  }
+
+  if (ts.isArrayBindingPattern(name)) {
+    markWildcard(source.root);
+    clearBindingAliases(name, aliases);
+    return;
+  }
+
+  for (const element of name.elements) {
+    if (ts.isOmittedExpression(element)) continue;
+
+    if (element.dotDotDotToken || element.initializer) {
+      markWildcard(source.root);
+      clearBindingAliases(element.name, aliases);
+      continue;
+    }
+
+    let key: string | undefined;
+    if (!element.propertyName) {
+      if (ts.isIdentifier(element.name)) {
+        key = element.name.text;
+      }
+    } else if (ts.isIdentifier(element.propertyName)) {
+      key = element.propertyName.text;
+    } else if (ts.isStringLiteral(element.propertyName)) {
+      key = element.propertyName.text;
+    } else if (ts.isNumericLiteral(element.propertyName)) {
+      key = element.propertyName.text;
+    } else {
+      markWildcard(source.root);
+    }
+
+    if (!key) {
+      clearBindingAliases(element.name, aliases);
+      continue;
+    }
+
+    assignParameterBindingAlias(
+      element.name,
+      {
+        root: source.root,
+        path: [...source.path, key],
+        dynamic: source.dynamic,
+      },
+      aliases,
+      markWildcard,
+    );
+  }
+}
+
 function toCapability(state: MutableCapabilityState): ReactiveCapability {
   const hasReads = state.reads.size > 0;
   const hasWrites = state.writes.size > 0;
@@ -222,50 +292,70 @@ export function analyzeFunctionCapabilities(
 ): FunctionCapabilitySummary {
   const states = new Map<string, MutableCapabilityState>();
   const aliases = new Map<string, SourceRef>();
+  const parameterStateKeys: string[] = [];
 
-  for (const parameter of fn.parameters) {
-    if (ts.isIdentifier(parameter.name)) {
-      aliases.set(parameter.name.text, {
-        root: parameter.name.text,
-        path: [],
-        dynamic: false,
-      });
-      states.set(parameter.name.text, {
+  const ensureState = (name: string): MutableCapabilityState => {
+    let state = states.get(name);
+    if (!state) {
+      state = {
         reads: new Set<string>(),
         writes: new Set<string>(),
         passthrough: false,
         wildcard: false,
-      });
+      };
+      states.set(name, state);
     }
-  }
-
-  if (states.size === 0) {
-    return { params: [] };
-  }
+    return state;
+  };
 
   const trackRead = (name: string, path: readonly string[]): void => {
-    const state = states.get(name);
-    if (!state) return;
-    state.reads.add(encodePath(path));
+    ensureState(name).reads.add(encodePath(path));
   };
 
   const trackWrite = (name: string, path: readonly string[]): void => {
-    const state = states.get(name);
-    if (!state) return;
-    state.writes.add(encodePath(path));
+    ensureState(name).writes.add(encodePath(path));
   };
 
   const markWildcard = (name: string): void => {
-    const state = states.get(name);
-    if (!state) return;
-    state.wildcard = true;
+    ensureState(name).wildcard = true;
   };
 
   const markPassthrough = (name: string): void => {
-    const state = states.get(name);
-    if (!state) return;
-    state.passthrough = true;
+    ensureState(name).passthrough = true;
   };
+
+  for (let index = 0; index < fn.parameters.length; index++) {
+    const parameter = fn.parameters[index]!;
+    const stateKey = ts.isIdentifier(parameter.name)
+      ? parameter.name.text
+      : `${PARAMETER_SUMMARY_PREFIX}${index}`;
+    parameterStateKeys[index] = stateKey;
+    ensureState(stateKey);
+
+    if (ts.isIdentifier(parameter.name)) {
+      aliases.set(parameter.name.text, {
+        root: stateKey,
+        path: [],
+        dynamic: false,
+      });
+      continue;
+    }
+
+    assignParameterBindingAlias(
+      parameter.name,
+      {
+        root: stateKey,
+        path: [],
+        dynamic: false,
+      },
+      aliases,
+      markWildcard,
+    );
+  }
+
+  if (parameterStateKeys.length === 0) {
+    return { params: [] };
+  }
 
   const resolveFromAccess = (expression: ts.Expression): SourceRef | undefined => {
     const info = extractAccessPath(expression);
@@ -679,12 +769,16 @@ export function analyzeFunctionCapabilities(
   }
 
   const params: CapabilityParamSummary[] = [];
-  for (const parameter of fn.parameters) {
-    if (!ts.isIdentifier(parameter.name)) continue;
-    const state = states.get(parameter.name.text);
+  for (let index = 0; index < fn.parameters.length; index++) {
+    const parameter = fn.parameters[index];
+    if (!parameter) continue;
+    const summaryName = ts.isIdentifier(parameter.name)
+      ? parameter.name.text
+      : `${PARAMETER_SUMMARY_PREFIX}${index}`;
+    const state = states.get(summaryName);
     if (!state) continue;
     params.push({
-      name: parameter.name.text,
+      name: summaryName,
       capability: toCapability(state),
       readPaths: Array.from(state.reads).map(decodePath),
       writePaths: Array.from(state.writes).map(decodePath),

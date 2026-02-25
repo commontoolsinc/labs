@@ -22,6 +22,7 @@ import {
   Transformer,
   type TypeRegistry,
 } from "../core/mod.ts";
+import { analyzeFunctionCapabilities } from "../policy/mod.ts";
 
 /**
  * Schema Injection Transformer - TypeRegistry Integration
@@ -158,6 +159,88 @@ function buildShrunkTypeNodeFromType(
   return factory.createTypeLiteralNode(properties);
 }
 
+function getPropertyNameText(name: ts.PropertyName): string | undefined {
+  if (ts.isIdentifier(name)) return name.text;
+  if (ts.isStringLiteral(name)) return name.text;
+  if (ts.isNumericLiteral(name)) return name.text;
+  if (ts.isNoSubstitutionTemplateLiteral(name)) return name.text;
+  return undefined;
+}
+
+function buildShrunkTypeNodeFromTypeNode(
+  node: ts.TypeNode,
+  paths: readonly (readonly string[])[],
+  factory: ts.NodeFactory,
+): ts.TypeNode | undefined {
+  const normalized = uniquePaths(paths);
+  if (normalized.length === 0) {
+    return undefined;
+  }
+
+  if (normalized.some((path) => path.length === 0)) {
+    return node;
+  }
+
+  if (ts.isTypeLiteralNode(node)) {
+    const grouped = groupPathsByHead(normalized);
+    const members: ts.TypeElement[] = [];
+
+    for (const member of node.members) {
+      if (!ts.isPropertySignature(member) || !member.name || !member.type) {
+        continue;
+      }
+
+      const propertyName = getPropertyNameText(member.name);
+      if (!propertyName) continue;
+      const childPaths = grouped.get(propertyName);
+      if (!childPaths) continue;
+
+      const shrunkChild = buildShrunkTypeNodeFromTypeNode(
+        member.type,
+        childPaths,
+        factory,
+      ) ?? member.type;
+
+      members.push(
+        factory.updatePropertySignature(
+          member,
+          member.modifiers,
+          member.name,
+          member.questionToken,
+          shrunkChild,
+        ),
+      );
+    }
+
+    if (members.length === 0) {
+      return undefined;
+    }
+    return factory.createTypeLiteralNode(members);
+  }
+
+  if (
+    ts.isTypeReferenceNode(node) &&
+    isCellLikeTypeNode(node) &&
+    node.typeArguments &&
+    node.typeArguments.length > 0
+  ) {
+    const [inner, ...rest] = node.typeArguments;
+    if (!inner) return undefined;
+    const shrunkInner = buildShrunkTypeNodeFromTypeNode(
+      inner,
+      normalized,
+      factory,
+    ) ?? inner;
+    return factory.updateTypeReferenceNode(
+      node,
+      node.typeName,
+      factory.createNodeArray([shrunkInner, ...rest]),
+    );
+  }
+
+  return node;
+}
+
 function wrapTypeNodeWithCapability(
   node: ts.TypeNode,
   capability: ReactiveCapability,
@@ -182,8 +265,12 @@ function wrapTypeNodeWithCapability(
 
 function isCellLikeTypeNode(node: ts.TypeNode): boolean {
   if (!ts.isTypeReferenceNode(node)) return false;
-  if (!ts.isIdentifier(node.typeName)) return false;
-  const name = node.typeName.text;
+  const name = ts.isIdentifier(node.typeName)
+    ? node.typeName.text
+    : ts.isQualifiedName(node.typeName)
+    ? node.typeName.right.text
+    : undefined;
+  if (!name) return false;
   return name === "Cell" ||
     name === "Writable" ||
     name === "OpaqueCell" ||
@@ -218,11 +305,13 @@ function findCapabilitySummaryForParameter(
   capabilityRegistry?: CapabilitySummaryRegistry,
 ): CapabilityParamSummary | undefined {
   if (!capabilityRegistry) return undefined;
-  const summary = capabilityRegistry.get(fn);
+  const summary = capabilityRegistry?.get(fn) ?? analyzeFunctionCapabilities(fn);
   if (!summary) return undefined;
   const parameter = fn.parameters[index];
-  if (!parameter || !ts.isIdentifier(parameter.name)) return undefined;
-  const paramName = parameter.name.text;
+  if (!parameter) return undefined;
+  const paramName = ts.isIdentifier(parameter.name)
+    ? parameter.name.text
+    : `__param${index}`;
   return summary.params.find((param) => param.name === paramName);
 }
 
@@ -259,14 +348,17 @@ function applyCapabilitySummaryToArgument(
   ]);
 
   let next = baseTypeNode;
-  if (!paramSummary.wildcard && baseType && paths.length > 0) {
-    const shrunk = buildShrunkTypeNodeFromType(
-      baseType,
-      paths,
-      checker,
-      sourceFile,
-      factory,
-    );
+  if (!paramSummary.wildcard && paths.length > 0) {
+    let shrunk = buildShrunkTypeNodeFromTypeNode(baseTypeNode, paths, factory);
+    if (!shrunk && baseType) {
+      shrunk = buildShrunkTypeNodeFromType(
+        baseType,
+        paths,
+        checker,
+        sourceFile,
+        factory,
+      );
+    }
     if (shrunk) {
       next = shrunk;
     }
@@ -312,14 +404,17 @@ function applyCapabilitySummaryToParameter(
   ]);
 
   let next = baseTypeNode;
-  if (!paramSummary.wildcard && baseType && paths.length > 0) {
-    const shrunk = buildShrunkTypeNodeFromType(
-      baseType,
-      paths,
-      checker,
-      sourceFile,
-      factory,
-    );
+  if (!paramSummary.wildcard && paths.length > 0) {
+    let shrunk = buildShrunkTypeNodeFromTypeNode(baseTypeNode, paths, factory);
+    if (!shrunk && baseType) {
+      shrunk = buildShrunkTypeNodeFromType(
+        baseType,
+        paths,
+        checker,
+        sourceFile,
+        factory,
+      )
+    }
     if (shrunk) {
       next = shrunk;
     }
@@ -890,7 +985,9 @@ export class SchemaInjectionTransformer extends Transformer {
   transform(context: TransformationContext): ts.SourceFile {
     const { sourceFile, tsContext: transformation, checker } = context;
     const typeRegistry = context.options.typeRegistry;
-    const capabilityRegistry = context.options.capabilitySummaryRegistry;
+    const capabilityRegistry = context.options.useLegacyOpaqueRefSemantics
+      ? undefined
+      : context.options.capabilitySummaryRegistry;
 
     const visit = (node: ts.Node): ts.Node => {
       if (!ts.isCallExpression(node)) {
@@ -922,14 +1019,57 @@ export class SchemaInjectionTransformer extends Transformer {
             return ts.visitEachChild(node, visit, transformation);
           }
 
+          let eventTypeNode: ts.TypeNode = eventType;
+          let stateTypeNode: ts.TypeNode = stateType;
+          const handlerCandidate = node.arguments[0];
+          if (
+            handlerCandidate &&
+            (ts.isFunctionExpression(handlerCandidate) ||
+              ts.isArrowFunction(handlerCandidate))
+          ) {
+            const handlerFn = handlerCandidate;
+            const eventTypeValue = getTypeFromTypeNodeWithFallback(
+              eventType,
+              checker,
+              typeRegistry,
+            );
+            const stateTypeValue = getTypeFromTypeNodeWithFallback(
+              stateType,
+              checker,
+              typeRegistry,
+            );
+
+            eventTypeNode = applyCapabilitySummaryToParameter(
+              handlerFn,
+              0,
+              eventType,
+              eventTypeValue,
+              checker,
+              sourceFile,
+              factory,
+              capabilityRegistry,
+            ) ?? eventType;
+
+            stateTypeNode = applyCapabilitySummaryToParameter(
+              handlerFn,
+              1,
+              stateType,
+              stateTypeValue,
+              checker,
+              sourceFile,
+              factory,
+              capabilityRegistry,
+            ) ?? stateType;
+          }
+
           const toSchemaEvent = createSchemaCallWithRegistryTransfer(
             context,
-            eventType,
+            eventTypeNode,
             typeRegistry,
           );
           const toSchemaState = createSchemaCallWithRegistryTransfer(
             context,
-            stateType,
+            stateTypeNode,
             typeRegistry,
           );
 

@@ -683,6 +683,19 @@ function maybeRegisterBuilderCapabilitySummary(
   }
 }
 
+function registerBuilderSummariesInSubtree(
+  node: ts.Node,
+  context: TransformationContext,
+): void {
+  const visit = (current: ts.Node): void => {
+    if (ts.isCallExpression(current)) {
+      maybeRegisterBuilderCapabilitySummary(current, context);
+    }
+    ts.forEachChild(current, visit);
+  };
+  visit(node);
+}
+
 export class CapabilityLoweringTransformer extends Transformer {
   override filter(context: TransformationContext): boolean {
     return context.ctHelpers.sourceHasHelpers() &&
@@ -710,6 +723,7 @@ export class CapabilityLoweringTransformer extends Transformer {
               ...visitedNode.arguments.slice(1),
             ],
           );
+          registerBuilderSummariesInSubtree(transformedCallback.body, context);
           maybeRegisterBuilderCapabilitySummary(rewritten, context);
           return rewritten;
         }
