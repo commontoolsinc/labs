@@ -225,12 +225,16 @@ ${systemSection}${profileSection}`;
             <h2 style={{ margin: 0, fontSize: "18px" }}>Quick Capture</h2>
           </ct-toolbar>
 
-          <ct-vscroll flex showScrollbar fadeEdges>
+          <ct-vscroll flex showScrollbar fadeEdges snapToBottom>
             <ct-vstack gap="3" style="padding: 1rem;">
+              <ct-message-beads
+                label="capture"
+                $messages={messages}
+                pending={pending}
+              />
               {ifElse(
                 hasMessages,
-                <ct-message-beads
-                  label="capture"
+                <ct-chat
                   $messages={messages}
                   pending={pending}
                 />,
