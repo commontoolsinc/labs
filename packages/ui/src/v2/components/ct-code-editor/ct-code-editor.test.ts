@@ -28,7 +28,7 @@ function getBacklinks(state: EditorState): BacklinkInfo[] {
 }
 
 // ---------------------------------------------------------------------------
-// Existing basic tests
+// Basic tests
 // ---------------------------------------------------------------------------
 
 describe("CTCodeEditor", () => {
@@ -83,7 +83,7 @@ describe("CTCodeEditor", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 1. parseBacklinks() - Backlink parsing
+// parseBacklinks() - Backlink parsing
 // ---------------------------------------------------------------------------
 
 describe("parseBacklinks", () => {
@@ -188,7 +188,7 @@ describe("parseBacklinks", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 2. backlinkField StateField - Position tracking through edits
+// backlinkField StateField - Position tracking through edits
 // ---------------------------------------------------------------------------
 
 describe("backlinkField", () => {
@@ -285,7 +285,7 @@ describe("backlinkField", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 3. backlinkEditFilter - Transaction filter protecting IDs
+// backlinkEditFilter - Transaction filter protecting IDs
 // ---------------------------------------------------------------------------
 
 describe("backlinkEditFilter", () => {
@@ -389,7 +389,7 @@ describe("backlinkEditFilter", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 4. atomicBacklinkRanges - Structural properties
+// atomicBacklinkRanges - Structural properties
 // ---------------------------------------------------------------------------
 
 describe("atomicBacklinkRanges", () => {
@@ -421,7 +421,7 @@ describe("atomicBacklinkRanges", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 5. Backlink decoration plugin - Decoration boundaries
+// Backlink decoration plugin - Decoration boundaries
 // ---------------------------------------------------------------------------
 
 describe("backlink decoration plugin", () => {
@@ -449,7 +449,7 @@ describe("backlink decoration plugin", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 6. Enter keymap conditions
+// Enter keymap conditions
 // ---------------------------------------------------------------------------
 
 describe("Enter keymap conditions", () => {
