@@ -834,11 +834,15 @@ describe("storable-native-instances", () => {
 
   describe("SpecialPrimitiveValue", () => {
     it("StorableEpochNsec is instanceof SpecialPrimitiveValue", () => {
-      expect(new StorableEpochNsec(0n)).toBeInstanceOf(SpecialPrimitiveValue);
+      expect(new StorableEpochNsec(0n) instanceof SpecialPrimitiveValue).toBe(
+        true,
+      );
     });
 
     it("StorableEpochDays is instanceof SpecialPrimitiveValue", () => {
-      expect(new StorableEpochDays(0n)).toBeInstanceOf(SpecialPrimitiveValue);
+      expect(new StorableEpochDays(0n) instanceof SpecialPrimitiveValue).toBe(
+        true,
+      );
     });
 
     it("StorableEpochNsec instances are always frozen", () => {

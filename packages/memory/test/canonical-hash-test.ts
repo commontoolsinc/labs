@@ -894,6 +894,64 @@ Deno.test("canonicalHash", async (t) => {
   );
 
   // =========================================================================
+  // StorableContentId hashing (TAG_CONTENT_ID = 0x29)
+  // =========================================================================
+
+  await t.step(
+    "StorableContentId matches hand-computed byte stream",
+    () => {
+      // Algorithm tag "fid1" = [0x66, 0x69, 0x64, 0x31] (4 bytes UTF-8)
+      // Hash bytes: [0xDE, 0xAD, 0xBE, 0xEF] (4 bytes)
+      const cid = new StorableContentId(
+        new Uint8Array([0xDE, 0xAD, 0xBE, 0xEF]),
+        "fid1",
+      );
+      // Expected: TAG_CONTENT_ID(0x29), algTagLen(0x04), "fid1", hashLen(0x04), hash
+      const expected = sha256(
+        new Uint8Array([
+          0x29,
+          0x04,
+          0x66,
+          0x69,
+          0x64,
+          0x31,
+          0x04,
+          0xDE,
+          0xAD,
+          0xBE,
+          0xEF,
+        ]),
+      );
+      assertEquals(hex(canonicalHash(cid)), hex(expected));
+    },
+  );
+
+  await t.step(
+    "StorableContentId with different algorithm tags produce different hashes",
+    () => {
+      const bytes = new Uint8Array([0x01, 0x02, 0x03]);
+      const cid1 = new StorableContentId(bytes, "fid1");
+      const cid2 = new StorableContentId(bytes, "fid2");
+      assertNotEquals(hex(canonicalHash(cid1)), hex(canonicalHash(cid2)));
+    },
+  );
+
+  await t.step(
+    "StorableContentId with different hash bytes produce different hashes",
+    () => {
+      const cid1 = new StorableContentId(
+        new Uint8Array([0x01, 0x02]),
+        "fid1",
+      );
+      const cid2 = new StorableContentId(
+        new Uint8Array([0x03, 0x04]),
+        "fid1",
+      );
+      assertNotEquals(hex(canonicalHash(cid1)), hex(canonicalHash(cid2)));
+    },
+  );
+
+  // =========================================================================
   // canonicalHash returns StorableContentId
   // =========================================================================
 

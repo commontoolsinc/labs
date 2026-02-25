@@ -325,7 +325,7 @@ export class StorableSet extends StorableNativeWrapper<Set<StorableValue>> {
  * Temporal type representing nanoseconds from the POSIX Epoch (1970-01-01T00:00:00Z).
  * Wraps a `bigint` value. Used for high-precision timestamps. Direct member of
  * `StorableDatum` (not a `StorableInstance`).
- * See Section 1.4.5 of the formal spec.
+ * See Section 1.4.6 of the formal spec.
  */
 export class StorableEpochNsec extends SpecialPrimitiveValue {
   constructor(
@@ -341,7 +341,7 @@ export class StorableEpochNsec extends SpecialPrimitiveValue {
  * Temporal type representing days from the POSIX Epoch (1970-01-01).
  * Wraps a `bigint` value. Used for date-only (no time) values. Direct member of
  * `StorableDatum` (not a `StorableInstance`).
- * See Section 1.4.6 of the formal spec.
+ * See Section 1.4.7 of the formal spec.
  */
 export class StorableEpochDays extends SpecialPrimitiveValue {
   constructor(
