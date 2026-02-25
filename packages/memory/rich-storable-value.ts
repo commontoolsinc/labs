@@ -59,16 +59,18 @@ export function toRichStorableValue(
     return value as StorableValueLayer;
   }
 
-  // Native convertible instances: dispatch via tagFromNativeValue() which uses
-  // a constructor switch (O(1)) with Error.isError() fallback for exotic
-  // Error subclasses.
+  // Object-type dispatch via tagFromNativeValue() -- a constructor switch
+  // (O(1)) with fallbacks for exotic Error subclasses, cross-realm arrays,
+  // and null-prototype objects.
   if (typeof value === "object" && value !== null) {
     const nativeTag = tagFromNativeValue(value);
+
     if (nativeTag === NATIVE_TAGS.Error) {
       const wrapped = new StorableError(value as Error);
       if (freeze) Object.freeze(wrapped);
       return wrapped;
     }
+
     if (nativeTag === NATIVE_TAGS.Date) {
       // Date instances are converted to StorableEpochNsec (nanoseconds from
       // epoch). Extra enumerable properties cause rejection ("death before
@@ -79,6 +81,35 @@ export function toRichStorableValue(
       if (freeze) Object.freeze(wrapped);
       return wrapped;
     }
+
+    if (nativeTag === NATIVE_TAGS.Array) {
+      // Arrays pass through without converting `undefined` to `null` or
+      // densifying sparse arrays. When freezing, return a frozen shallow
+      // copy rather than freezing the caller's array in place.
+      const arr = value as unknown[];
+      if (freeze) {
+        if (Object.isFrozen(arr)) return arr;
+        const copy = new Array(arr.length);
+        for (let i = 0; i < arr.length; i++) {
+          if (i in arr) copy[i] = arr[i];
+        }
+        return Object.freeze(copy);
+      }
+      return arr;
+    }
+
+    if (nativeTag === NATIVE_TAGS.Object) {
+      // Plain objects pass through. When freezing, return a frozen shallow
+      // copy rather than freezing the caller's object in place.
+      if (freeze) {
+        if (Object.isFrozen(value)) return value;
+        return Object.freeze({ ...value });
+      }
+      return value;
+    }
+
+    // Other object types (Map, Set, Uint8Array, class instances, etc.)
+    // fall through to toRichStorableValueBase for toJSON/rejection handling.
   }
 
   // `undefined` passes through as-is.
@@ -86,25 +117,8 @@ export function toRichStorableValue(
     return undefined;
   }
 
-  // For arrays, return as-is without converting `undefined` to `null` or
-  // densifying sparse arrays. When freezing, return a frozen shallow copy
-  // rather than freezing the caller's array in place.
-  if (Array.isArray(value)) {
-    if (freeze) {
-      if (Object.isFrozen(value)) return value;
-      const copy = new Array(value.length);
-      for (let i = 0; i < value.length; i++) {
-        if (i in value) copy[i] = value[i];
-      }
-      return Object.freeze(copy);
-    }
-    return value;
-  }
-
-  // For all remaining types, apply the same logic as legacy toStorableValue.
-  // When freezing, copy the result if it's an object that might be the
-  // caller's original value (plain objects pass through from
-  // toRichStorableValueBase). Never freeze the caller's argument in place.
+  // Non-object types (primitives, bigint, functions) and unrecognized
+  // object types (class instances with toJSON, etc.).
   const result = toRichStorableValueBase(value);
   if (freeze && result !== null && typeof result === "object") {
     if (Object.isFrozen(result)) return result;
