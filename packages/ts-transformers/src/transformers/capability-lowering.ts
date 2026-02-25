@@ -606,6 +606,12 @@ function transformPatternCallback(
       for (const binding of bindings) {
         opaqueRoots.add(binding.localName);
       }
+    } else if (ts.isArrayBindingPattern(firstParam.name)) {
+      reportComputationError(
+        context,
+        firstParam,
+        "Array destructuring in pattern parameters is not lowerable. Use an object parameter and explicit input.key(...) bindings.",
+      );
     } else {
       reportComputationError(
         context,
