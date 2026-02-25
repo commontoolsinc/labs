@@ -952,6 +952,13 @@ describe("storable-value", () => {
         expect(Object.isFrozen(result)).toBe(true);
         expect(result).not.toBe(obj);
       });
+
+      it("converts function with toJSON via toRichStorableValueBase", () => {
+        const fn = () => {};
+        (fn as unknown as { toJSON: () => string }).toJSON = () =>
+          "converted fn";
+        expect(toStorableValue(fn)).toBe("converted fn");
+      });
     });
 
     describe("toDeepStorableValue", () => {
