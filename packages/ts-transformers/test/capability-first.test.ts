@@ -306,6 +306,33 @@ const h = handler((event: { id: string }, state: Writable<{ foo: string; bar: st
 );
 
 Deno.test(
+  "Capability-first: handler explicit type arguments shrink event and state paths",
+  async () => {
+    const source = `/// <cts-enable />
+import { handler, type Writable } from "commontools";
+const h = handler<
+  { detail: { message: string; unused: number } },
+  Writable<{ foo: string; bar: string }>
+>((event, state) => {
+  event.detail.message;
+  state.key("foo").get();
+});
+`;
+
+    const output = await transformSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, '"message"');
+    assert(!output.includes('"unused"'));
+    assertStringIncludes(output, "asCell: true");
+    assertStringIncludes(output, '"foo"');
+    assert(!output.includes('"bar"'));
+  },
+);
+
+Deno.test(
   "Capability-first: lift passthrough degrades wrapped input to opaque capability",
   async () => {
     const source = `/// <cts-enable />
@@ -321,6 +348,28 @@ const fn = lift((input: Writable<{ foo: string; bar: string }>) => input);
     assertStringIncludes(output, "asOpaque: true");
     assertStringIncludes(output, '"foo"');
     assertStringIncludes(output, '"bar"');
+  },
+);
+
+Deno.test(
+  "Capability-first: lift write-only usage shrinks wrapped input paths",
+  async () => {
+    const source = `/// <cts-enable />
+import { lift, type Writable } from "commontools";
+const fn = lift((input: Writable<{ foo: string; bar: string }>) => {
+  input.key("foo").set("updated");
+  return 1;
+});
+`;
+
+    const output = await transformSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, "asCell: true");
+    assertStringIncludes(output, '"foo"');
+    assert(!output.includes('"bar"'));
   },
 );
 
