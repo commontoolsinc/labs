@@ -7,9 +7,9 @@ import type {
 } from "@commontools/memory/interface";
 import type {
   CommitError,
+  IAttestation,
   ICfcPreparedDigestMismatchError,
   ICfcPrepareRequiredError,
-  IAttestation,
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
   InactiveTransactionError,
@@ -288,7 +288,8 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   private isCommitBearingAttempt(): boolean {
-    return this.cfcOutboxState.length > 0 || hasWriteActivity(this.journal.activity());
+    return this.cfcOutboxState.length > 0 ||
+      hasWriteActivity(this.journal.activity());
   }
 
   private clearCfcOutbox(): void {
@@ -307,6 +308,12 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   private async commitWithGate(): Promise<Result<Unit, CommitError>> {
+    const status = this.tx.status();
+    if (status.status !== "ready") {
+      this.clearCfcOutbox();
+      return await this.tx.commit();
+    }
+
     const commitBearing = this.isCommitBearingAttempt();
     if (!this.cfcRelevantState || !commitBearing) {
       const commitResult = await this.tx.commit();
@@ -323,15 +330,21 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       this.clearCfcOutbox();
       const abortResult = this.tx.abort(error);
       if (abortResult.error) {
-        logger.warn("storage-error", "Failed to abort tx after CFC gate error", {
-          gateError: error,
-          abortError: abortResult.error,
-        });
+        logger.warn(
+          "storage-error",
+          "Failed to abort tx after CFC gate error",
+          {
+            gateError: error,
+            abortError: abortResult.error,
+          },
+        );
       }
       return { error };
     }
 
-    const actualDigest = await computeCfcActivityDigest(this.journal.activity());
+    const actualDigest = await computeCfcActivityDigest(
+      this.journal.activity(),
+    );
     if (actualDigest !== this.preparedActivityDigestState) {
       const error = CfcPreparedDigestMismatchError(
         this.preparedActivityDigestState,
@@ -340,10 +353,14 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       this.clearCfcOutbox();
       const abortResult = this.tx.abort(error);
       if (abortResult.error) {
-        logger.warn("storage-error", "Failed to abort tx after CFC gate error", {
-          gateError: error,
-          abortError: abortResult.error,
-        });
+        logger.warn(
+          "storage-error",
+          "Failed to abort tx after CFC gate error",
+          {
+            gateError: error,
+            abortError: abortResult.error,
+          },
+        );
       }
       return { error };
     }

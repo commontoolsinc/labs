@@ -5,12 +5,18 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
+import { computeCfcSchemaHash } from "../src/cfc/schema-hash.ts";
 
 const signer = await Identity.fromPassphrase("cfc scheduler prepare shim test");
 const space = signer.did();
 
 const ifcNumberSchema: JSONSchema = {
   type: "number",
+  ifc: { classification: ["secret"] },
+};
+
+const ifcStringSchema: JSONSchema = {
+  type: "string",
   ifc: { classification: ["secret"] },
 };
 
@@ -34,8 +40,18 @@ describe("CFC scheduler prepare shim", () => {
 
   it("commits reactive action with IFC-relevant read/write via prepare shim", async () => {
     let tx = runtime.edit();
-    const input = runtime.getCell<number>(space, "cfc-prepare-input", undefined, tx);
-    const output = runtime.getCell<number>(space, "cfc-prepare-output", undefined, tx);
+    const input = runtime.getCell<number>(
+      space,
+      "cfc-prepare-input",
+      undefined,
+      tx,
+    );
+    const output = runtime.getCell<number>(
+      space,
+      "cfc-prepare-output",
+      undefined,
+      tx,
+    );
     input.set(1);
     output.set(0);
     await tx.commit();
@@ -60,9 +76,24 @@ describe("CFC scheduler prepare shim", () => {
 
   it("commits event handler path with IFC-relevant read/write via prepare shim", async () => {
     let tx = runtime.edit();
-    const eventCell = runtime.getCell<number>(space, "cfc-prepare-event", undefined, tx);
-    const sourceCell = runtime.getCell<number>(space, "cfc-prepare-source", undefined, tx);
-    const resultCell = runtime.getCell<number>(space, "cfc-prepare-result", undefined, tx);
+    const eventCell = runtime.getCell<number>(
+      space,
+      "cfc-prepare-event",
+      undefined,
+      tx,
+    );
+    const sourceCell = runtime.getCell<number>(
+      space,
+      "cfc-prepare-source",
+      undefined,
+      tx,
+    );
+    const resultCell = runtime.getCell<number>(
+      space,
+      "cfc-prepare-result",
+      undefined,
+      tx,
+    );
     eventCell.set(0);
     sourceCell.set(5);
     resultCell.set(0);
@@ -100,9 +131,24 @@ describe("CFC scheduler prepare shim", () => {
 
   it("retries event handler attempts and still commits through prepare shim", async () => {
     let tx = runtime.edit();
-    const eventCell = runtime.getCell<number>(space, "cfc-prepare-retry-event", undefined, tx);
-    const sourceCell = runtime.getCell<number>(space, "cfc-prepare-retry-source", undefined, tx);
-    const resultCell = runtime.getCell<number>(space, "cfc-prepare-retry-result", undefined, tx);
+    const eventCell = runtime.getCell<number>(
+      space,
+      "cfc-prepare-retry-event",
+      undefined,
+      tx,
+    );
+    const sourceCell = runtime.getCell<number>(
+      space,
+      "cfc-prepare-retry-source",
+      undefined,
+      tx,
+    );
+    const resultCell = runtime.getCell<number>(
+      space,
+      "cfc-prepare-retry-result",
+      undefined,
+      tx,
+    );
     eventCell.set(0);
     sourceCell.set(7);
     resultCell.set(0);
@@ -143,5 +189,73 @@ describe("CFC scheduler prepare shim", () => {
     expect(attempts).toBe(2);
     expect(callbackStatus).toBe("done");
     expect(resultCell.get()).toBe(27);
+  });
+
+  it("does not retry terminal CFC prepare errors", async () => {
+    let tx = runtime.edit();
+    const eventCell = runtime.getCell<number>(
+      space,
+      "cfc-prepare-terminal-event",
+      undefined,
+      tx,
+    );
+    const targetCell = runtime.getCell<number>(
+      space,
+      "cfc-prepare-terminal-target",
+      undefined,
+      tx,
+    );
+    eventCell.set(0);
+    targetCell.set(1);
+    await tx.commit();
+
+    const mismatchedSchemaHash = await computeCfcSchemaHash(ifcStringSchema);
+    tx = runtime.edit();
+    tx.writeOrThrow({
+      space,
+      id: targetCell.getAsNormalizedFullLink().id,
+      type: "application/json",
+      path: ["cfc", "schemaHash"],
+    }, mismatchedSchemaHash);
+    await tx.commit();
+
+    let attempts = 0;
+    let callbackStatus: string | undefined;
+    let callbackErrorName: string | undefined;
+    let callbackErrorReasonName: string | undefined;
+
+    runtime.scheduler.addEventHandler(
+      (handlerTx, _event) => {
+        attempts++;
+        targetCell.withTx(handlerTx).asSchema(ifcNumberSchema).set(42);
+      },
+      eventCell.getAsNormalizedFullLink(),
+    );
+
+    await new Promise<void>((resolve) => {
+      runtime.scheduler.queueEvent(
+        eventCell.getAsNormalizedFullLink(),
+        1,
+        2,
+        (commitTx) => {
+          const status = commitTx.status();
+          callbackStatus = status.status;
+          if (status.status === "error") {
+            callbackErrorName = status.error.name;
+            callbackErrorReasonName =
+              (status.error as { reason?: { name?: string } })
+                .reason?.name;
+          }
+          resolve();
+        },
+      );
+    });
+    await runtime.scheduler.idle();
+    await runtime.scheduler.idle();
+
+    expect(attempts).toBe(1);
+    expect(callbackStatus).toBe("error");
+    expect(callbackErrorName).toBe("StorageTransactionAborted");
+    expect(callbackErrorReasonName).toBe("CfcSchemaHashMismatchError");
   });
 });
