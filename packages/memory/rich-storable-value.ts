@@ -52,21 +52,25 @@ export function toRichStorableValue(
 
   // StorableInstance values (including StorableError, UnknownStorable, etc.)
   // pass through as-is -- they are already valid StorableValue members.
+  // Note: we do NOT freeze the incoming value. Conversion functions must
+  // not modify the caller's argument. The deep conversion path creates
+  // its own copies when freezing is needed.
   if (isStorableInstance(value)) {
-    if (freeze) Object.freeze(value);
     return value as StorableValueLayer;
   }
 
-  // Native convertible instances: dispatch via tagFromNativeValue() which uses
-  // a constructor switch (O(1)) with Error.isError() fallback for exotic
-  // Error subclasses.
+  // Object-type dispatch via tagFromNativeValue() -- a constructor switch
+  // (O(1)) with fallbacks for exotic Error subclasses, cross-realm arrays,
+  // and null-prototype objects.
   if (typeof value === "object" && value !== null) {
     const nativeTag = tagFromNativeValue(value);
+
     if (nativeTag === NATIVE_TAGS.Error) {
       const wrapped = new StorableError(value as Error);
       if (freeze) Object.freeze(wrapped);
       return wrapped;
     }
+
     if (nativeTag === NATIVE_TAGS.Date) {
       // Date instances are converted to StorableEpochNsec (nanoseconds from
       // epoch). Extra enumerable properties cause rejection ("death before
@@ -77,6 +81,35 @@ export function toRichStorableValue(
       if (freeze) Object.freeze(wrapped);
       return wrapped;
     }
+
+    if (nativeTag === NATIVE_TAGS.Array) {
+      // Arrays pass through without converting `undefined` to `null` or
+      // densifying sparse arrays. When freezing, return a frozen shallow
+      // copy rather than freezing the caller's array in place.
+      const arr = value as unknown[];
+      if (freeze) {
+        if (Object.isFrozen(arr)) return arr;
+        const copy = new Array(arr.length);
+        for (let i = 0; i < arr.length; i++) {
+          if (i in arr) copy[i] = arr[i];
+        }
+        return Object.freeze(copy);
+      }
+      return arr;
+    }
+
+    if (nativeTag === NATIVE_TAGS.Object) {
+      // Plain objects pass through. When freezing, return a frozen shallow
+      // copy rather than freezing the caller's object in place.
+      if (freeze) {
+        if (Object.isFrozen(value)) return value;
+        return Object.freeze({ ...value });
+      }
+      return value;
+    }
+
+    // Other object types (Map, Set, Uint8Array, class instances, etc.)
+    // fall through to toRichStorableValueBase for toJSON/rejection handling.
   }
 
   // `undefined` passes through as-is.
@@ -84,17 +117,12 @@ export function toRichStorableValue(
     return undefined;
   }
 
-  // For arrays, return as-is without converting `undefined` to `null` or
-  // densifying sparse arrays.
-  if (Array.isArray(value)) {
-    if (freeze) Object.freeze(value);
-    return value;
-  }
-
-  // For all remaining types, apply the same logic as legacy toStorableValue.
+  // Non-object types (primitives, bigint, functions) and unrecognized
+  // object types (class instances with toJSON, etc.).
   const result = toRichStorableValueBase(value);
   if (freeze && result !== null && typeof result === "object") {
-    Object.freeze(result);
+    if (Object.isFrozen(result)) return result;
+    return Object.freeze({ ...result });
   }
   return result;
 }
@@ -272,9 +300,11 @@ function toDeepRichStorableValueInternal(
   }
 
   // Try to convert the top level via the rich shallow converter.
+  // Pass freeze=false: the deep path handles freezing its own newly-built
+  // results; the shallow converter should not freeze anything.
   let value: StorableValueLayer;
   try {
-    value = toRichStorableValue(original);
+    value = toRichStorableValue(original, false);
   } catch (e) {
     if (isOriginalRecord) {
       converted.delete(original);
@@ -325,9 +355,9 @@ function toDeepRichStorableValueInternal(
 
   // Other StorableInstance values (Cell, Stream, UnknownStorable, etc.)
   // don't need recursion -- their [DECONSTRUCT] implementations return
-  // proper StorableValue.
+  // proper StorableValue. We do not freeze protocol objects; they are
+  // managed by the caller.
   if (isStorableInstance(value)) {
-    if (freeze) Object.freeze(value);
     if (isOriginalRecord) {
       converted.set(original, value);
     }
