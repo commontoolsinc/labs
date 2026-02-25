@@ -299,12 +299,15 @@ Use exact piece names from the piece list above for fromName/toName/pieceNames.`
     );
   });
 
-  const allEdges = computed(() => [...baseEdges, ...agentEdges]);
+  const allEdges = computed(() => [
+    ...baseEdges,
+    ...(agentEdges ?? []),
+  ]);
 
   // Computed counts for UI
   const baseEdgeCount = computed(() => baseEdges.length);
-  const agentEdgeCount = computed(() => agentEdges.length);
-  const compoundNodeCount = computed(() => compoundNodes.length);
+  const agentEdgeCount = computed(() => (agentEdges ?? []).length);
+  const compoundNodeCount = computed(() => (compoundNodes ?? []).length);
 
   return {
     [NAME]: computed(() => {
