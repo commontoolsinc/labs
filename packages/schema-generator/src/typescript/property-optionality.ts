@@ -66,6 +66,9 @@ export function isDefaultAliasSymbol(symbol: ts.Symbol | undefined): boolean {
   // The canonical Default<T,V> is declared in @commontools/api (packages/api/index.ts).
   // Cover both workspace-resolved paths (".../packages/api/index.ts") and any
   // future npm-published form ("@commontools/api").
+  // Also accept "commontools.d.ts" which is the filename used in test environments
+  // where the types are registered under a synthetic path.
   return fileName.endsWith("/api/index.ts") ||
-    fileName.includes("@commontools/api");
+    fileName.includes("@commontools/api") ||
+    fileName === "commontools.d.ts";
 }
