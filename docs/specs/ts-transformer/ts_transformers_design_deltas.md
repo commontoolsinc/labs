@@ -71,6 +71,10 @@ This document is a proposal backlog, not a statement of current behavior.
 - In **compute context**: rewrite only when receiver type is in the
   non-auto-unwrapped cell-like set (`Cell`, `Writable`, `Stream`, etc.).
 - Never rewrite plain JS array operators.
+- The callback parameter of `.map` is treated as a **pattern callback
+  parameter** only in cases where the call is actually rewritten to
+  `mapWithPattern`. If a `.map` is not rewritten, its callback parameter keeps
+  ordinary compute/plain semantics.
 
 **Initial operator in scope:** `.map`  
 **Future analogous operators:** `.filter`, `.find`, `.some`, `.every` (subject
@@ -92,7 +96,81 @@ to runtime contract support).
 4. Context evaluation uses the **active context at the operator site after
    prior rewrites**, including synthetic compute wrappers introduced by JSX
    rewriting.
-5. Test matrix exists and is extensible to future operators.
+5. `.map` callback parameter context is conditional on transform outcome:
+   rewritten `.map` -> pattern callback semantics; non-rewritten `.map` ->
+   regular callback semantics.
+6. Test matrix exists and is extensible to future operators.
+
+## D-004 Replace OpaqueRef-Heuristic Typing With Capability Dataflow + Type Shrinking
+
+**Policy target:**
+
+- Move away from relying on complex proxy-heavy `OpaqueRef<T>` surface types as
+  the primary decision source for transform policy.
+- Build a flow-aware capability model from normal parameters/locals and
+  propagated origins.
+- Treat pattern inputs and outputs of `lift(...)` / `pattern(...)` inside
+  patterns as origin sources, then follow aliases/reassignments/destructuring.
+- Summarize actual usage at boundaries:
+  - read-only -> `ReadonlyCell<T>`
+  - write-only -> `WriteonlyCell<T>`
+  - read+write -> `Cell<T>` / `Writable<T>`
+  - pass-through only -> `OpaqueCell<T>`
+- Shrink structural types to paths actually observed as read/written, with
+  conservative fallback to broader shape on unknown-dynamic operations.
+- In pattern-style contexts, treat "lowerable to opaque/key semantics" as the
+  primary legality criterion. Uses that cannot be lowered should produce
+  diagnostics.
+
+**Additional lowering target:**
+
+- If a receiver is capability-classified as `OpaqueCell`, lower path navigation:
+  - `foo.bar.baz` -> `foo.key("bar", "baz")`
+  - `foo?.bar?.baz` -> `foo.key("bar", "baz")`
+- Optional-chain path navigation should not force a data read when represented
+  via `key(...)` traversal.
+- Canonicalize destructured pattern-style parameters to a single receiver
+  parameter plus synthesized key-bindings.
+  - Example: `pattern(({ foo, bar }) => body)` ->
+    `pattern((input) => { const foo = input.key("foo"); const bar = input.key("bar"); return body; })`
+  - This also applies to callbacks rewritten to `mapWithPattern`.
+
+**Rationale:**
+
+- Current context/type heuristics are increasingly brittle for nested/synthetic
+  boundaries.
+- `OpaqueRef` type complexity leaks into policy in ways that are hard to reason
+  about and hard to maintain.
+- Least-capability boundary types make behavior and contracts explicit while
+  reducing accidental overexposure.
+
+**Acceptance criteria:**
+
+1. Rewrite decisions for collection and conditional operators can be explained
+   from `{context, receiver capability summary}`, not `OpaqueRef` heuristics.
+2. Boundary schemas/types for pattern/lift/derive/handler inputs and outputs can
+   be shrunk to used paths when no wildcard operations are present.
+3. Wildcard/dynamic operations (`...obj`, `Object.keys`, `for..in`, unknown
+   dynamic keys, serialization-like full traversal) conservatively disable path
+   shrinking for affected roots.
+4. Capability shrink is path-sensitive across local aliasing/reassignment within
+   the analyzed function scope.
+5. Opaque path navigation lowering (`prop` / optional-chain navigation ->
+   `key(...)`) is deterministic and semantics-preserving.
+6. Optional-call forms (for example `foo?.bar()`) are explicitly out of scope
+   for key-lowering until modeled separately.
+7. A feature gate exists for rollout and A/B fixture validation.
+8. Destructured callback parameters in pattern-style contexts are lowered to
+   non-destructured receiver parameters with explicit `key(...)` bindings.
+9. Alias/nested destructuring (for example `{ bar: b }`, `{ user: { name } }`)
+   maps to the correct key paths.
+10. Unsupported destructuring features that require full-value materialization
+    (`...rest`, computed binding keys, default initializers requiring
+    undefined-check semantics) are either conservatively handled via explicit
+    compute wrappers or diagnosed until modeled.
+11. Pattern-context diagnostics are emitted when an expression/use-site cannot be
+    represented under opaque/key lowering rules, rather than by separate legacy
+    heuristic checks.
 
 ## Principles
 
@@ -151,6 +229,23 @@ When disallowing expressions in pattern context, diagnostics should explain:
 2. why direct computation is constrained there,
 3. which compute-context wrapper to use.
 
+## P-009 Least Capability At Boundaries
+
+When a boundary type can be represented with less authority without losing
+needed behavior, prefer the least-capability representation.
+
+## P-010 Path-Sensitive Precision, Conservative Fallback
+
+Use precise path-level shrinking when evidence is strong. When analysis is
+ambiguous, fall back to broader types/shapes rather than risking unsoundness.
+
+## P-011 Pattern Legality Is Lowerability
+
+In pattern context, if authored code can be lowered to explicit opaque/key
+operations, it is legal. If it cannot be lowered soundly, it should be rejected
+with diagnostics that explain the blocking construct and compute-context escape
+hatch.
+
 ## Candidate Implementation Touchpoints
 
 - `packages/ts-transformers/src/ast/reactive-context.ts`
@@ -160,8 +255,15 @@ When disallowing expressions in pattern context, diagnostics should explain:
 - `packages/ts-transformers/src/transformers/opaque-ref/emitters/conditional-expression.ts`
 - `packages/ts-transformers/src/closures/strategies/map-strategy.ts`
 - `packages/ts-transformers/src/ast/call-kind.ts`
+- `packages/ts-transformers/src/ast/dataflow.ts` (or successor capability graph)
+- `packages/ts-transformers/src/ast/type-inference.ts`
+- `packages/ts-transformers/src/ast/type-building.ts`
 - validation messaging in
   `packages/ts-transformers/src/transformers/pattern-context-validation.ts`
+- replacement/merge path for that validation in capability-lowering diagnostics
+- schema emission in `packages/ts-transformers/src/transformers/schema-injection.ts`
+- schema generation coupling in
+  `packages/ts-transformers/src/transformers/schema-generator.ts`
 - docs currently describing “safe context,” including
   `packages/ts-transformers/docs/SAFE_CONTEXT_TRANSFORMS_DESIGN.md`
 
@@ -266,6 +368,65 @@ with semantics.
 
 This turns policy regressions into obvious test failures.
 
+## S-007 Introduce A Dedicated Capability-Flow IR
+
+**Current complexity:** expression-local dataflow exists, but not a dedicated
+summary model for read/write/pass-through capability at boundaries.
+
+**Recommendation:** add a first-class capability-flow IR per analyzed function:
+
+1. origin roots (pattern params, lift/pattern outputs, callback params)
+2. alias graph edges (assignment/destructure/rebind)
+3. operation facts (`read(path)`, `write(path)`, `pass`, `unknown-read`,
+   `unknown-write`)
+4. boundary summaries (per root and per emitted callback/module boundary)
+
+For `.map` callbacks, callback parameters are origin roots in pattern mode only
+for map calls that resolve to `mapWithPattern` under policy. Non-rewritten
+`.map` callbacks should not be promoted to pattern-origin roots.
+
+## S-008 Centralize Capability Shrinking In One Summarizer
+
+**Current complexity:** type shaping logic is distributed across closure/schema
+helpers.
+
+**Recommendation:** one summarizer should own:
+
+1. capability class (`opaque`, `readonly`, `writeonly`, `cell`)
+2. path set and wildcard flags
+3. conversion to TypeNode/schema hints for downstream emitters
+
+## S-009 Add A Receiver Path-Lowering Pass For OpaqueCell
+
+**Current complexity:** property/optional-chain behavior is split across several
+emitters and contextual checks.
+
+**Recommendation:** add a targeted lowering step (or utility used by emitters)
+that converts property navigation on capability-proven `OpaqueCell` receivers to
+`key(...)` chains, with explicit exclusions for optional-call.
+
+## S-010 Add A Shared Parameter Canonicalization Pass
+
+**Current complexity:** destructuring behavior is encoded in multiple callback
+transforms and depends on proxy-style access assumptions.
+
+**Recommendation:** add one reusable canonicalization utility for pattern-style
+callbacks:
+
+1. rewrite parameter binding patterns to a single receiver identifier
+2. synthesize stable local bindings via `receiver.key(...)`
+3. preserve aliasing and nested paths
+4. apply consistently to `pattern(...)` and rewritten `mapWithPattern` callbacks
+
+## S-011 Unify Validation With Lowerability Analysis
+
+**Current complexity:** a separate validation transformer enforces pattern
+context constraints using heuristics that may diverge from lowering behavior.
+
+**Recommendation:** generate pattern-context diagnostics from the same analysis
+that decides opaque/key lowering. This removes split-brain behavior where code
+is "valid per validator" but not lowerable, or vice versa.
+
 ## Proposed Implementation Path
 
 ## Phase 0: Lock Baseline And Prepare Rollout
@@ -337,6 +498,100 @@ logic.
 
 **Exit criteria:** no dead-path fallback logic for replaced policies.
 
+## Capability Dataflow Rollout Path
+
+## Phase D0: Guardrails And Instrumentation
+
+1. Add feature gate (`capabilityDataflowV1`) and fixture split for old/new path.
+2. Add characterization tests for tricky nested cases and current boundary types.
+
+**Exit criteria:** dual-path test harness in place with stable baseline.
+
+## Phase D1: Origin Tagging
+
+1. Tag analysis origins from:
+   - pattern/lift/derive/handler/action callback parameters
+   - results of `lift(...)` and `pattern(...)` invoked within pattern code
+   - `.map` callback parameters only when that call site is selected for
+     `mapWithPattern` rewrite
+2. Persist origin identity through synthetic node creation via registry metadata.
+
+**Exit criteria:** origins are queryable at any operator/boundary site.
+
+## Phase D2: Local Alias/Reassignment Flow Graph
+
+1. Implement statement-level local flow tracking for:
+   - direct assignment/reassignment
+   - object/array destructuring
+   - parameter rebinding aliases
+2. Emit conservative "unknown" edges on unsupported constructs.
+3. Add parameter canonicalization for pattern-style destructured inputs to
+   explicit key-binding prologues.
+
+**Exit criteria:** alias lineage is available for capability summarization.
+
+## Phase D3: Operation Classification
+
+1. Classify operations per origin/path:
+   - reads (`get`, comparisons, arithmetic, branch predicates, template use)
+   - writes (`set`, `update`, `push`, `send`, mutation helpers)
+   - pass-through (argument forwarding/return without local read/write)
+2. Detect wildcard/full-shape triggers (`...`, `Object.keys`, dynamic unknown
+   key access, broad iteration).
+3. Emit "non-lowerable in pattern context" reason codes for constructs requiring
+   diagnostics.
+
+**Exit criteria:** per-origin fact sets are stable across fixtures.
+
+## Phase D4: Boundary Capability And Shape Shrinking
+
+1. Produce boundary summaries:
+   - `OpaqueCell` / `ReadonlyCell` / `WriteonlyCell` / `Cell`
+   - used path tree + wildcard flags
+2. Wire summaries into schema/type emission in schema-injection/generator path.
+
+**Exit criteria:** emitted boundary type/schema changes match expected least
+capability for covered fixtures.
+
+## Phase D5: Policy Integration For Operator Rewrites
+
+1. Replace map/logical receiver classification inputs with capability summaries.
+2. Remove remaining `OpaqueRef`-specific heuristic branches where superseded.
+3. Start routing pattern-context validation diagnostics through lowering
+   eligibility checks.
+
+**Exit criteria:** operator rewrite matrix decisions are capability-backed.
+
+## Phase D6: Opaque Path Navigation Lowering
+
+1. Lower `foo.bar.baz` and optional-chain path navigation to `foo.key(...)`
+   when receiver summary is `OpaqueCell`.
+2. Ensure optional-chain navigation lowering preserves no-throw behavior.
+3. Keep optional-call excluded and diagnosed if needed.
+4. Ensure destructured parameter lowering composes with path-navigation lowering
+   without duplicate or conflicting rewrites.
+
+**Exit criteria:** snapshot parity for supported forms and explicit handling of
+unsupported optional-call cases.
+
+## Phase D7: Interprocedural Summaries (Selective)
+
+1. Emit compact summaries for `lift`/`pattern` outputs used within same module.
+2. Reuse summaries at call sites to avoid recomputation and improve precision.
+
+**Exit criteria:** improved shrinking precision in nested helper pipelines
+without major compile-time regression.
+
+## Phase D8: Default-On And Legacy Cleanup
+
+1. Flip `capabilityDataflowV1` to default after stabilization window.
+2. Remove legacy branches tied to old `OpaqueRef` heuristics.
+3. Update behavior spec to reflect new default behavior.
+4. Retire or reduce legacy pattern-context validation passes once lowerability
+   diagnostics are complete.
+
+**Exit criteria:** new path is default, old path removed or hard-deprecated.
+
 ## Open Questions
 
 1. Should ternary in compute context JSX also be preserved (no `ifElse`
@@ -347,3 +602,7 @@ logic.
    destabilizing in-flight work?
 4. Should `contextPolicyV2` be short-lived (one release) or support a longer
    dual-path migration window?
+5. For path shrinking, which operations should immediately force wildcard shape
+   fallback vs allow partial precision?
+6. Do we require interprocedural summaries before enabling capability shrinking
+   by default, or can local-only analysis ship first?

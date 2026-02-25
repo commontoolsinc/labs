@@ -132,6 +132,45 @@ narrow and type-driven.
 For future operators (`.filter`, `.find`, etc.), the goal is to keep the same
 matrix shape unless there is a semantics-specific reason to diverge.
 
+Important callback rule for `.map`:
+
+1. If a call site is rewritten to `mapWithPattern`, its callback parameter
+   semantics are pattern-like (opaque/pattern callback boundary).
+2. If a call site is not rewritten, callback parameter semantics stay normal for
+   that context (no implicit promotion to pattern callback semantics).
+
+## G-011 Least-Capability Boundary Types
+
+Boundary types should reflect the minimum authority required by observed usage,
+not the maximum authority implied by broad source annotations or proxy-heavy
+type defaults.
+
+Target direction:
+
+1. read-only usage -> `ReadonlyCell<T>`
+2. write-only usage -> `WriteonlyCell<T>`
+3. read+write usage -> `Cell<T>` / `Writable<T>`
+4. pass-through-only usage -> `OpaqueCell<T>`
+
+## G-012 Path-Sensitive Type Shrinking
+
+When usage evidence permits, emitted boundary types/schemas should mention only
+the object paths actually read or written. Unknown-dynamic or wildcard
+operations should conservatively fall back to broader shape.
+
+## G-013 Destructured Parameter Compatibility Under Key-Based Access
+
+Common authored forms like `pattern(({ foo, bar }) => ...)` must remain valid.
+If key-based access becomes canonical, transforms should preserve author
+ergonomics by rewriting destructured pattern-style parameters into explicit
+receiver-plus-key bindings.
+
+## G-014 One Source Of Truth For Pattern Diagnostics
+
+Pattern-context errors should come from the same lowerability/capability
+analysis that powers rewriting. We should avoid a separate heuristic validator
+with independent acceptance criteria.
+
 ## 5. Non-Goals
 
 ## NG-001 Security Boundary
@@ -200,6 +239,34 @@ Examples of required behavior:
 3. Context shifts introduced by earlier transformer passes (for example JSX
    rewriting introducing synthetic compute wrappers) are treated as real context
    boundaries for downstream collection-operator decisions.
+4. For collection callbacks (notably `.map`), callback context classification is
+   tied to transform outcome: only rewritten `mapWithPattern` callbacks are
+   treated as pattern callback boundaries.
+
+## C-007 Conservative Analysis Fallback
+
+When capability/path analysis is uncertain, behavior must degrade safely toward
+broader types and fewer aggressive rewrites rather than risking unsound
+narrowing.
+
+## C-008 Optional-Chain Navigation Semantics
+
+If property-navigation optional chains are lowered to `key(...)` on opaque
+receivers, lowering must preserve no-throw navigation semantics. Optional-call
+forms remain explicitly out of scope until modeled.
+
+## C-009 Destructuring Lowering Semantics
+
+Destructured parameter lowering must preserve meaning for supported forms
+(property pick, alias, nested pick). Forms that imply full-value materialization
+or undefined-default semantics beyond current model (`...rest`, computed binding
+keys, complex defaults) require explicit conservative handling or diagnostics.
+
+## C-010 Pattern Context Must Be Opaque-Lowerable
+
+In pattern-style contexts, authored expressions are valid only if they can be
+lowered to opaque/key/capability-respecting operations. Non-lowerable constructs
+must produce clear diagnostics with compute-context alternatives.
 
 ## 7. Success Criteria
 
@@ -213,6 +280,14 @@ We are meeting goals when:
 5. transformed output supports practical debugging and code review
 6. nested context tests demonstrate the collection-operator policy matrix for
    `.map` and any newly added analogous operators
+7. boundary capability fixtures show deterministic shrink to
+   `OpaqueCell`/`ReadonlyCell`/`WriteonlyCell`/`Cell` based on observed usage
+8. path-shrinking fixtures show precise contraction on static paths and
+   conservative fallback on wildcard operations
+9. destructured-parameter fixtures (`{ foo, bar }`, alias, nested) produce
+   stable receiver-plus-`key(...)` lowered output with equivalent behavior
+10. pattern-context diagnostics in fixtures align with lowerability outcomes,
+    without dependency on a separate heuristic-only validator path
 
 ## 8. Policy For Future Changes
 
@@ -223,6 +298,8 @@ When evaluating a transformer change:
 3. identify any non-goal drift (`NG-*`)
 4. include fixture/unit evidence
 5. update behavior and delta docs together
+6. state whether diagnostics are emitted by lowerability analysis or legacy
+   compatibility shims
 
 ## 9. Current Strategic Direction
 
@@ -231,3 +308,7 @@ Near-term direction implied by the current delta backlog:
 1. move terminology from “safe context” toward semantic context naming
 2. make conditional-operator rewrite policy context-driven and coherent
 3. prioritize deterministic rules over local heuristics where possible
+4. migrate from `OpaqueRef`-driven heuristics toward capability dataflow from
+   regular parameter flow
+5. make least-capability and path-shrunk boundary emission a first-class design
+   target
