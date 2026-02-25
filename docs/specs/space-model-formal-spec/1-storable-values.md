@@ -1194,7 +1194,7 @@ export function serialize(
   // the standard alphabet with no padding, matching the stringification
   // format.
   if (value instanceof StorableContentId) {
-    return context.encode('ContentId@1', [value.algorithmTag, base64Encode(value.hash)]);
+    return context.encode('ContentId@1', [value.algorithmTag, base64EncodeUnpadded(value.hash)]);
   }
 
   // --- `undefined` ---
