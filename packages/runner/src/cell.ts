@@ -553,7 +553,7 @@ export class CellImpl<T extends StorableValue>
       this.tx,
       this.link,
       [],
-      options,
+      { ...options, synced: this.synced },
     );
     const elapsed = logger.timeEnd("cell", "get")!;
     if (elapsed > 50) {
@@ -1085,6 +1085,7 @@ export class CellImpl<T extends StorableValue>
 
   sync(): Promise<Cell<T>> | Cell<T> {
     this.synced = true;
+    logger.info("sync", this.link);
     if (this.link.id.startsWith("data:")) {
       return this as unknown as Cell<T>;
     }
