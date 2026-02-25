@@ -18,7 +18,9 @@ import {
   bash,
   calculator,
   fetchAndRunPattern,
+  listMentionable,
   listPatternIndex,
+  listRecent,
   navigateToPattern,
   readWebpage,
   searchWeb,
@@ -30,9 +32,10 @@ import {
   type SummaryIndexEntry,
 } from "./summary-index.tsx";
 import {
-  findIncomingPattern,
-  findOutgoingPattern,
+  type CompoundNode,
+  getNeighborsPattern,
   type GraphEdge,
+  searchGraphPattern,
 } from "./knowledge-graph.tsx";
 
 interface DoListTools {
@@ -127,32 +130,6 @@ const wishTool = pattern<WishToolParameters>(
   },
 );
 
-const listMentionable = pattern<
-  { mentionable: Array<MentionablePiece> },
-  { result: Array<{ label: string; piece: MentionablePiece }> }
->(
-  ({ mentionable }) => {
-    const result = mentionable.map((c) => ({
-      label: c[NAME]!,
-      piece: c,
-    }));
-    return { result };
-  },
-);
-
-const listRecent = pattern<
-  { recentPieces: Array<MentionablePiece> },
-  { result: Array<{ label: string; piece: MentionablePiece }> }
->(
-  ({ recentPieces }) => {
-    const namesList = recentPieces.map((c) => ({
-      label: c[NAME]!,
-      piece: c,
-    }));
-    return { result: namesList };
-  },
-);
-
 /** Read current do list items */
 const readDoList = pattern<
   { items: Array<{ title: string; done: boolean; indent: number }> },
@@ -177,8 +154,9 @@ export default pattern<OmniboxFABInput>(
     const { entries: summaryEntries } = wish<{
       entries: SummaryIndexEntry[];
     }>({ query: "#summaryIndex" }).result;
-    const { edges: graphEdges } = wish<{
+    const { edges: graphEdges, compoundNodes: graphCompoundNodes } = wish<{
       edges: GraphEdge[];
+      compoundNodes: CompoundNode[];
     }>({ query: "#knowledgeGraph" }).result;
 
     const sandboxId = Writable.of(
@@ -200,7 +178,7 @@ export default pattern<OmniboxFABInput>(
 ${profileSection}
 Tool usage priority:
 - For finding content in the space: use searchSpace with a query to search across all piece summaries and names
-- For finding relationships between pieces: use findIncomingLinks/findOutgoingLinks with an entity reference, or searchGraph with a text query
+- For finding relationships between pieces: use getNeighbors with an entity reference to get all incoming/outgoing links, or searchAnnotations to search agent-created annotations by text
 - For patterns: listPatternIndex first
 - For existing pages/notes/content: searchSpace first, then listRecent or listMentionable to identify what they're referencing
 - Attach relevant items to conversation after instantiation/retrieval if they support ongoing tasks
@@ -241,12 +219,12 @@ Be matter-of-fact. Prefer action to explanation.`;
         addDoItem: {
           handler: doListTools.addItem,
           description:
-            "Add a task to the do list. Use indent for sub-tasks (0=root, 1=sub, 2=sub-sub).",
+            "Add a task to the do list. Use indent for sub-tasks (0=root, 1=sub, 2=sub-sub). Pass attachments array to link pieces.",
         },
         addDoItems: {
           handler: doListTools.addItems,
           description:
-            "Add multiple tasks at once. Use when parsing text into items.",
+            "Add multiple tasks at once. Each item can have attachments to link pieces.",
         },
         removeDoItem: {
           handler: doListTools.removeItemByTitle,
@@ -255,7 +233,7 @@ Be matter-of-fact. Prefer action to explanation.`;
         updateDoItem: {
           handler: doListTools.updateItemByTitle,
           description:
-            "Update a task by title. Set done=true to complete, newTitle to rename.",
+            "Update a task by title. Set done=true to complete, newTitle to rename, attachments to link pieces.",
         },
         readDoList: patternTool(readDoList, {
           items: doListTools.items,
@@ -263,11 +241,12 @@ Be matter-of-fact. Prefer action to explanation.`;
         searchSpace: patternTool(summarySearchPattern, {
           entries: summaryEntries,
         }),
-        findIncomingLinks: patternTool(findIncomingPattern, {
+        getNeighbors: patternTool(getNeighborsPattern, {
           edges: graphEdges,
         }),
-        findOutgoingLinks: patternTool(findOutgoingPattern, {
+        searchAnnotations: patternTool(searchGraphPattern, {
           edges: graphEdges,
+          compoundNodes: graphCompoundNodes,
         }),
       },
     });

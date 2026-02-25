@@ -23,6 +23,8 @@ const MAX_RECENT_CHARMS = 10;
 import BacklinksIndex, { type MentionablePiece } from "./backlinks-index.tsx";
 import SummaryIndex from "./summary-index.tsx";
 import KnowledgeGraph from "./knowledge-graph.tsx";
+
+import QuickCapture from "./quick-capture.tsx";
 import OmniboxFAB from "./omnibox-fab.tsx";
 import DoList from "../do-list/do-list.tsx";
 import Notebook from "../notes/notebook.tsx";
@@ -135,6 +137,15 @@ const menuNewNotebook = handler<void, { menuOpen: Writable<boolean> }>(
   },
 );
 
+// Menu: Quick Capture
+const menuQuickCapture = handler<
+  void,
+  { menuOpen: Writable<boolean>; quickCapture: any }
+>((_, { menuOpen, quickCapture }) => {
+  menuOpen.set(false);
+  return navigateTo(quickCapture);
+});
+
 // Helper to find existing All Notes piece
 const findAllNotebooksPiece = (allPieces: Writable<MinimalPiece[]>) => {
   const pieces = allPieces.get();
@@ -215,6 +226,8 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
   const summaryIdx = SummaryIndex({});
   const knowledgeGraph = KnowledgeGraph({});
 
+  const quickCapture = QuickCapture({ allPieces });
+
   const fab = OmniboxFAB({
     mentionable: index.mentionable,
     doListTools: {
@@ -233,6 +246,8 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
     backlinksIndex: index,
     summaryIndex: summaryIdx,
     knowledgeGraph,
+
+    quickCapture,
     [NAME]: computed(() => `Space Home (${visiblePieces.length})`),
     [UI]: (
       <ct-screen>
@@ -289,6 +304,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
           >
             Graph
           </ct-cell-link>
+
           <div slot="end">
             <ct-button
               variant="ghost"
@@ -343,6 +359,13 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                 style={{ justifyContent: "flex-start" }}
               >
                 {"\u00A0\u00A0"}📓 New Notebook
+              </ct-button>
+              <ct-button
+                variant="ghost"
+                onClick={menuQuickCapture({ menuOpen, quickCapture })}
+                style={{ justifyContent: "flex-start" }}
+              >
+                {"\u00A0\u00A0"}⚡ Quick Capture
               </ct-button>
               <div
                 style={{

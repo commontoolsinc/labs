@@ -11,3 +11,6 @@ const summary = computed(() => {
   return `${done} of ${total} complete`;
 });
 ```
+
+See also: [Summary Convention](../../conventions/summary.md) for the hierarchical
+summary pattern used by container patterns.

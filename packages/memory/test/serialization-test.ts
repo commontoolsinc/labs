@@ -18,15 +18,22 @@ import type { StorableValue } from "../interface.ts";
 import type { SerializedForm } from "../json-serialization-context.ts";
 import { UnknownStorable } from "../unknown-storable.ts";
 import { ProblematicStorable } from "../problematic-storable.ts";
+import { ExplicitTagStorable } from "../explicit-tag-storable.ts";
 import {
   deepNativeValueFromStorableValue,
   nativeValueFromStorableValue,
+  StorableEpochDays,
+  StorableEpochNsec,
   StorableError,
   StorableMap,
   StorableSet,
 } from "../storable-native-instances.ts";
 import { FrozenMap, FrozenSet } from "../frozen-builtins.ts";
-import { canBeStored } from "../rich-storable-value.ts";
+import { canBeStored, toRichStorableValue } from "../rich-storable-value.ts";
+import {
+  resetExperimentalStorableConfig,
+  setExperimentalStorableConfig,
+} from "../storable-value.ts";
 
 /** Creates a standard test context (non-lenient) and a mock runtime. */
 function makeTestContext() {
@@ -241,13 +248,54 @@ describe("serialization", () => {
   // --------------------------------------------------------------------------
 
   describe("bigint", () => {
-    it("serializes to { '/BigInt@1': '<string>' }", () => {
+    it("serializes 42n to base64 of two's complement bytes", () => {
       const { context } = makeTestContext();
       const result = serialize(
         42n as StorableValue,
         context,
       );
-      expect(result).toEqual({ "/BigInt@1": "42" });
+      // 42n -> [0x2a] -> base64 "Kg"
+      expect(result).toEqual({ "/BigInt@1": "Kg" });
+    });
+
+    it("serializes 0n to base64 'AA'", () => {
+      const { context } = makeTestContext();
+      const result = serialize(0n as StorableValue, context);
+      // 0n -> [0x00] -> base64 "AA"
+      expect(result).toEqual({ "/BigInt@1": "AA" });
+    });
+
+    it("serializes -1n to base64 '/w'", () => {
+      const { context } = makeTestContext();
+      const result = serialize(-1n as StorableValue, context);
+      // -1n -> [0xFF] -> base64 "/w"
+      expect(result).toEqual({ "/BigInt@1": "/w" });
+    });
+
+    it("serializes 1n to base64 'AQ'", () => {
+      const { context } = makeTestContext();
+      const result = serialize(1n as StorableValue, context);
+      // 1n -> [0x01] -> base64 "AQ"
+      expect(result).toEqual({ "/BigInt@1": "AQ" });
+    });
+
+    it("serializes 128n with sign-extension byte", () => {
+      const { context } = makeTestContext();
+      const result = serialize(128n as StorableValue, context);
+      // 128n -> [0x00, 0x80] -> base64 "AIA"
+      expect(result).toEqual({ "/BigInt@1": "AIA" });
+    });
+
+    it("base64 output is unpadded (no trailing =)", () => {
+      const { context } = makeTestContext();
+      // 42n produces 1 byte -> 2 base64 chars (would be "Kg==" with padding)
+      const result = serialize(42n as StorableValue, context) as Record<
+        string,
+        string
+      >;
+      const b64 = result["/BigInt@1"];
+      expect(b64).toBe("Kg");
+      expect(b64).not.toContain("=");
     });
 
     it("round-trips at top level", () => {
@@ -265,10 +313,42 @@ describe("serialization", () => {
       expect(result).toBe(0n);
     });
 
+    it("round-trips 1n", () => {
+      const result = roundTrip(1n as StorableValue);
+      expect(result).toBe(1n);
+    });
+
+    it("round-trips -1n", () => {
+      const result = roundTrip(-1n as StorableValue);
+      expect(result).toBe(-1n);
+    });
+
     it("round-trips large bigint", () => {
       const big = 2n ** 64n;
       const result = roundTrip(big as StorableValue);
       expect(result).toBe(big);
+    });
+
+    it("round-trips large negative bigint", () => {
+      const big = -(2n ** 64n);
+      const result = roundTrip(big as StorableValue);
+      expect(result).toBe(big);
+    });
+
+    it("round-trips boundary value 127n", () => {
+      expect(roundTrip(127n as StorableValue)).toBe(127n);
+    });
+
+    it("round-trips boundary value 128n", () => {
+      expect(roundTrip(128n as StorableValue)).toBe(128n);
+    });
+
+    it("round-trips boundary value -128n", () => {
+      expect(roundTrip(-128n as StorableValue)).toBe(-128n);
+    });
+
+    it("round-trips boundary value -129n", () => {
+      expect(roundTrip(-129n as StorableValue)).toBe(-129n);
     });
 
     it("round-trips in arrays", () => {
@@ -296,9 +376,18 @@ describe("serialization", () => {
       expect(serializedNum).not.toEqual(serializedBig);
     });
 
+    it("rejects padded base64 input (ProblematicStorable)", () => {
+      const { context, runtime } = makeTestContext();
+      // "Kg==" is the padded form of "Kg" (42n) -- padding is now rejected.
+      const data = { "/BigInt@1": "Kg==" } as SerializedForm;
+      const result = deserialize(data, context, runtime);
+      expect(result).toBeInstanceOf(ProblematicStorable);
+      const prob = result as unknown as ProblematicStorable;
+      expect(prob.typeTag).toBe("BigInt@1");
+    });
+
     it("deserializes non-string state to ProblematicStorable", () => {
       const { context, runtime } = makeTestContext();
-      // Manually construct a wire value with a non-string BigInt@1 state.
       const data = { "/BigInt@1": 42 } as SerializedForm;
       const result = deserialize(data, context, runtime);
       expect(result).toBeInstanceOf(ProblematicStorable);
@@ -321,14 +410,191 @@ describe("serialization", () => {
       expect(result).toBeInstanceOf(ProblematicStorable);
     });
 
-    it("deserializes invalid string state to ProblematicStorable", () => {
+    it("deserializes empty base64 string to ProblematicStorable", () => {
       const { context, runtime } = makeTestContext();
-      const data = { "/BigInt@1": "hello" } as SerializedForm;
+      const data = { "/BigInt@1": "" } as SerializedForm;
       const result = deserialize(data, context, runtime);
       expect(result).toBeInstanceOf(ProblematicStorable);
       const prob = result as unknown as ProblematicStorable;
       expect(prob.typeTag).toBe("BigInt@1");
-      expect(prob.state).toBe("hello");
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // StorableEpochNsec
+  // --------------------------------------------------------------------------
+
+  describe("StorableEpochNsec", () => {
+    it("serializes to /EpochNsec@1 with flat base64", () => {
+      const { context } = makeTestContext();
+      const sn = new StorableEpochNsec(0n);
+      const result = serialize(sn as StorableValue, context) as Record<
+        string,
+        unknown
+      >;
+      expect(Object.keys(result)).toEqual(["/EpochNsec@1"]);
+      // Flat format: base64 string directly, not nested {"/BigInt@1": ...}
+      expect(result["/EpochNsec@1"]).toBe("AA");
+    });
+
+    it("round-trips at top level (epoch zero)", () => {
+      const sn = new StorableEpochNsec(0n);
+      const result = roundTrip(
+        sn as StorableValue,
+      ) as unknown as StorableEpochNsec;
+      expect(result).toBeInstanceOf(StorableEpochNsec);
+      expect(result.value).toBe(0n);
+    });
+
+    it("round-trips positive nanosecond timestamp", () => {
+      // 2024-01-01T00:00:00Z = 1704067200 seconds = 1704067200000000000 nsec
+      const nsec = 1704067200000000000n;
+      const sn = new StorableEpochNsec(nsec);
+      const result = roundTrip(
+        sn as StorableValue,
+      ) as unknown as StorableEpochNsec;
+      expect(result).toBeInstanceOf(StorableEpochNsec);
+      expect(result.value).toBe(nsec);
+    });
+
+    it("round-trips negative nanosecond timestamp (pre-epoch)", () => {
+      const nsec = -86400000000000n; // -1 day in nanoseconds
+      const sn = new StorableEpochNsec(nsec);
+      const result = roundTrip(
+        sn as StorableValue,
+      ) as unknown as StorableEpochNsec;
+      expect(result).toBeInstanceOf(StorableEpochNsec);
+      expect(result.value).toBe(nsec);
+    });
+
+    it("round-trips large future date", () => {
+      // Year 3000-ish
+      const nsec = 32503680000000000000n;
+      const sn = new StorableEpochNsec(nsec);
+      const result = roundTrip(
+        sn as StorableValue,
+      ) as unknown as StorableEpochNsec;
+      expect(result.value).toBe(nsec);
+    });
+
+    it("round-trips in nested structure", () => {
+      const obj = {
+        timestamp: new StorableEpochNsec(42000000000n),
+        label: "test",
+      } as unknown as StorableValue;
+      const result = roundTrip(obj) as Record<string, StorableValue>;
+      expect(result.label).toBe("test");
+      const ts = result.timestamp as unknown as StorableEpochNsec;
+      expect(ts).toBeInstanceOf(StorableEpochNsec);
+      expect(ts.value).toBe(42000000000n);
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // StorableEpochDays
+  // --------------------------------------------------------------------------
+
+  describe("StorableEpochDays", () => {
+    it("serializes to /EpochDays@1 with flat base64", () => {
+      const { context } = makeTestContext();
+      const sd = new StorableEpochDays(0n);
+      const result = serialize(sd as StorableValue, context) as Record<
+        string,
+        unknown
+      >;
+      expect(Object.keys(result)).toEqual(["/EpochDays@1"]);
+      // Flat format: base64 string directly, not nested {"/BigInt@1": ...}
+      expect(result["/EpochDays@1"]).toBe("AA");
+    });
+
+    it("round-trips at top level (epoch zero)", () => {
+      const sd = new StorableEpochDays(0n);
+      const result = roundTrip(
+        sd as StorableValue,
+      ) as unknown as StorableEpochDays;
+      expect(result).toBeInstanceOf(StorableEpochDays);
+      expect(result.value).toBe(0n);
+    });
+
+    it("round-trips positive day count", () => {
+      const days = 19723n; // ~2024-01-01
+      const sd = new StorableEpochDays(days);
+      const result = roundTrip(
+        sd as StorableValue,
+      ) as unknown as StorableEpochDays;
+      expect(result).toBeInstanceOf(StorableEpochDays);
+      expect(result.value).toBe(days);
+    });
+
+    it("round-trips negative day count (pre-epoch)", () => {
+      const days = -365n;
+      const sd = new StorableEpochDays(days);
+      const result = roundTrip(
+        sd as StorableValue,
+      ) as unknown as StorableEpochDays;
+      expect(result).toBeInstanceOf(StorableEpochDays);
+      expect(result.value).toBe(days);
+    });
+
+    it("round-trips in nested structure", () => {
+      const obj = {
+        date: new StorableEpochDays(19723n),
+        label: "birthday",
+      } as unknown as StorableValue;
+      const result = roundTrip(obj) as Record<string, StorableValue>;
+      expect(result.label).toBe("birthday");
+      const d = result.date as unknown as StorableEpochDays;
+      expect(d).toBeInstanceOf(StorableEpochDays);
+      expect(d.value).toBe(19723n);
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Date -> StorableEpochNsec conversion
+  // --------------------------------------------------------------------------
+
+  describe("Date -> StorableEpochNsec conversion", () => {
+    it("converts Date(0) to StorableEpochNsec(0n)", () => {
+      setExperimentalStorableConfig({ richStorableValues: true });
+      try {
+        const date = new Date(0);
+        const result = toRichStorableValue(
+          date,
+        ) as unknown as StorableEpochNsec;
+        expect(result).toBeInstanceOf(StorableEpochNsec);
+        expect(result.value).toBe(0n);
+      } finally {
+        resetExperimentalStorableConfig();
+      }
+    });
+
+    it("converts Date to nanoseconds (msec * 1_000_000)", () => {
+      setExperimentalStorableConfig({ richStorableValues: true });
+      try {
+        const date = new Date("2024-01-01T00:00:00.000Z");
+        const result = toRichStorableValue(
+          date,
+        ) as unknown as StorableEpochNsec;
+        expect(result).toBeInstanceOf(StorableEpochNsec);
+        const expectedNsec = BigInt(date.getTime()) * 1_000_000n;
+        expect(result.value).toBe(expectedNsec);
+      } finally {
+        resetExperimentalStorableConfig();
+      }
+    });
+
+    it("converts negative Date to negative nanoseconds", () => {
+      setExperimentalStorableConfig({ richStorableValues: true });
+      try {
+        const date = new Date(-86400000); // -1 day
+        const result = toRichStorableValue(
+          date,
+        ) as unknown as StorableEpochNsec;
+        expect(result).toBeInstanceOf(StorableEpochNsec);
+        expect(result.value).toBe(-86400000000000n);
+      } finally {
+        resetExperimentalStorableConfig();
+      }
     });
   });
 
@@ -1163,6 +1429,36 @@ describe("serialization", () => {
         state: "s",
         error: "e",
       });
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // ExplicitTagStorable base class
+  // --------------------------------------------------------------------------
+
+  describe("ExplicitTagStorable", () => {
+    it("UnknownStorable is an instance of ExplicitTagStorable", () => {
+      const us = new UnknownStorable("Test@1", "state");
+      expect(us instanceof ExplicitTagStorable).toBe(true);
+    });
+
+    it("ProblematicStorable is an instance of ExplicitTagStorable", () => {
+      const ps = new ProblematicStorable("Test@1", "state", "oops");
+      expect(ps instanceof ExplicitTagStorable).toBe(true);
+    });
+
+    it("ExplicitTagStorable provides access to typeTag and state", () => {
+      const us: ExplicitTagStorable = new UnknownStorable("Tag@2", 42);
+      expect(us.typeTag).toBe("Tag@2");
+      expect(us.state).toBe(42);
+
+      const ps: ExplicitTagStorable = new ProblematicStorable(
+        "Bad@1",
+        "data",
+        "err",
+      );
+      expect(ps.typeTag).toBe("Bad@1");
+      expect(ps.state).toBe("data");
     });
   });
 

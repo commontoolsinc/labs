@@ -63,6 +63,7 @@ interface NotebookOutput {
   title: string;
   notes: NotePiece[];
   noteCount: number;
+  summary: string;
   isNotebook: boolean;
   isHidden: boolean;
   backlinks: MentionablePiece[];
@@ -514,6 +515,14 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
     // Use computed() for proper reactive tracking of notes.length
     const noteCount = computed(() => notes.get().length);
     const hasNotes = computed(() => notes.get().length > 0);
+
+    const summary = computed(() => {
+      const notesList = notes.get() ?? [];
+      return notesList
+        .map((note: any) => note?.summary ?? note?.[NAME] ?? "")
+        .filter((s: string) => s.length > 0)
+        .join(" | ");
+    });
 
     // Selection state for multi-select
     const selectedNoteIndices = Writable.of<number[]>([]);
@@ -1461,6 +1470,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
       title,
       notes,
       noteCount,
+      summary,
       backlinks,
       // Make notes discoverable via [[ autocomplete system-wide
       mentionable: notes,

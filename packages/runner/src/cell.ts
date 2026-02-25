@@ -5,6 +5,7 @@ import {
   isRecord,
 } from "@commontools/utils/types";
 import {
+  isArrayIndexPropertyName,
   toDeepStorableValue,
   toStorableValue,
 } from "@commontools/memory/storable-value";
@@ -72,6 +73,7 @@ import {
 import type { Runtime } from "./runtime.ts";
 import {
   areLinksSame,
+  createDataCellURI,
   createSigilLinkFromParsedLink,
   findAndInlineDataURILinks,
   isCellLink,
@@ -552,7 +554,7 @@ export class CellImpl<T extends StorableValue>
       this.tx,
       this.link,
       [],
-      options,
+      { ...options, synced: this.synced },
     );
     const elapsed = logger.timeEnd("cell", "get")!;
     if (elapsed > 50) {
@@ -1084,6 +1086,7 @@ export class CellImpl<T extends StorableValue>
 
   sync(): Promise<Cell<T>> | Cell<T> {
     this.synced = true;
+    logger.info("sync", this.link);
     if (this.link.id.startsWith("data:")) {
       return this as unknown as Cell<T>;
     }
@@ -1091,11 +1094,14 @@ export class CellImpl<T extends StorableValue>
   }
 
   resolveAsCell(): Cell<T> {
-    const link = resolveLink(
+    const readTx = this.runtime.readTx(this.tx);
+    let link: NormalizedFullLink = resolveLink(
       this.runtime,
-      this.runtime.readTx(this.tx),
+      readTx,
       this.link,
     );
+    const nonReactiveTx = createNonReactiveTransaction(readTx);
+    link = maybeConvertArrayPathToDataURILink(nonReactiveTx, link);
     return createCell(this.runtime, link, this.tx, this.synced);
   }
 
@@ -1584,6 +1590,77 @@ function deepTraverse(value: unknown, seen = new WeakSet<object>()): void {
     // Ignore errors from traversal (e.g., link cycles)
     // We've already registered the dependencies we can access
   }
+}
+
+function maybeConvertArrayPathToDataURILink(
+  tx: IExtendedStorageTransaction,
+  link: NormalizedFullLink,
+): NormalizedFullLink {
+  if (link.path.length === 0) {
+    return link;
+  }
+
+  let rootValue: unknown;
+  try {
+    rootValue = tx.readValueOrThrow({ ...link, path: [] }, {
+      meta: ignoreReadForScheduling,
+    });
+  } catch {
+    return link;
+  }
+
+  let current: unknown = rootValue;
+  const prefix: string[] = [];
+  let candidate:
+    | {
+      value: unknown;
+      path: string[];
+      remainingPath: string[];
+    }
+    | undefined;
+
+  for (let i = 0; i < link.path.length; i++) {
+    if (!isRecord(current)) {
+      break;
+    }
+
+    const segment = link.path[i];
+    let next: unknown;
+
+    if (Array.isArray(current)) {
+      if (!isArrayIndexPropertyName(segment)) {
+        break;
+      }
+      next = (current as unknown as Record<string, unknown>)[segment];
+      if (isRecord(next) && !isCellLink(next)) {
+        candidate = {
+          value: next,
+          path: [...prefix, segment],
+          remainingPath: link.path.slice(i + 1),
+        };
+      }
+    } else {
+      next = (current as Record<string, unknown>)[segment];
+    }
+
+    prefix.push(segment);
+    current = next;
+  }
+
+  if (candidate === undefined) {
+    return link;
+  }
+
+  const baseLink: NormalizedFullLink = {
+    ...link,
+    path: candidate.path,
+  };
+
+  return {
+    ...link,
+    id: createDataCellURI(candidate.value, baseLink),
+    path: candidate.remainingPath,
+  };
 }
 
 /**

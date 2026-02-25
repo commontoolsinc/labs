@@ -4,10 +4,8 @@ import type {
   JsonWireValue,
   SerializedForm,
 } from "./json-serialization-context.ts";
-import { UnknownStorable } from "./unknown-storable.ts";
-import { ProblematicStorable } from "./problematic-storable.ts";
+import { ExplicitTagStorable } from "./explicit-tag-storable.ts";
 import {
-  StorableDate,
   StorableError,
   StorableMap,
   StorableSet,
@@ -42,7 +40,9 @@ export class JsonEncodingContext
     this.registry.set(TAGS.Error, StorableError);
     this.registry.set(TAGS.Map, StorableMap);
     this.registry.set(TAGS.Set, StorableSet);
-    this.registry.set(TAGS.Date, StorableDate);
+    // Note: TAGS.EpochNsec and TAGS.EpochDays are NOT registered here --
+    // they have dedicated TypeHandlers (EpochNsecHandler, EpochDaysHandler)
+    // that handle both serialization and deserialization directly.
     // Note: TAGS.BigInt is NOT registered here -- bigint is a primitive in
     // StorableDatum and is handled by a TypeHandler (like UndefinedHandler),
     // not a StorableInstance wrapper.
@@ -51,10 +51,7 @@ export class JsonEncodingContext
 
   /** Get the wire format tag for a storable instance's type. */
   getTagFor(value: StorableInstance): string {
-    if (value instanceof UnknownStorable) {
-      return value.typeTag;
-    }
-    if (value instanceof ProblematicStorable) {
+    if (value instanceof ExplicitTagStorable) {
       return value.typeTag;
     }
     // Check for typeTag property (used by native-wrapping StorableInstance classes).

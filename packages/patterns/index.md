@@ -1113,3 +1113,29 @@ type Input = {
 ```ts
 // Returns a 3-column grid view of pieces with live previews
 ```
+
+## `github-activity/main.tsx`
+
+Fetches recent commits from a GitHub repository via the public API, displays
+them as a clickable card list, and uses an LLM to generate a summary of recent
+development activity. Fully reactive — changing the repo URL re-fetches and
+re-summarizes.
+
+**Keywords:** github, commits, fetchData, generateText, LLM, summary, activity
+
+### Input Schema
+
+```ts
+type Input = {
+  repoUrl: Writable<
+    Default<string, "https://github.com/anthropics/claude-code">
+  >;
+};
+```
+
+### Output Schema
+
+```ts
+// Displays LLM-generated activity summary and scrollable commit list
+// with author, date, and clickable links to GitHub
+```

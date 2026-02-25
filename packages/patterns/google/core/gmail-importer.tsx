@@ -130,6 +130,8 @@ interface Output {
   mentionable: { [NAME]: string; summary: string; [UI]: VNode }[];
   /** Number of emails imported */
   emailCount: number;
+  /** Summary of container-level emails for hierarchical indexing */
+  summary: string;
   /** Auth UI component for managing Google OAuth connection */
   authUI: VNode;
   /** Handler to trigger email fetch from external patterns */
@@ -1127,6 +1129,15 @@ export default pattern<
   const isReady = computed(() => !!auth.token);
   const currentEmail = computed(() => auth.user?.email ?? "");
 
+  const summary = computed(() => {
+    const emailList = emails.get();
+    return emailList
+      .slice(0, 20)
+      .map((e: any) => e?.summary ?? e?.subject ?? "")
+      .filter((s: string) => s.length > 0)
+      .join(" | ");
+  });
+
   const googleUpdaterStream = googleUpdater({
     emails,
     auth,
@@ -1370,6 +1381,7 @@ export default pattern<
     emails,
     mentionable: emails.map((e) => <EmailCard email={e} />),
     emailCount: derive(emails, (list: Email[]) => list?.length || 0),
+    summary,
     bgUpdater: googleUpdaterStream,
     isReady,
     // Pattern tools for omnibot

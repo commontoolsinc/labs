@@ -29,6 +29,7 @@ interface CalendarOutput {
   sortedEvents: EventPiece[];
   mentionable: EventPiece[];
   todayDate: string;
+  summary: string;
   addEvent: Stream<{ title: string; date: string; time: string }>;
   removeEvent: Stream<{ event: EventPiece }>;
 }
@@ -69,6 +70,13 @@ export default pattern<CalendarInput, CalendarOutput>(({ events }) => {
       if (aDate !== bDate) return aDate.localeCompare(bDate);
       return (a.time || "").localeCompare(b.time || "");
     });
+  });
+
+  const summary = computed(() => {
+    const sorted = sortedEvents;
+    return sorted
+      .map((e) => `${e.date} ${e.time || ""} ${e.title}`.trim())
+      .join(", ");
   });
 
   const addEvent = action(
@@ -218,6 +226,7 @@ export default pattern<CalendarInput, CalendarOutput>(({ events }) => {
     sortedEvents,
     mentionable: events,
     todayDate,
+    summary,
     addEvent,
     removeEvent,
   };

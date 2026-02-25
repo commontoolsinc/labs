@@ -39,6 +39,7 @@ interface ContactBookOutput {
   contacts: Contact[];
   relationships: Relationship[];
   mentionable: Contact[];
+  summary: string;
   onAddContact: Stream<void>;
 }
 
@@ -47,6 +48,12 @@ export default pattern<ContactBookInput, ContactBookOutput>(
     const searchQuery = Writable.of("");
 
     const contactCount = computed(() => contacts.get().length);
+
+    const summary = computed(() => {
+      return contacts.get()
+        .map((c) => c.name || "(unnamed)")
+        .join(", ");
+    });
 
     const contactSelectItems = computed(
       () =>
@@ -220,6 +227,7 @@ export default pattern<ContactBookInput, ContactBookOutput>(
       contacts,
       relationships,
       mentionable: contacts,
+      summary,
       onAddContact,
     };
   },

@@ -87,8 +87,8 @@ Total: 1 byte. No payload.
 
 ```
 Bytes: TAG_BOOLEAN  PAYLOAD
-       0x21         0x01   (true)
-       0x21         0x00   (false)
+       0x22         0x01   (true)
+       0x22         0x00   (false)
 ```
 
 Total: 2 bytes.
@@ -97,7 +97,7 @@ Total: 2 bytes.
 
 ```
 Bytes: TAG_NUMBER  IEEE_754_FLOAT64_BE
-       0x22        <8 bytes>
+       0x23        <8 bytes>
 ```
 
 Total: 9 bytes.
@@ -124,7 +124,7 @@ big-endian byte order.
 
 ```
 Bytes: TAG_STRING  LENGTH_LEB128  UTF8_BYTES
-       0x23        <1+ bytes>     <length bytes>
+       0x24        <1+ bytes>     <length bytes>
 ```
 
 Total: 1 + len(LEB128) + N bytes, where N is the byte length of the UTF-8
@@ -136,14 +136,14 @@ encoding.
   Multilingual Plane (U+0000--U+FFFF) use 1--3 bytes; supplementary characters
   (U+10000 and above) use 4 bytes.
 
-Empty string (`""`) is encoded as `0x23 0x00` — the tag plus a zero-length
+Empty string (`""`) is encoded as `0x24 0x00` — the tag plus a zero-length
 prefix and no payload bytes.
 
 ### 4.5 `bigint`
 
 ```
 Bytes: TAG_BIGINT  LENGTH_LEB128  TWO_COMP_BYTES
-       0x24        <1+ bytes>     <length bytes>
+       0x26        <1+ bytes>     <length bytes>
 ```
 
 Total: 1 + len(LEB128) + N bytes, where N is the minimal encoding length.
@@ -165,7 +165,7 @@ Total: 1 + len(LEB128) + N bytes, where N is the minimal encoding length.
 
 ```
 Bytes: TAG_UNDEFINED
-       0x25
+       0x21
 ```
 
 Total: 1 byte. No payload.
@@ -174,7 +174,7 @@ Total: 1 byte. No payload.
 
 ```
 Bytes: TAG_BYTES  LENGTH_LEB128  RAW_BYTES
-       0x26       <1+ bytes>     <length bytes>
+       0x25       <1+ bytes>     <length bytes>
 ```
 
 Total: 1 + len(LEB128) + N bytes, where N is the byte array length.
@@ -182,10 +182,55 @@ Total: 1 + len(LEB128) + N bytes, where N is the byte array length.
 - **Length**: The number of bytes in the array, encoded as unsigned LEB128.
 - **Payload**: The raw bytes of the underlying `Uint8Array`, in order.
 
-Empty byte array is encoded as `0x26 0x00` — the tag plus a zero-length prefix
+Empty byte array is encoded as `0x25 0x00` — the tag plus a zero-length prefix
 and no payload bytes.
 
-### 4.8 Array
+### 4.8 `StorableEpochNsec`
+
+```
+Bytes: TAG_EPOCH_NSEC  LENGTH_LEB128  TWO_COMP_BYTES
+       0x27            <1+ bytes>     <length bytes>
+```
+
+Total: 1 + len(LEB128) + N bytes, where N is the minimal encoding length.
+
+`StorableEpochNsec` represents a nanosecond-precision Unix epoch timestamp. It
+is a direct `StorableDatum` member (not a `StorableInstance`) and has a dedicated
+type tag.
+
+- **Length**: The number of bytes in the two's-complement representation of the
+  wrapped `bigint` value, encoded as unsigned LEB128.
+- **Payload**: The value encoded identically to `bigint` (Section 4.5): signed
+  two's-complement, big-endian, minimal bytes.
+
+The encoding is structurally identical to `TAG_BIGINT` but uses a different type
+tag (`0x27` instead of `0x26`), ensuring that `StorableEpochNsec(42n)` and
+`42n` produce distinct hashes.
+
+### 4.9 `StorableEpochDays`
+
+```
+Bytes: TAG_EPOCH_DAYS  LENGTH_LEB128  TWO_COMP_BYTES
+       0x28            <1+ bytes>     <length bytes>
+```
+
+Total: 1 + len(LEB128) + N bytes, where N is the minimal encoding length.
+
+`StorableEpochDays` represents a day-precision Unix epoch timestamp. It is a
+direct `StorableDatum` member (not a `StorableInstance`) and has a dedicated type
+tag.
+
+- **Length**: The number of bytes in the two's-complement representation of the
+  wrapped `bigint` value, encoded as unsigned LEB128.
+- **Payload**: The value encoded identically to `bigint` (Section 4.5): signed
+  two's-complement, big-endian, minimal bytes.
+
+The encoding is structurally identical to `TAG_BIGINT` but uses a different type
+tag (`0x28` instead of `0x26`), ensuring that `StorableEpochDays(42n)` and
+`42n` produce distinct hashes. It also differs from `StorableEpochNsec` (`0x27`)
+so the two temporal types are always distinguishable.
+
+### 4.10 Array
 
 ```
 Bytes: TAG_ARRAY  ELEMENT_0  ELEMENT_1  ...  ELEMENT_N-1  TAG_END
@@ -195,7 +240,7 @@ Bytes: TAG_ARRAY  ELEMENT_0  ELEMENT_1  ...  ELEMENT_N-1  TAG_END
 - **Elements**: Each element is hashed recursively in index order (0, 1, 2,
   ...). Present elements are fed to the hasher as complete tagged values
   (starting with their own type tag). Holes are encoded using run-length
-  encoding (see Section 4.11).
+  encoding (see Section 4.13).
 - **Terminator**: `TAG_END` (`0x00`) marks the end of the element sequence.
   This is unambiguous because `TAG_END` cannot appear as the start of any
   element value.
@@ -203,7 +248,7 @@ Bytes: TAG_ARRAY  ELEMENT_0  ELEMENT_1  ...  ELEMENT_N-1  TAG_END
 Empty array (`[]`) is encoded as `0x10 0x00` — the tag immediately followed by
 `TAG_END`.
 
-### 4.9 Object
+### 4.11 Object
 
 ```
 Bytes: TAG_OBJECT  KEY_0  VALUE_0  KEY_1  VALUE_1  ...  TAG_END
@@ -221,7 +266,7 @@ Bytes: TAG_OBJECT  KEY_0  VALUE_0  KEY_1  VALUE_1  ...  TAG_END
 Empty object (`{}`) is encoded as `0x11 0x00` — the tag immediately followed by
 `TAG_END`.
 
-### 4.10 `StorableInstance`
+### 4.12 `StorableInstance`
 
 ```
 Bytes: TAG_INSTANCE  TYPE_TAG_LEN_LEB128  TYPE_TAG_UTF8  STATE_HASH
@@ -235,16 +280,12 @@ Bytes: TAG_INSTANCE  TYPE_TAG_LEN_LEB128  TYPE_TAG_UTF8  STATE_HASH
 - **Deconstructed state**: The value returned by `[DECONSTRUCT]()`, hashed
   recursively as a complete tagged value.
 
-> **Note on `StorableUint8Array`.** `StorableUint8Array` is **not** hashed via
-> `TAG_INSTANCE`. It has a dedicated type tag (`TAG_BYTES`) and is hashed using
-> its raw byte content directly (see Section 4.7). This reflects its nature as
-> a fundamental data type rather than a general storable instance.
->
-> **Note on `StorableDate`.** `StorableDate` does not have a dedicated type tag.
-> It is hashed via `TAG_INSTANCE` through its `[DECONSTRUCT]` method, like any
-> other `StorableInstance`.
+> **Note on types with dedicated tags.** `StorableUint8Array`,
+> `StorableEpochNsec`, and `StorableEpochDays` are **not** hashed via
+> `TAG_INSTANCE`. Each has a dedicated type tag and is encoded directly (see
+> Sections 4.7, 4.8, and 4.9 respectively).
 
-### 4.11 Holes (sparse array elements)
+### 4.13 Holes (sparse array elements)
 
 ```
 Bytes: TAG_HOLE  RUN_COUNT_LEB128
@@ -253,7 +294,7 @@ Bytes: TAG_HOLE  RUN_COUNT_LEB128
 
 Total: 1 + len(LEB128) bytes per run (typically 2 bytes for small runs).
 
-Holes appear only within array encodings (Section 4.8). Consecutive holes are
+Holes appear only within array encodings (Section 4.10). Consecutive holes are
 **always coalesced** into maximal runs:
 
 - A single hole at index `i` with present elements at `i-1` and `i+1` is
@@ -264,7 +305,7 @@ Holes appear only within array encodings (Section 4.8). Consecutive holes are
   consecutive holes into smaller runs. Doing so would produce a different byte
   stream and therefore a different hash.
 
-> **Distinction.** `TAG_HOLE` (`0x01`), `TAG_UNDEFINED` (`0x25`), and `TAG_NULL`
+> **Distinction.** `TAG_HOLE` (`0x01`), `TAG_UNDEFINED` (`0x21`), and `TAG_NULL`
 > (`0x20`) are all distinct. The arrays `[1, , 3]`, `[1, undefined, 3]`, and
 > `[1, null, 3]` produce three different hashes.
 
@@ -315,8 +356,9 @@ the sort order and the hash encoding use the same byte representation.
 The overall traversal is depth-first, left-to-right:
 
 1. Feed the type tag byte.
-2. For primitive types with variable-length payloads (string, bigint, bytes),
-   feed the LEB128 byte-length prefix, then the payload.
+2. For primitive types with variable-length payloads (string, bigint, bytes,
+   epoch-nsec, epoch-days), feed the LEB128 byte-length prefix, then the
+   payload.
 3. For compound types (array, object), recursively hash each child, then feed
    `TAG_END`. Each child's bytes (starting with its own type tag) are fed to
    the **same** hasher — there is no per-child sub-hash.
@@ -342,19 +384,19 @@ representative values. Bytes are shown in hexadecimal.
 ### 7.2 `true`
 
 ```
-21 01
+22 01
 ```
 
 ### 7.3 `false`
 
 ```
-21 00
+22 00
 ```
 
 ### 7.4 `42` (number)
 
 ```
-22  40 45 00 00 00 00 00 00
+23  40 45 00 00 00 00 00 00
 ```
 
 IEEE 754 binary64 for `42.0` is `0x4045000000000000`.
@@ -362,7 +404,7 @@ IEEE 754 binary64 for `42.0` is `0x4045000000000000`.
 ### 7.5 `0` (number)
 
 ```
-22  00 00 00 00 00 00 00 00
+23  00 00 00 00 00 00 00 00
 ```
 
 Note: `-0` produces the same byte stream (normalized to `+0`).
@@ -373,41 +415,60 @@ Note: `-0` produces the same byte stream (normalized to `+0`).
 Length 5 in LEB128 is `0x05`.
 
 ```
-23  05  68 65 6C 6C 6F
+24  05  68 65 6C 6C 6F
 ```
 
 ### 7.7 `""` (empty string)
 
 ```
-23  00
+24  00
 ```
 
 ### 7.8 `undefined`
 
 ```
-25
+21
 ```
 
-### 7.9 `[1, , 3]` (sparse array)
+### 7.9 `StorableEpochNsec(0n)`
+
+```
+27  01  00
+```
+
+`TAG_EPOCH_NSEC` (`0x27`), followed by the bigint `0n` encoded as minimal
+two's-complement: length 1 (LEB128 `0x01`) and payload `0x00`.
+
+### 7.10 `StorableEpochDays(42n)`
+
+`42n` in minimal two's-complement is `0x2A` (1 byte).
+
+```
+28  01  2A
+```
+
+`TAG_EPOCH_DAYS` (`0x28`), length 1 (`0x01`), payload `0x2A`.
+
+### 7.11 `[1, , 3]` (sparse array)
 
 Three elements: number `1`, one hole, number `3`. Terminated by `TAG_END`.
 
 - Tag: `10`
-- Element 0 (`1`): `22 3F F0 00 00 00 00 00 00` (IEEE 754 for `1.0`)
+- Element 0 (`1`): `23 3F F0 00 00 00 00 00 00` (IEEE 754 for `1.0`)
 - Element 1 (hole, run of 1): `01 01`
-- Element 2 (`3`): `22 40 08 00 00 00 00 00 00` (IEEE 754 for `3.0`)
+- Element 2 (`3`): `23 40 08 00 00 00 00 00 00` (IEEE 754 for `3.0`)
 - End: `00`
 
 Full byte stream:
 ```
 10
-22 3F F0 00 00 00 00 00 00
+23 3F F0 00 00 00 00 00 00
 01 01
-22 40 08 00 00 00 00 00 00
+23 40 08 00 00 00 00 00 00
 00
 ```
 
-### 7.10 `[]` (empty array)
+### 7.12 `[]` (empty array)
 
 ```
 10 00
@@ -415,29 +476,29 @@ Full byte stream:
 
 `TAG_ARRAY` immediately followed by `TAG_END`.
 
-### 7.11 `{ a: 1, b: 2 }` (object)
+### 7.13 `{ a: 1, b: 2 }` (object)
 
 Two keys. UTF-8 sort order: `"a"` (0x61) < `"b"` (0x62). Terminated by
 `TAG_END`.
 
 - Tag: `11`
-- Key `"a"` (1 byte in UTF-8): `23 01 61`
-- Value `1`: `22 3F F0 00 00 00 00 00 00`
-- Key `"b"` (1 byte in UTF-8): `23 01 62`
-- Value `2`: `22 40 00 00 00 00 00 00 00` (IEEE 754 for `2.0`)
+- Key `"a"` (1 byte in UTF-8): `24 01 61`
+- Value `1`: `23 3F F0 00 00 00 00 00 00`
+- Key `"b"` (1 byte in UTF-8): `24 01 62`
+- Value `2`: `23 40 00 00 00 00 00 00 00` (IEEE 754 for `2.0`)
 - End: `00`
 
 Full byte stream:
 ```
 11
-23 01 61
-22 3F F0 00 00 00 00 00 00
-23 01 62
-22 40 00 00 00 00 00 00 00
+24 01 61
+23 3F F0 00 00 00 00 00 00
+24 01 62
+23 40 00 00 00 00 00 00 00
 00
 ```
 
-### 7.12 `{}` (empty object)
+### 7.14 `{}` (empty object)
 
 ```
 11 00
@@ -445,11 +506,11 @@ Full byte stream:
 
 `TAG_OBJECT` immediately followed by `TAG_END`.
 
-### 7.13 `[1, undefined, 3]` vs. `[1, , 3]` vs. `[1, null, 3]`
+### 7.15 `[1, undefined, 3]` vs. `[1, , 3]` vs. `[1, null, 3]`
 
 These three arrays produce different byte streams at the middle element:
 
-- `[1, undefined, 3]`: middle element is `25` (`TAG_UNDEFINED`)
+- `[1, undefined, 3]`: middle element is `21` (`TAG_UNDEFINED`)
 - `[1, , 3]`: middle element is `01 01` (`TAG_HOLE` + run of 1)
 - `[1, null, 3]`: middle element is `20` (`TAG_NULL`)
 
@@ -478,6 +539,8 @@ rather than producing a hash.
 | String byte length                | unsigned LEB128 | Byte count of UTF-8 payload      |
 | Bigint payload bytes              | unsigned LEB128 | Byte count of two's complement   |
 | Byte array (`StorableUint8Array`) | unsigned LEB128 | Byte count of raw payload        |
+| `StorableEpochNsec` payload       | unsigned LEB128 | Byte count of two's complement   |
+| `StorableEpochDays` payload       | unsigned LEB128 | Byte count of two's complement   |
 | `StorableInstance` type tag       | unsigned LEB128 | Byte count of type tag UTF-8     |
 | Hole run count                    | unsigned LEB128 | Number of consecutive holes      |
 | Array elements                    | `TAG_END`       | Sentinel after last element      |

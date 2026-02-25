@@ -9,15 +9,22 @@ import type { ReconstructionContext } from "../storable-protocol.ts";
 import type { StorableValue } from "../interface.ts";
 import {
   deepNativeValueFromStorableValue,
+  isConvertibleNativeInstance,
   nativeValueFromStorableValue,
-  StorableDate,
+  StorableEpochDays,
+  StorableEpochNsec,
   StorableError,
   StorableMap,
   StorableNativeWrapper,
   StorableSet,
   StorableUint8Array,
 } from "../storable-native-instances.ts";
-import { FrozenDate, FrozenMap, FrozenSet } from "../frozen-builtins.ts";
+import { FrozenMap, FrozenSet } from "../frozen-builtins.ts";
+import {
+  NATIVE_TAGS,
+  tagFromNativeClass,
+  tagFromNativeValue,
+} from "../type-tags.ts";
 
 /** Dummy reconstruction context for tests. */
 const dummyContext: ReconstructionContext = {
@@ -283,7 +290,7 @@ describe("storable-native-instances", () => {
   });
 
   // --------------------------------------------------------------------------
-  // Stub wrappers (StorableMap, StorableSet, StorableDate, StorableUint8Array)
+  // Stub wrappers (StorableMap, StorableSet, StorableUint8Array)
   // --------------------------------------------------------------------------
 
   describe("stub wrappers", () => {
@@ -388,52 +395,6 @@ describe("storable-native-instances", () => {
       expect(result.has(1 as StorableValue)).toBe(true);
     });
 
-    it("StorableDate implements StorableInstance", () => {
-      const sd = new StorableDate(new Date());
-      expect(isStorableInstance(sd)).toBe(true);
-      expect(sd.typeTag).toBe("Date@1");
-    });
-
-    it("StorableDate [DECONSTRUCT] returns milliseconds-since-epoch", () => {
-      const date = new Date("2024-01-01T00:00:00.000Z");
-      const sd = new StorableDate(date);
-      expect(sd[DECONSTRUCT]()).toBe(date.getTime());
-    });
-
-    it("StorableDate.toNativeValue(true) returns FrozenDate", () => {
-      const date = new Date("2024-01-01");
-      const sd = new StorableDate(date);
-      const result = sd.toNativeValue(true);
-      expect(result).toBeInstanceOf(FrozenDate);
-      expect(result).toBeInstanceOf(Date);
-      expect(result.getTime()).toBe(date.getTime());
-    });
-
-    it("StorableDate.toNativeValue(false) returns the original Date", () => {
-      const date = new Date("2024-01-01");
-      const sd = new StorableDate(date);
-      const result = sd.toNativeValue(false);
-      expect(result).toBe(date); // same reference
-      expect(result).not.toBeInstanceOf(FrozenDate);
-    });
-
-    it("StorableDate.toNativeValue(true) returns same FrozenDate if already frozen", () => {
-      const fd = new FrozenDate("2024-01-01");
-      const sd = new StorableDate(fd);
-      const result = sd.toNativeValue(true);
-      expect(result).toBe(fd); // same reference
-    });
-
-    it("StorableDate.toNativeValue(false) copies a FrozenDate to mutable Date", () => {
-      const fd = new FrozenDate("2024-01-01");
-      const sd = new StorableDate(fd);
-      const result = sd.toNativeValue(false);
-      expect(result).not.toBe(fd);
-      expect(result).toBeInstanceOf(Date);
-      expect(result).not.toBeInstanceOf(FrozenDate);
-      expect(result.getTime()).toBe(fd.getTime());
-    });
-
     it("StorableUint8Array implements StorableInstance", () => {
       const su = new StorableUint8Array(new Uint8Array([1, 2, 3]));
       expect(isStorableInstance(su)).toBe(true);
@@ -468,6 +429,74 @@ describe("storable-native-instances", () => {
       const result = su.toNativeValue(false);
       expect(result).toBe(bytes); // same reference
       expect(result).toBeInstanceOf(Uint8Array);
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // StorableEpochNsec (direct StorableDatum member, not StorableInstance)
+  // --------------------------------------------------------------------------
+
+  describe("StorableEpochNsec", () => {
+    it("is NOT a StorableInstance (no DECONSTRUCT)", () => {
+      const sn = new StorableEpochNsec(0n);
+      expect(isStorableInstance(sn)).toBe(false);
+    });
+
+    it("wraps a bigint value", () => {
+      const sn = new StorableEpochNsec(1234567890000000000n);
+      expect(sn.value).toBe(1234567890000000000n);
+    });
+
+    it("wraps zero", () => {
+      const sn = new StorableEpochNsec(0n);
+      expect(sn.value).toBe(0n);
+    });
+
+    it("wraps negative values (pre-epoch)", () => {
+      const sn = new StorableEpochNsec(-1000000000n);
+      expect(sn.value).toBe(-1000000000n);
+    });
+
+    it("handles large future date (year 3000)", () => {
+      const nsec = 32503680000000000000n;
+      const sn = new StorableEpochNsec(nsec);
+      expect(sn.value).toBe(nsec);
+    });
+
+    it("is instanceof StorableEpochNsec", () => {
+      const sn = new StorableEpochNsec(42n);
+      expect(sn instanceof StorableEpochNsec).toBe(true);
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // StorableEpochDays (direct StorableDatum member, not StorableInstance)
+  // --------------------------------------------------------------------------
+
+  describe("StorableEpochDays", () => {
+    it("is NOT a StorableInstance (no DECONSTRUCT)", () => {
+      const sd = new StorableEpochDays(0n);
+      expect(isStorableInstance(sd)).toBe(false);
+    });
+
+    it("wraps a bigint value", () => {
+      const sd = new StorableEpochDays(19723n);
+      expect(sd.value).toBe(19723n);
+    });
+
+    it("wraps zero (epoch day)", () => {
+      const sd = new StorableEpochDays(0n);
+      expect(sd.value).toBe(0n);
+    });
+
+    it("wraps negative values (pre-epoch)", () => {
+      const sd = new StorableEpochDays(-365n);
+      expect(sd.value).toBe(-365n);
+    });
+
+    it("is instanceof StorableEpochDays", () => {
+      const sd = new StorableEpochDays(100n);
+      expect(sd instanceof StorableEpochDays).toBe(true);
     });
   });
 
@@ -518,14 +547,6 @@ describe("storable-native-instances", () => {
       expect(result).toBe(set); // same reference
       expect(result).toBeInstanceOf(Set);
       expect(result).not.toBeInstanceOf(FrozenSet);
-    });
-
-    it("unwraps StorableDate to FrozenDate (default)", () => {
-      const date = new Date("2024-01-01");
-      const sd = new StorableDate(date);
-      const result = nativeValueFromStorableValue(sd as StorableValue);
-      expect(result).toBeInstanceOf(FrozenDate);
-      expect((result as Date).getTime()).toBe(date.getTime());
     });
 
     it("unwraps StorableUint8Array to Blob (default frozen)", () => {
@@ -675,6 +696,135 @@ describe("storable-native-instances", () => {
       };
       expect(result.outer.inner).toBeInstanceOf(Error);
       expect(result.outer.inner.message).toBe("nested");
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // tagFromNativeValue / tagFromNativeClass / isConvertibleNativeInstance
+  // --------------------------------------------------------------------------
+
+  describe("tagFromNativeValue", () => {
+    it("returns Error tag for standard Error subclasses", () => {
+      const cases: [string, Error][] = [
+        ["Error", new Error("test")],
+        ["TypeError", new TypeError("test")],
+        ["RangeError", new RangeError("test")],
+        ["SyntaxError", new SyntaxError("test")],
+        ["ReferenceError", new ReferenceError("test")],
+        ["URIError", new URIError("test")],
+        ["EvalError", new EvalError("test")],
+      ];
+      for (const [_name, value] of cases) {
+        expect(tagFromNativeValue(value)).toBe(NATIVE_TAGS.Error);
+      }
+    });
+
+    it("returns Error tag for exotic Error subclass (custom class)", () => {
+      class MyFancyError extends Error {
+        constructor(msg: string) {
+          super(msg);
+          this.name = "MyFancyError";
+        }
+      }
+      const exotic = new MyFancyError("exotic");
+      // Constructor is MyFancyError, not in the switch -- falls back to
+      // Error.isError().
+      expect(tagFromNativeValue(exotic)).toBe(NATIVE_TAGS.Error);
+    });
+
+    it("returns Map tag for Map instances", () => {
+      expect(tagFromNativeValue(new Map())).toBe(NATIVE_TAGS.Map);
+    });
+
+    it("returns Set tag for Set instances", () => {
+      expect(tagFromNativeValue(new Set())).toBe(NATIVE_TAGS.Set);
+    });
+
+    it("returns Date tag for Date instances", () => {
+      expect(tagFromNativeValue(new Date())).toBe(NATIVE_TAGS.Date);
+    });
+
+    it("returns Uint8Array tag for Uint8Array instances", () => {
+      expect(tagFromNativeValue(new Uint8Array())).toBe(
+        NATIVE_TAGS.Uint8Array,
+      );
+    });
+
+    it("returns null for plain objects", () => {
+      expect(tagFromNativeValue({})).toBe(null);
+    });
+
+    it("returns null for arrays", () => {
+      expect(tagFromNativeValue([])).toBe(null);
+    });
+
+    it("returns null for RegExp", () => {
+      expect(tagFromNativeValue(/abc/)).toBe(null);
+    });
+
+    it("returns null for null-prototype objects (no constructor)", () => {
+      const obj = Object.create(null);
+      expect(tagFromNativeValue(obj)).toBe(null);
+    });
+  });
+
+  describe("tagFromNativeClass", () => {
+    it("returns Error tag for standard Error constructors", () => {
+      const constructors = [
+        Error,
+        TypeError,
+        RangeError,
+        SyntaxError,
+        ReferenceError,
+        URIError,
+        EvalError,
+      ];
+      for (const ctor of constructors) {
+        expect(tagFromNativeClass(ctor)).toBe(NATIVE_TAGS.Error);
+      }
+    });
+
+    it("returns Error tag for exotic Error subclass constructor", () => {
+      class ExoticError extends Error {}
+      // Constructor is ExoticError, not in the switch -- falls back to
+      // Error.isError(prototype) check.
+      expect(tagFromNativeClass(ExoticError)).toBe(NATIVE_TAGS.Error);
+    });
+
+    it("returns correct tags for Map, Set, Date, Uint8Array", () => {
+      expect(tagFromNativeClass(Map)).toBe(NATIVE_TAGS.Map);
+      expect(tagFromNativeClass(Set)).toBe(NATIVE_TAGS.Set);
+      expect(tagFromNativeClass(Date)).toBe(NATIVE_TAGS.Date);
+      expect(tagFromNativeClass(Uint8Array)).toBe(NATIVE_TAGS.Uint8Array);
+    });
+
+    it("returns null for unrecognized constructors", () => {
+      expect(tagFromNativeClass(RegExp)).toBe(null);
+      expect(tagFromNativeClass(WeakMap)).toBe(null);
+      expect(tagFromNativeClass(Promise)).toBe(null);
+    });
+  });
+
+  describe("isConvertibleNativeInstance", () => {
+    it("returns true for all convertible types", () => {
+      expect(isConvertibleNativeInstance(new Error("e"))).toBe(true);
+      expect(isConvertibleNativeInstance(new TypeError("e"))).toBe(true);
+      expect(isConvertibleNativeInstance(new Map())).toBe(true);
+      expect(isConvertibleNativeInstance(new Set())).toBe(true);
+      expect(isConvertibleNativeInstance(new Date())).toBe(true);
+      expect(isConvertibleNativeInstance(new Uint8Array())).toBe(true);
+    });
+
+    it("returns true for exotic Error subclass", () => {
+      class WeirdError extends RangeError {}
+      expect(isConvertibleNativeInstance(new WeirdError("weird"))).toBe(true);
+    });
+
+    it("returns false for non-convertible types", () => {
+      expect(isConvertibleNativeInstance({})).toBe(false);
+      expect(isConvertibleNativeInstance([])).toBe(false);
+      expect(isConvertibleNativeInstance(/abc/)).toBe(false);
+      expect(isConvertibleNativeInstance(new WeakMap())).toBe(false);
     });
   });
 });

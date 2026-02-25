@@ -52,6 +52,7 @@ const logger = getLogger("llm-dialog", {
 const client = new LLMClient();
 const REQUEST_TIMEOUT = 1000 * 60 * 5; // 5 minutes
 const TOOL_CALL_TIMEOUT = 1000 * 30 * 1; // 30 seconds
+const MAX_SERIALIZE_DEPTH = 100;
 
 /**
  * Remove the injected `result` field from a JSON schema so tools don't
@@ -280,7 +281,15 @@ function traverseAndSerialize(
   schema: JSONSchema | undefined,
   seen: Set<unknown> = new Set(),
   contextSpace?: MemorySpace,
+  depth: number = 0,
 ): unknown {
+  if (depth > MAX_SERIALIZE_DEPTH) {
+    const msg =
+      `[LLM Serialize] Maximum depth of ${MAX_SERIALIZE_DEPTH} reached.`;
+    logger.warn(msg);
+    console.warn(msg);
+    return "[Maximum depth reached]";
+  }
   if (!isRecord(value)) return value;
 
   // If we encounter an `any` schema, turn value into a cell link
@@ -302,6 +311,7 @@ function traverseAndSerialize(
         schema,
         seen,
         contextSpace,
+        depth + 1,
       );
     } else {
       // Use createLLMFriendlyLink to include space for cross-space cells
@@ -318,6 +328,7 @@ function traverseAndSerialize(
         schema,
         seen,
         contextSpace,
+        depth + 1,
       );
     } else {
       throw new Error(
@@ -325,7 +336,8 @@ function traverseAndSerialize(
       );
     }
   }
-  seen.add(value);
+  const nextSeen = new Set(seen);
+  nextSeen.add(value);
 
   const cfc = new ContextualFlowControl();
 
@@ -337,8 +349,9 @@ function traverseAndSerialize(
       let result = traverseAndSerialize(
         v,
         linkSchema,
-        seen,
+        nextSeen,
         contextSpace,
+        depth + 1,
       );
       // Decorate array entries with links that point to underlying cells, if
       // any. Ignores data: URIs, since they're not useful as links for the LLM.
@@ -361,14 +374,15 @@ function traverseAndSerialize(
         // Skip $-prefixed properties ($UI, $TYPE, etc.) - these are internal/VDOM
         .filter(([key]) => !key.startsWith("$"))
         .map((
-          [key, value],
+          [key, propValue],
         ) => [
           key,
           traverseAndSerialize(
-            value,
+            propValue,
             schema !== undefined ? cfc.schemaAtPath(schema, [key]) : undefined,
-            seen,
+            nextSeen,
             contextSpace,
+            depth + 1,
           ),
         ]),
     );
@@ -2019,11 +2033,13 @@ export function llmDialog(
         },
       );
 
-      sendResult(tx, result);
       cellsInitialized = true;
     }
 
+    sendResult(tx, result);
+
     // This will remain the reactive part. It will be called whenever one of the
+
     // read cells change. This is why it's important to do the read before the
     // "&& requestId" part: Otherwise, we'd run this once without requestId and
     // so read no cells and then this wouldn't be called again.

@@ -1,12 +1,17 @@
 /// <cts-enable />
 import {
+  type BuiltInLLMMessage,
   computed,
   type Default,
   equals,
+  handler,
+  ifElse,
+  llmDialog,
   NAME,
   pattern,
   patternTool,
-  type PatternToolResult,
+  Stream,
+  toSchema,
   UI,
   wish,
   Writable,
@@ -29,17 +34,6 @@ export type CompoundNode = {
 
 type Input = Record<string, never>;
 
-type Output = {
-  edges: GraphEdge[];
-  compoundNodes: CompoundNode[];
-  findIncoming: PatternToolResult<{ edges: GraphEdge[] }>;
-  findOutgoing: PatternToolResult<{ edges: GraphEdge[] }>;
-  searchGraph: PatternToolResult<{
-    edges: GraphEdge[];
-    compoundNodes: CompoundNode[];
-  }>;
-};
-
 /** Query result type for LLM consumption — names for readability, refs for identity. */
 type EdgeResult = {
   from: Writable<MentionablePiece>;
@@ -49,12 +43,52 @@ type EdgeResult = {
   description: string;
 };
 
-/** Query sub-pattern: finds incoming edges to an entity. */
-export const findIncomingPattern = pattern<
+/** Structured result the LLM agent produces. */
+type GraphAnnotations = {
+  links: Array<{ fromName: string; toName: string; description: string }>;
+  groups: Array<{ name: string; pieceNames: string[]; summary: string }>;
+};
+
+// --- Module-scope handlers ---
+
+const triggerBuild = handler<
+  unknown,
+  { addMessage: Stream<BuiltInLLMMessage> }
+>((_, { addMessage }) => {
+  addMessage.send({
+    role: "user",
+    content: [{
+      type: "text" as const,
+      text: "Analyze the knowledge graph and create annotations.",
+    }],
+  });
+});
+
+const triggerRebuild = handler<
+  unknown,
+  {
+    addMessage: Stream<BuiltInLLMMessage>;
+    messages: Writable<BuiltInLLMMessage[]>;
+  }
+>((_, { addMessage, messages }) => {
+  messages.set([]);
+  addMessage.send({
+    role: "user",
+    content: [{
+      type: "text" as const,
+      text: "Analyze the knowledge graph and create annotations.",
+    }],
+  });
+});
+
+// --- Query sub-patterns ---
+
+/** Query sub-pattern: finds all edges connected to an entity (incoming + outgoing). */
+export const getNeighborsPattern = pattern<
   { entity: Writable<MentionablePiece>; edges: GraphEdge[] },
-  { result: EdgeResult[] }
+  { incoming: EdgeResult[]; outgoing: EdgeResult[] }
 >(({ entity, edges }) => {
-  const result = computed(() => {
+  const incoming = computed(() => {
     return edges
       .filter((edge) => equals(edge.to, entity))
       .map((edge) => ({
@@ -66,15 +100,7 @@ export const findIncomingPattern = pattern<
       }));
   });
 
-  return { result };
-});
-
-/** Query sub-pattern: finds outgoing edges from an entity. */
-export const findOutgoingPattern = pattern<
-  { entity: Writable<MentionablePiece>; edges: GraphEdge[] },
-  { result: EdgeResult[] }
->(({ entity, edges }) => {
-  const result = computed(() => {
+  const outgoing = computed(() => {
     return edges
       .filter((edge) => equals(edge.from, entity))
       .map((edge) => ({
@@ -86,7 +112,7 @@ export const findOutgoingPattern = pattern<
       }));
   });
 
-  return { result };
+  return { incoming, outgoing };
 });
 
 /** Query sub-pattern: searches graph by text query. */
@@ -125,7 +151,30 @@ export const searchGraphPattern = pattern<
   return { edges: filteredEdges, compoundNodes: filteredNodes };
 });
 
-const KnowledgeGraph = pattern<Input, Output>(() => {
+/** Pattern tool: lists all pieces with their summaries. */
+const listPiecesPattern = pattern<
+  {
+    entries: Array<
+      { piece: Writable<MentionablePiece>; summary: string; name: string }
+    >;
+  },
+  {
+    result: Array<
+      { piece: Writable<MentionablePiece>; name: string; summary: string }
+    >;
+  }
+>(({ entries }) => {
+  const result = entries.map((e) => ({
+    piece: e.piece,
+    name: e.name,
+    summary: e.summary,
+  }));
+  return { result };
+});
+
+// --- Main pattern ---
+
+const KnowledgeGraph = pattern<Input>(() => {
   const mentionable = wish<Default<Writable<MentionablePiece>[], []>>({
     query: "#mentionable",
   }).result;
@@ -135,7 +184,6 @@ const KnowledgeGraph = pattern<Input, Output>(() => {
     for (const piece of mentionable ?? []) {
       if (!piece) continue;
       const pieceName = (piece.get()[NAME] ?? "").toString();
-      // Access mentioned via .key() for reactive tracking
       const mentioned = piece.key("mentioned").get() ?? [];
       for (const mentionedItem of mentioned) {
         if (!mentionedItem) continue;
@@ -152,19 +200,148 @@ const KnowledgeGraph = pattern<Input, Output>(() => {
     return result;
   });
 
-  const agentEdges = Writable.of<GraphEdge[]>([]);
-  const compoundNodes = Writable.of<CompoundNode[]>([]);
+  // Wish for summary index data
+  const { entries: summaryEntries } = wish<
+    {
+      entries: Array<
+        { piece: Writable<MentionablePiece>; summary: string; name: string }
+      >;
+    }
+  >({ query: "#summaryIndex" }).result;
 
-  const allEdges = computed(() => [...baseEdges, ...agentEdges.get()]);
+  // LLM agent state
+  const messages = Writable.of<BuiltInLLMMessage[]>([]);
+  const hasBeenBuilt = computed(() => messages.get().length > 0);
 
-  const edgeCount = computed(() => allEdges.length);
+  const agentSystemPrompt = computed(() => {
+    const entries = summaryEntries ?? [];
+    const pieceList = entries.map((e: any) => `- ${e.name}: ${e.summary}`).join(
+      "\n",
+    );
+    const baseEdgeList = baseEdges.map((e) =>
+      `- ${e.fromName} → ${e.toName} (${e.description})`
+    ).join("\n");
+
+    return `You are a knowledge graph analyst. Your job is to discover and annotate relationships between pieces — both explicit ones and hidden connections the user hasn't linked yet.
+
+Pieces in the space (with summaries):
+${pieceList || "(none)"}
+
+Existing base links (from explicit mentions):
+${baseEdgeList || "(none)"}
+
+Your tasks:
+1. **Enrich existing links** — upgrade generic "mentions" to richer descriptions like "references recipe", "extends idea", "provides context for", "contradicts", "builds upon"
+2. **Discover hidden connections** — read the piece names and summaries carefully. Look for pieces that share themes, reference similar concepts, could inform each other, or represent different perspectives on the same topic. These are the MOST VALUABLE links to create — connections the user hasn't made explicitly but that exist semantically.
+3. **Create groups** — cluster related pieces that share a theme, project, or domain
+
+When discovering hidden connections, think broadly:
+- Pieces about related topics (e.g. a recipe and a grocery list, a meeting note and a project plan)
+- Pieces that could inform each other (e.g. research notes and a draft document)
+- Pieces with overlapping entities (people, places, concepts mentioned in summaries)
+- Temporal or causal relationships (e.g. a decision and its consequences)
+- Complementary perspectives on the same subject
+
+Do NOT recreate links that already exist in the base links above.
+Use listPieces and getNeighbors to explore, then call presentResult with your annotations.
+Use exact piece names from the piece list above for fromName/toName/pieceNames.`;
+  });
+
+  const allEdgesFromBase = baseEdges;
+
+  // LLM dialog with resultSchema — agent produces structured annotations
+  const dialogOptions = {
+    system: agentSystemPrompt,
+    messages,
+    tools: {
+      listPieces: patternTool(listPiecesPattern, { entries: summaryEntries }),
+      getNeighbors: patternTool(getNeighborsPattern, {
+        edges: allEdgesFromBase,
+      }),
+    },
+    model: "anthropic:claude-sonnet-4-5" as const,
+    builtinTools: false,
+    resultSchema: toSchema<GraphAnnotations>(),
+  };
+  const { addMessage, pending, result: annotations } = llmDialog(
+    dialogOptions,
+  );
+
+  // Resolve annotations into actual GraphEdges by looking up piece refs by name
+  const agentEdges = computed(() => {
+    if (!annotations) return [] as GraphEdge[];
+    const links = annotations.links ?? [];
+    const entryList = summaryEntries ?? [];
+    return links.flatMap(
+      (link: { fromName: string; toName: string; description: string }) => {
+        const fromEntry = entryList.find((e: any) => e.name === link.fromName);
+        const toEntry = entryList.find((e: any) => e.name === link.toName);
+        if (!fromEntry || !toEntry) return [];
+        return [{
+          from: fromEntry.piece,
+          to: toEntry.piece,
+          fromName: link.fromName,
+          toName: link.toName,
+          description: link.description,
+        }];
+      },
+    );
+  });
+
+  const compoundNodes = computed(() => {
+    if (!annotations) return [] as CompoundNode[];
+    const groups = annotations.groups ?? [];
+    const entryList = summaryEntries ?? [];
+    return groups.map(
+      (group: { name: string; pieceNames: string[]; summary: string }) => ({
+        [NAME]: group.name,
+        linkedPieces: (group.pieceNames ?? [])
+          .map((name: string) =>
+            entryList.find((e: any) => e.name === name)
+              ?.piece
+          )
+          .filter(Boolean) as Writable<MentionablePiece>[],
+        summary: group.summary,
+      }),
+    );
+  });
+
+  const allEdges = computed(() => [
+    ...baseEdges,
+    ...(agentEdges ?? []),
+  ]);
+
+  // Computed counts for UI
+  const baseEdgeCount = computed(() => baseEdges.length);
+  const agentEdgeCount = computed(() => (agentEdges ?? []).length);
+  const compoundNodeCount = computed(() => (compoundNodes ?? []).length);
 
   return {
-    [NAME]: computed(() => `Knowledge Graph (${edgeCount} links)`),
+    [NAME]: computed(() => {
+      const total = baseEdgeCount + agentEdgeCount;
+      return `Knowledge Graph (${total} links)`;
+    }),
     [UI]: (
       <ct-screen>
         <ct-toolbar slot="header" sticky>
           <h2 style={{ margin: 0, fontSize: "18px" }}>Knowledge Graph</h2>
+          <div slot="end">
+            {ifElse(
+              hasBeenBuilt,
+              <ct-button
+                variant="ghost"
+                onClick={triggerRebuild({ addMessage, messages })}
+              >
+                Rebuild
+              </ct-button>,
+              <ct-button
+                variant="primary"
+                onClick={triggerBuild({ addMessage })}
+              >
+                Build Graph
+              </ct-button>,
+            )}
+          </div>
         </ct-toolbar>
         <ct-vstack gap="4" padding="6">
           <span
@@ -173,8 +350,42 @@ const KnowledgeGraph = pattern<Input, Output>(() => {
               color: "var(--ct-color-text-secondary)",
             }}
           >
-            {edgeCount} links
+            {baseEdgeCount} base links, {agentEdgeCount} agent links,{" "}
+            {compoundNodeCount} groups
           </span>
+
+          <ct-message-beads
+            label="graph analysis"
+            $messages={messages}
+            pending={pending}
+          />
+
+          {ifElse(
+            computed(() => compoundNodes.length > 0),
+            <div>
+              <h3 style={{ margin: "0 0 8px", fontSize: "15px" }}>Groups</h3>
+              <ct-table full-width>
+                <tbody>
+                  {compoundNodes.map((node: any) => (
+                    <tr>
+                      <td style={{ fontWeight: "500" }}>{node[NAME]}</td>
+                      <td
+                        style={{
+                          fontSize: "13px",
+                          color: "var(--ct-color-text-secondary)",
+                        }}
+                      >
+                        {node.summary}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </ct-table>
+            </div>,
+            null,
+          )}
+
+          <h3 style={{ margin: "0", fontSize: "15px" }}>Links</h3>
           <ct-table full-width>
             <tbody>
               {allEdges.map((edge) => (
@@ -203,8 +414,7 @@ const KnowledgeGraph = pattern<Input, Output>(() => {
     ),
     edges: allEdges,
     compoundNodes,
-    findIncoming: patternTool(findIncomingPattern, { edges: allEdges }),
-    findOutgoing: patternTool(findOutgoingPattern, { edges: allEdges }),
+    getNeighbors: patternTool(getNeighborsPattern, { edges: allEdges }),
     searchGraph: patternTool(searchGraphPattern, {
       edges: allEdges,
       compoundNodes,

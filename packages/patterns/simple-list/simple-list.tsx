@@ -59,6 +59,7 @@ interface SimpleListOutput {
   [NAME]: string;
   [UI]: VNode;
   items: SimpleListItem[];
+  summary: string;
   toggleIndent: Stream<{ index: number }>;
   setIndent: Stream<{ index: number; indented: boolean }>;
   deleteItem: Stream<{ index: number }>;
@@ -115,6 +116,12 @@ export const SimpleListModule = pattern<
     if (total === 0) return "Empty";
     const done = list.filter((item) => item.done).length;
     return `${done}/${total}`;
+  });
+
+  const summary = computed(() => {
+    return (items.get() || [])
+      .map((item) => `${item.done ? "✓" : "○"} ${item.text}`)
+      .join(", ");
   });
 
   return {
@@ -228,6 +235,7 @@ export const SimpleListModule = pattern<
       </ct-vstack>
     ),
     items,
+    summary,
     toggleIndent,
     setIndent,
     deleteItem,

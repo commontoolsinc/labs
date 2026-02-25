@@ -25,9 +25,3 @@ export type SerializedForm = JsonWireValue;
  * See Section 4.3 of the formal spec.
  */
 export type JsonSerializationContext = SerializationContext<JsonWireValue>;
-
-/**
- * Re-export `SerializationContext` so existing consumers of this module can
- * still import it from here during the transition.
- */
-export type { SerializationContext } from "./serialization-context.ts";

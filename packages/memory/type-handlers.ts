@@ -7,9 +7,19 @@ import {
 } from "./storable-protocol.ts";
 import type { SerializationContext } from "./serialization-context.ts";
 import type { SerializedForm } from "./json-serialization-context.ts";
-import { UnknownStorable } from "./unknown-storable.ts";
+import { ExplicitTagStorable } from "./explicit-tag-storable.ts";
 import { ProblematicStorable } from "./problematic-storable.ts";
+import {
+  StorableEpochDays,
+  StorableEpochNsec,
+} from "./storable-native-instances.ts";
 import { TAGS } from "./type-tags.ts";
+import {
+  bigintFromMinimalTwosComplement,
+  bigintToMinimalTwosComplement,
+  fromBase64,
+  toUnpaddedBase64,
+} from "./bigint-encoding.ts";
 
 /**
  * Interface for per-type serialize/deserialize handlers. Each handler knows
@@ -144,9 +154,13 @@ export const UndefinedHandler: TypeHandler = {
 };
 
 /**
- * Handler for `bigint`. Serializes to `TAGS.BigInt` tag with the string
- * representation as state (since JSON has no native bigint type).
- * Wire format: `{ "/BigInt@1": "12345" }`.
+ * Handler for `bigint`. Serializes to `TAGS.BigInt` tag with an unpadded
+ * base64 string encoding the bigint's two's-complement big-endian byte
+ * representation. Wire format: `{ "/BigInt@1": "<base64>" }`.
+ *
+ * The byte encoding is the same one used by the canonical hash (Section 3.7
+ * of the byte-level spec): minimal two's-complement big-endian, with sign
+ * extension as needed.
  */
 export const BigIntHandler: TypeHandler = {
   tag: TAGS.BigInt,
@@ -160,7 +174,9 @@ export const BigIntHandler: TypeHandler = {
     context: SerializationContext<SerializedForm>,
     _recurse: (v: StorableValue) => SerializedForm,
   ): SerializedForm {
-    return context.encode(TAGS.BigInt, String(value) as SerializedForm);
+    const bytes = bigintToMinimalTwosComplement(value as bigint);
+    const b64 = toUnpaddedBase64(bytes);
+    return context.encode(TAGS.BigInt, b64 as SerializedForm);
   },
 
   deserialize(
@@ -177,12 +193,119 @@ export const BigIntHandler: TypeHandler = {
       );
     }
     try {
-      return BigInt(state);
+      const bytes = fromBase64(state);
+      return bigintFromMinimalTwosComplement(bytes);
     } catch {
       return makeProblematic(
         TAGS.BigInt,
         state,
-        `bigint: invalid string: ${state}`,
+        `bigint: invalid base64: ${state}`,
+      );
+    }
+  },
+};
+
+/**
+ * Handler for `StorableEpochNsec`. Serializes to a flat base64 string encoding
+ * the underlying bigint's two's-complement big-endian byte representation.
+ * Wire format: `{ "/EpochNsec@1": "<base64>" }`. StorableEpochNsec is a direct
+ * member of StorableDatum (not a StorableInstance), so this handler uses
+ * `instanceof` directly.
+ * See Section 5.3 of the formal spec.
+ */
+export const EpochNsecHandler: TypeHandler = {
+  tag: TAGS.EpochNsec,
+
+  canSerialize(value: StorableValue): boolean {
+    return value instanceof StorableEpochNsec;
+  },
+
+  serialize(
+    value: StorableValue,
+    context: SerializationContext<SerializedForm>,
+    _recurse: (v: StorableValue) => SerializedForm,
+  ): SerializedForm {
+    const nsec = (value as StorableEpochNsec).value;
+    const bytes = bigintToMinimalTwosComplement(nsec);
+    const b64 = toUnpaddedBase64(bytes);
+    return context.encode(TAGS.EpochNsec, b64 as SerializedForm);
+  },
+
+  deserialize(
+    state: SerializedForm,
+    _context: SerializationContext<SerializedForm>,
+    _runtime: ReconstructionContext,
+    _recurse: (v: SerializedForm) => StorableValue,
+  ): StorableValue {
+    if (typeof state !== "string") {
+      return makeProblematic(
+        TAGS.EpochNsec,
+        state,
+        `EpochNsec: expected string state, got ${typeof state}`,
+      );
+    }
+    try {
+      const bytes = fromBase64(state);
+      const bigint = bigintFromMinimalTwosComplement(bytes);
+      return new StorableEpochNsec(bigint) as unknown as StorableValue;
+    } catch {
+      return makeProblematic(
+        TAGS.EpochNsec,
+        state,
+        `EpochNsec: invalid base64: ${state}`,
+      );
+    }
+  },
+};
+
+/**
+ * Handler for `StorableEpochDays`. Serializes to a flat base64 string encoding
+ * the underlying bigint's two's-complement big-endian byte representation.
+ * Wire format: `{ "/EpochDays@1": "<base64>" }`. StorableEpochDays is a direct
+ * member of StorableDatum (not a StorableInstance), so this handler uses
+ * `instanceof` directly. Same flat encoding approach as `EpochNsecHandler`.
+ * See Section 5.3 of the formal spec.
+ */
+export const EpochDaysHandler: TypeHandler = {
+  tag: TAGS.EpochDays,
+
+  canSerialize(value: StorableValue): boolean {
+    return value instanceof StorableEpochDays;
+  },
+
+  serialize(
+    value: StorableValue,
+    context: SerializationContext<SerializedForm>,
+    _recurse: (v: StorableValue) => SerializedForm,
+  ): SerializedForm {
+    const days = (value as StorableEpochDays).value;
+    const bytes = bigintToMinimalTwosComplement(days);
+    const b64 = toUnpaddedBase64(bytes);
+    return context.encode(TAGS.EpochDays, b64 as SerializedForm);
+  },
+
+  deserialize(
+    state: SerializedForm,
+    _context: SerializationContext<SerializedForm>,
+    _runtime: ReconstructionContext,
+    _recurse: (v: SerializedForm) => StorableValue,
+  ): StorableValue {
+    if (typeof state !== "string") {
+      return makeProblematic(
+        TAGS.EpochDays,
+        state,
+        `EpochDays: expected string state, got ${typeof state}`,
+      );
+    }
+    try {
+      const bytes = fromBase64(state);
+      const bigint = bigintFromMinimalTwosComplement(bytes);
+      return new StorableEpochDays(bigint) as unknown as StorableValue;
+    } catch {
+      return makeProblematic(
+        TAGS.EpochDays,
+        state,
+        `EpochDays: invalid base64: ${state}`,
       );
     }
   },
@@ -190,8 +313,8 @@ export const BigIntHandler: TypeHandler = {
 
 /**
  * Handler for `StorableInstance` values (custom protocol types, including
- * `StorableError`, `UnknownStorable`, and `ProblematicStorable`). Serializes
- * via `[DECONSTRUCT]` and the context's tag/encode methods. Deserialization
+ * `StorableError` and `ExplicitTagStorable` subtypes). Serializes via
+ * `[DECONSTRUCT]` and the context's tag/encode methods. Deserialization
  * is not dispatched via this handler's tag (since each instance type has its
  * own tag like `TAGS.Error`); instead, the serializer falls back to the
  * class registry for those tags.
@@ -213,13 +336,9 @@ export const StorableInstanceHandler: TypeHandler = {
   ): SerializedForm {
     const inst = value as StorableInstance;
 
-    // UnknownStorable and ProblematicStorable: use preserved typeTag
-    // and re-serialize their stored state.
-    if (inst instanceof UnknownStorable) {
-      const serializedState = recurse(inst.state);
-      return context.encode(inst.typeTag, serializedState);
-    }
-    if (inst instanceof ProblematicStorable) {
+    // ExplicitTagStorable (UnknownStorable, ProblematicStorable): use
+    // preserved typeTag and re-serialize their stored state.
+    if (inst instanceof ExplicitTagStorable) {
       const serializedState = recurse(inst.state);
       return context.encode(inst.typeTag, serializedState);
     }
@@ -245,16 +364,20 @@ export const StorableInstanceHandler: TypeHandler = {
 
 /**
  * Create a registry with the built-in type handlers. The order matters for
- * serialization: `StorableInstance` is checked first (most specific), then
- * `bigint` and `undefined`. Primitives (null, boolean, number, string),
- * arrays, and plain objects are handled as fallthrough in the serializer
- * after no handler matches.
+ * serialization: `EpochNsec` and `EpochDays` are checked first (direct
+ * StorableDatum members that need `instanceof`-based matching), then
+ * `StorableInstance` (generic protocol types), then `bigint` and `undefined`.
+ * Primitives (null, boolean, number, string), arrays, and plain objects are
+ * handled as fallthrough in the serializer after no handler matches.
  */
 export function createDefaultRegistry(): TypeHandlerRegistry {
   const registry = new TypeHandlerRegistry();
-  // StorableInstance first (most specific -- checked via isStorableInstance brand).
-  // This now covers all native wrappers (StorableError, etc.) since they
-  // implement StorableInstance.
+  // EpochNsec/EpochDays first -- they are direct StorableDatum members matched
+  // by instanceof, and must be checked before the generic StorableInstanceHandler.
+  registry.register(EpochNsecHandler);
+  registry.register(EpochDaysHandler);
+  // StorableInstance (generic -- checked via isStorableInstance brand).
+  // Covers StorableError, UnknownStorable, ProblematicStorable, etc.
   registry.register(StorableInstanceHandler);
   // Primitives that need tagged encoding (can't be expressed in JSON natively).
   registry.register(BigIntHandler);

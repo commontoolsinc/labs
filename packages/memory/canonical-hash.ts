@@ -10,9 +10,14 @@
  * Gated behind `ExperimentalOptions.canonicalHashing`.
  */
 import { createHasher, type IncrementalHasher } from "./hash-impl.ts";
-import { StorableUint8Array } from "./storable-native-instances.ts";
+import {
+  StorableEpochDays,
+  StorableEpochNsec,
+  StorableUint8Array,
+} from "./storable-native-instances.ts";
 import { DECONSTRUCT, isStorableInstance } from "./storable-protocol.ts";
 import { encodeULEB128 } from "@commontools/leb128";
+import { bigintToMinimalTwosComplement } from "./bigint-encoding.ts";
 
 // ---------------------------------------------------------------------------
 // Type tag bytes (Section 2 of the byte-level spec)
@@ -27,14 +32,16 @@ const TAG_ARRAY = 0x10;
 const TAG_OBJECT = 0x11;
 const TAG_INSTANCE = 0x12;
 
-// Primitive (0x2N)
+// Primitive (0x2N) -- ordered by conceptual size
 const TAG_NULL = 0x20;
-const TAG_BOOLEAN = 0x21;
-const TAG_NUMBER = 0x22;
-const TAG_STRING = 0x23;
-const TAG_BIGINT = 0x24;
-const TAG_UNDEFINED = 0x25;
-const TAG_BYTES = 0x26;
+const TAG_UNDEFINED = 0x21;
+const TAG_BOOLEAN = 0x22;
+const TAG_NUMBER = 0x23;
+const TAG_STRING = 0x24;
+const TAG_BYTES = 0x25;
+const TAG_BIGINT = 0x26;
+const TAG_EPOCH_NSEC = 0x27;
+const TAG_EPOCH_DAYS = 0x28;
 
 // ---------------------------------------------------------------------------
 // Pre-allocated tag byte arrays (avoids per-call allocation)
@@ -46,13 +53,15 @@ const TAG_ARRAY_BYTES = new Uint8Array([TAG_ARRAY]);
 const TAG_OBJECT_BYTES = new Uint8Array([TAG_OBJECT]);
 const TAG_INSTANCE_BYTES = new Uint8Array([TAG_INSTANCE]);
 const TAG_NULL_BYTES = new Uint8Array([TAG_NULL]);
+const TAG_UNDEFINED_BYTES = new Uint8Array([TAG_UNDEFINED]);
 const TAG_BOOLEAN_TRUE_BYTES = new Uint8Array([TAG_BOOLEAN, 0x01]);
 const TAG_BOOLEAN_FALSE_BYTES = new Uint8Array([TAG_BOOLEAN, 0x00]);
 const TAG_NUMBER_BYTES = new Uint8Array([TAG_NUMBER]);
 const TAG_STRING_BYTES = new Uint8Array([TAG_STRING]);
-const TAG_BIGINT_BYTES = new Uint8Array([TAG_BIGINT]);
-const TAG_UNDEFINED_BYTES = new Uint8Array([TAG_UNDEFINED]);
 const TAG_BYTES_BYTES = new Uint8Array([TAG_BYTES]);
+const TAG_BIGINT_BYTES = new Uint8Array([TAG_BIGINT]);
+const TAG_EPOCH_NSEC_BYTES = new Uint8Array([TAG_EPOCH_NSEC]);
+const TAG_EPOCH_DAYS_BYTES = new Uint8Array([TAG_EPOCH_DAYS]);
 
 // ---------------------------------------------------------------------------
 // Shared scratch buffer (safe in single-threaded synchronous JS -- see
@@ -73,54 +82,6 @@ const encoder = new TextEncoder();
 
 function feedLength(hasher: IncrementalHasher, value: number): void {
   hasher.update(encodeULEB128(value));
-}
-
-// ---------------------------------------------------------------------------
-// Helper: bigint to minimal two's-complement big-endian bytes
-// ---------------------------------------------------------------------------
-
-function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
-  if (value === 0n) {
-    return new Uint8Array([0]);
-  }
-
-  // Determine if negative.
-  const negative = value < 0n;
-
-  let hex: string;
-  if (!negative) {
-    hex = value.toString(16);
-    // Pad to even length.
-    if (hex.length % 2 !== 0) hex = "0" + hex;
-    // If high bit is set, prepend a zero byte to keep it positive.
-    if (parseInt(hex[0], 16) >= 8) hex = "00" + hex;
-  } else {
-    // For negative numbers, compute two's complement.
-    const abs = -value;
-    const absHex = abs.toString(16);
-    // Number of bits for the magnitude.
-    const bitLen = absHex.length * 4;
-    // We need enough bytes to represent the value, rounded up.
-    let byteLen = Math.ceil(bitLen / 8);
-    // Two's complement of -abs is 2^n - abs where n is the byte-aligned size.
-    let twos = (1n << BigInt(byteLen * 8)) - abs;
-    // Verify the high bit is set (value must look negative).
-    const highNibble = parseInt(twos.toString(16)[0] || "0", 16);
-    if (highNibble < 8) {
-      // High bit not set -- need one more byte.
-      byteLen++;
-      twos = (1n << BigInt(byteLen * 8)) - abs;
-    }
-    hex = twos.toString(16);
-    // Pad to exact byte length.
-    while (hex.length < byteLen * 2) hex = "0" + hex;
-  }
-
-  const bytes = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < bytes.length; i++) {
-    bytes[i] = parseInt(hex.substring(i * 2, i * 2 + 2), 16);
-  }
-  return bytes;
 }
 
 // ---------------------------------------------------------------------------
@@ -203,8 +164,25 @@ function feedObjectValue(
     return;
   }
 
-  // 3. StorableInstance (generic protocol path via DECONSTRUCT).
-  // StorableDate falls through to here (hashed via typeTag + DECONSTRUCT).
+  // 3a. StorableEpochNsec (dedicated primitive tag)
+  if (value instanceof StorableEpochNsec) {
+    hasher.update(TAG_EPOCH_NSEC_BYTES);
+    const bytes = bigintToMinimalTwosComplement(value.value);
+    feedLength(hasher, bytes.length);
+    hasher.update(bytes);
+    return;
+  }
+
+  // 3b. StorableEpochDays (dedicated primitive tag)
+  if (value instanceof StorableEpochDays) {
+    hasher.update(TAG_EPOCH_DAYS_BYTES);
+    const bytes = bigintToMinimalTwosComplement(value.value);
+    feedLength(hasher, bytes.length);
+    hasher.update(bytes);
+    return;
+  }
+
+  // 4. StorableInstance (generic protocol path via DECONSTRUCT).
   if (isStorableInstance(value)) {
     hasher.update(TAG_INSTANCE_BYTES);
     const typeTag = (value as { typeTag?: unknown }).typeTag;
@@ -221,7 +199,7 @@ function feedObjectValue(
     return;
   }
 
-  // 4. Array (with sparse hole handling, terminated by TAG_END)
+  // 5. Array (with sparse hole handling, terminated by TAG_END)
   if (Array.isArray(value)) {
     hasher.update(TAG_ARRAY_BYTES);
     let i = 0;
@@ -244,7 +222,7 @@ function feedObjectValue(
     return;
   }
 
-  // 5. Plain object
+  // 6. Plain object
   const obj = value as Record<string, unknown>;
   const keys = Object.keys(obj);
   // Sort keys by UTF-8 byte comparison.

@@ -124,6 +124,7 @@ export function processDefaultValue(
   tx: IExtendedStorageTransaction | undefined,
   link: NormalizedFullLink,
   defaultValue: any,
+  synced = false,
 ): any {
   const schema = link.schema;
   if (!schema) return defaultValue;
@@ -154,6 +155,7 @@ export function processDefaultValue(
           schema: mergeDefaults(resolvedSchema, defaultValue),
         },
         getTransactionForChildCells(tx),
+        synced,
       );
     }
   }
@@ -191,6 +193,7 @@ export function processDefaultValue(
             tx,
             { ...link, schema: propSchema, path: [...link.path, key] },
             defaultValue[key as keyof typeof defaultValue],
+            synced,
           );
           processedKeys.add(key);
         } else if (isObject(propSchema)) {
@@ -201,6 +204,7 @@ export function processDefaultValue(
               tx,
               { ...link, schema: propSchema, path: [...link.path, key] },
               undefined,
+              synced,
             );
           } else if (propSchema.default !== undefined) {
             result[key] = processDefaultValue(
@@ -208,6 +212,7 @@ export function processDefaultValue(
               tx,
               { ...link, schema: propSchema, path: [...link.path, key] },
               propSchema.default,
+              synced,
             );
           } else if (
             resolvedSchema?.required?.includes(key) &&
@@ -218,6 +223,7 @@ export function processDefaultValue(
               tx,
               { ...link, schema: propSchema, path: [...link.path, key] },
               propSchema.type === "object" ? {} : [],
+              synced,
             );
           }
         }
@@ -243,12 +249,13 @@ export function processDefaultValue(
               path: [...link.path, key],
             },
             defaultValue[key as keyof typeof defaultValue],
+            synced,
           );
         }
       }
     }
 
-    return annotateWithBackToCellSymbols(result, runtime, link, tx);
+    return annotateWithBackToCellSymbols(result, runtime, link, tx, synced);
   }
 
   // Handle array type defaults
@@ -284,13 +291,14 @@ export function processDefaultValue(
           path: [...link.path, String(i)],
         },
         item,
+        synced,
       )
     );
-    return annotateWithBackToCellSymbols(result, runtime, link, tx);
+    return annotateWithBackToCellSymbols(result, runtime, link, tx, synced);
   }
 
   // For primitive types, return as is
-  return annotateWithBackToCellSymbols(defaultValue, runtime, link, tx);
+  return annotateWithBackToCellSymbols(defaultValue, runtime, link, tx, synced);
 }
 
 function mergeDefaults(
@@ -321,6 +329,7 @@ function annotateWithBackToCellSymbols(
   runtime: Runtime,
   link: NormalizedFullLink,
   tx: IExtendedStorageTransaction | undefined,
+  synced = false,
 ) {
   if (
     isRecord(value) && !isCell(value) && !isCellResultForDereferencing(value)
@@ -329,7 +338,8 @@ function annotateWithBackToCellSymbols(
     Object.defineProperty(value, toCell, {
       // Use getTransactionForChildCells so that if this was called from sample(),
       // the resulting cell is still reactive
-      value: () => createCell(runtime, link, getTransactionForChildCells(tx)),
+      value: () =>
+        createCell(runtime, link, getTransactionForChildCells(tx), synced),
       enumerable: false,
     });
     Object.freeze(value);
@@ -340,6 +350,8 @@ function annotateWithBackToCellSymbols(
 export interface ValidateAndTransformOptions {
   /** When true, also read into each Cell created for asCell fields to capture dependencies */
   traverseCells?: boolean;
+  /** When true, cells created during traversal are marked as already synced */
+  synced?: boolean;
 }
 
 export function validateAndTransform(
@@ -402,7 +414,11 @@ export function validateAndTransform(
   // We'll use this for the value, and potentially merge the schema
   // This gets me the result of following all the links, so I can get the value
   const ref = resolveLink(runtime, tx, link);
-  const objectCreator = new TransformObjectCreator(runtime, tx!);
+  const objectCreator = new TransformObjectCreator(
+    runtime,
+    tx!,
+    options?.synced ?? false,
+  );
 
   // If our link is asCell/asStream, and we don't have any path portions, we
   // can just create the cell and mostly skip reading the value and traversal.
@@ -460,6 +476,7 @@ class TransformObjectCreator
   constructor(
     private runtime: Runtime,
     private tx: IExtendedStorageTransaction,
+    private synced: boolean,
   ) {
   }
 
@@ -503,7 +520,7 @@ class TransformObjectCreator
     link: NormalizedFullLink,
     value: T | undefined,
   ): T | undefined {
-    return processDefaultValue(this.runtime, this.tx, link, value);
+    return processDefaultValue(this.runtime, this.tx, link, value, this.synced);
   }
 
   // This is an early pass to see if we should just create a proxy or cell
@@ -528,6 +545,7 @@ class TransformObjectCreator
           this.runtime,
           { ...link, schema: restSchema },
           getTransactionForChildCells(this.tx),
+          this.synced,
         ) as AnyCellWrapping<StorableDatum>;
       }
       // If it's not a cell/stream, but the schema is true-ish, use a
@@ -544,6 +562,7 @@ class TransformObjectCreator
           this.tx,
           link,
           link.schema.default,
+          this.synced,
         );
       }
       // If we're an object, we may be missing some properties that have a
@@ -557,11 +576,17 @@ class TransformObjectCreator
           if (isObject(propSchema) && propSchema.default !== undefined) {
             const valueObj = value as Record<string, any>;
             if (valueObj[propName] === undefined) {
-              valueObj[propName] = processDefaultValue(this.runtime, this.tx, {
-                ...link,
-                path: [...link.path, propName],
-                schema: propSchema,
-              }, undefined);
+              valueObj[propName] = processDefaultValue(
+                this.runtime,
+                this.tx,
+                {
+                  ...link,
+                  path: [...link.path, propName],
+                  schema: propSchema,
+                },
+                undefined,
+                this.synced,
+              );
             }
           }
         }
@@ -569,7 +594,13 @@ class TransformObjectCreator
       // TODO(@ubik2): What if we're an array? Is it possible to have undefined
       // elements in our array?
     }
-    return annotateWithBackToCellSymbols(value, this.runtime, link, this.tx);
+    return annotateWithBackToCellSymbols(
+      value,
+      this.runtime,
+      link,
+      this.tx,
+      this.synced,
+    );
   }
 }
 
