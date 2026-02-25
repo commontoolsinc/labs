@@ -643,6 +643,39 @@ export function inferContextualType(
 }
 
 /**
+ * Check if a single union/intersection member represents an array-like type.
+ *
+ * Handles:
+ * - Direct array/tuple types: T[]
+ * - Intersection-with-brand: T[] & { [DEFAULT_MARKER]: T[] } (from Default<T[], V> expansion)
+ * - Default<T[], V> alias (non-flattened form, retained aliasSymbol)
+ */
+function isEffectiveArrayMember(
+  t: ts.Type,
+  checker: ts.TypeChecker,
+): boolean {
+  if (checker.isArrayType(t) || checker.isTupleType(t)) return true;
+  // Intersection like (T[] & brand): check if any member is an array
+  if (t.flags & ts.TypeFlags.Intersection) {
+    return (t as ts.IntersectionType).types.some(
+      (m) => checker.isArrayType(m) || checker.isTupleType(m),
+    );
+  }
+  // Non-flattened Default<T[], V> alias (aliasSymbol retained on the union type)
+  const alias = t as {
+    aliasSymbol?: ts.Symbol;
+    aliasTypeArguments?: readonly ts.Type[];
+  };
+  if (
+    isDefaultAliasSymbol(alias.aliasSymbol) && alias.aliasTypeArguments?.[0]
+  ) {
+    const baseT = alias.aliasTypeArguments[0];
+    return checker.isArrayType(baseT) || checker.isTupleType(baseT);
+  }
+  return false;
+}
+
+/**
  * Helper to check if a type's type argument is an array.
  * Handles unions and intersections recursively, similar to isOpaqueRefType.
  */
@@ -692,18 +725,20 @@ export function hasArrayTypeArgument(
             return true;
           }
         }
-        // Handle T[] | undefined (from optional WishState properties):
-        // strip undefined from the union and check if the remainder is an array
-        if (innerType.isUnion()) {
-          const nonUndefined = innerType.types.filter(
+        // Handle T[] | undefined and Default<T[]> | undefined.
+        //
+        // Default<T[], V> expands to a union (T[] & brand) | T[] at the TypeScript
+        // type level. Combined with WishState's `result: T | undefined`, TypeScript
+        // flattens the whole thing into a 3-member union:
+        //   (T[] & brand) | T[] | undefined
+        // After stripping undefined we get 2 members, so we cannot require
+        // nonUndefined.length === 1.  Instead, check if ANY non-undefined member
+        // is array-like (direct array, or intersection/alias wrapping an array).
+        if (innerType.flags & ts.TypeFlags.Union) {
+          const nonUndefined = (innerType as ts.UnionType).types.filter(
             (t) => !(t.flags & ts.TypeFlags.Undefined),
           );
-          const sole = nonUndefined[0];
-          if (
-            nonUndefined.length === 1 && sole &&
-            (checker.isArrayType(sole) ||
-              checker.isTupleType(sole))
-          ) {
+          if (nonUndefined.every((t) => isEffectiveArrayMember(t, checker))) {
             return true;
           }
         }
