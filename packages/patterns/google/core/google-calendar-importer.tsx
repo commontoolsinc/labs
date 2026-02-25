@@ -591,6 +591,8 @@ interface Output {
   calendars: Calendar[];
   /** Number of events imported */
   eventCount: number;
+  /** Summary of container-level events for hierarchical indexing */
+  summary: string;
 }
 
 const toggleShowEvents = handler<unknown, { showEvents: Writable<boolean> }>(
@@ -686,6 +688,14 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
           new Date(a.startDateTime || a.start).getTime() -
           new Date(b.startDateTime || b.start).getTime()
         );
+    });
+
+    const summary = derive(events, (eventList: CalendarEvent[]) => {
+      return eventList
+        .slice(0, 20)
+        .map((e) => `${e.summary || ""} ${e.start || ""}`.trim())
+        .filter((s) => s.length > 0)
+        .join(" | ");
     });
 
     const totalUpcoming = derive(
@@ -1064,6 +1074,7 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
         logDeriveCall(`eventCount (length=${list?.length})`);
         return list?.length || 0;
       }),
+      summary,
       bgUpdater: calendarUpdater({
         events,
         calendars,

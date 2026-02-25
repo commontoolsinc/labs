@@ -28,6 +28,7 @@ export interface HabitTrackerOutput {
   habits: Habit[];
   logs: HabitLog[];
   todayDate: string;
+  summary: string;
   toggleHabit: Stream<{ habitName: string }>;
   addHabit: Stream<{ name: string; icon: string }>;
   deleteHabit: Stream<{ habit: Habit }>;
