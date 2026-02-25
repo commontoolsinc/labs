@@ -1525,13 +1525,14 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                       {computed(() => {
                         if (isComplete) return null;
                         const ik = "inbox:" + idx;
-                        if (selectedItem.get() === ik) return (
+                        if (selectedItem.get() !== ik) return null;
+                        return (
                           <div style={{ display: "flex", gap: "8px", padding: "6px 0 8px" }}>
                             <div style={actionBtnDone} onClick={() => markItemDone.send({ key: ik })}>✓ Done</div>
                             <div style={actionBtnDelete} onClick={() => deleteItem.send({ key: ik })}>✕ Delete</div>
+                            <div style={actionBtnDirective} onClick={openItemDirective}>→ Directive</div>
                           </div>
                         );
-                        return null;
                       })}
                     </div>
                   );
@@ -1878,13 +1879,14 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                         </div>
                         {computed(() => {
                           const pk = "projects:" + idx;
-                          if (selectedItem.get() === pk) return (
+                          if (selectedItem.get() !== pk) return null;
+                          return (
                             <div style={{ display: "flex", gap: "8px", padding: "6px 0 8px", flexWrap: "wrap" as const }}>
                               <div style={actionBtnDone} onClick={() => markItemDone.send({ key: pk })}>✓ Done</div>
                               <div style={actionBtnDelete} onClick={() => deleteItem.send({ key: pk })}>✕ Delete</div>
+                              <div style={actionBtnDirective} onClick={openItemDirective}>→ Directive</div>
                             </div>
                           );
-                          return null;
                         })}
                       </div>
                     );
@@ -2051,13 +2053,14 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                             ) : null}
                           </div>
                           {computed(() => {
-                            const pk = "people:" + idx;
-                            if (selectedItem.get() === pk) return (
+                            const ppk = "people:" + idx;
+                            if (selectedItem.get() !== ppk) return null;
+                            return (
                               <div style={{ display: "flex", gap: "8px", padding: "6px 0 8px" }}>
-                                <div style={actionBtnDelete} onClick={() => deleteItem.send({ key: pk })}>✕ Delete</div>
+                                <div style={actionBtnDelete} onClick={() => deleteItem.send({ key: ppk })}>✕ Delete</div>
+                                <div style={actionBtnDirective} onClick={openItemDirective}>→ Directive</div>
                               </div>
                             );
-                            return null;
                           })}
                         </div>
                       );
@@ -2398,13 +2401,14 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                                     </div>
                                   </div>
                                   {computed(() => {
-                                    if (selectedItem.get() === ak) return (
+                                    if (selectedItem.get() !== ak) return null;
+                                    return (
                                       <div style={{ display: "flex", gap: "8px", padding: "6px 0 8px" }}>
                                         <div style={actionBtnDone} onClick={() => markItemDone.send({ key: ak })}>✓ Done</div>
                                         <div style={actionBtnDelete} onClick={() => deleteItem.send({ key: ak })}>✕ Delete</div>
+                                        <div style={actionBtnDirective} onClick={openItemDirective}>→ Directive</div>
                                       </div>
                                     );
-                                    return null;
                                   })}
                                 </div>
                               );
@@ -2441,6 +2445,20 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
               return null;
             })}
           </div>
+
+          {/* ── Item Directive Input (shared across all panels) ── */}
+          {computed(() => {
+            const sel = selectedItem.get();
+            if (!sel || !itemDirectiveOpen.get()) return null;
+            return (
+              <div style={{ padding: "0 16px", marginBottom: "8px" }}>
+                <div style={directiveInputRowStyle}>
+                  <ct-textarea $value={itemDirectiveDraft} placeholder="Directive about this item..." rows={1} style={{ flex: "1", borderRadius: "10px", fontSize: "14px" }} />
+                  <div style={directiveSendBtnStyle} onClick={sendItemDirective}>Send</div>
+                </div>
+              </div>
+            );
+          })}
 
           {/* ── Question Tabs (Segmented control) ── */}
           <div style={{ padding: "0 16px", marginBottom: "0" }}>
