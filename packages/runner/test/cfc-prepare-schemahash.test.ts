@@ -45,19 +45,23 @@ describe("CFC prepare schema hash", () => {
     await storageManager.close();
   });
 
-  async function readSchemaHash(id: URI): Promise<unknown> {
+  async function readCfcPath(id: URI, path: readonly string[]): Promise<unknown> {
     const tx = runtime.edit();
     const value = tx.readOrThrow({
       space,
       id,
       type: "application/json",
-      path: ["cfc", "schemaHash"],
+      path: ["cfc", ...path],
     });
     const { error } = await tx.commit();
     if (error) {
       throw new Error(`failed to read schemaHash: ${error.name}`);
     }
     return value;
+  }
+
+  async function readSchemaHash(id: URI): Promise<unknown> {
+    return await readCfcPath(id, ["schemaHash"]);
   }
 
   it("persists cfc.schemaHash during prepare for relevant writes", async () => {
@@ -78,6 +82,29 @@ describe("CFC prepare schema hash", () => {
     const persistedSchemaHash = await readSchemaHash(link.id);
     const expectedSchemaHash = await computeCfcSchemaHash(ifcObjectSchema);
     expect(persistedSchemaHash).toBe(expectedSchemaHash);
+  });
+
+  it("persists cfc.labels root classification during prepare", async () => {
+    const tx = runtime.edit();
+    const cell = runtime.getCell<{ count: number }>(
+      space,
+      "cfc-prepare-labels-persist",
+      ifcObjectSchema,
+      tx,
+    );
+    const link = cell.getAsNormalizedFullLink();
+    cell.set({ count: 1 });
+
+    await prepareCfcCommitIfNeeded(tx);
+    const { error } = await tx.commit();
+    expect(error).toBeUndefined();
+
+    const persistedLabels = await readCfcPath(link.id, ["labels"]);
+    expect(persistedLabels).toEqual({
+      "/": {
+        classification: ["secret"],
+      },
+    });
   });
 
   it("commits when existing cfc.schemaHash matches", async () => {
