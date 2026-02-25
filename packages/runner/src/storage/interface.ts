@@ -760,6 +760,17 @@ export interface ICfcInputRequirementViolationError extends IStorageError {
   readonly actualIntegrity?: readonly string[];
 }
 
+export interface ICfcOutputTransitionViolationError extends IStorageError {
+  readonly name: "CfcOutputTransitionViolationError";
+  readonly requirement: "confidentialityMonotonicity";
+  readonly space: MemorySpace;
+  readonly id: URI;
+  readonly type: string;
+  readonly path: string;
+  readonly minClassification: string;
+  readonly actualClassification: string;
+}
+
 /**
  * Error that indicating that no change could be made to a transaction is it is
  * no longer active.
@@ -787,7 +798,8 @@ export type CommitError =
   | ICfcPreparedDigestMismatchError
   | ICfcPrepareSchemaUnavailableError
   | ICfcSchemaHashMismatchError
-  | ICfcInputRequirementViolationError;
+  | ICfcInputRequirementViolationError
+  | ICfcOutputTransitionViolationError;
 
 /**
  * Error returned when a read or write operation fails because the intra-value
