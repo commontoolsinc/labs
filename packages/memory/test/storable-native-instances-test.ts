@@ -761,6 +761,11 @@ describe("storable-native-instances", () => {
     it("returns null for RegExp", () => {
       expect(tagFromNativeValue(/abc/)).toBe(null);
     });
+
+    it("returns null for null-prototype objects (no constructor)", () => {
+      const obj = Object.create(null);
+      expect(tagFromNativeValue(obj)).toBe(null);
+    });
   });
 
   describe("tagFromNativeClass", () => {

@@ -90,8 +90,14 @@ export function tagFromNativeClass(
 
     default:
       // Catch exotic Error subclasses (e.g. custom subclasses with
-      // non-standard constructors).
-      if (constructorFn.prototype instanceof Error) return NATIVE_TAGS.Error;
+      // non-standard constructors). Guard against non-function values
+      // (e.g. null-prototype objects where .constructor is undefined).
+      if (
+        typeof constructorFn === "function" &&
+        constructorFn.prototype instanceof Error
+      ) {
+        return NATIVE_TAGS.Error;
+      }
       return null;
   }
 }
@@ -106,8 +112,13 @@ export function tagFromNativeClass(
  * `Error.isError()`.
  */
 export function tagFromNativeValue(value: object): NativeTag | null {
-  const tag = tagFromNativeClass(value.constructor);
-  if (tag !== null) return tag;
+  // Guard: null-prototype objects or exotic objects may not have a function
+  // constructor.
+  const ctor = value.constructor;
+  if (typeof ctor === "function") {
+    const tag = tagFromNativeClass(ctor);
+    if (tag !== null) return tag;
+  }
 
   // Fallback for exotic Error subclasses (e.g. DOMException, custom
   // subclasses with non-standard constructors).
