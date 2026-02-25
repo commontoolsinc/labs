@@ -66,7 +66,7 @@ export type NativeTag = typeof NATIVE_TAGS[keyof typeof NATIVE_TAGS];
  * actual Error instances, not the prototype chain -- so we use `instanceof`.)
  */
 export function tagFromNativeClass(
-  constructorFn: Function,
+  constructorFn: { prototype: unknown },
 ): NativeTag | null {
   switch (constructorFn) {
     // Error and standard subclasses all map to the Error tag.

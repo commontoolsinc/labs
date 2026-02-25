@@ -714,7 +714,7 @@ describe("storable-native-instances", () => {
         ["URIError", new URIError("test")],
         ["EvalError", new EvalError("test")],
       ];
-      for (const [name, value] of cases) {
+      for (const [_name, value] of cases) {
         expect(tagFromNativeValue(value)).toBe(NATIVE_TAGS.Error);
       }
     });
