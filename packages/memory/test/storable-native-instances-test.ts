@@ -11,6 +11,7 @@ import {
   deepNativeValueFromStorableValue,
   isConvertibleNativeInstance,
   nativeValueFromStorableValue,
+  SpecialPrimitiveValue,
   StorableEpochDays,
   StorableEpochNsec,
   StorableError,
@@ -20,6 +21,7 @@ import {
   StorableUint8Array,
 } from "../storable-native-instances.ts";
 import { FrozenMap, FrozenSet } from "../frozen-builtins.ts";
+import { toRichStorableValue } from "../rich-storable-value.ts";
 import {
   NATIVE_TAGS,
   tagFromNativeClass,
@@ -750,21 +752,21 @@ describe("storable-native-instances", () => {
       );
     });
 
-    it("returns null for plain objects", () => {
-      expect(tagFromNativeValue({})).toBe(null);
+    it("returns Object tag for plain objects", () => {
+      expect(tagFromNativeValue({})).toBe(NATIVE_TAGS.Object);
     });
 
-    it("returns null for arrays", () => {
-      expect(tagFromNativeValue([])).toBe(null);
+    it("returns Array tag for arrays", () => {
+      expect(tagFromNativeValue([])).toBe(NATIVE_TAGS.Array);
     });
 
     it("returns null for RegExp", () => {
       expect(tagFromNativeValue(/abc/)).toBe(null);
     });
 
-    it("returns null for null-prototype objects (no constructor)", () => {
+    it("returns Object tag for null-prototype objects (no constructor)", () => {
       const obj = Object.create(null);
-      expect(tagFromNativeValue(obj)).toBe(null);
+      expect(tagFromNativeValue(obj)).toBe(NATIVE_TAGS.Object);
     });
   });
 
@@ -791,7 +793,9 @@ describe("storable-native-instances", () => {
       expect(tagFromNativeClass(ExoticError)).toBe(NATIVE_TAGS.Error);
     });
 
-    it("returns correct tags for Map, Set, Date, Uint8Array", () => {
+    it("returns correct tags for Array, Object, Map, Set, Date, Uint8Array", () => {
+      expect(tagFromNativeClass(Array)).toBe(NATIVE_TAGS.Array);
+      expect(tagFromNativeClass(Object)).toBe(NATIVE_TAGS.Object);
       expect(tagFromNativeClass(Map)).toBe(NATIVE_TAGS.Map);
       expect(tagFromNativeClass(Set)).toBe(NATIVE_TAGS.Set);
       expect(tagFromNativeClass(Date)).toBe(NATIVE_TAGS.Date);
@@ -825,6 +829,32 @@ describe("storable-native-instances", () => {
       expect(isConvertibleNativeInstance([])).toBe(false);
       expect(isConvertibleNativeInstance(/abc/)).toBe(false);
       expect(isConvertibleNativeInstance(new WeakMap())).toBe(false);
+    });
+  });
+
+  describe("SpecialPrimitiveValue", () => {
+    it("StorableEpochNsec is instanceof SpecialPrimitiveValue", () => {
+      expect(new StorableEpochNsec(0n)).toBeInstanceOf(SpecialPrimitiveValue);
+    });
+
+    it("StorableEpochDays is instanceof SpecialPrimitiveValue", () => {
+      expect(new StorableEpochDays(0n)).toBeInstanceOf(SpecialPrimitiveValue);
+    });
+
+    it("StorableEpochNsec instances are always frozen", () => {
+      expect(Object.isFrozen(new StorableEpochNsec(42n))).toBe(true);
+    });
+
+    it("StorableEpochDays instances are always frozen", () => {
+      expect(Object.isFrozen(new StorableEpochDays(100n))).toBe(true);
+    });
+
+    it("passes through toRichStorableValue unchanged even with freeze=false", () => {
+      const nsec = new StorableEpochNsec(123n);
+      const days = new StorableEpochDays(456n);
+      // freeze=false should still return the same instance (not a copy).
+      expect(toRichStorableValue(nsec, false)).toBe(nsec);
+      expect(toRichStorableValue(days, false)).toBe(days);
     });
   });
 });

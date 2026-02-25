@@ -1,5 +1,6 @@
 import { assertEquals, assertNotEquals, assertThrows } from "@std/assert";
-import { canonicalHash } from "../canonical-hash.ts";
+import { canonicalHash as canonicalHashRaw } from "../canonical-hash.ts";
+import { StorableContentId } from "../storable-content-id.ts";
 import {
   StorableEpochDays,
   StorableEpochNsec,
@@ -20,6 +21,11 @@ function sha256(bytes: number[]): Uint8Array {
 
 function hex(hash: Uint8Array): string {
   return Array.from(hash).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** Extract the raw hash bytes from canonicalHash for comparison. */
+function canonicalHash(value: unknown): Uint8Array {
+  return canonicalHashRaw(value).hash;
 }
 
 // =========================================================================
@@ -886,4 +892,28 @@ Deno.test("canonicalHash", async (t) => {
       assertNotEquals(hex(canonicalHash(obj)), hex(wrongOrder));
     },
   );
+
+  // =========================================================================
+  // canonicalHash returns StorableContentId
+  // =========================================================================
+
+  await t.step("canonicalHash returns StorableContentId with fid1 tag", () => {
+    const result = canonicalHashRaw(42);
+    assertEquals(result instanceof StorableContentId, true);
+    assertEquals(result.algorithmTag, "fid1");
+    assertEquals(result.hash.length, 32);
+  });
+
+  await t.step("StorableContentId.toString() produces fid1:<base64>", () => {
+    const result = canonicalHashRaw(42);
+    const str = result.toString();
+    assertEquals(str.startsWith("fid1:"), true);
+    // Should not contain padding (unpadded base64).
+    assertEquals(str.includes("="), false);
+  });
+
+  await t.step("StorableContentId is frozen (SpecialPrimitiveValue)", () => {
+    const result = canonicalHashRaw(42);
+    assertEquals(Object.isFrozen(result), true);
+  });
 });

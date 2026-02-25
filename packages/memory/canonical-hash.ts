@@ -15,6 +15,7 @@ import {
   StorableEpochNsec,
   StorableUint8Array,
 } from "./storable-native-instances.ts";
+import { StorableContentId } from "./storable-content-id.ts";
 import { DECONSTRUCT, isStorableInstance } from "./storable-protocol.ts";
 import { encodeULEB128 } from "@commontools/leb128";
 import { bigintToMinimalTwosComplement } from "./bigint-encoding.ts";
@@ -254,12 +255,13 @@ function feedObjectValue(
 // ---------------------------------------------------------------------------
 
 /**
- * Compute the canonical SHA-256 hash of a `StorableValue`. Returns the
- * raw 32-byte digest. The caller (`refer()`) wraps it via
+ * Compute the canonical SHA-256 hash of a `StorableValue`. Returns a
+ * `StorableContentId` with algorithm tag `fid1` (fabric ID, v1).
+ * The caller (`refer()`) extracts the raw digest via `.hash` for
  * `Reference.fromDigest()`.
  */
-export function canonicalHash(value: unknown): Uint8Array {
+export function canonicalHash(value: unknown): StorableContentId {
   const hasher = createHasher();
   feedValue(hasher, value);
-  return hasher.digest();
+  return new StorableContentId(hasher.digest(), "fid1");
 }

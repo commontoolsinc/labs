@@ -43,6 +43,8 @@ export const TAGS = Object.freeze(
  */
 export const NATIVE_TAGS = Object.freeze(
   {
+    Array: "Array",
+    Object: "Object",
     Error: "Error",
     Map: "Map",
     Set: "Set",
@@ -79,6 +81,10 @@ export function tagFromNativeClass(
     case EvalError:
       return NATIVE_TAGS.Error;
 
+    case Array:
+      return NATIVE_TAGS.Array;
+    case Object:
+      return NATIVE_TAGS.Object;
     case Map:
       return NATIVE_TAGS.Map;
     case Set:
@@ -123,6 +129,13 @@ export function tagFromNativeValue(value: object): NativeTag | null {
   // Fallback for exotic Error subclasses (e.g. DOMException, custom
   // subclasses with non-standard constructors).
   if (Error.isError(value)) return NATIVE_TAGS.Error;
+
+  // Fallback for arrays (cross-realm arrays may have a different constructor).
+  if (Array.isArray(value)) return NATIVE_TAGS.Array;
+
+  // Fallback for null-prototype objects (Object.create(null)).
+  const proto = Object.getPrototypeOf(value);
+  if (proto === null) return NATIVE_TAGS.Object;
 
   return null;
 }

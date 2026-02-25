@@ -7,7 +7,7 @@ import type {
 import { isStorableInstance } from "./storable-protocol.ts";
 import {
   isConvertibleNativeInstance,
-  StorableEpochDays,
+  SpecialPrimitiveValue,
   StorableEpochNsec,
   StorableError,
   UNSAFE_KEYS,
@@ -43,12 +43,10 @@ export function toRichStorableValue(
   value: unknown,
   freeze = true,
 ): StorableValueLayer {
-  // Temporal types (StorableEpochNsec, StorableEpochDays) are direct
-  // StorableDatum members -- pass through as-is.
-  if (
-    value instanceof StorableEpochNsec || value instanceof StorableEpochDays
-  ) {
-    if (freeze) Object.freeze(value);
+  // Special primitives (StorableEpochNsec, StorableEpochDays) are direct
+  // StorableDatum members -- always frozen, pass through as-is regardless
+  // of the `freeze` argument (they behave like true primitives).
+  if (value instanceof SpecialPrimitiveValue) {
     return value as StorableValueLayer;
   }
 
@@ -232,10 +230,8 @@ function isDeepFrozenStorableValue(value: unknown): boolean {
     return true;
   }
 
-  // Temporal types are simple frozen value wrappers.
-  if (
-    value instanceof StorableEpochNsec || value instanceof StorableEpochDays
-  ) {
+  // Special primitives are simple frozen value wrappers.
+  if (value instanceof SpecialPrimitiveValue) {
     return true;
   }
 
@@ -318,11 +314,9 @@ function toDeepRichStorableValueInternal(
     return result as StorableValue;
   }
 
-  // Temporal types are direct StorableDatum members -- pass through.
-  if (
-    value instanceof StorableEpochNsec || value instanceof StorableEpochDays
-  ) {
-    if (freeze) Object.freeze(value);
+  // Special primitives are direct StorableDatum members -- always frozen,
+  // pass through as-is regardless of the `freeze` argument.
+  if (value instanceof SpecialPrimitiveValue) {
     if (isOriginalRecord) {
       converted.set(original, value);
     }
@@ -464,11 +458,8 @@ export function isRichStorableValue(
       if (value === null) {
         return true;
       }
-      // Temporal types are direct StorableDatum members.
-      if (
-        value instanceof StorableEpochNsec ||
-        value instanceof StorableEpochDays
-      ) {
+      // Special primitives are direct StorableDatum members.
+      if (value instanceof SpecialPrimitiveValue) {
         return true;
       }
       // StorableInstance values (including StorableError, UnknownStorable,
