@@ -321,12 +321,8 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
     const subProjectOpen = Writable.of<boolean>(false);
     const subProjectDraft = Writable.of<string>("");
 
-    // Inline edit state
-    const editingItem = Writable.of<string>("");  // key like "inbox:0", "projects:3", etc.
-    const editDraft = Writable.of<string>("");
-    // Double-click detection state
-    const dblClickKey = Writable.of<string>("");
-    const dblClickTs = Writable.of<number>(0);
+    // Inline edit state — STRIPPED (D-106 caused reactive loop / "Too many iterations")
+    // TODO: re-implement with lighter reactive footprint
 
     // Add item state
     const addItemOpen = Writable.of<boolean>(false);
@@ -716,71 +712,11 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
       fetch("http://127.0.0.1:9876/sync", { method: "POST", mode: "cors" });
     });
 
-    // Inline edit actions
-    const startEdit = action(({ key, text }: { key: string; text: string }) => {
-      editingItem.set(key);
-      editDraft.set(text);
-    });
-
-    const commitEdit = action(() => {
-      const key = editingItem.get();
-      if (!key) return;
-      const newText = editDraft.get().trim();
-      if (!newText) { editingItem.set(""); editDraft.set(""); return; }
-      const [panel, idxStr] = [key.split(":")[0], key.split(":")[1]];
-      const idx = parseInt(idxStr);
-      const now = new Date().toISOString();
-      let oldText = "";
-      if (panel === "inbox") { const item = displayInbox[idx]; if (item) oldText = item.text; }
-      else if (panel === "projects") { const item = displayProjects[idx]; if (item) oldText = item.name; }
-      else if (panel === "people") { const item = displayPeople[idx]; if (item) oldText = item.name; }
-      else if (panel === "waiting") { const item = displayWaiting[idx]; if (item) oldText = item.entity; }
-      else if (panel === "actions") { const item = displayActions[idx]; if (item) oldText = item.text; }
-      if (oldText && newText !== oldText) {
-        userActions.set([...userActions.get(), { type: "edit", panel, text: oldText, newText, ts: now }]);
-      }
-      editingItem.set("");
-      editDraft.set("");
-      selectedItem.set("");
-    });
-
-    const cancelEdit = action(() => {
-      editingItem.set("");
-      editDraft.set("");
-    });
-
-    // Double-click to edit: first click selects, second click within 400ms opens inline edit
-    const dblClick = action(({ key, text }: { key: string; text: string }) => {
-      const now = Date.now();
-      if (dblClickKey.get() === key && now - dblClickTs.get() < 400) {
-        // Double-click detected — open inline edit
-        editingItem.set(key);
-        editDraft.set(text);
-        dblClickKey.set("");
-        dblClickTs.set(0);
-        selectedItem.set("");
-        itemDirectiveOpen.set(false);
-        itemDirectiveDraft.set("");
-        subProjectOpen.set(false);
-        subProjectDraft.set("");
-      } else {
-        // First click — normal select behavior
-        dblClickKey.set(key);
-        dblClickTs.set(now);
-        if (editingItem.get()) { editingItem.set(""); editDraft.set(""); }
-        const current = selectedItem.get();
-        selectedItem.set(current === key ? "" : key);
-        itemDirectiveOpen.set(false);
-        itemDirectiveDraft.set("");
-        subProjectOpen.set(false);
-        subProjectDraft.set("");
-      }
-    });
+    // D-106 inline edit actions STRIPPED — caused reactive loop / "Too many iterations"
 
     // Per-item actions
     const selectItem = action(({ key }: { key: string }) => {
       const current = selectedItem.get();
-      if (editingItem.get()) { editingItem.set(""); editDraft.set(""); }
       selectedItem.set(current === key ? "" : key);
       itemDirectiveOpen.set(false);
       itemDirectiveDraft.set("");
@@ -862,12 +798,12 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
     });
 
     const sendItemDirective = action(() => {
-      const key = selectedItem.get();
-      if (!key) return;
+      const selKey = selectedItem.get();
+      if (!selKey) return;
       const text = itemDirectiveDraft.get().trim();
       if (!text) return;
 
-      const [panel, idxStr] = [key.split(":")[0], key.split(":")[1]];
+      const [panel, idxStr] = [selKey.split(":")[0], selKey.split(":")[1]];
       const idx = parseInt(idxStr);
 
       // Build context prefix based on item from display computeds
@@ -908,11 +844,11 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
     });
 
     const sendSubProject = action(() => {
-      const key = selectedItem.get();
-      if (!key) return;
+      const selKey = selectedItem.get();
+      if (!selKey) return;
       const text = subProjectDraft.get().trim();
       if (!text) return;
-      const idx = parseInt(key.split(":")[1]);
+      const idx = parseInt(selKey.split(":")[1]);
       const project = displayProjects[idx];
       if (!project) return;
       const now = new Date().toISOString();
@@ -1550,7 +1486,7 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                         onClick={() =>
                           isComplete
                             ? (item.done ? unmarkItemDone.send({ key: "inbox:" + idx }) : markItemDone.send({ key: "inbox:" + idx }))
-                            : dblClick.send({ key: "inbox:" + idx, text: item.text })
+                            : selectItem.send({ key: "inbox:" + idx })
                         }
                       >
                         <span
@@ -1586,53 +1522,17 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                           </a>
                         ) : null}
                       </div>
-                      {isComplete ? null : ifElse(
-                        computed(() => editingItem.get() === "inbox:" + idx),
-                        <div style={{ display: "flex", gap: "8px", padding: "6px 0 8px", alignItems: "center" }}>
-                          <ct-textarea $value={editDraft} rows={1} style={{ flex: "1", borderRadius: "10px", fontSize: "14px" }} />
-                          <div style={{ ...actionBtnDone, background: color.blue, color: "#fff" }} onClick={commitEdit}>Save</div>
-                          <div style={actionBtnDelete} onClick={cancelEdit}>Cancel</div>
-                        </div>,
-                        null,
-                      )}
-                      {isComplete ? null : ifElse(
-                        computed(
-                          () => selectedItem.get() === "inbox:" + idx && editingItem.get() !== "inbox:" + idx,
-                        ),
-                        <div>
-                          <div
-                            style={{
-                              display: "flex",
-                              gap: "8px",
-                              padding: "6px 0 8px",
-                            }}
-                          >
-                            <div
-                              style={actionBtnDone}
-                              onClick={() =>
-                                markItemDone.send({ key: "inbox:" + idx })
-                              }
-                            >
-                              ✓ Done
-                            </div>
-                            <div
-                              style={actionBtnDelete}
-                              onClick={() =>
-                                deleteItem.send({ key: "inbox:" + idx })
-                              }
-                            >
-                              ✕ Delete
-                            </div>
-                            <div
-                              style={{ ...actionBtnDirective, background: "rgba(0, 122, 255, 0.12)", color: color.blue }}
-                              onClick={() => startEdit.send({ key: "inbox:" + idx, text: item.text })}
-                            >
-                              ✎ Edit
-                            </div>
+                      {computed(() => {
+                        if (isComplete) return null;
+                        const ik = "inbox:" + idx;
+                        if (selectedItem.get() === ik) return (
+                          <div style={{ display: "flex", gap: "8px", padding: "6px 0 8px" }}>
+                            <div style={actionBtnDone} onClick={() => markItemDone.send({ key: ik })}>✓ Done</div>
+                            <div style={actionBtnDelete} onClick={() => deleteItem.send({ key: ik })}>✕ Delete</div>
                           </div>
-                        </div>,
-                        null,
-                      )}
+                        );
+                        return null;
+                      })}
                     </div>
                   );
                   });
@@ -1936,7 +1836,7 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                           {/* Item content — click to drill in if has children, else select to show buttons */}
                           <div
                             style={{ display: "flex", alignItems: "center", gap: "10px", flex: "1", cursor: "pointer" }}
-                            onClick={() => item.hasChildren ? drillIntoProject.send({ id: item.id, name: p.name }) : dblClick.send({ key: "projects:" + idx, text: p.name })}
+                            onClick={() => item.hasChildren ? drillIntoProject.send({ id: item.id, name: p.name }) : selectItem.send({ key: "projects:" + idx })}
                           >
                             <span style={{ fontSize: "12px", color: color.tertiaryLabel, fontWeight: "500", minWidth: "32px", flexShrink: "0" }}>
                               {p.id}
@@ -1976,50 +1876,16 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                             <span style={{ fontSize: "14px", color: color.tertiaryLabel, paddingLeft: "8px", flexShrink: "0", cursor: "pointer" }} onClick={() => drillIntoProject.send({ id: item.id, name: p.name })}>{">"}</span>
                           ) : null}
                         </div>
-                        {ifElse(
-                          computed(() => editingItem.get() === "projects:" + idx),
-                          <div style={{ display: "flex", gap: "8px", padding: "6px 0 8px", alignItems: "center" }}>
-                            <ct-textarea $value={editDraft} rows={1} style={{ flex: "1", borderRadius: "10px", fontSize: "14px" }} />
-                            <div style={{ ...actionBtnDone, background: color.blue, color: "#fff" }} onClick={commitEdit}>Save</div>
-                            <div style={actionBtnDelete} onClick={cancelEdit}>Cancel</div>
-                          </div>,
-                          null,
-                        )}
-                        {ifElse(
-                          computed(
-                            () => selectedItem.get() === "projects:" + idx && editingItem.get() !== "projects:" + idx,
-                          ),
-                          <div>
-                            <div
-                              style={{
-                                display: "flex",
-                                gap: "8px",
-                                padding: "6px 0 8px",
-                                flexWrap: "wrap" as const,
-                              }}
-                            >
-                              <div
-                                style={actionBtnDone}
-                                onClick={() => markItemDone.send({ key: "projects:" + idx })}
-                              >
-                                ✓ Done
-                              </div>
-                              <div
-                                style={actionBtnDelete}
-                                onClick={() => deleteItem.send({ key: "projects:" + idx })}
-                              >
-                                ✕ Delete
-                              </div>
-                              <div
-                                style={{ ...actionBtnDirective, background: "rgba(0, 122, 255, 0.12)", color: color.blue }}
-                                onClick={() => startEdit.send({ key: "projects:" + idx, text: p.name })}
-                              >
-                                ✎ Edit
-                              </div>
+                        {computed(() => {
+                          const pk = "projects:" + idx;
+                          if (selectedItem.get() === pk) return (
+                            <div style={{ display: "flex", gap: "8px", padding: "6px 0 8px", flexWrap: "wrap" as const }}>
+                              <div style={actionBtnDone} onClick={() => markItemDone.send({ key: pk })}>✓ Done</div>
+                              <div style={actionBtnDelete} onClick={() => deleteItem.send({ key: pk })}>✕ Delete</div>
                             </div>
-                          </div>,
-                          null,
-                        )}
+                          );
+                          return null;
+                        })}
                       </div>
                     );
                   });
@@ -2158,7 +2024,7 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                             {/* Item content — click to drill in (if has linked items) or select */}
                             <div
                               style={{ display: "flex", alignItems: "center", gap: "10px", flex: "1", cursor: "pointer" }}
-                              onClick={() => linkedCount > 0 ? drillIntoPerson.send({ id: p.id, name: p.name }) : dblClick.send({ key: "people:" + idx, text: p.name })}
+                              onClick={() => linkedCount > 0 ? drillIntoPerson.send({ id: p.id, name: p.name }) : selectItem.send({ key: "people:" + idx })}
                             >
                               <span style={{ fontWeight: "600", flex: "1" }}>{p.name}</span>
                               <span style={{ fontSize: "12px", color: color.secondaryLabel, fontWeight: "400" }}>{p.role}</span>
@@ -2184,35 +2050,15 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                               </span>
                             ) : null}
                           </div>
-                          {ifElse(
-                            computed(() => editingItem.get() === "people:" + idx),
-                            <div style={{ display: "flex", gap: "8px", padding: "6px 0 8px", alignItems: "center" }}>
-                              <ct-textarea $value={editDraft} rows={1} style={{ flex: "1", borderRadius: "10px", fontSize: "14px" }} />
-                              <div style={{ ...actionBtnDone, background: color.blue, color: "#fff" }} onClick={commitEdit}>Save</div>
-                              <div style={actionBtnDelete} onClick={cancelEdit}>Cancel</div>
-                            </div>,
-                            null,
-                          )}
-                          {ifElse(
-                            computed(() => selectedItem.get() === "people:" + idx && editingItem.get() !== "people:" + idx),
-                            <div>
+                          {computed(() => {
+                            const pk = "people:" + idx;
+                            if (selectedItem.get() === pk) return (
                               <div style={{ display: "flex", gap: "8px", padding: "6px 0 8px" }}>
-                                <div
-                                  style={{ ...actionBtnDirective, background: "rgba(0, 122, 255, 0.12)", color: color.blue }}
-                                  onClick={() => startEdit.send({ key: "people:" + idx, text: p.name })}
-                                >
-                                  ✎ Edit
-                                </div>
-                                <div
-                                  style={actionBtnDelete}
-                                  onClick={() => deleteItem.send({ key: "people:" + idx })}
-                                >
-                                  ✕ Delete
-                                </div>
+                                <div style={actionBtnDelete} onClick={() => deleteItem.send({ key: pk })}>✕ Delete</div>
                               </div>
-                            </div>,
-                            null,
-                          )}
+                            );
+                            return null;
+                          })}
                         </div>
                       );
                     });
@@ -2515,154 +2361,57 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                             ({ctxActions.length})
                           </span>
                         </div>
-                        {ifElse(
-                          computed(() => expandedContext.get() === ctx),
+                        {computed(() => {
+                          if (expandedContext.get() !== ctx) return null;
+                          return (
                           <div style={{ paddingLeft: "16px" }}>
-                            {ctxActions.map(
-                              ({
-                                a,
-                                origIdx,
-                              }: {
-                                a: NextAction;
-                                origIdx: number;
-                              }) => (
+                            {ctxActions.map(({ a, origIdx }: { a: NextAction; origIdx: number }) => {
+                              const ak = "actions:" + origIdx;
+                              return (
                                 <div>
                                   <div
                                     style={computed(() =>
-                                      selectedItem.get() ===
-                                      "actions:" + origIdx
-                                        ? {
-                                            ...itemRowStyle,
-                                            display: "flex",
-                                            alignItems: "center",
-                                            gap: "8px",
-                                            background:
-                                              "rgba(0, 122, 255, 0.06)",
-                                            borderRadius: "8px",
-                                            padding: "8px",
-                                          }
-                                        : {
-                                            ...itemRowStyle,
-                                            display: "flex",
-                                            alignItems: "center",
-                                            gap: "8px",
-                                          },
+                                      selectedItem.get() === ak
+                                        ? { ...itemRowStyle, display: "flex", alignItems: "center", gap: "8px", background: "rgba(0, 122, 255, 0.06)", borderRadius: "8px", padding: "8px" }
+                                        : { ...itemRowStyle, display: "flex", alignItems: "center", gap: "8px" },
                                     )}
                                   >
                                     <div
-                                      style={{
-                                        width: "18px",
-                                        height: "18px",
-                                        borderRadius: "50%",
-                                        border: `1.5px solid ${color.tertiaryLabel}`,
-                                        flexShrink: "0",
-                                        cursor: "pointer",
-                                      }}
-                                      onClick={() =>
-                                        markItemDone.send({
-                                          key: "actions:" + origIdx,
-                                        })
-                                      }
+                                      style={{ width: "18px", height: "18px", borderRadius: "50%", border: `1.5px solid ${color.tertiaryLabel}`, flexShrink: "0", cursor: "pointer" }}
+                                      onClick={() => markItemDone.send({ key: ak })}
                                     />
                                     <div
                                       style={{ flex: "1", display: "flex", alignItems: "center", gap: "4px", cursor: "pointer", minWidth: "0" }}
-                                      onClick={() =>
-                                        dblClick.send({
-                                          key: "actions:" + origIdx,
-                                          text: a.text,
-                                        })
-                                      }
+                                      onClick={() => selectItem.send({ key: ak })}
                                     >
                                     {a.section ? (
-                                      <span
-                                        style={{
-                                          fontSize: "11px",
-                                          color: color.tertiaryLabel,
-                                          marginRight: "6px",
-                                          flexShrink: "0",
-                                        }}
-                                      >
+                                      <span style={{ fontSize: "11px", color: color.tertiaryLabel, marginRight: "6px", flexShrink: "0" }}>
                                         [{a.section}]
                                       </span>
                                     ) : null}
                                     <span style={{ flex: "1" }}>{a.text}</span>
                                     {a.projectId ? (
-                                      <span
-                                        style={{
-                                          padding: "1px 6px",
-                                          borderRadius: "100px",
-                                          fontSize: "10px",
-                                          fontWeight: "500",
-                                          background: "rgba(0, 122, 255, 0.08)",
-                                          color: color.blue,
-                                          marginLeft: "6px",
-                                          flexShrink: "0",
-                                        }}
-                                      >
+                                      <span style={{ padding: "1px 6px", borderRadius: "100px", fontSize: "10px", fontWeight: "500", background: "rgba(0, 122, 255, 0.08)", color: color.blue, marginLeft: "6px", flexShrink: "0" }}>
                                         {a.projectId}
                                       </span>
                                     ) : null}
                                     </div>
                                   </div>
-                                  {ifElse(
-                                    computed(() => editingItem.get() === "actions:" + origIdx),
-                                    <div style={{ display: "flex", gap: "8px", padding: "6px 0 8px", alignItems: "center" }}>
-                                      <ct-textarea $value={editDraft} rows={1} style={{ flex: "1", borderRadius: "10px", fontSize: "14px" }} />
-                                      <div style={{ ...actionBtnDone, background: color.blue, color: "#fff" }} onClick={commitEdit}>Save</div>
-                                      <div style={actionBtnDelete} onClick={cancelEdit}>Cancel</div>
-                                    </div>,
-                                    null,
-                                  )}
-                                  {ifElse(
-                                    computed(
-                                      () =>
-                                        selectedItem.get() ===
-                                        "actions:" + origIdx && editingItem.get() !== "actions:" + origIdx,
-                                    ),
-                                    <div>
-                                      <div
-                                        style={{
-                                          display: "flex",
-                                          gap: "8px",
-                                          padding: "6px 0 8px",
-                                        }}
-                                      >
-                                        <div
-                                          style={actionBtnDone}
-                                          onClick={() =>
-                                            markItemDone.send({
-                                              key: "actions:" + origIdx,
-                                            })
-                                          }
-                                        >
-                                          ✓ Done
-                                        </div>
-                                        <div
-                                          style={actionBtnDelete}
-                                          onClick={() =>
-                                            deleteItem.send({
-                                              key: "actions:" + origIdx,
-                                            })
-                                          }
-                                        >
-                                          ✕ Delete
-                                        </div>
-                                        <div
-                                          style={{ ...actionBtnDirective, background: "rgba(0, 122, 255, 0.12)", color: color.blue }}
-                                          onClick={() => startEdit.send({ key: "actions:" + origIdx, text: a.text })}
-                                        >
-                                          ✎ Edit
-                                        </div>
+                                  {computed(() => {
+                                    if (selectedItem.get() === ak) return (
+                                      <div style={{ display: "flex", gap: "8px", padding: "6px 0 8px" }}>
+                                        <div style={actionBtnDone} onClick={() => markItemDone.send({ key: ak })}>✓ Done</div>
+                                        <div style={actionBtnDelete} onClick={() => deleteItem.send({ key: ak })}>✕ Delete</div>
                                       </div>
-                                    </div>,
-                                    null,
-                                  )}
+                                    );
+                                    return null;
+                                  })}
                                 </div>
-                              ),
-                            )}
-                          </div>,
-                          null,
-                        )}
+                              );
+                            })}
+                          </div>
+                          );
+                        })}
                       </div>
                     );
                   });
@@ -2864,230 +2613,60 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                     {item.question}
                   </div>
 
-                  {ifElse(
-                    computed(
-                      () =>
-                        item.context !== undefined && item.context !== "",
-                    ),
-                    <div
-                      style={{
-                        fontSize: "13px",
-                        lineHeight: "1.45",
-                        color: color.secondaryLabel,
-                        marginBottom: "12px",
-                      }}
-                    >
+                  {item.context !== undefined && item.context !== "" ? (
+                    <div style={{ fontSize: "13px", lineHeight: "1.45", color: color.secondaryLabel, marginBottom: "12px" }}>
                       {item.context}
-                    </div>,
-                    null,
-                  )}
+                    </div>
+                  ) : null}
 
                   {/* Pending actions */}
-                  {ifElse(
-                    computed(() => item.status === "pending"),
+                  {item.status === "pending" ? (
                     <div>
-                      {ifElse(
-                        computed(
-                          () =>
-                            item.options !== undefined &&
-                            item.options.length > 0,
-                        ),
-                        <div
-                          style={{
-                            display: "flex",
-                            flexWrap: "wrap" as const,
-                            gap: "6px",
-                            marginBottom: "10px",
-                          }}
-                        >
-                          {computed(() =>
-                            item.options.map((opt: string) => (
-                              <div
-                                style={{
-                                  padding: "6px 14px",
-                                  borderRadius: "100px",
-                                  fontSize: "13px",
-                                  fontWeight: "500",
-                                  background: `rgba(0, 122, 255, 0.1)`,
-                                  color: color.blue,
-                                  cursor: "pointer",
-                                }}
-                                onClick={() =>
-                                  answerQuestion.send({
-                                    id: item.id,
-                                    answer: opt,
-                                    author: "human-lead",
-                                  })
-                                }
-                              >
-                                {opt}
-                              </div>
-                            )),
-                          )}
-                        </div>,
-                        null,
-                      )}
-
+                      {item.options !== undefined && item.options.length > 0 ? (
+                        <div style={{ display: "flex", flexWrap: "wrap" as const, gap: "6px", marginBottom: "10px" }}>
+                          {item.options.map((opt: string) => (
+                            <div
+                              style={{ padding: "6px 14px", borderRadius: "100px", fontSize: "13px", fontWeight: "500", background: "rgba(0, 122, 255, 0.1)", color: color.blue, cursor: "pointer" }}
+                              onClick={() => answerQuestion.send({ id: item.id, answer: opt, author: "human-lead" })}
+                            >
+                              {opt}
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
                       <div style={{ display: "flex", gap: "8px" }}>
-                        <div
-                          style={{
-                            padding: "7px 16px",
-                            borderRadius: "100px",
-                            fontSize: "13px",
-                            fontWeight: "600",
-                            background: color.blue,
-                            color: "#fff",
-                            cursor: "pointer",
-                          }}
-                          onClick={() =>
-                            selectQuestion.send({ id: item.id })
-                          }
-                        >
-                          Reply
-                        </div>
-                        <div
-                          style={{
-                            padding: "7px 16px",
-                            borderRadius: "100px",
-                            fontSize: "13px",
-                            fontWeight: "500",
-                            color: color.secondaryLabel,
-                            cursor: "pointer",
-                          }}
-                          onClick={() =>
-                            dismissQuestion.send({ id: item.id })
-                          }
-                        >
-                          Dismiss
-                        </div>
+                        <div style={{ padding: "7px 16px", borderRadius: "100px", fontSize: "13px", fontWeight: "600", background: color.blue, color: "#fff", cursor: "pointer" }} onClick={() => selectQuestion.send({ id: item.id })}>Reply</div>
+                        <div style={{ padding: "7px 16px", borderRadius: "100px", fontSize: "13px", fontWeight: "500", color: color.secondaryLabel, cursor: "pointer" }} onClick={() => dismissQuestion.send({ id: item.id })}>Dismiss</div>
                       </div>
-                    </div>,
-                    null,
-                  )}
+                    </div>
+                  ) : null}
 
                   {/* Answered state */}
-                  {ifElse(
-                    computed(() => item.status === "answered"),
+                  {item.status === "answered" ? (
                     <div>
-                      <div
-                        style={{
-                          padding: "10px 12px",
-                          background: color.fillTertiary,
-                          borderRadius: "10px",
-                          marginBottom: "6px",
-                        }}
-                      >
-                        <div
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "center",
-                            marginBottom: "4px",
-                          }}
-                        >
-                          <span
-                            style={{
-                              fontSize: "12px",
-                              fontWeight: "600",
-                              color: color.blue,
-                            }}
-                          >
-                            {item.answeredBy}
-                          </span>
-                          <span
-                            style={{
-                              fontSize: "11px",
-                              color: color.tertiaryLabel,
-                            }}
-                          >
-                            {item.answeredAt}
-                          </span>
+                      <div style={{ padding: "10px 12px", background: color.fillTertiary, borderRadius: "10px", marginBottom: "6px" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                          <span style={{ fontSize: "12px", fontWeight: "600", color: color.blue }}>{item.answeredBy}</span>
+                          <span style={{ fontSize: "11px", color: color.tertiaryLabel }}>{item.answeredAt}</span>
                         </div>
-                        <div
-                          style={{
-                            fontSize: "14px",
-                            lineHeight: "1.45",
-                            color: color.label,
-                          }}
-                        >
-                          {item.answer}
-                        </div>
+                        <div style={{ fontSize: "14px", lineHeight: "1.45", color: color.label }}>{item.answer}</div>
                       </div>
 
-                      {ifElse(
-                        computed(
-                          () =>
-                            item.replies !== undefined &&
-                            item.replies.length > 0,
-                        ),
-                        <div
-                          style={{
-                            borderLeft: `2px solid ${color.separator}`,
-                            marginLeft: "12px",
-                            paddingLeft: "12px",
-                          }}
-                        >
-                          {computed(() =>
-                            item.replies.map((reply: Reply) => (
-                              <div
-                                style={{
-                                  padding: "8px 10px",
-                                  background: color.fillTertiary,
-                                  borderRadius: "8px",
-                                  marginBottom: "4px",
-                                }}
-                              >
-                                <div
-                                  style={{
-                                    display: "flex",
-                                    justifyContent: "space-between",
-                                    alignItems: "center",
-                                    marginBottom: "2px",
-                                  }}
-                                >
-                                  <span
-                                    style={{
-                                      fontSize: "12px",
-                                      fontWeight: "600",
-                                      color: reply.author === "human-lead"
-                                        ? color.green
-                                        : color.blue,
-                                    }}
-                                  >
-                                    {reply.author}
-                                  </span>
-                                  <span
-                                    style={{
-                                      fontSize: "10px",
-                                      color: color.tertiaryLabel,
-                                    }}
-                                  >
-                                    {reply.at}
-                                  </span>
-                                </div>
-                                <div
-                                  style={{
-                                    fontSize: "13px",
-                                    lineHeight: "1.4",
-                                    color: color.label,
-                                  }}
-                                >
-                                  {reply.text}
-                                </div>
+                      {item.replies !== undefined && item.replies.length > 0 ? (
+                        <div style={{ borderLeft: `2px solid ${color.separator}`, marginLeft: "12px", paddingLeft: "12px" }}>
+                          {item.replies.map((reply: Reply) => (
+                            <div style={{ padding: "8px 10px", background: color.fillTertiary, borderRadius: "8px", marginBottom: "4px" }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "2px" }}>
+                                <span style={{ fontSize: "12px", fontWeight: "600", color: reply.author === "human-lead" ? color.green : color.blue }}>{reply.author}</span>
+                                <span style={{ fontSize: "10px", color: color.tertiaryLabel }}>{reply.at}</span>
                               </div>
-                            )),
-                          )}
-                        </div>,
-                        null,
-                      )}
+                              <div style={{ fontSize: "13px", lineHeight: "1.4", color: color.label }}>{reply.text}</div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
 
-                      <div
-                        style={{
-                          display: "flex",
-                          gap: "8px",
-                          marginTop: "8px",
-                        }}
-                      >
+                      <div style={{ display: "flex", gap: "8px", marginTop: "8px" }}>
                         <div
                           style={{
                             padding: "5px 14px",
@@ -3096,7 +2675,7 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                             fontWeight: "500",
                             color: color.blue,
                             cursor: "pointer",
-                            background: `rgba(0, 122, 255, 0.08)`,
+                            background: "rgba(0, 122, 255, 0.08)",
                           }}
                           onClick={() =>
                             reopenQuestion.send({ id: item.id })
@@ -3105,9 +2684,8 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                           Add Reply
                         </div>
                       </div>
-                    </div>,
-                    null,
-                  )}
+                    </div>
+                  ) : null}
                 </div>
               ));
             })}
