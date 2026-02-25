@@ -19,7 +19,14 @@ import {
 import { TreeOperations } from "./tree-operations.ts";
 import { getNodeByPath } from "./node-path.ts";
 
-describe("Keyboard Commands", () => {
+// Cell runtime starts internal timers (sync polling, etc.) that outlive individual
+// tests. Disable Deno's leak detection for this suite — same pattern used in
+// packages/runner/integration/*.test.ts.
+describe({
+  name: "Keyboard Commands",
+  sanitizeOps: false,
+  sanitizeResources: false,
+}, () => {
   let outliner: CTOutliner;
 
   async function setupOutliner() {

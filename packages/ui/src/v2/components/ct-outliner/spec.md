@@ -218,7 +218,7 @@ change propagation and link resolution:
 
 - All nodes must have `[ID]` properties for Cell array operations
 - Uses `.getAsQueryResult()` for reading data to resolve links
-- Uses `mutateCell()` for safe mutations within transactions
+- Uses `mutateCellHandle()` for safe mutations within transactions
 - Path-based operations avoid node reference issues
 
 ### Performance Considerations
