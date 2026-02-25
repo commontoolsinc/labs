@@ -65,51 +65,55 @@ export function toRichStorableValue(
   if (typeof value === "object" && value !== null) {
     const nativeTag = tagFromNativeValue(value);
 
-    if (nativeTag === NATIVE_TAGS.Error) {
-      const wrapped = new StorableError(value as Error);
-      if (freeze) Object.freeze(wrapped);
-      return wrapped;
-    }
+    switch (nativeTag) {
+      case NATIVE_TAGS.Error: {
+        const wrapped = new StorableError(value as Error);
+        if (freeze) Object.freeze(wrapped);
+        return wrapped;
+      }
 
-    if (nativeTag === NATIVE_TAGS.Date) {
-      // Date instances are converted to StorableEpochNsec (nanoseconds from
-      // epoch). Extra enumerable properties cause rejection ("death before
-      // confusion").
-      rejectExtraProperties(value, "Date");
-      const nsec = BigInt((value as Date).getTime()) * 1_000_000n;
-      const wrapped = new StorableEpochNsec(nsec);
-      if (freeze) Object.freeze(wrapped);
-      return wrapped;
-    }
+      case NATIVE_TAGS.Date: {
+        // Date instances are converted to StorableEpochNsec (nanoseconds from
+        // epoch). Extra enumerable properties cause rejection ("death before
+        // confusion").
+        rejectExtraProperties(value, "Date");
+        const nsec = BigInt((value as Date).getTime()) * 1_000_000n;
+        const wrapped = new StorableEpochNsec(nsec);
+        if (freeze) Object.freeze(wrapped);
+        return wrapped;
+      }
 
-    if (nativeTag === NATIVE_TAGS.Array) {
-      // Arrays pass through without converting `undefined` to `null` or
-      // densifying sparse arrays. When freezing, return a frozen shallow
-      // copy rather than freezing the caller's array in place.
-      const arr = value as unknown[];
-      if (freeze) {
-        if (Object.isFrozen(arr)) return arr;
-        const copy = new Array(arr.length);
-        for (let i = 0; i < arr.length; i++) {
-          if (i in arr) copy[i] = arr[i];
+      case NATIVE_TAGS.Array: {
+        // Arrays pass through without converting `undefined` to `null` or
+        // densifying sparse arrays. When freezing, return a frozen shallow
+        // copy rather than freezing the caller's array in place.
+        const arr = value as unknown[];
+        if (freeze) {
+          if (Object.isFrozen(arr)) return arr;
+          const copy = new Array(arr.length);
+          for (let i = 0; i < arr.length; i++) {
+            if (i in arr) copy[i] = arr[i];
+          }
+          return Object.freeze(copy);
         }
-        return Object.freeze(copy);
+        return arr;
       }
-      return arr;
-    }
 
-    if (nativeTag === NATIVE_TAGS.Object) {
-      // Plain objects pass through. When freezing, return a frozen shallow
-      // copy rather than freezing the caller's object in place.
-      if (freeze) {
-        if (Object.isFrozen(value)) return value;
-        return Object.freeze({ ...value });
+      case NATIVE_TAGS.Object: {
+        // Plain objects pass through. When freezing, return a frozen shallow
+        // copy rather than freezing the caller's object in place.
+        if (freeze) {
+          if (Object.isFrozen(value)) return value;
+          return Object.freeze({ ...value });
+        }
+        return value;
       }
-      return value;
-    }
 
-    // Other object types (Map, Set, Uint8Array, class instances, etc.)
-    // fall through to toRichStorableValueBase for toJSON/rejection handling.
+      default:
+        // Other object types (Map, Set, Uint8Array, class instances, etc.)
+        // fall through to toRichStorableValueBase for toJSON/rejection handling.
+        break;
+    }
   }
 
   // `undefined` passes through as-is.
