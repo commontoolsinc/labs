@@ -4199,6 +4199,183 @@ describe("Cell success callbacks", () => {
       expect(resolvedLink.path.length).toBe(0);
       expect(resolved.equals(finalPiece)).toBe(true);
     });
+
+    describe("array elements", () => {
+      it("keeps the same link for non-link primitive array elements", () => {
+        const arrayCell = runtime.getCell<number[]>(
+          space,
+          "resolve-array-non-link",
+          { type: "array", items: { type: "number" } },
+          tx,
+        );
+        arrayCell.set([10, 20, 30]);
+
+        const itemCell = arrayCell.key(1);
+        const itemLink = itemCell.getAsNormalizedFullLink();
+        const resolved = itemCell.resolveAsCell();
+
+        expect(resolved.getAsNormalizedFullLink()).toEqual(itemLink);
+        expect(resolved.get()).toBe(20);
+      });
+
+      it("resolves non-link object array elements to data URI cells", () => {
+        const arrayCell = runtime.getCell<Array<{ name: string }>>(
+          space,
+          "resolve-array-non-link-object",
+          {
+            type: "array",
+            items: {
+              type: "object",
+              properties: { name: { type: "string" } },
+            },
+          },
+          tx,
+        );
+        arrayCell.setRaw([{ name: "first" }, { name: "second" }]);
+
+        const itemCell = arrayCell.key(0);
+        const itemLink = itemCell.getAsNormalizedFullLink();
+        expect(itemLink.path).toEqual(["0"]);
+
+        const resolved = itemCell.resolveAsCell();
+        const resolvedLink = resolved.getAsNormalizedFullLink();
+
+        expect(resolvedLink.id.startsWith("data:application/json,")).toBe(true);
+        expect(resolvedLink.path).toEqual([]);
+        expect(resolved.get()).toEqualIgnoringSymbols({ name: "first" });
+      });
+
+      it("resolves array element links to the target cell", () => {
+        const target = runtime.getCell<{ value: number }>(
+          space,
+          "resolve-array-target",
+          { type: "object", properties: { value: { type: "number" } } },
+          tx,
+        );
+        target.set({ value: 42 });
+
+        const arrayCell = runtime.getCell<unknown[]>(
+          space,
+          "resolve-array-link",
+          { type: "array", items: {} },
+          tx,
+        );
+        arrayCell.set([target]);
+
+        const itemCell = arrayCell.key(0);
+        expect(itemCell.getAsNormalizedFullLink().path).toEqual(["0"]);
+
+        const resolved = itemCell.resolveAsCell();
+        const resolvedLink = resolved.getAsNormalizedFullLink();
+
+        expect(resolvedLink.path.length).toBe(0);
+        expect(resolved.equals(target)).toBe(true);
+      });
+
+      it("resolves array element chains of links to the final target", () => {
+        const finalTarget = runtime.getCell<{ label: string }>(
+          space,
+          "resolve-array-chain-final",
+          { type: "object", properties: { label: { type: "string" } } },
+          tx,
+        );
+        finalTarget.set({ label: "final" });
+
+        const middle = runtime.getCell<{ result: unknown }>(
+          space,
+          "resolve-array-chain-middle",
+          { type: "object", properties: { result: {} } },
+          tx,
+        );
+        middle.set({ result: finalTarget });
+
+        const arrayCell = runtime.getCell<unknown[]>(
+          space,
+          "resolve-array-chain-start",
+          { type: "array", items: {} },
+          tx,
+        );
+        arrayCell.set([middle.key("result")]);
+
+        const resolved = arrayCell.key(0).resolveAsCell();
+        const resolvedLink = resolved.getAsNormalizedFullLink();
+
+        expect(resolvedLink.path.length).toBe(0);
+        expect(resolved.equals(finalTarget)).toBe(true);
+      });
+
+      it("resolves asCell array item to data URI when item is inline data", () => {
+        const schema = {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { foo: { type: "number" } },
+            asCell: true,
+          },
+        } as const satisfies JSONSchema;
+
+        const arrayCell = runtime.getCell<{ foo: number }[]>(
+          space,
+          "resolve-array-ascell-inline",
+          schema,
+          tx,
+        );
+        arrayCell.setRaw([{ foo: 1 }, { foo: 2 }]);
+
+        const result = arrayCell.get();
+        expect(Array.isArray(result)).toBe(true);
+
+        const first = result[0] as unknown as Writable<{ foo: number }>;
+        expect(isCell(first)).toBe(true);
+        expect(first.getAsNormalizedFullLink().path).toEqual(["0"]);
+
+        const resolved = first.resolveAsCell();
+        expect(
+          resolved.getAsNormalizedFullLink().id.startsWith(
+            "data:application/json,",
+          ),
+        ).toBe(true);
+        expect(resolved.getAsNormalizedFullLink().path).toEqual([]);
+        expect(resolved.get()).toEqualIgnoringSymbols({ foo: 1 });
+      });
+
+      it("resolves asCell array item when item value is a link", () => {
+        const schema = {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { foo: { type: "number" } },
+            asCell: true,
+          },
+        } as const satisfies JSONSchema;
+
+        const target = runtime.getCell<{ foo: number }>(
+          space,
+          "resolve-array-ascell-link-target",
+          { type: "object", properties: { foo: { type: "number" } } },
+          tx,
+        );
+        target.set({ foo: 99 });
+
+        const arrayCell = runtime.getCell<{ foo: number }[]>(
+          space,
+          "resolve-array-ascell-link",
+          schema,
+          tx,
+        );
+        arrayCell.setRaw([target.getAsLink()]);
+
+        const result = arrayCell.get();
+        const first = result[0] as unknown as Writable<{ foo: number }>;
+        expect(isCell(first)).toBe(true);
+
+        const resolved = first.resolveAsCell();
+        const resolvedLink = resolved.getAsNormalizedFullLink();
+
+        expect(resolvedLink.path.length).toBe(0);
+        expect(resolved.equals(target)).toBe(true);
+      });
+    });
   });
 
   describe("cell.equals() instance method", () => {
