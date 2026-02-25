@@ -2031,8 +2031,10 @@ There are two directions:
  *
  * **Freeze semantics (shallow):** By default, the returned value is frozen
  * at the top level via `Object.freeze()`. Nested values are NOT recursively
- * frozen. If the input is already a frozen `StorableValue`, returns the same
- * object. Pass `freeze: false` to skip freezing (see below).
+ * frozen. The caller's input is never mutated — if the top-level value is
+ * an unfrozen array or object, a shallow copy is made before freezing. If
+ * the input is already a frozen `StorableValue`, returns the same object.
+ * Pass `freeze: false` to skip freezing (see below).
  */
 export function toStorableValue(
   value: StorableValue | StorableNativeObject,
@@ -2049,8 +2051,10 @@ export function toStorableValue(
  *   together in one recursive descent — there are no separate passes. Each
  *   node is checked, wrapped if needed, and frozen before the function
  *   returns from that level.
- * - If the input is already a deeply-frozen `StorableValue`, returns the
- *   same object (no copying).
+ * - **No caller mutation:** The caller's input objects are never frozen or
+ *   modified in place. When freezing is needed, shallow copies are made
+ *   first. If the input is already a deeply-frozen `StorableValue`, returns
+ *   the same object (no copying needed).
  * - Detects circular references and throws.
  *
  * Pass `freeze: false` to perform wrapping and validation without freezing
@@ -2088,6 +2092,15 @@ conversion are frozen **by default**:
   nesting, performed in the **same recursive pass** as validation and wrapping.
   There are no separate passes — each node is checked, wrapped, and frozen
   before the recursion returns from that level.
+
+**Caller arguments are never mutated.** The conversion functions must not call
+`Object.freeze()` on the caller's input objects. When `freeze` is `true` and
+the input is an unfrozen array or plain object, the function creates a shallow
+copy and freezes the copy. This ensures that callers can safely pass mutable
+data structures without side effects — the caller's objects remain mutable
+after the call returns. (Wrapper objects like `StorableError` are freshly
+constructed by the conversion function, so freezing them is not a mutation of
+caller state.)
 
 **Always-frozen types bypass the `freeze` option.** JS primitives (`null`,
 `boolean`, `number`, `string`, `undefined`, `bigint`) are inherently immutable
