@@ -186,7 +186,21 @@ function toRichStorableValueBase(value: unknown): StorableValueLayer {
       }
     }
 
-    case "function":
+    case "function": {
+      if (hasToJSONMethod(value)) {
+        const converted = value.toJSON();
+        if (!isRichStorableValue(converted)) {
+          throw new Error(
+            `\`toJSON()\` on ${typeof value} returned something other than a storable value`,
+          );
+        }
+        return converted;
+      }
+      throw new Error(
+        "Cannot store function per se (needs to have a `toJSON()` method)",
+      );
+    }
+
     case "object": {
       if (value === null) {
         return null;
@@ -200,10 +214,6 @@ function toRichStorableValueBase(value: unknown): StorableValueLayer {
           );
         }
         return converted;
-      } else if (typeof value === "function") {
-        throw new Error(
-          "Cannot store function per se (needs to have a `toJSON()` method)",
-        );
       } else if (isInstance(value)) {
         // Error and StorableInstance are handled above in toRichStorableValue;
         // any other instance without toJSON is not storable.

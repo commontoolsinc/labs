@@ -20,14 +20,22 @@ import { FrozenMap, FrozenSet } from "./frozen-builtins.ts";
  * the "wild-west" instances that get converted into `StorableNativeWrapper`
  * subclasses or `StorableInstance` types by the conversion layer.
  *
- * Arrays, plain objects, and objects with `toJSON()` are recognized by
+ * Arrays, plain objects, objects with `toJSON()`, and system-defined special
+ * primitives (EpochNsec, EpochDays, ContentId) are recognized by
  * `tagFromNativeValue()` but are NOT convertible native instances -- they
  * have their own handling paths in the conversion layer.
  */
 export function isConvertibleNativeInstance(value: object): boolean {
-  const tag = tagFromNativeValue(value);
-  return tag !== null && tag !== NATIVE_TAGS.Array &&
-    tag !== NATIVE_TAGS.Object && tag !== NATIVE_TAGS.HasToJSON;
+  switch (tagFromNativeValue(value)) {
+    case NATIVE_TAGS.Error:
+    case NATIVE_TAGS.Map:
+    case NATIVE_TAGS.Set:
+    case NATIVE_TAGS.Date:
+    case NATIVE_TAGS.Uint8Array:
+      return true;
+    default:
+      return false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -399,17 +407,20 @@ export class StorableUint8Array
 // ---------------------------------------------------------------------------
 
 /**
- * Shallow unwrap: if the top-level value is a `StorableNativeWrapper`, call
- * its `toNativeValue()` method. Other values (primitives, arrays, objects,
- * non-native `StorableInstance` values) pass through as-is, but their freeze
- * state is adjusted to match the `frozen` argument.
+ * Shallow unwrap: convert a `StorableValue` to a native JS value, with
+ * freeze-state adjustment for types that support it.
  *
- * The freeze-state contract: the output's freeze state ALWAYS matches `frozen`.
- * - `frozen === true` and value is already frozen -> return as-is.
- * - `frozen === true` and value is unfrozen -> return a frozen copy.
- * - `frozen === false` and value is frozen -> return an unfrozen copy.
- * - `frozen === false` and value is unfrozen -> return as-is.
- * Primitives are inherently immutable and always pass through unchanged.
+ * Behavior by value category:
+ * - **StorableNativeWrapper** (Error, Map, Set, Uint8Array): delegates to
+ *   `toNativeValue(frozen)`, which adjusts freeze state.
+ * - **Arrays and plain objects**: freeze state is adjusted to match `frozen`
+ *   (shallow copy if needed).
+ * - **SpecialPrimitiveValue** (EpochNsec, EpochDays, ContentId): pass through
+ *   as-is (always frozen by construction).
+ * - **Non-native StorableInstance** (Cell, Stream, UnknownStorable, etc.):
+ *   pass through as-is (freeze state is an internal concern of the wrapper).
+ * - **Primitives** (null, undefined, boolean, number, string, bigint):
+ *   inherently immutable, pass through unchanged.
  */
 export function nativeValueFromStorableValue(
   value: StorableValue,

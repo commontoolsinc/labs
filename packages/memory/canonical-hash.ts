@@ -10,13 +10,10 @@
  * Gated behind `ExperimentalOptions.canonicalHashing`.
  */
 import { createHasher, type IncrementalHasher } from "./hash-impl.ts";
-import {
-  StorableEpochDays,
-  StorableEpochNsec,
-  StorableUint8Array,
-} from "./storable-native-instances.ts";
 import { StorableContentId } from "./storable-content-id.ts";
+import { StorableUint8Array } from "./storable-native-instances.ts";
 import { DECONSTRUCT, isStorableInstance } from "./storable-protocol.ts";
+import { NATIVE_TAGS, tagFromNativeValue } from "./type-tags.ts";
 import { encodeULEB128 } from "@commontools/leb128";
 import { bigintToMinimalTwosComplement } from "./bigint-encoding.ts";
 
@@ -134,7 +131,11 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
       break;
 
     case "object":
-      feedObjectValue(hasher, value);
+      if (value === null) {
+        hasher.update(TAG_NULL_BYTES);
+      } else {
+        feedObjectValue(hasher, value);
+      }
       break;
 
     default:
@@ -145,20 +146,18 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
 }
 
 /**
- * Feed an object-typed value (null, StorableUint8Array, StorableInstance,
- * Array, or plain object) into the hasher.
+ * Feed an object-typed value (special primitives, StorableInstance, Array,
+ * or plain object) into the hasher. Dispatches via `tagFromNativeValue()` /
+ * `NATIVE_TAGS` for recognized types. The `null` case is handled by the
+ * caller (`feedValue()`).
  */
 function feedObjectValue(
   hasher: IncrementalHasher,
-  value: object | null,
+  value: object,
 ): void {
-  // 1. null (typeof null === "object")
-  if (value === null) {
-    hasher.update(TAG_NULL_BYTES);
-    return;
-  }
-
-  // 2. StorableUint8Array (before generic StorableInstance check)
+  // StorableUint8Array has a dedicated hash encoding (TAG_BYTES) but is a
+  // StorableInstance wrapper, not a native Uint8Array. Handle before the
+  // tagFromNativeValue switch.
   if (value instanceof StorableUint8Array) {
     hasher.update(TAG_BYTES_BYTES);
     const bytes = value.bytes;
@@ -167,36 +166,54 @@ function feedObjectValue(
     return;
   }
 
-  // 3a. StorableEpochNsec (dedicated primitive tag)
-  if (value instanceof StorableEpochNsec) {
-    hasher.update(TAG_EPOCH_NSEC_BYTES);
-    const bytes = bigintToMinimalTwosComplement(value.value);
-    feedLength(hasher, bytes.length);
-    hasher.update(bytes);
-    return;
+  const nativeTag = tagFromNativeValue(value);
+
+  switch (nativeTag) {
+    case NATIVE_TAGS.EpochNsec: {
+      hasher.update(TAG_EPOCH_NSEC_BYTES);
+      const bytes = bigintToMinimalTwosComplement(
+        (value as { value: bigint }).value,
+      );
+      feedLength(hasher, bytes.length);
+      hasher.update(bytes);
+      return;
+    }
+
+    case NATIVE_TAGS.EpochDays: {
+      hasher.update(TAG_EPOCH_DAYS_BYTES);
+      const bytes = bigintToMinimalTwosComplement(
+        (value as { value: bigint }).value,
+      );
+      feedLength(hasher, bytes.length);
+      hasher.update(bytes);
+      return;
+    }
+
+    case NATIVE_TAGS.ContentId: {
+      const cid = value as StorableContentId;
+      hasher.update(TAG_CONTENT_ID_BYTES);
+      const algTagUtf8 = encoder.encode(cid.algorithmTag);
+      feedLength(hasher, algTagUtf8.length);
+      hasher.update(algTagUtf8);
+      feedLength(hasher, cid.hash.length);
+      hasher.update(cid.hash);
+      return;
+    }
+
+    case NATIVE_TAGS.Array:
+      feedArray(hasher, value as unknown[]);
+      return;
+
+    case NATIVE_TAGS.Object:
+      feedPlainObject(hasher, value as Record<string, unknown>);
+      return;
+
+      // Error, Map, Set, Date, HasToJSON: not valid StorableValue types for
+      // hashing -- they should have been converted before reaching here.
+      // Fall through to the StorableInstance / error path below.
   }
 
-  // 3b. StorableEpochDays (dedicated primitive tag)
-  if (value instanceof StorableEpochDays) {
-    hasher.update(TAG_EPOCH_DAYS_BYTES);
-    const bytes = bigintToMinimalTwosComplement(value.value);
-    feedLength(hasher, bytes.length);
-    hasher.update(bytes);
-    return;
-  }
-
-  // 3c. StorableContentId (dedicated primitive tag)
-  if (value instanceof StorableContentId) {
-    hasher.update(TAG_CONTENT_ID_BYTES);
-    const algTagUtf8 = encoder.encode(value.algorithmTag);
-    feedLength(hasher, algTagUtf8.length);
-    hasher.update(algTagUtf8);
-    feedLength(hasher, value.hash.length);
-    hasher.update(value.hash);
-    return;
-  }
-
-  // 4. StorableInstance (generic protocol path via DECONSTRUCT).
+  // StorableInstance (generic protocol path via DECONSTRUCT).
   if (isStorableInstance(value)) {
     hasher.update(TAG_INSTANCE_BYTES);
     const typeTag = (value as { typeTag?: unknown }).typeTag;
@@ -213,32 +230,46 @@ function feedObjectValue(
     return;
   }
 
-  // 5. Array (with sparse hole handling, terminated by TAG_END)
-  if (Array.isArray(value)) {
-    hasher.update(TAG_ARRAY_BYTES);
-    let i = 0;
-    while (i < value.length) {
-      if (!(i in value)) {
-        // Start of a hole run -- coalesce consecutive holes.
-        let runLen = 0;
-        while (i < value.length && !(i in value)) {
-          runLen++;
-          i++;
-        }
-        hasher.update(TAG_HOLE_BYTES);
-        feedLength(hasher, runLen);
-      } else {
-        feedValue(hasher, value[i]);
+  throw new Error(
+    `canonicalHash: unsupported object type: ${
+      value?.constructor?.name ?? typeof value
+    }`,
+  );
+}
+
+/**
+ * Feed an array value with sparse hole handling, terminated by TAG_END.
+ */
+function feedArray(hasher: IncrementalHasher, value: unknown[]): void {
+  hasher.update(TAG_ARRAY_BYTES);
+  let i = 0;
+  while (i < value.length) {
+    if (!(i in value)) {
+      // Start of a hole run -- coalesce consecutive holes.
+      let runLen = 0;
+      while (i < value.length && !(i in value)) {
+        runLen++;
         i++;
       }
+      hasher.update(TAG_HOLE_BYTES);
+      feedLength(hasher, runLen);
+    } else {
+      feedValue(hasher, value[i]);
+      i++;
     }
-    hasher.update(TAG_END_BYTES);
-    return;
   }
+  hasher.update(TAG_END_BYTES);
+}
 
-  // 6. Plain object
-  const obj = value as Record<string, unknown>;
-  const keys = Object.keys(obj);
+/**
+ * Feed a plain object value, keys sorted by UTF-8 byte order, terminated
+ * by TAG_END.
+ */
+function feedPlainObject(
+  hasher: IncrementalHasher,
+  value: Record<string, unknown>,
+): void {
+  const keys = Object.keys(value);
   // Sort keys by UTF-8 byte comparison.
   keys.sort((a, b) => {
     const aBytes = encoder.encode(a);
@@ -258,7 +289,7 @@ function feedObjectValue(
     feedLength(hasher, keyUtf8.length);
     hasher.update(keyUtf8);
     // Value is hashed recursively.
-    feedValue(hasher, obj[key]);
+    feedValue(hasher, value[key]);
   }
   hasher.update(TAG_END_BYTES);
 }
