@@ -768,6 +768,30 @@ describe("storable-native-instances", () => {
       const obj = Object.create(null);
       expect(tagFromNativeValue(obj)).toBe(NATIVE_TAGS.Object);
     });
+
+    it("returns HasToJSON tag for plain objects with toJSON()", () => {
+      const obj = { toJSON: () => "converted" };
+      expect(tagFromNativeValue(obj)).toBe(NATIVE_TAGS.HasToJSON);
+    });
+
+    it("returns HasToJSON tag for arrays with toJSON()", () => {
+      const arr = [1, 2, 3] as unknown[] & { toJSON?: () => unknown };
+      arr.toJSON = () => "custom array";
+      expect(tagFromNativeValue(arr)).toBe(NATIVE_TAGS.HasToJSON);
+    });
+
+    it("returns HasToJSON tag for class instances with toJSON()", () => {
+      class Custom {
+        toJSON() {
+          return { x: 1 };
+        }
+      }
+      expect(tagFromNativeValue(new Custom())).toBe(NATIVE_TAGS.HasToJSON);
+    });
+
+    it("returns Date tag for Date (not HasToJSON despite Date.toJSON)", () => {
+      expect(tagFromNativeValue(new Date())).toBe(NATIVE_TAGS.Date);
+    });
   });
 
   describe("tagFromNativeClass", () => {
@@ -829,6 +853,10 @@ describe("storable-native-instances", () => {
       expect(isConvertibleNativeInstance([])).toBe(false);
       expect(isConvertibleNativeInstance(/abc/)).toBe(false);
       expect(isConvertibleNativeInstance(new WeakMap())).toBe(false);
+    });
+
+    it("returns false for objects with toJSON()", () => {
+      expect(isConvertibleNativeInstance({ toJSON: () => "x" })).toBe(false);
     });
   });
 

@@ -21,14 +21,14 @@ import { FrozenMap, FrozenSet } from "./frozen-builtins.ts";
  * the "wild-west" instances that get converted into `StorableNativeWrapper`
  * subclasses or `StorableInstance` types by the conversion layer.
  *
- * Arrays and plain objects are recognized by `tagFromNativeValue()` but are
- * NOT convertible native instances -- they are already valid `StorableValue`
- * members without wrapping.
+ * Arrays, plain objects, and objects with `toJSON()` are recognized by
+ * `tagFromNativeValue()` but are NOT convertible native instances -- they
+ * have their own handling paths in the conversion layer.
  */
 export function isConvertibleNativeInstance(value: object): boolean {
   const tag = tagFromNativeValue(value);
   return tag !== null && tag !== NATIVE_TAGS.Array &&
-    tag !== NATIVE_TAGS.Object;
+    tag !== NATIVE_TAGS.Object && tag !== NATIVE_TAGS.HasToJSON;
 }
 
 // ---------------------------------------------------------------------------
