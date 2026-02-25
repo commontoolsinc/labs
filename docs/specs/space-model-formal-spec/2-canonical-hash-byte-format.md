@@ -23,9 +23,11 @@ implementation plan Phase 6.1.
 The hash function is **SHA-256** (FIPS 180-4). All byte sequences described in
 this document are fed to a SHA-256 context in the order specified.
 
-The output is **32 raw bytes** (256 bits). String encoding of the output (e.g.,
-base64) is a separate concern at the call site and is not part of this
-specification.
+The digest output is **32 raw bytes** (256 bits). The `canonicalHash()` function
+wraps the raw bytes into a `StorableContentId` instance (Section 1.4.8 of the
+formal spec) with algorithm tag `fid1`. Callers who need a string
+representation call `toString()` on the result, which produces
+`fid1:<base64hash>` (unpadded base64).
 
 > **Future addition.** BLAKE2b is listed as a recommended second algorithm in
 > the formal spec. When added, it will use the same byte-level input format
@@ -230,7 +232,31 @@ tag (`0x28` instead of `0x26`), ensuring that `StorableEpochDays(42n)` and
 `42n` produce distinct hashes. It also differs from `StorableEpochNsec` (`0x27`)
 so the two temporal types are always distinguishable.
 
-### 4.10 Array
+### 4.10 `StorableContentId`
+
+```
+Bytes: TAG_CONTENT_ID  ALG_TAG_LEN_LEB128  ALG_TAG_UTF8  HASH_LEN_LEB128  HASH_BYTES
+       0x29            <1+ bytes>          <varies>      <1+ bytes>       <varies>
+```
+
+Total: 1 + len(LEB128) + A + len(LEB128) + H bytes, where A is the byte length
+of the algorithm tag in UTF-8 and H is the number of hash bytes.
+
+`StorableContentId` represents a content identifier — a hash with an algorithm
+tag. It is a direct `StorableDatum` member (not a `StorableInstance`) and has a
+dedicated type tag.
+
+- **Algorithm tag length**: The byte length of the algorithm tag string in
+  UTF-8, encoded as unsigned LEB128.
+- **Algorithm tag**: The algorithm tag string (e.g., `"fid1"`) encoded as raw
+  UTF-8 bytes.
+- **Hash byte length**: The number of hash bytes, encoded as unsigned LEB128.
+- **Hash bytes**: The raw hash bytes, in order.
+
+The two-field encoding ensures that content IDs with different algorithm tags
+but identical hash bytes produce different hashes, and vice versa.
+
+### 4.11 Array
 
 ```
 Bytes: TAG_ARRAY  ELEMENT_0  ELEMENT_1  ...  ELEMENT_N-1  TAG_END
@@ -240,7 +266,7 @@ Bytes: TAG_ARRAY  ELEMENT_0  ELEMENT_1  ...  ELEMENT_N-1  TAG_END
 - **Elements**: Each element is hashed recursively in index order (0, 1, 2,
   ...). Present elements are fed to the hasher as complete tagged values
   (starting with their own type tag). Holes are encoded using run-length
-  encoding (see Section 4.13).
+  encoding (see Section 4.14).
 - **Terminator**: `TAG_END` (`0x00`) marks the end of the element sequence.
   This is unambiguous because `TAG_END` cannot appear as the start of any
   element value.
@@ -248,7 +274,7 @@ Bytes: TAG_ARRAY  ELEMENT_0  ELEMENT_1  ...  ELEMENT_N-1  TAG_END
 Empty array (`[]`) is encoded as `0x10 0x00` — the tag immediately followed by
 `TAG_END`.
 
-### 4.11 Object
+### 4.12 Object
 
 ```
 Bytes: TAG_OBJECT  KEY_0  VALUE_0  KEY_1  VALUE_1  ...  TAG_END
@@ -266,7 +292,7 @@ Bytes: TAG_OBJECT  KEY_0  VALUE_0  KEY_1  VALUE_1  ...  TAG_END
 Empty object (`{}`) is encoded as `0x11 0x00` — the tag immediately followed by
 `TAG_END`.
 
-### 4.12 `StorableInstance`
+### 4.13 `StorableInstance`
 
 ```
 Bytes: TAG_INSTANCE  TYPE_TAG_LEN_LEB128  TYPE_TAG_UTF8  STATE_HASH
@@ -281,11 +307,11 @@ Bytes: TAG_INSTANCE  TYPE_TAG_LEN_LEB128  TYPE_TAG_UTF8  STATE_HASH
   recursively as a complete tagged value.
 
 > **Note on types with dedicated tags.** `StorableUint8Array`,
-> `StorableEpochNsec`, and `StorableEpochDays` are **not** hashed via
-> `TAG_INSTANCE`. Each has a dedicated type tag and is encoded directly (see
-> Sections 4.7, 4.8, and 4.9 respectively).
+> `StorableEpochNsec`, `StorableEpochDays`, and `StorableContentId` are **not**
+> hashed via `TAG_INSTANCE`. Each has a dedicated type tag and is encoded
+> directly (see Sections 4.7, 4.8, 4.9, and 4.10 respectively).
 
-### 4.13 Holes (sparse array elements)
+### 4.14 Holes (sparse array elements)
 
 ```
 Bytes: TAG_HOLE  RUN_COUNT_LEB128
@@ -294,7 +320,7 @@ Bytes: TAG_HOLE  RUN_COUNT_LEB128
 
 Total: 1 + len(LEB128) bytes per run (typically 2 bytes for small runs).
 
-Holes appear only within array encodings (Section 4.10). Consecutive holes are
+Holes appear only within array encodings (Section 4.11). Consecutive holes are
 **always coalesced** into maximal runs:
 
 - A single hole at index `i` with present elements at `i-1` and `i+1` is
@@ -357,8 +383,8 @@ The overall traversal is depth-first, left-to-right:
 
 1. Feed the type tag byte.
 2. For primitive types with variable-length payloads (string, bigint, bytes,
-   epoch-nsec, epoch-days), feed the LEB128 byte-length prefix, then the
-   payload.
+   epoch-nsec, epoch-days, content-id), feed the LEB128 byte-length prefix(es),
+   then the payload.
 3. For compound types (array, object), recursively hash each child, then feed
    `TAG_END`. Each child's bytes (starting with its own type tag) are fed to
    the **same** hasher — there is no per-child sub-hash.
@@ -449,7 +475,19 @@ two's-complement: length 1 (LEB128 `0x01`) and payload `0x00`.
 
 `TAG_EPOCH_DAYS` (`0x28`), length 1 (`0x01`), payload `0x2A`.
 
-### 7.11 `[1, , 3]` (sparse array)
+### 7.11 `StorableContentId("fid1", <4 bytes: 0xDE 0xAD 0xBE 0xEF>)`
+
+Algorithm tag `"fid1"` is 4 bytes in UTF-8: `0x66`, `0x69`, `0x64`, `0x31`.
+Hash payload is 4 bytes: `0xDE`, `0xAD`, `0xBE`, `0xEF`.
+
+```
+29  04  66 69 64 31  04  DE AD BE EF
+```
+
+`TAG_CONTENT_ID` (`0x29`), algorithm tag length 4 (`0x04`), algorithm tag
+`"fid1"`, hash byte length 4 (`0x04`), hash bytes.
+
+### 7.12 `[1, , 3]` (sparse array)
 
 Three elements: number `1`, one hole, number `3`. Terminated by `TAG_END`.
 
@@ -468,7 +506,7 @@ Full byte stream:
 00
 ```
 
-### 7.12 `[]` (empty array)
+### 7.13 `[]` (empty array)
 
 ```
 10 00
@@ -476,7 +514,7 @@ Full byte stream:
 
 `TAG_ARRAY` immediately followed by `TAG_END`.
 
-### 7.13 `{ a: 1, b: 2 }` (object)
+### 7.14 `{ a: 1, b: 2 }` (object)
 
 Two keys. UTF-8 sort order: `"a"` (0x61) < `"b"` (0x62). Terminated by
 `TAG_END`.
@@ -498,7 +536,7 @@ Full byte stream:
 00
 ```
 
-### 7.14 `{}` (empty object)
+### 7.15 `{}` (empty object)
 
 ```
 11 00
@@ -506,7 +544,7 @@ Full byte stream:
 
 `TAG_OBJECT` immediately followed by `TAG_END`.
 
-### 7.15 `[1, undefined, 3]` vs. `[1, , 3]` vs. `[1, null, 3]`
+### 7.16 `[1, undefined, 3]` vs. `[1, , 3]` vs. `[1, null, 3]`
 
 These three arrays produce different byte streams at the middle element:
 
@@ -541,6 +579,8 @@ rather than producing a hash.
 | Byte array (`StorableUint8Array`) | unsigned LEB128 | Byte count of raw payload        |
 | `StorableEpochNsec` payload       | unsigned LEB128 | Byte count of two's complement   |
 | `StorableEpochDays` payload       | unsigned LEB128 | Byte count of two's complement   |
+| `StorableContentId` algorithm tag | unsigned LEB128 | Byte count of algorithm tag UTF-8|
+| `StorableContentId` hash bytes    | unsigned LEB128 | Byte count of raw hash payload   |
 | `StorableInstance` type tag       | unsigned LEB128 | Byte count of type tag UTF-8     |
 | Hole run count                    | unsigned LEB128 | Number of consecutive holes      |
 | Array elements                    | `TAG_END`       | Sentinel after last element      |
