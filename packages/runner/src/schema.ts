@@ -8,7 +8,10 @@ import type { JSONValue } from "@commontools/api";
 import { type StorableDatum } from "@commontools/memory/interface";
 import { createCell, isCell } from "./cell.ts";
 import { readMaybeLink, resolveLink } from "./link-resolution.ts";
-import { type IExtendedStorageTransaction } from "./storage/interface.ts";
+import {
+  type IExtendedStorageTransaction,
+  type Metadata,
+} from "./storage/interface.ts";
 import { getTransactionForChildCells } from "./storage/extended-storage-transaction.ts";
 import { type Runtime } from "./runtime.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
@@ -18,6 +21,7 @@ import {
 } from "./query-result-proxy.ts";
 import { toCell } from "./back-to-cell.ts";
 import { markCfcRelevantForSchema } from "./cfc/relevance.ts";
+import { CFC_READ_MAX_CONFIDENTIALITY_MARKER } from "./cfc/internal-markers.ts";
 import {
   combineSchema,
   IObjectCreator,
@@ -348,6 +352,26 @@ function annotateWithBackToCellSymbols(
   return value;
 }
 
+function readIfcInputMeta(schema: JSONSchema | undefined): Metadata | undefined {
+  if (!isObject(schema) || !isObject(schema.ifc)) {
+    return undefined;
+  }
+  const rawMaxConfidentiality = (schema.ifc as Record<string, unknown>)
+    .maxConfidentiality;
+  if (!Array.isArray(rawMaxConfidentiality)) {
+    return undefined;
+  }
+  const maxConfidentiality = rawMaxConfidentiality.filter(
+    (entry): entry is string => typeof entry === "string" && entry.length > 0,
+  );
+  if (maxConfidentiality.length === 0) {
+    return undefined;
+  }
+  return {
+    [CFC_READ_MAX_CONFIDENTIALITY_MARKER]: maxConfidentiality,
+  };
+}
+
 export interface ValidateAndTransformOptions {
   /** When true, also read into each Cell created for asCell fields to capture dependencies */
   traverseCells?: boolean;
@@ -453,7 +477,14 @@ export function validateAndTransform(
   // Link paths don't include value, but doc address should
   const { space, id, type, path } = ref;
   const address = { space, id, type, path: ["value", ...path] };
-  const doc = { address, value: tx!.readValueOrThrow(ref) };
+  const readMeta = readIfcInputMeta(ref.schema ?? link.schema);
+  const doc = {
+    address,
+    value: tx!.readValueOrThrow(
+      ref,
+      readMeta ? { meta: readMeta } : undefined,
+    ),
+  };
   // If we have a ref with a schema, use that; otherwise, use the link's schema
   const selector = {
     path: doc.address.path,
