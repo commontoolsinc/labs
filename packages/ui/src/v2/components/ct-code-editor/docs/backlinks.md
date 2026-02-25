@@ -35,7 +35,6 @@ one looks at any proposed change and asks: _does it touch the `(id)]]` portion
 of a backlink?_ If so, it either blocks the change entirely (edit starts inside
 the ID) or truncates it to the name boundary (edit spans from name into ID).
 
-
 ### 3. `atomicRanges` — cursor skipping (`atomicBacklinkRanges`)
 
 `EditorView.atomicRanges` tells CM6 to treat a range as a single unit for cursor
@@ -81,12 +80,10 @@ than doing their own parsing.
 
 ## Known issues and future improvements
 
-1. **The file is large (~1790 lines).** The backlink logic (roughly lines
-   94–988) is entirely self-contained with no dependency on the Lit component
-   that wraps it. Extracting it to `lib/backlinks.ts` would be a clean,
-   non-breaking refactor. The test exports (`parseBacklinks`, `backlinkField`,
-   `atomicBacklinkRanges`, `backlinkEditFilter`, `BacklinkInfo`) were added
-   specifically to make that extraction safe.
+1. **The backlink logic lives in `features/backlinks.ts`**, fully extracted from
+   the Lit component. The exports (`parseBacklinks`, `backlinkField`,
+   `atomicBacklinkRanges`, `backlinkEditFilter`, `BacklinkInfo`) are tested
+   directly in `features/backlinks.test.ts`.
 
 2. **The `ViewPlugin` re-runs on every selection change** across the whole
    document. For documents with many backlinks this is fine, but it could bail
