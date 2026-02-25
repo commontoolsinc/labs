@@ -2,6 +2,7 @@ import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import type {
   ICfcInputRequirementViolationError,
+  ICfcOutputTransitionViolationError,
   ICfcPrepareSchemaUnavailableError,
   ICfcSchemaHashMismatchError,
   IExtendedStorageTransaction,
@@ -16,6 +17,7 @@ import {
 import { partitionConsumedBoundaryReads } from "./consumed-reads.ts";
 import {
   collectConsumedInputLabels,
+  type ConsumedReadWithEffectiveLabel,
   consumedReadEntityKey,
 } from "./consumed-input-labels.ts";
 import {
@@ -96,6 +98,26 @@ function CfcRequiredIntegrityViolationError(
     path: read.path,
     requiredIntegrity: [...requiredIntegrity],
     actualIntegrity: [...actualIntegrity],
+  };
+}
+
+function CfcOutputTransitionViolationError(
+  entity: EntityAddress,
+  path: string,
+  minClassification: string,
+  actualClassification: string,
+): ICfcOutputTransitionViolationError {
+  return {
+    name: "CfcOutputTransitionViolationError",
+    message:
+      "CFC prepare output transition failed: write classification is not monotone with consumed input",
+    requirement: "confidentialityMonotonicity",
+    space: entity.space,
+    id: entity.id,
+    type: entity.type,
+    path,
+    minClassification,
+    actualClassification,
   };
 }
 
@@ -232,7 +254,7 @@ function integritySatisfiesRequiredIntegrity(
 
 function verifyInputRequirementsForAttempt(
   tx: IExtendedStorageTransaction,
-): void {
+): readonly ConsumedReadWithEffectiveLabel[] {
   const { consumedReads } = partitionConsumedBoundaryReads(tx.journal.activity());
   const labelsByEntity = new Map<string, Record<string, Labels>>();
 
@@ -290,12 +312,80 @@ function verifyInputRequirementsForAttempt(
       }
     }
   }
+
+  return consumedReadLabels;
+}
+
+function classificationDominates(
+  actualClassification: string,
+  minClassification: string,
+  cfc: ContextualFlowControl,
+): boolean {
+  try {
+    return cfc.lub(new Set([actualClassification, minClassification])) ===
+      actualClassification;
+  } catch {
+    return false;
+  }
+}
+
+function strongestConsumedClassification(
+  consumedReadLabels: readonly ConsumedReadWithEffectiveLabel[],
+  cfc: ContextualFlowControl,
+): string {
+  const consumed = new Set<string>();
+  for (const read of consumedReadLabels) {
+    consumed.add(read.effectiveLabel?.classification?.[0] ?? "unclassified");
+  }
+  if (consumed.size === 0) {
+    return "unclassified";
+  }
+  return cfc.lub(consumed);
+}
+
+function verifyOutputTransitionsForAttempt(
+  tx: IExtendedStorageTransaction,
+  consumedReadLabels: readonly ConsumedReadWithEffectiveLabel[],
+): void {
+  const writtenEntities = collectWrittenEntities(tx);
+  if (writtenEntities.length === 0) {
+    return;
+  }
+
+  const cfc = new ContextualFlowControl();
+  const minClassification = strongestConsumedClassification(consumedReadLabels, cfc);
+  for (const entity of writtenEntities) {
+    const schema = getCfcWriteSchemaContext(tx, {
+      ...entity,
+      path: [],
+    });
+    if (!schema) {
+      continue;
+    }
+
+    const actualClassification = cfc.lubSchema(schema) ?? "unclassified";
+    if (
+      !classificationDominates(
+        actualClassification,
+        minClassification,
+        cfc,
+      )
+    ) {
+      throw CfcOutputTransitionViolationError(
+        entity,
+        "/",
+        minClassification,
+        actualClassification,
+      );
+    }
+  }
 }
 
 export async function prepareBoundaryCommit(
   tx: IExtendedStorageTransaction,
 ): Promise<void> {
-  verifyInputRequirementsForAttempt(tx);
+  const consumedReadLabels = verifyInputRequirementsForAttempt(tx);
+  verifyOutputTransitionsForAttempt(tx, consumedReadLabels);
 
   const writtenEntities = collectWrittenEntities(tx);
   const hasIfcWriteReason = tx.cfcReasons.includes("ifc-write-schema");
