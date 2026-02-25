@@ -907,21 +907,19 @@ Deno.test("canonicalHash", async (t) => {
         "fid1",
       );
       // Expected: TAG_CONTENT_ID(0x29), algTagLen(0x04), "fid1", hashLen(0x04), hash
-      const expected = sha256(
-        new Uint8Array([
-          0x29,
-          0x04,
-          0x66,
-          0x69,
-          0x64,
-          0x31,
-          0x04,
-          0xDE,
-          0xAD,
-          0xBE,
-          0xEF,
-        ]),
-      );
+      const expected = sha256([
+        0x29,
+        0x04,
+        0x66,
+        0x69,
+        0x64,
+        0x31,
+        0x04,
+        0xDE,
+        0xAD,
+        0xBE,
+        0xEF,
+      ]);
       assertEquals(hex(canonicalHash(cid)), hex(expected));
     },
   );
