@@ -100,9 +100,6 @@ export function toRichStorableValue(
       }
 
       case NATIVE_TAGS.Object: {
-        // Plain objects pass through, but objects with toJSON() must fall
-        // through to toRichStorableValueBase for legacy conversion handling.
-        if (hasToJSONMethod(value)) break;
         // When freezing, return a frozen shallow copy rather than freezing
         // the caller's object in place.
         const obj = value as Record<string, unknown>;
@@ -113,9 +110,28 @@ export function toRichStorableValue(
         return obj;
       }
 
+      case NATIVE_TAGS.HasToJSON: {
+        // Objects (or arrays/class instances) with a toJSON() method.
+        // Call toJSON() and validate the result.
+        const converted = (value as { toJSON: () => unknown }).toJSON();
+        if (!isRichStorableValue(converted)) {
+          throw new Error(
+            `\`toJSON()\` on ${typeof value} returned something other than a storable value`,
+          );
+        }
+        if (freeze && converted !== null && typeof converted === "object") {
+          if (Object.isFrozen(converted)) return converted;
+          if (Array.isArray(converted)) {
+            return Object.freeze([...converted]) as StorableValueLayer;
+          }
+          return Object.freeze({ ...converted }) as StorableValueLayer;
+        }
+        return converted;
+      }
+
       default:
         // Other object types (Map, Set, Uint8Array, class instances, etc.)
-        // fall through to toRichStorableValueBase for toJSON/rejection handling.
+        // fall through to toRichStorableValueBase for rejection handling.
         break;
     }
   }

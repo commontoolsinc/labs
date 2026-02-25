@@ -50,6 +50,7 @@ export const NATIVE_TAGS = Object.freeze(
     Set: "Set",
     Date: "Date",
     Uint8Array: "Uint8Array",
+    HasToJSON: "HasToJSON",
   } as const,
 );
 
@@ -123,7 +124,19 @@ export function tagFromNativeValue(value: object): NativeTag | null {
   const ctor = value.constructor;
   if (typeof ctor === "function") {
     const tag = tagFromNativeClass(ctor);
-    if (tag !== null) return tag;
+    if (tag !== null) {
+      // Plain objects and arrays with a toJSON() method should be routed
+      // through the toJSON conversion path, not their normal pass-through
+      // handling. Other recognized types (Error, Date, Map, etc.) have their
+      // own dedicated conversion paths that take priority over toJSON.
+      if (
+        (tag === NATIVE_TAGS.Object || tag === NATIVE_TAGS.Array) &&
+        hasToJSON(value)
+      ) {
+        return NATIVE_TAGS.HasToJSON;
+      }
+      return tag;
+    }
   }
 
   // Fallback for exotic Error subclasses (e.g. DOMException, custom
@@ -137,5 +150,14 @@ export function tagFromNativeValue(value: object): NativeTag | null {
   const proto = Object.getPrototypeOf(value);
   if (proto === null) return NATIVE_TAGS.Object;
 
+  // Unrecognized class instances with toJSON() get the HasToJSON tag.
+  if (hasToJSON(value)) return NATIVE_TAGS.HasToJSON;
+
   return null;
+}
+
+/** Checks whether a value has a callable `toJSON()` method. */
+function hasToJSON(value: object): boolean {
+  return "toJSON" in value &&
+    typeof (value as { toJSON: unknown }).toJSON === "function";
 }
