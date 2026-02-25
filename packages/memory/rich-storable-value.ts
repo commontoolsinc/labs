@@ -103,10 +103,10 @@ export function toRichStorableValue(
         // Plain objects pass through. When freezing, return a frozen shallow
         // copy rather than freezing the caller's object in place.
         if (freeze) {
-          if (Object.isFrozen(value)) return value;
-          return Object.freeze({ ...value });
+          if (Object.isFrozen(value)) return value as StorableValueLayer;
+          return Object.freeze({ ...value }) as StorableValueLayer;
         }
-        return value;
+        return value as StorableValueLayer;
       }
 
       default:
