@@ -1,4 +1,5 @@
 import type { JSONSchema } from "../builder/types.ts";
+import { deepEqual } from "@commontools/utils/deep-equal";
 import { ContextualFlowControl } from "../cfc.ts";
 import type {
   ICfcInputRequirementViolationError,
@@ -118,6 +119,24 @@ function CfcOutputTransitionViolationError(
     path,
     minClassification,
     actualClassification,
+  };
+}
+
+function CfcOutputExactCopyViolationError(
+  entity: EntityAddress,
+  path: string,
+  sourcePath: string,
+): ICfcOutputTransitionViolationError {
+  return {
+    name: "CfcOutputTransitionViolationError",
+    message:
+      "CFC prepare output transition failed: exactCopyOf assertion was not satisfied",
+    requirement: "exactCopyOf",
+    space: entity.space,
+    id: entity.id,
+    type: entity.type,
+    path,
+    sourcePath,
   };
 }
 
@@ -343,15 +362,92 @@ function strongestConsumedClassification(
   return cfc.lub(consumed);
 }
 
+function fromCanonicalPath(path: string): string[] {
+  if (path === "/" || path.length === 0) {
+    return [];
+  }
+  const rawParts = path.startsWith("/") ? path.slice(1).split("/") : [];
+  return rawParts.filter(Boolean).map((part) =>
+    part.replaceAll("~1", "/").replaceAll("~0", "~")
+  );
+}
+
+function readExactCopyOf(schema: JSONSchema | undefined): string | undefined {
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
+    return undefined;
+  }
+  const rawIfc = (schema as { ifc?: unknown }).ifc;
+  if (!rawIfc || typeof rawIfc !== "object" || Array.isArray(rawIfc)) {
+    return undefined;
+  }
+  const rawExactCopyOf = (rawIfc as { exactCopyOf?: unknown }).exactCopyOf;
+  if (typeof rawExactCopyOf !== "string" || !rawExactCopyOf.startsWith("/")) {
+    return undefined;
+  }
+  return rawExactCopyOf;
+}
+
+function readValueAtCanonicalPath(
+  tx: IExtendedStorageTransaction,
+  address: EntityAddress,
+  path: string,
+): unknown {
+  return tx.readValueOrThrow(
+    {
+      ...address,
+      path: fromCanonicalPath(path),
+    },
+    { meta: internalVerifierReadMeta },
+  );
+}
+
+function resolveConsumedSourceValue(
+  tx: IExtendedStorageTransaction,
+  consumedReadLabels: readonly ConsumedReadWithEffectiveLabel[],
+  sourcePath: string,
+): unknown | undefined {
+  const values: unknown[] = [];
+  const seen = new Set<string>();
+  for (const consumed of consumedReadLabels) {
+    if (consumed.read.path !== sourcePath) {
+      continue;
+    }
+    const key = [
+      consumed.read.space,
+      consumed.read.id,
+      consumed.read.type,
+      consumed.read.path,
+    ].join("\u0000");
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    values.push(readValueAtCanonicalPath(tx, {
+      space: consumed.read.space as EntityAddress["space"],
+      id: consumed.read.id as EntityAddress["id"],
+      type: consumed.read.type as EntityAddress["type"],
+    }, consumed.read.path));
+  }
+  if (values.length === 0) {
+    return undefined;
+  }
+  const first = values[0];
+  if (values.every((value) => deepEqual(value, first))) {
+    return first;
+  }
+  return undefined;
+}
+
 function verifyOutputTransitionsForAttempt(
   tx: IExtendedStorageTransaction,
   consumedReadLabels: readonly ConsumedReadWithEffectiveLabel[],
 ): void {
-  const writtenEntities = collectWrittenEntities(tx);
-  if (writtenEntities.length === 0) {
+  const canonical = canonicalizeBoundaryActivity(tx.journal.activity());
+  if (canonical.attemptedWrites.length === 0) {
     return;
   }
 
+  const writtenEntities = collectWrittenEntities(tx);
   const cfc = new ContextualFlowControl();
   const minClassification = strongestConsumedClassification(consumedReadLabels, cfc);
   for (const entity of writtenEntities) {
@@ -377,6 +473,36 @@ function verifyOutputTransitionsForAttempt(
         minClassification,
         actualClassification,
       );
+    }
+  }
+
+  for (const write of canonical.finalAttemptedWrites) {
+    const entity: EntityAddress = {
+      space: write.space as EntityAddress["space"],
+      id: write.id as EntityAddress["id"],
+      type: write.type as EntityAddress["type"],
+    };
+    const rootSchema = getCfcWriteSchemaContext(tx, { ...entity, path: [] });
+    if (!rootSchema) {
+      continue;
+    }
+    const schemaAtWritePath = cfc.getSchemaAtPath(
+      rootSchema,
+      fromCanonicalPath(write.path),
+    );
+    const exactCopyOf = readExactCopyOf(schemaAtWritePath);
+    if (!exactCopyOf) {
+      continue;
+    }
+
+    const sourceValue = resolveConsumedSourceValue(
+      tx,
+      consumedReadLabels,
+      exactCopyOf,
+    );
+    const outputValue = readValueAtCanonicalPath(tx, entity, write.path);
+    if (sourceValue === undefined || !deepEqual(sourceValue, outputValue)) {
+      throw CfcOutputExactCopyViolationError(entity, write.path, exactCopyOf);
     }
   }
 }
