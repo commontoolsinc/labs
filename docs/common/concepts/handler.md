@@ -160,7 +160,7 @@ See [Testing Handlers via CLI](../workflows/handlers-cli-testing.md) for the ful
 | Defined | Inside pattern | Module scope |
 | State access | Closure | Explicit binding |
 | Reusable with different state | No | Yes |
-| Exportable as Stream | No | Yes |
+| Returns Stream | Yes | Yes |
 | Simpler syntax | Yes | No |
 
-**Default to `action()`** - only use `handler()` when you need reusability or exports.
+Both `action()` and `handler()` return `Stream<T>` and can be exported in the Output type. **Default to `action()`** - only use `handler()` when you need to reuse the same logic with different state bindings.
