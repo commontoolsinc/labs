@@ -26,7 +26,9 @@ import { type MentionablePiece } from "./backlinks-index.tsx";
 
 // ===== Input/Output Types =====
 
-type QuickCaptureInput = Record<string, never>;
+interface QuickCaptureInput {
+  allPieces: Writable<MentionablePiece[]>;
+}
 
 interface QuickCaptureOutput {
   [NAME]: string;
@@ -87,29 +89,34 @@ const captureHandler = handler<
   });
 });
 
-// ===== Wrapper pattern: create a notebook pre-populated with notes =====
+// ===== Note/Notebook creation handlers =====
 
-const createNotebookWithNotes = handler<
-  { title: string; notesData?: Array<{ title: string; content: string }> },
-  Record<string, never>
->(({ title, notesData }) => {
-  const notes = (notesData ?? []).map(
-    (data: { title: string; content: string }) =>
-      Note({
-        title: data.title,
-        content: data.content,
-        isHidden: true,
-        noteId: generateId(),
-      }),
-  );
-  const notebook = Notebook({ title, notes });
-  return { created: title, noteCount: notes.length, notebook };
+const createNoteHandler = handler<
+  { title: string; content: string },
+  { allPieces: Writable<MentionablePiece[]> }
+>(({ title, content }, { allPieces }) => {
+  const note = Note({
+    title,
+    content,
+    noteId: generateId(),
+  });
+  allPieces.push(note as any);
+  return note;
+});
+
+const createNotebookHandler = handler<
+  { title: string },
+  { allPieces: Writable<MentionablePiece[]> }
+>(({ title }, { allPieces }) => {
+  const notebook = Notebook({ title });
+  allPieces.push(notebook as any);
+  return notebook;
 });
 
 // ===== Main Pattern =====
 
 export default pattern<QuickCaptureInput, QuickCaptureOutput>(
-  () => {
+  ({ allPieces }) => {
     // Wishes for space data
     const mentionable = wish<MentionablePiece[]>({
       query: "#mentionable",
@@ -169,11 +176,15 @@ ${profileSection}`;
       }),
       listMentionable: patternTool(listMentionable, { mentionable }),
       listRecent: patternTool(listRecent, { recentPieces }),
-      createNote: patternTool(Note),
-      createNotebook: {
-        handler: createNotebookWithNotes({}),
+      createNote: {
+        handler: createNoteHandler({ allPieces }),
         description:
-          "Create a notebook with optional initial notes. Pass title and notesData array. Use for grouping related notes.",
+          "Create a single note with a title and markdown content. Returns the created note cell. Call once per note.",
+      },
+      createNotebook: {
+        handler: createNotebookHandler({ allPieces }),
+        description:
+          "Create a notebook with a title. Use sparingly — only for the 'Capture Log' notebook or when there's a clear reason to group notes.",
       },
     };
     const dialogParams = {
