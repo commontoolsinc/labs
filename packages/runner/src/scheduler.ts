@@ -28,9 +28,9 @@ import type {
   ChangeGroup,
   CommitError,
   IExtendedStorageTransaction,
-  IStorageTransactionAborted,
   IMemorySpaceAddress,
   IStorageSubscription,
+  IStorageTransactionAborted,
   MediaType,
   MemoryAddressPathComponent,
   Metadata,
@@ -2682,9 +2682,24 @@ function transactionAbortedFromError(
   };
 }
 
+function isCfcCommitError(error: unknown): error is CommitError {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  const name = (error as { name?: unknown }).name;
+  return name === "CfcPrepareRequiredError" ||
+    name === "CfcPreparedDigestMismatchError" ||
+    name === "CfcPrepareSchemaUnavailableError" ||
+    name === "CfcSchemaHashMismatchError";
+}
+
 function commitWithCfcPrepare(
   tx: IExtendedStorageTransaction,
 ): Promise<Result<Unit, CommitError>> {
+  if (tx.status().status !== "ready") {
+    return tx.commit();
+  }
+
   if (!tx.cfcRelevant || !isCommitBearingAttempt(tx)) {
     return tx.commit();
   }
@@ -2693,6 +2708,9 @@ function commitWithCfcPrepare(
     .then(() => tx.commit())
     .catch((error) => {
       tx.abort(error);
+      if (isCfcCommitError(error)) {
+        return { error };
+      }
       const status = tx.status();
       if (status.status === "error") {
         return { error: status.error as CommitError };

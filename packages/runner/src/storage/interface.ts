@@ -730,6 +730,22 @@ export interface ICfcPreparedDigestMismatchError extends IStorageError {
   readonly actualDigest: string;
 }
 
+export interface ICfcPrepareSchemaUnavailableError extends IStorageError {
+  readonly name: "CfcPrepareSchemaUnavailableError";
+  readonly space: MemorySpace;
+  readonly id: URI;
+  readonly type: string;
+}
+
+export interface ICfcSchemaHashMismatchError extends IStorageError {
+  readonly name: "CfcSchemaHashMismatchError";
+  readonly expectedSchemaHash: string;
+  readonly actualSchemaHash: string;
+  readonly space: MemorySpace;
+  readonly id: URI;
+  readonly type: string;
+}
+
 /**
  * Error that indicating that no change could be made to a transaction is it is
  * no longer active.
@@ -754,7 +770,9 @@ export type CommitError =
   | InactiveTransactionError
   | StorageTransactionRejected
   | ICfcPrepareRequiredError
-  | ICfcPreparedDigestMismatchError;
+  | ICfcPreparedDigestMismatchError
+  | ICfcPrepareSchemaUnavailableError
+  | ICfcSchemaHashMismatchError;
 
 /**
  * Error returned when a read or write operation fails because the intra-value

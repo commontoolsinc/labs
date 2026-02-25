@@ -5,6 +5,7 @@ import {
   canonicalizeBoundaryActivity,
   canonicalizeStoragePath,
 } from "../src/cfc/canonical-activity.ts";
+import { internalVerifierReadMeta } from "../src/cfc/internal-markers.ts";
 
 describe("canonicalizeStoragePath", () => {
   it("canonicalizes /value wrapper paths", () => {
@@ -74,7 +75,7 @@ describe("canonicalizeBoundaryActivity", () => {
           id: "of:doc",
           type: "application/json",
           path: ["value", "secret"],
-          meta: { internalVerifierRead: true },
+          meta: internalVerifierReadMeta,
         },
       },
     ];
