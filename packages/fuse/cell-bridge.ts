@@ -616,7 +616,7 @@ export class CellBridge {
     return (value: unknown, depth: number): string | null => {
       if (!isSigilLink(value)) return null;
 
-      // Handler links (internal/*) are rendered as .handler files, not symlinks.
+      // Stream cells are rendered as .handler files, not symlinks.
       if (isHandlerCell(value)) return null;
 
       const inner = (value as Record<string, unknown>)["/"] as Record<

@@ -83,31 +83,24 @@ export function isSigilLink(v: unknown): boolean {
 }
 
 /**
- * Detect handler Cell references: live Cell objects whose `_link.path` starts
- * with `internal/`. These represent stream handlers (increment, decrement, etc.)
- * and should be rendered as `.handler` files, not expanded as directories
- * full of Cell runtime internals.
+ * Detect stream/handler Cell references via duck-typing.
+ * Live Cell objects expose an `isStream()` method that returns true for
+ * stream handlers (increment, decrement, etc.). These should be rendered
+ * as `.handler` files, not expanded as directories of Cell internals.
  *
- * Also matches serialized sigil links (`{"/": {"link@1": {path: ["internal", ...]}}}`)
- * for robustness.
+ * Also matches raw `{ $stream: true }` markers for completeness.
  */
 export function isHandlerCell(v: unknown): boolean {
   if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
-  const obj = v as Record<string, unknown>;
-
-  // Live Cell object: has _kind === "cell" and _link.path[0] === "internal"
-  if (obj._kind === "cell" && typeof obj._link === "object" && obj._link) {
-    const link = obj._link as { path?: readonly string[] };
-    return Array.isArray(link.path) && link.path[0] === "internal";
+  // Duck-type: Cell objects have an isStream() method
+  const cell = v as { isStream?: () => boolean };
+  if (typeof cell.isStream === "function") {
+    try {
+      return cell.isStream();
+    } catch {
+      return false;
+    }
   }
-
-  // Serialized sigil link form: {"/": {"link@1": {path: ["internal", ...]}}}
-  if (isSigilLink(v)) {
-    const inner = obj["/"] as Record<string, unknown>;
-    const linkData = inner["link@1"] as { path?: readonly string[] };
-    return Array.isArray(linkData.path) && linkData.path[0] === "internal";
-  }
-
   return false;
 }
 

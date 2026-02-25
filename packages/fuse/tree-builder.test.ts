@@ -216,73 +216,34 @@ Deno.test("isSigilLink - rejects non-sigil values", () => {
   assertEquals(isSigilLink({ "/": { "link@1": {} }, extra: true }), false);
 });
 
-Deno.test("isHandlerCell - detects handler cells and sigil links to internal/*", () => {
-  // Live Cell object with _kind="cell" and _link.path starting with "internal"
-  assertEquals(
-    isHandlerCell({
-      _kind: "cell",
-      _link: { path: ["internal", "increment"], id: "of:abc" },
-      runtime: {},
-      tx: 0,
-    }),
-    true,
-  );
-  // Live Cell but path is not internal/* — not a handler
-  assertEquals(
-    isHandlerCell({
-      _kind: "cell",
-      _link: { path: ["result", "value"], id: "of:abc" },
-    }),
-    false,
-  );
-  // Serialized sigil link with path starting with "internal"
-  assertEquals(
-    isHandlerCell(
-      { "/": { "link@1": { id: "of:abc", path: ["internal", "increment"] } } },
-    ),
-    true,
-  );
-  // Serialized sigil link, path is not internal/* — not a handler
-  assertEquals(
-    isHandlerCell(
-      { "/": { "link@1": { id: "of:abc", path: ["result", "value"] } } },
-    ),
-    false,
-  );
-  // Not a Cell or sigil link at all
-  assertEquals(isHandlerCell({ $stream: true }), false);
+Deno.test("isHandlerCell - detects stream cells via duck-typing", () => {
+  // Mock Cell with isStream() returning true
+  assertEquals(isHandlerCell({ isStream: () => true }), true);
+  // Mock Cell with isStream() returning false
+  assertEquals(isHandlerCell({ isStream: () => false }), false);
+  // Not a Cell — no isStream method
+  assertEquals(isHandlerCell({ name: "Alice" }), false);
   assertEquals(isHandlerCell(42), false);
   assertEquals(isHandlerCell(null), false);
+  assertEquals(isHandlerCell({ $stream: true }), false);
 });
 
 Deno.test("buildJsonTree - handler cells skipped via skipEntry", () => {
   const tree = new FsTree();
 
-  // Simulate live Cell objects (as returned by piece.result.get())
+  // Simulate live Cell objects with isStream() (as returned by piece.result.get())
   const data = {
     value: 10,
     increment: {
-      _kind: "cell",
-      _link: { path: ["internal", "increment"], id: "of:abc" },
-      runtime: {},
+      isStream: () => true,
       toJSON() {
-        return {
-          "/": {
-            "link@1": { id: "of:abc", path: ["internal", "increment"] },
-          },
-        };
+        return { "/handler": "increment" };
       },
     },
     decrement: {
-      _kind: "cell",
-      _link: { path: ["internal", "decrement"], id: "of:abc" },
-      runtime: {},
+      isStream: () => true,
       toJSON() {
-        return {
-          "/": {
-            "link@1": { id: "of:abc", path: ["internal", "decrement"] },
-          },
-        };
+        return { "/handler": "decrement" };
       },
     },
   };
