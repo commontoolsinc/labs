@@ -18,16 +18,9 @@ export default pattern((state) => {
                 properties: {
                     element: {
                         $ref: "#/$defs/Item"
-                    },
-                    index: {
-                        type: "number"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {}
                     }
                 },
-                required: ["element", "params"],
+                required: ["element"],
                 $defs: {
                     Item: {
                         type: "object",
@@ -73,16 +66,9 @@ export default pattern((state) => {
                 properties: {
                     element: {
                         $ref: "#/$defs/Item"
-                    },
-                    index: {
-                        type: "number"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {}
                     }
                 },
-                required: ["element", "params"],
+                required: ["element"],
                 $defs: {
                     Item: {
                         type: "object",

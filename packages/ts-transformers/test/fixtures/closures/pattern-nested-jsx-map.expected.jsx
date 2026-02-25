@@ -191,9 +191,6 @@ export default pattern(({ items }) => {
                     element: {
                         $ref: "#/$defs/Tag"
                     },
-                    index: {
-                        type: "number"
-                    },
                     params: {
                         type: "object",
                         properties: {
@@ -255,13 +252,9 @@ export default pattern(({ items }) => {
             properties: {
                 element: {
                     $ref: "#/$defs/Item"
-                },
-                params: {
-                    type: "object",
-                    properties: {}
                 }
             },
-            required: ["element", "params"],
+            required: ["element"],
             $defs: {
                 Item: {
                     type: "object",

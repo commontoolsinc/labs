@@ -61,13 +61,9 @@ export default pattern(({ showItems, items }) => {
             properties: {
                 element: {
                     $ref: "#/$defs/Item"
-                },
-                params: {
-                    type: "object",
-                    properties: {}
                 }
             },
-            required: ["element", "params"],
+            required: ["element"],
             $defs: {
                 Item: {
                     type: "object",

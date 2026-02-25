@@ -85,9 +85,6 @@ export default pattern((state) => {
                         },
                         required: ["price"]
                     },
-                    index: {
-                        type: "number"
-                    },
                     params: {
                         type: "object",
                         properties: {

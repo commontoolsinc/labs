@@ -38,15 +38,6 @@ export default pattern((state) => {
             }, ({ cost, state }) => cost * state.discount)}</span>), {
                 type: "object",
                 properties: {
-                    element: {
-                        type: "object",
-                        properties: {
-                            price: {
-                                type: "number"
-                            }
-                        },
-                        required: ["price"]
-                    },
                     params: {
                         type: "object",
                         properties: {
@@ -64,7 +55,7 @@ export default pattern((state) => {
                         required: ["state"]
                     }
                 },
-                required: ["element", "params"]
+                required: ["params"]
             } as const satisfies __ctHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"

@@ -11,13 +11,9 @@ export default pattern(({ items }) => {
         properties: {
             element: {
                 $ref: "#/$defs/TodoItem"
-            },
-            params: {
-                type: "object",
-                properties: {}
             }
         },
-        required: ["element", "params"],
+        required: ["element"],
         $defs: {
             TodoItem: {
                 type: "object",
@@ -46,16 +42,9 @@ export default pattern(({ items }) => {
         properties: {
             element: {
                 $ref: "#/$defs/TodoItem"
-            },
-            index: {
-                type: "number"
-            },
-            params: {
-                type: "object",
-                properties: {}
             }
         },
-        required: ["element", "params"],
+        required: ["element"],
         $defs: {
             TodoItem: {
                 type: "object",

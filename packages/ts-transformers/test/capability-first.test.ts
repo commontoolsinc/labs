@@ -221,12 +221,56 @@ const p = pattern((input: Writable<{ foo: string; bar: string }>) => input.key("
 );
 
 Deno.test(
+  "Capability-first: pattern explicit type arguments still shrink input paths",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern, type Writable } from "commontools";
+const p = pattern<Writable<{ foo: string; bar: string }>, { foo: string }>((input) => ({
+  foo: input.key("foo").get(),
+}));
+`;
+
+    const output = await transformSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, "asCell: true");
+    assertStringIncludes(output, '"foo"');
+    assert(!output.includes('"bar"'));
+  },
+);
+
+Deno.test(
   "Capability-first: derive input shrinks to observed key paths",
   async () => {
     const source = `/// <cts-enable />
 import { derive, type Writable } from "commontools";
 const state = {} as Writable<{ foo: string; bar: string }>;
 const d = derive(state, (input: Writable<{ foo: string; bar: string }>) => input.key("foo").get());
+`;
+
+    const output = await transformSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, "asCell: true");
+    assertStringIncludes(output, '"foo"');
+    assert(!output.includes('"bar"'));
+  },
+);
+
+Deno.test(
+  "Capability-first: derive explicit type arguments still shrink input paths",
+  async () => {
+    const source = `/// <cts-enable />
+import { derive, type Writable } from "commontools";
+const input = {} as Writable<{ foo: string; bar: string }>;
+const d = derive<Writable<{ foo: string; bar: string }>, string>(
+  input,
+  (value) => value.key("foo").get(),
+);
 `;
 
     const output = await transformSource(source, {
@@ -277,6 +321,27 @@ const fn = lift((input: Writable<{ foo: string; bar: string }>) => input);
     assertStringIncludes(output, "asOpaque: true");
     assertStringIncludes(output, '"foo"');
     assertStringIncludes(output, '"bar"');
+  },
+);
+
+Deno.test(
+  "Capability-first: lift explicit type arguments still shrink input paths",
+  async () => {
+    const source = `/// <cts-enable />
+import { lift, type Writable } from "commontools";
+const fn = lift<Writable<{ foo: string; bar: string }>, string>(
+  (input) => input.key("foo").get(),
+);
+`;
+
+    const output = await transformSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, "asCell: true");
+    assertStringIncludes(output, '"foo"');
+    assert(!output.includes('"bar"'));
   },
 );
 

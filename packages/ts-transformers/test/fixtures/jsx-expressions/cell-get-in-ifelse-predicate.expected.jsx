@@ -61,18 +61,12 @@ export default pattern(({ showHistory, messageCount, dismissedIndex }) => {
 }, {
     type: "object",
     properties: {
-        showHistory: {
-            type: "boolean"
-        },
-        messageCount: {
-            type: "number"
-        },
         dismissedIndex: {
             type: "number",
             asCell: true
         }
     },
-    required: ["showHistory", "messageCount", "dismissedIndex"]
+    required: ["dismissedIndex"]
 } as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {

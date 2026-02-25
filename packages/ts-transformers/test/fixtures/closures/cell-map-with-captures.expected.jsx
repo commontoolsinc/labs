@@ -44,9 +44,6 @@ export default pattern((state) => {
             }, ({ value, state }) => value * state.multiplier)}</span>), {
                 type: "object",
                 properties: {
-                    element: {
-                        type: "number"
-                    },
                     params: {
                         type: "object",
                         properties: {
@@ -64,7 +61,7 @@ export default pattern((state) => {
                         required: ["state"]
                     }
                 },
-                required: ["element", "params"]
+                required: ["params"]
             } as const satisfies __ctHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"

@@ -46,9 +46,6 @@ export default pattern((state) => {
                     element: {
                         $ref: "#/$defs/Item"
                     },
-                    index: {
-                        type: "number"
-                    },
                     params: {
                         type: "object",
                         properties: {

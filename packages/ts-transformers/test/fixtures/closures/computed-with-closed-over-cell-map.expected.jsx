@@ -42,9 +42,6 @@ export default function TestComputedWithClosedOverCellMap() {
     }, ({ numbers, multiplier }) => numbers.mapWithPattern(__ctHelpers.pattern(({ element: n, params: { multiplier } }) => n * multiplier.get(), {
         type: "object",
         properties: {
-            element: {
-                type: "number"
-            },
             params: {
                 type: "object",
                 properties: {
@@ -56,7 +53,7 @@ export default function TestComputedWithClosedOverCellMap() {
                 required: ["multiplier"]
             }
         },
-        required: ["element", "params"]
+        required: ["params"]
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema), {

@@ -65,24 +65,14 @@ export default pattern((_state: any) => {
                     element: {
                         type: "object",
                         properties: {
-                            id: {
-                                type: "string"
-                            },
                             name: {
                                 type: "string"
                             }
                         },
-                        required: ["id", "name"]
-                    },
-                    index: {
-                        type: "number"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {}
+                        required: ["name"]
                     }
                 },
-                required: ["element", "params"]
+                required: ["element"]
             } as const satisfies __ctHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"

@@ -84,22 +84,9 @@ export default pattern(({ items, hasItems }) => {
                     properties: {
                         element: {
                             $ref: "#/$defs/Item"
-                        },
-                        params: {
-                            type: "object",
-                            properties: {
-                                items: {
-                                    type: "array",
-                                    items: {
-                                        $ref: "#/$defs/Item"
-                                    },
-                                    asOpaque: true
-                                }
-                            },
-                            required: ["items"]
                         }
                     },
-                    required: ["element", "params"],
+                    required: ["element"],
                     $defs: {
                         Item: {
                             type: "object",
@@ -149,12 +136,9 @@ export default pattern(({ items, hasItems }) => {
             items: {
                 $ref: "#/$defs/Item"
             }
-        },
-        hasItems: {
-            type: "boolean"
         }
     },
-    required: ["items", "hasItems"],
+    required: ["items"],
     $defs: {
         Item: {
             type: "object",

@@ -962,6 +962,22 @@ function handlePatternSchemaInjection(
     }
   }
 
+  const originalInputTypeNode = inputTypeNode;
+  inputTypeNode = applyCapabilitySummaryToArgument(
+    builderFunction,
+    inputTypeNode,
+    inputType,
+    checker,
+    sourceFile,
+    factory,
+    capabilityRegistry,
+  ) ?? inputTypeNode;
+  if (inputTypeNode !== originalInputTypeNode) {
+    // Capability lowering produced a synthetic wrapped/shrunk node.
+    // Avoid reusing stale type references from the pre-shrunk node.
+    inputType = undefined;
+  }
+
   // Create both schemas
   const inputSchemaCall = createToSchemaCall(context, inputTypeNode);
   if (inputType && typeRegistry) {
@@ -1205,8 +1221,32 @@ export class SchemaInjectionTransformer extends Transformer {
             }
           }
 
+          let argumentTypeNode: ts.TypeNode = argumentType;
+          const deriveCallback = node.arguments[1];
+          if (
+            deriveCallback &&
+            (ts.isArrowFunction(deriveCallback) ||
+              ts.isFunctionExpression(deriveCallback))
+          ) {
+            const transformedArgumentType = applyCapabilitySummaryToArgument(
+              deriveCallback,
+              argumentType,
+              argumentTypeValue,
+              checker,
+              sourceFile,
+              factory,
+              capabilityRegistry,
+            );
+            if (transformedArgumentType) {
+              argumentTypeNode = transformedArgumentType;
+              if (argumentTypeNode !== argumentType) {
+                argumentTypeValue = undefined;
+              }
+            }
+          }
+
           return updateWithSchemas(
-            argumentType,
+            argumentTypeNode,
             argumentTypeValue,
             resultType,
             resultTypeValue,
@@ -1324,8 +1364,32 @@ export class SchemaInjectionTransformer extends Transformer {
             resultTypeValue = typeRegistry.get(resultType);
           }
 
+          let argumentTypeNode: ts.TypeNode = argumentType;
+          const liftCallback = node.arguments[0];
+          if (
+            liftCallback &&
+            (ts.isArrowFunction(liftCallback) ||
+              ts.isFunctionExpression(liftCallback))
+          ) {
+            const transformedArgumentType = applyCapabilitySummaryToArgument(
+              liftCallback,
+              argumentType,
+              argumentTypeValue,
+              checker,
+              sourceFile,
+              factory,
+              capabilityRegistry,
+            );
+            if (transformedArgumentType) {
+              argumentTypeNode = transformedArgumentType;
+              if (argumentTypeNode !== argumentType) {
+                argumentTypeValue = undefined;
+              }
+            }
+          }
+
           return updateWithSchemas(
-            argumentType,
+            argumentTypeNode,
             argumentTypeValue,
             resultType,
             resultTypeValue,

@@ -89,13 +89,9 @@ export default pattern(() => {
                 properties: {
                     element: {
                         $ref: "#/$defs/Charm"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {}
                     }
                 },
-                required: ["element", "params"],
+                required: ["element"],
                 $defs: {
                     Charm: {
                         type: "object",

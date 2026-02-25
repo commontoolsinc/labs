@@ -199,10 +199,6 @@ export default pattern((state) => {
         }, ({ x, state }) => x * state.factor)}</li>), {
             type: "object",
             properties: {
-                element: {
-                    type: "number",
-                    asOpaque: true
-                },
                 params: {
                     type: "object",
                     properties: {
@@ -220,7 +216,7 @@ export default pattern((state) => {
                     required: ["state"]
                 }
             },
-            required: ["element", "params"]
+            required: ["params"]
         } as const satisfies __ctHelpers.JSONSchema, {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
@@ -414,13 +410,9 @@ export default pattern((state) => {
                 properties: {
                     element: {
                         type: "string"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {}
                     }
                 },
-                required: ["element", "params"]
+                required: ["element"]
             } as const satisfies __ctHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
@@ -710,21 +702,14 @@ export default pattern((state) => {
                             name: {
                                 type: "string"
                             },
-                            age: {
-                                type: "number"
-                            },
                             active: {
                                 type: "boolean"
                             }
                         },
-                        required: ["name", "age", "active"]
-                    },
-                    params: {
-                        type: "object",
-                        properties: {}
+                        required: ["name", "active"]
                     }
                 },
-                required: ["element", "params"]
+                required: ["element"]
             } as const satisfies __ctHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"

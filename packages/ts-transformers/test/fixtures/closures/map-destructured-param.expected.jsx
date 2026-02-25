@@ -69,9 +69,6 @@ export default pattern((state) => {
           </div>), {
                 type: "object",
                 properties: {
-                    element: {
-                        $ref: "#/$defs/Point"
-                    },
                     params: {
                         type: "object",
                         properties: {
@@ -89,21 +86,7 @@ export default pattern((state) => {
                         required: ["state"]
                     }
                 },
-                required: ["element", "params"],
-                $defs: {
-                    Point: {
-                        type: "object",
-                        properties: {
-                            x: {
-                                type: "number"
-                            },
-                            y: {
-                                type: "number"
-                            }
-                        },
-                        required: ["x", "y"]
-                    }
-                }
+                required: ["params"]
             } as const satisfies __ctHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"

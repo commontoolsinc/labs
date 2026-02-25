@@ -308,13 +308,9 @@ export default pattern(({ items }) => {
                 properties: {
                     element: {
                         $ref: "#/$defs/Assignment"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {}
                     }
                 },
-                required: ["element", "params"],
+                required: ["element"],
                 $defs: {
                     Assignment: {
                         type: "object",

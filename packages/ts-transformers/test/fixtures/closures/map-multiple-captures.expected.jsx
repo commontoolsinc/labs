@@ -86,12 +86,9 @@ export default pattern((state) => {
                                     }
                                 },
                                 required: ["discount", "taxRate"]
-                            },
-                            multiplier: {
-                                type: "number"
                             }
                         },
-                        required: ["state", "multiplier"]
+                        required: ["state"]
                     }
                 },
                 required: ["element", "params"],

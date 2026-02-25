@@ -255,19 +255,9 @@ export default pattern(({ items, showInactive }) => {
                 properties: {
                     element: {
                         $ref: "#/$defs/Tag"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {
-                            showInactive: {
-                                type: "boolean",
-                                asOpaque: true
-                            }
-                        },
-                        required: ["showInactive"]
                     }
                 },
-                required: ["element", "params"],
+                required: ["element"],
                 $defs: {
                     Tag: {
                         type: "object",
@@ -312,19 +302,9 @@ export default pattern(({ items, showInactive }) => {
             properties: {
                 element: {
                     $ref: "#/$defs/Item"
-                },
-                params: {
-                    type: "object",
-                    properties: {
-                        showInactive: {
-                            type: "boolean",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["showInactive"]
                 }
             },
-            required: ["element", "params"],
+            required: ["element"],
             $defs: {
                 Item: {
                     type: "object",
