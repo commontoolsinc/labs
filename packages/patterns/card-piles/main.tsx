@@ -1,5 +1,7 @@
 /// <cts-enable />
 import {
+  action,
+  computed,
   Default,
   handler,
   NAME,
@@ -29,18 +31,18 @@ const RANKS = [
 type Suit = (typeof SUITS)[number];
 type Rank = (typeof RANKS)[number];
 
-interface Card {
+export interface Card {
   suit: Suit;
   rank: Rank;
 }
 
-const defaultPile1: Card[] = [
+export const defaultPile1: Card[] = [
   { suit: "hearts", rank: "A" },
   { suit: "spades", rank: "K" },
   { suit: "diamonds", rank: "7" },
 ];
 
-const defaultPile2: Card[] = [
+export const defaultPile2: Card[] = [
   { suit: "clubs", rank: "Q" },
   { suit: "hearts", rank: "10" },
   { suit: "spades", rank: "3" },
@@ -57,6 +59,8 @@ interface CardPilesOutput {
   pile1: Card[];
   pile2: Card[];
   shuffle: Stream<void>;
+  moveToPile1: Stream<{ detail: { sourceCell: Writable<Card> } }>;
+  moveToPile2: Stream<{ detail: { sourceCell: Writable<Card> } }>;
 }
 
 function getSuitSymbol(suit: Suit): string {
@@ -76,38 +80,14 @@ function getSuitColor(suit: Suit): string {
   return suit === "hearts" || suit === "diamonds" ? "#dc2626" : "#1e293b";
 }
 
-const moveToPile1 = handler<
+const moveToPile = handler<
   { detail: { sourceCell: Writable<Card> } },
-  { pile1: Writable<Card[]>; pile2: Writable<Card[]> }
->((event, { pile1, pile2 }) => {
+  { source: Writable<Card[]>; target: Writable<Card[]> }
+>((event, { source, target }) => {
   const sourceCard = event.detail?.sourceCell;
   if (!sourceCard) return;
-  pile2.remove(sourceCard);
-  pile1.push(sourceCard);
-});
-
-const moveToPile2 = handler<
-  { detail: { sourceCell: Writable<Card> } },
-  { pile1: Writable<Card[]>; pile2: Writable<Card[]> }
->((event, { pile1, pile2 }) => {
-  const sourceCard = event.detail?.sourceCell;
-  if (!sourceCard) return;
-  pile1.remove(sourceCard);
-  pile2.push(sourceCard);
-});
-
-const shufflePiles = handler<
-  void,
-  { pile1: Writable<Card[]>; pile2: Writable<Card[]> }
->((_, { pile1, pile2 }) => {
-  const all = [...pile1.get(), ...pile2.get()];
-  for (let i = all.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [all[i], all[j]] = [all[j], all[i]];
-  }
-  const mid = Math.ceil(all.length / 2);
-  pile1.set(all.slice(0, mid));
-  pile2.set(all.slice(mid));
+  source.remove(sourceCard);
+  target.push(sourceCard);
 });
 
 const cardStyle = {
@@ -151,8 +131,38 @@ const cardListStyle = {
   alignItems: "center",
 } as const;
 
+const emptyPileStyle = {
+  color: "var(--ct-color-text-secondary, #94a3b8)",
+  fontSize: "13px",
+  fontStyle: "italic",
+  textAlign: "center",
+  padding: "2rem 0.5rem",
+} as const;
+
 export default pattern<CardPilesInput, CardPilesOutput>(({ pile1, pile2 }) => {
-  const shuffle = shufflePiles({ pile1, pile2 });
+  const shuffle = action(() => {
+    const all = [...pile1.get(), ...pile2.get()];
+    for (let i = all.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [all[i], all[j]] = [all[j], all[i]];
+    }
+    const mid = Math.ceil(all.length / 2);
+    pile1.set(all.slice(0, mid));
+    pile2.set(all.slice(mid));
+  });
+
+  const moveToPile1 = moveToPile({ source: pile2, target: pile1 });
+  const moveToPile2 = moveToPile({ source: pile1, target: pile2 });
+
+  const pile1Label = computed(() => {
+    const count = pile1.get().length;
+    return `Pile 1 (${count} ${count === 1 ? "card" : "cards"})`;
+  });
+
+  const pile2Label = computed(() => {
+    const count = pile2.get().length;
+    return `Pile 2 (${count} ${count === 1 ? "card" : "cards"})`;
+  });
 
   return {
     [NAME]: "Card Piles",
@@ -172,10 +182,10 @@ export default pattern<CardPilesInput, CardPilesOutput>(({ pile1, pile2 }) => {
         >
           <ct-drop-zone
             accept="card,cell-link"
-            onct-drop={moveToPile1({ pile1, pile2 })}
+            onct-drop={moveToPile1}
           >
             <div style={pileStyle}>
-              <div style={pileLabelStyle}>PILE 1</div>
+              <div style={pileLabelStyle}>{pile1Label}</div>
               <div style={cardListStyle}>
                 {pile1.map((card) => (
                   <ct-drag-source $cell={card} type="card">
@@ -219,16 +229,21 @@ export default pattern<CardPilesInput, CardPilesOutput>(({ pile1, pile2 }) => {
                     </div>
                   </ct-drag-source>
                 ))}
+                {computed(() =>
+                  pile1.get().length === 0
+                    ? <div style={emptyPileStyle}>Drop cards here</div>
+                    : null
+                )}
               </div>
             </div>
           </ct-drop-zone>
 
           <ct-drop-zone
             accept="card,cell-link"
-            onct-drop={moveToPile2({ pile1, pile2 })}
+            onct-drop={moveToPile2}
           >
             <div style={pileStyle}>
-              <div style={pileLabelStyle}>PILE 2</div>
+              <div style={pileLabelStyle}>{pile2Label}</div>
               <div style={cardListStyle}>
                 {pile2.map((card) => (
                   <ct-drag-source $cell={card} type="card">
@@ -272,6 +287,11 @@ export default pattern<CardPilesInput, CardPilesOutput>(({ pile1, pile2 }) => {
                     </div>
                   </ct-drag-source>
                 ))}
+                {computed(() =>
+                  pile2.get().length === 0
+                    ? <div style={emptyPileStyle}>Drop cards here</div>
+                    : null
+                )}
               </div>
             </div>
           </ct-drop-zone>
@@ -281,5 +301,7 @@ export default pattern<CardPilesInput, CardPilesOutput>(({ pile1, pile2 }) => {
     pile1,
     pile2,
     shuffle,
+    moveToPile1,
+    moveToPile2,
   };
 });

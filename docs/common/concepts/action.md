@@ -103,4 +103,4 @@ However, `action()` is preferred for:
 |----------|----------|
 | `action()` | Default choice - closes over pattern state |
 | Arrow function | Simple one-liners in JSX |
-| `handler()` | Reusable logic with different bindings, or exported streams |
+| `handler()` | Reusable logic with different state bindings |
