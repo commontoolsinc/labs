@@ -743,6 +743,11 @@ export class Scheduler {
                 error,
               );
 
+              if (!shouldRetryCommitError(error)) {
+                this.retries.delete(action);
+                return;
+              }
+
               this.retries.set(action, (this.retries.get(action) ?? 0) + 1);
               if (this.retries.get(action)! < MAX_RETRIES_FOR_REACTIVE) {
                 // Re-schedule the action to run again on conflict failure.
@@ -2112,7 +2117,11 @@ export class Scheduler {
             // to be the same order as the original event, but it's close
             // enough, especially for a series of event that act on the same
             // conflicting data.
-            if (commitError && retriesLeft > 0) {
+            if (
+              commitError &&
+              retriesLeft > 0 &&
+              shouldRetryCommitError(commitError)
+            ) {
               logger.warn(
                 "scheduler",
                 `Event handler transaction failed, retrying (${retriesLeft} retries left)`,
@@ -2691,6 +2700,10 @@ function isCfcCommitError(error: unknown): error is CommitError {
     name === "CfcPreparedDigestMismatchError" ||
     name === "CfcPrepareSchemaUnavailableError" ||
     name === "CfcSchemaHashMismatchError";
+}
+
+function shouldRetryCommitError(error: CommitError): boolean {
+  return !isCfcCommitError(error);
 }
 
 function commitWithCfcPrepare(
