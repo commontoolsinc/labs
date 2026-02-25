@@ -12,7 +12,10 @@ import type {
 import { cloneIfNecessary } from "@commontools/memory/storable-value";
 import { createCell, isCell } from "./cell.ts";
 import { readMaybeLink, resolveLink } from "./link-resolution.ts";
-import { type IExtendedStorageTransaction } from "./storage/interface.ts";
+import {
+  type IExtendedStorageTransaction,
+  type Metadata,
+} from "./storage/interface.ts";
 import { getTransactionForChildCells } from "./storage/extended-storage-transaction.ts";
 import { type Runtime } from "./runtime.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
@@ -22,6 +25,7 @@ import {
 } from "./query-result-proxy.ts";
 import { toCell } from "./back-to-cell.ts";
 import { markCfcRelevantForSchema } from "./cfc/relevance.ts";
+import { CFC_READ_MAX_CONFIDENTIALITY_MARKER } from "./cfc/internal-markers.ts";
 import {
   combineSchema,
   IMemorySpaceValueAddress,
@@ -354,6 +358,26 @@ function annotateWithBackToCellSymbols(
   return value;
 }
 
+function readIfcInputMeta(schema: JSONSchema | undefined): Metadata | undefined {
+  if (!isObject(schema) || !isObject(schema.ifc)) {
+    return undefined;
+  }
+  const rawMaxConfidentiality = (schema.ifc as Record<string, unknown>)
+    .maxConfidentiality;
+  if (!Array.isArray(rawMaxConfidentiality)) {
+    return undefined;
+  }
+  const maxConfidentiality = rawMaxConfidentiality.filter(
+    (entry): entry is string => typeof entry === "string" && entry.length > 0,
+  );
+  if (maxConfidentiality.length === 0) {
+    return undefined;
+  }
+  return {
+    [CFC_READ_MAX_CONFIDENTIALITY_MARKER]: maxConfidentiality,
+  };
+}
+
 export interface ValidateAndTransformOptions {
   /** When true, also read into each Cell created for asCell fields to capture dependencies */
   traverseCells?: boolean;
@@ -464,10 +488,18 @@ export function validateAndTransform(
     type,
     path: ["value", ...path],
   };
-  // Get the full value without telling the scheduler. The traverse method will
-  // notify the scheduler for shallow reads as they occur.
-  const value = tx.readOrThrow(address, { meta: ignoreReadForScheduling });
-  const doc = { address, value: value };
+  const readMeta = readIfcInputMeta(ref.schema ?? link.schema);
+  const mergedReadMeta = { ...ignoreReadForScheduling, ...readMeta };
+  const doc = {
+    address,
+    // Read the full document without scheduling it directly. The traverser
+    // records the relevant shallow reads, while CFC input checks still receive
+    // read metadata derived from the schema.
+    value: tx!.readOrThrow(
+      address,
+      { meta: mergedReadMeta },
+    ),
+  };
   // If we have a ref with a schema, use that; otherwise, use the link's schema
   const selector = {
     path: doc.address.path,

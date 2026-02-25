@@ -20,6 +20,13 @@ const ifcStringSchema: JSONSchema = {
   ifc: { classification: ["secret"] },
 };
 
+const maxConfidentialInputSchema = {
+  type: "number",
+  ifc: {
+    maxConfidentiality: ["confidential"],
+  },
+} as unknown as JSONSchema;
+
 describe("CFC scheduler prepare shim", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
@@ -294,6 +301,56 @@ describe("CFC scheduler prepare shim", () => {
         sourceCell.withTx(actionTx).asSchema(ifcNumberSchema).get() ?? 0,
       );
       targetCell.withTx(actionTx).asSchema(ifcNumberSchema).set(source + 1);
+    };
+
+    await runtime.scheduler.run(action);
+    await runtime.scheduler.idle();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await runtime.scheduler.idle();
+    await targetCell.pull();
+
+    expect(attempts).toBe(1);
+    expect(targetCell.get()).toBe(0);
+  });
+
+  it("does not retry reactive actions on maxConfidentiality input failures", async () => {
+    let tx = runtime.edit();
+    const sourceCell = runtime.getCell<number>(
+      space,
+      "cfc-prepare-maxconf-reactive-source",
+      undefined,
+      tx,
+    );
+    const targetCell = runtime.getCell<number>(
+      space,
+      "cfc-prepare-maxconf-reactive-target",
+      undefined,
+      tx,
+    );
+    sourceCell.set(10);
+    targetCell.set(0);
+    await tx.commit();
+
+    tx = runtime.edit();
+    tx.writeOrThrow({
+      space,
+      id: sourceCell.getAsNormalizedFullLink().id,
+      type: "application/json",
+      path: ["cfc", "labels"],
+    }, {
+      "/": {
+        classification: ["secret"],
+      },
+    });
+    await tx.commit();
+
+    let attempts = 0;
+    const action = (actionTx: IExtendedStorageTransaction) => {
+      attempts++;
+      const source = Number(
+        sourceCell.withTx(actionTx).asSchema(maxConfidentialInputSchema).get() ?? 0,
+      );
+      targetCell.withTx(actionTx).set(source + 1);
     };
 
     await runtime.scheduler.run(action);

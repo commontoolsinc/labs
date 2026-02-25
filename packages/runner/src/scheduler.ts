@@ -3474,7 +3474,8 @@ function isCfcCommitError(error: unknown): error is CommitError {
   return name === "CfcPrepareRequiredError" ||
     name === "CfcPreparedDigestMismatchError" ||
     name === "CfcPrepareSchemaUnavailableError" ||
-    name === "CfcSchemaHashMismatchError";
+    name === "CfcSchemaHashMismatchError" ||
+    name === "CfcInputRequirementViolationError";
 }
 
 function shouldRetryCommitError(error: CommitError): boolean {

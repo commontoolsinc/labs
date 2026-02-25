@@ -1,6 +1,7 @@
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import type {
+  ICfcInputRequirementViolationError,
   ICfcPrepareSchemaUnavailableError,
   ICfcSchemaHashMismatchError,
   IExtendedStorageTransaction,
@@ -8,13 +9,19 @@ import type {
   Labels,
 } from "../storage/interface.ts";
 import { computeCfcActivityDigest } from "./activity-digest.ts";
-import { canonicalizeBoundaryActivity } from "./canonical-activity.ts";
+import {
+  type CanonicalBoundaryRead,
+  canonicalizeBoundaryActivity,
+} from "./canonical-activity.ts";
 import { partitionConsumedBoundaryReads } from "./consumed-reads.ts";
 import {
   collectConsumedInputLabels,
   consumedReadEntityKey,
 } from "./consumed-input-labels.ts";
-import { internalVerifierReadMeta } from "./internal-markers.ts";
+import {
+  internalVerifierReadMeta,
+  readMaxConfidentialityFromMeta,
+} from "./internal-markers.ts";
 import { getCfcWriteSchemaContext } from "./schema-context.ts";
 import { computeCfcSchemaHash } from "./schema-hash.ts";
 
@@ -50,6 +57,25 @@ function CfcSchemaHashMismatchError(
     space: entity.space,
     id: entity.id,
     type: entity.type,
+  };
+}
+
+function CfcInputRequirementViolationError(
+  read: CanonicalBoundaryRead,
+  maxConfidentiality: readonly string[],
+  actualClassification: string,
+): ICfcInputRequirementViolationError {
+  return {
+    name: "CfcInputRequirementViolationError",
+    message:
+      "CFC prepare input requirement failed: consumed input exceeds maxConfidentiality",
+    requirement: "maxConfidentiality",
+    space: read.space as IMemorySpaceAddress["space"],
+    id: read.id as IMemorySpaceAddress["id"],
+    type: read.type,
+    path: read.path,
+    maxConfidentiality: [...maxConfidentiality],
+    actualClassification,
   };
 }
 
@@ -145,12 +171,27 @@ function computePreparedLabels(schema: JSONSchema): Record<string, Labels> {
   };
 }
 
+function classificationSatisfiesMaxConfidentiality(
+  classification: string,
+  maxConfidentiality: readonly string[],
+  cfc: ContextualFlowControl,
+): boolean {
+  for (const maxClassification of maxConfidentiality) {
+    try {
+      const joined = cfc.lub(new Set([classification, maxClassification]));
+      if (joined === maxClassification) {
+        return true;
+      }
+    } catch {
+      // Unknown classifications are treated as non-matching for this bound.
+    }
+  }
+  return false;
+}
+
 function verifyInputRequirementsForAttempt(
   tx: IExtendedStorageTransaction,
 ): void {
-  // Input requirement policy checks are added in a later phase.
-  // For now, we still gather effective labels for consumed reads while
-  // keeping verifier-internal reads separate from consumed handler inputs.
   const { consumedReads } = partitionConsumedBoundaryReads(tx.journal.activity());
   const labelsByEntity = new Map<string, Record<string, Labels>>();
 
@@ -169,7 +210,29 @@ function verifyInputRequirementsForAttempt(
     labelsByEntity.set(key, normalizeLabelsByPath(rawLabels));
   }
 
-  collectConsumedInputLabels(consumedReads, labelsByEntity);
+  const consumedReadLabels = collectConsumedInputLabels(consumedReads, labelsByEntity);
+  const cfc = new ContextualFlowControl();
+  for (const consumed of consumedReadLabels) {
+    const maxConfidentiality = readMaxConfidentialityFromMeta(consumed.read.meta);
+    if (!maxConfidentiality || maxConfidentiality.length === 0) {
+      continue;
+    }
+    const actualClassification =
+      consumed.effectiveLabel?.classification?.[0] ?? "unclassified";
+    if (
+      !classificationSatisfiesMaxConfidentiality(
+        actualClassification,
+        maxConfidentiality,
+        cfc,
+      )
+    ) {
+      throw CfcInputRequirementViolationError(
+        consumed.read,
+        maxConfidentiality,
+        actualClassification,
+      );
+    }
+  }
 }
 
 export async function prepareBoundaryCommit(
