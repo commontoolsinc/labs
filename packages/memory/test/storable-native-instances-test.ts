@@ -843,6 +843,34 @@ describe("storable-native-instances", () => {
       expect(tagFromNativeClass(WeakMap)).toBe(null);
       expect(tagFromNativeClass(Promise)).toBe(null);
     });
+
+    it("returns HasToJSON for class with toJSON on prototype", () => {
+      class WithToJSON {
+        toJSON() {
+          return { x: 1 };
+        }
+      }
+      expect(tagFromNativeClass(WithToJSON)).toBe(NATIVE_TAGS.HasToJSON);
+    });
+
+    it("returns HasToJSON for subclass inheriting toJSON", () => {
+      class Base {
+        toJSON() {
+          return "base";
+        }
+      }
+      class Sub extends Base {}
+      expect(tagFromNativeClass(Sub)).toBe(NATIVE_TAGS.HasToJSON);
+    });
+
+    it("returns Date tag for Date (not HasToJSON despite Date.prototype.toJSON)", () => {
+      expect(tagFromNativeClass(Date)).toBe(NATIVE_TAGS.Date);
+    });
+
+    it("returns null for class without toJSON", () => {
+      class Plain {}
+      expect(tagFromNativeClass(Plain)).toBe(null);
+    });
   });
 
   describe("isConvertibleNativeInstance", () => {
