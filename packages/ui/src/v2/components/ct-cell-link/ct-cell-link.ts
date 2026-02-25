@@ -185,8 +185,15 @@ export class CTCellLink extends BaseElement {
     this._cleanupSubscription();
 
     if (this._resolvedCell) {
-      // Subscribe to the cell to get updates for NAME
-      this._unsubscribe = this._resolvedCell.subscribe((val) => {
+      // Subscribe with a minimal schema that only resolves $NAME.
+      // Without this, cells from $cell bindings arrive with schema: {}
+      // (stripped from the VDOM prop's asCell wrapper), causing
+      // handleCellSubscribe to walk the entire piece output graph.
+      const namedCell = this._resolvedCell.asSchema<{ [NAME]?: string }>({
+        type: "object",
+        properties: { [NAME]: { type: "string" } },
+      });
+      this._unsubscribe = namedCell.subscribe((val) => {
         this._updateNameFromValue(val);
       });
     }

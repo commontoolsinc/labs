@@ -428,6 +428,12 @@ export class RuntimeProcessor {
         typeof request.cell.schema === "object" &&
         Object.keys(request.cell.schema).length > 0;
       if (!hasSchema && isCellResult(value)) {
+        console.warn(
+          `[handleCellSubscribe] Cell subscription without schema produced ` +
+            `CellResult proxy — converting to link. This may indicate a ` +
+            `missing schema declaration. cell=${request.cell.id.slice(-20)} ` +
+            `path=${request.cell.path.join("/")}`,
+        );
         const converted = getCellOrThrow(value).getAsLink({
           includeSchema: true,
           keepAsCell: true,
