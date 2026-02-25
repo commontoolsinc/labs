@@ -114,7 +114,7 @@ const handleExternalPin = handler<
 /** Wish for a #tag or a custom query with optional linked context. Automatically navigates to the result. */
 type WishToolParameters = { query: string; context?: Record<string, any> };
 
-const wishTool = pattern<WishToolParameters>(
+const wishTool = pattern<WishToolParameters, boolean>(
   ({ query, context }) => {
     const wishResult = wish<any>({
       query,

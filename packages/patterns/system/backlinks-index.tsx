@@ -6,6 +6,7 @@ import {
   NAME,
   pattern,
   UI,
+  type VNode,
   Writable,
 } from "commontools";
 
@@ -127,7 +128,7 @@ type Entry = {
 };
 
 /** Sub-pattern to render a single entry row with its backlinks. */
-const EntryRow = pattern<Entry, { [UI]: any }>(({ piece, backlinks }) => {
+const EntryRow = pattern<Entry, { [UI]: VNode }>(({ piece, backlinks }) => {
   return {
     [UI]: (
       <ct-card>
