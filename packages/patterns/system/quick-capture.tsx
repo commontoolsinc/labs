@@ -105,10 +105,17 @@ const createNoteHandler = handler<
 });
 
 const createNotebookHandler = handler<
-  { title: string },
+  { title: string; notes?: Array<{ title: string; content: string }> },
   { allPieces: Writable<MentionablePiece[]> }
->(({ title }, { allPieces }) => {
-  const notebook = Notebook({ title });
+>(({ title, notes: notesData }, { allPieces }) => {
+  const notes = (notesData ?? []).map((data) =>
+    Note({
+      title: data.title,
+      content: data.content,
+      noteId: generateId(),
+    })
+  );
+  const notebook = Notebook({ title, notes });
   allPieces.push(notebook as any);
   return notebook;
 });
@@ -151,7 +158,7 @@ Process:
    - Notes: "📝 " (📝 + space) — e.g. a note titled "Meeting with Alice" displays as "📝 Meeting with Alice"
    - Notebooks: "📓 " (📓 + space) — e.g. "📓 Capture Log (3)"
    When creating wiki-links, you MUST include the emoji prefix for the link to resolve. Example: [[📝 Meeting with Alice]], NOT [[Meeting with Alice]]. Always match the exact title format you see in searchSpace results for existing content.
-6. Use createNote to create each note individually. Each call returns the note cell with its address, so you can reference it precisely in subsequent notes.
+6. Use createNote to create each note individually. Note: the tool calls won't return note IDs, but you can use listMentionable or searchSpace to find notes after they've been created.
 7. After creating all content notes, create a reflection note titled something like "Capture Summary: [brief topic] — [date]" that contains:
    - A link to the transcript note from step 1
    - A list of all notes created, with [[Title]] links to each
@@ -184,7 +191,7 @@ ${profileSection}`;
       createNotebook: {
         handler: createNotebookHandler({ allPieces }),
         description:
-          "Create a notebook with a title. Use sparingly — only for the 'Capture Log' notebook or when there's a clear reason to group notes.",
+          "Create a notebook with a title and optional initial notes (each with title and content). Notes are created as real Note instances inside the notebook. Use sparingly — only for the 'Capture Log' notebook or when there's a clear reason to group notes.",
       },
     };
     const dialogParams = {
