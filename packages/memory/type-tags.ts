@@ -1,3 +1,9 @@
+import {
+  StorableEpochDays,
+  StorableEpochNsec,
+} from "./storable-native-instances.ts";
+import { StorableContentId } from "./storable-content-id.ts";
+
 /**
  * Canonical type tags for the `/<Type>@<Version>` wire format. Collected in a
  * single frozen object so that use sites are type-checked for valid tag
@@ -35,11 +41,19 @@ export const TAGS = Object.freeze(
 // ---------------------------------------------------------------------------
 
 /**
- * Tags identifying native JS types that the storable system can convert.
- * These are distinct from wire-format `TAGS` -- they identify *what the native
- * value is*, not what storable type it becomes after conversion. For example,
- * a `Date` is identified as `NATIVE_TAGS.Date` here; the conversion layer
- * decides it becomes a `StorableEpochNsec` with wire tag `TAGS.EpochNsec`.
+ * Tags identifying classes that the storable system recognizes for dispatch.
+ * These are distinct from wire-format `TAGS` -- they identify *what the value
+ * is*, not what storable type it becomes after conversion.
+ *
+ * Covers two categories:
+ * - **Native JS builtins**: Array, Object, Error, Map, Set, Date, Uint8Array.
+ * - **System-defined value types**: StorableEpochNsec, StorableEpochDays,
+ *   StorableContentId -- classes defined by this system that behave like
+ *   primitives (always frozen, pass through conversion unchanged) but aren't
+ *   under the open-ended `StorableInstance` umbrella.
+ *
+ * Additionally, `HasToJSON` is a synthetic tag for values whose class provides
+ * a `toJSON()` method but isn't otherwise recognized.
  */
 export const NATIVE_TAGS = Object.freeze(
   {
@@ -50,6 +64,9 @@ export const NATIVE_TAGS = Object.freeze(
     Set: "Set",
     Date: "Date",
     Uint8Array: "Uint8Array",
+    EpochNsec: "EpochNsec",
+    EpochDays: "EpochDays",
+    ContentId: "ContentId",
     HasToJSON: "HasToJSON",
   } as const,
 );
@@ -58,9 +75,9 @@ export const NATIVE_TAGS = Object.freeze(
 export type NativeTag = typeof NATIVE_TAGS[keyof typeof NATIVE_TAGS];
 
 /**
- * Canonical mapping from a native JS constructor to its native-instance tag.
- * Returns the tag string if the constructor is a recognized convertible native
- * type, or `null` otherwise.
+ * Canonical mapping from a constructor to its native-instance tag. Returns the
+ * tag string if the constructor is a recognized type (JS builtins or
+ * system-defined special primitives), or `null` otherwise.
  *
  * Uses a `switch` on the constructor identity for O(1) dispatch (instead of
  * sequential `instanceof` checks). Falls back to `instanceof Error` on the
@@ -95,6 +112,12 @@ export function tagFromNativeClass(
       return NATIVE_TAGS.Date;
     case Uint8Array:
       return NATIVE_TAGS.Uint8Array;
+    case StorableEpochNsec:
+      return NATIVE_TAGS.EpochNsec;
+    case StorableEpochDays:
+      return NATIVE_TAGS.EpochDays;
+    case StorableContentId:
+      return NATIVE_TAGS.ContentId;
 
     default:
       // Catch exotic Error subclasses (e.g. custom subclasses with
