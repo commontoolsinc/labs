@@ -52,8 +52,10 @@ export function toRichStorableValue(
 
   // StorableInstance values (including StorableError, UnknownStorable, etc.)
   // pass through as-is -- they are already valid StorableValue members.
+  // Note: we do NOT freeze the incoming value. Conversion functions must
+  // not modify the caller's argument. The deep conversion path creates
+  // its own copies when freezing is needed.
   if (isStorableInstance(value)) {
-    if (freeze) Object.freeze(value);
     return value as StorableValueLayer;
   }
 
@@ -85,16 +87,28 @@ export function toRichStorableValue(
   }
 
   // For arrays, return as-is without converting `undefined` to `null` or
-  // densifying sparse arrays.
+  // densifying sparse arrays. When freezing, return a frozen shallow copy
+  // rather than freezing the caller's array in place.
   if (Array.isArray(value)) {
-    if (freeze) Object.freeze(value);
+    if (freeze) {
+      if (Object.isFrozen(value)) return value;
+      const copy = new Array(value.length);
+      for (let i = 0; i < value.length; i++) {
+        if (i in value) copy[i] = value[i];
+      }
+      return Object.freeze(copy);
+    }
     return value;
   }
 
   // For all remaining types, apply the same logic as legacy toStorableValue.
+  // When freezing, copy the result if it's an object that might be the
+  // caller's original value (plain objects pass through from
+  // toRichStorableValueBase). Never freeze the caller's argument in place.
   const result = toRichStorableValueBase(value);
   if (freeze && result !== null && typeof result === "object") {
-    Object.freeze(result);
+    if (Object.isFrozen(result)) return result;
+    return Object.freeze({ ...result });
   }
   return result;
 }
@@ -272,9 +286,11 @@ function toDeepRichStorableValueInternal(
   }
 
   // Try to convert the top level via the rich shallow converter.
+  // Pass freeze=false: the deep path handles freezing its own newly-built
+  // results; the shallow converter should not freeze anything.
   let value: StorableValueLayer;
   try {
-    value = toRichStorableValue(original);
+    value = toRichStorableValue(original, false);
   } catch (e) {
     if (isOriginalRecord) {
       converted.delete(original);
@@ -325,9 +341,9 @@ function toDeepRichStorableValueInternal(
 
   // Other StorableInstance values (Cell, Stream, UnknownStorable, etc.)
   // don't need recursion -- their [DECONSTRUCT] implementations return
-  // proper StorableValue.
+  // proper StorableValue. We do not freeze protocol objects; they are
+  // managed by the caller.
   if (isStorableInstance(value)) {
-    if (freeze) Object.freeze(value);
     if (isOriginalRecord) {
       converted.set(original, value);
     }

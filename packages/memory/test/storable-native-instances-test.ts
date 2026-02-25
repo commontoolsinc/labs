@@ -21,7 +21,10 @@ import {
   StorableUint8Array,
 } from "../storable-native-instances.ts";
 import { FrozenMap, FrozenSet } from "../frozen-builtins.ts";
-import { toRichStorableValue } from "../rich-storable-value.ts";
+import {
+  toDeepRichStorableValue,
+  toRichStorableValue,
+} from "../rich-storable-value.ts";
 import {
   NATIVE_TAGS,
   tagFromNativeClass,
@@ -859,6 +862,46 @@ describe("storable-native-instances", () => {
       // freeze=false should still return the same instance (not a copy).
       expect(toRichStorableValue(nsec, false)).toBe(nsec);
       expect(toRichStorableValue(days, false)).toBe(days);
+    });
+  });
+
+  describe("toRichStorableValue does not freeze caller arguments", () => {
+    it("does not freeze the original array", () => {
+      const arr = [1, 2, 3];
+      toRichStorableValue(arr, true);
+      expect(Object.isFrozen(arr)).toBe(false);
+    });
+
+    it("does not freeze the original plain object", () => {
+      const obj = { a: 1, b: 2 };
+      toRichStorableValue(obj, true);
+      expect(Object.isFrozen(obj)).toBe(false);
+    });
+
+    it("returns a frozen copy for arrays when freeze=true", () => {
+      const arr = [1, 2, 3];
+      const result = toRichStorableValue(arr, true);
+      expect(Object.isFrozen(result)).toBe(true);
+      expect(result).not.toBe(arr);
+    });
+
+    it("returns a frozen copy for plain objects when freeze=true", () => {
+      const obj = { a: 1, b: 2 };
+      const result = toRichStorableValue(obj, true);
+      expect(Object.isFrozen(result)).toBe(true);
+      expect(result).not.toBe(obj);
+    });
+
+    it("deep conversion does not freeze the original array", () => {
+      const arr = [1, 2, 3];
+      toDeepRichStorableValue(arr, true);
+      expect(Object.isFrozen(arr)).toBe(false);
+    });
+
+    it("deep conversion does not freeze the original plain object", () => {
+      const obj = { a: 1, b: 2 };
+      toDeepRichStorableValue(obj, true);
+      expect(Object.isFrozen(obj)).toBe(false);
     });
   });
 });
