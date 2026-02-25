@@ -48,13 +48,17 @@ const encoder = new TextEncoder();
 async function main() {
   const args = parseArgs(Deno.args, {
     string: ["api-url", "space", "identity"],
+    boolean: ["debug"],
     collect: ["space"],
     default: {
       "api-url": Deno.env.get("CT_API_URL") ?? "",
       space: [] as string[],
       identity: Deno.env.get("CT_IDENTITY") ?? "",
+      debug: false,
     },
   });
+
+  const debug = args.debug;
 
   const mountpoint = args._[0] as string;
   if (!mountpoint) {
@@ -1357,6 +1361,19 @@ async function main() {
           notifySupported = false;
           break;
         }
+      }
+    };
+    bridge.onInvalidateInode = (ino: bigint) => {
+      if (unmounting) return;
+      // Invalidate all cached data for this inode (off=0, len=-1 means all)
+      const ret = fuse.symbols.fuse_lowlevel_notify_inval_inode(
+        chan,
+        ino,
+        0n,
+        -1n,
+      );
+      if (debug) {
+        console.log(`notify_inval_inode(ino=${ino}) => ${ret}`);
       }
     };
   }

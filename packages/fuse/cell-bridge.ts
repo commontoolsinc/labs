@@ -24,8 +24,10 @@ export interface WritePath {
   piece: PieceController;
 }
 
-/** Callback to invalidate kernel cache entries. */
+/** Callback to invalidate kernel cache entries (by name under a parent). */
 export type InvalidateCallback = (parentIno: bigint, names: string[]) => void;
+/** Callback to invalidate cached attrs/data for an inode (forces readdir refresh). */
+export type InvalidateInodeCallback = (ino: bigint) => void;
 
 /** Per-space state after connection. */
 export interface SpaceState {
@@ -51,6 +53,7 @@ export class CellBridge {
   knownSpaces: Map<string, string> = new Map();
   /** Callback for kernel cache invalidation (set by mod.ts after mount). */
   onInvalidate: InvalidateCallback | null = null;
+  onInvalidateInode: InvalidateInodeCallback | null = null;
   private identity: string = "";
   private apiUrl: string = "";
   private connecting: Set<string> = new Set();
@@ -474,10 +477,10 @@ export class CellBridge {
     // Update index and invalidate
     this.updateIndexJson(state);
     if (this.onInvalidate) {
+      // Invalidate child entries under pieces/
       const invalidNames = [
         ...toRemove,
         ...toAdd.map((p) => {
-          // Find the name we assigned
           for (const [n, id] of state.pieceMap) {
             if (id === p.id) return n;
           }
@@ -486,6 +489,12 @@ export class CellBridge {
         ".index.json",
       ];
       this.onInvalidate(state.piecesIno, invalidNames);
+      // Also invalidate "pieces" entry on the space dir so readdir refreshes
+      this.onInvalidate(state.spaceIno, ["pieces"]);
+    }
+    // Invalidate cached inode data for pieces dir (forces readdir refresh)
+    if (this.onInvalidateInode) {
+      this.onInvalidateInode(state.piecesIno);
     }
   }
 
