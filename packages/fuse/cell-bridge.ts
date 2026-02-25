@@ -30,13 +30,18 @@ export type InvalidateCallback = (parentIno: bigint, names: string[]) => void;
 /** Per-space state after connection. */
 export interface SpaceState {
   manager: PieceManager;
+  pieces: PiecesController;
   spaceIno: bigint;
   piecesIno: bigint;
   entitiesIno: bigint;
   pieceMap: Map<string, string>; // name → entity ID
   pieceControllers: Map<string, PieceController>; // name → controller
+  /** Per-piece subscription cancellers, keyed by piece name. */
+  pieceSubs: Map<string, Cancel[]>;
   did: string;
   unsubscribes: Cancel[];
+  /** Used names set for collision resolution. */
+  usedNames: Set<string>;
 }
 
 export class CellBridge {
@@ -339,72 +344,167 @@ export class CellBridge {
       "object",
     );
 
-    // Fetch all pieces
+    const state: SpaceState = {
+      manager,
+      pieces,
+      spaceIno,
+      piecesIno,
+      entitiesIno,
+      pieceMap: new Map(),
+      pieceControllers: new Map(),
+      pieceSubs: new Map(),
+      did: spaceDid,
+      unsubscribes: [],
+      usedNames: new Set(),
+    };
+
+    // Fetch all pieces and populate tree
     const allPieces = await pieces.getAllPieces();
     console.log(`[${spaceName}] Found ${allPieces.length} pieces`);
 
-    // Track name → entity ID, name → controller, and subscription cleanup
-    const pieceMap = new Map<string, string>();
-    const pieceControllers = new Map<string, PieceController>();
-    const unsubscribes: Cancel[] = [];
-
-    // Track used names to resolve collisions (e.g., todo-app, todo-app-2)
-    const usedNames = new Set<string>();
-
     for (const piece of allPieces) {
-      let name = piece.name() || piece.id;
-      if (usedNames.has(name)) {
-        let suffix = 2;
-        while (usedNames.has(`${name}-${suffix}`)) suffix++;
-        name = `${name}-${suffix}`;
-      }
-      usedNames.add(name);
-
-      pieceMap.set(name, piece.id);
-      pieceControllers.set(name, piece);
-
-      const pieceIno = await this.loadPieceTree(
-        piece,
-        piecesIno,
-        name,
-        spaceName,
-      );
-
-      // entities/<entity-hash>/ — direct cell access by entity ID
-      // (populated on demand, not symlinked to pieces/)
-
-      // Subscribe to cell changes
-      const subs = await this.subscribePiece(
-        piece,
-        pieceIno,
-        name,
-        spaceName,
-      );
-      unsubscribes.push(...subs);
+      await this.addPieceToSpace(state, piece, spaceName);
     }
 
-    // pieces/.index.json: name → entity ID mapping
+    // pieces/.index.json
+    this.updateIndexJson(state);
+
+    // Subscribe to piece list changes so new/removed pieces update the tree
+    const piecesCell = await manager.getPieces();
+    const piecesListCancel = piecesCell.sink(() => {
+      setTimeout(() => {
+        this.syncPieceList(state, spaceName).catch((e) => {
+          console.error(`[${spaceName}] Piece list sync error: ${e}`);
+        });
+      }, 0);
+    });
+    state.unsubscribes.push(piecesListCancel);
+
+    return state;
+  }
+
+  /**
+   * Add a single piece to a space's tree, subscribe to its cells.
+   * Returns the assigned display name.
+   */
+  private async addPieceToSpace(
+    state: SpaceState,
+    piece: PieceController,
+    spaceName: string,
+  ): Promise<string> {
+    let name = piece.name() || piece.id;
+    if (state.usedNames.has(name)) {
+      let suffix = 2;
+      while (state.usedNames.has(`${name}-${suffix}`)) suffix++;
+      name = `${name}-${suffix}`;
+    }
+    state.usedNames.add(name);
+
+    state.pieceMap.set(name, piece.id);
+    state.pieceControllers.set(name, piece);
+
+    const pieceIno = await this.loadPieceTree(
+      piece,
+      state.piecesIno,
+      name,
+      spaceName,
+    );
+
+    const subs = await this.subscribePiece(piece, pieceIno, name, spaceName);
+    state.pieceSubs.set(name, subs);
+    state.unsubscribes.push(...subs);
+
+    return name;
+  }
+
+  /**
+   * Remove a piece from a space's tree and clean up subscriptions.
+   */
+  private removePieceFromSpace(state: SpaceState, name: string): void {
+    // Cancel piece-level subscriptions
+    const subs = state.pieceSubs.get(name);
+    if (subs) {
+      for (const cancel of subs) cancel();
+      state.pieceSubs.delete(name);
+    }
+
+    // Remove tree nodes
+    this.tree.removeChild(state.piecesIno, name);
+
+    state.pieceMap.delete(name);
+    state.pieceControllers.delete(name);
+    state.usedNames.delete(name);
+  }
+
+  /**
+   * Sync the piece list: diff current tree against the live pieces cell,
+   * adding new pieces and removing deleted ones.
+   */
+  private async syncPieceList(
+    state: SpaceState,
+    spaceName: string,
+  ): Promise<void> {
+    const allPieces = await state.pieces.getAllPieces();
+
+    // Build set of current entity IDs
+    const liveIds = new Set(allPieces.map((p) => p.id));
+
+    // Find pieces to remove (in our tree but no longer in the live list)
+    const toRemove: string[] = [];
+    for (const [name, id] of state.pieceMap) {
+      if (!liveIds.has(id)) toRemove.push(name);
+    }
+
+    // Find pieces to add (in the live list but not in our tree)
+    const knownIds = new Set(state.pieceMap.values());
+    const toAdd = allPieces.filter((p) => !knownIds.has(p.id));
+
+    if (toRemove.length === 0 && toAdd.length === 0) return;
+
+    for (const name of toRemove) {
+      this.removePieceFromSpace(state, name);
+      console.log(`[${spaceName}] Removed piece: ${name}`);
+    }
+
+    for (const piece of toAdd) {
+      const name = await this.addPieceToSpace(state, piece, spaceName);
+      console.log(`[${spaceName}] Added piece: ${name}`);
+    }
+
+    // Update index and invalidate
+    this.updateIndexJson(state);
+    if (this.onInvalidate) {
+      const invalidNames = [
+        ...toRemove,
+        ...toAdd.map((p) => {
+          // Find the name we assigned
+          for (const [n, id] of state.pieceMap) {
+            if (id === p.id) return n;
+          }
+          return "";
+        }),
+        ".index.json",
+      ];
+      this.onInvalidate(state.piecesIno, invalidNames);
+    }
+  }
+
+  /** Update the pieces/.index.json file for a space. */
+  private updateIndexJson(state: SpaceState): void {
+    const existingIno = this.tree.lookup(state.piecesIno, ".index.json");
+    if (existingIno !== undefined) {
+      this.tree.clear(existingIno);
+    }
     const indexObj: Record<string, string> = {};
-    for (const [name, id] of pieceMap) {
+    for (const [name, id] of state.pieceMap) {
       indexObj[name] = id;
     }
     this.tree.addFile(
-      piecesIno,
+      state.piecesIno,
       ".index.json",
       JSON.stringify(indexObj, null, 2),
       "object",
     );
-
-    return {
-      manager,
-      spaceIno,
-      piecesIno,
-      entitiesIno,
-      pieceMap,
-      pieceControllers,
-      did: spaceDid,
-      unsubscribes,
-    };
   }
 
   /**
