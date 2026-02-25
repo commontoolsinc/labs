@@ -4,6 +4,7 @@ import {
   assertStringIncludes,
 } from "@std/assert";
 import { transformSource, validateSource } from "./utils.ts";
+import { COMMONTOOLS_TYPES } from "./commontools-test-types.ts";
 
 Deno.test("Capability-first: pattern JSX lowers && with when()", async () => {
   const source = `/// <cts-enable />
@@ -179,5 +180,23 @@ const p = pattern((input) => input.foo);
     );
     assertEquals(standaloneDiagnostics.length, 1);
     assertStringIncludes(standaloneDiagnostics[0]!.message, "standalone");
+  },
+);
+
+Deno.test(
+  "Capability-first: explicit Writable input keeps wrapped object schema in lift",
+  async () => {
+    const source = `/// <cts-enable />
+import { lift, type Writable } from "commontools";
+const fn = lift((input: Writable<{ foo: string; bar: string }>) => input.get().foo);
+`;
+
+    const output = await transformSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, "asCell: true");
+    assertStringIncludes(output, '"foo"');
   },
 );

@@ -41,7 +41,7 @@ export class CommonToolsFormatter implements TypeFormatter {
       context.typeNode,
       context.typeChecker,
     );
-    if (wrapperViaNode === "Default") {
+    if (wrapperViaNode) {
       return true;
     }
 
@@ -167,6 +167,21 @@ export class CommonToolsFormatter implements TypeFormatter {
       );
     }
 
+    // Synthetic wrapper nodes (for example __ctHelpers.ReadonlyCell<...>) may
+    // resolve to `any` in checker contexts created before helper injection.
+    // In that case, fall back to node-driven wrapper formatting.
+    if (
+      resolvedWrapper &&
+      resolvedWrapper.kind !== "Default" &&
+      !wrapperInfo
+    ) {
+      return this.formatWrapperTypeFromNode(
+        resolvedWrapper.node,
+        context,
+        resolvedWrapper.kind,
+      );
+    }
+
     // If we detected a wrapper syntactically but the current type is wrapped in
     // additional layers (e.g., Opaque<OpaqueRef<...>>), recursively unwrap using
     // brand information until we reach the underlying wrapper.
@@ -196,6 +211,73 @@ export class CommonToolsFormatter implements TypeFormatter {
     throw new Error(
       `Unexpected CommonTools type: ${nodeName}`,
     );
+  }
+
+  private formatWrapperTypeFromNode(
+    typeRefNode: ts.TypeReferenceNode,
+    context: GenerationContext,
+    wrapperKind: WrapperKind,
+  ): SchemaDefinition {
+    const innerTypeNode = typeRefNode.typeArguments?.[0];
+    if (!innerTypeNode) {
+      throw new Error(`${wrapperKind}<T> requires type argument`);
+    }
+
+    let innerType: ts.Type;
+    try {
+      innerType = context.typeChecker.getTypeFromTypeNode(innerTypeNode);
+    } catch {
+      innerType = context.typeChecker.getAnyType();
+    }
+
+    // Keep schema-hint propagation behavior aligned with type-based wrapper formatting.
+    let childContext = context;
+    let isArrayPropertyOnlyAccess = false;
+    if (context.schemaHints && context.typeNode) {
+      const hint = context.schemaHints.get(context.typeNode);
+      if (hint?.items === false) {
+        isArrayPropertyOnlyAccess = true;
+        const itemsOverride: Record<string, unknown> = {
+          type: "object",
+          properties: {},
+        };
+        if (wrapperKind === "Cell") {
+          itemsOverride.asCell = true;
+        } else if (wrapperKind === "OpaqueRef") {
+          itemsOverride.asOpaque = true;
+        }
+        childContext = { ...context, arrayItemsOverride: itemsOverride };
+      }
+    }
+
+    const innerSchema = this.schemaGenerator.formatChildType(
+      innerType,
+      childContext,
+      innerTypeNode,
+    );
+
+    if (isArrayPropertyOnlyAccess) {
+      return innerSchema;
+    }
+
+    if (wrapperKind === "Stream") {
+      const { asCell: _drop, ...rest } = innerSchema as Record<string, unknown>;
+      return this.applyWrapperSemantics(rest as SchemaDefinition, "Stream");
+    }
+
+    if (wrapperKind === "Cell") {
+      const innerWrapper = resolveWrapperNode(innerTypeNode, context.typeChecker);
+      if (
+        this.isStreamType(innerType, context.typeChecker) ||
+        innerWrapper?.kind === "Stream"
+      ) {
+        throw new Error(
+          "Cell<Stream<T>> is unsupported. Wrap the stream: Cell<{ stream: Stream<T> }>.",
+        );
+      }
+    }
+
+    return this.applyWrapperSemantics(innerSchema, wrapperKind);
   }
 
   private formatWrapperType(
@@ -229,10 +311,21 @@ export class CommonToolsFormatter implements TypeFormatter {
       }
     }
 
-    // Resolve inner type, preferring type information; fall back to node if needed
+    // Resolve inner type, preferring type information but falling back to node
+    // when wrapper references degrade to unknown/any/type-parameter.
     let innerType: ts.Type | undefined = innerTypeFromType;
-    if (!innerType && innerTypeNode) {
-      innerType = context.typeChecker.getTypeFromTypeNode(innerTypeNode);
+    if (
+      (!innerType || this.isUnusableInnerType(innerType)) &&
+      innerTypeNode
+    ) {
+      try {
+        const fromNode = context.typeChecker.getTypeFromTypeNode(innerTypeNode);
+        if (fromNode && !this.isUnusableInnerType(fromNode)) {
+          innerType = fromNode;
+        }
+      } catch {
+        // Leave innerType as-is and continue with conservative fallback.
+      }
     }
     if (!innerType) {
       throw new Error(
@@ -307,6 +400,11 @@ export class CommonToolsFormatter implements TypeFormatter {
 
     // Apply wrapper semantics (asCell/asOpaque) to the inner schema
     return this.applyWrapperSemantics(innerSchema, wrapperKind);
+  }
+
+  private isUnusableInnerType(type: ts.Type): boolean {
+    return (type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown | ts.TypeFlags.TypeParameter)) !==
+      0;
   }
 
   /**

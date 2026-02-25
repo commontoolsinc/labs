@@ -24,6 +24,33 @@ const KNOWN_PATH_TERMINAL_METHODS = new Set([
 
 const WILDCARD_OBJECT_METHODS = new Set(["keys", "values", "entries"]);
 
+function unwrapExpression(expr: ts.Expression): ts.Expression {
+  let current = expr;
+  while (true) {
+    if (ts.isParenthesizedExpression(current)) {
+      current = current.expression;
+      continue;
+    }
+    if (ts.isAsExpression(current)) {
+      current = current.expression;
+      continue;
+    }
+    if (ts.isTypeAssertionExpression(current)) {
+      current = current.expression;
+      continue;
+    }
+    if (ts.isSatisfiesExpression(current)) {
+      current = current.expression;
+      continue;
+    }
+    if (ts.isNonNullExpression(current)) {
+      current = current.expression;
+      continue;
+    }
+    return current;
+  }
+}
+
 function getAccessInfo(expr: ts.Expression): {
   root?: string;
   path: string[];
@@ -198,6 +225,136 @@ function reportComputationError(context: TransformationContext, node: ts.Node, m
     message,
     node,
   });
+}
+
+function isOpaqueOriginCall(
+  expression: ts.CallExpression,
+  context: TransformationContext,
+): boolean {
+  const kind = detectCallKind(expression, context.checker);
+  if (!kind) return false;
+
+  if (kind.kind === "builder") {
+    return kind.builderName === "lift" || kind.builderName === "pattern";
+  }
+
+  return false;
+}
+
+function isOpaqueSourceExpression(
+  expression: ts.Expression,
+  opaqueRoots: ReadonlySet<string>,
+  context: TransformationContext,
+): boolean {
+  const current = unwrapExpression(expression);
+  const info = getAccessInfo(current);
+  if (info.root && opaqueRoots.has(info.root)) {
+    return true;
+  }
+
+  if (ts.isCallExpression(current)) {
+    if (isOpaqueOriginCall(current, context)) {
+      return true;
+    }
+
+    if (ts.isPropertyAccessExpression(current.expression)) {
+      const methodName = current.expression.name.text;
+      if (methodName === "key" || methodName === "get") {
+        return isOpaqueSourceExpression(current.expression.expression, opaqueRoots, context);
+      }
+    }
+  }
+
+  return false;
+}
+
+function addBindingTargets(
+  name: ts.BindingName,
+  bucket: Set<string>,
+): void {
+  if (ts.isIdentifier(name)) {
+    bucket.add(name.text);
+    return;
+  }
+
+  for (const element of name.elements) {
+    if (ts.isOmittedExpression(element)) continue;
+    addBindingTargets(element.name, bucket);
+  }
+}
+
+function addAssignmentTargets(
+  target: ts.Expression,
+  bucket: Set<string>,
+): void {
+  if (ts.isParenthesizedExpression(target)) {
+    addAssignmentTargets(target.expression, bucket);
+    return;
+  }
+
+  if (ts.isIdentifier(target)) {
+    bucket.add(target.text);
+    return;
+  }
+
+  if (ts.isObjectLiteralExpression(target)) {
+    for (const property of target.properties) {
+      if (ts.isShorthandPropertyAssignment(property)) {
+        bucket.add(property.name.text);
+      } else if (ts.isPropertyAssignment(property)) {
+        addAssignmentTargets(property.initializer, bucket);
+      }
+    }
+    return;
+  }
+
+  if (ts.isArrayLiteralExpression(target)) {
+    for (const element of target.elements) {
+      if (ts.isSpreadElement(element)) continue;
+      addAssignmentTargets(element, bucket);
+    }
+  }
+}
+
+function collectOpaqueRootsFromBody(
+  body: ts.ConciseBody,
+  initialRoots: ReadonlySet<string>,
+  context: TransformationContext,
+): Set<string> {
+  const roots = new Set(initialRoots);
+
+  const visit = (node: ts.Node): void => {
+    if (ts.isFunctionLike(node) && node !== body) {
+      // Nested callbacks own their own origin tracking.
+      return;
+    }
+
+    if (ts.isVariableDeclaration(node)) {
+      if (node.initializer && isOpaqueSourceExpression(node.initializer, roots, context)) {
+        addBindingTargets(node.name, roots);
+      }
+    }
+
+    if (
+      ts.isBinaryExpression(node) &&
+      node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      isOpaqueSourceExpression(node.right, roots, context)
+    ) {
+      addAssignmentTargets(node.left, roots);
+    }
+
+    ts.forEachChild(node, visit);
+  };
+
+  if (ts.isBlock(body)) {
+    for (const statement of body.statements) {
+      visit(statement);
+    }
+  } else {
+    visit(body);
+  }
+
+  return roots;
 }
 
 function reportOptionalError(context: TransformationContext, node: ts.Node, message: string): void {
@@ -431,6 +588,9 @@ function transformPatternCallback(
           ),
         )
       );
+      for (const binding of bindings) {
+        opaqueRoots.add(binding.localName);
+      }
     } else {
       reportComputationError(
         context,
@@ -441,6 +601,10 @@ function transformPatternCallback(
   }
 
   let body: ts.ConciseBody = callback.body;
+  const expandedOpaqueRoots = collectOpaqueRootsFromBody(body, opaqueRoots, context);
+  for (const root of expandedOpaqueRoots) {
+    opaqueRoots.add(root);
+  }
   body = rewritePatternBody(body, opaqueRoots, context);
 
   if (prologue.length > 0) {
