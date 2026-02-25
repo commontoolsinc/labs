@@ -10,6 +10,10 @@ import type {
 import { computeCfcActivityDigest } from "./activity-digest.ts";
 import { canonicalizeBoundaryActivity } from "./canonical-activity.ts";
 import { partitionConsumedBoundaryReads } from "./consumed-reads.ts";
+import {
+  collectConsumedInputLabels,
+  consumedReadEntityKey,
+} from "./consumed-input-labels.ts";
 import { internalVerifierReadMeta } from "./internal-markers.ts";
 import { getCfcWriteSchemaContext } from "./schema-context.ts";
 import { computeCfcSchemaHash } from "./schema-hash.ts";
@@ -80,6 +84,15 @@ function schemaHashAddress(entity: EntityAddress): IMemorySpaceAddress {
   };
 }
 
+function readLabelsAddress(entity: EntityAddress): IMemorySpaceAddress {
+  return {
+    space: entity.space,
+    id: entity.id,
+    type: entity.type,
+    path: ["cfc", "labels"],
+  };
+}
+
 function labelsAddress(entity: EntityAddress): IMemorySpaceAddress {
   return {
     space: entity.space,
@@ -87,6 +100,36 @@ function labelsAddress(entity: EntityAddress): IMemorySpaceAddress {
     type: entity.type,
     path: ["cfc", "labels"],
   };
+}
+
+function normalizeLabelsByPath(value: unknown): Record<string, Labels> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  const labelsByPath: Record<string, Labels> = {};
+  for (const [path, rawLabel] of Object.entries(value)) {
+    if (!path.startsWith("/")) {
+      continue;
+    }
+    if (!rawLabel || typeof rawLabel !== "object" || Array.isArray(rawLabel)) {
+      continue;
+    }
+    const rawClassification = (rawLabel as { classification?: unknown })
+      .classification;
+    if (!Array.isArray(rawClassification)) {
+      continue;
+    }
+
+    const classification = rawClassification.filter((entry): entry is string =>
+      typeof entry === "string" && entry.length > 0
+    );
+    if (classification.length === 0) {
+      continue;
+    }
+    labelsByPath[path] = { classification };
+  }
+  return labelsByPath;
 }
 
 function computePreparedLabels(schema: JSONSchema): Record<string, Labels> {
@@ -106,9 +149,27 @@ function verifyInputRequirementsForAttempt(
   tx: IExtendedStorageTransaction,
 ): void {
   // Input requirement policy checks are added in a later phase.
-  // For now, we still partition reads so verifier-internal reads are kept
-  // separate from consumed handler inputs.
-  partitionConsumedBoundaryReads(tx.journal.activity());
+  // For now, we still gather effective labels for consumed reads while
+  // keeping verifier-internal reads separate from consumed handler inputs.
+  const { consumedReads } = partitionConsumedBoundaryReads(tx.journal.activity());
+  const labelsByEntity = new Map<string, Record<string, Labels>>();
+
+  for (const read of consumedReads) {
+    const key = consumedReadEntityKey(read);
+    if (labelsByEntity.has(key)) {
+      continue;
+    }
+    const rawLabels = tx.readOrThrow(readLabelsAddress({
+      space: read.space as IMemorySpaceAddress["space"],
+      id: read.id as IMemorySpaceAddress["id"],
+      type: read.type as IMemorySpaceAddress["type"],
+    }), {
+      meta: internalVerifierReadMeta,
+    });
+    labelsByEntity.set(key, normalizeLabelsByPath(rawLabels));
+  }
+
+  collectConsumedInputLabels(consumedReads, labelsByEntity);
 }
 
 export async function prepareBoundaryCommit(
