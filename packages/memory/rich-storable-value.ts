@@ -100,8 +100,11 @@ export function toRichStorableValue(
       }
 
       case NATIVE_TAGS.Object: {
-        // Plain objects pass through. When freezing, return a frozen shallow
-        // copy rather than freezing the caller's object in place.
+        // Plain objects pass through, but objects with toJSON() must fall
+        // through to toRichStorableValueBase for legacy conversion handling.
+        if (hasToJSONMethod(value)) break;
+        // When freezing, return a frozen shallow copy rather than freezing
+        // the caller's object in place.
         const obj = value as Record<string, unknown>;
         if (freeze) {
           if (Object.isFrozen(obj)) return obj;
