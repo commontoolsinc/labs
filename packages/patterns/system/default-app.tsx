@@ -23,7 +23,7 @@ const MAX_RECENT_CHARMS = 10;
 import BacklinksIndex, { type MentionablePiece } from "./backlinks-index.tsx";
 import SummaryIndex from "./summary-index.tsx";
 import KnowledgeGraph from "./knowledge-graph.tsx";
-import SystemPrompt from "./system-prompt.tsx";
+
 import QuickCapture from "./quick-capture.tsx";
 import OmniboxFAB from "./omnibox-fab.tsx";
 import DoList from "../do-list/do-list.tsx";
@@ -225,7 +225,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
   const index = BacklinksIndex({ allPieces: allPiecesWithSystem });
   const summaryIdx = SummaryIndex({});
   const knowledgeGraph = KnowledgeGraph({});
-  const systemPrompt = SystemPrompt({});
+
   const quickCapture = QuickCapture({ allPieces });
 
   const fab = OmniboxFAB({
@@ -246,7 +246,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
     backlinksIndex: index,
     summaryIndex: summaryIdx,
     knowledgeGraph,
-    systemPrompt,
+
     quickCapture,
     [NAME]: computed(() => `Space Home (${visiblePieces.length})`),
     [UI]: (
@@ -304,18 +304,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
           >
             Graph
           </ct-cell-link>
-          <ct-cell-link
-            $cell={systemPrompt}
-            slot="end"
-            style={{
-              fontSize: "14px",
-              padding: "6px 12px",
-              textDecoration: "none",
-              color: "var(--ct-color-text-secondary)",
-            }}
-          >
-            System
-          </ct-cell-link>
+
           <div slot="end">
             <ct-button
               variant="ghost"
