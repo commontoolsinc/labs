@@ -88,13 +88,32 @@ const createNotebookHandler = handler<
   return { created: title };
 });
 
+type PromptAttachment = {
+  id: string;
+  name: string;
+  type: "file" | "clipboard" | "mention";
+  data?: any;
+  piece?: any;
+};
+
 const sendMessage = handler<
-  { detail: { text: string } },
+  { detail: { text: string; attachments?: PromptAttachment[] } },
   { addMessage: Stream<BuiltInLLMMessage> }
 >((event, { addMessage }) => {
+  const { text, attachments } = event.detail;
+
+  // Resolve pasted content attachments inline so the LLM sees actual content
+  // instead of just a reference like [Pasted content (4799 chars)](#attachment-xxx)
+  let resolved = text;
+  for (const att of attachments ?? []) {
+    if (att.type === "clipboard" && typeof att.data === "string") {
+      resolved = resolved.replace(`[${att.name}](#${att.id})`, att.data);
+    }
+  }
+
   addMessage.send({
     role: "user",
-    content: [{ type: "text" as const, text: event.detail.text }],
+    content: [{ type: "text" as const, text: resolved }],
   });
 });
 
