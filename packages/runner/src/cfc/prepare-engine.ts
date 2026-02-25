@@ -7,6 +7,7 @@ import type {
 } from "../storage/interface.ts";
 import { computeCfcActivityDigest } from "./activity-digest.ts";
 import { canonicalizeBoundaryActivity } from "./canonical-activity.ts";
+import { partitionConsumedBoundaryReads } from "./consumed-reads.ts";
 import { internalVerifierReadMeta } from "./internal-markers.ts";
 import { getCfcWriteSchemaContext } from "./schema-context.ts";
 import { computeCfcSchemaHash } from "./schema-hash.ts";
@@ -77,9 +78,20 @@ function schemaHashAddress(entity: EntityAddress): IMemorySpaceAddress {
   };
 }
 
+function verifyInputRequirementsForAttempt(
+  tx: IExtendedStorageTransaction,
+): void {
+  // Input requirement policy checks are added in a later phase.
+  // For now, we still partition reads so verifier-internal reads are kept
+  // separate from consumed handler inputs.
+  partitionConsumedBoundaryReads(tx.journal.activity());
+}
+
 export async function prepareBoundaryCommit(
   tx: IExtendedStorageTransaction,
 ): Promise<void> {
+  verifyInputRequirementsForAttempt(tx);
+
   const writtenEntities = collectWrittenEntities(tx);
   const hasIfcWriteReason = tx.cfcReasons.includes("ifc-write-schema");
   let enforcedSchemaHashCount = 0;
