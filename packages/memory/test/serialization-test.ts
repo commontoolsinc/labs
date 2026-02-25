@@ -18,6 +18,7 @@ import type { StorableValue } from "../interface.ts";
 import type { SerializedForm } from "../json-serialization-context.ts";
 import { UnknownStorable } from "../unknown-storable.ts";
 import { ProblematicStorable } from "../problematic-storable.ts";
+import { ExplicitTagStorable } from "../explicit-tag-storable.ts";
 import {
   deepNativeValueFromStorableValue,
   nativeValueFromStorableValue,
@@ -1428,6 +1429,36 @@ describe("serialization", () => {
         state: "s",
         error: "e",
       });
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // ExplicitTagStorable base class
+  // --------------------------------------------------------------------------
+
+  describe("ExplicitTagStorable", () => {
+    it("UnknownStorable is an instance of ExplicitTagStorable", () => {
+      const us = new UnknownStorable("Test@1", "state");
+      expect(us instanceof ExplicitTagStorable).toBe(true);
+    });
+
+    it("ProblematicStorable is an instance of ExplicitTagStorable", () => {
+      const ps = new ProblematicStorable("Test@1", "state", "oops");
+      expect(ps instanceof ExplicitTagStorable).toBe(true);
+    });
+
+    it("ExplicitTagStorable provides access to typeTag and state", () => {
+      const us: ExplicitTagStorable = new UnknownStorable("Tag@2", 42);
+      expect(us.typeTag).toBe("Tag@2");
+      expect(us.state).toBe(42);
+
+      const ps: ExplicitTagStorable = new ProblematicStorable(
+        "Bad@1",
+        "data",
+        "err",
+      );
+      expect(ps.typeTag).toBe("Bad@1");
+      expect(ps.state).toBe("data");
     });
   });
 

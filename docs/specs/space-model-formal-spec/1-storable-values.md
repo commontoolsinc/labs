@@ -824,7 +824,39 @@ When deserializing, a context may encounter a type tag it doesn't recognize —
 for example, data written by a newer version of the system. Unknown types are
 **passed through** rather than rejected, preserving forward compatibility.
 
-### 3.2 `UnknownStorable`
+### 3.2 `ExplicitTagStorable` (Base Class)
+
+Both `UnknownStorable` and `ProblematicStorable` share a common pattern: they
+carry an explicit wire-format type tag and raw state for round-tripping. The
+abstract base class `ExplicitTagStorable` factors out these shared fields,
+enabling a single `instanceof ExplicitTagStorable` check where code needs to
+handle both subtypes uniformly (e.g., serialization dispatch).
+
+```typescript
+// file: packages/common/explicit-tag-storable.ts
+
+/**
+ * Base class for storable types that carry an explicit wire-format tag.
+ * Used by UnknownStorable (unrecognized types) and ProblematicStorable
+ * (failed deconstruction/reconstruction). Enables a single instanceof
+ * check where code needs to handle both.
+ */
+export abstract class ExplicitTagStorable {
+  constructor(
+    /** The original type tag, e.g. `"FutureType@2"`. */
+    readonly typeTag: string,
+    /** The raw state, already recursively processed by the deserializer. */
+    readonly state: StorableValue,
+  ) {}
+}
+```
+
+Each subclass implements `StorableInstance` (providing `[DECONSTRUCT]`) and a
+static `[RECONSTRUCT]` independently. The base class holds only the shared
+fields — `DECONSTRUCT` stays on each subclass since the deconstruction payloads
+differ in shape.
+
+### 3.3 `UnknownStorable`
 
 ```typescript
 // file: packages/common/unknown-storable.ts
@@ -835,6 +867,7 @@ import {
   type StorableInstance,
   type ReconstructionContext,
 } from './storable-protocol';
+import { ExplicitTagStorable } from './explicit-tag-storable';
 
 /**
  * Holds an unrecognized type's data for round-tripping. The serialization
@@ -842,13 +875,11 @@ import {
  * tag, it wraps the tag and state here; on re-serialization, it uses the
  * preserved `typeTag` to produce the original wire format.
  */
-export class UnknownStorable implements StorableInstance {
-  constructor(
-    /** The original type tag, e.g. `"FutureType@2"`. */
-    readonly typeTag: string,
-    /** The raw state, already recursively processed by the serializer. */
-    readonly state: StorableValue,
-  ) {}
+export class UnknownStorable extends ExplicitTagStorable
+  implements StorableInstance {
+  constructor(typeTag: string, state: StorableValue) {
+    super(typeTag, state);
+  }
 
   [DECONSTRUCT]() {
     return { type: this.typeTag, state: this.state };
@@ -863,7 +894,7 @@ export class UnknownStorable implements StorableInstance {
 }
 ```
 
-### 3.3 Behavior
+### 3.4 Behavior
 
 - When the serialization system encounters an unknown type tag during
   deserialization, it wraps the original tag and state into `{ type, state }`
@@ -872,7 +903,7 @@ export class UnknownStorable implements StorableInstance {
   `typeTag` to produce the original wire format.
 - This allows data to round-trip through systems that don't understand it.
 
-### 3.4 `ProblematicStorable` (Recommended)
+### 3.5 `ProblematicStorable` (Recommended)
 
 It is recommended that implementations provide a `ProblematicStorable` type,
 analogous to `UnknownStorable`, for cases where deconstruction or reconstruction
@@ -889,20 +920,22 @@ import {
   type StorableInstance,
   type ReconstructionContext,
 } from './storable-protocol';
+import { ExplicitTagStorable } from './explicit-tag-storable';
 
 /**
  * Holds a value whose deconstruction or reconstruction failed. Preserves
  * the original tag and raw state for round-tripping and debugging.
  */
-export class ProblematicStorable implements StorableInstance {
+export class ProblematicStorable extends ExplicitTagStorable
+  implements StorableInstance {
   constructor(
-    /** The original type tag, e.g. `"MyType@1"`. */
-    readonly typeTag: string,
-    /** The raw state that could not be processed. */
-    readonly state: StorableValue,
+    typeTag: string,
+    state: StorableValue,
     /** A description of what went wrong. */
     readonly error: string,
-  ) {}
+  ) {
+    super(typeTag, state);
+  }
 
   [DECONSTRUCT]() {
     return { type: this.typeTag, state: this.state, error: this.error };
@@ -1417,7 +1450,7 @@ round-trip correctly.
 > `BigInt@1`, `EpochNsec@1`, `EpochDays@1`, or `Bytes@1`) must validate that
 > its state is a `string` containing valid unpadded base64 before decoding. On
 > malformed input — wrong type, invalid format, or missing fields — the handler
-> should produce a `ProblematicStorable` (Section 3.4) rather than throwing or
+> should produce a `ProblematicStorable` (Section 3.5) rather than throwing or
 > silently producing garbage. This principle applies to all type handlers. Wire
 > data is untrusted input. See Section 7.4 for the broader principle that
 > applies to all code consuming deserialized values.
@@ -1579,12 +1612,12 @@ organized into three categories by high nibble:
 | Tag               | Hex    | Decimal | Used for                        |
 |:------------------|:-------|:--------|:--------------------------------|
 | `TAG_NULL`        | `0x20` | 32      | `null`                          |
-| `TAG_BOOLEAN`     | `0x21` | 33      | `boolean`                       |
-| `TAG_NUMBER`      | `0x22` | 34      | `number` (finite, non-NaN)      |
-| `TAG_STRING`      | `0x23` | 35      | `string`                        |
-| `TAG_BIGINT`      | `0x24` | 36      | `bigint`                        |
-| `TAG_UNDEFINED`   | `0x25` | 37      | `undefined`                     |
-| `TAG_BYTES`       | `0x26` | 38      | `StorableUint8Array`            |
+| `TAG_UNDEFINED`   | `0x21` | 33      | `undefined`                     |
+| `TAG_BOOLEAN`     | `0x22` | 34      | `boolean`                       |
+| `TAG_NUMBER`      | `0x23` | 35      | `number` (finite, non-NaN)      |
+| `TAG_STRING`      | `0x24` | 36      | `string`                        |
+| `TAG_BYTES`       | `0x25` | 37      | `StorableUint8Array`            |
+| `TAG_BIGINT`      | `0x26` | 38      | `bigint`                        |
 | `TAG_EPOCH_NSEC`  | `0x27` | 39      | `StorableEpochNsec`             |
 | `TAG_EPOCH_DAYS`  | `0x28` | 40      | `StorableEpochDays`             |
 

@@ -6,7 +6,7 @@ import {
   type ReconstructionContext,
   type StorableInstance,
 } from "./storable-protocol.ts";
-import { TAGS } from "./type-tags.ts";
+import { tagFromNativeValue, TAGS } from "./type-tags.ts";
 import { FrozenMap, FrozenSet } from "./frozen-builtins.ts";
 
 // ---------------------------------------------------------------------------
@@ -20,13 +20,7 @@ import { FrozenMap, FrozenSet } from "./frozen-builtins.ts";
  * subclasses or `StorableInstance` types by the conversion layer.
  */
 export function isConvertibleNativeInstance(value: object): boolean {
-  return (
-    Error.isError(value) ||
-    value instanceof Map ||
-    value instanceof Set ||
-    value instanceof Date ||
-    value instanceof Uint8Array
-  );
+  return tagFromNativeValue(value) !== null;
 }
 
 // ---------------------------------------------------------------------------

@@ -51,6 +51,7 @@
     "./json-encoding": "./json-encoding.ts",
     "./serialization": "./serialization.ts",
     "./type-handlers": "./type-handlers.ts",
+    "./explicit-tag-storable": "./explicit-tag-storable.ts",
     "./unknown-storable": "./unknown-storable.ts",
     "./problematic-storable": "./problematic-storable.ts",
     "./frozen-builtins": "./frozen-builtins.ts",

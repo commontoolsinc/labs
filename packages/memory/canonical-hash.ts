@@ -32,14 +32,14 @@ const TAG_ARRAY = 0x10;
 const TAG_OBJECT = 0x11;
 const TAG_INSTANCE = 0x12;
 
-// Primitive (0x2N)
+// Primitive (0x2N) -- ordered by conceptual size
 const TAG_NULL = 0x20;
-const TAG_BOOLEAN = 0x21;
-const TAG_NUMBER = 0x22;
-const TAG_STRING = 0x23;
-const TAG_BIGINT = 0x24;
-const TAG_UNDEFINED = 0x25;
-const TAG_BYTES = 0x26;
+const TAG_UNDEFINED = 0x21;
+const TAG_BOOLEAN = 0x22;
+const TAG_NUMBER = 0x23;
+const TAG_STRING = 0x24;
+const TAG_BYTES = 0x25;
+const TAG_BIGINT = 0x26;
 const TAG_EPOCH_NSEC = 0x27;
 const TAG_EPOCH_DAYS = 0x28;
 
@@ -53,13 +53,13 @@ const TAG_ARRAY_BYTES = new Uint8Array([TAG_ARRAY]);
 const TAG_OBJECT_BYTES = new Uint8Array([TAG_OBJECT]);
 const TAG_INSTANCE_BYTES = new Uint8Array([TAG_INSTANCE]);
 const TAG_NULL_BYTES = new Uint8Array([TAG_NULL]);
+const TAG_UNDEFINED_BYTES = new Uint8Array([TAG_UNDEFINED]);
 const TAG_BOOLEAN_TRUE_BYTES = new Uint8Array([TAG_BOOLEAN, 0x01]);
 const TAG_BOOLEAN_FALSE_BYTES = new Uint8Array([TAG_BOOLEAN, 0x00]);
 const TAG_NUMBER_BYTES = new Uint8Array([TAG_NUMBER]);
 const TAG_STRING_BYTES = new Uint8Array([TAG_STRING]);
-const TAG_BIGINT_BYTES = new Uint8Array([TAG_BIGINT]);
-const TAG_UNDEFINED_BYTES = new Uint8Array([TAG_UNDEFINED]);
 const TAG_BYTES_BYTES = new Uint8Array([TAG_BYTES]);
+const TAG_BIGINT_BYTES = new Uint8Array([TAG_BIGINT]);
 const TAG_EPOCH_NSEC_BYTES = new Uint8Array([TAG_EPOCH_NSEC]);
 const TAG_EPOCH_DAYS_BYTES = new Uint8Array([TAG_EPOCH_DAYS]);
 
