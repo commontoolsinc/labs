@@ -43,20 +43,80 @@ import {
   selectFact,
   type Session as SpaceSession,
 } from "./space.ts";
-import { evaluateDocumentLinks } from "./space-schema.ts";
+import { evaluateDocumentLinks, ServerObjectManager } from "./space-schema.ts";
 import * as Subscription from "./subscription.ts";
 import * as FactModule from "./fact.ts";
 import { setRevision } from "@commontools/memory/selection";
 import { getLogger } from "@commontools/utils/logger";
 import { ACL_TYPE, isACL } from "./acl.ts";
-import { MapSet } from "@commontools/runner/traverse";
+import { createSchemaMemo, MapSet } from "@commontools/runner/traverse";
 import { deepEqual } from "@commontools/runner";
 import type { SchemaPathSelector } from "./consumer.ts";
 
 const logger = getLogger("memory-provider", {
-  enabled: false,
-  level: "info",
+  enabled: true,
+  level: "warn",
 });
+
+const SLOW_QUERY_THRESHOLD_MS = 100;
+const SLOW_QUERY_BUFFER_SIZE = 100;
+
+export interface SlowQuery {
+  timestamp: number;
+  elapsed: number;
+  operation: string;
+  space: string;
+  selectorCount: number;
+  subscribe: boolean;
+  selector: unknown;
+  /** Doc IDs from the selectSchema keys */
+  docs?: string[];
+  // Detailed stats from selectSchema (when available)
+  factCount?: number;
+  trackerKeys?: number;
+  trackerVals?: number;
+  docsLoaded?: number;
+  sqliteReads?: number;
+  sqliteMs?: number;
+  sqliteCacheHits?: number;
+  sharedMemoSize?: number;
+}
+
+const slowQueries: SlowQuery[] = [];
+
+function recordSlowQuery(entry: SlowQuery) {
+  slowQueries.push(entry);
+  if (slowQueries.length > SLOW_QUERY_BUFFER_SIZE) {
+    slowQueries.shift();
+  }
+  logger.warn(
+    "slow-query",
+    () => [
+      `${entry.operation} ${entry.elapsed.toFixed(0)}ms`,
+      `space=${entry.space}`,
+      `selectors=${entry.selectorCount}`,
+      `subscribe=${entry.subscribe}`,
+      ...(entry.factCount !== undefined
+        ? [
+          `facts=${entry.factCount}`,
+          `trackerKeys=${entry.trackerKeys}`,
+          `trackerVals=${entry.trackerVals}`,
+          `docsLoaded=${entry.docsLoaded}`,
+          `sqliteReads=${entry.sqliteReads}`,
+          `sqliteMs=${entry.sqliteMs?.toFixed(1)}`,
+          `sqliteCacheHits=${entry.sqliteCacheHits}`,
+          `sharedMemo=${entry.sharedMemoSize}`,
+        ]
+        : []),
+      `selector=${JSON.stringify(entry.selector)}`,
+    ],
+  );
+}
+
+/** Returns the last N slow queries (>100ms). */
+export function getSlowQueries(): readonly SlowQuery[] {
+  return slowQueries;
+}
 
 export * as Error from "./error.ts";
 export * from "./interface.ts";
@@ -183,6 +243,10 @@ class MemoryProviderSession<
   sharedSchemaTracker: MapSet<string, SchemaPathSelector> = new MapSet(
     deepEqual,
   );
+  // Shared SchemaMemo across all subscription queries on this connection.
+  // Traversal results from one subscription are reused by subsequent
+  // subscriptions that traverse the same doc+path+schema combos.
+  private sharedSchemaMemo = createSchemaMemo();
 
   constructor(
     public memory: MemorySession,
@@ -328,34 +392,88 @@ class MemoryProviderSession<
 
     switch (invocation.cmd) {
       case "/memory/query": {
+        const selectorKeys = Object.keys(invocation.args.select ?? {});
+        logger.debug(
+          "query",
+          () => [
+            `space=${invocation.sub}`,
+            `selectors=${selectorKeys.length}`,
+            `since=${invocation.args.since ?? "none"}`,
+          ],
+        );
+        logger.timeStart("query");
+        const queryResult = (await this.memory.query(invocation)) as Result<
+          Selection<Space>,
+          QueryError
+        >;
+        const queryElapsed = logger.timeEnd("query") ?? 0;
+        logger.debug(
+          "query-done",
+          () => [
+            `space=${invocation.sub}`,
+            `ok=${!!queryResult.ok}`,
+            `elapsed=${queryElapsed.toFixed(1)}ms`,
+          ],
+        );
+        if (queryElapsed > SLOW_QUERY_THRESHOLD_MS) {
+          recordSlowQuery({
+            timestamp: Date.now(),
+            elapsed: queryElapsed,
+            operation: "query",
+            space: invocation.sub,
+            selectorCount: selectorKeys.length,
+            subscribe: false,
+            selector: invocation.args.select,
+            docs: selectorKeys,
+          });
+        }
         return this.perform({
           the: "task/return",
           of,
-          is: (await this.memory.query(invocation)) as Result<
-            Selection<Space>,
-            QueryError
-          >,
+          is: queryResult,
         });
       }
       case "/memory/graph/query": {
+        const schemaKeys = Object.keys(invocation.args.selectSchema ?? {});
+        logger.debug(
+          "graph-query",
+          () => [
+            `space=${invocation.sub}`,
+            `schemas=${schemaKeys.length}`,
+            `subscribe=${!!invocation.args.subscribe}`,
+            `since=${invocation.args.since ?? "none"}`,
+          ],
+        );
         // Use querySchemaWithTracker when subscribing to capture the schemaTracker
         // for incremental updates on subsequent commits
         if (invocation.args.subscribe) {
           // Pass existing sharedSchemaTracker to enable early termination when
           // traversing into docs that are already tracked by other subscriptions
+          logger.timeStart("graph-query", "subscribe");
           const trackerResult = await Memory.querySchemaWithTracker(
             this.memory as Memory.Memory,
             invocation,
             this.sharedSchemaTracker,
+            { sharedMemo: this.sharedSchemaMemo },
           );
+          const gqSubElapsed = logger.timeEnd("graph-query", "subscribe");
           if ("error" in trackerResult) {
+            logger.warn(
+              "graph-query-error",
+              () => [
+                `space=${invocation.sub}`,
+                `elapsed=${gqSubElapsed?.toFixed(1)}ms`,
+                `error=`,
+                trackerResult.error,
+              ],
+            );
             return this.perform({
               the: "task/return",
               of,
               is: trackerResult,
             });
           }
-          const { selection } = trackerResult.ok;
+          const { selection, stats: schemaStats } = trackerResult.ok;
           this.addSchemaSubscription(of, invocation, selection);
           this.memory.subscribe(this);
 
@@ -368,6 +486,29 @@ class MemoryProviderSession<
               this.filterKnownFacts(factVersions),
             );
           }
+          const gqSubMs = gqSubElapsed ?? 0;
+          logger.debug(
+            "graph-query-subscribe-done",
+            () => [
+              `space=${invocation.sub}`,
+              `elapsed=${gqSubMs.toFixed(1)}ms`,
+              `trackerSize=${this.sharedSchemaTracker.size}`,
+              `sharedMemo=${this.sharedSchemaMemo.size}`,
+            ],
+          );
+          if (gqSubMs > SLOW_QUERY_THRESHOLD_MS) {
+            recordSlowQuery({
+              timestamp: Date.now(),
+              elapsed: gqSubMs,
+              operation: "graph-query/subscribe",
+              space: invocation.sub,
+              selectorCount: schemaKeys.length,
+              subscribe: true,
+              selector: invocation.args.selectSchema,
+              docs: schemaKeys,
+              ...schemaStats,
+            });
+          }
           return this.perform({
             the: "task/return",
             of,
@@ -376,7 +517,9 @@ class MemoryProviderSession<
         }
 
         // Non-subscribing queries use the regular querySchema
+        logger.timeStart("graph-query", "one-shot");
         const result = await this.memory.querySchema(invocation);
+        const gqElapsed = logger.timeEnd("graph-query", "one-shot");
         // Filter out any known results
         if (result.ok !== undefined && invocation.args.excludeSent) {
           const space = invocation.sub;
@@ -386,6 +529,27 @@ class MemoryProviderSession<
             this.filterKnownFacts(factVersions),
           );
         }
+        const gqMs = gqElapsed ?? 0;
+        logger.debug(
+          "graph-query-done",
+          () => [
+            `space=${invocation.sub}`,
+            `ok=${result.ok !== undefined}`,
+            `elapsed=${gqMs.toFixed(1)}ms`,
+          ],
+        );
+        if (gqMs > SLOW_QUERY_THRESHOLD_MS) {
+          recordSlowQuery({
+            timestamp: Date.now(),
+            elapsed: gqMs,
+            operation: "graph-query/one-shot",
+            space: invocation.sub,
+            selectorCount: schemaKeys.length,
+            subscribe: false,
+            selector: invocation.args.selectSchema,
+            docs: schemaKeys,
+          });
+        }
         return this.perform({
           the: "task/return",
           of,
@@ -393,22 +557,33 @@ class MemoryProviderSession<
         });
       }
       case "/memory/transact": {
+        const changeKeys = Object.keys(invocation.args.changes ?? {});
         logger.debug(
-          "server-transact",
+          "transact",
           () => [
-            "Received transaction:",
-            `space: ${invocation.sub}`,
-            `changes:`,
-            JSON.stringify(invocation.args.changes, null, 2),
+            `space=${invocation.sub}`,
+            `changes=${changeKeys.length}`,
           ],
         );
+        logger.timeStart("transact");
         const result = await this.memory.transact(invocation);
+        const txElapsed = logger.timeEnd("transact");
         if (result.error) {
           logger.warn(
-            "server-transact-error",
+            "transact-error",
             () => [
-              "Transaction failed:",
+              `space=${invocation.sub}`,
+              `elapsed=${txElapsed?.toFixed(1)}ms`,
               JSON.stringify(result.error, null, 2),
+            ],
+          );
+        } else {
+          logger.debug(
+            "transact-done",
+            () => [
+              `space=${invocation.sub}`,
+              `elapsed=${txElapsed?.toFixed(1)}ms`,
+              `changes=${changeKeys.length}`,
             ],
           );
         }
@@ -461,6 +636,7 @@ class MemoryProviderSession<
   }
 
   async commit(commit: Commit<Space>, labels?: Memory.FactSelection) {
+    logger.timeStart("commit");
     // We should really only have one item, but it's technically legal to have
     // multiple transactions in the same commit, so iterate
     for (
@@ -473,9 +649,11 @@ class MemoryProviderSession<
       }
       // First, check to see if any of our schema queries need to be notified
       // Any queries that lack access are skipped (with a console log)
+      logger.timeStart("commit", "schema-match");
       const schemaFacts = await this.getSchemaSubscriptionMatches(
         redactedData.transaction,
       );
+      logger.timeEnd("commit", "schema-match");
 
       // Send commits with revisions to commit log subscriptions
       // The client's startSynchronization() reads revisions to update its heap
@@ -505,6 +683,7 @@ class MemoryProviderSession<
         }
       }
     }
+    logger.timeEnd("commit");
     return { ok: {} };
   }
 
@@ -730,6 +909,16 @@ class MemoryProviderSession<
     // TODO(ubik2,seefeld): Make this a per-session classification
     const classification = ["public", "secret"];
 
+    // Share one ServerObjectManager across all evaluateDocumentLinks calls
+    // so SQLite reads from one doc traversal can be reused by the next.
+    const sharedManager = new ServerObjectManager(
+      spaceSession,
+      new Set<string>(classification),
+    );
+    // Share one SchemaMemo so traversal results from one doc are reused
+    // when traversing linked docs that overlap across affected documents.
+    const sharedMemo = createSchemaMemo();
+
     // Purge these docs from the tracker -- we want to re-evaluate the queries
     const staleSchemaTracker = new Map<string, Set<SchemaPathSelector>>();
     for (const [docKey, _schemaSelectors] of affectedDocs) {
@@ -759,9 +948,22 @@ class MemoryProviderSession<
           schemaSelector,
           classification,
           this.sharedSchemaTracker,
+          sharedManager,
+          sharedMemo,
         );
       }
     }
+
+    logger.debug(
+      "incremental-update",
+      () => [
+        `affectedDocs=${affectedDocs.size}`,
+        `sqliteReads=${sharedManager.sqliteReads}`,
+        `sqliteMs=${sharedManager.sqliteTotalMs.toFixed(1)}`,
+        `sqliteCacheHits=${sharedManager.sqliteCacheHits}`,
+        `schemaMemo=${sharedMemo.size}`,
+      ],
+    );
 
     // Fetch each unique doc once and add to results
     for (const [docKey, _value] of this.sharedSchemaTracker) {

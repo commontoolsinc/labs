@@ -182,6 +182,7 @@ export const querySchemaWithTracker = async (
   session: Session,
   query: SchemaQuery,
   existingSchemaTracker?: Space.SelectSchemaResult["schemaTracker"],
+  options?: Space.SelectSchemaOptions,
 ) => {
   return await traceAsync("memory.querySchemaWithTracker", async (span) => {
     addMemoryAttributes(span, {
@@ -201,6 +202,7 @@ export const querySchemaWithTracker = async (
       space as unknown as Space.Session<typeof query.sub>,
       query,
       existingSchemaTracker,
+      options,
     );
   });
 };

@@ -8,6 +8,7 @@ import type { StorableDatum } from "./interface.ts";
 import {
   type BaseMemoryAddress,
   CompoundCycleTracker,
+  createSchemaMemo,
   getAtPath,
   type IAttestation,
   loadSource,
@@ -15,6 +16,7 @@ import {
   MapSet,
   type ObjectStorageManager,
   type PointerCycleTracker,
+  type SchemaMemo,
   SchemaObjectTraverser,
 } from "@commontools/runner/traverse";
 import { type Immutable, isObject } from "@commontools/utils/types";
@@ -59,8 +61,8 @@ import { IMemorySpaceAttestation } from "../runner/src/storage/interface.ts";
 export type * from "./interface.ts";
 
 const logger = getLogger("space-schema", {
-  enabled: false,
-  level: "info",
+  enabled: true,
+  level: "warn",
 });
 
 // This class is used to manage the underlying objects in storage, so the
@@ -77,6 +79,11 @@ export class ServerObjectManager implements ObjectStorageManager {
     { cause: CauseString; since: number }
   >();
   private restrictedValues = new Set<string>();
+  // Cache keys where selectFact returned undefined (doc not found)
+  private missingValues = new Set<string>();
+  sqliteReads = 0;
+  sqliteTotalMs = 0;
+  sqliteCacheHits = 0;
 
   constructor(
     private session: SpaceStoreSession<MemorySpace>,
@@ -94,14 +101,21 @@ export class ServerObjectManager implements ObjectStorageManager {
   load(address: BaseMemoryAddress): IAttestation | null {
     const key = `${address.id}/${address.type}`;
     if (this.readValues.has(key)) {
+      this.sqliteCacheHits++;
       return this.readValues.get(key)!;
-    } else if (this.restrictedValues.has(key)) {
+    } else if (this.restrictedValues.has(key) || this.missingValues.has(key)) {
+      this.sqliteCacheHits++;
       return null;
     }
+    const t0 = performance.now();
     const fact = selectFact(this.session, {
       of: address.id,
       the: address.type,
     });
+    const readMs = performance.now() - t0;
+    this.sqliteReads++;
+    this.sqliteTotalMs += readMs;
+    logger.time(t0, "sqlite", "selectFact");
     if (fact !== undefined) {
       const address = { id: fact.of, type: fact.the, path: [] };
       const valueEntry = {
@@ -109,7 +123,11 @@ export class ServerObjectManager implements ObjectStorageManager {
         value: fact.is ? (fact.is as JSONObject) : undefined,
       };
       if (!this.readLabels.has(address.id)) {
+        const t1 = performance.now();
         const label = getLabel(this.session, address.id);
+        this.sqliteReads++;
+        this.sqliteTotalMs += performance.now() - t1;
+        logger.time(t1, "sqlite", "getLabel");
         this.readLabels.set(address.id, label);
       }
       const labelEntry = this.readLabels.get(address.id);
@@ -132,6 +150,8 @@ export class ServerObjectManager implements ObjectStorageManager {
       this.readValues.set(key, valueEntry);
       return valueEntry;
     }
+    // Cache the miss so we don't hit SQLite again for the same key
+    this.missingValues.add(key);
     return null;
   }
 
@@ -145,21 +165,47 @@ export class ServerObjectManager implements ObjectStorageManager {
   }
 }
 
+export interface SelectSchemaStats {
+  elapsedMs: number;
+  factCount: number;
+  trackerKeys: number;
+  trackerVals: number;
+  docsLoaded: number;
+  sqliteReads: number;
+  sqliteMs: number;
+  sqliteCacheHits: number;
+  sharedMemoSize: number;
+}
+
 export interface SelectSchemaResult {
   facts: FactSelection;
   schemaTracker: MapSet<string, SchemaPathSelector>;
+  stats?: SelectSchemaStats;
+}
+
+export interface SelectSchemaOptions {
+  /** Reuse a ServerObjectManager across multiple selectSchema calls to share
+   *  the SQLite read cache (readValues / missingValues / readLabels). */
+  sharedManager?: ServerObjectManager;
+  /** Reuse a SchemaMemo across multiple selectSchema calls so traversal
+   *  results from one query are available to subsequent queries. */
+  sharedMemo?: SchemaMemo;
 }
 
 export const selectSchema = <Space extends MemorySpace>(
   session: SpaceStoreSession<Space>,
   { selectSchema, since, classification }: SchemaQuery["args"],
   existingSchemaTracker?: MapSet<string, SchemaPathSelector>,
+  options?: SelectSchemaOptions,
 ): SelectSchemaResult => {
   const startTime = performance.timeOrigin + performance.now();
 
   const providedClassifications = new Set<string>(classification);
-  // Track any docs loaded while traversing the factSelection
-  const manager = new ServerObjectManager(session, providedClassifications);
+  // Track any docs loaded while traversing the factSelection.
+  // If a shared manager is provided, reuse it so SQLite read cache is shared
+  // across multiple selectSchema calls on the same provider/connection.
+  const manager = options?.sharedManager ??
+    new ServerObjectManager(session, providedClassifications);
   // while loading dependent docs, we want to avoid cycles
   const tracker = new CompoundCycleTracker<
     Immutable<StorableDatum>,
@@ -169,6 +215,11 @@ export const selectSchema = <Space extends MemorySpace>(
   // Use existing tracker if provided, otherwise create new one
   const schemaTracker = existingSchemaTracker ??
     new MapSet<string, SchemaPathSelector>(deepEqual);
+  // Shared memo cache across all loadFactsForDoc calls in this query.
+  // Since the traversal only discovers linked docs (populating schemaTracker),
+  // memoizing across docs is safe — same doc+path+schema always produces
+  // the same links.
+  const sharedMemo = options?.sharedMemo ?? createSchemaMemo();
 
   const includedFacts: FactSelection = {}; // we'll store all the raw facts we accesed here
   // First, collect all the potentially relevant facts (without dereferencing pointers)
@@ -198,6 +249,7 @@ export const selectSchema = <Space extends MemorySpace>(
       };
       // Then filter the facts by the associated schemas, which will dereference
       // pointers as we walk through the structure.
+      const docT0 = performance.now();
       loadFactsForDoc(
         manager,
         entry,
@@ -206,7 +258,21 @@ export const selectSchema = <Space extends MemorySpace>(
         cfc,
         session.subject,
         schemaTracker,
+        sharedMemo,
       );
+      const docElapsed = performance.now() - docT0;
+      if (docElapsed > 500) {
+        logger.warn("slow-loadFactsForDoc", () => [
+          `${docElapsed.toFixed(0)}ms`,
+          `doc=${entry.address.id}/${entry.address.type}`,
+          `trackerKeys=${schemaTracker.size}`,
+          `trackerVals=${schemaTracker.totalValues}`,
+          `sqliteReads=${manager.sqliteReads}`,
+          `sqliteMs=${manager.sqliteTotalMs.toFixed(1)}`,
+          `sqliteCacheHits=${manager.sqliteCacheHits}`,
+          `schemaPath=${JSON.stringify(selectorEntry.value.path)}`,
+        ]);
+      }
 
       // Add any facts that we accessed while traversing the object with its schema
       // We'll need the same set of objects on the client to traverse it there.
@@ -273,11 +339,35 @@ export const selectSchema = <Space extends MemorySpace>(
     }
   }
   const endTime = performance.timeOrigin + performance.now();
-  if ((endTime - startTime) > 100) {
-    logger.info("slow-select", () => ["Slow selectSchema:", selectSchema]);
+  const selectElapsed = endTime - startTime;
+  const factCount = [...iterate(includedFacts)].length;
+  const stats: SelectSchemaStats = {
+    elapsedMs: selectElapsed,
+    factCount,
+    trackerKeys: schemaTracker.size,
+    trackerVals: schemaTracker.totalValues,
+    docsLoaded: [...manager.getReadDocs()].length,
+    sqliteReads: manager.sqliteReads,
+    sqliteMs: manager.sqliteTotalMs,
+    sqliteCacheHits: manager.sqliteCacheHits,
+    sharedMemoSize: sharedMemo.size,
+  };
+  if (selectElapsed > 100) {
+    logger.warn("slow-selectSchema", () => [
+      `${selectElapsed.toFixed(0)}ms`,
+      `facts=${factCount}`,
+      `trackerKeys=${schemaTracker.size}`,
+      `trackerVals=${schemaTracker.totalValues}`,
+      `docsLoaded=${stats.docsLoaded}`,
+      `sqliteReads=${manager.sqliteReads}`,
+      `sqliteMs=${manager.sqliteTotalMs.toFixed(1)}`,
+      `sqliteCacheHits=${manager.sqliteCacheHits}`,
+      `sharedMemo=${sharedMemo.size}`,
+      `selectors=${JSON.stringify(selectSchema)}`,
+    ]);
   }
 
-  return { facts: includedFacts, schemaTracker };
+  return { facts: includedFacts, schemaTracker, stats };
 };
 
 /**
@@ -297,9 +387,14 @@ export function evaluateDocumentLinks<Space extends MemorySpace>(
   schemaSelector: SchemaPathSelector,
   classification: string[],
   schemaTracker: MapSet<string, SchemaPathSelector>,
+  sharedManager?: ServerObjectManager,
+  sharedMemo?: SchemaMemo,
 ): MapSet<string, SchemaPathSelector> {
-  const providedClassifications = new Set<string>(classification);
-  const manager = new ServerObjectManager(session, providedClassifications);
+  const manager = sharedManager ??
+    new ServerObjectManager(
+      session,
+      new Set<string>(classification),
+    );
   const tracker = new CompoundCycleTracker<
     Immutable<StorableDatum>,
     JSONSchema | undefined
@@ -332,6 +427,7 @@ export function evaluateDocumentLinks<Space extends MemorySpace>(
     cfc,
     session.subject,
     schemaTracker,
+    sharedMemo,
   );
 
   return schemaTracker;
@@ -348,6 +444,7 @@ function loadFactsForDoc(
   cfc: ContextualFlowControl,
   space: MemorySpace,
   schemaTracker: MapSet<string, SchemaPathSelector>,
+  sharedMemo?: SchemaMemo,
 ) {
   // A query without a schema context is the same as a query with the minimal schema
   // This will match the specified document, but no linked documents
@@ -398,6 +495,7 @@ function loadFactsForDoc(
         undefined,
         // FIXME(@ubik2): I think this should be true, but not part of this PR
         undefined,
+        sharedMemo,
       );
       // We don't actually use the return value here, but we've built up
       // a list of all the documents we need to watch.

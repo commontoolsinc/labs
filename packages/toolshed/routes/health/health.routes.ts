@@ -21,6 +21,38 @@ export const index = createRoute({
   },
 });
 
+export const stats = createRoute({
+  path: "/api/health/stats",
+  method: "get",
+  tags,
+  responses: {
+    [HttpStatusCodes.OK]: jsonContent(
+      z.object({
+        timestamp: z.number(),
+        logCounts: z.any(),
+        timingStats: z.any(),
+      }),
+      "Logger counts and timing statistics",
+    ),
+  },
+});
+
+export const dash = createRoute({
+  path: "/api/health/dash",
+  method: "get",
+  tags,
+  responses: {
+    [HttpStatusCodes.OK]: {
+      content: {
+        "text/html": {
+          schema: z.any().describe("Health dashboard HTML page"),
+        },
+      },
+      description: "Health dashboard",
+    },
+  },
+});
+
 export const llm = createRoute({
   path: "/api/health/llm",
   method: "get",
@@ -44,4 +76,6 @@ export const llm = createRoute({
 });
 
 export type IndexRoute = typeof index;
+export type StatsRoute = typeof stats;
+export type DashRoute = typeof dash;
 export type LLMRoute = typeof llm;
