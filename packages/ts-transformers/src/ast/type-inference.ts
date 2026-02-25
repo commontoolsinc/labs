@@ -1,6 +1,9 @@
 import ts from "typescript";
 import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
-import { getTypeAtLocationWithFallback } from "./utils.ts";
+import {
+  getTypeAtLocationWithFallback,
+  isDefaultAliasSymbol,
+} from "./utils.ts";
 
 /**
  * Type inference utilities for function signatures
@@ -574,15 +577,15 @@ export function inferArrayElementType(
           };
         }
       } else {
-        // Check for Default<T[]> brand union: aliasSymbol = "Default", aliasTypeArguments[0] = T[]
-        // Default<T,V> expands to a branded union at the type level; the type object
-        // retains aliasSymbol so we can detect and unwrap it here.
+        // Check for Default<T[]> brand union: aliasSymbol = Default from @commontools/api,
+        // aliasTypeArguments[0] = T[]. Default<T,V> expands to a branded union at the type
+        // level; the type object retains aliasSymbol so we can detect and unwrap it here.
         const innerAlias = innerType as {
           aliasSymbol?: ts.Symbol;
           aliasTypeArguments?: readonly ts.Type[];
         };
         if (
-          innerAlias.aliasSymbol?.name === "Default" &&
+          isDefaultAliasSymbol(innerAlias.aliasSymbol) &&
           innerAlias.aliasTypeArguments?.[0] &&
           checker.isArrayType(innerAlias.aliasTypeArguments[0])
         ) {
@@ -673,15 +676,15 @@ export function hasArrayTypeArgument(
         if (checker.isArrayType(innerType) || checker.isTupleType(innerType)) {
           return true;
         }
-        // Handle Default<T[]> brand union: aliasSymbol is "Default" and first
-        // aliasTypeArgument is T[]. typeToTypeNode expands Default<T[],V> to a
-        // branded union, but the type object retains aliasSymbol = Default.
+        // Handle Default<T[]> brand union: aliasSymbol is Default from @commontools/api and
+        // first aliasTypeArgument is T[]. typeToTypeNode expands Default<T[],V> to a
+        // branded union, but the type object retains aliasSymbol so we can detect it here.
         const innerAlias = innerType as {
           aliasSymbol?: ts.Symbol;
           aliasTypeArguments?: readonly ts.Type[];
         };
         if (
-          innerAlias.aliasSymbol?.name === "Default" &&
+          isDefaultAliasSymbol(innerAlias.aliasSymbol) &&
           innerAlias.aliasTypeArguments?.[0]
         ) {
           const baseT = innerAlias.aliasTypeArguments[0];

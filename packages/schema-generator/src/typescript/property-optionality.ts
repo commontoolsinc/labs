@@ -50,3 +50,22 @@ export function isDefaultNodeWithUndefined(
 export function isOptionalSymbol(symbol: ts.Symbol): boolean {
   return (symbol.flags & ts.SymbolFlags.Optional) !== 0;
 }
+
+/**
+ * Returns true if `symbol` is the `Default` type alias from `@commontools/api`.
+ *
+ * Checks both the symbol name AND its declaring source file so that any
+ * user-defined type that happens to be named "Default" is not treated as the
+ * framework's Default<T,V>.
+ */
+export function isDefaultAliasSymbol(symbol: ts.Symbol | undefined): boolean {
+  if (!symbol || symbol.getName() !== "Default") return false;
+  const decl = symbol.declarations?.[0];
+  if (!decl) return false;
+  const fileName = decl.getSourceFile().fileName;
+  // The canonical Default<T,V> is declared in @commontools/api (packages/api/index.ts).
+  // Cover both workspace-resolved paths (".../packages/api/index.ts") and any
+  // future npm-published form ("@commontools/api").
+  return fileName.endsWith("/api/index.ts") ||
+    fileName.includes("@commontools/api");
+}

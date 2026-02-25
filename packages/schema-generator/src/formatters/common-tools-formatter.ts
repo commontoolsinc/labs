@@ -5,6 +5,7 @@ import {
   getCellWrapperInfo,
   isCellBrand,
 } from "../typescript/cell-brand.ts";
+import { isDefaultAliasSymbol } from "../typescript/property-optionality.ts";
 import type {
   GenerationContext,
   SchemaDefinition,
@@ -47,7 +48,7 @@ export class CommonToolsFormatter implements TypeFormatter {
     // Fallback: check via aliasSymbol for Default<T> when typeToTypeNode expanded the alias.
     // typeToTypeNode expands Default<T,V> to its branded union representation, losing the
     // "Default" type node. The type object itself still carries aliasSymbol = Default.
-    if ((type as TypeWithInternals).aliasSymbol?.name === "Default") {
+    if (isDefaultAliasSymbol((type as TypeWithInternals).aliasSymbol)) {
       return true;
     }
 
@@ -124,7 +125,7 @@ export class CommonToolsFormatter implements TypeFormatter {
     // and V from aliasTypeArguments[1] so the default value is preserved in the schema.
     const typeWithAlias = type as TypeWithInternals;
     if (
-      typeWithAlias.aliasSymbol?.name === "Default" &&
+      isDefaultAliasSymbol(typeWithAlias.aliasSymbol) &&
       typeWithAlias.aliasTypeArguments &&
       typeWithAlias.aliasTypeArguments.length >= 1
     ) {
