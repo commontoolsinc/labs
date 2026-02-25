@@ -145,6 +145,7 @@ export default pattern<{
                         <a
                           href={commit.html_url}
                           target="_blank"
+                          rel="noopener noreferrer"
                           style="font-size: 13px; color: #0969da;"
                         >
                           View commit →
