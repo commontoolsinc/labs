@@ -3761,6 +3761,7 @@ interface CTCodeEditorAttributes<T> extends CTHTMLAttributes<T> {
   "tabSize"?: number;
   "tabIndent"?: boolean;
   "theme"?: "light" | "dark";
+  "mode"?: "code" | "prose";
   "onct-change"?: any;
   "onct-focus"?: any;
   "onct-blur"?: any;

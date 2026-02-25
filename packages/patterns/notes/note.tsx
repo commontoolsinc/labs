@@ -357,10 +357,9 @@ const Note = pattern<NoteInput, NoteOutput>(
         onbacklink-click={handlePieceLinkClick}
         onbacklink-create={handleNewBacklink({ mentionable, allPieces })}
         language="text/markdown"
-        theme="light"
+        mode="prose"
         wordWrap
         tabIndent
-        lineNumbers
       />
     );
 
