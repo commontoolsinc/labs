@@ -22,6 +22,14 @@ const confidentialNumberSchema = {
   ifc: { classification: ["confidential"] },
 } as unknown as JSONSchema;
 
+const exactCopyNumberSchema = {
+  type: "number",
+  ifc: {
+    classification: ["secret"],
+    exactCopyOf: "/",
+  },
+} as unknown as JSONSchema;
+
 describe("CFC prepare output transitions", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
@@ -105,5 +113,54 @@ describe("CFC prepare output transitions", () => {
     expect(
       (thrown as { requirement?: string } | undefined)?.requirement,
     ).toBe("confidentialityMonotonicity");
+  });
+
+  it("allows prepare when exactCopyOf assertion is satisfied", async () => {
+    const sourceId = runtime.getCell(space, "cfc-output-exact-copy-source")
+      .getAsNormalizedFullLink().id;
+    await seedInputClassification(sourceId, 11, "secret");
+
+    const tx = runtime.edit();
+    const sourceCell = runtime.getCell<number>(space, "cfc-output-exact-copy-source");
+    const targetCell = runtime.getCell<number>(space, "cfc-output-exact-copy-target");
+    const value = Number(sourceCell.withTx(tx).asSchema(secretNumberSchema).get() ?? 0);
+    targetCell.withTx(tx).asSchema(exactCopyNumberSchema).set(value);
+
+    await prepareCfcCommitIfNeeded(tx);
+    const { error } = await tx.commit();
+    expect(error).toBeUndefined();
+  });
+
+  it("rejects prepare when exactCopyOf assertion is violated", async () => {
+    const sourceId = runtime.getCell(space, "cfc-output-exact-copy-fail-source")
+      .getAsNormalizedFullLink().id;
+    await seedInputClassification(sourceId, 11, "secret");
+
+    const tx = runtime.edit();
+    const sourceCell = runtime.getCell<number>(
+      space,
+      "cfc-output-exact-copy-fail-source",
+    );
+    const targetCell = runtime.getCell<number>(
+      space,
+      "cfc-output-exact-copy-fail-target",
+    );
+    const value = Number(sourceCell.withTx(tx).asSchema(secretNumberSchema).get() ?? 0);
+    targetCell.withTx(tx).asSchema(exactCopyNumberSchema).set(value + 1);
+
+    let thrown: unknown;
+    try {
+      await prepareCfcCommitIfNeeded(tx);
+    } catch (error) {
+      thrown = error;
+    }
+    tx.abort(thrown);
+
+    expect((thrown as { name?: string } | undefined)?.name).toBe(
+      "CfcOutputTransitionViolationError",
+    );
+    expect(
+      (thrown as { requirement?: string } | undefined)?.requirement,
+    ).toBe("exactCopyOf");
   });
 });
