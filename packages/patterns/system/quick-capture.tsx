@@ -17,12 +17,7 @@ import {
 import Note from "../notes/note.tsx";
 import Notebook from "../notes/notebook.tsx";
 import { generateId } from "../notes/schemas.tsx";
-import {
-  fetchAndRunPattern,
-  listMentionable,
-  listPatternIndex,
-  listRecent,
-} from "./common-tools.tsx";
+import { listMentionable, listRecent } from "./common-tools.tsx";
 import {
   searchPattern as summarySearchPattern,
   type SummaryIndexEntry,
@@ -54,26 +49,7 @@ const createNoteHandler = handler<
     noteId: generateId(),
   });
   allPieces.push(note as any);
-  return { created: title };
-});
-
-const createNotesHandler = handler<
-  { notes: Array<{ title: string; content: string }> },
-  { allPieces: Writable<MentionablePiece[]> }
->(({ notes: notesData }, { allPieces }) => {
-  const created: any[] = [];
-  for (const data of notesData) {
-    const note = Note({
-      title: data.title,
-      content: data.content,
-      noteId: generateId(),
-    });
-    created.push(note);
-  }
-  for (const note of created) {
-    allPieces.push(note as any);
-  }
-  return { created: created.length };
+  return note;
 });
 
 const createNotebookHandler = handler<
@@ -95,6 +71,19 @@ type PromptAttachment = {
   data?: any;
   piece?: any;
 };
+
+const clearChat = handler(
+  (
+    _: never,
+    { messages, pending }: {
+      messages: Writable<Array<BuiltInLLMMessage>>;
+      pending: Writable<boolean | undefined>;
+    },
+  ) => {
+    messages.set([]);
+    pending.set(false);
+  },
+);
 
 const sendMessage = handler<
   { detail: { text: string; attachments?: PromptAttachment[] } },
@@ -163,7 +152,7 @@ Process:
    - Notes: "📝 " (📝 + space) — e.g. a note titled "Meeting with Alice" displays as "📝 Meeting with Alice"
    - Notebooks: "📓 " (📓 + space) — e.g. "📓 Capture Log (3)"
    When creating wiki-links, you MUST include the emoji prefix for the link to resolve. Example: [[📝 Meeting with Alice]], NOT [[Meeting with Alice]]. Always match the exact title format you see in searchSpace results for existing content.
-5. Use createNotes to batch-create the notes.
+5. Use createNote to create each note individually. Each call returns the note cell with its address, so you can reference it precisely in subsequent notes and the capture log.
 6. After creating content notes, create a capture log entry: a final note titled something like "Capture: [brief topic summary] — [date]" that contains:
    - The original raw transcript/text (preserved verbatim in a blockquote or code block)
    - A list of all notes created from it, with [[Title]] links to each
@@ -188,17 +177,10 @@ ${profileSection}`;
       }),
       listMentionable: patternTool(listMentionable, { mentionable }),
       listRecent: patternTool(listRecent, { recentPieces }),
-      listPatternIndex: patternTool(listPatternIndex),
-      fetchAndRunPattern: patternTool(fetchAndRunPattern),
       createNote: {
         handler: createNoteHandler({ allPieces }),
         description:
-          "Create a single note with a title and markdown content. Returns the created note.",
-      },
-      createNotes: {
-        handler: createNotesHandler({ allPieces }),
-        description:
-          "Create multiple notes at once. Each note has a title and content. More efficient than calling createNote repeatedly.",
+          "Create a single note with a title and markdown content. Returns the created note cell with its address. Call once per note.",
       },
       createNotebook: {
         handler: createNotebookHandler({ allPieces }),
@@ -214,7 +196,7 @@ ${profileSection}`;
       builtinTools: false,
     };
 
-    const { addMessage, pending } = llmDialog(dialogParams);
+    const { addMessage, cancelGeneration, pending } = llmDialog(dialogParams);
 
     const hasMessages = computed(() => messages.get().length > 0);
 
@@ -253,11 +235,26 @@ ${profileSection}`;
           </ct-vscroll>
 
           <div slot="footer" style="padding: 0.5rem 1rem 1rem;">
+            {ifElse(
+              hasMessages,
+              <ct-hstack align="center" gap="1" style="padding-bottom: 0.5rem;">
+                <ct-button
+                  variant="pill"
+                  type="button"
+                  title="Clear chat"
+                  onClick={clearChat({ messages, pending })}
+                >
+                  Clear
+                </ct-button>
+              </ct-hstack>,
+              <span />,
+            )}
             <ct-prompt-input
               placeholder="Paste text to capture..."
               pending={pending}
               $mentionable={mentionable}
               onct-send={sendMessage({ addMessage })}
+              onct-stop={cancelGeneration}
             />
           </div>
         </ct-screen>
