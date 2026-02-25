@@ -26,11 +26,16 @@ import { FrozenMap, FrozenSet } from "./frozen-builtins.ts";
  * have their own handling paths in the conversion layer.
  */
 export function isConvertibleNativeInstance(value: object): boolean {
-  const tag = tagFromNativeValue(value);
-  return tag !== null && tag !== NATIVE_TAGS.Array &&
-    tag !== NATIVE_TAGS.Object && tag !== NATIVE_TAGS.HasToJSON &&
-    tag !== NATIVE_TAGS.EpochNsec && tag !== NATIVE_TAGS.EpochDays &&
-    tag !== NATIVE_TAGS.ContentId;
+  switch (tagFromNativeValue(value)) {
+    case NATIVE_TAGS.Error:
+    case NATIVE_TAGS.Map:
+    case NATIVE_TAGS.Set:
+    case NATIVE_TAGS.Date:
+    case NATIVE_TAGS.Uint8Array:
+      return true;
+    default:
+      return false;
+  }
 }
 
 // ---------------------------------------------------------------------------
