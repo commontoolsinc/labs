@@ -258,4 +258,51 @@ describe("CFC scheduler prepare shim", () => {
     expect(callbackErrorName).toBe("StorageTransactionAborted");
     expect(callbackErrorReasonName).toBe("CfcSchemaHashMismatchError");
   });
+
+  it("does not retry reactive actions on terminal CFC prepare errors", async () => {
+    let tx = runtime.edit();
+    const sourceCell = runtime.getCell<number>(
+      space,
+      "cfc-prepare-terminal-reactive-source",
+      undefined,
+      tx,
+    );
+    const targetCell = runtime.getCell<number>(
+      space,
+      "cfc-prepare-terminal-reactive-target",
+      undefined,
+      tx,
+    );
+    sourceCell.set(10);
+    targetCell.set(0);
+    await tx.commit();
+
+    const mismatchedSchemaHash = await computeCfcSchemaHash(ifcStringSchema);
+    tx = runtime.edit();
+    tx.writeOrThrow({
+      space,
+      id: targetCell.getAsNormalizedFullLink().id,
+      type: "application/json",
+      path: ["cfc", "schemaHash"],
+    }, mismatchedSchemaHash);
+    await tx.commit();
+
+    let attempts = 0;
+    const action = (actionTx: IExtendedStorageTransaction) => {
+      attempts++;
+      const source = Number(
+        sourceCell.withTx(actionTx).asSchema(ifcNumberSchema).get() ?? 0,
+      );
+      targetCell.withTx(actionTx).asSchema(ifcNumberSchema).set(source + 1);
+    };
+
+    await runtime.scheduler.run(action);
+    await runtime.scheduler.idle();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await runtime.scheduler.idle();
+    await targetCell.pull();
+
+    expect(attempts).toBe(1);
+    expect(targetCell.get()).toBe(0);
+  });
 });
