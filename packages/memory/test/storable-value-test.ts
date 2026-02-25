@@ -926,6 +926,32 @@ describe("storable-value", () => {
         expect(toStorableValue(undefined, false)).toBe(undefined);
         expect(toStorableValue(BigInt(42), false)).toBe(BigInt(42));
       });
+
+      it("does not freeze the original array", () => {
+        const arr = [1, 2, 3];
+        toStorableValue(arr, true);
+        expect(Object.isFrozen(arr)).toBe(false);
+      });
+
+      it("does not freeze the original plain object", () => {
+        const obj = { a: 1, b: 2 };
+        toStorableValue(obj, true);
+        expect(Object.isFrozen(obj)).toBe(false);
+      });
+
+      it("returns a frozen copy for arrays when freeze=true", () => {
+        const arr = [1, 2, 3];
+        const result = toStorableValue(arr, true);
+        expect(Object.isFrozen(result)).toBe(true);
+        expect(result).not.toBe(arr);
+      });
+
+      it("returns a frozen copy for plain objects when freeze=true", () => {
+        const obj = { a: 1, b: 2 };
+        const result = toStorableValue(obj, true);
+        expect(Object.isFrozen(result)).toBe(true);
+        expect(result).not.toBe(obj);
+      });
     });
 
     describe("toDeepStorableValue", () => {
@@ -992,6 +1018,18 @@ describe("storable-value", () => {
         expect(toDeepStorableValue(42, false)).toBe(42);
         expect(toDeepStorableValue("hello", false)).toBe("hello");
         expect(toDeepStorableValue(null, false)).toBe(null);
+      });
+
+      it("does not freeze the original array", () => {
+        const arr = [1, 2, 3];
+        toDeepStorableValue(arr, true);
+        expect(Object.isFrozen(arr)).toBe(false);
+      });
+
+      it("does not freeze the original plain object", () => {
+        const obj = { a: 1, b: 2 };
+        toDeepStorableValue(obj, true);
+        expect(Object.isFrozen(obj)).toBe(false);
       });
     });
   });
