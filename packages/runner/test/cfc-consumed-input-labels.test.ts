@@ -40,8 +40,14 @@ describe("collectConsumedInputLabels", () => {
       [
         consumedReadEntityKey(reads[0]),
         {
-          "/": { classification: ["confidential"] },
-          "/profile/ssn": { classification: ["secret"] },
+          "/": {
+            classification: ["confidential"],
+            integrity: ["source-a"],
+          },
+          "/profile/ssn": {
+            classification: ["secret"],
+            integrity: ["source-b"],
+          },
         },
       ],
       [
@@ -56,9 +62,11 @@ describe("collectConsumedInputLabels", () => {
     expect(labeled).toHaveLength(3);
     expect(labeled[0].effectiveLabel).toEqual({
       classification: ["secret"],
+      integrity: ["source-a", "source-b"],
     });
     expect(labeled[1].effectiveLabel).toEqual({
       classification: ["confidential"],
+      integrity: ["source-a"],
     });
     expect(labeled[2].effectiveLabel).toEqual({
       classification: ["unclassified"],
