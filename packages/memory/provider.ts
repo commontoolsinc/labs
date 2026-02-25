@@ -826,6 +826,7 @@ class MemoryProviderSession<
     }
 
     // Extract changed document keys from transaction
+    const t0 = performance.now();
     const changedDocs = this.extractChangedDocKeys(space, transaction);
     if (changedDocs.size === 0) {
       return [];
@@ -840,6 +841,7 @@ class MemoryProviderSession<
       throw new Error(`Failed to mount space ${space}: ${mountResult.error}`);
     }
     const spaceSession = mountResult.ok as unknown as SpaceSession<Space>;
+    const tMount = performance.now();
 
     // Find affected docs using the shared schemaTracker (for non-wildcard)
     const sharedAffectedDocs = new Map<string, Set<SchemaPathSelector>>();
@@ -849,14 +851,17 @@ class MemoryProviderSession<
         sharedAffectedDocs.set(docKey, new Set(existingSelectors));
       }
     }
+    const tLookup = performance.now();
 
     // Process shared affected docs
     const { newFacts } = this.processIncrementalUpdate(
       spaceSession,
       sharedAffectedDocs,
     );
+    const tShared = performance.now();
 
     // Add facts from wildcard subscriptions
+    let wildcardCount = 0;
     for (const [_jobId, subscription] of this.schemaChannels) {
       if (subscription.isWildcardQuery) {
         const wildcardDocs = this.findAffectedDocsForWildcard(
@@ -864,6 +869,7 @@ class MemoryProviderSession<
           subscription.invocation,
         );
         if (wildcardDocs.size > 0) {
+          wildcardCount += wildcardDocs.size;
           const wildcardResult = this.processIncrementalUpdate(
             spaceSession,
             wildcardDocs,
@@ -873,6 +879,22 @@ class MemoryProviderSession<
           }
         }
       }
+    }
+    const tWildcard = performance.now();
+    const total = tWildcard - t0;
+    if (total > 20) {
+      logger.warn("slow-schema-match", () => [
+        `${total.toFixed(0)}ms total`,
+        `mount=${(tMount - t0).toFixed(0)}ms`,
+        `lookup=${(tLookup - tMount).toFixed(0)}ms`,
+        `shared=${(tShared - tLookup).toFixed(0)}ms`,
+        `wildcard=${(tWildcard - tShared).toFixed(0)}ms`,
+        `changedDocs=${changedDocs.size}`,
+        `sharedAffected=${sharedAffectedDocs.size}`,
+        `wildcardDocs=${wildcardCount}`,
+        `schemaChannels=${this.schemaChannels.size}`,
+        `newFacts=${newFacts.size}`,
+      ]);
     }
 
     return [...newFacts.values()];
@@ -929,12 +951,10 @@ class MemoryProviderSession<
       }
     }
 
-    // Check which docs we're watching that didn't just change, so we don't
-    // have to reload them to see if we should send them
-    const existingDocs = new Set<string>();
-    for (const [key, _value] of this.sharedSchemaTracker) {
-      existingDocs.add(key);
-    }
+    // Snapshot tracker keys BEFORE traversal so we can diff afterward.
+    // Use the tracker's size as a cheap proxy — we only need to find
+    // keys that were added during evaluateDocumentLinks.
+    const trackerSizeBefore = this.sharedSchemaTracker.size;
 
     // Evaluate each affected doc with each of its schemas
     // evaluateDocumentLinks does a full traversal and finds all linked documents
@@ -965,28 +985,45 @@ class MemoryProviderSession<
       ],
     );
 
-    // Fetch each unique doc once and add to results
-    for (const [docKey, _value] of this.sharedSchemaTracker) {
-      // Don't bother with anything we already tracked
-      if (existingDocs.has(docKey)) {
-        continue;
+    // Use docs loaded by the manager during traversal as candidates for
+    // new facts. This avoids iterating the entire sharedSchemaTracker
+    // (which can have thousands of entries) on every commit.
+    // The manager already loaded these docs from SQLite, so we have their
+    // data without an extra read.
+    if (this.sharedSchemaTracker.size > trackerSizeBefore) {
+      for (const loaded of sharedManager.getReadDocs()) {
+        const docKey =
+          `${spaceSession.subject}/${loaded.address.id}/${loaded.address.type}`;
+        // Only include docs that weren't already in the tracker before traversal
+        if (!staleSchemaTracker.has(docKey) && loaded.value !== undefined) {
+          const details = sharedManager.getDetails(loaded.address);
+          if (details) {
+            const factKey = this.formatAddress(spaceSession.subject, {
+              of: loaded.address.id,
+              the: loaded.address.type,
+            });
+            newFacts.set(factKey, {
+              of: loaded.address.id,
+              the: loaded.address.type,
+              cause: causeFromString(details.cause),
+              is: loaded.value,
+              since: details.since,
+            });
+          }
+        }
       }
+    }
 
+    // Also include the affected (changed) docs themselves — their data
+    // may have changed even if they were already tracked.
+    for (const [docKey, _schemaSelectors] of affectedDocs) {
       const address = this.parseDocKey(docKey);
       if (address === undefined) continue;
-
       const fact = selectFact(spaceSession, {
         of: address.id,
         the: address.type,
       });
-
-      if (!fact || fact.is === undefined) {
-        // Document doesn't exist yet - skip
-        continue;
-      }
-
-      // The format of this key doesn't really matter
-      // this uses the watch:// format, but we could use the docKey
+      if (!fact || fact.is === undefined) continue;
       const factKey = this.formatAddress(spaceSession.subject, fact);
       newFacts.set(factKey, {
         of: fact.of,
