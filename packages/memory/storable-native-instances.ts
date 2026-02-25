@@ -6,7 +6,8 @@ import {
   type ReconstructionContext,
   type StorableInstance,
 } from "./storable-protocol.ts";
-import { tagFromNativeValue, TAGS } from "./type-tags.ts";
+import { SpecialPrimitiveValue } from "./special-primitive-value.ts";
+import { NATIVE_TAGS, tagFromNativeValue, TAGS } from "./type-tags.ts";
 import { FrozenMap, FrozenSet } from "./frozen-builtins.ts";
 
 // ---------------------------------------------------------------------------
@@ -18,9 +19,15 @@ import { FrozenMap, FrozenSet } from "./frozen-builtins.ts";
  * system knows how to wrap (Error, Map, Set, Date, Uint8Array). These are
  * the "wild-west" instances that get converted into `StorableNativeWrapper`
  * subclasses or `StorableInstance` types by the conversion layer.
+ *
+ * Arrays, plain objects, and objects with `toJSON()` are recognized by
+ * `tagFromNativeValue()` but are NOT convertible native instances -- they
+ * have their own handling paths in the conversion layer.
  */
 export function isConvertibleNativeInstance(value: object): boolean {
-  return tagFromNativeValue(value) !== null;
+  const tag = tagFromNativeValue(value);
+  return tag !== null && tag !== NATIVE_TAGS.Array &&
+    tag !== NATIVE_TAGS.Object && tag !== NATIVE_TAGS.HasToJSON;
 }
 
 // ---------------------------------------------------------------------------
@@ -317,26 +324,32 @@ export class StorableSet extends StorableNativeWrapper<Set<StorableValue>> {
  * Temporal type representing nanoseconds from the POSIX Epoch (1970-01-01T00:00:00Z).
  * Wraps a `bigint` value. Used for high-precision timestamps. Direct member of
  * `StorableDatum` (not a `StorableInstance`).
- * See Section 1.4.5 of the formal spec.
+ * See Section 1.4.6 of the formal spec.
  */
-export class StorableEpochNsec {
+export class StorableEpochNsec extends SpecialPrimitiveValue {
   constructor(
     /** Nanoseconds from POSIX Epoch. Negative values represent pre-epoch timestamps. */
     readonly value: bigint,
-  ) {}
+  ) {
+    super();
+    Object.freeze(this);
+  }
 }
 
 /**
  * Temporal type representing days from the POSIX Epoch (1970-01-01).
  * Wraps a `bigint` value. Used for date-only (no time) values. Direct member of
  * `StorableDatum` (not a `StorableInstance`).
- * See Section 1.4.6 of the formal spec.
+ * See Section 1.4.7 of the formal spec.
  */
-export class StorableEpochDays {
+export class StorableEpochDays extends SpecialPrimitiveValue {
   constructor(
     /** Days from POSIX Epoch. Negative values represent pre-epoch dates. */
     readonly value: bigint,
-  ) {}
+  ) {
+    super();
+    Object.freeze(this);
+  }
 }
 
 /**
@@ -406,11 +419,9 @@ export function nativeValueFromStorableValue(
     return value.toNativeValue(frozen);
   }
 
-  // Temporal types (StorableEpochNsec, StorableEpochDays) are simple value
-  // wrappers -- pass through as-is.
-  if (
-    value instanceof StorableEpochNsec || value instanceof StorableEpochDays
-  ) {
+  // Special primitives (StorableEpochNsec, StorableEpochDays) are simple
+  // value wrappers -- pass through as-is.
+  if (value instanceof SpecialPrimitiveValue) {
     return value;
   }
 
@@ -482,11 +493,9 @@ export function deepNativeValueFromStorableValue(
     return value.toNativeValue(frozen);
   }
 
-  // Temporal types (StorableEpochNsec, StorableEpochDays) are simple value
-  // wrappers -- pass through as-is.
-  if (
-    value instanceof StorableEpochNsec || value instanceof StorableEpochDays
-  ) {
+  // Special primitives (StorableEpochNsec, StorableEpochDays) are simple
+  // value wrappers -- pass through as-is.
+  if (value instanceof SpecialPrimitiveValue) {
     return value;
   }
 

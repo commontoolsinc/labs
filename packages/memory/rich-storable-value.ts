@@ -5,9 +5,9 @@ import type {
   StorableValueLayer,
 } from "./interface.ts";
 import { isStorableInstance } from "./storable-protocol.ts";
+import { SpecialPrimitiveValue } from "./special-primitive-value.ts";
 import {
   isConvertibleNativeInstance,
-  StorableEpochDays,
   StorableEpochNsec,
   StorableError,
   UNSAFE_KEYS,
@@ -43,41 +43,96 @@ export function toRichStorableValue(
   value: unknown,
   freeze = true,
 ): StorableValueLayer {
-  // Temporal types (StorableEpochNsec, StorableEpochDays) are direct
-  // StorableDatum members -- pass through as-is.
-  if (
-    value instanceof StorableEpochNsec || value instanceof StorableEpochDays
-  ) {
-    if (freeze) Object.freeze(value);
+  // Special primitives (StorableEpochNsec, StorableEpochDays) are direct
+  // StorableDatum members -- always frozen, pass through as-is regardless
+  // of the `freeze` argument (they behave like true primitives).
+  if (value instanceof SpecialPrimitiveValue) {
     return value as StorableValueLayer;
   }
 
   // StorableInstance values (including StorableError, UnknownStorable, etc.)
   // pass through as-is -- they are already valid StorableValue members.
+  // Note: we do NOT freeze the incoming value. Conversion functions must
+  // not modify the caller's argument. The deep conversion path creates
+  // its own copies when freezing is needed.
   if (isStorableInstance(value)) {
-    if (freeze) Object.freeze(value);
     return value as StorableValueLayer;
   }
 
-  // Native convertible instances: dispatch via tagFromNativeValue() which uses
-  // a constructor switch (O(1)) with Error.isError() fallback for exotic
-  // Error subclasses.
+  // Object-type dispatch via tagFromNativeValue() -- a constructor switch
+  // (O(1)) with fallbacks for exotic Error subclasses, cross-realm arrays,
+  // and null-prototype objects.
   if (typeof value === "object" && value !== null) {
     const nativeTag = tagFromNativeValue(value);
-    if (nativeTag === NATIVE_TAGS.Error) {
-      const wrapped = new StorableError(value as Error);
-      if (freeze) Object.freeze(wrapped);
-      return wrapped;
-    }
-    if (nativeTag === NATIVE_TAGS.Date) {
-      // Date instances are converted to StorableEpochNsec (nanoseconds from
-      // epoch). Extra enumerable properties cause rejection ("death before
-      // confusion").
-      rejectExtraProperties(value, "Date");
-      const nsec = BigInt((value as Date).getTime()) * 1_000_000n;
-      const wrapped = new StorableEpochNsec(nsec);
-      if (freeze) Object.freeze(wrapped);
-      return wrapped;
+
+    switch (nativeTag) {
+      case NATIVE_TAGS.Error: {
+        const wrapped = new StorableError(value as Error);
+        if (freeze) Object.freeze(wrapped);
+        return wrapped;
+      }
+
+      case NATIVE_TAGS.Date: {
+        // Date instances are converted to StorableEpochNsec (nanoseconds from
+        // epoch). Extra enumerable properties cause rejection ("death before
+        // confusion").
+        rejectExtraProperties(value, "Date");
+        const nsec = BigInt((value as Date).getTime()) * 1_000_000n;
+        const wrapped = new StorableEpochNsec(nsec);
+        if (freeze) Object.freeze(wrapped);
+        return wrapped;
+      }
+
+      case NATIVE_TAGS.Array: {
+        // Arrays pass through without converting `undefined` to `null` or
+        // densifying sparse arrays. When freezing, return a frozen shallow
+        // copy rather than freezing the caller's array in place.
+        const arr = value as unknown[];
+        if (freeze) {
+          if (Object.isFrozen(arr)) return arr;
+          const copy = new Array(arr.length);
+          for (let i = 0; i < arr.length; i++) {
+            if (i in arr) copy[i] = arr[i];
+          }
+          return Object.freeze(copy);
+        }
+        return arr;
+      }
+
+      case NATIVE_TAGS.Object: {
+        // When freezing, return a frozen shallow copy rather than freezing
+        // the caller's object in place.
+        const obj = value as Record<string, unknown>;
+        if (freeze) {
+          if (Object.isFrozen(obj)) return obj;
+          return Object.freeze({ ...obj });
+        }
+        return obj;
+      }
+
+      case NATIVE_TAGS.HasToJSON: {
+        // Objects (or arrays/class instances) with a toJSON() method.
+        // Call toJSON() and validate the result.
+        const converted = (value as { toJSON: () => unknown }).toJSON();
+        if (!isRichStorableValue(converted)) {
+          throw new Error(
+            `\`toJSON()\` on ${typeof value} returned something other than a storable value`,
+          );
+        }
+        if (freeze && converted !== null && typeof converted === "object") {
+          if (Object.isFrozen(converted)) return converted;
+          if (Array.isArray(converted)) {
+            return Object.freeze([...converted]) as StorableValueLayer;
+          }
+          return Object.freeze({ ...converted }) as StorableValueLayer;
+        }
+        return converted;
+      }
+
+      default:
+        // Other object types (Map, Set, Uint8Array, class instances, etc.)
+        // fall through to toRichStorableValueBase for rejection handling.
+        break;
     }
   }
 
@@ -86,17 +141,12 @@ export function toRichStorableValue(
     return undefined;
   }
 
-  // For arrays, return as-is without converting `undefined` to `null` or
-  // densifying sparse arrays.
-  if (Array.isArray(value)) {
-    if (freeze) Object.freeze(value);
-    return value;
-  }
-
-  // For all remaining types, apply the same logic as legacy toStorableValue.
+  // Non-object types (primitives, bigint, functions) and unrecognized
+  // object types (class instances with toJSON, etc.).
   const result = toRichStorableValueBase(value);
   if (freeze && result !== null && typeof result === "object") {
-    Object.freeze(result);
+    if (Object.isFrozen(result)) return result;
+    return Object.freeze({ ...result });
   }
   return result;
 }
@@ -232,10 +282,8 @@ function isDeepFrozenStorableValue(value: unknown): boolean {
     return true;
   }
 
-  // Temporal types are simple frozen value wrappers.
-  if (
-    value instanceof StorableEpochNsec || value instanceof StorableEpochDays
-  ) {
+  // Special primitives are simple frozen value wrappers.
+  if (value instanceof SpecialPrimitiveValue) {
     return true;
   }
 
@@ -276,9 +324,11 @@ function toDeepRichStorableValueInternal(
   }
 
   // Try to convert the top level via the rich shallow converter.
+  // Pass freeze=false: the deep path handles freezing its own newly-built
+  // results; the shallow converter should not freeze anything.
   let value: StorableValueLayer;
   try {
-    value = toRichStorableValue(original);
+    value = toRichStorableValue(original, false);
   } catch (e) {
     if (isOriginalRecord) {
       converted.delete(original);
@@ -318,11 +368,9 @@ function toDeepRichStorableValueInternal(
     return result as StorableValue;
   }
 
-  // Temporal types are direct StorableDatum members -- pass through.
-  if (
-    value instanceof StorableEpochNsec || value instanceof StorableEpochDays
-  ) {
-    if (freeze) Object.freeze(value);
+  // Special primitives are direct StorableDatum members -- always frozen,
+  // pass through as-is regardless of the `freeze` argument.
+  if (value instanceof SpecialPrimitiveValue) {
     if (isOriginalRecord) {
       converted.set(original, value);
     }
@@ -331,9 +379,9 @@ function toDeepRichStorableValueInternal(
 
   // Other StorableInstance values (Cell, Stream, UnknownStorable, etc.)
   // don't need recursion -- their [DECONSTRUCT] implementations return
-  // proper StorableValue.
+  // proper StorableValue. We do not freeze protocol objects; they are
+  // managed by the caller.
   if (isStorableInstance(value)) {
-    if (freeze) Object.freeze(value);
     if (isOriginalRecord) {
       converted.set(original, value);
     }
@@ -464,11 +512,8 @@ export function isRichStorableValue(
       if (value === null) {
         return true;
       }
-      // Temporal types are direct StorableDatum members.
-      if (
-        value instanceof StorableEpochNsec ||
-        value instanceof StorableEpochDays
-      ) {
+      // Special primitives are direct StorableDatum members.
+      if (value instanceof SpecialPrimitiveValue) {
         return true;
       }
       // StorableInstance values (including StorableError, UnknownStorable,

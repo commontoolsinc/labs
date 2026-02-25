@@ -7,6 +7,7 @@ import {
 } from "../storable-protocol.ts";
 import type { ReconstructionContext } from "../storable-protocol.ts";
 import type { StorableValue } from "../interface.ts";
+import { SpecialPrimitiveValue } from "../special-primitive-value.ts";
 import {
   deepNativeValueFromStorableValue,
   isConvertibleNativeInstance,
@@ -20,6 +21,7 @@ import {
   StorableUint8Array,
 } from "../storable-native-instances.ts";
 import { FrozenMap, FrozenSet } from "../frozen-builtins.ts";
+import { toRichStorableValue } from "../rich-storable-value.ts";
 import {
   NATIVE_TAGS,
   tagFromNativeClass,
@@ -750,21 +752,57 @@ describe("storable-native-instances", () => {
       );
     });
 
-    it("returns null for plain objects", () => {
-      expect(tagFromNativeValue({})).toBe(null);
+    it("returns Object tag for plain objects", () => {
+      expect(tagFromNativeValue({})).toBe(NATIVE_TAGS.Object);
     });
 
-    it("returns null for arrays", () => {
-      expect(tagFromNativeValue([])).toBe(null);
+    it("returns Array tag for arrays", () => {
+      expect(tagFromNativeValue([])).toBe(NATIVE_TAGS.Array);
     });
 
     it("returns null for RegExp", () => {
       expect(tagFromNativeValue(/abc/)).toBe(null);
     });
 
-    it("returns null for null-prototype objects (no constructor)", () => {
+    it("returns Object tag for null-prototype objects (no constructor)", () => {
       const obj = Object.create(null);
-      expect(tagFromNativeValue(obj)).toBe(null);
+      expect(tagFromNativeValue(obj)).toBe(NATIVE_TAGS.Object);
+    });
+
+    it("returns HasToJSON tag for plain objects with toJSON()", () => {
+      const obj = { toJSON: () => "converted" };
+      expect(tagFromNativeValue(obj)).toBe(NATIVE_TAGS.HasToJSON);
+    });
+
+    it("returns HasToJSON tag for arrays with toJSON()", () => {
+      const arr = [1, 2, 3] as unknown[] & { toJSON?: () => unknown };
+      arr.toJSON = () => "custom array";
+      expect(tagFromNativeValue(arr)).toBe(NATIVE_TAGS.HasToJSON);
+    });
+
+    it("returns HasToJSON tag for class instances with toJSON()", () => {
+      class Custom {
+        toJSON() {
+          return { x: 1 };
+        }
+      }
+      expect(tagFromNativeValue(new Custom())).toBe(NATIVE_TAGS.HasToJSON);
+    });
+
+    it("returns Date tag for Date (not HasToJSON despite Date.toJSON)", () => {
+      expect(tagFromNativeValue(new Date())).toBe(NATIVE_TAGS.Date);
+    });
+
+    // Functions with toJSON() return HasToJSON from tagFromNativeValue when
+    // called directly. In practice, the typeof === "object" guard in
+    // toRichStorableValue prevents functions from reaching tagFromNativeValue;
+    // they are handled separately in toRichStorableValueBase.
+    it("returns HasToJSON for functions with toJSON() (if called directly)", () => {
+      const fn = () => {};
+      (fn as unknown as { toJSON: () => string }).toJSON = () => "converted";
+      expect(tagFromNativeValue(fn as unknown as object)).toBe(
+        NATIVE_TAGS.HasToJSON,
+      );
     });
   });
 
@@ -791,7 +829,9 @@ describe("storable-native-instances", () => {
       expect(tagFromNativeClass(ExoticError)).toBe(NATIVE_TAGS.Error);
     });
 
-    it("returns correct tags for Map, Set, Date, Uint8Array", () => {
+    it("returns correct tags for Array, Object, Map, Set, Date, Uint8Array", () => {
+      expect(tagFromNativeClass(Array)).toBe(NATIVE_TAGS.Array);
+      expect(tagFromNativeClass(Object)).toBe(NATIVE_TAGS.Object);
       expect(tagFromNativeClass(Map)).toBe(NATIVE_TAGS.Map);
       expect(tagFromNativeClass(Set)).toBe(NATIVE_TAGS.Set);
       expect(tagFromNativeClass(Date)).toBe(NATIVE_TAGS.Date);
@@ -802,6 +842,34 @@ describe("storable-native-instances", () => {
       expect(tagFromNativeClass(RegExp)).toBe(null);
       expect(tagFromNativeClass(WeakMap)).toBe(null);
       expect(tagFromNativeClass(Promise)).toBe(null);
+    });
+
+    it("returns HasToJSON for class with toJSON on prototype", () => {
+      class WithToJSON {
+        toJSON() {
+          return { x: 1 };
+        }
+      }
+      expect(tagFromNativeClass(WithToJSON)).toBe(NATIVE_TAGS.HasToJSON);
+    });
+
+    it("returns HasToJSON for subclass inheriting toJSON", () => {
+      class Base {
+        toJSON() {
+          return "base";
+        }
+      }
+      class Sub extends Base {}
+      expect(tagFromNativeClass(Sub)).toBe(NATIVE_TAGS.HasToJSON);
+    });
+
+    it("returns Date tag for Date (not HasToJSON despite Date.prototype.toJSON)", () => {
+      expect(tagFromNativeClass(Date)).toBe(NATIVE_TAGS.Date);
+    });
+
+    it("returns null for class without toJSON", () => {
+      class Plain {}
+      expect(tagFromNativeClass(Plain)).toBe(null);
     });
   });
 
@@ -825,6 +893,40 @@ describe("storable-native-instances", () => {
       expect(isConvertibleNativeInstance([])).toBe(false);
       expect(isConvertibleNativeInstance(/abc/)).toBe(false);
       expect(isConvertibleNativeInstance(new WeakMap())).toBe(false);
+    });
+
+    it("returns false for objects with toJSON()", () => {
+      expect(isConvertibleNativeInstance({ toJSON: () => "x" })).toBe(false);
+    });
+  });
+
+  describe("SpecialPrimitiveValue", () => {
+    it("StorableEpochNsec is instanceof SpecialPrimitiveValue", () => {
+      expect(new StorableEpochNsec(0n) instanceof SpecialPrimitiveValue).toBe(
+        true,
+      );
+    });
+
+    it("StorableEpochDays is instanceof SpecialPrimitiveValue", () => {
+      expect(new StorableEpochDays(0n) instanceof SpecialPrimitiveValue).toBe(
+        true,
+      );
+    });
+
+    it("StorableEpochNsec instances are always frozen", () => {
+      expect(Object.isFrozen(new StorableEpochNsec(42n))).toBe(true);
+    });
+
+    it("StorableEpochDays instances are always frozen", () => {
+      expect(Object.isFrozen(new StorableEpochDays(100n))).toBe(true);
+    });
+
+    it("passes through toRichStorableValue unchanged even with freeze=false", () => {
+      const nsec = new StorableEpochNsec(123n);
+      const days = new StorableEpochDays(456n);
+      // freeze=false should still return the same instance (not a copy).
+      expect(toRichStorableValue(nsec, false)).toBe(nsec);
+      expect(toRichStorableValue(days, false)).toBe(days);
     });
   });
 });

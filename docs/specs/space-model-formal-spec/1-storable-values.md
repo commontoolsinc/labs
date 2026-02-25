@@ -85,9 +85,11 @@ type StorableValue =
   | undefined // first-class storable; requires tagged representation in formats lacking native `undefined`
   | bigint    // large integers; rides through without wrapping (like `undefined`)
 
-  // (b) Temporal primitives (direct datum members, not StorableInstance)
+  // (b) Special primitives (SpecialPrimitiveValue subclasses — direct datum
+  //     members, not StorableInstance; always frozen)
   | StorableEpochNsec
   | StorableEpochDays
+  | StorableContentId
 
   // (c) Branded storables (custom types implementing the storable protocol)
   //     This arm covers:
@@ -210,13 +212,13 @@ cases needed in the serializer. The hashing system also uses the standard
 `TAG_INSTANCE` path for most wrappers, but optimizes `StorableUint8Array`
 with a dedicated `TAG_BYTES` tag for content-level identity (see Section 6.3).
 
-The temporal types (`StorableEpochNsec`, `StorableEpochDays`) are **not**
-`StorableInstance`s — they are direct members of `StorableDatum`, like `bigint`.
-They are simple value wrappers (constructor + `readonly value: bigint`) that the
-conversion layer creates from native `Date` objects. They have dedicated
-canonical hash tags (`TAG_EPOCH_NSEC`, `TAG_EPOCH_DAYS`) and dedicated
-`TypeHandler`s for wire format serialization, but they do not implement
-`[DECONSTRUCT]`, `[RECONSTRUCT]`, or carry a `typeTag` property.
+The **special primitive** types (`StorableEpochNsec`, `StorableEpochDays`,
+`StorableContentId`) are **not** `StorableInstance`s — they are direct members
+of `StorableDatum`, like `bigint`. They all extend `SpecialPrimitiveValue`
+(Section 1.4.5), which marks them as always-frozen value types that bypass the
+`freeze` option in conversion functions. They have dedicated canonical hash tags
+and dedicated `TypeHandler`s for wire format serialization, but they do not
+implement `[DECONSTRUCT]`, `[RECONSTRUCT]`, or carry a `typeTag` property.
 
 #### 1.4.1 Wrapper Class Summary
 
@@ -239,15 +241,17 @@ Each wrapper class above:
   serialization context for tag resolution, following the pattern established
   by `UnknownStorable` and `ProblematicStorable`.
 
-Unlike the wrappers above, `StorableEpochNsec` and `StorableEpochDays` are
-**direct members of `StorableDatum`** and do not implement `StorableInstance`.
-They are simple value wrappers with a constructor and a `readonly value: bigint`
-property. See Sections 1.4.5 and 1.4.6.
+Unlike the wrappers above, the special primitive types (`StorableEpochNsec`,
+`StorableEpochDays`, `StorableContentId`) are **direct members of
+`StorableDatum`** and do not implement `StorableInstance`. They all extend
+`SpecialPrimitiveValue` (Section 1.4.5), which provides always-frozen semantics.
+See Sections 1.4.5 through 1.4.8.
 
-| Direct Datum Type | Wraps | Wire Tag | Stored Value | Notes |
-|-------------------|-------|----------|--------------|-------|
-| `StorableEpochNsec` | `Date` | `EpochNsec@1` | `bigint` (signed nanoseconds from POSIX Epoch) | Primary temporal type. JS `Date` has only millisecond precision; conversion from `Date` multiplies by 10^6. When `Temporal` is available, `Temporal.Instant` maps naturally (it uses nanoseconds from epoch internally). |
-| `StorableEpochDays` | _(nascent)_ | `EpochDays@1` | `bigint` (signed days from POSIX Epoch) | Day-precision temporal type. Anticipates `Temporal.PlainDate`. Mostly nascent — class and spec entry are defined, but full integration (Temporal types, calendar concerns) is deferred. |
+| Direct Datum Type | Extends | Wire Tag | Stored Value | Notes |
+|-------------------|---------|----------|--------------|-------|
+| `StorableEpochNsec` | `SpecialPrimitiveValue` | `EpochNsec@1` | `bigint` (signed nanoseconds from POSIX Epoch) | Primary temporal type. JS `Date` has only millisecond precision; conversion from `Date` multiplies by 10^6. When `Temporal` is available, `Temporal.Instant` maps naturally (it uses nanoseconds from epoch internally). |
+| `StorableEpochDays` | `SpecialPrimitiveValue` | `EpochDays@1` | `bigint` (signed days from POSIX Epoch) | Day-precision temporal type. Anticipates `Temporal.PlainDate`. Mostly nascent — class and spec entry are defined, but full integration (Temporal types, calendar concerns) is deferred. |
+| `StorableContentId` | `SpecialPrimitiveValue` | _(none — see Section 1.4.8)_ | `Uint8Array` (hash bytes) + `string` (algorithm tag) | Content identifier / hash. Stringifies as `<algorithmTag>:<base64hash>` (unpadded base64). The first algorithm tag is `fid1` ("fabric ID, v1"). |
 
 #### Extra Enumerable Properties
 
@@ -258,7 +262,8 @@ so `StorableError` preserves them: `[DECONSTRUCT]` includes them in its output,
 and `[RECONSTRUCT]` restores them on the reconstructed `Error`.
 
 **`StorableMap`, `StorableSet`, `StorableEpochNsec`, `StorableEpochDays`,
-`StorableUint8Array`** must NOT carry extra enumerable properties. Their
+`StorableContentId`, `StorableUint8Array`** must NOT carry extra enumerable
+properties. Their
 stored value contains only the essential native data (entries, items,
 epoch value, bytes respectively). Extra enumerable properties on the source
 native object cause **rejection** — the conversion function throws. This follows
@@ -396,7 +401,48 @@ export class StorableSet implements StorableInstance {
 }
 ```
 
-#### 1.4.5 `StorableEpochNsec`
+#### 1.4.5 `SpecialPrimitiveValue` (Base Class)
+
+`SpecialPrimitiveValue` is the abstract base class for non-`StorableInstance`
+datum types that sit directly in the `StorableValue` union alongside JS
+primitives. It is analogous to `ExplicitTagStorable` (Section 3.2) — both are
+abstract bases that factor out shared structure — but for a different arm of
+the type hierarchy:
+
+- `ExplicitTagStorable` is the base for `StorableInstance` subtypes that carry
+  an explicit wire-format tag (`UnknownStorable`, `ProblematicStorable`).
+- `SpecialPrimitiveValue` is the base for direct datum types that behave like
+  primitives but need a class wrapper (`StorableEpochNsec`, `StorableEpochDays`,
+  `StorableContentId`).
+
+```typescript
+// file: packages/memory/special-primitive-value.ts
+
+/**
+ * Abstract base class for storable datum types that behave like primitives
+ * but need a class wrapper for identity and type dispatch. Subclasses are
+ * direct members of `StorableValue` (not `StorableInstance`s) and have
+ * dedicated canonical hash tags and wire-format `TypeHandler`s.
+ *
+ * **Always-frozen semantics:** `SpecialPrimitiveValue` instances are
+ * treated as inherently frozen, like JS primitives (`number`, `string`,
+ * `bigint`, etc.). The `freeze` option on conversion functions
+ * (`toStorableValue()`, `toDeepStorableValue()`, etc.) does not affect
+ * them — they are always returned as-is, regardless of the `freeze`
+ * setting. This is because their state is immutable by construction
+ * (readonly fields, no mutation methods), so freezing is a no-op and
+ * thawing is meaningless.
+ */
+export abstract class SpecialPrimitiveValue {}
+```
+
+Subclasses define their own state (e.g., `readonly value: bigint` for temporal
+types, `readonly hash: Uint8Array` + `readonly algorithmTag: string` for
+content IDs). The base class holds no state — its purpose is to provide a single
+`instanceof SpecialPrimitiveValue` check where code needs to identify these
+types uniformly (e.g., the conversion functions' freeze-bypass logic).
+
+#### 1.4.6 `StorableEpochNsec`
 
 ```typescript
 /**
@@ -413,17 +459,19 @@ export class StorableSet implements StorableInstance {
  * in any particular string representation (ISO 8601, etc.) and lets the
  * serialization layer use the same bigint encoding as `BigInt@1`.
  */
-export class StorableEpochNsec {
-  constructor(readonly value: bigint) {}
+export class StorableEpochNsec extends SpecialPrimitiveValue {
+  constructor(readonly value: bigint) {
+    super();
+  }
 }
 ```
 
-#### 1.4.6 `StorableEpochDays`
+#### 1.4.7 `StorableEpochDays`
 
 ```typescript
 /**
  * Temporal type representing days from the POSIX Epoch (1970-01-01).
- * Direct member of `StorableDatum` (not a `StorableInstance`).
+ * Extends `SpecialPrimitiveValue` (not a `StorableInstance`).
  * Anticipates `Temporal.PlainDate`.
  *
  * Mostly nascent — the class and spec entry are defined, but full
@@ -431,12 +479,62 @@ export class StorableEpochNsec {
  *
  * The underlying value is a `bigint`.
  */
-export class StorableEpochDays {
-  constructor(readonly value: bigint) {}
+export class StorableEpochDays extends SpecialPrimitiveValue {
+  constructor(readonly value: bigint) {
+    super();
+  }
 }
 ```
 
-#### 1.4.7 `StorableUint8Array`
+#### 1.4.8 `StorableContentId`
+
+```typescript
+// file: packages/memory/storable-content-id.ts
+
+/**
+ * A content identifier — a hash that identifies a storable value by its
+ * canonical hash bytes and an algorithm tag. Extends `SpecialPrimitiveValue`
+ * (not a `StorableInstance`): it is a direct member of `StorableDatum`,
+ * has a dedicated canonical hash tag, and is always-frozen.
+ *
+ * The first algorithm tag is `fid1` ("fabric ID, v1"), which corresponds
+ * to the SHA-256-based canonical hash produced by `canonicalHash()`
+ * (Section 6.4).
+ *
+ * Stringification: `<algorithmTag>:<base64hash>` where the base64 encoding
+ * uses the standard alphabet (`A-Za-z0-9+/`) with no `=` padding. For
+ * example, a `fid1` content ID might stringify as
+ * `fid1:n4bQgYhMfWWaL+qgxVrQFaO/TxsrC4Is0V1sFbDwCgg`.
+ */
+export class StorableContentId extends SpecialPrimitiveValue {
+  constructor(
+    /** The raw hash bytes (e.g., 32 bytes for SHA-256). */
+    readonly hash: Uint8Array,
+    /** The algorithm tag identifying the hash algorithm and version. */
+    readonly algorithmTag: string,
+  ) {
+    super();
+  }
+
+  /** Returns `<algorithmTag>:<base64hash>` (unpadded base64). */
+  toString(): string {
+    return `${this.algorithmTag}:${base64EncodeUnpadded(this.hash)}`;
+  }
+}
+```
+
+The `algorithmTag` field is an opaque string identifier. Known algorithm tags:
+
+| Algorithm Tag | Meaning | Hash Algorithm | Output Size |
+|:--------------|:--------|:---------------|:------------|
+| `fid1`        | Fabric ID, version 1 | SHA-256 (Section 6.4) | 32 bytes |
+
+Future algorithm tags may be added for different hash algorithms or versioned
+content-addressing schemes. The algorithm tag is part of the content ID's
+identity — two `StorableContentId` instances with the same hash bytes but
+different algorithm tags are distinct values.
+
+#### 1.4.9 `StorableUint8Array`
 
 ```typescript
 export class StorableUint8Array implements StorableInstance {
@@ -457,7 +555,7 @@ export class StorableUint8Array implements StorableInstance {
 }
 ```
 
-#### 1.4.8 `bigint` — Not Wrapped
+#### 1.4.10 `bigint` — Not Wrapped
 
 `bigint` is a JavaScript primitive (`typeof x === 'bigint'`), not an object. It
 rides through the `StorableValue` layer directly, like `undefined`. No
@@ -465,7 +563,7 @@ rides through the `StorableValue` layer directly, like `undefined`. No
 `bigint` with a dedicated handler (analogous to `UndefinedHandler`); see
 Section 4.5.
 
-#### 1.4.9 Design Notes
+#### 1.4.11 Design Notes
 
 > **Why wrapper classes instead of inline serializer branches?** Each wrapper
 > genuinely implements `StorableInstance`, so `isStorableInstance()` returns `true` for
@@ -481,9 +579,11 @@ Section 4.5.
 > native objects. Code that needs the underlying native type uses
 > `nativeValueFromStorableValue()` (Section 8) as a separate step.
 >
-> **File organization.** All six wrapper classes are expected to live in a
-> single file (e.g., `storable-native-wrappers.ts`), since each is small
-> (~30 lines) and they share the same imports.
+> **File organization.** The native object wrapper classes (`StorableError`,
+> `StorableMap`, `StorableSet`, `StorableUint8Array`) and the
+> `SpecialPrimitiveValue` subclasses (`StorableEpochNsec`,
+> `StorableEpochDays`, `StorableContentId`) are each small (~30 lines) and
+> may be organized into one or a few files as an implementation decision.
 
 ### 1.5 Recursive Containers
 
@@ -591,8 +691,9 @@ export const RECONSTRUCT = Symbol.for('common.reconstruct');
  * user-defined types (`Cell`, `Stream`) and system types
  * (`UnknownStorable`, `ProblematicStorable`).
  *
- * Note: `StorableEpochNsec` and `StorableEpochDays` are direct
- * `StorableDatum` members and do NOT implement this interface.
+ * Note: `SpecialPrimitiveValue` subclasses (`StorableEpochNsec`,
+ * `StorableEpochDays`, `StorableContentId`) are direct `StorableDatum`
+ * members and do NOT implement this interface.
  */
 export interface StorableInstance {
   /**
@@ -1085,6 +1186,15 @@ export function serialize(
   // StorableEpochNsec but with a distinct wire tag.
   if (value instanceof StorableEpochDays) {
     return context.encode('EpochDays@1', base64Encode(bigintToTwosComplement(value.value)));
+  }
+
+  // --- StorableContentId ---
+  // Direct StorableDatum member (not a StorableInstance). Encoded as a
+  // two-element array: [algorithmTag, base64hash]. The base64 encoding uses
+  // the standard alphabet with no padding, matching the stringification
+  // format.
+  if (value instanceof StorableContentId) {
+    return context.encode('ContentId@1', [value.algorithmTag, base64EncodeUnpadded(value.hash)]);
   }
 
   // --- `undefined` ---
@@ -1620,6 +1730,7 @@ organized into three categories by high nibble:
 | `TAG_BIGINT`      | `0x26` | 38      | `bigint`                        |
 | `TAG_EPOCH_NSEC`  | `0x27` | 39      | `StorableEpochNsec`             |
 | `TAG_EPOCH_DAYS`  | `0x28` | 40      | `StorableEpochDays`             |
+| `TAG_CONTENT_ID`  | `0x29` | 41      | `StorableContentId`             |
 
 All unassigned values are reserved for future use. The category structure
 (meta/compound/primitive) is a convention for readability and is not enforced by
@@ -1650,15 +1761,17 @@ nibble range.
  * Specific hashing contexts (e.g., pattern ID generation vs. request
  * deduplication) specify which algorithm is used in that context.
  *
- * Output format depends on context. When a string representation is needed,
- * base64 with the standard alphabet (`A-Za-z0-9+/`) and no `=` padding is
- * the standard encoding (see Section 5.3, base64 convention). When no
- * stringification is needed, raw hash bytes are perfectly acceptable.
+ * The return value is a `StorableContentId` instance (Section 1.4.8),
+ * which encapsulates the raw hash bytes and the algorithm tag. The
+ * algorithm tag for SHA-256 is `fid1` ("fabric ID, v1"). Callers who
+ * need a string representation can call `toString()` on the result,
+ * which produces `<algorithmTag>:<base64hash>` (unpadded base64 with
+ * the standard alphabet `A-Za-z0-9+/`; see Section 5.3).
  */
 export function canonicalHash(
   value: StorableValue,
   algorithm?: 'sha256' | 'blake2b',
-): string {
+): StorableContentId {
   // Type tag bytes — see Section 6.3 for the full table.
   // Tag categories: meta (0x0N), compound (0x1N), primitive (0x2N).
   //
@@ -1678,6 +1791,9 @@ export function canonicalHash(
   //                        (same payload format as TAG_BIGINT but distinct tag)
   // - `StorableEpochDays`: hash(TAG_EPOCH_DAYS, leb128(byteLen), twosComplementBytes)
   //                        (same payload format as TAG_BIGINT but distinct tag)
+  // - `StorableContentId`: hash(TAG_CONTENT_ID, leb128(algTagLen), algTagUtf8,
+  //                              leb128(hashByteLen), hashBytes)
+  //                        (algorithm tag as UTF-8 string, then raw hash bytes)
   // - array:               hash(TAG_ARRAY, ...elements, TAG_END)
   //                        Elements are hashed in index order:
   //                          if `i in array`: canonicalHash(array[i])
@@ -1724,6 +1840,7 @@ export function canonicalHash(
   // - `StorableUint8Array` uses TAG_BYTES (dedicated primitive tag).
   // - `StorableEpochNsec` uses TAG_EPOCH_NSEC (dedicated primitive tag).
   // - `StorableEpochDays` uses TAG_EPOCH_DAYS (dedicated primitive tag).
+  // - `StorableContentId` uses TAG_CONTENT_ID (dedicated primitive tag).
   //
   // Examples:
   // - `StorableError`:      hash(TAG_INSTANCE, ..., "Error@1", canonicalHash(errorState))
@@ -1733,6 +1850,8 @@ export function canonicalHash(
   //                         where elements are hashed in insertion order
   // - `StorableEpochNsec`:  hash(TAG_EPOCH_NSEC, leb128(byteLen), twosComplementBytes)
   // - `StorableEpochDays`:  hash(TAG_EPOCH_DAYS, leb128(byteLen), twosComplementBytes)
+  // - `StorableContentId`:  hash(TAG_CONTENT_ID, leb128(algTagLen), algTagUtf8,
+  //                               leb128(hashByteLen), hashBytes)
   // - `StorableUint8Array`: hash(TAG_BYTES, leb128(byteLen), rawBytes)
   //
   // Each type is tagged to prevent collisions between types with
@@ -1912,8 +2031,10 @@ There are two directions:
  *
  * **Freeze semantics (shallow):** By default, the returned value is frozen
  * at the top level via `Object.freeze()`. Nested values are NOT recursively
- * frozen. If the input is already a frozen `StorableValue`, returns the same
- * object. Pass `freeze: false` to skip freezing (see below).
+ * frozen. The caller's input is never mutated — if the top-level value is
+ * an unfrozen array or object, a shallow copy is made before freezing. If
+ * the input is already a frozen `StorableValue`, returns the same object.
+ * Pass `freeze: false` to skip freezing (see below).
  */
 export function toStorableValue(
   value: StorableValue | StorableNativeObject,
@@ -1930,8 +2051,10 @@ export function toStorableValue(
  *   together in one recursive descent — there are no separate passes. Each
  *   node is checked, wrapped if needed, and frozen before the function
  *   returns from that level.
- * - If the input is already a deeply-frozen `StorableValue`, returns the
- *   same object (no copying).
+ * - **No caller mutation:** The caller's input objects are never frozen or
+ *   modified in place. When freezing is needed, shallow copies are made
+ *   first. If the input is already a deeply-frozen `StorableValue`, returns
+ *   the same object (no copying needed).
  * - Detects circular references and throws.
  *
  * Pass `freeze: false` to perform wrapping and validation without freezing
@@ -1948,6 +2071,7 @@ export function toDeepStorableValue(
 | Input Type | Output |
 |------------|--------|
 | `null`, `boolean`, `number`, `string`, `undefined`, `bigint` | Returned as-is (primitives are `StorableValue` directly). `-0` is normalized to `0`. Non-finite numbers (`NaN`, `Infinity`) cause rejection. |
+| `SpecialPrimitiveValue` (`StorableEpochNsec`, `StorableEpochDays`, `StorableContentId`) | Returned as-is. Always-frozen: the `freeze` option has no effect on these types (see Section 1.4.5). |
 | `StorableInstance` (including wrapper classes) | Returned as-is (already `StorableValue`). |
 | `Error` | Wrapped into `StorableError`. Before wrapping, `cause` and custom enumerable properties are recursively converted to `StorableValue` (deep variant) or left as-is (shallow variant). Extra enumerable properties are preserved (see Section 1.4.1). This ensures that by the time `StorableError.[DECONSTRUCT]` runs, all nested values are already valid `StorableValue`. |
 | `Map` | Wrapped into `StorableMap`. Keys and values are recursively converted (deep variant only). Extra enumerable properties on the `Map` object cause **rejection** (throw) — it is better to fail loudly than silently lose data. |
@@ -1968,6 +2092,24 @@ conversion are frozen **by default**:
   nesting, performed in the **same recursive pass** as validation and wrapping.
   There are no separate passes — each node is checked, wrapped, and frozen
   before the recursion returns from that level.
+
+**Caller arguments are never mutated.** The conversion functions must not call
+`Object.freeze()` on the caller's input objects. When `freeze` is `true` and
+the input is an unfrozen array or plain object, the function creates a shallow
+copy and freezes the copy. This ensures that callers can safely pass mutable
+data structures without side effects — the caller's objects remain mutable
+after the call returns. (Wrapper objects like `StorableError` are freshly
+constructed by the conversion function, so freezing them is not a mutation of
+caller state.)
+
+**Always-frozen types bypass the `freeze` option.** JS primitives (`null`,
+`boolean`, `number`, `string`, `undefined`, `bigint`) are inherently immutable
+and pass through unchanged regardless of the `freeze` setting.
+`SpecialPrimitiveValue` instances (`StorableEpochNsec`, `StorableEpochDays`,
+`StorableContentId`) are treated the same way — they are always returned as-is,
+never copied or modified by the freeze/thaw logic. Their state is immutable by
+construction (readonly fields, no mutation methods), so `Object.freeze()` is
+unnecessary and thawing is meaningless. See Section 1.4.5.
 
 If the input is already frozen (or deep-frozen for the deep variant), the same
 object is returned — no defensive copying. This avoids unnecessary allocation
@@ -2118,6 +2260,7 @@ etc.).
  * - `StorableSet`        -> `FrozenSet` / `Set` (original if freeze state matches; copy otherwise)
  * - `StorableEpochNsec`  -> the bigint value (nanoseconds from POSIX Epoch)
  * - `StorableEpochDays`  -> the bigint value (days from POSIX Epoch)
+ * - `StorableContentId`  -> passed through unchanged (always-frozen; Section 1.4.5)
  * - `StorableUint8Array` -> `Blob` (when frozen) or original `Uint8Array` (when not)
  *
  * Non-wrapper `StorableInstance` values (`Cell`, `Stream`, `UnknownStorable`,
@@ -2133,9 +2276,10 @@ etc.).
  * value in the output matches the `frozen` argument. When `freeze` is `true`
  * (the default), `StorableMap` and `StorableSet` unwrap to `FrozenMap` and
  * `FrozenSet` respectively — effectively-immutable wrappers that expose
- * read-only interfaces and throw on mutation attempts. The temporal wrappers
+ * read-only interfaces and throw on mutation attempts. The temporal types
  * (`StorableEpochNsec`, `StorableEpochDays`) unwrap to their bigint values,
- * which are inherently immutable primitives.
+ * which are inherently immutable primitives. `StorableContentId` passes
+ * through unchanged — it is always-frozen (Section 1.4.5).
  * `StorableUint8Array` unwraps to `Blob`, which is
  * inherently immutable (see rationale below). `StorableError` unwraps to a
  * frozen `Error`. This preserves the immutable-forward guarantee even in the
@@ -2174,6 +2318,7 @@ export function deepNativeValueFromStorableValue(
 | `StorableSet` | `FrozenSet` (original if already `FrozenSet`; new wrapper otherwise) | `Set` (original if already plain `Set`; mutable copy otherwise) |
 | `StorableEpochNsec` | `bigint` (the nanosecond value; inherently immutable) | `bigint` (same — primitives have no mutable/immutable distinction) |
 | `StorableEpochDays` | `bigint` (the day value; inherently immutable) | `bigint` (same) |
+| `StorableContentId` | Passed through unchanged (always-frozen; Section 1.4.5) | Passed through unchanged (same) |
 | `StorableUint8Array` | `Blob` (inherently immutable; always new) | `Uint8Array` (original reference) |
 | Other `StorableInstance` | Passed through unchanged | Passed through unchanged |
 | Primitives | Passed through unchanged | Passed through unchanged |

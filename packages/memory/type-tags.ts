@@ -43,11 +43,14 @@ export const TAGS = Object.freeze(
  */
 export const NATIVE_TAGS = Object.freeze(
   {
+    Array: "Array",
+    Object: "Object",
     Error: "Error",
     Map: "Map",
     Set: "Set",
     Date: "Date",
     Uint8Array: "Uint8Array",
+    HasToJSON: "HasToJSON",
   } as const,
 );
 
@@ -61,7 +64,8 @@ export type NativeTag = typeof NATIVE_TAGS[keyof typeof NATIVE_TAGS];
  *
  * Uses a `switch` on the constructor identity for O(1) dispatch (instead of
  * sequential `instanceof` checks). Falls back to `instanceof Error` on the
- * constructor's prototype to catch exotic Error subclasses. (Note:
+ * constructor's prototype to catch exotic Error subclasses, and checks for
+ * `toJSON()` on the prototype for unrecognized classes. (Note:
  * `Error.isError()` doesn't work on prototype objects -- it only recognizes
  * actual Error instances, not the prototype chain -- so we use `instanceof`.)
  */
@@ -79,6 +83,10 @@ export function tagFromNativeClass(
     case EvalError:
       return NATIVE_TAGS.Error;
 
+    case Array:
+      return NATIVE_TAGS.Array;
+    case Object:
+      return NATIVE_TAGS.Object;
     case Map:
       return NATIVE_TAGS.Map;
     case Set:
@@ -98,6 +106,14 @@ export function tagFromNativeClass(
       ) {
         return NATIVE_TAGS.Error;
       }
+      // Unrecognized class whose prototype has a toJSON() method.
+      if (
+        constructorFn.prototype !== null &&
+        constructorFn.prototype !== undefined &&
+        hasToJSON(constructorFn.prototype as object)
+      ) {
+        return NATIVE_TAGS.HasToJSON;
+      }
       return null;
   }
 }
@@ -107,22 +123,60 @@ export function tagFromNativeClass(
  * Returns the tag string if the value is a recognized convertible native
  * instance, or `null` otherwise.
  *
- * Dispatches via the value's constructor (O(1) switch). For exotic Error
- * subclasses whose constructor isn't in the switch, falls back to
- * `Error.isError()`.
+ * Dispatches via the value's constructor (O(1) switch in `tagFromNativeClass`).
+ * Falls back to `Error.isError()` for exotic Error subclasses, `Array.isArray`
+ * for cross-realm arrays, and prototype check for null-prototype objects.
+ *
+ * For tags that have pass-through handling (`Object`, `Array`) or no dedicated
+ * handler (`null`), a per-instance `hasToJSON` check upgrades the tag to
+ * `HasToJSON`. Dedicated types (Error, Date, Map, etc.) and `HasToJSON` from
+ * `tagFromNativeClass` are returned as-is.
  */
 export function tagFromNativeValue(value: object): NativeTag | null {
   // Guard: null-prototype objects or exotic objects may not have a function
   // constructor.
   const ctor = value.constructor;
+  let tag: NativeTag | null = null;
+
   if (typeof ctor === "function") {
-    const tag = tagFromNativeClass(ctor);
-    if (tag !== null) return tag;
+    tag = tagFromNativeClass(ctor);
   }
 
-  // Fallback for exotic Error subclasses (e.g. DOMException, custom
-  // subclasses with non-standard constructors).
-  if (Error.isError(value)) return NATIVE_TAGS.Error;
+  // tagFromNativeClass handles dedicated types (Error, Date, Map, etc.) and
+  // returns HasToJSON for classes whose prototype has toJSON(). For those,
+  // return immediately -- no instance-level override needed.
+  if (
+    tag !== null && tag !== NATIVE_TAGS.Object && tag !== NATIVE_TAGS.Array
+  ) {
+    return tag;
+  }
 
-  return null;
+  // Fallbacks for values whose constructor wasn't recognized (tag === null).
+  if (tag === null) {
+    // Exotic Error subclasses (e.g. DOMException).
+    if (Error.isError(value)) return NATIVE_TAGS.Error;
+
+    // Cross-realm arrays may have a different constructor.
+    if (Array.isArray(value)) tag = NATIVE_TAGS.Array;
+
+    // Null-prototype objects (Object.create(null)).
+    if (tag === null) {
+      const proto = Object.getPrototypeOf(value);
+      if (proto === null) tag = NATIVE_TAGS.Object;
+    }
+  }
+
+  // For Object, Array, and still-null tags: a per-instance toJSON() method
+  // overrides to HasToJSON. This catches plain objects with toJSON as an own
+  // property, arrays with toJSON added, and unrecognized class instances
+  // whose prototype wasn't caught by tagFromNativeClass.
+  if (hasToJSON(value)) return NATIVE_TAGS.HasToJSON;
+
+  return tag;
+}
+
+/** Checks whether a value has a callable `toJSON()` method. */
+function hasToJSON(value: object): boolean {
+  return "toJSON" in value &&
+    typeof (value as { toJSON: unknown }).toJSON === "function";
 }

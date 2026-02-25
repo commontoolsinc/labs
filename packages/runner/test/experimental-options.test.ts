@@ -109,7 +109,8 @@ describe("ExperimentalOptions", () => {
       setExperimentalStorableConfig({ richStorableValues: true });
       const arr = [1, undefined, 3];
       const result = toStorableValue(arr);
-      expect(result).toBe(arr);
+      expect(result).toEqual(arr);
+      expect((result as unknown[])[1]).toBe(undefined);
     });
 
     it("returns to flag-OFF behavior after reset", () => {

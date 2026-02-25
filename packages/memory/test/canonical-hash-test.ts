@@ -1,5 +1,6 @@
 import { assertEquals, assertNotEquals, assertThrows } from "@std/assert";
-import { canonicalHash } from "../canonical-hash.ts";
+import { canonicalHash as canonicalHashRaw } from "../canonical-hash.ts";
+import { StorableContentId } from "../storable-content-id.ts";
 import {
   StorableEpochDays,
   StorableEpochNsec,
@@ -20,6 +21,11 @@ function sha256(bytes: number[]): Uint8Array {
 
 function hex(hash: Uint8Array): string {
   return Array.from(hash).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** Extract the raw hash bytes from canonicalHash for comparison. */
+function canonicalHash(value: unknown): Uint8Array {
+  return canonicalHashRaw(value).hash;
 }
 
 // =========================================================================
@@ -886,4 +892,84 @@ Deno.test("canonicalHash", async (t) => {
       assertNotEquals(hex(canonicalHash(obj)), hex(wrongOrder));
     },
   );
+
+  // =========================================================================
+  // StorableContentId hashing (TAG_CONTENT_ID = 0x29)
+  // =========================================================================
+
+  await t.step(
+    "StorableContentId matches hand-computed byte stream",
+    () => {
+      // Algorithm tag "fid1" = [0x66, 0x69, 0x64, 0x31] (4 bytes UTF-8)
+      // Hash bytes: [0xDE, 0xAD, 0xBE, 0xEF] (4 bytes)
+      const cid = new StorableContentId(
+        new Uint8Array([0xDE, 0xAD, 0xBE, 0xEF]),
+        "fid1",
+      );
+      // Expected: TAG_CONTENT_ID(0x29), algTagLen(0x04), "fid1", hashLen(0x04), hash
+      const expected = sha256([
+        0x29,
+        0x04,
+        0x66,
+        0x69,
+        0x64,
+        0x31,
+        0x04,
+        0xDE,
+        0xAD,
+        0xBE,
+        0xEF,
+      ]);
+      assertEquals(hex(canonicalHash(cid)), hex(expected));
+    },
+  );
+
+  await t.step(
+    "StorableContentId with different algorithm tags produce different hashes",
+    () => {
+      const bytes = new Uint8Array([0x01, 0x02, 0x03]);
+      const cid1 = new StorableContentId(bytes, "fid1");
+      const cid2 = new StorableContentId(bytes, "fid2");
+      assertNotEquals(hex(canonicalHash(cid1)), hex(canonicalHash(cid2)));
+    },
+  );
+
+  await t.step(
+    "StorableContentId with different hash bytes produce different hashes",
+    () => {
+      const cid1 = new StorableContentId(
+        new Uint8Array([0x01, 0x02]),
+        "fid1",
+      );
+      const cid2 = new StorableContentId(
+        new Uint8Array([0x03, 0x04]),
+        "fid1",
+      );
+      assertNotEquals(hex(canonicalHash(cid1)), hex(canonicalHash(cid2)));
+    },
+  );
+
+  // =========================================================================
+  // canonicalHash returns StorableContentId
+  // =========================================================================
+
+  await t.step("canonicalHash returns StorableContentId with fid1 tag", () => {
+    const result = canonicalHashRaw(42);
+    assertEquals(result instanceof StorableContentId, true);
+    assertEquals(result.algorithmTag, "fid1");
+    assertEquals(result.hash.length, 32);
+  });
+
+  await t.step("StorableContentId.toString() produces fid1:<base64>", () => {
+    const result = canonicalHashRaw(42);
+    const str = result.toString();
+    assertEquals(str.startsWith("fid1:"), true);
+    // Should not contain padding (unpadded base64).
+    assertEquals(str.includes("="), false);
+  });
+
+  await t.step("StorableContentId is frozen (SpecialPrimitiveValue)", () => {
+    const result = canonicalHashRaw(42);
+    assertEquals(Object.isFrozen(result), true);
+  });
 });

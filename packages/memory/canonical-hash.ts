@@ -15,6 +15,7 @@ import {
   StorableEpochNsec,
   StorableUint8Array,
 } from "./storable-native-instances.ts";
+import { StorableContentId } from "./storable-content-id.ts";
 import { DECONSTRUCT, isStorableInstance } from "./storable-protocol.ts";
 import { encodeULEB128 } from "@commontools/leb128";
 import { bigintToMinimalTwosComplement } from "./bigint-encoding.ts";
@@ -42,6 +43,7 @@ const TAG_BYTES = 0x25;
 const TAG_BIGINT = 0x26;
 const TAG_EPOCH_NSEC = 0x27;
 const TAG_EPOCH_DAYS = 0x28;
+const TAG_CONTENT_ID = 0x29;
 
 // ---------------------------------------------------------------------------
 // Pre-allocated tag byte arrays (avoids per-call allocation)
@@ -62,6 +64,7 @@ const TAG_BYTES_BYTES = new Uint8Array([TAG_BYTES]);
 const TAG_BIGINT_BYTES = new Uint8Array([TAG_BIGINT]);
 const TAG_EPOCH_NSEC_BYTES = new Uint8Array([TAG_EPOCH_NSEC]);
 const TAG_EPOCH_DAYS_BYTES = new Uint8Array([TAG_EPOCH_DAYS]);
+const TAG_CONTENT_ID_BYTES = new Uint8Array([TAG_CONTENT_ID]);
 
 // ---------------------------------------------------------------------------
 // Shared scratch buffer (safe in single-threaded synchronous JS -- see
@@ -182,6 +185,17 @@ function feedObjectValue(
     return;
   }
 
+  // 3c. StorableContentId (dedicated primitive tag)
+  if (value instanceof StorableContentId) {
+    hasher.update(TAG_CONTENT_ID_BYTES);
+    const algTagUtf8 = encoder.encode(value.algorithmTag);
+    feedLength(hasher, algTagUtf8.length);
+    hasher.update(algTagUtf8);
+    feedLength(hasher, value.hash.length);
+    hasher.update(value.hash);
+    return;
+  }
+
   // 4. StorableInstance (generic protocol path via DECONSTRUCT).
   if (isStorableInstance(value)) {
     hasher.update(TAG_INSTANCE_BYTES);
@@ -254,12 +268,13 @@ function feedObjectValue(
 // ---------------------------------------------------------------------------
 
 /**
- * Compute the canonical SHA-256 hash of a `StorableValue`. Returns the
- * raw 32-byte digest. The caller (`refer()`) wraps it via
+ * Compute the canonical SHA-256 hash of a `StorableValue`. Returns a
+ * `StorableContentId` with algorithm tag `fid1` (fabric ID, v1).
+ * The caller (`refer()`) extracts the raw digest via `.hash` for
  * `Reference.fromDigest()`.
  */
-export function canonicalHash(value: unknown): Uint8Array {
+export function canonicalHash(value: unknown): StorableContentId {
   const hasher = createHasher();
   feedValue(hasher, value);
-  return hasher.digest();
+  return new StorableContentId(hasher.digest(), "fid1");
 }
