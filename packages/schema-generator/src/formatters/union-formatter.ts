@@ -12,6 +12,9 @@ import {
 } from "../type-utils.ts";
 import { isObject, isRecord } from "@commontools/utils/types";
 
+// Simple primitive schemas only have these keys (possibly just one)
+const PRIMITIVE_SCHEMA_KEY_SET = new Set(["type", "enum"]);
+
 export class UnionFormatter implements TypeFormatter {
   constructor(private schemaGenerator: SchemaGenerator) {}
 
@@ -176,17 +179,16 @@ export class UnionFormatter implements TypeFormatter {
     if (anyOf.some((option) => JSON.stringify(option) === curStr)) {
       return false;
     }
-    const primitiveSchemaKeys = new Set(["type", "enum"]);
     // See if we can merge into one of the anyOf options
     const matchingTypeIdx = anyOf.findIndex((option) =>
       isObject(option) &&
-      primitiveSchemaKeys.isSupersetOf(new Set(Object.keys(option))) &&
+      PRIMITIVE_SCHEMA_KEY_SET.isSupersetOf(new Set(Object.keys(option))) &&
       "type" in option && option.type === cur.type
     );
     const matchingType = matchingTypeIdx !== -1
       ? anyOf[matchingTypeIdx]
       : undefined;
-    const isCurPrimitive = primitiveSchemaKeys.isSupersetOf(
+    const isCurPrimitive = PRIMITIVE_SCHEMA_KEY_SET.isSupersetOf(
       new Set(Object.keys(cur)),
     );
     if (
@@ -223,7 +225,7 @@ export class UnionFormatter implements TypeFormatter {
       // If cur is a primitive non-enum with a known type, we can merge with any existing non-enum primitive
       const matchingNonEnumIdx = anyOf.findIndex((option) =>
         isRecord(option) &&
-        primitiveSchemaKeys.isSupersetOf(new Set(Object.keys(option))) &&
+        PRIMITIVE_SCHEMA_KEY_SET.isSupersetOf(new Set(Object.keys(option))) &&
         option.enum === undefined
       );
       const matchingNonEnum = matchingNonEnumIdx !== -1
