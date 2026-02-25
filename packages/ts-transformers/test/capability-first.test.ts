@@ -146,6 +146,29 @@ const p = pattern(({ foo = "fallback" }) => <div>{foo}</div>);
 );
 
 Deno.test(
+  "Capability-first diagnostics: computed binding key destructuring is non-lowerable",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern } from "commontools";
+const p = pattern(({ ["foo"]: foo }) => <div>{foo}</div>);
+`;
+
+    const { diagnostics } = await validateSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+    });
+    const computationDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-context:computation"
+    );
+
+    assertEquals(computationDiagnostics.length, 1);
+    assertStringIncludes(
+      computationDiagnostics[0]!.message,
+      "Computed destructuring keys",
+    );
+  },
+);
+
+Deno.test(
   "Capability-first diagnostics: optional-call stays blocked in pattern context",
   async () => {
     const source = `/// <cts-enable />
