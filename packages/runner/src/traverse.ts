@@ -82,6 +82,14 @@ interface IMemorySpaceAttestation {
  */
 const _hashCache = new WeakMap<object, string>();
 
+// Schema operation intern caches: memoize merge/combine results so
+// structurally-identical operations return the same object identity.
+// This ensures downstream stableStringify hits the _hashCache WeakMap
+// (O(1) identity lookup) instead of re-walking the schema tree.
+const _mergeSchemaOptionCache = new Map<string, JSONSchema>();
+const _combineSchemaCache = new Map<string, JSONSchema>();
+const _mergeSchemaFlagsCache = new Map<string, JSONSchema>();
+
 function stableStringify(value: unknown): string {
   if (value === null) return "n";
   if (value === undefined) return "u";
@@ -1255,6 +1263,18 @@ function combineOptionalSchema(
 
 // Merge any schema flags like asCell or asStream from flagSchema into schema.
 export function mergeSchemaFlags(flagSchema: JSONSchema, schema: JSONSchema) {
+  const key = stableStringify(flagSchema) + "|" + stableStringify(schema);
+  const cached = _mergeSchemaFlagsCache.get(key);
+  if (cached !== undefined) return cached;
+  const result = _mergeSchemaFlagsUncached(flagSchema, schema);
+  _mergeSchemaFlagsCache.set(key, result);
+  return result;
+}
+
+function _mergeSchemaFlagsUncached(
+  flagSchema: JSONSchema,
+  schema: JSONSchema,
+) {
   if (isObject(flagSchema)) {
     // we want to preserve asCell and asStream -- if true, these will override
     // the value in the schema
@@ -1302,6 +1322,18 @@ export function mergeSchemaFlags(flagSchema: JSONSchema, schema: JSONSchema) {
  * @returns
  */
 export function combineSchema(
+  parentSchema: JSONSchema,
+  linkSchema: JSONSchema,
+): JSONSchema {
+  const key = stableStringify(parentSchema) + "|" + stableStringify(linkSchema);
+  const cached = _combineSchemaCache.get(key);
+  if (cached !== undefined) return cached;
+  const result = _combineSchemaUncached(parentSchema, linkSchema);
+  _combineSchemaCache.set(key, result);
+  return result;
+}
+
+function _combineSchemaUncached(
   parentSchema: JSONSchema,
   linkSchema: JSONSchema,
 ): JSONSchema {
@@ -2610,11 +2642,16 @@ function mergeSchemaOption(
   // JSONSchema rules should.
   // For example, `{type: "object", anyOf: [{type: "string"}]}` schema should
   // never match
-  return isObject(innerSchema)
+  const key = stableStringify(outerSchema) + "|" + stableStringify(innerSchema);
+  const cached = _mergeSchemaOptionCache.get(key);
+  if (cached !== undefined) return cached;
+  const result = isObject(innerSchema)
     ? { ...outerSchema, ...innerSchema }
     : innerSchema
     ? outerSchema // innerSchema === true
     : false; // innerSchema === false
+  _mergeSchemaOptionCache.set(key, result as JSONSchema);
+  return result;
 }
 
 // Utility function used for debugging so we can convert proxy objects into
