@@ -543,3 +543,50 @@ const p = pattern(() => {
     assert(!output.includes(".mapWithPattern("));
   },
 );
+
+Deno.test(
+  "Capability-first: derive wildcard usage keeps conservative full-shape input schema",
+  async () => {
+    const source = `/// <cts-enable />
+import { derive, type Writable } from "commontools";
+const input = {} as Writable<{ foo: string; bar: string }>;
+const d = derive(input, (v: Writable<{ foo: string; bar: string }>) => {
+  const foo = v.key("foo").get();
+  Object.keys(v.get());
+  return foo;
+});
+`;
+
+    const output = await transformSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, "asCell: true");
+    assertStringIncludes(output, '"foo"');
+    assertStringIncludes(output, '"bar"');
+  },
+);
+
+Deno.test(
+  "Capability-first: handler wildcard usage keeps conservative full-shape state schema",
+  async () => {
+    const source = `/// <cts-enable />
+import { handler, type Writable } from "commontools";
+const h = handler((event: { id: string }, state: Writable<{ foo: string; bar: string }>) => {
+  const foo = state.key("foo").get();
+  Object.keys(state.get());
+  return foo + event.id;
+});
+`;
+
+    const output = await transformSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, "asCell: true");
+    assertStringIncludes(output, '"foo"');
+    assertStringIncludes(output, '"bar"');
+  },
+);

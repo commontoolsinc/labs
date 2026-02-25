@@ -686,8 +686,6 @@ export function analyzeFunctionCapabilities(
             const argPath = extractLiteralPathArguments(node.arguments);
             if (argPath.dynamic) {
               markWildcard(receiver.root);
-            } else {
-              trackRead(receiver.root, [...receiver.path, ...argPath.path]);
             }
           } else if (WRITER_METHODS.has(methodName)) {
             trackWriteRef(receiver);

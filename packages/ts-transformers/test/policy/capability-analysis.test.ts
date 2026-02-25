@@ -132,3 +132,48 @@ Deno.test("Capability analysis tracks destructured parameter paths", () => {
   assert(params.readPaths.includes("input.foo"));
   assertEquals(params.wildcard, false);
 });
+
+Deno.test("Capability analysis classifies write-only usage", () => {
+  const fn = parseFirstCallback(
+    `const fn = (input) => {
+      input.key("count").set(1);
+    };`,
+  );
+  const summary = analyzeFunctionCapabilities(fn);
+  const input = getPaths(summary, "input");
+
+  assertEquals(input.capability, "writeonly");
+  assert(input.writePaths.includes("count"));
+  assertEquals(input.readPaths.length, 0);
+});
+
+Deno.test("Capability analysis classifies read+write usage as writable", () => {
+  const fn = parseFirstCallback(
+    `const fn = (input) => {
+      input.key("count").set(input.key("count").get() + 1);
+      return input.key("count").get();
+    };`,
+  );
+  const summary = analyzeFunctionCapabilities(fn);
+  const input = getPaths(summary, "input");
+
+  assertEquals(input.capability, "writable");
+  assert(input.readPaths.includes("count"));
+  assert(input.writePaths.includes("count"));
+});
+
+Deno.test("Capability analysis classifies pure passthrough as opaque", () => {
+  const fn = parseFirstCallback(
+    `const fn = (input) => {
+      const alias = input;
+      return alias;
+    };`,
+  );
+  const summary = analyzeFunctionCapabilities(fn);
+  const input = getPaths(summary, "input");
+
+  assertEquals(input.capability, "opaque");
+  assertEquals(input.readPaths.length, 0);
+  assertEquals(input.writePaths.length, 0);
+  assertEquals(input.passthrough, true);
+});
