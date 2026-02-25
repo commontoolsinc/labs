@@ -40,24 +40,34 @@ function effectiveLabelForPath(
   cfc: ContextualFlowControl,
 ): Labels | undefined {
   const classifications = new Set<string>();
+  const integrity = new Set<string>();
   for (const prefix of pathPrefixes(path)) {
     const label = labelsByPath[prefix];
-    if (!label?.classification) {
-      continue;
+    if (label?.classification) {
+      for (const classification of label.classification) {
+        if (typeof classification === "string" && classification.length > 0) {
+          classifications.add(classification);
+        }
+      }
     }
-    for (const classification of label.classification) {
-      if (typeof classification === "string" && classification.length > 0) {
-        classifications.add(classification);
+    if (label?.integrity) {
+      for (const atom of label.integrity) {
+        if (typeof atom === "string" && atom.length > 0) {
+          integrity.add(atom);
+        }
       }
     }
   }
 
-  if (classifications.size === 0) {
+  if (classifications.size === 0 && integrity.size === 0) {
     return undefined;
   }
 
   return {
-    classification: [cfc.lub(classifications)],
+    ...(classifications.size > 0
+      ? { classification: [cfc.lub(classifications)] }
+      : {}),
+    ...(integrity.size > 0 ? { integrity: [...integrity].sort() } : {}),
   };
 }
 

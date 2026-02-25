@@ -68,9 +68,10 @@ export interface IReadOptions {
 }
 
 // This type is used to tag a document with any important metadata.
-// Currently, the only supported type is the classification.
+// Labels currently support confidentiality-like classification and integrity tags.
 export type Labels = {
   classification?: string[];
+  integrity?: string[];
 };
 
 /** Immutable storage value container. */
@@ -748,13 +749,15 @@ export interface ICfcSchemaHashMismatchError extends IStorageError {
 
 export interface ICfcInputRequirementViolationError extends IStorageError {
   readonly name: "CfcInputRequirementViolationError";
-  readonly requirement: "maxConfidentiality";
+  readonly requirement: "maxConfidentiality" | "requiredIntegrity";
   readonly space: MemorySpace;
   readonly id: URI;
   readonly type: string;
   readonly path: string;
-  readonly maxConfidentiality: readonly string[];
-  readonly actualClassification: string;
+  readonly maxConfidentiality?: readonly string[];
+  readonly requiredIntegrity?: readonly string[];
+  readonly actualClassification?: string;
+  readonly actualIntegrity?: readonly string[];
 }
 
 /**

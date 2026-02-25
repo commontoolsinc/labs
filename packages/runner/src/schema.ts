@@ -21,7 +21,10 @@ import {
 } from "./query-result-proxy.ts";
 import { toCell } from "./back-to-cell.ts";
 import { markCfcRelevantForSchema } from "./cfc/relevance.ts";
-import { CFC_READ_MAX_CONFIDENTIALITY_MARKER } from "./cfc/internal-markers.ts";
+import {
+  CFC_READ_MAX_CONFIDENTIALITY_MARKER,
+  CFC_READ_REQUIRED_INTEGRITY_MARKER,
+} from "./cfc/internal-markers.ts";
 import {
   combineSchema,
   IObjectCreator,
@@ -358,17 +361,28 @@ function readIfcInputMeta(schema: JSONSchema | undefined): Metadata | undefined 
   }
   const rawMaxConfidentiality = (schema.ifc as Record<string, unknown>)
     .maxConfidentiality;
-  if (!Array.isArray(rawMaxConfidentiality)) {
-    return undefined;
-  }
-  const maxConfidentiality = rawMaxConfidentiality.filter(
-    (entry): entry is string => typeof entry === "string" && entry.length > 0,
-  );
-  if (maxConfidentiality.length === 0) {
+  const maxConfidentiality = Array.isArray(rawMaxConfidentiality)
+    ? rawMaxConfidentiality.filter(
+      (entry): entry is string => typeof entry === "string" && entry.length > 0,
+    )
+    : [];
+  const rawRequiredIntegrity = (schema.ifc as Record<string, unknown>)
+    .requiredIntegrity;
+  const requiredIntegrity = Array.isArray(rawRequiredIntegrity)
+    ? rawRequiredIntegrity.filter(
+      (entry): entry is string => typeof entry === "string" && entry.length > 0,
+    )
+    : [];
+  if (maxConfidentiality.length === 0 && requiredIntegrity.length === 0) {
     return undefined;
   }
   return {
-    [CFC_READ_MAX_CONFIDENTIALITY_MARKER]: maxConfidentiality,
+    ...(maxConfidentiality.length > 0
+      ? { [CFC_READ_MAX_CONFIDENTIALITY_MARKER]: maxConfidentiality }
+      : {}),
+    ...(requiredIntegrity.length > 0
+      ? { [CFC_READ_REQUIRED_INTEGRITY_MARKER]: requiredIntegrity }
+      : {}),
   };
 }
 

@@ -21,6 +21,7 @@ import {
 import {
   internalVerifierReadMeta,
   readMaxConfidentialityFromMeta,
+  readRequiredIntegrityFromMeta,
 } from "./internal-markers.ts";
 import { getCfcWriteSchemaContext } from "./schema-context.ts";
 import { computeCfcSchemaHash } from "./schema-hash.ts";
@@ -60,7 +61,7 @@ function CfcSchemaHashMismatchError(
   };
 }
 
-function CfcInputRequirementViolationError(
+function CfcMaxConfidentialityViolationError(
   read: CanonicalBoundaryRead,
   maxConfidentiality: readonly string[],
   actualClassification: string,
@@ -76,6 +77,25 @@ function CfcInputRequirementViolationError(
     path: read.path,
     maxConfidentiality: [...maxConfidentiality],
     actualClassification,
+  };
+}
+
+function CfcRequiredIntegrityViolationError(
+  read: CanonicalBoundaryRead,
+  requiredIntegrity: readonly string[],
+  actualIntegrity: readonly string[],
+): ICfcInputRequirementViolationError {
+  return {
+    name: "CfcInputRequirementViolationError",
+    message:
+      "CFC prepare input requirement failed: consumed input misses requiredIntegrity",
+    requirement: "requiredIntegrity",
+    space: read.space as IMemorySpaceAddress["space"],
+    id: read.id as IMemorySpaceAddress["id"],
+    type: read.type,
+    path: read.path,
+    requiredIntegrity: [...requiredIntegrity],
+    actualIntegrity: [...actualIntegrity],
   };
 }
 
@@ -143,17 +163,24 @@ function normalizeLabelsByPath(value: unknown): Record<string, Labels> {
     }
     const rawClassification = (rawLabel as { classification?: unknown })
       .classification;
-    if (!Array.isArray(rawClassification)) {
+    const classification = Array.isArray(rawClassification)
+      ? rawClassification.filter((entry): entry is string =>
+        typeof entry === "string" && entry.length > 0
+      )
+      : [];
+    const rawIntegrity = (rawLabel as { integrity?: unknown }).integrity;
+    const integrity = Array.isArray(rawIntegrity)
+      ? rawIntegrity.filter((entry): entry is string =>
+        typeof entry === "string" && entry.length > 0
+      )
+      : [];
+    if (classification.length === 0 && integrity.length === 0) {
       continue;
     }
-
-    const classification = rawClassification.filter((entry): entry is string =>
-      typeof entry === "string" && entry.length > 0
-    );
-    if (classification.length === 0) {
-      continue;
-    }
-    labelsByPath[path] = { classification };
+    labelsByPath[path] = {
+      ...(classification.length > 0 ? { classification } : {}),
+      ...(integrity.length > 0 ? { integrity } : {}),
+    };
   }
   return labelsByPath;
 }
@@ -189,6 +216,20 @@ function classificationSatisfiesMaxConfidentiality(
   return false;
 }
 
+function integritySatisfiesRequiredIntegrity(
+  actualIntegrity: readonly string[] | undefined,
+  requiredIntegrity: readonly string[],
+): boolean {
+  if (requiredIntegrity.length === 0) {
+    return true;
+  }
+  if (!actualIntegrity || actualIntegrity.length === 0) {
+    return false;
+  }
+  const actualSet = new Set(actualIntegrity);
+  return requiredIntegrity.every((atom) => actualSet.has(atom));
+}
+
 function verifyInputRequirementsForAttempt(
   tx: IExtendedStorageTransaction,
 ): void {
@@ -214,23 +255,39 @@ function verifyInputRequirementsForAttempt(
   const cfc = new ContextualFlowControl();
   for (const consumed of consumedReadLabels) {
     const maxConfidentiality = readMaxConfidentialityFromMeta(consumed.read.meta);
-    if (!maxConfidentiality || maxConfidentiality.length === 0) {
-      continue;
+    if (maxConfidentiality && maxConfidentiality.length > 0) {
+      const actualClassification =
+        consumed.effectiveLabel?.classification?.[0] ?? "unclassified";
+      if (
+        !classificationSatisfiesMaxConfidentiality(
+          actualClassification,
+          maxConfidentiality,
+          cfc,
+        )
+      ) {
+        throw CfcMaxConfidentialityViolationError(
+          consumed.read,
+          maxConfidentiality,
+          actualClassification,
+        );
+      }
     }
-    const actualClassification =
-      consumed.effectiveLabel?.classification?.[0] ?? "unclassified";
-    if (
-      !classificationSatisfiesMaxConfidentiality(
-        actualClassification,
-        maxConfidentiality,
-        cfc,
-      )
-    ) {
-      throw CfcInputRequirementViolationError(
-        consumed.read,
-        maxConfidentiality,
-        actualClassification,
-      );
+
+    const requiredIntegrity = readRequiredIntegrityFromMeta(consumed.read.meta);
+    if (requiredIntegrity && requiredIntegrity.length > 0) {
+      const actualIntegrity = consumed.effectiveLabel?.integrity ?? [];
+      if (
+        !integritySatisfiesRequiredIntegrity(
+          actualIntegrity,
+          requiredIntegrity,
+        )
+      ) {
+        throw CfcRequiredIntegrityViolationError(
+          consumed.read,
+          requiredIntegrity,
+          actualIntegrity,
+        );
+      }
     }
   }
 }

@@ -19,6 +19,13 @@ const maxConfidentialSchema = {
   },
 } as unknown as JSONSchema;
 
+const requiredIntegritySchema = {
+  type: "number",
+  ifc: {
+    requiredIntegrity: ["trusted-source"],
+  },
+} as unknown as JSONSchema;
+
 describe("CFC prepare input requirements", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
@@ -41,6 +48,7 @@ describe("CFC prepare input requirements", () => {
     id: URI,
     value: number,
     classification: string,
+    integrity?: readonly string[],
   ): Promise<void> {
     const tx = runtime.edit();
     tx.writeOrThrow({
@@ -57,6 +65,7 @@ describe("CFC prepare input requirements", () => {
     }, {
       "/": {
         classification: [classification],
+        ...(integrity ? { integrity } : {}),
       },
     });
     const { error } = await tx.commit();
@@ -122,5 +131,80 @@ describe("CFC prepare input requirements", () => {
     expect(
       (thrown as { requirement?: string } | undefined)?.requirement,
     ).toBe("maxConfidentiality");
+  });
+
+  it("allows prepare when consumed input satisfies requiredIntegrity", async () => {
+    const sourceId = runtime.getCell(
+      space,
+      "cfc-input-required-integrity-allow-source",
+    ).getAsNormalizedFullLink().id;
+    await seedInputWithClassification(
+      sourceId,
+      1,
+      "confidential",
+      ["trusted-source"],
+    );
+
+    const tx = runtime.edit();
+    const sourceCell = runtime.getCell<number>(
+      space,
+      "cfc-input-required-integrity-allow-source",
+    );
+    const targetCell = runtime.getCell<number>(
+      space,
+      "cfc-input-required-integrity-allow-target",
+    );
+
+    const value = Number(
+      sourceCell.withTx(tx).asSchema(requiredIntegritySchema).get() ?? 0,
+    );
+    targetCell.withTx(tx).set(value + 1);
+
+    await prepareCfcCommitIfNeeded(tx);
+    const { error } = await tx.commit();
+    expect(error).toBeUndefined();
+  });
+
+  it("rejects prepare when consumed input misses requiredIntegrity", async () => {
+    const sourceId = runtime.getCell(
+      space,
+      "cfc-input-required-integrity-reject-source",
+    ).getAsNormalizedFullLink().id;
+    await seedInputWithClassification(
+      sourceId,
+      1,
+      "confidential",
+      ["untrusted-source"],
+    );
+
+    const tx = runtime.edit();
+    const sourceCell = runtime.getCell<number>(
+      space,
+      "cfc-input-required-integrity-reject-source",
+    );
+    const targetCell = runtime.getCell<number>(
+      space,
+      "cfc-input-required-integrity-reject-target",
+    );
+
+    const value = Number(
+      sourceCell.withTx(tx).asSchema(requiredIntegritySchema).get() ?? 0,
+    );
+    targetCell.withTx(tx).set(value + 1);
+
+    let thrown: unknown;
+    try {
+      await prepareCfcCommitIfNeeded(tx);
+    } catch (error) {
+      thrown = error;
+    }
+    tx.abort(thrown);
+
+    expect((thrown as { name?: string } | undefined)?.name).toBe(
+      "CfcInputRequirementViolationError",
+    );
+    expect(
+      (thrown as { requirement?: string } | undefined)?.requirement,
+    ).toBe("requiredIntegrity");
   });
 });
