@@ -11,9 +11,13 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Map with common shorthand index parameter names */}
-        {state.items.mapWithPattern(__ctHelpers.pattern(({ element: item, index: i, params: {} }) => (<div key={i}>
-            Item #{i}: {item.name}
-          </div>), {
+        {state.items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const item = __ct_pattern_input.key("element");
+                const i = __ct_pattern_input.key("index");
+                return (<div key={i}>
+            Item #{i}: {item.key("name")}
+          </div>);
+            }, {
                 type: "object",
                 properties: {
                     element: {
@@ -59,9 +63,13 @@ export default pattern((state) => {
             } as const satisfies __ctHelpers.JSONSchema), {})}
 
         {/* Map with idx as index parameter */}
-        {state.items.mapWithPattern(__ctHelpers.pattern(({ element: item, index: idx, params: {} }) => (<div key={idx}>
-            Position {idx}: {item.name}
-          </div>), {
+        {state.items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const item = __ct_pattern_input.key("element");
+                const idx = __ct_pattern_input.key("index");
+                return (<div key={idx}>
+            Position {idx}: {item.key("name")}
+          </div>);
+            }, {
                 type: "object",
                 properties: {
                     element: {

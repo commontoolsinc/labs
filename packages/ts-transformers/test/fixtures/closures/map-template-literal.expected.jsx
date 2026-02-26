@@ -13,7 +13,7 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Template literal with captures */}
-        {state.items.mapWithPattern(__ctHelpers.pattern(({ element: item, params: { state } }) => (<div>{__ctHelpers.derive({
+        {state.items.map((item) => (<div>{__ctHelpers.derive({
                 type: "object",
                 properties: {
                     state: {
@@ -52,75 +52,7 @@ export default pattern((state) => {
                 item: {
                     name: item.name
                 }
-            }, ({ state, item }) => `${state.prefix} ${item.name} ${state.suffix}`)}</div>), {
-                type: "object",
-                properties: {
-                    element: {
-                        $ref: "#/$defs/Item"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {
-                            state: {
-                                type: "object",
-                                properties: {
-                                    prefix: {
-                                        type: "string",
-                                        asOpaque: true
-                                    },
-                                    suffix: {
-                                        type: "string",
-                                        asOpaque: true
-                                    }
-                                },
-                                required: ["prefix", "suffix"]
-                            }
-                        },
-                        required: ["state"]
-                    }
-                },
-                required: ["element", "params"],
-                $defs: {
-                    Item: {
-                        type: "object",
-                        properties: {
-                            id: {
-                                type: "number"
-                            },
-                            name: {
-                                type: "string"
-                            }
-                        },
-                        required: ["id", "name"]
-                    }
-                }
-            } as const satisfies __ctHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __ctHelpers.JSONSchema), {
-                state: {
-                    prefix: state.prefix,
-                    suffix: state.suffix
-                }
-            })}
+            }, ({ state, item }) => `${state.prefix} ${item.name} ${state.suffix}`)}</div>))}
       </div>),
     };
 }, {

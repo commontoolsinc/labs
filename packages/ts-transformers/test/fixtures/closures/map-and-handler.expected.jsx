@@ -10,7 +10,7 @@ interface State {
 export default pattern((state) => {
     return {
         [UI]: (<div>
-        {state.items.mapWithPattern(__ctHelpers.pattern(({ element: item, index, params: { state } }) => (<div>
+        {state.items.map((item, index) => (<div>
             <span>{__ctHelpers.derive({
                 type: "object",
                 properties: {
@@ -58,13 +58,9 @@ export default pattern((state) => {
                             }
                         },
                         required: ["selectedIndex"]
-                    },
-                    index: {
-                        type: "number",
-                        asOpaque: true
                     }
                 },
-                required: ["state", "index"]
+                required: ["state"]
             } as const satisfies __ctHelpers.JSONSchema, (__ct_handler_event, { state, index }) => state.selectedIndex.set(index))({
                 state: {
                     selectedIndex: state.selectedIndex
@@ -73,67 +69,7 @@ export default pattern((state) => {
             })}>
               Select
             </button>
-          </div>), {
-                type: "object",
-                properties: {
-                    element: {
-                        type: "object",
-                        properties: {
-                            price: {
-                                type: "number"
-                            }
-                        },
-                        required: ["price"]
-                    },
-                    params: {
-                        type: "object",
-                        properties: {
-                            state: {
-                                type: "object",
-                                properties: {
-                                    discount: {
-                                        type: "number",
-                                        asOpaque: true
-                                    },
-                                    selectedIndex: {
-                                        type: "number",
-                                        asCell: true
-                                    }
-                                },
-                                required: ["discount", "selectedIndex"]
-                            }
-                        },
-                        required: ["state"]
-                    }
-                },
-                required: ["element", "params"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __ctHelpers.JSONSchema), {
-                state: {
-                    discount: state.discount,
-                    selectedIndex: state.selectedIndex
-                }
-            })}
+          </div>))}
         <div>
           Selected: {__ctHelpers.derive({
             type: "object",
@@ -168,7 +104,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.items,
                 selectedIndex: state.selectedIndex
-            } }, ({ state }) => state.items[state.selectedIndex.get()]?.price ?? 0)} x {state.discount} ={" "}
+            } }, ({ state }) => state.items[state.selectedIndex.get()]?.price ?? 0)} x {state.key("discount")} ={" "}
           {__ctHelpers.derive({
             type: "object",
             properties: {

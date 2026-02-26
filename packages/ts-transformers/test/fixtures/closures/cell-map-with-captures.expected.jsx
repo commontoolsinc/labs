@@ -6,22 +6,12 @@ interface State {
 }
 export default pattern((state) => {
     // Explicitly type as Cell to ensure closure transformation
-    const typedValues: Cell<number[]> = cell(state.values, {
-        type: "array",
-        items: {
-            type: "number"
-        },
-        asOpaque: true
-    } as const satisfies __ctHelpers.JSONSchema);
+    const typedValues: Cell<number[]> = cell(state.key("values"));
     return {
         [UI]: (<div>
-        {typedValues.mapWithPattern(__ctHelpers.pattern(({ element: value, params: { state } }) => (<span>{__ctHelpers.derive({
+        {typedValues.map((value) => (<span>{__ctHelpers.derive({
                 type: "object",
                 properties: {
-                    value: {
-                        type: "number",
-                        asOpaque: true
-                    },
                     state: {
                         type: "object",
                         properties: {
@@ -33,7 +23,7 @@ export default pattern((state) => {
                         required: ["multiplier"]
                     }
                 },
-                required: ["value", "state"]
+                required: ["state"]
             } as const satisfies __ctHelpers.JSONSchema, {
                 type: "number"
             } as const satisfies __ctHelpers.JSONSchema, {
@@ -41,53 +31,7 @@ export default pattern((state) => {
                 state: {
                     multiplier: state.multiplier
                 }
-            }, ({ value, state }) => value * state.multiplier)}</span>), {
-                type: "object",
-                properties: {
-                    params: {
-                        type: "object",
-                        properties: {
-                            state: {
-                                type: "object",
-                                properties: {
-                                    multiplier: {
-                                        type: "number",
-                                        asOpaque: true
-                                    }
-                                },
-                                required: ["multiplier"]
-                            }
-                        },
-                        required: ["state"]
-                    }
-                },
-                required: ["params"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __ctHelpers.JSONSchema), {
-                state: {
-                    multiplier: state.multiplier
-                }
-            })}
+            }, ({ value, state }) => value * state.multiplier)}</span>))}
       </div>),
     };
 }, {

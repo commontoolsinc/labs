@@ -12,14 +12,10 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Map with destructured parameter and capture */}
-        {state.points.mapWithPattern(__ctHelpers.pattern(({ element: { x, y }, params: { state } }) => (<div>
+        {state.points.map(({ x, y }) => (<div>
             Point: ({__ctHelpers.derive({
                 type: "object",
                 properties: {
-                    x: {
-                        type: "number",
-                        asOpaque: true
-                    },
                     state: {
                         type: "object",
                         properties: {
@@ -31,7 +27,7 @@ export default pattern((state) => {
                         required: ["scale"]
                     }
                 },
-                required: ["x", "state"]
+                required: ["state"]
             } as const satisfies __ctHelpers.JSONSchema, {
                 type: "number"
             } as const satisfies __ctHelpers.JSONSchema, {
@@ -42,10 +38,6 @@ export default pattern((state) => {
             }, ({ x, state }) => x * state.scale)}, {__ctHelpers.derive({
                 type: "object",
                 properties: {
-                    y: {
-                        type: "number",
-                        asOpaque: true
-                    },
                     state: {
                         type: "object",
                         properties: {
@@ -57,7 +49,7 @@ export default pattern((state) => {
                         required: ["scale"]
                     }
                 },
-                required: ["y", "state"]
+                required: ["state"]
             } as const satisfies __ctHelpers.JSONSchema, {
                 type: "number"
             } as const satisfies __ctHelpers.JSONSchema, {
@@ -66,53 +58,7 @@ export default pattern((state) => {
                     scale: state.scale
                 }
             }, ({ y, state }) => y * state.scale)})
-          </div>), {
-                type: "object",
-                properties: {
-                    params: {
-                        type: "object",
-                        properties: {
-                            state: {
-                                type: "object",
-                                properties: {
-                                    scale: {
-                                        type: "number",
-                                        asOpaque: true
-                                    }
-                                },
-                                required: ["scale"]
-                            }
-                        },
-                        required: ["state"]
-                    }
-                },
-                required: ["params"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __ctHelpers.JSONSchema), {
-                state: {
-                    scale: state.scale
-                }
-            })}
+          </div>))}
       </div>),
     };
 }, {

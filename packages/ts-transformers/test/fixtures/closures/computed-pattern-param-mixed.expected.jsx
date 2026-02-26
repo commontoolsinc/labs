@@ -30,15 +30,12 @@ export default pattern((config: {
                 },
                 required: ["base", "multiplier"]
             },
-            offset: {
-                type: "number"
-            },
             threshold: {
                 type: "number",
                 asCell: true
             }
         },
-        required: ["value", "config", "offset", "threshold"]
+        required: ["value", "config", "threshold"]
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema, {

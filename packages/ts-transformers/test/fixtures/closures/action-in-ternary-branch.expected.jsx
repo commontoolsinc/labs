@@ -15,7 +15,8 @@ interface Card {
 interface Input {
     card: Card;
 }
-export default pattern(({ card }) => {
+export default pattern((__ct_pattern_input) => {
+    const card = __ct_pattern_input.key("card");
     const isEditing = Cell.of(false, {
         type: "boolean"
     } as const satisfies __ctHelpers.JSONSchema);
@@ -92,16 +93,9 @@ export default pattern(({ card }) => {
                         }
                     },
                     required: ["title", "description"]
-                },
-                hasDescription: {
-                    type: "boolean",
-                    asOpaque: true
-                },
-                startEditing: {
-                    asStream: true
                 }
             },
-            required: ["card", "hasDescription", "startEditing"]
+            required: ["card"]
         } as const satisfies __ctHelpers.JSONSchema, {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"

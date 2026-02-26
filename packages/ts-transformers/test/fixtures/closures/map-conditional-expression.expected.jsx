@@ -13,7 +13,7 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Ternary with captures in map callback */}
-        {state.items.mapWithPattern(__ctHelpers.pattern(({ element: item, params: { state } }) => (<div>
+        {state.items.map((item) => (<div>
             Price: ${__ctHelpers.ifElse({
                 type: "boolean"
             } as const satisfies __ctHelpers.JSONSchema, {
@@ -92,75 +92,7 @@ export default pattern((state) => {
                     discount: state.discount
                 }
             }, ({ item, state }) => item.price * (1 - state.discount)), item.price)}
-          </div>), {
-                type: "object",
-                properties: {
-                    element: {
-                        $ref: "#/$defs/Item"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {
-                            state: {
-                                type: "object",
-                                properties: {
-                                    threshold: {
-                                        type: "number",
-                                        asOpaque: true
-                                    },
-                                    discount: {
-                                        type: "number",
-                                        asOpaque: true
-                                    }
-                                },
-                                required: ["threshold", "discount"]
-                            }
-                        },
-                        required: ["state"]
-                    }
-                },
-                required: ["element", "params"],
-                $defs: {
-                    Item: {
-                        type: "object",
-                        properties: {
-                            id: {
-                                type: "number"
-                            },
-                            price: {
-                                type: "number"
-                            }
-                        },
-                        required: ["id", "price"]
-                    }
-                }
-            } as const satisfies __ctHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __ctHelpers.JSONSchema), {
-                state: {
-                    threshold: state.threshold,
-                    discount: state.discount
-                }
-            })}
+          </div>))}
       </div>),
     };
 }, {

@@ -10,36 +10,12 @@ export default pattern((state) => {
     const wishQuery = derive({
         type: "object",
         properties: {
-            food: {
-                type: "string",
-                asOpaque: true
-            },
-            prefs: {
-                type: "array",
-                items: {
-                    $ref: "#/$defs/Preference"
-                },
-                asOpaque: true
-            }
+            prefs: true
         },
-        required: ["food", "prefs"],
-        $defs: {
-            Preference: {
-                type: "object",
-                properties: {
-                    ingredient: {
-                        type: "string"
-                    },
-                    preference: {
-                        "enum": ["liked", "disliked"]
-                    }
-                },
-                required: ["ingredient", "preference"]
-            }
-        }
+        required: ["prefs"]
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __ctHelpers.JSONSchema, { food: state.foodDescription, prefs: state.preferences }, ({ food, prefs }) => {
+    } as const satisfies __ctHelpers.JSONSchema, { food: state.key("foodDescription"), prefs: state.key("preferences") }, ({ food, prefs }) => {
         // Filter-map chain inside derive callback
         // The .map() should NOT be transformed to .mapWithPattern() because:
         // - Inside derive, `prefs` is unwrapped to a plain array

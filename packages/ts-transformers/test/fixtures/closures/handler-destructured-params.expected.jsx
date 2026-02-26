@@ -7,7 +7,7 @@ interface State {
 // Test destructured event handler params with typed ct-select onct-change
 export default pattern((state) => {
     return {
-        [UI]: (<ct-select $value={state.selectedValue} items={[
+        [UI]: (<ct-select $value={state.key("selectedValue")} items={[
                 { label: "Option A", value: "a" },
                 { label: "Option B", value: "b" },
             ]} onct-change={__ctHelpers.handler({
@@ -28,10 +28,9 @@ export default pattern((state) => {
                                 },
                                 required: ["label", "value"]
                             }
-                        },
-                        value: true
+                        }
                     },
-                    required: ["items", "value"]
+                    required: ["items"]
                 }
             },
             required: ["detail"]

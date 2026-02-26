@@ -11,9 +11,6 @@ export default pattern((state) => {
         {plainArray.map((n) => (<span>{__ctHelpers.derive({
                 type: "object",
                 properties: {
-                    n: {
-                        type: "number"
-                    },
                     state: {
                         type: "object",
                         properties: {
@@ -25,7 +22,7 @@ export default pattern((state) => {
                         required: ["multiplier"]
                     }
                 },
-                required: ["n", "state"]
+                required: ["state"]
             } as const satisfies __ctHelpers.JSONSchema, {
                 type: "number"
             } as const satisfies __ctHelpers.JSONSchema, {

@@ -13,90 +13,25 @@ interface State {
 export default pattern((state) => {
     return {
         [UI]: (<div>
-        {state.items.mapWithPattern(__ctHelpers.pattern(({ element, params: {} }) => {
-                const __ct_val_key = dynamicKey();
-                const { foo } = element;
-                const val = __ctHelpers.derive({
-                    type: "object",
-                    properties: {
-                        element: true,
-                        __ct_val_key: true
-                    },
-                    required: ["element", "__ct_val_key"]
-                } as const satisfies __ctHelpers.JSONSchema, {
-                    type: "number",
-                    asOpaque: true
-                } as const satisfies __ctHelpers.JSONSchema, {
-                    element: element,
-                    __ct_val_key: __ct_val_key
-                }, ({ element, __ct_val_key }) => element[__ct_val_key]);
-                return (<span>{__ctHelpers.derive({
-                    type: "object",
-                    properties: {
-                        foo: {
-                            type: "number",
-                            asOpaque: true
-                        },
-                        val: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["foo", "val"]
-                } as const satisfies __ctHelpers.JSONSchema, {
-                    type: "number"
-                } as const satisfies __ctHelpers.JSONSchema, {
-                    foo: foo,
-                    val: val
-                }, ({ foo, val }) => foo + val)}</span>);
-            }, {
+        {state.items.map(({ foo, [dynamicKey()]: val }) => (<span>{__ctHelpers.derive({
                 type: "object",
                 properties: {
-                    element: {
-                        $ref: "#/$defs/Item"
+                    foo: {
+                        type: "number",
+                        asOpaque: true
                     },
-                    params: {
-                        type: "object",
-                        properties: {}
+                    val: {
+                        type: "number",
+                        asOpaque: true
                     }
                 },
-                required: ["element", "params"],
-                $defs: {
-                    Item: {
-                        type: "object",
-                        properties: {
-                            foo: {
-                                type: "number"
-                            },
-                            value: {
-                                type: "number"
-                            }
-                        },
-                        required: ["foo", "value"]
-                    }
-                }
+                required: ["foo", "val"]
             } as const satisfies __ctHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __ctHelpers.JSONSchema), {})}
+                type: "number"
+            } as const satisfies __ctHelpers.JSONSchema, {
+                foo: foo,
+                val: val
+            }, ({ foo, val }) => foo + val)}</span>))}
       </div>),
     };
 }, {

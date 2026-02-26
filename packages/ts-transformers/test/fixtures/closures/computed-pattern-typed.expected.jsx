@@ -1,6 +1,7 @@
 import * as __ctHelpers from "commontools";
 import { cell, computed, pattern } from "commontools";
-export default pattern(({ multiplier }) => {
+export default pattern((__ct_pattern_input) => {
+    const multiplier = __ct_pattern_input.key("multiplier");
     const value = cell(10, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema);
@@ -10,13 +11,9 @@ export default pattern(({ multiplier }) => {
             value: {
                 type: "number",
                 asCell: true
-            },
-            multiplier: {
-                type: "number",
-                asOpaque: true
             }
         },
-        required: ["value", "multiplier"]
+        required: ["value"]
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema, {

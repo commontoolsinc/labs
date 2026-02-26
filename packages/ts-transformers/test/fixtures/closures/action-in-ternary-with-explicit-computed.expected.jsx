@@ -14,7 +14,8 @@ interface Card {
 interface Input {
     card: Card;
 }
-export default pattern(({ card }) => {
+export default pattern((__ct_pattern_input) => {
+    const card = __ct_pattern_input.key("card");
     const isEditing = Cell.of(false, {
         type: "boolean"
     } as const satisfies __ctHelpers.JSONSchema);
@@ -53,7 +54,7 @@ export default pattern(({ card }) => {
                     properties: {}
                 }]
         } as const satisfies __ctHelpers.JSONSchema, isEditing, <div>Editing</div>, <div>
-            <span>{card.title}</span>
+            <span>{card.key("title")}</span>
             {/* Explicit computed() wrapping JSX that references the action */}
             {/* The action must be captured in the derive created for this computed */}
             {__ctHelpers.derive({
@@ -68,12 +69,9 @@ export default pattern(({ card }) => {
                             }
                         },
                         required: ["description"]
-                    },
-                    startEditing: {
-                        asStream: true
                     }
                 },
-                required: ["card", "startEditing"]
+                required: ["card"]
             } as const satisfies __ctHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"

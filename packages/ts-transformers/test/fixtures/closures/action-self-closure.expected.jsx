@@ -10,7 +10,8 @@ interface TestOutput {
     title: string;
     count: number;
 }
-export default pattern(({ title, [SELF]: self }) => {
+export default pattern((__ct_pattern_input) => {
+    const title = __ct_pattern_input.key("title");
     const count = Writable.of(0, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema);
@@ -49,36 +50,12 @@ export default pattern(({ title, [SELF]: self }) => {
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "object",
         properties: {
-            self: {
-                $ref: "#/$defs/TestOutput",
-                asOpaque: true
-            },
             count: {
                 type: "number",
                 asCell: true
             }
         },
-        required: ["self", "count"],
-        $defs: {
-            TestOutput: {
-                type: "object",
-                properties: {
-                    title: {
-                        type: "string"
-                    },
-                    count: {
-                        type: "number"
-                    },
-                    $NAME: {
-                        type: "string"
-                    },
-                    $UI: {
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }
-                },
-                required: ["title", "count", "$NAME", "$UI"]
-            }
-        }
+        required: ["count"]
     } as const satisfies __ctHelpers.JSONSchema, (_, { self, count }) => {
         console.log("self:", self);
         count.set(count.get() + 1);

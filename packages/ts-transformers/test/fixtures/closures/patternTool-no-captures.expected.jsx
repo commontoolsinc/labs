@@ -12,14 +12,11 @@ export default pattern(() => {
         return derive({
             type: "object",
             properties: {
-                query: {
-                    type: "string"
-                },
                 content: {
                     type: "string"
                 }
             },
-            required: ["query", "content"]
+            required: ["content"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "array",
             items: {

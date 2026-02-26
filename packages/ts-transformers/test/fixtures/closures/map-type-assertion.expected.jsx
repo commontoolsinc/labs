@@ -10,13 +10,17 @@ interface State {
 }
 export default pattern((state) => {
     // Type assertion to OpaqueRef<Item[]>
-    const typedItems = state.items as OpaqueRef<Item[]>;
+    const typedItems = state.key("items") as OpaqueRef<Item[]>;
     return {
         [UI]: (<div>
         {/* Map on type-asserted reactive array */}
-        {typedItems.mapWithPattern(__ctHelpers.pattern(({ element: item, params: { state } }) => (<div>
-            {state.prefix}: {item.name}
-          </div>), {
+        {typedItems.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const item = __ct_pattern_input.key("element");
+                const state = __ct_pattern_input.key("params", "state");
+                return (<div>
+            {state.key("prefix")}: {item.key("name")}
+          </div>);
+            }, {
                 type: "object",
                 properties: {
                     element: {

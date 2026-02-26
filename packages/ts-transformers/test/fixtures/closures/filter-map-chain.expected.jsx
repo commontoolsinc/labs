@@ -74,7 +74,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.items
             } }, ({ state }) => state.items
-            .filter((item) => item.active)).mapWithPattern(__ctHelpers.pattern(({ element: item, params: { state } }) => (<div>
+            .filter((item) => item.active)).map((item) => (<div>
               Total: {__ctHelpers.derive({
             type: "object",
             properties: {
@@ -110,74 +110,7 @@ export default pattern((state) => {
                 taxRate: state.taxRate
             }
         }, ({ item, state }) => item.price * (1 + state.taxRate))}
-            </div>), {
-            type: "object",
-            properties: {
-                element: {
-                    $ref: "#/$defs/Item",
-                    asOpaque: true
-                },
-                params: {
-                    type: "object",
-                    properties: {
-                        state: {
-                            type: "object",
-                            properties: {
-                                taxRate: {
-                                    type: "number",
-                                    asOpaque: true
-                                }
-                            },
-                            required: ["taxRate"]
-                        }
-                    },
-                    required: ["state"]
-                }
-            },
-            required: ["element", "params"],
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        id: {
-                            type: "number"
-                        },
-                        price: {
-                            type: "number"
-                        },
-                        active: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["id", "price", "active"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    type: "object",
-                    properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
-                }],
-            $defs: {
-                UIRenderable: {
-                    type: "object",
-                    properties: {
-                        $UI: {
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }
-                    },
-                    required: ["$UI"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema), {
-            state: {
-                taxRate: state.taxRate
-            }
-        })}
+            </div>))}
       </div>),
     };
 }, {

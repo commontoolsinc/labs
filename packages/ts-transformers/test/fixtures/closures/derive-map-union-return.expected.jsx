@@ -64,7 +64,7 @@ export default pattern((state) => {
             }, {
                 type: "null"
             }]
-    } as const satisfies __ctHelpers.JSONSchema, state.messages, (messages) => {
+    } as const satisfies __ctHelpers.JSONSchema, state.key("messages"), (messages) => {
         if (!messages || messages.length === 0)
             return null;
         for (let i = messages.length - 1; i >= 0; i--) {

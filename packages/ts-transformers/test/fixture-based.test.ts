@@ -66,6 +66,7 @@ const configs: FixtureConfig[] = [
       { pattern: /^event-/, name: "Event handlers" },
       { pattern: /^lift-/, name: "Generic closures" },
     ],
+    useLegacyOpaqueRefSemantics: false,
   },
   {
     directory: "schema-injection",

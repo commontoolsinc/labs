@@ -37,7 +37,8 @@ const removeItem = handler(true as const satisfies __ctHelpers.JSONSchema, {
 } as const satisfies __ctHelpers.JSONSchema, (_, _2) => {
     // Not relevant for repro
 });
-export default pattern(({ items }: InputSchema) => {
+export default pattern((__ct_pattern_input: InputSchema) => {
+    const items = __ct_pattern_input.key("items");
     return {
         [UI]: (<ul>
           {items.map((_, index) => (<li key={index}>
@@ -47,31 +48,7 @@ export default pattern(({ items }: InputSchema) => {
             </li>))}
         </ul>),
     };
-}, {
-    type: "object",
-    properties: {
-        items: {
-            type: "array",
-            items: {
-                $ref: "#/$defs/Item"
-            },
-            "default": []
-        }
-    },
-    required: ["items"],
-    $defs: {
-        Item: {
-            type: "object",
-            properties: {
-                text: {
-                    type: "string",
-                    "default": ""
-                }
-            },
-            required: ["text"]
-        }
-    }
-} as const satisfies __ctHelpers.JSONSchema, {
+}, false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {

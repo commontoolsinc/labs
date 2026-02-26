@@ -17,7 +17,7 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Should NOT capture module-level constant or function */}
-        {state.items.mapWithPattern(__ctHelpers.pattern(({ element: item, params: {} }) => (<div>
+        {state.items.map((item) => (<div>
             Item: {__ctHelpers.derive({
                 type: "object",
                 properties: {
@@ -38,50 +38,7 @@ export default pattern((state) => {
             } as const satisfies __ctHelpers.JSONSchema, { item: {
                     price: item.price
                 } }, ({ item }) => formatPrice(item.price * (1 + TAX_RATE)))}
-          </div>), {
-                type: "object",
-                properties: {
-                    element: {
-                        $ref: "#/$defs/Item"
-                    }
-                },
-                required: ["element"],
-                $defs: {
-                    Item: {
-                        type: "object",
-                        properties: {
-                            id: {
-                                type: "number"
-                            },
-                            price: {
-                                type: "number"
-                            }
-                        },
-                        required: ["id", "price"]
-                    }
-                }
-            } as const satisfies __ctHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __ctHelpers.JSONSchema), {})}
+          </div>))}
       </div>),
     };
 }, {

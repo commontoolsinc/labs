@@ -8,7 +8,10 @@ interface State {
 export default pattern((state) => {
     return {
         [UI]: (<div>
-        {state.entries.mapWithPattern(__ctHelpers.pattern(({ element: { 0: first }, params: {} }) => (<span>{first}</span>), {
+        {state.entries.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const first = __ct_pattern_input.key("element", "0");
+                return (<span>{first}</span>);
+            }, {
                 type: "object",
                 properties: {
                     element: {

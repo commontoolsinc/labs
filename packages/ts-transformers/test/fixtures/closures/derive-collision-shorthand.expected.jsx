@@ -13,13 +13,9 @@ export default function TestDeriveCollisionShorthand() {
             multiplier: {
                 type: "number",
                 asCell: true
-            },
-            multiplier_1: {
-                type: "number",
-                asCell: true
             }
         },
-        required: ["multiplier", "multiplier_1"]
+        required: ["multiplier"]
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "object",
         properties: {

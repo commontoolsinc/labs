@@ -14,7 +14,7 @@ interface State {
 export default pattern((state) => {
     return {
         [UI]: (<div>
-        {state.items.mapWithPattern(__ctHelpers.pattern(({ element: item, params: { state } }) => (<span>
+        {state.items.map((item) => (<span>
             {__ctHelpers.derive({
                 type: "object",
                 properties: {
@@ -71,83 +71,7 @@ export default pattern((state) => {
                     }
                 }
             }, ({ item, state }) => item.price * state.checkout.discount * state.upsell.discount)}
-          </span>), {
-                type: "object",
-                properties: {
-                    element: {
-                        type: "object",
-                        properties: {
-                            price: {
-                                type: "number"
-                            }
-                        },
-                        required: ["price"]
-                    },
-                    params: {
-                        type: "object",
-                        properties: {
-                            state: {
-                                type: "object",
-                                properties: {
-                                    checkout: {
-                                        type: "object",
-                                        properties: {
-                                            discount: {
-                                                type: "number",
-                                                asOpaque: true
-                                            }
-                                        },
-                                        required: ["discount"]
-                                    },
-                                    upsell: {
-                                        type: "object",
-                                        properties: {
-                                            discount: {
-                                                type: "number",
-                                                asOpaque: true
-                                            }
-                                        },
-                                        required: ["discount"]
-                                    }
-                                },
-                                required: ["checkout", "upsell"]
-                            }
-                        },
-                        required: ["state"]
-                    }
-                },
-                required: ["element", "params"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __ctHelpers.JSONSchema), {
-                state: {
-                    checkout: {
-                        discount: state.checkout.discount
-                    },
-                    upsell: {
-                        discount: state.upsell.discount
-                    }
-                }
-            })}
+          </span>))}
       </div>),
     };
 }, {

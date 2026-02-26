@@ -46,8 +46,7 @@ export class TransformationContext {
   }
 
   reportDiagnostic(input: DiagnosticInput): void {
-    const start = input.node.getStart();
-    const length = input.node.getEnd() - start;
+    const { start, length } = this.resolveDiagnosticRange(input.node);
     const location = this.sourceFile.getLineAndCharacterOfPosition(start);
     const diagnostic: TransformationDiagnostic = {
       severity: input.severity ?? "error",
@@ -65,6 +64,29 @@ export class TransformationContext {
     if (this.options.diagnosticsCollector) {
       this.options.diagnosticsCollector.push(diagnostic);
     }
+  }
+
+  private resolveDiagnosticRange(node: ts.Node): { start: number; length: number } {
+    let current: ts.Node | undefined = node;
+    while (current) {
+      const pos = current.pos;
+      const end = current.end;
+      if (pos >= 0 && end >= pos) {
+        try {
+          const start = current.getStart(this.sourceFile);
+          return {
+            start,
+            length: Math.max(0, end - start),
+          };
+        } catch {
+          // Some synthetic nodes still throw here; continue walking to a real parent.
+        }
+      }
+      current = current.parent;
+    }
+
+    // Final fallback for fully synthetic trees with no real source positions.
+    return { start: 0, length: 0 };
   }
 
   /**

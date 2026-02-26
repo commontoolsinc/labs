@@ -23,7 +23,9 @@ interface PatternInput {
     ]>>;
     showInactive?: Default<boolean, false>;
 }
-export default pattern(({ items, showInactive }) => {
+export default pattern((__ct_pattern_input) => {
+    const items = __ct_pattern_input.key("items");
+    const showInactive = __ct_pattern_input.key("showInactive");
     const hasItems = __ctHelpers.derive({
         type: "object",
         properties: {
@@ -119,7 +121,7 @@ export default pattern(({ items, showInactive }) => {
                     required: ["$UI"]
                 }
             }
-        } as const satisfies __ctHelpers.JSONSchema, hasItems, items.mapWithPattern(__ctHelpers.pattern(({ element: item, params: { showInactive } }) => (<div>
+        } as const satisfies __ctHelpers.JSONSchema, hasItems, items.map((item) => (<div>
               {/* Ternary in outer map, outside inner map - should also be ifElse */}
               <strong>{__ctHelpers.ifElse({
             type: "boolean"
@@ -184,7 +186,7 @@ export default pattern(({ items, showInactive }) => {
                 }
             } }, ({ item }) => item.tags.length > 0)), item.label, "No tags")}</strong>
               <ul>
-                {item.tags.mapWithPattern(__ctHelpers.pattern(({ element: tag, params: { showInactive } }) => (<li>
+                {item.tags.map((tag) => (<li>
                     {/* This ternary should be transformed to ifElse */}
                     {__ctHelpers.ifElse({
                 type: "boolean",
@@ -199,10 +201,6 @@ export default pattern(({ items, showInactive }) => {
             } as const satisfies __ctHelpers.JSONSchema, tag.active, tag.name, __ctHelpers.derive({
                 type: "object",
                 properties: {
-                    showInactive: {
-                        type: "boolean",
-                        asOpaque: true
-                    },
                     tag: {
                         type: "object",
                         properties: {
@@ -214,7 +212,7 @@ export default pattern(({ items, showInactive }) => {
                         required: ["name"]
                     }
                 },
-                required: ["showInactive", "tag"]
+                required: ["tag"]
             } as const satisfies __ctHelpers.JSONSchema, {
                 type: "string"
             } as const satisfies __ctHelpers.JSONSchema, {
@@ -250,114 +248,9 @@ export default pattern(({ items, showInactive }) => {
             } as const satisfies __ctHelpers.JSONSchema, { tag: {
                     name: tag.name
                 } }, ({ tag }) => `(${tag.name})`), "")))}
-                  </li>), {
-                type: "object",
-                properties: {
-                    element: {
-                        $ref: "#/$defs/Tag"
-                    }
-                },
-                required: ["element"],
-                $defs: {
-                    Tag: {
-                        type: "object",
-                        properties: {
-                            name: {
-                                type: "string"
-                            },
-                            active: {
-                                type: "boolean"
-                            }
-                        },
-                        required: ["name", "active"]
-                    }
-                }
-            } as const satisfies __ctHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __ctHelpers.JSONSchema), {
-                showInactive: showInactive
-            })}
+                  </li>))}
               </ul>
-            </div>), {
-            type: "object",
-            properties: {
-                element: {
-                    $ref: "#/$defs/Item"
-                }
-            },
-            required: ["element"],
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        label: {
-                            type: "string"
-                        },
-                        tags: {
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/Tag"
-                            }
-                        }
-                    },
-                    required: ["label", "tags"]
-                },
-                Tag: {
-                    type: "object",
-                    properties: {
-                        name: {
-                            type: "string"
-                        },
-                        active: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["name", "active"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    type: "object",
-                    properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
-                }],
-            $defs: {
-                UIRenderable: {
-                    type: "object",
-                    properties: {
-                        $UI: {
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }
-                    },
-                    required: ["$UI"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema), {
-            showInactive: showInactive
-        }), <p>No items</p>)}
+            </div>)), <p>No items</p>)}
       </div>),
     };
 }, {

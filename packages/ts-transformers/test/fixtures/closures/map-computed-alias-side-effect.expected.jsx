@@ -10,7 +10,8 @@ interface State {
 export default pattern((state) => {
     return {
         [UI]: (<div>
-        {state.items.mapWithPattern(__ctHelpers.pattern(({ element, params: {} }) => {
+        {state.items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const element = __ct_pattern_input.key("element");
                 const __ct_amount_key = nextKey();
                 const amount = __ctHelpers.derive({
                     type: "object",

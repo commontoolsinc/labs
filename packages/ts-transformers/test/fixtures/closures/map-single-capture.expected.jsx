@@ -9,7 +9,7 @@ interface State {
 export default pattern((state) => {
     return {
         [UI]: (<div>
-        {state.items.mapWithPattern(__ctHelpers.pattern(({ element: item, params: { state } }) => (<span>{__ctHelpers.derive({
+        {state.items.map((item) => (<span>{__ctHelpers.derive({
                 type: "object",
                 properties: {
                     item: {
@@ -43,62 +43,7 @@ export default pattern((state) => {
                 state: {
                     discount: state.discount
                 }
-            }, ({ item, state }) => item.price * state.discount)}</span>), {
-                type: "object",
-                properties: {
-                    element: {
-                        type: "object",
-                        properties: {
-                            price: {
-                                type: "number"
-                            }
-                        },
-                        required: ["price"]
-                    },
-                    params: {
-                        type: "object",
-                        properties: {
-                            state: {
-                                type: "object",
-                                properties: {
-                                    discount: {
-                                        type: "number",
-                                        asOpaque: true
-                                    }
-                                },
-                                required: ["discount"]
-                            }
-                        },
-                        required: ["state"]
-                    }
-                },
-                required: ["element", "params"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __ctHelpers.JSONSchema), {
-                state: {
-                    discount: state.discount
-                }
-            })}
+            }, ({ item, state }) => item.price * state.discount)}</span>))}
       </div>),
     };
 }, {
