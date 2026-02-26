@@ -2,7 +2,10 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { ReactiveControllerHost } from "lit";
 import { isCellHandle } from "@commontools/runtime-client";
-import { createMockCellHandle } from "../test-utils/mock-cell-handle.ts";
+import {
+  createMockCellHandle,
+  pushUpdate,
+} from "../test-utils/mock-cell-handle.ts";
 import {
   ArrayCellController,
   BooleanCellController,
@@ -64,6 +67,48 @@ describe("createMockCellHandle", () => {
       received = v;
     });
     expect(received).toBe("now");
+  });
+
+  it("child.set() propagates to parent value and fires parent subscribers", async () => {
+    const parent = createMockCellHandle({ name: "Alice", age: 30 });
+    const values: unknown[] = [];
+    parent.subscribe((v) => values.push(structuredClone(v)));
+
+    const child = parent.key("name");
+    await child.set("Bob");
+
+    expect(parent.get()).toEqual({ name: "Bob", age: 30 });
+    // values[0] = initial ({name:"Alice",age:30}), values[1] = after child.set
+    expect(values.length).toBeGreaterThanOrEqual(2);
+    expect(values[values.length - 1]).toEqual({ name: "Bob", age: 30 });
+  });
+
+  it("child.set() on array element propagates to parent", async () => {
+    const parent = createMockCellHandle(["x", "y", "z"]);
+    const item = parent.key(1 as keyof string[]);
+    await item.set("Y" as any);
+    expect(parent.get()).toEqual(["x", "Y", "z"]);
+  });
+
+  it("pushUpdate() simulates backend-pushed value change", () => {
+    const cell = createMockCellHandle("original");
+    const received: (string | undefined)[] = [];
+    cell.subscribe((v) => received.push(v));
+    received.length = 0; // clear initial
+
+    pushUpdate(cell, "from-backend");
+    expect(cell.get()).toBe("from-backend");
+    expect(received).toEqual(["from-backend"]);
+  });
+
+  it("pushUpdate() suppresses callback when value is equal", () => {
+    const cell = createMockCellHandle(42);
+    let callCount = 0;
+    cell.subscribe(() => callCount++);
+    const afterSubscribe = callCount;
+
+    pushUpdate(cell, 42); // same value
+    expect(callCount).toBe(afterSubscribe);
   });
 });
 
@@ -197,6 +242,91 @@ describe("CellController", () => {
     // Should not throw
     ctrl.setValue("ignored");
   });
+
+  it("bind() with schema parameter creates schema-annotated handle", () => {
+    const host = createMockHost();
+    const ctrl = new CellController<string>(host, {
+      timing: { strategy: "immediate" },
+    });
+    const cell = createMockCellHandle("typed");
+    const schema = { type: "string" } as const;
+    ctrl.bind(cell, schema);
+    // bind(cell, schema) calls cell.asSchema(schema) — the controller should
+    // hold a different handle than the original, with the schema on its ref.
+    expect(ctrl.getValue()).toBe("typed");
+    expect(ctrl.hasCell()).toBe(true);
+    const bound = ctrl.getCell()!;
+    expect(bound).not.toBe(cell); // asSchema creates a new handle
+    expect(bound.ref().schema).toEqual(schema);
+  });
+
+  it("hostConnected() re-establishes subscription after disconnect", () => {
+    let updateCount = 0;
+    const host: ReactiveControllerHost = {
+      addController: () => {},
+      removeController: () => {},
+      requestUpdate: () => {
+        updateCount++;
+      },
+      updateComplete: Promise.resolve(true),
+    } as unknown as ReactiveControllerHost;
+
+    const ctrl = new CellController<string>(host, {
+      timing: { strategy: "immediate" },
+    });
+    const cell = createMockCellHandle("a");
+    ctrl.bind(cell);
+
+    ctrl.hostDisconnected();
+    updateCount = 0;
+    pushUpdate(cell, "while-disconnected");
+    expect(updateCount).toBe(0); // no updates while disconnected
+
+    ctrl.hostConnected();
+    updateCount = 0;
+    pushUpdate(cell, "after-reconnect");
+    expect(updateCount).toBeGreaterThan(0); // subscription restored
+  });
+
+  it("hostDisconnected stops requestUpdate on external cell changes", () => {
+    let updateCount = 0;
+    const host: ReactiveControllerHost = {
+      addController: () => {},
+      removeController: () => {},
+      requestUpdate: () => {
+        updateCount++;
+      },
+      updateComplete: Promise.resolve(true),
+    } as unknown as ReactiveControllerHost;
+
+    const ctrl = new CellController<string>(host, {
+      timing: { strategy: "immediate" },
+    });
+    const cell = createMockCellHandle("a");
+    ctrl.bind(cell);
+    updateCount = 0;
+
+    ctrl.hostDisconnected();
+    pushUpdate(cell, "ignored");
+    expect(updateCount).toBe(0);
+  });
+
+  it("onChange fires on backend-pushed value change (without setValue)", () => {
+    const host = createMockHost();
+    const changes: Array<{ newVal: string; oldVal: string }> = [];
+    const ctrl = new CellController<string>(host, {
+      timing: { strategy: "immediate" },
+      onChange: (n, o) => changes.push({ newVal: n, oldVal: o }),
+    });
+    const cell = createMockCellHandle("initial");
+    ctrl.bind(cell);
+    changes.length = 0; // clear bind-time onChange calls
+
+    pushUpdate(cell, "external");
+    const change = changes.find((c) => c.newVal === "external");
+    expect(change).toBeDefined();
+    expect(change!.oldVal).toBe("initial");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -305,21 +435,14 @@ describe("ArrayCellController", () => {
     expect(cell.get()).toEqual(["a", "c"]);
   });
 
-  it("updateItem replaces item via cell.key().set()", () => {
+  it("updateItem replaces item via cell.key().set() and propagates to parent", () => {
     const host = createMockHost();
     const ctrl = new ArrayCellController<string>(host);
     const cell = createMockCellHandle(["x", "y", "z"]);
     ctrl.bind(cell);
-    // updateItem uses cell.key(index).set() for CellHandle-backed arrays.
-    // The child CellHandle gets the update; the parent's local cache
-    // isn't automatically synced (that happens via backend push in prod).
-    // Just verify the call doesn't throw and the child reflects the value.
     ctrl.updateItem("y", "Y");
-    // key() creates a fresh child each time, pre-populated from parent cache
-    // Since parent cache still has "y", the new child reads "y".
-    // The actual set() went through on the child that updateItem created.
-    // In production the backend would push the update to the parent.
-    // For this test, we just verify no errors occur.
+    // With parent-child propagation, the child's set() updates the parent
+    expect(cell.get()).toEqual(["x", "Y", "z"]);
   });
 });
 
