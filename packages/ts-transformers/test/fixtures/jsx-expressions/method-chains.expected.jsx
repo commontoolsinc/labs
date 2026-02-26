@@ -170,13 +170,9 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.items,
                 threshold: state.threshold
-            } }, ({ state }) => state.items.filter((x) => x > state.threshold)).mapWithPattern(__ctHelpers.pattern(({ element: x, params: { state } }) => (<li>Value: {__ctHelpers.derive({
+            } }, ({ state }) => state.items.filter((x) => x > state.threshold)).map((x) => (<li>Value: {__ctHelpers.derive({
             type: "object",
             properties: {
-                x: {
-                    type: "number",
-                    asOpaque: true
-                },
                 state: {
                     type: "object",
                     properties: {
@@ -188,7 +184,7 @@ export default pattern((state) => {
                     required: ["factor"]
                 }
             },
-            required: ["x", "state"]
+            required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, {
@@ -196,53 +192,7 @@ export default pattern((state) => {
             state: {
                 factor: state.factor
             }
-        }, ({ x, state }) => x * state.factor)}</li>), {
-            type: "object",
-            properties: {
-                params: {
-                    type: "object",
-                    properties: {
-                        state: {
-                            type: "object",
-                            properties: {
-                                factor: {
-                                    type: "number",
-                                    asOpaque: true
-                                }
-                            },
-                            required: ["factor"]
-                        }
-                    },
-                    required: ["state"]
-                }
-            },
-            required: ["params"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    type: "object",
-                    properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
-                }],
-            $defs: {
-                UIRenderable: {
-                    type: "object",
-                    properties: {
-                        $UI: {
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }
-                    },
-                    required: ["$UI"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema), {
-            state: {
-                factor: state.factor
-            }
-        })}
+        }, ({ x, state }) => x * state.factor)}</li>))}
         </ul>
 
         {/* Multiple filters */}
@@ -394,7 +344,7 @@ export default pattern((state) => {
         <h3>Complex Method Combinations</h3>
         {/* Map with chained operations inside */}
         <ul>
-          {state.names.mapWithPattern(__ctHelpers.pattern(({ element: name, params: {} }) => (<li>{__ctHelpers.derive({
+          {state.names.map((name) => (<li>{__ctHelpers.derive({
                 type: "object",
                 properties: {
                     name: {
@@ -405,36 +355,7 @@ export default pattern((state) => {
                 required: ["name"]
             } as const satisfies __ctHelpers.JSONSchema, {
                 type: "string"
-            } as const satisfies __ctHelpers.JSONSchema, { name: name }, ({ name }) => name.trim().toLowerCase().replace(" ", "-"))}</li>), {
-                type: "object",
-                properties: {
-                    element: {
-                        type: "string"
-                    }
-                },
-                required: ["element"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __ctHelpers.JSONSchema), {})}
+            } as const satisfies __ctHelpers.JSONSchema, { name: name }, ({ name }) => name.trim().toLowerCase().replace(" ", "-"))}</li>))}
         </ul>
 
         {/* Reduce with reactive accumulator */}
@@ -646,7 +567,7 @@ export default pattern((state) => {
 
         {/* Map with conditional logic */}
         <ul>
-          {state.users.mapWithPattern(__ctHelpers.pattern(({ element: u, params: {} }) => (<li>{__ctHelpers.ifElse({
+          {state.users.map((u) => (<li>{__ctHelpers.ifElse({
                 type: "boolean",
                 asOpaque: true
             } as const satisfies __ctHelpers.JSONSchema, {
@@ -693,45 +614,7 @@ export default pattern((state) => {
                 type: "string"
             } as const satisfies __ctHelpers.JSONSchema, { u: {
                     name: u.name
-                } }, ({ u }) => u.name.toLowerCase()))}</li>), {
-                type: "object",
-                properties: {
-                    element: {
-                        type: "object",
-                        properties: {
-                            name: {
-                                type: "string"
-                            },
-                            active: {
-                                type: "boolean"
-                            }
-                        },
-                        required: ["name", "active"]
-                    }
-                },
-                required: ["element"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __ctHelpers.JSONSchema), {})}
+                } }, ({ u }) => u.name.toLowerCase()))}</li>))}
         </ul>
 
         {/* Some/every with reactive predicates */}

@@ -6,7 +6,7 @@ interface PatternState {
 }
 export default pattern((state) => {
     return {
-        [NAME]: state.label,
+        [NAME]: state.key("label"),
         [UI]: (<section>
         {__ctHelpers.ifElse({
             type: "boolean"

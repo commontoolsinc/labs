@@ -19,7 +19,8 @@ const handleClick = handler(true as const satisfies __ctHelpers.JSONSchema, {
 } as const satisfies __ctHelpers.JSONSchema, (_, { count }) => {
     count.set(count.get() + 1);
 });
-export default pattern(({ count }) => {
+export default pattern((__ct_pattern_input) => {
+    const count = __ct_pattern_input.key("count");
     return {
         [UI]: (<div>
           {/* Regular JSX expression - should be wrapped in derive */}

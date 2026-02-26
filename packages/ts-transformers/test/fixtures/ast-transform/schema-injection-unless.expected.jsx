@@ -4,7 +4,9 @@ interface State {
     value: string | null;
     defaultValue: string;
 }
-export default pattern(({ value, defaultValue }) => {
+export default pattern((__ct_pattern_input) => {
+    const value = __ct_pattern_input.key("value");
+    const defaultValue = __ct_pattern_input.key("defaultValue");
     // unless(condition, fallback) - returns condition if truthy, else fallback
     const result = unless({
         anyOf: [{

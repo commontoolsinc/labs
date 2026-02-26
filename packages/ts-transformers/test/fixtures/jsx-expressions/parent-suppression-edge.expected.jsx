@@ -81,8 +81,8 @@ export default pattern((state) => {
         <h3>Same Base, Different Properties</h3>
         {/* Multiple accesses to same object in one expression */}
         <p>
-          User info: {state.user.name} (age: {state.user.age}, email:{" "}
-          {state.user.email})
+          User info: {state.key("user", "name")} (age: {state.key("user", "age")}, email:{" "}
+          {state.key("user", "email")})
         </p>
 
         {/* String concatenation with multiple property accesses */}
@@ -200,84 +200,78 @@ export default pattern((state) => {
         <h3>Deeply Nested Property Chains</h3>
         {/* Multiple references to deeply nested object */}
         <p>
-          Theme: {state.config.theme.colors.primary} /{" "}
-          {state.config.theme.colors.secondary} on{" "}
-          {state.config.theme.colors.background}
+          Theme: {state.key("config", "theme", "colors", "primary")} /{" "}
+          {state.key("config", "theme", "colors", "secondary")} on{" "}
+          {state.key("config", "theme", "colors", "background")}
         </p>
 
         {/* Fonts from same nested structure */}
         <p>
-          Typography: Headings in {state.config.theme.fonts.heading}, body in
+          Typography: Headings in {state.key("config", "theme", "fonts", "heading")}, body in
           {" "}
-          {state.config.theme.fonts.body}, code in{" "}
-          {state.config.theme.fonts.mono}
+          {state.key("config", "theme", "fonts", "body")}, code in{" "}
+          {state.key("config", "theme", "fonts", "mono")}
         </p>
 
         {/* Mixed depth accesses */}
         <p>
           Config summary: Dark mode{" "}
-          {__ctHelpers.ifElse({
-            type: "boolean",
-            asOpaque: true
-        } as const satisfies __ctHelpers.JSONSchema, {
+          {__ctHelpers.ifElse(true as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             "enum": ["enabled", "disabled"]
-        } as const satisfies __ctHelpers.JSONSchema, state.config.features.darkMode, "enabled", "disabled")} with{" "}
-          {state.config.theme.colors.primary} primary color
+        } as const satisfies __ctHelpers.JSONSchema, state.key("config", "features", "darkMode"), "enabled", "disabled")} with{" "}
+          {state.key("config", "theme", "colors", "primary")} primary color
         </p>
 
         <h3>Very Deep Nesting with Multiple References</h3>
         {/* Accessing different properties at same deep level */}
         <p>
-          Deep value: {state.deeply.nested.structure.with.many.levels.value}
+          Deep value: {state.key("deeply", "nested", "structure", "with", "many", "levels", "value")}
           {" "}
-          (count: {state.deeply.nested.structure.with.many.levels.count})
+          (count: {state.key("deeply", "nested", "structure", "with", "many", "levels", "count")})
         </p>
 
         {/* Mixed depth from same root */}
         <p>
-          Mixed depths: {state.deeply.nested.structure.with.many.levels.value}
+          Mixed depths: {state.key("deeply", "nested", "structure", "with", "many", "levels", "value")}
           {" "}
-          in {state.deeply.nested.structure.with.many.levels.count} items
+          in {state.key("deeply", "nested", "structure", "with", "many", "levels", "count")} items
         </p>
 
         <h3>Arrays with Shared Base</h3>
         {/* Multiple array properties */}
         <p>
-          Array info: First has {state.arrays.first.length} items, second has
+          Array info: First has {state.key("arrays", "first", "length")} items, second has
           {" "}
-          {state.arrays.second.length} items
+          {state.key("arrays", "second", "length")} items
         </p>
 
         {/* Nested array access with shared base */}
         <p>
-          Nested: {state.arrays.nested[0]!.items.length} items in first, count is
+          Nested: {state.key("arrays", "nested", "0")!.items.length} items in first, count is
           {" "}
-          {state.arrays.nested[0]!.count}
+          {state.key("arrays", "nested", "0")!.count}
         </p>
 
         {/* Array and property access mixed */}
         <p>
-          First item: {state.arrays.first[0]} (total:{" "}
-          {state.arrays.first.length})
+          First item: {state.key("arrays", "first", "0")} (total:{" "}
+          {state.key("arrays", "first", "length")})
         </p>
 
         <h3>Complex Expressions with Shared Bases</h3>
         {/* Conditional with multiple property accesses */}
         <p>
-          Status: {__ctHelpers.ifElse({
-            type: "boolean",
-            asOpaque: true
-        } as const satisfies __ctHelpers.JSONSchema, {
+          Status: {__ctHelpers.ifElse(true as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, state.user.settings.notifications, __ctHelpers.derive({
+        } as const satisfies __ctHelpers.JSONSchema, state.key("user", "settings", "notifications"), __ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -527,135 +521,54 @@ export default pattern((state) => {
 
         {/* Property access and method calls mixed */}
         <p>
-          Profile length: {state.user.profile.bio.length} chars in bio,{" "}
-          {state.user.profile.location.length} chars in location
+          Profile length: {state.key("user", "profile", "bio", "length")} chars in bio,{" "}
+          {state.key("user", "profile", "location", "length")} chars in location
         </p>
 
         <h3>Edge Cases for Parent Suppression</h3>
         {/* Same intermediate parent used differently */}
         <p>
-          User settings: Theme is {state.user.settings.theme} with privacy{" "}
-          {state.user.settings.privacy}
+          User settings: Theme is {state.key("user", "settings", "theme")} with privacy{" "}
+          {state.key("user", "settings", "privacy")}
         </p>
 
         {/* Parent and child both used */}
         <p>
-          Data summary: {state.data.items.length} items with average{" "}
-          {state.data.totals.average}
+          Data summary: {state.key("data", "items", "length")} items with average{" "}
+          {state.key("data", "totals", "average")}
         </p>
 
         {/* Multiple levels of the same chain */}
         <p>
-          Nested refs: {state.config.theme.colors.primary} in{" "}
-          {state.config.theme.fonts.body} with{" "}
-          {__ctHelpers.ifElse({
-            type: "boolean",
-            asOpaque: true
-        } as const satisfies __ctHelpers.JSONSchema, {
+          Nested refs: {state.key("config", "theme", "colors", "primary")} in{" "}
+          {state.key("config", "theme", "fonts", "body")} with{" "}
+          {__ctHelpers.ifElse(true as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             "enum": ["animations", "no animations"]
-        } as const satisfies __ctHelpers.JSONSchema, state.config.features.animations, "animations", "no animations")}
+        } as const satisfies __ctHelpers.JSONSchema, state.key("config", "features", "animations"), "animations", "no animations")}
         </p>
 
         <h3>Extreme Parent Suppression Test</h3>
         {/* Using every level of a deep chain */}
         <p>
-          All levels: Root: {__ctHelpers.ifElse({
-            type: "object",
-            properties: {
-                nested: {
-                    type: "object",
-                    properties: {
-                        structure: {
-                            type: "object",
-                            properties: {
-                                "with": {
-                                    type: "object",
-                                    properties: {
-                                        many: {
-                                            type: "object",
-                                            properties: {
-                                                levels: {
-                                                    type: "object",
-                                                    properties: {
-                                                        value: {
-                                                            type: "string"
-                                                        },
-                                                        count: {
-                                                            type: "number"
-                                                        }
-                                                    },
-                                                    required: ["value", "count"]
-                                                }
-                                            },
-                                            required: ["levels"]
-                                        }
-                                    },
-                                    required: ["many"]
-                                }
-                            },
-                            required: ["with"]
-                        }
-                    },
-                    required: ["structure"]
-                }
-            },
-            required: ["nested"],
-            asOpaque: true
-        } as const satisfies __ctHelpers.JSONSchema, {
+          All levels: Root: {__ctHelpers.ifElse(true as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             "enum": ["exists", "missing"]
-        } as const satisfies __ctHelpers.JSONSchema, state.deeply, "exists", "missing")}, Nested:{" "}
-          {__ctHelpers.ifElse({
-            type: "object",
-            properties: {
-                structure: {
-                    type: "object",
-                    properties: {
-                        "with": {
-                            type: "object",
-                            properties: {
-                                many: {
-                                    type: "object",
-                                    properties: {
-                                        levels: {
-                                            type: "object",
-                                            properties: {
-                                                value: {
-                                                    type: "string"
-                                                },
-                                                count: {
-                                                    type: "number"
-                                                }
-                                            },
-                                            required: ["value", "count"]
-                                        }
-                                    },
-                                    required: ["levels"]
-                                }
-                            },
-                            required: ["many"]
-                        }
-                    },
-                    required: ["with"]
-                }
-            },
-            required: ["structure"],
-            asOpaque: true
-        } as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, state.key("deeply"), "exists", "missing")}, Nested:{" "}
+          {__ctHelpers.ifElse(true as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             "enum": ["exists", "missing"]
-        } as const satisfies __ctHelpers.JSONSchema, state.deeply.nested, "exists", "missing")}, Value:{" "}
-          {state.deeply.nested.structure.with.many.levels.value}
+        } as const satisfies __ctHelpers.JSONSchema, state.key("deeply", "nested"), "exists", "missing")}, Value:{" "}
+          {state.key("deeply", "nested", "structure", "with", "many", "levels", "value")}
         </p>
       </div>),
     };

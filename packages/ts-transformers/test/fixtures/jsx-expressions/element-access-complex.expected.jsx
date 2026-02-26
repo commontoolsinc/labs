@@ -121,7 +121,7 @@ export default pattern((state) => {
         <h3>Multiple References to Same Array</h3>
         {/* Same array accessed multiple times with different indices */}
         <p>
-          First and last: {state.items[0]} and{" "}
+          First and last: {state.key("items", "0")} and{" "}
           {__ctHelpers.derive({
             type: "object",
             properties: {
@@ -566,7 +566,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.items,
                 b: state.b
-            } }, ({ state }) => state.items[state.b]!), state.items[0]!)}
+            } }, ({ state }) => state.items[state.b]!), state.key("items", "0")!)}
         </p>
 
         {/* Element access in boolean expression */}

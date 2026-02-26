@@ -35,35 +35,29 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         <h3>Basic Property Access</h3>
-        <h1>{state.user.name}</h1>
-        <p>Age: {state.user.age}</p>
-        <p>Active: {__ctHelpers.ifElse({
-            type: "boolean",
-            asOpaque: true
-        } as const satisfies __ctHelpers.JSONSchema, {
+        <h1>{state.key("user", "name")}</h1>
+        <p>Age: {state.key("user", "age")}</p>
+        <p>Active: {__ctHelpers.ifElse(true as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             "enum": ["Yes", "No"]
-        } as const satisfies __ctHelpers.JSONSchema, state.user.active, "Yes", "No")}</p>
+        } as const satisfies __ctHelpers.JSONSchema, state.key("user", "active"), "Yes", "No")}</p>
 
         <h3>Nested Property Access</h3>
-        <p>Bio: {state.user.profile.bio}</p>
-        <p>Location: {state.user.profile.location}</p>
-        <p>Theme: {state.user.profile.settings.theme}</p>
+        <p>Bio: {state.key("user", "profile", "bio")}</p>
+        <p>Location: {state.key("user", "profile", "location")}</p>
+        <p>Theme: {state.key("user", "profile", "settings", "theme")}</p>
         <p>
           Notifications:{" "}
-          {__ctHelpers.ifElse({
-            type: "boolean",
-            asOpaque: true
-        } as const satisfies __ctHelpers.JSONSchema, {
+          {__ctHelpers.ifElse(true as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             "enum": ["On", "Off"]
-        } as const satisfies __ctHelpers.JSONSchema, state.user.profile.settings.notifications, "On", "Off")}
+        } as const satisfies __ctHelpers.JSONSchema, state.key("user", "profile", "settings", "notifications"), "On", "Off")}
         </p>
 
         <h3>Property Access with Operations</h3>
@@ -95,7 +89,7 @@ export default pattern((state) => {
                     age: state.user.age
                 }
             } }, ({ state }) => state.user.age + 1)}</p>
-        <p>Name length: {state.user.name.length}</p>
+        <p>Name length: {state.key("user", "name", "length")}</p>
         <p>Uppercase name: {__ctHelpers.derive({
             type: "object",
             properties: {
@@ -206,7 +200,7 @@ export default pattern((state) => {
                 items: state.items,
                 index: state.index
             } }, ({ state }) => state.items[state.index])}</p>
-        <p>First item: {state.items[0]}</p>
+        <p>First item: {state.key("items", "0")}</p>
         <p>Last item: {__ctHelpers.derive({
             type: "object",
             properties: {
@@ -271,7 +265,7 @@ export default pattern((state) => {
 
         <h3>Config Access with Styles</h3>
         <p style={{
-            color: state.config.theme.primaryColor,
+            color: state.key("config", "theme", "primaryColor"),
             fontSize: __ctHelpers.derive({
                 type: "object",
                 properties: {
@@ -312,17 +306,14 @@ export default pattern((state) => {
           Styled text
         </p>
         <div style={{
-            backgroundColor: __ctHelpers.ifElse({
-                type: "boolean",
-                asOpaque: true
-            } as const satisfies __ctHelpers.JSONSchema, {
+            backgroundColor: __ctHelpers.ifElse(true as const satisfies __ctHelpers.JSONSchema, {
                 type: "string"
             } as const satisfies __ctHelpers.JSONSchema, {
                 type: "string"
             } as const satisfies __ctHelpers.JSONSchema, {
                 "enum": ["#333", "#fff"]
-            } as const satisfies __ctHelpers.JSONSchema, state.config.features.darkMode, "#333", "#fff"),
-            borderColor: state.config.theme.secondaryColor,
+            } as const satisfies __ctHelpers.JSONSchema, state.key("config", "features", "darkMode"), "#333", "#fff"),
+            borderColor: state.key("config", "theme", "secondaryColor"),
         }}>
           Theme-aware box
         </div>

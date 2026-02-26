@@ -25,6 +25,7 @@ const configs: FixtureConfig[] = [
     directory: "ast-transform",
     describe: "AST Transformation",
     formatTestName: (name) => `transforms ${name.replace(/-/g, " ")}`,
+    useLegacyOpaqueRefSemantics: false,
   },
   {
     directory: "handler-schema",
@@ -41,6 +42,7 @@ const configs: FixtureConfig[] = [
       }
       return `transforms ${formatted}`;
     },
+    useLegacyOpaqueRefSemantics: false,
   },
   {
     directory: "schema-transform",

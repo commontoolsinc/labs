@@ -3,7 +3,7 @@ import { pattern, UI } from "commontools";
 export default pattern((cell) => {
     return {
         [UI]: (<div>
-        <p>Current value: {cell.value}</p>
+        <p>Current value: {cell.key("value")}</p>
         <p>Next value: {__ctHelpers.derive({
             type: "object",
             properties: {
@@ -45,7 +45,7 @@ export default pattern((cell) => {
                 value: cell.value
             } }, ({ cell }) => cell.value * 2)}</p>
       </div>),
-        value: cell.value,
+        value: cell.key("value"),
     };
 }, {
     type: "object",

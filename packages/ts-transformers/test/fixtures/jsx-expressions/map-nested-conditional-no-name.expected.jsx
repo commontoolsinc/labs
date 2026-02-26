@@ -32,7 +32,7 @@ export default pattern((_state: any) => {
                     properties: {}
                 }]
         } as const satisfies __ctHelpers.JSONSchema, showList, <div>
-            {items.mapWithPattern(__ctHelpers.pattern(({ element: item, params: {} }) => (<div>
+            {items.map((item) => (<div>
                 {__ctHelpers.when({
                 type: "string",
                 asOpaque: true
@@ -47,42 +47,7 @@ export default pattern((_state: any) => {
                         properties: {}
                     }]
             } as const satisfies __ctHelpers.JSONSchema, item.name, <span>{item.name}</span>)}
-              </div>), {
-                type: "object",
-                properties: {
-                    element: {
-                        type: "object",
-                        properties: {
-                            name: {
-                                type: "string"
-                            }
-                        },
-                        required: ["name"]
-                    }
-                },
-                required: ["element"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __ctHelpers.JSONSchema), {})}
+              </div>))}
           </div>)}
       </div>),
     };

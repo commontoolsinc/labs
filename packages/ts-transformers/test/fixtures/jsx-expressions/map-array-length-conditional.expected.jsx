@@ -38,7 +38,10 @@ export default pattern((_state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, { list: list }, ({ list }) => list.get().length > 0), <div>
-            {list.mapWithPattern(__ctHelpers.pattern(({ element: name, params: {} }) => (<span>{name}</span>), {
+            {list.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const name = __ct_pattern_input.key("element");
+                return (<span>{name}</span>);
+            }, {
                 type: "object",
                 properties: {
                     element: {

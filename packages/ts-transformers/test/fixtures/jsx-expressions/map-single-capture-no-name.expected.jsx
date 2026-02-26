@@ -59,17 +59,24 @@ export default pattern((_state: any) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, { people: people }, ({ people }) => people.get().length > 0), <ul>
-            {people.mapWithPattern(__ctHelpers.pattern(({ element: person, index, params: {} }) => (<li key={index}>{person.name}</li>), {
+            {people.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const person = __ct_pattern_input.key("element");
+                const index = __ct_pattern_input.key("index");
+                return (<li key={index}>{person.key("name")}</li>);
+            }, {
                 type: "object",
                 properties: {
                     element: {
                         type: "object",
                         properties: {
+                            id: {
+                                type: "string"
+                            },
                             name: {
                                 type: "string"
                             }
                         },
-                        required: ["name"]
+                        required: ["id", "name"]
                     }
                 },
                 required: ["element"]

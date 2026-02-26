@@ -14,8 +14,8 @@ interface State {
 export default pattern((state) => {
     return {
         [UI]: (<div>
-        <span>{state.maybe?.value}</span>
-        {state.items.mapWithPattern(__ctHelpers.pattern(({ element: item, params: {} }) => (<span>{__ctHelpers.derive({
+        <span>{state.key("maybe", "value")}</span>
+        {state.items.map((item) => (<span>{__ctHelpers.derive({
                 type: "object",
                 properties: {
                     item: {
@@ -47,52 +47,7 @@ export default pattern((state) => {
                 type: "number"
             } as const satisfies __ctHelpers.JSONSchema, { item: {
                     maybe: item.maybe
-                } }, ({ item }) => item.maybe?.value ?? 0)}</span>), {
-                type: "object",
-                properties: {
-                    element: {
-                        $ref: "#/$defs/Item"
-                    }
-                },
-                required: ["element"],
-                $defs: {
-                    Item: {
-                        type: "object",
-                        properties: {
-                            maybe: {
-                                type: "object",
-                                properties: {
-                                    value: {
-                                        type: "number"
-                                    }
-                                },
-                                required: ["value"]
-                            }
-                        }
-                    }
-                }
-            } as const satisfies __ctHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __ctHelpers.JSONSchema), {})}
+                } }, ({ item }) => item.maybe?.value ?? 0)}</span>))}
       </div>),
     };
 }, {

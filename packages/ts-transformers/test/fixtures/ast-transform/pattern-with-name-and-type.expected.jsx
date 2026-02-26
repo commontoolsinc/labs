@@ -5,7 +5,7 @@ interface MyInput {
 }
 export default pattern((input: MyInput) => {
     return {
-        result: input.value * 2,
+        result: input.key("value") * 2,
     };
 }, {
     type: "object",

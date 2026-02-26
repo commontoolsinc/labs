@@ -16,7 +16,7 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         <h3>Array Operations</h3>
-        <p>Total items: {state.items.length}</p>
+        <p>Total items: {state.key("items", "length")}</p>
         <p>
           Filtered count:{" "}
           {__ctHelpers.derive({
@@ -71,7 +71,7 @@ export default pattern((state) => {
 
         <h3>Array with Complex Expressions</h3>
         <ul>
-          {state.items.mapWithPattern(__ctHelpers.pattern(({ element: item, params: { state } }) => (<li key={item.id}>
+          {state.items.map((item) => (<li key={item.id}>
               <span>{item.name}</span>
               <span>- Original: ${item.price}</span>
               <span>
@@ -155,85 +155,11 @@ export default pattern((state) => {
             }, ({ item, state }) => (item.price * (1 - state.discount) * (1 + state.taxRate))
                 .toFixed(2))}
               </span>
-            </li>), {
-                type: "object",
-                properties: {
-                    element: {
-                        $ref: "#/$defs/Item"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {
-                            state: {
-                                type: "object",
-                                properties: {
-                                    discount: {
-                                        type: "number",
-                                        asOpaque: true
-                                    },
-                                    taxRate: {
-                                        type: "number",
-                                        asOpaque: true
-                                    }
-                                },
-                                required: ["discount", "taxRate"]
-                            }
-                        },
-                        required: ["state"]
-                    }
-                },
-                required: ["element", "params"],
-                $defs: {
-                    Item: {
-                        type: "object",
-                        properties: {
-                            id: {
-                                type: "number"
-                            },
-                            name: {
-                                type: "string"
-                            },
-                            price: {
-                                type: "number"
-                            },
-                            active: {
-                                type: "boolean"
-                            }
-                        },
-                        required: ["id", "name", "price", "active"]
-                    }
-                }
-            } as const satisfies __ctHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __ctHelpers.JSONSchema), {
-                state: {
-                    discount: state.discount,
-                    taxRate: state.taxRate
-                }
-            })}
+            </li>))}
         </ul>
 
         <h3>Array Methods</h3>
-        <p>Item count: {state.items.length}</p>
+        <p>Item count: {state.key("items", "length")}</p>
         <p>Active items: {__ctHelpers.derive({
             type: "object",
             properties: {
@@ -479,7 +405,7 @@ export default pattern((state) => {
         </p>
 
         <h3>Object Operations</h3>
-        <div data-item-count={state.items.length} data-has-filter={__ctHelpers.derive({
+        <div data-item-count={state.key("items", "length")} data-has-filter={__ctHelpers.derive({
             type: "object",
             properties: {
                 state: {
@@ -505,7 +431,7 @@ export default pattern((state) => {
                 filter: {
                     length: state.filter.length
                 }
-            } }, ({ state }) => state.filter.length > 0)} data-discount={state.discount}>
+            } }, ({ state }) => state.filter.length > 0)} data-discount={state.key("discount")}>
           Object attributes
         </div>
       </div>),

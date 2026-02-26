@@ -205,7 +205,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 title: state.title
             } }, ({ state }) => state.title.toLowerCase())}</p>
-        <p>Length: {state.message.length}</p>
+        <p>Length: {state.key("message", "length")}</p>
         <p>Substring: {__ctHelpers.derive({
             type: "object",
             properties: {

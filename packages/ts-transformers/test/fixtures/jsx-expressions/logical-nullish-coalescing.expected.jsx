@@ -20,10 +20,10 @@ export default pattern((_state) => {
                     }]
             },
             retries: {
-                type: ["number", "undefined"]
+                type: "number"
             }
         },
-        required: ["timeout", "retries"]
+        required: ["timeout"]
     } as const satisfies __ctHelpers.JSONSchema);
     const items = cell<string[]>([], {
         type: "array",
@@ -34,39 +34,17 @@ export default pattern((_state) => {
     return {
         [UI]: (<div>
         {/* ?? followed by || - different semantics */}
-        <span>Timeout: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                config: {
-                    type: "object",
-                    properties: {
-                        timeout: {
-                            anyOf: [{
-                                    type: "number"
-                                }, {
-                                    type: "null"
-                                }]
-                        },
-                        retries: {
-                            type: ["number", "undefined"]
-                        }
-                    },
-                    required: ["timeout", "retries"],
-                    asCell: true
-                }
-            },
-            required: ["config"]
+        <span>Timeout: {__ctHelpers.unless({
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             anyOf: [{
                     type: "number"
                 }, {
-                    type: "string",
-                    "enum": ["disabled"]
+                    type: "string"
                 }]
-        } as const satisfies __ctHelpers.JSONSchema, { config: config }, ({ config }) => (config.get().timeout ?? 30) || "disabled")}</span>
-
-        {/* ?? followed by && */}
-        <span>{__ctHelpers.derive({
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 config: {
@@ -80,21 +58,64 @@ export default pattern((_state) => {
                                 }]
                         },
                         retries: {
-                            type: ["number", "undefined"]
+                            type: "number"
                         }
                     },
-                    required: ["timeout", "retries"],
+                    required: ["timeout"],
                     asCell: true
                 }
             },
             required: ["config"]
         } as const satisfies __ctHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __ctHelpers.JSONSchema, { config: config }, ({ config }) => (config.get().timeout ?? 30)), "disabled")}</span>
+
+        {/* ?? followed by && */}
+        <span>{__ctHelpers.when({
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
             "enum": [false, "Will retry"]
-        } as const satisfies __ctHelpers.JSONSchema, { config: config }, ({ config }) => (config.get().retries ?? 3) > 0 && "Will retry")}</span>
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+            type: "object",
+            properties: {
+                config: {
+                    type: "object",
+                    properties: {
+                        timeout: {
+                            anyOf: [{
+                                    type: "number"
+                                }, {
+                                    type: "null"
+                                }]
+                        },
+                        retries: {
+                            type: "number"
+                        }
+                    },
+                    required: ["timeout"],
+                    asCell: true
+                }
+            },
+            required: ["config"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, { config: config }, ({ config }) => (config.get().retries ?? 3) > 0), "Will retry")}</span>
 
         {/* Mixed: ?? with && and || */}
         <span>
-          {__ctHelpers.derive({
+          {__ctHelpers.unless({
+            anyOf: [{
+                    type: "string"
+                }, {
+                    type: "boolean"
+                }]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
                 items: {
@@ -107,8 +128,13 @@ export default pattern((_state) => {
             },
             required: ["items"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => items.get().length > 0 && (items.get()[0] ?? "empty") || "no items")}
+            anyOf: [{
+                    type: "string"
+                }, {
+                    type: "boolean",
+                    "enum": [false]
+                }]
+        } as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => items.get().length > 0 && (items.get()[0] ?? "empty")), "no items")}
         </span>
       </div>),
     };

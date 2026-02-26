@@ -26,12 +26,8 @@ export default function TestComponent({ items, cellRef }: {
         properties: {
             name: {
                 type: "string"
-            },
-            value: {
-                type: "string"
             }
-        },
-        required: ["value"]
+        }
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "string"
     } as const satisfies __ctHelpers.JSONSchema, cellRef, (ref) => ref.name || "Unknown")}</span>
@@ -46,14 +42,11 @@ export default function TestComponent({ items, cellRef }: {
         } as const satisfies __ctHelpers.JSONSchema, index, (i) => i + 1)}: {derive({
             type: "object",
             properties: {
-                id: {
-                    type: "number"
-                },
                 title: {
                     type: "string"
                 }
             },
-            required: ["id", "title"]
+            required: ["title"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, item, (it) => it.title)}

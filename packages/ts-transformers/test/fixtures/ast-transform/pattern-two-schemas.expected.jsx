@@ -8,7 +8,8 @@ interface Input {
 interface Result {
     doubled: number;
 }
-export default pattern(({ count }) => {
+export default pattern((__ct_pattern_input) => {
+    const count = __ct_pattern_input.key("count");
     return {
         doubled: count * 2
     };
