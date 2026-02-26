@@ -38,6 +38,8 @@ export const contentIdFromJSON: (
   source: { "/": string },
 ) => Reference.View = Reference.fromJSON;
 
+// ---------------------------------------------------------------------------
+
 /**
  * Module-level flag for canonical hashing mode, set by the `Runtime`
  * constructor via `setCanonicalHashConfig()`. When enabled, `refer()`
