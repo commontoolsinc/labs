@@ -485,7 +485,13 @@ export class CellBridge {
       entityId,
       spaceName,
     );
-    await this.subscribePiece(matchedPiece, pieceIno, entityId, spaceName);
+    const subs = await this.subscribePiece(
+      matchedPiece,
+      pieceIno,
+      entityId,
+      spaceName,
+    );
+    state.pieceSubs.set(`entity:${entityId}`, subs);
     return true;
   }
 
