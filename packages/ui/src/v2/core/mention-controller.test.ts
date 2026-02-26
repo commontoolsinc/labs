@@ -4,7 +4,7 @@ import type { ReactiveControllerHost } from "lit";
 import { NAME } from "@commontools/runner/shared";
 import { createMockCellHandle } from "../test-utils/mock-cell-handle.ts";
 import { MentionController } from "./mention-controller.ts";
-import type { Mentionable, MentionableArray } from "./mentionable.ts";
+import type { MentionableArray } from "./mentionable.ts";
 
 /** Minimal KeyboardEvent stand-in for Deno (no DOM). */
 function fakeKeyEvent(key: string): KeyboardEvent {
@@ -29,24 +29,14 @@ function createMentionableCell(names: string[]) {
   });
 }
 
-/** Simulates typing by providing content/cursor position to the controller. */
-function makeInputHelper(ctrl: MentionController) {
-  let content = "";
-  let cursor = 0;
-
-  // Patch config callbacks via the public API by creating a new controller
-  // Actually, we need to set these at construction time. Return a factory instead.
-  return { content, cursor };
-}
-
 // ---------------------------------------------------------------------------
 // Trigger detection and query extraction
 // ---------------------------------------------------------------------------
 
 describe("MentionController — trigger detection", () => {
   it("shows mentions when @ is typed", () => {
-    let content = "@";
-    let cursor = 1;
+    const content = "@";
+    const cursor = 1;
     const ctrl = new MentionController(createMockHost(), {
       getContent: () => content,
       getCursorPosition: () => cursor,
@@ -58,8 +48,8 @@ describe("MentionController — trigger detection", () => {
   });
 
   it("extracts query after @", () => {
-    let content = "@ali";
-    let cursor = 4;
+    const content = "@ali";
+    const cursor = 4;
     const ctrl = new MentionController(createMockHost(), {
       getContent: () => content,
       getCursorPosition: () => cursor,
@@ -71,8 +61,8 @@ describe("MentionController — trigger detection", () => {
   });
 
   it("hides when space appears in query", () => {
-    let content = "@ali ce";
-    let cursor = 7;
+    const content = "@ali ce";
+    const cursor = 7;
     const ctrl = new MentionController(createMockHost(), {
       getContent: () => content,
       getCursorPosition: () => cursor,
@@ -83,8 +73,8 @@ describe("MentionController — trigger detection", () => {
   });
 
   it("hides when no trigger is present", () => {
-    let content = "hello";
-    let cursor = 5;
+    const content = "hello";
+    const cursor = 5;
     const ctrl = new MentionController(createMockHost(), {
       getContent: () => content,
       getCursorPosition: () => cursor,
@@ -96,8 +86,8 @@ describe("MentionController — trigger detection", () => {
   });
 
   it("supports custom trigger character", () => {
-    let content = "#";
-    let cursor = 1;
+    const content = "#";
+    const cursor = 1;
     const ctrl = new MentionController(createMockHost(), {
       trigger: "#",
       getContent: () => content,
@@ -124,8 +114,8 @@ describe("MentionController — filtering", () => {
   });
 
   it("filters by name (case-insensitive)", () => {
-    let content = "@al";
-    let cursor = 3;
+    const content = "@al";
+    const cursor = 3;
     const ctrl = new MentionController(createMockHost(), {
       getContent: () => content,
       getCursorPosition: () => cursor,
@@ -152,8 +142,8 @@ describe("MentionController — filtering", () => {
 
 describe("MentionController — keyboard navigation", () => {
   function createShowingController() {
-    let content = "@";
-    let cursor = 1;
+    const content = "@";
+    const cursor = 1;
     const ctrl = new MentionController(createMockHost(), {
       getContent: () => content,
       getCursorPosition: () => cursor,
@@ -204,8 +194,8 @@ describe("MentionController — keyboard navigation", () => {
 
   it("Enter inserts the selected mention", () => {
     const inserts: string[] = [];
-    let content = "@";
-    let cursor = 1;
+    const content = "@";
+    const cursor = 1;
     const ctrl = new MentionController(createMockHost(), {
       getContent: () => content,
       getCursorPosition: () => cursor,
@@ -233,8 +223,8 @@ describe("MentionController — keyboard navigation", () => {
   });
 
   it("Enter returns false when no matches exist", () => {
-    let content = "@zzzzz";
-    let cursor = 6;
+    const content = "@zzzzz";
+    const cursor = 6;
     const ctrl = new MentionController(createMockHost(), {
       getContent: () => content,
       getCursorPosition: () => cursor,
@@ -257,8 +247,8 @@ describe("MentionController — keyboard navigation", () => {
 describe("MentionController — mention insertion", () => {
   it("encodes mention as markdown link [name](encodedId)", () => {
     const inserts: string[] = [];
-    let content = "@";
-    let cursor = 1;
+    const content = "@";
+    const cursor = 1;
     const ctrl = new MentionController(createMockHost(), {
       getContent: () => content,
       getCursorPosition: () => cursor,
@@ -322,8 +312,8 @@ describe("MentionController — extractMentionsFromText", () => {
 
 describe("MentionController — lifecycle", () => {
   it("hide() resets state", () => {
-    let content = "@ali";
-    let cursor = 4;
+    const content = "@ali";
+    const cursor = 4;
     const ctrl = new MentionController(createMockHost(), {
       getContent: () => content,
       getCursorPosition: () => cursor,
