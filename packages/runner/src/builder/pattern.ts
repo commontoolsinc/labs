@@ -104,7 +104,9 @@ export function pattern<T, R>(
 ): PatternFactory<T, R>;
 // Implementation signature
 export function pattern<T, R>(
-  fn: (input: OpaqueRef<T> & { [SELF]: OpaqueRef<R> }) => Opaque<R>,
+  fn: (
+    input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<R> },
+  ) => Opaque<R>,
   argumentSchema?: JSONSchema,
   resultSchema?: JSONSchema,
 ): PatternFactory<T, R> {
@@ -174,7 +176,7 @@ export function patternFromFrame<T, R>(
 function factoryFromPattern<T, R>(
   argumentSchemaArg: JSONSchema | undefined,
   resultSchemaArg: JSONSchema | undefined,
-  inputs: OpaqueRef<Required<T>>,
+  inputs: OpaqueRef<RequireDefaults<T>>,
   outputs: Opaque<R>,
 ): PatternFactory<T, R> {
   // Capture selfRef before collectCellsAndNodes transforms inputs from OpaqueRef to Cell
