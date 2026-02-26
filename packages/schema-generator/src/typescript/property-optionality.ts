@@ -68,7 +68,7 @@ export function isDefaultAliasSymbol(symbol: ts.Symbol | undefined): boolean {
   // future npm-published form ("@commontools/api").
   // Also accept "commontools.d.ts" which is the filename used in test environments
   // where the types are registered under a synthetic path.
-  return fileName.endsWith("/api/index.ts") ||
+  return fileName.endsWith("/packages/api/index.ts") ||
     fileName.includes("@commontools/api") ||
-    fileName === "commontools.d.ts";
+    fileName.endsWith("commontools.d.ts");
 }
