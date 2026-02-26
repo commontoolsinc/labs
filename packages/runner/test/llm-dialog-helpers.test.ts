@@ -12,6 +12,8 @@ const {
   createToolResultMessages,
   hasValidContent,
   simplifySchemaForContext,
+  prepareSchemaForLLM,
+  resolveRefsForLLM,
 } = llmDialogTestHelpers;
 
 Deno.test("parseTargetString recognizes handle format", () => {
@@ -449,4 +451,208 @@ Deno.test("simplifySchemaForContext handles Stream with nested detail structure"
     result.properties?.editContent?.properties?.detail?.properties?.value?.type,
     "string",
   );
+});
+
+// Tests for resolveRefsForLLM
+
+Deno.test("resolveRefsForLLM resolves simple $ref", () => {
+  const schema: any = {
+    type: "object",
+    $defs: {
+      Name: { type: "string" },
+    },
+    properties: {
+      name: { $ref: "#/$defs/Name" },
+    },
+  };
+  const result = resolveRefsForLLM(schema) as any;
+  assertEquals(result.properties?.name, { type: "string" });
+  assertEquals(result.$defs, undefined);
+});
+
+Deno.test("resolveRefsForLLM resolves nested $ref chains", () => {
+  const schema: any = {
+    type: "object",
+    $defs: {
+      Inner: { type: "number" },
+      Outer: {
+        type: "object",
+        properties: {
+          value: { $ref: "#/$defs/Inner" },
+        },
+      },
+    },
+    properties: {
+      data: { $ref: "#/$defs/Outer" },
+    },
+  };
+  const result = resolveRefsForLLM(schema) as any;
+  assertEquals(result.properties?.data?.type, "object");
+  assertEquals(result.properties?.data?.properties?.value, { type: "number" });
+  assertEquals(result.$defs, undefined);
+});
+
+Deno.test("resolveRefsForLLM truncates circular $ref", () => {
+  const schema: any = {
+    type: "object",
+    $defs: {
+      Node: {
+        type: "object",
+        properties: {
+          child: { $ref: "#/$defs/Node" },
+          value: { type: "string" },
+        },
+      },
+    },
+    properties: {
+      root: { $ref: "#/$defs/Node" },
+    },
+  };
+  const result = resolveRefsForLLM(schema) as any;
+  // First level should be resolved
+  assertEquals(result.properties?.root?.type, "object");
+  assertEquals(result.properties?.root?.properties?.value, { type: "string" });
+  // Circular reference should be truncated
+  assertEquals(result.properties?.root?.properties?.child, {
+    type: "object",
+    additionalProperties: true,
+  });
+  assertEquals(result.$defs, undefined);
+});
+
+Deno.test("resolveRefsForLLM passes through schema with no $ref unchanged", () => {
+  const schema: any = {
+    type: "object",
+    properties: {
+      name: { type: "string" },
+      age: { type: "number" },
+    },
+    required: ["name"],
+  };
+  const result = resolveRefsForLLM(schema) as any;
+  assertEquals(result.type, "object");
+  assertEquals(result.properties?.name, { type: "string" });
+  assertEquals(result.properties?.age, { type: "number" });
+  assertEquals(result.required, ["name"]);
+});
+
+Deno.test("resolveRefsForLLM preserves sibling properties alongside $ref", () => {
+  const schema: any = {
+    type: "object",
+    $defs: {
+      Items: { type: "array", items: { type: "string" } },
+    },
+    properties: {
+      list: { $ref: "#/$defs/Items", default: [] },
+    },
+  };
+  const result = resolveRefsForLLM(schema) as any;
+  assertEquals(result.properties?.list?.type, "array");
+  assertEquals(result.properties?.list?.default, []);
+  assertEquals(result.properties?.list?.items, { type: "string" });
+});
+
+Deno.test("resolveRefsForLLM handles mutually recursive types", () => {
+  const schema: any = {
+    type: "object",
+    $defs: {
+      A: {
+        type: "object",
+        properties: { b: { $ref: "#/$defs/B" } },
+      },
+      B: {
+        type: "object",
+        properties: { a: { $ref: "#/$defs/A" } },
+      },
+    },
+    properties: {
+      start: { $ref: "#/$defs/A" },
+    },
+  };
+  const result = resolveRefsForLLM(schema) as any;
+  assertEquals(result.properties?.start?.type, "object");
+  // A resolved -> B resolved -> A is circular, truncated
+  assertEquals(result.properties?.start?.properties?.b?.type, "object");
+  assertEquals(
+    result.properties?.start?.properties?.b?.properties?.a,
+    { type: "object", additionalProperties: true },
+  );
+});
+
+// Tests for prepareSchemaForLLM
+
+Deno.test("prepareSchemaForLLM strips internal markers and resolves $ref", () => {
+  const schema: any = {
+    type: "object",
+    $defs: {
+      Item: { type: "string" },
+    },
+    properties: {
+      data: { $ref: "#/$defs/Item", asCell: true },
+      stream: { type: "number", asStream: true },
+      hidden: { type: "object", asOpaque: true },
+    },
+  };
+  const result = prepareSchemaForLLM(schema) as any;
+  // asCell, asStream, asOpaque should be stripped
+  assertEquals(result.properties?.data?.asCell, undefined);
+  assertEquals(result.properties?.stream?.asStream, undefined);
+  assertEquals(result.properties?.hidden?.asOpaque, undefined);
+  // $ref should be resolved
+  assertEquals(result.properties?.data?.type, "string");
+  assertEquals(result.$defs, undefined);
+});
+
+Deno.test("prepareSchemaForLLM handles recursive TodoItem schema", () => {
+  // This mirrors the writable-recursive-todoitem.expected.json fixture
+  const schema: any = {
+    $defs: {
+      AnonymousType_1: {
+        items: { $ref: "#/$defs/TodoItem" },
+        type: "array",
+      },
+      TodoItem: {
+        properties: {
+          done: { default: false, type: "boolean" },
+          items: { $ref: "#/$defs/AnonymousType_1", asCell: true, default: [] },
+          title: { type: "string" },
+        },
+        required: ["done", "items", "title"],
+        type: "object",
+      },
+    },
+    properties: {
+      todos: { $ref: "#/$defs/AnonymousType_1", default: [] },
+    },
+    required: ["todos"],
+    type: "object",
+  };
+  const result = prepareSchemaForLLM(schema) as any;
+
+  // No $defs or $ref in output
+  assertEquals(result.$defs, undefined);
+  assertEquals(JSON.stringify(result).includes("$ref"), false);
+
+  // No internal markers
+  assertEquals(JSON.stringify(result).includes("asCell"), false);
+
+  // Structure should be resolved
+  assertEquals(result.type, "object");
+  assertEquals(result.properties?.todos?.type, "array");
+  assertEquals(result.properties?.todos?.default, []);
+
+  // The items of todos should be resolved TodoItem objects
+  const todoItem = result.properties?.todos?.items;
+  assertEquals(todoItem?.type, "object");
+  assertEquals(todoItem?.properties?.title?.type, "string");
+  assertEquals(todoItem?.properties?.done?.type, "boolean");
+
+  // The nested items field (recursive) should be truncated
+  // since TodoItem -> AnonymousType_1 -> TodoItem is circular.
+  // When a circular $ref is detected, it's replaced with a permissive object.
+  const nestedItems = todoItem?.properties?.items;
+  assertEquals(nestedItems, {
+    type: "object",
+    additionalProperties: true,
+  });
 });
