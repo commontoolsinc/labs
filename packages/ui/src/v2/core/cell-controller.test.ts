@@ -1,8 +1,7 @@
 // Cell Controller tests temporarily disabled for type checking.
-// TODO(#ct-outliner): These tests need a CellHandle mock that passes isCellHandle() (which uses
-// instanceof CellHandle). Plain-object mocks won't work. Same blocker as the
-// ct-outliner tests that use Cell objects as stand-ins for CellHandle.
-// See ct-outliner/ct-outliner.ts mutateCellHandle() doc comment for related context.
+// TODO(#ui): These tests need a CellHandle mock that passes isCellHandle() (which uses
+// instanceof CellHandle). Plain-object mocks won't work — CellHandle's constructor
+// requires a live RuntimeClient.
 
 /*
 import { describe, it } from "@std/testing/bdd";
