@@ -35,8 +35,8 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                a: state.a,
-                b: state.b
+                a: state.key("a"),
+                b: state.key("b")
             } }, ({ state }) => Math.max(state.a, state.b))}</p>
         <p>Min: {__ctHelpers.derive({
             type: "object",
@@ -56,7 +56,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                a: state.a
+                a: state.key("a")
             } }, ({ state }) => Math.min(state.a, 10))}</p>
         <p>Abs: {__ctHelpers.derive({
             type: "object",
@@ -80,8 +80,8 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                a: state.a,
-                b: state.b
+                a: state.key("a"),
+                b: state.key("b")
             } }, ({ state }) => Math.abs(state.a - state.b))}</p>
         <p>Round: {__ctHelpers.derive({
             type: "object",
@@ -101,7 +101,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                price: state.price
+                price: state.key("price")
             } }, ({ state }) => Math.round(state.price))}</p>
         <p>Floor: {__ctHelpers.derive({
             type: "object",
@@ -121,7 +121,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                price: state.price
+                price: state.key("price")
             } }, ({ state }) => Math.floor(state.price))}</p>
         <p>Ceiling: {__ctHelpers.derive({
             type: "object",
@@ -141,7 +141,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                price: state.price
+                price: state.key("price")
             } }, ({ state }) => Math.ceil(state.price))}</p>
         <p>Square root: {__ctHelpers.derive({
             type: "object",
@@ -161,7 +161,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                a: state.a
+                a: state.key("a")
             } }, ({ state }) => Math.sqrt(state.a))}</p>
 
         <h3>String Methods as Function Calls</h3>
@@ -183,7 +183,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                name: state.name
+                name: state.key("name")
             } }, ({ state }) => state.name.toUpperCase())}</p>
         <p>Lowercase: {__ctHelpers.derive({
             type: "object",
@@ -203,7 +203,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                name: state.name
+                name: state.key("name")
             } }, ({ state }) => state.name.toLowerCase())}</p>
         <p>Substring: {__ctHelpers.derive({
             type: "object",
@@ -223,7 +223,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                text: state.text
+                text: state.key("text")
             } }, ({ state }) => state.text.substring(0, 5))}</p>
         <p>Replace: {__ctHelpers.derive({
             type: "object",
@@ -243,7 +243,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                text: state.text
+                text: state.key("text")
             } }, ({ state }) => state.text.replace("old", "new"))}</p>
         <p>Includes: {__ctHelpers.ifElse({
             type: "boolean"
@@ -271,7 +271,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                text: state.text
+                text: state.key("text")
             } }, ({ state }) => state.text.includes("test")), "Yes", "No")}</p>
         <p>Starts with: {__ctHelpers.ifElse({
             type: "boolean"
@@ -299,7 +299,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                name: state.name
+                name: state.key("name")
             } }, ({ state }) => state.name.startsWith("A")), "Yes", "No")}</p>
 
         <h3>Number Methods</h3>
@@ -321,7 +321,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                price: state.price
+                price: state.key("price")
             } }, ({ state }) => state.price.toFixed(2))}</p>
         <p>To Precision: {__ctHelpers.derive({
             type: "object",
@@ -341,7 +341,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                price: state.price
+                price: state.key("price")
             } }, ({ state }) => state.price.toPrecision(4))}</p>
 
         <h3>Parse Functions</h3>
@@ -363,7 +363,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                float: state.float
+                float: state.key("float")
             } }, ({ state }) => parseInt(state.float))}</p>
         <p>Parse Float: {__ctHelpers.derive({
             type: "object",
@@ -383,7 +383,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                float: state.float
+                float: state.key("float")
             } }, ({ state }) => parseFloat(state.float))}</p>
 
         <h3>Array Method Calls</h3>
@@ -409,7 +409,7 @@ export default pattern((state) => {
             type: "number",
             asOpaque: true
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                values: state.values
+                values: state.key("values")
             } }, ({ state }) => state.values.reduce((a, b) => a + b, 0))}</p>
         <p>Max value: {__ctHelpers.derive({
             type: "object",
@@ -432,7 +432,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                values: state.values
+                values: state.key("values")
             } }, ({ state }) => Math.max(...state.values))}</p>
         <p>Joined: {__ctHelpers.derive({
             type: "object",
@@ -455,7 +455,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                values: state.values
+                values: state.key("values")
             } }, ({ state }) => state.values.join(", "))}</p>
 
         <h3>Complex Function Calls</h3>
@@ -477,7 +477,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                a: state.a
+                a: state.key("a")
             } }, ({ state }) => Math.pow(state.a, 2))}</p>
         <p>Nested calls: {__ctHelpers.derive({
             type: "object",
@@ -497,7 +497,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                a: state.a
+                a: state.key("a")
             } }, ({ state }) => Math.round(Math.sqrt(state.a)))}</p>
         <p>Chained calls: {__ctHelpers.derive({
             type: "object",
@@ -517,7 +517,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                name: state.name
+                name: state.key("name")
             } }, ({ state }) => state.name.trim().toUpperCase())}</p>
         <p>With expressions: {__ctHelpers.derive({
             type: "object",
@@ -541,8 +541,8 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                a: state.a,
-                b: state.b
+                a: state.key("a"),
+                b: state.key("b")
             } }, ({ state }) => Math.max(state.a + 1, state.b * 2))}</p>
       </div>),
     };

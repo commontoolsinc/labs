@@ -38,12 +38,20 @@ export default pattern((__ct_pattern_input) => {
         } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
+                showHistory: {
+                    type: "boolean",
+                    asOpaque: true
+                },
+                messageCount: {
+                    type: "number",
+                    asOpaque: true
+                },
                 dismissedIndex: {
                     type: "number",
                     asCell: true
                 }
             },
-            required: ["dismissedIndex"]
+            required: ["showHistory", "messageCount", "dismissedIndex"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, {
@@ -56,12 +64,18 @@ export default pattern((__ct_pattern_input) => {
 }, {
     type: "object",
     properties: {
+        showHistory: {
+            type: "boolean"
+        },
+        messageCount: {
+            type: "number"
+        },
         dismissedIndex: {
             type: "number",
             asCell: true
         }
     },
-    required: ["dismissedIndex"]
+    required: ["showHistory", "messageCount", "dismissedIndex"]
 } as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {

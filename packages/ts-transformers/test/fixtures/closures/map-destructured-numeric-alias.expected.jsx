@@ -16,19 +16,10 @@ export default pattern((state) => {
                 properties: {
                     element: {
                         type: "object",
-                        properties: {
-                            "0": {
-                                type: "number"
-                            }
-                        },
-                        required: ["0"]
-                    },
-                    params: {
-                        type: "object",
                         properties: {}
                     }
                 },
-                required: ["element", "params"]
+                required: ["element"]
             } as const satisfies __ctHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"

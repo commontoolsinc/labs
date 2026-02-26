@@ -66,7 +66,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                value: state.value
+                value: state.key("value")
             } }, ({ state }) => state.value + 1), "unknown")}</li>
         </ul>
         <ct-button onClick={increment({ value: state.key("value") })}>+</ct-button>

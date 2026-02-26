@@ -22,6 +22,9 @@ export default pattern((state) => {
                 properties: {
                     element: {
                         $ref: "#/$defs/Item"
+                    },
+                    index: {
+                        type: "number"
                     }
                 },
                 required: ["element"],
@@ -74,6 +77,9 @@ export default pattern((state) => {
                 properties: {
                     element: {
                         $ref: "#/$defs/Item"
+                    },
+                    index: {
+                        type: "number"
                     }
                 },
                 required: ["element"],

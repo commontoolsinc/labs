@@ -75,7 +75,7 @@ export default pattern((state) => {
                     }
                 }
             } as const satisfies __ctHelpers.JSONSchema, { state: {
-                    isEditing: state.isEditing
+                    isEditing: state.key("isEditing")
                 } }, ({ state }) => (<ct-button onClick={__ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
                 type: "object",
                 properties: {

@@ -49,12 +49,36 @@ export default pattern(({ title, [SELF]: self }) => {
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "object",
         properties: {
+            self: {
+                $ref: "#/$defs/TestOutput",
+                asOpaque: true
+            },
             count: {
                 type: "number",
                 asCell: true
             }
         },
-        required: ["count"]
+        required: ["self", "count"],
+        $defs: {
+            TestOutput: {
+                type: "object",
+                properties: {
+                    title: {
+                        type: "string"
+                    },
+                    count: {
+                        type: "number"
+                    },
+                    $NAME: {
+                        type: "string"
+                    },
+                    $UI: {
+                        $ref: "https://commonfabric.org/schemas/vnode.json"
+                    }
+                },
+                required: ["title", "count", "$NAME", "$UI"]
+            }
+        }
     } as const satisfies __ctHelpers.JSONSchema, (_, { self, count }) => {
         console.log("self:", self);
         count.set(count.get() + 1);

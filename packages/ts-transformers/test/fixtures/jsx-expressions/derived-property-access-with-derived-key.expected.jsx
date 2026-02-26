@@ -59,40 +59,9 @@ export default pattern((__ct_pattern_input) => {
     const groupedByAisle = derive({
         type: "object",
         properties: {
-            itemsWithAisles: {
-                type: "array",
-                items: {
-                    type: "object",
-                    properties: {
-                        aisle: {
-                            type: "string"
-                        },
-                        item: {
-                            $ref: "#/$defs/Item",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["aisle", "item"]
-                },
-                asOpaque: true
-            }
+            itemsWithAisles: true
         },
-        required: ["itemsWithAisles"],
-        $defs: {
-            Item: {
-                type: "object",
-                properties: {
-                    name: {
-                        type: "string"
-                    },
-                    done: {
-                        type: "boolean",
-                        asCell: true
-                    }
-                },
-                required: ["name", "done"]
-            }
-        }
+        required: ["itemsWithAisles"]
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "object",
         properties: {},

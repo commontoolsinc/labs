@@ -52,7 +52,7 @@ export default pattern((__ct_pattern_input) => {
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "boolean"
     } as const satisfies __ctHelpers.JSONSchema, { card: {
-            description: card.description
+            description: card.key("description")
         } }, ({ card }) => {
         const desc = card.description;
         return desc && desc.length > 0;
@@ -93,9 +93,16 @@ export default pattern((__ct_pattern_input) => {
                         }
                     },
                     required: ["title", "description"]
+                },
+                hasDescription: {
+                    type: "boolean",
+                    asOpaque: true
+                },
+                startEditing: {
+                    asStream: true
                 }
             },
-            required: ["card"]
+            required: ["card", "hasDescription", "startEditing"]
         } as const satisfies __ctHelpers.JSONSchema, {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"
@@ -119,8 +126,8 @@ export default pattern((__ct_pattern_input) => {
             }
         } as const satisfies __ctHelpers.JSONSchema, {
             card: {
-                title: card.title,
-                description: card.description
+                title: card.key("title"),
+                description: card.key("description")
             },
             hasDescription: hasDescription,
             startEditing: startEditing

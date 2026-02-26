@@ -16,6 +16,10 @@ export default pattern((state) => {
             Item #{__ctHelpers.derive({
                 type: "object",
                 properties: {
+                    index: {
+                        type: "number",
+                        asOpaque: true
+                    },
                     state: {
                         type: "object",
                         properties: {
@@ -27,7 +31,7 @@ export default pattern((state) => {
                         required: ["offset"]
                     }
                 },
-                required: ["state"]
+                required: ["index", "state"]
             } as const satisfies __ctHelpers.JSONSchema, {
                 type: "number"
             } as const satisfies __ctHelpers.JSONSchema, {

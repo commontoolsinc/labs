@@ -45,9 +45,12 @@ export default pattern((state) => {
                             }
                         },
                         required: ["discount", "taxRate"]
+                    },
+                    multiplier: {
+                        type: "number"
                     }
                 },
-                required: ["item", "state"]
+                required: ["item", "state", "multiplier"]
             } as const satisfies __ctHelpers.JSONSchema, {
                 type: "number"
             } as const satisfies __ctHelpers.JSONSchema, {

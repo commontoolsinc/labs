@@ -12,6 +12,10 @@ export default pattern((state) => {
         {typedValues.map((value) => (<span>{__ctHelpers.derive({
                 type: "object",
                 properties: {
+                    value: {
+                        type: "number",
+                        asOpaque: true
+                    },
                     state: {
                         type: "object",
                         properties: {
@@ -23,7 +27,7 @@ export default pattern((state) => {
                         required: ["multiplier"]
                     }
                 },
-                required: ["state"]
+                required: ["value", "state"]
             } as const satisfies __ctHelpers.JSONSchema, {
                 type: "number"
             } as const satisfies __ctHelpers.JSONSchema, {

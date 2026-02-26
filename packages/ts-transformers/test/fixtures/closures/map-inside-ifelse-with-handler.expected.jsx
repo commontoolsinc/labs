@@ -15,9 +15,13 @@ const removeItem = handler(true as const satisfies __ctHelpers.JSONSchema, {
                 asCell: true
             },
             asCell: true
+        },
+        item: {
+            $ref: "#/$defs/Item",
+            asCell: true
         }
     },
-    required: ["items"],
+    required: ["items", "item"],
     $defs: {
         Item: {
             type: "object",
@@ -86,9 +90,22 @@ export default pattern((__ct_pattern_input) => {
                     properties: {
                         element: {
                             $ref: "#/$defs/Item"
+                        },
+                        params: {
+                            type: "object",
+                            properties: {
+                                items: {
+                                    type: "array",
+                                    items: {
+                                        $ref: "#/$defs/Item"
+                                    },
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["items"]
                         }
                     },
-                    required: ["element"],
+                    required: ["element", "params"],
                     $defs: {
                         Item: {
                             type: "object",
@@ -138,9 +155,12 @@ export default pattern((__ct_pattern_input) => {
             items: {
                 $ref: "#/$defs/Item"
             }
+        },
+        hasItems: {
+            type: "boolean"
         }
     },
-    required: ["items"],
+    required: ["items", "hasItems"],
     $defs: {
         Item: {
             type: "object",

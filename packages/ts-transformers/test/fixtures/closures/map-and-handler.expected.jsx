@@ -58,9 +58,13 @@ export default pattern((state) => {
                             }
                         },
                         required: ["selectedIndex"]
+                    },
+                    index: {
+                        type: "number",
+                        asOpaque: true
                     }
                 },
-                required: ["state"]
+                required: ["state", "index"]
             } as const satisfies __ctHelpers.JSONSchema, (__ct_handler_event, { state, index }) => state.selectedIndex.set(index))({
                 state: {
                     selectedIndex: state.selectedIndex
@@ -102,8 +106,8 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                items: state.items,
-                selectedIndex: state.selectedIndex
+                items: state.key("items"),
+                selectedIndex: state.key("selectedIndex")
             } }, ({ state }) => state.items[state.selectedIndex.get()]?.price ?? 0)} x {state.key("discount")} ={" "}
           {__ctHelpers.derive({
             type: "object",
@@ -140,9 +144,9 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                items: state.items,
-                selectedIndex: state.selectedIndex,
-                discount: state.discount
+                items: state.key("items"),
+                selectedIndex: state.key("selectedIndex"),
+                discount: state.key("discount")
             } }, ({ state }) => (state.items[state.selectedIndex.get()]?.price ?? 0) * state.discount)}
         </div>
       </div>),

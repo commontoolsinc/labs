@@ -11,9 +11,13 @@ export default pattern((__ct_pattern_input) => {
             value: {
                 type: "number",
                 asCell: true
+            },
+            multiplier: {
+                type: "number",
+                asOpaque: true
             }
         },
-        required: ["value"]
+        required: ["value", "multiplier"]
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema, {

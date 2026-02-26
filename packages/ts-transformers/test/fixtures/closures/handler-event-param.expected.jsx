@@ -47,8 +47,8 @@ export default pattern((state) => {
             state.changeCount.set(state.changeCount.get() + 1);
         })({
             state: {
-                selectedValue: state.selectedValue,
-                changeCount: state.changeCount
+                selectedValue: state.key("selectedValue"),
+                changeCount: state.key("changeCount")
             }
         })}/>),
     };

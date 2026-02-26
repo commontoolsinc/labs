@@ -68,7 +68,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                value: state.value
+                value: state.key("value")
             } }, ({ state }) => state.value + 1)}
           <br />
           Previous: {__ctHelpers.derive({
@@ -89,7 +89,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                value: state.value
+                value: state.key("value")
             } }, ({ state }) => state.value - 1)}
           <br />
           Doubled: {__ctHelpers.derive({
@@ -110,7 +110,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                value: state.value
+                value: state.key("value")
             } }, ({ state }) => state.value * 2)}
           <br />
           Status: {__ctHelpers.ifElse({
@@ -139,7 +139,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                value: state.value
+                value: state.key("value")
             } }, ({ state }) => state.value > 10), "High", "Low")}
         </p>
         <ct-button onClick={increment({ value: state.key("value") })}>+</ct-button>

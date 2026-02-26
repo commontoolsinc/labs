@@ -23,9 +23,13 @@ export default function TestComputedWithClosedOverCellMap() {
                     type: "number"
                 },
                 asCell: true
+            },
+            multiplier: {
+                type: "number",
+                asCell: true
             }
         },
-        required: ["numbers"]
+        required: ["numbers", "multiplier"]
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "array",
         items: {
@@ -42,6 +46,9 @@ export default function TestComputedWithClosedOverCellMap() {
     }, {
         type: "object",
         properties: {
+            element: {
+                type: "number"
+            },
             params: {
                 type: "object",
                 properties: {
@@ -53,7 +60,7 @@ export default function TestComputedWithClosedOverCellMap() {
                 required: ["multiplier"]
             }
         },
-        required: ["params"]
+        required: ["element", "params"]
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema), {

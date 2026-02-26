@@ -201,6 +201,10 @@ export default pattern((__ct_pattern_input) => {
             } as const satisfies __ctHelpers.JSONSchema, tag.active, tag.name, __ctHelpers.derive({
                 type: "object",
                 properties: {
+                    showInactive: {
+                        type: "boolean",
+                        asOpaque: true
+                    },
                     tag: {
                         type: "object",
                         properties: {
@@ -212,7 +216,7 @@ export default pattern((__ct_pattern_input) => {
                         required: ["name"]
                     }
                 },
-                required: ["tag"]
+                required: ["showInactive", "tag"]
             } as const satisfies __ctHelpers.JSONSchema, {
                 type: "string"
             } as const satisfies __ctHelpers.JSONSchema, {

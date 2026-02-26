@@ -32,9 +32,76 @@ export default pattern((state: State) => {
     return {
         [UI]: (<div>
         {/* Map callback references handler - should NOT capture it */}
-        {state.items.map((item) => (<ct-button onClick={handleClick({ count: state.count })}>
-            {item.name}
-          </ct-button>))}
+        {state.items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const item = __ct_pattern_input.key("element");
+                const state = __ct_pattern_input.key("params", "state");
+                return (<ct-button onClick={handleClick({ count: state.key("count") })}>
+            {item.key("name")}
+          </ct-button>);
+            }, {
+                type: "object",
+                properties: {
+                    element: {
+                        $ref: "#/$defs/Item"
+                    },
+                    params: {
+                        type: "object",
+                        properties: {
+                            state: {
+                                type: "object",
+                                properties: {
+                                    count: {
+                                        type: "number",
+                                        asCell: true
+                                    }
+                                },
+                                required: ["count"]
+                            }
+                        },
+                        required: ["state"]
+                    }
+                },
+                required: ["element", "params"],
+                $defs: {
+                    Item: {
+                        type: "object",
+                        properties: {
+                            id: {
+                                type: "number"
+                            },
+                            name: {
+                                type: "string"
+                            }
+                        },
+                        required: ["id", "name"]
+                    }
+                }
+            } as const satisfies __ctHelpers.JSONSchema, {
+                anyOf: [{
+                        $ref: "https://commonfabric.org/schemas/vnode.json"
+                    }, {
+                        type: "object",
+                        properties: {}
+                    }, {
+                        $ref: "#/$defs/UIRenderable",
+                        asOpaque: true
+                    }],
+                $defs: {
+                    UIRenderable: {
+                        type: "object",
+                        properties: {
+                            $UI: {
+                                $ref: "https://commonfabric.org/schemas/vnode.json"
+                            }
+                        },
+                        required: ["$UI"]
+                    }
+                }
+            } as const satisfies __ctHelpers.JSONSchema), {
+                state: {
+                    count: state.key("count")
+                }
+            })}
       </div>),
     };
 }, {

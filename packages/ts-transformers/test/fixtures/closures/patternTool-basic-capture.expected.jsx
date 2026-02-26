@@ -16,11 +16,20 @@ export default pattern(() => {
         return __ctHelpers.derive({
             type: "object",
             properties: {
+                input: {
+                    type: "object",
+                    properties: {
+                        query: {
+                            type: "string"
+                        }
+                    },
+                    required: ["query"]
+                },
                 content: {
                     type: "string"
                 }
             },
-            required: ["content"]
+            required: ["input", "content"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "array",
             items: {

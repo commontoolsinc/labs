@@ -16,9 +16,21 @@ export default function TestAllLiteralWidening() {
             value: {
                 type: "number",
                 asCell: true
+            },
+            numLiteral: {
+                type: "number"
+            },
+            floatLiteral: {
+                type: "number"
+            },
+            boolLiteral: {
+                type: "boolean"
+            },
+            strLiteral: {
+                type: "string"
             }
         },
-        required: ["value"]
+        required: ["value", "numLiteral", "floatLiteral", "boolLiteral", "strLiteral"]
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "string"
     } as const satisfies __ctHelpers.JSONSchema, {

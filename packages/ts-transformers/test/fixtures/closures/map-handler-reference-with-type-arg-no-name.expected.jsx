@@ -99,7 +99,7 @@ export default pattern((state) => {
                 }
             } as const satisfies __ctHelpers.JSONSchema), {
                 state: {
-                    count: state.count
+                    count: state.key("count")
                 }
             })}
       </div>),

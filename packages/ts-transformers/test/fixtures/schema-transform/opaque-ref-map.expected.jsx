@@ -50,6 +50,9 @@ export default pattern((__ct_pattern_input) => {
         properties: {
             element: {
                 $ref: "#/$defs/TodoItem"
+            },
+            index: {
+                type: "number"
             }
         },
         required: ["element"],

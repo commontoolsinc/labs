@@ -12,6 +12,10 @@ export default pattern((state) => {
         {state.items.map(({ price: cost }) => (<span>{__ctHelpers.derive({
                 type: "object",
                 properties: {
+                    cost: {
+                        type: "number",
+                        asOpaque: true
+                    },
                     state: {
                         type: "object",
                         properties: {
@@ -23,7 +27,7 @@ export default pattern((state) => {
                         required: ["discount"]
                     }
                 },
-                required: ["state"]
+                required: ["cost", "state"]
             } as const satisfies __ctHelpers.JSONSchema, {
                 type: "number"
             } as const satisfies __ctHelpers.JSONSchema, {

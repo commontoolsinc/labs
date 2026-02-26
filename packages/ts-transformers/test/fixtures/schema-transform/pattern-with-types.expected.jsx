@@ -143,6 +143,9 @@ export default pattern((__ct_pattern_input) => {
                 properties: {
                     element: {
                         $ref: "#/$defs/Item"
+                    },
+                    index: {
+                        type: "number"
                     }
                 },
                 required: ["element"],

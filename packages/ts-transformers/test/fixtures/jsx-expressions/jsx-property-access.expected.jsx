@@ -86,7 +86,7 @@ export default pattern((state) => {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 user: {
-                    age: state.user.age
+                    age: state.key("user").age
                 }
             } }, ({ state }) => state.user.age + 1)}</p>
         <p>Name length: {state.key("user", "name", "length")}</p>
@@ -115,7 +115,7 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 user: {
-                    name: state.user.name
+                    name: state.key("user").name
                 }
             } }, ({ state }) => state.user.name.toUpperCase())}</p>
         <p>
@@ -160,7 +160,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 user: {
                     profile: {
-                        location: state.user.profile.location
+                        location: state.key("user").profile.location
                     }
                 }
             } }, ({ state }) => state.user.profile.location.includes("City")), "Yes", "No")}
@@ -197,8 +197,8 @@ export default pattern((state) => {
                     asOpaque: true
                 }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                items: state.items,
-                index: state.index
+                items: state.key("items"),
+                index: state.key("index")
             } }, ({ state }) => state.items[state.index])}</p>
         <p>First item: {state.key("items", "0")}</p>
         <p>Last item: {__ctHelpers.derive({
@@ -227,7 +227,7 @@ export default pattern((state) => {
                     asOpaque: true
                 }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                items: state.items
+                items: state.key("items")
             } }, ({ state }) => state.items[state.items.length - 1])}</p>
         <p>Number at index: {__ctHelpers.derive({
             type: "object",
@@ -259,8 +259,8 @@ export default pattern((state) => {
                     asOpaque: true
                 }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                numbers: state.numbers,
-                index: state.index
+                numbers: state.key("numbers"),
+                index: state.key("index")
             } }, ({ state }) => state.numbers[state.index])}</p>
 
         <h3>Config Access with Styles</h3>
@@ -298,7 +298,7 @@ export default pattern((state) => {
             } as const satisfies __ctHelpers.JSONSchema, { state: {
                     config: {
                         theme: {
-                            fontSize: state.config.theme.fontSize
+                            fontSize: state.key("config").theme.fontSize
                         }
                     }
                 } }, ({ state }) => state.config.theme.fontSize + "px"),
@@ -354,9 +354,9 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 user: {
-                    name: state.user.name,
+                    name: state.key("user").name,
                     profile: {
-                        location: state.user.profile.location
+                        location: state.key("user").profile.location
                     }
                 }
             } }, ({ state }) => state.user.name + " from " + state.user.profile.location)}</p>
@@ -392,7 +392,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 config: {
                     theme: {
-                        fontSize: state.config.theme.fontSize
+                        fontSize: state.key("config").theme.fontSize
                     }
                 }
             } }, ({ state }) => state.config.theme.fontSize + 2)}px</p>
@@ -444,8 +444,8 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 config: {
                     features: {
-                        beta: state.config.features.beta,
-                        darkMode: state.config.features.darkMode
+                        beta: state.key("config").features.beta,
+                        darkMode: state.key("config").features.darkMode
                     }
                 }
             } }, ({ state }) => state.config.features.beta && state.config.features.darkMode), "Yes", "No")}

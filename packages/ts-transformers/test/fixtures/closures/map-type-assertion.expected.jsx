@@ -81,7 +81,7 @@ export default pattern((state) => {
                 }
             } as const satisfies __ctHelpers.JSONSchema), {
                 state: {
-                    prefix: state.prefix
+                    prefix: state.key("prefix")
                 }
             })}
       </div>),

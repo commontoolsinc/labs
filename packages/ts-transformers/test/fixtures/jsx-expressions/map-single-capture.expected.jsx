@@ -77,6 +77,9 @@ export default pattern((_state) => {
                             }
                         },
                         required: ["id", "name"]
+                    },
+                    index: {
+                        type: "number"
                     }
                 },
                 required: ["element"]

@@ -28,9 +28,10 @@ export default pattern((state) => {
                                 },
                                 required: ["label", "value"]
                             }
-                        }
+                        },
+                        value: true
                     },
-                    required: ["items"]
+                    required: ["items", "value"]
                 }
             },
             required: ["detail"]
@@ -58,8 +59,8 @@ export default pattern((state) => {
             state.lastItems.set(items.map(i => i.label).join(", "));
         })({
             state: {
-                selectedValue: state.selectedValue,
-                lastItems: state.lastItems
+                selectedValue: state.key("selectedValue"),
+                lastItems: state.key("lastItems")
             }
         })}/>),
     };

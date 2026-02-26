@@ -135,6 +135,10 @@ export default pattern((__ct_pattern_input) => {
             } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
                 type: "object",
                 properties: {
+                    i: {
+                        type: "number",
+                        asOpaque: true
+                    },
                     item: {
                         type: "object",
                         properties: {
@@ -146,7 +150,7 @@ export default pattern((__ct_pattern_input) => {
                         required: ["selectedIndex"]
                     }
                 },
-                required: ["item"]
+                required: ["i", "item"]
             } as const satisfies __ctHelpers.JSONSchema, {
                 type: "boolean"
             } as const satisfies __ctHelpers.JSONSchema, {
@@ -157,6 +161,10 @@ export default pattern((__ct_pattern_input) => {
             }, ({ i, item }) => __ctHelpers.derive({
                 type: "object",
                 properties: {
+                    i: {
+                        type: "number",
+                        asOpaque: true
+                    },
                     item: {
                         type: "object",
                         properties: {
@@ -168,7 +176,7 @@ export default pattern((__ct_pattern_input) => {
                         required: ["selectedIndex"]
                     }
                 },
-                required: ["item"]
+                required: ["i", "item"]
             } as const satisfies __ctHelpers.JSONSchema, {
                 type: "boolean"
             } as const satisfies __ctHelpers.JSONSchema, {

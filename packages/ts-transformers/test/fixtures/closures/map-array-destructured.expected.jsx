@@ -115,7 +115,7 @@ export default pattern((state) => {
                 }
             } as const satisfies __ctHelpers.JSONSchema), {
                 state: {
-                    scale: state.scale
+                    scale: state.key("scale")
                 }
             })}
       </div>),

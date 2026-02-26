@@ -37,9 +37,9 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                title: state.title,
-                firstName: state.firstName,
-                lastName: state.lastName
+                title: state.key("title"),
+                firstName: state.key("firstName"),
+                lastName: state.key("lastName")
             } }, ({ state }) => state.title + ": " + state.firstName + " " + state.lastName)}</h1>
         <p>{__ctHelpers.derive({
             type: "object",
@@ -63,8 +63,8 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                firstName: state.firstName,
-                lastName: state.lastName
+                firstName: state.key("firstName"),
+                lastName: state.key("lastName")
             } }, ({ state }) => state.firstName + state.lastName)}</p>
         <p>{__ctHelpers.derive({
             type: "object",
@@ -84,7 +84,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                firstName: state.firstName
+                firstName: state.key("firstName")
             } }, ({ state }) => "Hello, " + state.firstName + "!")}</p>
 
         <h3>Template Literals</h3>
@@ -106,7 +106,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                firstName: state.firstName
+                firstName: state.key("firstName")
             } }, ({ state }) => `Welcome, ${state.firstName}!`)}</p>
         <p>{__ctHelpers.derive({
             type: "object",
@@ -130,8 +130,8 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                firstName: state.firstName,
-                lastName: state.lastName
+                firstName: state.key("firstName"),
+                lastName: state.key("lastName")
             } }, ({ state }) => `Full name: ${state.firstName} ${state.lastName}`)}</p>
         <p>{__ctHelpers.derive({
             type: "object",
@@ -159,9 +159,9 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                title: state.title,
-                firstName: state.firstName,
-                lastName: state.lastName
+                title: state.key("title"),
+                firstName: state.key("firstName"),
+                lastName: state.key("lastName")
             } }, ({ state }) => `${state.title}: ${state.firstName} ${state.lastName}`)}</p>
 
         <h3>String Methods</h3>
@@ -183,7 +183,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                firstName: state.firstName
+                firstName: state.key("firstName")
             } }, ({ state }) => state.firstName.toUpperCase())}</p>
         <p>Lowercase: {__ctHelpers.derive({
             type: "object",
@@ -203,7 +203,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                title: state.title
+                title: state.key("title")
             } }, ({ state }) => state.title.toLowerCase())}</p>
         <p>Length: {state.key("message", "length")}</p>
         <p>Substring: {__ctHelpers.derive({
@@ -224,7 +224,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                message: state.message
+                message: state.key("message")
             } }, ({ state }) => state.message.substring(0, 5))}</p>
 
         <h3>Mixed String and Number</h3>
@@ -250,8 +250,8 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                firstName: state.firstName,
-                count: state.count
+                firstName: state.key("firstName"),
+                count: state.key("count")
             } }, ({ state }) => state.firstName + " has " + state.count + " items")}</p>
         <p>{__ctHelpers.derive({
             type: "object",
@@ -275,8 +275,8 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                firstName: state.firstName,
-                count: state.count
+                firstName: state.key("firstName"),
+                count: state.key("count")
             } }, ({ state }) => `${state.firstName} has ${state.count} items`)}</p>
         <p>Count as string: {__ctHelpers.derive({
             type: "object",
@@ -296,7 +296,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                count: state.count
+                count: state.key("count")
             } }, ({ state }) => "Count: " + state.count)}</p>
       </div>),
     };

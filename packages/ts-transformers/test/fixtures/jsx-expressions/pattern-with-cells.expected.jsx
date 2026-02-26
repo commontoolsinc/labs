@@ -22,7 +22,7 @@ export default pattern((cell) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { cell: {
-                value: cell.value
+                value: cell.key("value")
             } }, ({ cell }) => cell.value + 1)}</p>
         <p>Double: {__ctHelpers.derive({
             type: "object",
@@ -42,7 +42,7 @@ export default pattern((cell) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { cell: {
-                value: cell.value
+                value: cell.key("value")
             } }, ({ cell }) => cell.value * 2)}</p>
       </div>),
         value: cell.key("value"),

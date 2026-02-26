@@ -69,9 +69,12 @@ export default pattern((__ct_pattern_input) => {
                             }
                         },
                         required: ["description"]
+                    },
+                    startEditing: {
+                        asStream: true
                     }
                 },
-                required: ["card"]
+                required: ["card", "startEditing"]
             } as const satisfies __ctHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
@@ -95,7 +98,7 @@ export default pattern((__ct_pattern_input) => {
                 }
             } as const satisfies __ctHelpers.JSONSchema, {
                 card: {
-                    description: card.description
+                    description: card.key("description")
                 },
                 startEditing: startEditing
             }, ({ card, startEditing }) => (<div>

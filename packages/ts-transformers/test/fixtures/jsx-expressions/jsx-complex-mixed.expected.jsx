@@ -64,8 +64,8 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                items: state.items,
-                filter: state.filter
+                items: state.key("items"),
+                filter: state.key("filter")
             } }, ({ state }) => state.items.filter((i) => i.name.includes(state.filter)).length)}
         </p>
 
@@ -201,7 +201,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                items: state.items
+                items: state.key("items")
             } }, ({ state }) => state.items.filter((i) => i.active).length)}</p>
 
         <h3>Simple Operations</h3>
@@ -223,7 +223,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                discount: state.discount
+                discount: state.key("discount")
             } }, ({ state }) => state.discount * 100)}%</p>
         <p>Tax percent: {__ctHelpers.derive({
             type: "object",
@@ -243,7 +243,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                taxRate: state.taxRate
+                taxRate: state.key("taxRate")
             } }, ({ state }) => state.taxRate * 100)}%</p>
 
         <h3>Array Predicates</h3>
@@ -296,7 +296,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                items: state.items
+                items: state.key("items")
             } }, ({ state }) => state.items.every((i) => i.active)), "Yes", "No")}</p>
         <p>Any active: {__ctHelpers.ifElse({
             type: "boolean"
@@ -347,7 +347,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                items: state.items
+                items: state.key("items")
             } }, ({ state }) => state.items.some((i) => i.active)), "Yes", "No")}</p>
         <p>
           Has expensive (gt 100):{" "}
@@ -400,7 +400,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                items: state.items
+                items: state.key("items")
             } }, ({ state }) => state.items.some((i) => i.price > 100)), "Yes", "No")}
         </p>
 
@@ -429,7 +429,7 @@ export default pattern((state) => {
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 filter: {
-                    length: state.filter.length
+                    length: state.key("filter").length
                 }
             } }, ({ state }) => state.filter.length > 0)} data-discount={state.key("discount")}>
           Object attributes

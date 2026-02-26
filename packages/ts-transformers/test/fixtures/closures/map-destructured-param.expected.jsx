@@ -16,6 +16,10 @@ export default pattern((state) => {
             Point: ({__ctHelpers.derive({
                 type: "object",
                 properties: {
+                    x: {
+                        type: "number",
+                        asOpaque: true
+                    },
                     state: {
                         type: "object",
                         properties: {
@@ -27,7 +31,7 @@ export default pattern((state) => {
                         required: ["scale"]
                     }
                 },
-                required: ["state"]
+                required: ["x", "state"]
             } as const satisfies __ctHelpers.JSONSchema, {
                 type: "number"
             } as const satisfies __ctHelpers.JSONSchema, {
@@ -38,6 +42,10 @@ export default pattern((state) => {
             }, ({ x, state }) => x * state.scale)}, {__ctHelpers.derive({
                 type: "object",
                 properties: {
+                    y: {
+                        type: "number",
+                        asOpaque: true
+                    },
                     state: {
                         type: "object",
                         properties: {
@@ -49,7 +57,7 @@ export default pattern((state) => {
                         required: ["scale"]
                     }
                 },
-                required: ["state"]
+                required: ["y", "state"]
             } as const satisfies __ctHelpers.JSONSchema, {
                 type: "number"
             } as const satisfies __ctHelpers.JSONSchema, {

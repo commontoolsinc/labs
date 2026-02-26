@@ -19,13 +19,20 @@ export default pattern((_state) => {
             }, {
                 type: "object",
                 properties: {
+                    element: {
+                        type: "number"
+                    },
+                    index: {
+                        type: "number"
+                    },
                     array: {
                         type: "array",
                         items: {
                             type: "number"
                         }
                     }
-                }
+                },
+                required: ["element"]
             } as const satisfies __ctHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"

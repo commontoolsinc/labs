@@ -72,7 +72,7 @@ export default pattern((state) => {
                 }
             }
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                items: state.items
+                items: state.key("items")
             } }, ({ state }) => state.items
             .filter((item) => item.active)).map((item) => (<div>
               Total: {__ctHelpers.derive({

@@ -10,12 +10,16 @@ export default function TestDerive() {
     const result = __ctHelpers.derive({
         type: "object",
         properties: {
+            value: {
+                type: "number",
+                asCell: true
+            },
             prefix: {
                 type: "string",
                 asCell: true
             }
         },
-        required: ["prefix"]
+        required: ["value", "prefix"]
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "string"
     } as const satisfies __ctHelpers.JSONSchema, {
