@@ -51,10 +51,18 @@ export interface CallbackContext {
   call: ts.CallExpression;
 }
 
+function resolveContextAnchor(node: ts.Node): ts.Node {
+  const original = ts.getOriginalNode(node);
+  if (original && original !== node && original.parent) {
+    return original;
+  }
+  return node;
+}
+
 export function findEnclosingCallbackContext(
   node: ts.Node,
 ): CallbackContext | undefined {
-  let current: ts.Node | undefined = node.parent;
+  let current: ts.Node | undefined = resolveContextAnchor(node).parent;
   while (current) {
     if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
       const parent: ts.Node | undefined = current.parent;
@@ -156,7 +164,8 @@ export function classifyReactiveContext(
   checker: ts.TypeChecker,
   lookup?: ReactiveContextLookup,
 ): ReactiveContextInfo {
-  let current: ts.Node | undefined = node.parent;
+  const anchor = resolveContextAnchor(node);
+  let current: ts.Node | undefined = anchor.parent;
   let inJsxExpression = false;
 
   while (current) {

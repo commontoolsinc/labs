@@ -12,61 +12,129 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Map with destructured parameter and capture */}
-        {state.points.map(({ x, y }) => (<div>
+        {state.points.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const x = __ct_pattern_input.key("element", "x");
+                const y = __ct_pattern_input.key("element", "y");
+                const state = __ct_pattern_input.key("params", "state");
+                return (<div>
             Point: ({__ctHelpers.derive({
+                    type: "object",
+                    properties: {
+                        x: {
+                            type: "number",
+                            asOpaque: true
+                        },
+                        state: {
+                            type: "object",
+                            properties: {
+                                scale: {
+                                    type: "number",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["scale"]
+                        }
+                    },
+                    required: ["x", "state"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "number"
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    x: x,
+                    state: {
+                        scale: state.key("scale")
+                    }
+                }, ({ x, state }) => x * state.scale)}, {__ctHelpers.derive({
+                    type: "object",
+                    properties: {
+                        y: {
+                            type: "number",
+                            asOpaque: true
+                        },
+                        state: {
+                            type: "object",
+                            properties: {
+                                scale: {
+                                    type: "number",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["scale"]
+                        }
+                    },
+                    required: ["y", "state"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "number"
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    y: y,
+                    state: {
+                        scale: state.key("scale")
+                    }
+                }, ({ y, state }) => y * state.scale)})
+          </div>);
+            }, {
                 type: "object",
                 properties: {
-                    x: {
-                        type: "number",
-                        asOpaque: true
+                    element: {
+                        $ref: "#/$defs/Point"
                     },
-                    state: {
+                    params: {
                         type: "object",
                         properties: {
-                            scale: {
-                                type: "number",
-                                asOpaque: true
+                            state: {
+                                type: "object",
+                                properties: {
+                                    scale: {
+                                        type: "number",
+                                        asOpaque: true
+                                    }
+                                },
+                                required: ["scale"]
                             }
                         },
-                        required: ["scale"]
+                        required: ["state"]
                     }
                 },
-                required: ["x", "state"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "number"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                x: x,
-                state: {
-                    scale: state.scale
-                }
-            }, ({ x, state }) => x * state.scale)}, {__ctHelpers.derive({
-                type: "object",
-                properties: {
-                    y: {
-                        type: "number",
-                        asOpaque: true
-                    },
-                    state: {
+                required: ["element", "params"],
+                $defs: {
+                    Point: {
                         type: "object",
                         properties: {
-                            scale: {
-                                type: "number",
-                                asOpaque: true
+                            x: {
+                                type: "number"
+                            },
+                            y: {
+                                type: "number"
                             }
                         },
-                        required: ["scale"]
+                        required: ["x", "y"]
                     }
-                },
-                required: ["y", "state"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "number"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                y: y,
-                state: {
-                    scale: state.scale
                 }
-            }, ({ y, state }) => y * state.scale)})
-          </div>))}
+            } as const satisfies __ctHelpers.JSONSchema, {
+                anyOf: [{
+                        $ref: "https://commonfabric.org/schemas/vnode.json"
+                    }, {
+                        type: "object",
+                        properties: {}
+                    }, {
+                        $ref: "#/$defs/UIRenderable",
+                        asOpaque: true
+                    }],
+                $defs: {
+                    UIRenderable: {
+                        type: "object",
+                        properties: {
+                            $UI: {
+                                $ref: "https://commonfabric.org/schemas/vnode.json"
+                            }
+                        },
+                        required: ["$UI"]
+                    }
+                }
+            } as const satisfies __ctHelpers.JSONSchema), {
+                state: {
+                    scale: state.key("scale")
+                }
+            })}
       </div>),
     };
 }, {

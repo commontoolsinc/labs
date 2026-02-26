@@ -9,33 +9,86 @@ export default pattern((state) => {
     const typedValues: Cell<number[]> = cell(state.key("values"));
     return {
         [UI]: (<div>
-        {typedValues.map((value) => (<span>{__ctHelpers.derive({
+        {typedValues.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const value = __ct_pattern_input.key("element");
+                const state = __ct_pattern_input.key("params", "state");
+                return (<span>{__ctHelpers.derive({
+                    type: "object",
+                    properties: {
+                        value: {
+                            type: "number",
+                            asOpaque: true
+                        },
+                        state: {
+                            type: "object",
+                            properties: {
+                                multiplier: {
+                                    type: "number",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["multiplier"]
+                        }
+                    },
+                    required: ["value", "state"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "number"
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    value: value,
+                    state: {
+                        multiplier: state.key("multiplier")
+                    }
+                }, ({ value, state }) => value * state.multiplier)}</span>);
+            }, {
                 type: "object",
                 properties: {
-                    value: {
-                        type: "number",
-                        asOpaque: true
+                    element: {
+                        type: "number"
                     },
-                    state: {
+                    params: {
                         type: "object",
                         properties: {
-                            multiplier: {
-                                type: "number",
-                                asOpaque: true
+                            state: {
+                                type: "object",
+                                properties: {
+                                    multiplier: {
+                                        type: "number",
+                                        asOpaque: true
+                                    }
+                                },
+                                required: ["multiplier"]
                             }
                         },
-                        required: ["multiplier"]
+                        required: ["state"]
                     }
                 },
-                required: ["value", "state"]
+                required: ["element", "params"]
             } as const satisfies __ctHelpers.JSONSchema, {
-                type: "number"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                value: value,
-                state: {
-                    multiplier: state.multiplier
+                anyOf: [{
+                        $ref: "https://commonfabric.org/schemas/vnode.json"
+                    }, {
+                        type: "object",
+                        properties: {}
+                    }, {
+                        $ref: "#/$defs/UIRenderable",
+                        asOpaque: true
+                    }],
+                $defs: {
+                    UIRenderable: {
+                        type: "object",
+                        properties: {
+                            $UI: {
+                                $ref: "https://commonfabric.org/schemas/vnode.json"
+                            }
+                        },
+                        required: ["$UI"]
+                    }
                 }
-            }, ({ value, state }) => value * state.multiplier)}</span>))}
+            } as const satisfies __ctHelpers.JSONSchema), {
+                state: {
+                    multiplier: state.key("multiplier")
+                }
+            })}
       </div>),
     };
 }, {

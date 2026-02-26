@@ -7,44 +7,101 @@ interface State {
 export default pattern((state) => {
     return {
         [UI]: (<div>
-        {state.sortedTags.map((tag) => (<span>
+        {state.sortedTags.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const tag = __ct_pattern_input.key("element");
+                const state = __ct_pattern_input.key("params", "state");
+                return (<span>
             {tag}: {__ctHelpers.derive({
+                    type: "object",
+                    properties: {
+                        state: {
+                            type: "object",
+                            properties: {
+                                tagCounts: {
+                                    type: "object",
+                                    properties: {},
+                                    additionalProperties: {
+                                        type: "number"
+                                    },
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["tagCounts"]
+                        },
+                        tag: {
+                            type: "string",
+                            asOpaque: true
+                        }
+                    },
+                    required: ["state", "tag"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    anyOf: [{
+                            type: "undefined"
+                        }, {
+                            type: "number",
+                            asOpaque: true
+                        }]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    state: {
+                        tagCounts: state.key("tagCounts")
+                    },
+                    tag: tag
+                }, ({ state, tag }) => state.tagCounts[tag])}
+          </span>);
+            }, {
                 type: "object",
                 properties: {
-                    state: {
+                    element: {
+                        type: "string"
+                    },
+                    params: {
                         type: "object",
                         properties: {
-                            tagCounts: {
+                            state: {
                                 type: "object",
-                                properties: {},
-                                additionalProperties: {
-                                    type: "number"
+                                properties: {
+                                    tagCounts: {
+                                        type: "object",
+                                        properties: {},
+                                        additionalProperties: {
+                                            type: "number"
+                                        },
+                                        asOpaque: true
+                                    }
                                 },
-                                asOpaque: true
+                                required: ["tagCounts"]
                             }
                         },
-                        required: ["tagCounts"]
-                    },
-                    tag: {
-                        type: "string",
-                        asOpaque: true
+                        required: ["state"]
                     }
                 },
-                required: ["state", "tag"]
+                required: ["element", "params"]
             } as const satisfies __ctHelpers.JSONSchema, {
                 anyOf: [{
-                        type: "undefined"
+                        $ref: "https://commonfabric.org/schemas/vnode.json"
                     }, {
-                        type: "number",
+                        type: "object",
+                        properties: {}
+                    }, {
+                        $ref: "#/$defs/UIRenderable",
                         asOpaque: true
-                    }]
-            } as const satisfies __ctHelpers.JSONSchema, {
+                    }],
+                $defs: {
+                    UIRenderable: {
+                        type: "object",
+                        properties: {
+                            $UI: {
+                                $ref: "https://commonfabric.org/schemas/vnode.json"
+                            }
+                        },
+                        required: ["$UI"]
+                    }
+                }
+            } as const satisfies __ctHelpers.JSONSchema), {
                 state: {
-                    tagCounts: state.tagCounts
-                },
-                tag: tag
-            }, ({ state, tag }) => state.tagCounts[tag])}
-          </span>))}
+                    tagCounts: state.key("tagCounts")
+                }
+            })}
       </div>),
     };
 }, {
@@ -100,3 +157,4 @@ export default pattern((state) => {
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
 h.fragment = __ctHelpers.h.fragment;
+

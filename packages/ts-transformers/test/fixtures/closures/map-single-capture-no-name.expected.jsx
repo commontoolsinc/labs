@@ -9,10 +9,46 @@ interface State {
 export default pattern((state: State) => {
     return {
         [UI]: (<div>
-        {state.items.map((item) => (<span>{__ctHelpers.derive({
+        {state.items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const item = __ct_pattern_input.key("element");
+                const state = __ct_pattern_input.key("params", "state");
+                return (<span>{__ctHelpers.derive({
+                    type: "object",
+                    properties: {
+                        item: {
+                            type: "object",
+                            properties: {
+                                price: {
+                                    type: "number"
+                                }
+                            },
+                            required: ["price"]
+                        },
+                        state: {
+                            type: "object",
+                            properties: {
+                                discount: {
+                                    type: "number"
+                                }
+                            },
+                            required: ["discount"]
+                        }
+                    },
+                    required: ["item", "state"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "number"
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    item: {
+                        price: item.key("price")
+                    },
+                    state: {
+                        discount: state.key("discount")
+                    }
+                }, ({ item, state }) => item.price * state.discount)}</span>);
+            }, {
                 type: "object",
                 properties: {
-                    item: {
+                    element: {
                         type: "object",
                         properties: {
                             price: {
@@ -21,27 +57,49 @@ export default pattern((state: State) => {
                         },
                         required: ["price"]
                     },
-                    state: {
+                    params: {
                         type: "object",
                         properties: {
-                            discount: {
-                                type: "number"
+                            state: {
+                                type: "object",
+                                properties: {
+                                    discount: {
+                                        type: "number"
+                                    }
+                                },
+                                required: ["discount"]
                             }
                         },
-                        required: ["discount"]
+                        required: ["state"]
                     }
                 },
-                required: ["item", "state"]
+                required: ["element", "params"]
             } as const satisfies __ctHelpers.JSONSchema, {
-                type: "number"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                item: {
-                    price: item.price
-                },
-                state: {
-                    discount: state.discount
+                anyOf: [{
+                        $ref: "https://commonfabric.org/schemas/vnode.json"
+                    }, {
+                        type: "object",
+                        properties: {}
+                    }, {
+                        $ref: "#/$defs/UIRenderable",
+                        asOpaque: true
+                    }],
+                $defs: {
+                    UIRenderable: {
+                        type: "object",
+                        properties: {
+                            $UI: {
+                                $ref: "https://commonfabric.org/schemas/vnode.json"
+                            }
+                        },
+                        required: ["$UI"]
+                    }
                 }
-            }, ({ item, state }) => item.price * state.discount)}</span>))}
+            } as const satisfies __ctHelpers.JSONSchema), {
+                state: {
+                    discount: state.key("discount")
+                }
+            })}
       </div>),
     };
 }, {

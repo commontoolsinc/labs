@@ -15,39 +15,87 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         <span>{state.key("maybe", "value")}</span>
-        {state.items.map((item) => (<span>{__ctHelpers.derive({
+        {state.items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const item = __ct_pattern_input.key("element");
+                return (<span>{__ctHelpers.derive({
+                    type: "object",
+                    properties: {
+                        item: {
+                            type: "object",
+                            properties: {
+                                maybe: {
+                                    anyOf: [{
+                                            type: "undefined"
+                                        }, {
+                                            anyOf: [{
+                                                    type: "undefined"
+                                                }, {
+                                                    type: "object",
+                                                    properties: {
+                                                        value: {
+                                                            type: "number"
+                                                        }
+                                                    },
+                                                    required: ["value"]
+                                                }],
+                                            asOpaque: true
+                                        }]
+                                }
+                            }
+                        }
+                    },
+                    required: ["item"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "number"
+                } as const satisfies __ctHelpers.JSONSchema, { item: {
+                        maybe: item.key("maybe")
+                    } }, ({ item }) => item.maybe?.value ?? 0)}</span>);
+            }, {
                 type: "object",
                 properties: {
-                    item: {
+                    element: {
+                        $ref: "#/$defs/Item"
+                    }
+                },
+                required: ["element"],
+                $defs: {
+                    Item: {
                         type: "object",
                         properties: {
                             maybe: {
-                                anyOf: [{
-                                        type: "undefined"
-                                    }, {
-                                        anyOf: [{
-                                                type: "undefined"
-                                            }, {
-                                                type: "object",
-                                                properties: {
-                                                    value: {
-                                                        type: "number"
-                                                    }
-                                                },
-                                                required: ["value"]
-                                            }],
-                                        asOpaque: true
-                                    }]
+                                type: "object",
+                                properties: {
+                                    value: {
+                                        type: "number"
+                                    }
+                                },
+                                required: ["value"]
                             }
                         }
                     }
-                },
-                required: ["item"]
+                }
             } as const satisfies __ctHelpers.JSONSchema, {
-                type: "number"
-            } as const satisfies __ctHelpers.JSONSchema, { item: {
-                    maybe: item.maybe
-                } }, ({ item }) => item.maybe?.value ?? 0)}</span>))}
+                anyOf: [{
+                        $ref: "https://commonfabric.org/schemas/vnode.json"
+                    }, {
+                        type: "object",
+                        properties: {}
+                    }, {
+                        $ref: "#/$defs/UIRenderable",
+                        asOpaque: true
+                    }],
+                $defs: {
+                    UIRenderable: {
+                        type: "object",
+                        properties: {
+                            $UI: {
+                                $ref: "https://commonfabric.org/schemas/vnode.json"
+                            }
+                        },
+                        required: ["$UI"]
+                    }
+                }
+            } as const satisfies __ctHelpers.JSONSchema), {})}
       </div>),
     };
 }, {
@@ -121,3 +169,4 @@ export default pattern((state) => {
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
 h.fragment = __ctHelpers.h.fragment;
+

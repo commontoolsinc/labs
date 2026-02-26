@@ -121,140 +121,264 @@ export default pattern((__ct_pattern_input) => {
                     required: ["$UI"]
                 }
             }
-        } as const satisfies __ctHelpers.JSONSchema, hasItems, items.map((item) => (<div>
+        } as const satisfies __ctHelpers.JSONSchema, hasItems, items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+            const item = __ct_pattern_input.key("element");
+            const showInactive = __ct_pattern_input.key("params", "showInactive");
+            return (<div>
               {/* Ternary in outer map, outside inner map - should also be ifElse */}
               <strong>{__ctHelpers.ifElse({
-            type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "string",
-            asOpaque: true
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
-            type: "object",
-            properties: {
-                item: {
-                    type: "object",
-                    properties: {
-                        tags: {
-                            type: "object",
-                            properties: {
-                                length: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["length"]
-                        }
-                    },
-                    required: ["tags"]
-                }
-            },
-            required: ["item"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { item: {
-                tags: {
-                    length: item.tags.length
-                }
-            } }, ({ item }) => __ctHelpers.derive({
-            type: "object",
-            properties: {
-                item: {
-                    type: "object",
-                    properties: {
-                        tags: {
-                            type: "object",
-                            properties: {
-                                length: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["length"]
-                        }
-                    },
-                    required: ["tags"]
-                }
-            },
-            required: ["item"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { item: {
-                tags: {
-                    length: item.tags.length
-                }
-            } }, ({ item }) => item.tags.length > 0)), item.label, "No tags")}</strong>
-              <ul>
-                {item.tags.map((tag) => (<li>
-                    {/* This ternary should be transformed to ifElse */}
-                    {__ctHelpers.ifElse({
-                type: "boolean",
-                asOpaque: true
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "string",
-                asOpaque: true
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __ctHelpers.JSONSchema, tag.active, tag.name, __ctHelpers.derive({
-                type: "object",
-                properties: {
-                    showInactive: {
-                        type: "boolean",
-                        asOpaque: true
-                    },
-                    tag: {
-                        type: "object",
-                        properties: {
-                            name: {
-                                type: "string",
-                                asOpaque: true
-                            }
-                        },
-                        required: ["name"]
-                    }
-                },
-                required: ["showInactive", "tag"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                showInactive: showInactive,
-                tag: {
-                    name: tag.name
-                }
-            }, ({ showInactive, tag }) => __ctHelpers.ifElse({
                 type: "boolean"
-            } as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, {
                 type: "string"
             } as const satisfies __ctHelpers.JSONSchema, {
                 type: "string"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __ctHelpers.JSONSchema, showInactive, __ctHelpers.derive({
+            } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
                 type: "object",
                 properties: {
-                    tag: {
+                    item: {
                         type: "object",
                         properties: {
-                            name: {
-                                type: "string",
-                                asOpaque: true
+                            tags: {
+                                type: "object",
+                                properties: {
+                                    length: {
+                                        type: "number"
+                                    }
+                                },
+                                required: ["length"]
                             }
                         },
-                        required: ["name"]
+                        required: ["tags"]
                     }
                 },
-                required: ["tag"]
+                required: ["item"]
             } as const satisfies __ctHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __ctHelpers.JSONSchema, { tag: {
-                    name: tag.name
-                } }, ({ tag }) => `(${tag.name})`), "")))}
-                  </li>))}
+                type: "boolean"
+            } as const satisfies __ctHelpers.JSONSchema, { item: {
+                    tags: {
+                        length: item.key("tags").length
+                    }
+                } }, ({ item }) => __ctHelpers.derive({
+                type: "object",
+                properties: {
+                    item: {
+                        type: "object",
+                        properties: {
+                            tags: {
+                                type: "object",
+                                properties: {
+                                    length: {
+                                        type: "number"
+                                    }
+                                },
+                                required: ["length"]
+                            }
+                        },
+                        required: ["tags"]
+                    }
+                },
+                required: ["item"]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "boolean"
+            } as const satisfies __ctHelpers.JSONSchema, { item: {
+                    tags: {
+                        length: item.tags.length
+                    }
+                } }, ({ item }) => item.tags.length > 0)), item.key("label"), "No tags")}</strong>
+              <ul>
+                {item.tags.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                    const tag = __ct_pattern_input.key("element");
+                    const showInactive = __ct_pattern_input.key("params", "showInactive");
+                    return (<li>
+                    {/* This ternary should be transformed to ifElse */}
+                    {__ctHelpers.ifElse(true as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, {
+                        type: "string"
+                    } as const satisfies __ctHelpers.JSONSchema, {
+                        type: "string"
+                    } as const satisfies __ctHelpers.JSONSchema, tag.key("active"), tag.key("name"), __ctHelpers.derive({
+                        type: "object",
+                        properties: {
+                            showInactive: {
+                                type: "boolean",
+                                asOpaque: true
+                            },
+                            tag: {
+                                type: "object",
+                                properties: {
+                                    name: {
+                                        type: "string",
+                                        asOpaque: true
+                                    }
+                                },
+                                required: ["name"]
+                            }
+                        },
+                        required: ["showInactive", "tag"]
+                    } as const satisfies __ctHelpers.JSONSchema, {
+                        type: "string"
+                    } as const satisfies __ctHelpers.JSONSchema, {
+                        showInactive: showInactive,
+                        tag: {
+                            name: tag.key("name")
+                        }
+                    }, ({ showInactive, tag }) => __ctHelpers.ifElse({
+                        type: "boolean"
+                    } as const satisfies __ctHelpers.JSONSchema, {
+                        type: "string"
+                    } as const satisfies __ctHelpers.JSONSchema, {
+                        type: "string"
+                    } as const satisfies __ctHelpers.JSONSchema, {
+                        type: "string"
+                    } as const satisfies __ctHelpers.JSONSchema, showInactive, __ctHelpers.derive({
+                        type: "object",
+                        properties: {
+                            tag: {
+                                type: "object",
+                                properties: {
+                                    name: {
+                                        type: "string",
+                                        asOpaque: true
+                                    }
+                                },
+                                required: ["name"]
+                            }
+                        },
+                        required: ["tag"]
+                    } as const satisfies __ctHelpers.JSONSchema, {
+                        type: "string"
+                    } as const satisfies __ctHelpers.JSONSchema, { tag: {
+                            name: tag.name
+                        } }, ({ tag }) => `(${tag.name})`), "")))}
+                  </li>);
+                }, {
+                    type: "object",
+                    properties: {
+                        element: {
+                            $ref: "#/$defs/Tag"
+                        },
+                        params: {
+                            type: "object",
+                            properties: {
+                                showInactive: {
+                                    type: "boolean",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["showInactive"]
+                        }
+                    },
+                    required: ["element", "params"],
+                    $defs: {
+                        Tag: {
+                            type: "object",
+                            properties: {
+                                name: {
+                                    type: "string"
+                                },
+                                active: {
+                                    type: "boolean"
+                                }
+                            },
+                            required: ["name", "active"]
+                        }
+                    }
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    anyOf: [{
+                            $ref: "https://commonfabric.org/schemas/vnode.json"
+                        }, {
+                            type: "object",
+                            properties: {}
+                        }, {
+                            $ref: "#/$defs/UIRenderable",
+                            asOpaque: true
+                        }],
+                    $defs: {
+                        UIRenderable: {
+                            type: "object",
+                            properties: {
+                                $UI: {
+                                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                                }
+                            },
+                            required: ["$UI"]
+                        }
+                    }
+                } as const satisfies __ctHelpers.JSONSchema), {
+                    showInactive: showInactive
+                })}
               </ul>
-            </div>)), <p>No items</p>)}
+            </div>);
+        }, {
+            type: "object",
+            properties: {
+                element: {
+                    $ref: "#/$defs/Item"
+                },
+                params: {
+                    type: "object",
+                    properties: {
+                        showInactive: {
+                            type: "boolean",
+                            asOpaque: true
+                        }
+                    },
+                    required: ["showInactive"]
+                }
+            },
+            required: ["element", "params"],
+            $defs: {
+                Item: {
+                    type: "object",
+                    properties: {
+                        label: {
+                            type: "string"
+                        },
+                        tags: {
+                            type: "array",
+                            items: {
+                                $ref: "#/$defs/Tag"
+                            }
+                        }
+                    },
+                    required: ["label", "tags"]
+                },
+                Tag: {
+                    type: "object",
+                    properties: {
+                        name: {
+                            type: "string"
+                        },
+                        active: {
+                            type: "boolean"
+                        }
+                    },
+                    required: ["name", "active"]
+                }
+            }
+        } as const satisfies __ctHelpers.JSONSchema, {
+            anyOf: [{
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    $ref: "#/$defs/UIRenderable",
+                    asOpaque: true
+                }],
+            $defs: {
+                UIRenderable: {
+                    type: "object",
+                    properties: {
+                        $UI: {
+                            $ref: "https://commonfabric.org/schemas/vnode.json"
+                        }
+                    },
+                    required: ["$UI"]
+                }
+            }
+        } as const satisfies __ctHelpers.JSONSchema), {
+            showInactive: showInactive
+        }), <p>No items</p>)}
       </div>),
     };
 }, {

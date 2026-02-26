@@ -92,7 +92,51 @@ export default pattern((__ct_pattern_input) => {
                 }
             },
             required: ["name", "active"]
-        } as const satisfies __ctHelpers.JSONSchema), {}).filter((entry) => entry.active)).map((entry) => <span>{entry.name}</span>)}
+        } as const satisfies __ctHelpers.JSONSchema), {}).filter((entry) => entry.active)).mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+            const entry = __ct_pattern_input.key("element");
+            return <span>{entry.key("name")}</span>;
+        }, {
+            type: "object",
+            properties: {
+                element: {
+                    type: "object",
+                    properties: {
+                        name: {
+                            type: "string",
+                            asOpaque: true
+                        },
+                        active: {
+                            type: "boolean",
+                            asOpaque: true
+                        }
+                    },
+                    required: ["name", "active"],
+                    asOpaque: true
+                }
+            },
+            required: ["element"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            anyOf: [{
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    $ref: "#/$defs/UIRenderable",
+                    asOpaque: true
+                }],
+            $defs: {
+                UIRenderable: {
+                    type: "object",
+                    properties: {
+                        $UI: {
+                            $ref: "https://commonfabric.org/schemas/vnode.json"
+                        }
+                    },
+                    required: ["$UI"]
+                }
+            }
+        } as const satisfies __ctHelpers.JSONSchema), {})}
       </div>),
     };
 }, {

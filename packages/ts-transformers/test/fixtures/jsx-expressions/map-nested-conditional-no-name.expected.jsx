@@ -32,22 +32,57 @@ export default pattern((_state: any) => {
                     properties: {}
                 }]
         } as const satisfies __ctHelpers.JSONSchema, showList, <div>
-            {items.map((item) => (<div>
-                {__ctHelpers.when({
-                type: "string",
-                asOpaque: true
+            {items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const item = __ct_pattern_input.key("element");
+                return (<div>
+                {__ctHelpers.when(true as const satisfies __ctHelpers.JSONSchema, {
+                    anyOf: [{}, {
+                            type: "object",
+                            properties: {}
+                        }]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    anyOf: [{}, {
+                            type: "object",
+                            properties: {}
+                        }]
+                } as const satisfies __ctHelpers.JSONSchema, item.key("name"), <span>{item.key("name")}</span>)}
+              </div>);
+            }, {
+                type: "object",
+                properties: {
+                    element: {
+                        type: "object",
+                        properties: {
+                            name: {
+                                type: "string"
+                            }
+                        },
+                        required: ["name"]
+                    }
+                },
+                required: ["element"]
             } as const satisfies __ctHelpers.JSONSchema, {
-                anyOf: [{}, {
+                anyOf: [{
+                        $ref: "https://commonfabric.org/schemas/vnode.json"
+                    }, {
                         type: "object",
                         properties: {}
-                    }]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                anyOf: [{}, {
+                    }, {
+                        $ref: "#/$defs/UIRenderable",
+                        asOpaque: true
+                    }],
+                $defs: {
+                    UIRenderable: {
                         type: "object",
-                        properties: {}
-                    }]
-            } as const satisfies __ctHelpers.JSONSchema, item.name, <span>{item.name}</span>)}
-              </div>))}
+                        properties: {
+                            $UI: {
+                                $ref: "https://commonfabric.org/schemas/vnode.json"
+                            }
+                        },
+                        required: ["$UI"]
+                    }
+                }
+            } as const satisfies __ctHelpers.JSONSchema), {})}
           </div>)}
       </div>),
     };

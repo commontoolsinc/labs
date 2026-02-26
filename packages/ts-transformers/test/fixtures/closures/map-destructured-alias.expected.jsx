@@ -9,33 +9,92 @@ interface State {
 export default pattern((state) => {
     return {
         [UI]: (<div>
-        {state.items.map(({ price: cost }) => (<span>{__ctHelpers.derive({
+        {state.items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const cost = __ct_pattern_input.key("element", "price");
+                const state = __ct_pattern_input.key("params", "state");
+                return (<span>{__ctHelpers.derive({
+                    type: "object",
+                    properties: {
+                        cost: {
+                            type: "number",
+                            asOpaque: true
+                        },
+                        state: {
+                            type: "object",
+                            properties: {
+                                discount: {
+                                    type: "number",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["discount"]
+                        }
+                    },
+                    required: ["cost", "state"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "number"
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    cost: cost,
+                    state: {
+                        discount: state.key("discount")
+                    }
+                }, ({ cost, state }) => cost * state.discount)}</span>);
+            }, {
                 type: "object",
                 properties: {
-                    cost: {
-                        type: "number",
-                        asOpaque: true
-                    },
-                    state: {
+                    element: {
                         type: "object",
                         properties: {
-                            discount: {
-                                type: "number",
-                                asOpaque: true
+                            price: {
+                                type: "number"
                             }
                         },
-                        required: ["discount"]
+                        required: ["price"]
+                    },
+                    params: {
+                        type: "object",
+                        properties: {
+                            state: {
+                                type: "object",
+                                properties: {
+                                    discount: {
+                                        type: "number",
+                                        asOpaque: true
+                                    }
+                                },
+                                required: ["discount"]
+                            }
+                        },
+                        required: ["state"]
                     }
                 },
-                required: ["cost", "state"]
+                required: ["element", "params"]
             } as const satisfies __ctHelpers.JSONSchema, {
-                type: "number"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                cost: cost,
-                state: {
-                    discount: state.discount
+                anyOf: [{
+                        $ref: "https://commonfabric.org/schemas/vnode.json"
+                    }, {
+                        type: "object",
+                        properties: {}
+                    }, {
+                        $ref: "#/$defs/UIRenderable",
+                        asOpaque: true
+                    }],
+                $defs: {
+                    UIRenderable: {
+                        type: "object",
+                        properties: {
+                            $UI: {
+                                $ref: "https://commonfabric.org/schemas/vnode.json"
+                            }
+                        },
+                        required: ["$UI"]
+                    }
                 }
-            }, ({ cost, state }) => cost * state.discount)}</span>))}
+            } as const satisfies __ctHelpers.JSONSchema), {
+                state: {
+                    discount: state.key("discount")
+                }
+            })}
       </div>),
     };
 }, {

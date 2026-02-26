@@ -23,7 +23,9 @@ export default pattern<Input>(({ messages }) => {
           return (
             <div>
               {messageReactions.map((reaction) => (
-                <button data-msg-id={msg.id}>{reaction.emoji}</button>
+                <button type="button" data-msg-id={msg.id}>
+                  {reaction.emoji}
+                </button>
               ))}
             </div>
           );

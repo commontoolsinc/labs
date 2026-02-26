@@ -12,35 +12,106 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Uses both index parameter and captures state.offset */}
-        {state.items.map((item, index) => (<div>
+        {state.items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const item = __ct_pattern_input.key("element");
+                const index = __ct_pattern_input.key("index");
+                const state = __ct_pattern_input.key("params", "state");
+                return (<div>
             Item #{__ctHelpers.derive({
+                    type: "object",
+                    properties: {
+                        index: {
+                            type: "number",
+                            asOpaque: true
+                        },
+                        state: {
+                            type: "object",
+                            properties: {
+                                offset: {
+                                    type: "number",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["offset"]
+                        }
+                    },
+                    required: ["index", "state"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "number"
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    index: index,
+                    state: {
+                        offset: state.key("offset")
+                    }
+                }, ({ index, state }) => index + state.offset)}: {item.key("name")}
+          </div>);
+            }, {
                 type: "object",
                 properties: {
-                    index: {
-                        type: "number",
-                        asOpaque: true
+                    element: {
+                        $ref: "#/$defs/Item"
                     },
-                    state: {
+                    index: {
+                        type: "number"
+                    },
+                    params: {
                         type: "object",
                         properties: {
-                            offset: {
-                                type: "number",
-                                asOpaque: true
+                            state: {
+                                type: "object",
+                                properties: {
+                                    offset: {
+                                        type: "number",
+                                        asOpaque: true
+                                    }
+                                },
+                                required: ["offset"]
                             }
                         },
-                        required: ["offset"]
+                        required: ["state"]
                     }
                 },
-                required: ["index", "state"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "number"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                index: index,
-                state: {
-                    offset: state.offset
+                required: ["element", "params"],
+                $defs: {
+                    Item: {
+                        type: "object",
+                        properties: {
+                            id: {
+                                type: "number"
+                            },
+                            name: {
+                                type: "string"
+                            }
+                        },
+                        required: ["id", "name"]
+                    }
                 }
-            }, ({ index, state }) => index + state.offset)}: {item.name}
-          </div>))}
+            } as const satisfies __ctHelpers.JSONSchema, {
+                anyOf: [{
+                        $ref: "https://commonfabric.org/schemas/vnode.json"
+                    }, {
+                        type: "object",
+                        properties: {}
+                    }, {
+                        $ref: "#/$defs/UIRenderable",
+                        asOpaque: true
+                    }],
+                $defs: {
+                    UIRenderable: {
+                        type: "object",
+                        properties: {
+                            $UI: {
+                                $ref: "https://commonfabric.org/schemas/vnode.json"
+                            }
+                        },
+                        required: ["$UI"]
+                    }
+                }
+            } as const satisfies __ctHelpers.JSONSchema), {
+                state: {
+                    offset: state.key("offset")
+                }
+            })}
       </div>),
     };
 }, {

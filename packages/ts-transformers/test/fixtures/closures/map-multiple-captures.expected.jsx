@@ -14,57 +14,134 @@ export default pattern((state) => {
     const multiplier = 2;
     return {
         [UI]: (<div>
-        {state.items.map((item) => (<span>
+        {state.items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const item = __ct_pattern_input.key("element");
+                const state = __ct_pattern_input.key("params", "state");
+                const multiplier = __ct_pattern_input.key("params", "multiplier");
+                return (<span>
             Total: {__ctHelpers.derive({
+                    type: "object",
+                    properties: {
+                        item: {
+                            type: "object",
+                            properties: {
+                                price: {
+                                    type: "number",
+                                    asOpaque: true
+                                },
+                                quantity: {
+                                    type: "number",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["price", "quantity"]
+                        },
+                        state: {
+                            type: "object",
+                            properties: {
+                                discount: {
+                                    type: "number",
+                                    asOpaque: true
+                                },
+                                taxRate: {
+                                    type: "number",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["discount", "taxRate"]
+                        },
+                        multiplier: {
+                            type: "number"
+                        }
+                    },
+                    required: ["item", "state", "multiplier"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "number"
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    item: {
+                        price: item.key("price"),
+                        quantity: item.key("quantity")
+                    },
+                    state: {
+                        discount: state.key("discount"),
+                        taxRate: state.key("taxRate")
+                    },
+                    multiplier: multiplier
+                }, ({ item, state, multiplier }) => item.price * item.quantity * state.discount * state.taxRate * multiplier + shippingCost)}
+          </span>);
+            }, {
                 type: "object",
                 properties: {
-                    item: {
+                    element: {
+                        $ref: "#/$defs/Item"
+                    },
+                    params: {
+                        type: "object",
+                        properties: {
+                            state: {
+                                type: "object",
+                                properties: {
+                                    discount: {
+                                        type: "number",
+                                        asOpaque: true
+                                    },
+                                    taxRate: {
+                                        type: "number",
+                                        asOpaque: true
+                                    }
+                                },
+                                required: ["discount", "taxRate"]
+                            },
+                            multiplier: {
+                                type: "number"
+                            }
+                        },
+                        required: ["state", "multiplier"]
+                    }
+                },
+                required: ["element", "params"],
+                $defs: {
+                    Item: {
                         type: "object",
                         properties: {
                             price: {
-                                type: "number",
-                                asOpaque: true
+                                type: "number"
                             },
                             quantity: {
-                                type: "number",
-                                asOpaque: true
+                                type: "number"
                             }
                         },
                         required: ["price", "quantity"]
-                    },
-                    state: {
+                    }
+                }
+            } as const satisfies __ctHelpers.JSONSchema, {
+                anyOf: [{
+                        $ref: "https://commonfabric.org/schemas/vnode.json"
+                    }, {
+                        type: "object",
+                        properties: {}
+                    }, {
+                        $ref: "#/$defs/UIRenderable",
+                        asOpaque: true
+                    }],
+                $defs: {
+                    UIRenderable: {
                         type: "object",
                         properties: {
-                            discount: {
-                                type: "number",
-                                asOpaque: true
-                            },
-                            taxRate: {
-                                type: "number",
-                                asOpaque: true
+                            $UI: {
+                                $ref: "https://commonfabric.org/schemas/vnode.json"
                             }
                         },
-                        required: ["discount", "taxRate"]
-                    },
-                    multiplier: {
-                        type: "number"
+                        required: ["$UI"]
                     }
-                },
-                required: ["item", "state", "multiplier"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "number"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                item: {
-                    price: item.price,
-                    quantity: item.quantity
-                },
+                }
+            } as const satisfies __ctHelpers.JSONSchema), {
                 state: {
-                    discount: state.discount,
-                    taxRate: state.taxRate
+                    discount: state.key("discount"),
+                    taxRate: state.key("taxRate")
                 },
                 multiplier: multiplier
-            }, ({ item, state, multiplier }) => item.price * item.quantity * state.discount * state.taxRate * multiplier + shippingCost)}
-          </span>))}
+            })}
       </div>),
     };
 }, {

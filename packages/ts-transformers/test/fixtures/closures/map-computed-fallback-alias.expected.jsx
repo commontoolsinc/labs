@@ -14,7 +14,8 @@ export default pattern((__ct_pattern_input) => {
     const messages = __ct_pattern_input.key("messages");
     return {
         [UI]: (<div>
-        {messages.map((msg) => {
+        {messages.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const msg = __ct_pattern_input.key("element");
                 const messageReactions = __ctHelpers.derive({
                     type: "object",
                     properties: {
@@ -66,7 +67,7 @@ export default pattern((__ct_pattern_input) => {
                         }
                     }
                 } as const satisfies __ctHelpers.JSONSchema, { msg: {
-                        reactions: msg.reactions
+                        reactions: msg.key("reactions")
                     } }, ({ msg }) => (msg.reactions) || []);
                 return (<div>
               {messageReactions.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
@@ -140,11 +141,70 @@ export default pattern((__ct_pattern_input) => {
                         }
                     } as const satisfies __ctHelpers.JSONSchema), {
                         msg: {
-                            id: msg.id
+                            id: msg.key("id")
                         }
                     })}
             </div>);
-            })}
+            }, {
+                type: "object",
+                properties: {
+                    element: {
+                        $ref: "#/$defs/Message"
+                    },
+                    params: {
+                        type: "object",
+                        properties: {}
+                    }
+                },
+                required: ["element", "params"],
+                $defs: {
+                    Message: {
+                        type: "object",
+                        properties: {
+                            id: {
+                                type: "string"
+                            },
+                            reactions: {
+                                type: "array",
+                                items: {
+                                    $ref: "#/$defs/Reaction"
+                                }
+                            }
+                        },
+                        required: ["id"]
+                    },
+                    Reaction: {
+                        type: "object",
+                        properties: {
+                            emoji: {
+                                type: "string"
+                            }
+                        },
+                        required: ["emoji"]
+                    }
+                }
+            } as const satisfies __ctHelpers.JSONSchema, {
+                anyOf: [{
+                        $ref: "https://commonfabric.org/schemas/vnode.json"
+                    }, {
+                        type: "object",
+                        properties: {}
+                    }, {
+                        $ref: "#/$defs/UIRenderable",
+                        asOpaque: true
+                    }],
+                $defs: {
+                    UIRenderable: {
+                        type: "object",
+                        properties: {
+                            $UI: {
+                                $ref: "https://commonfabric.org/schemas/vnode.json"
+                            }
+                        },
+                        required: ["$UI"]
+                    }
+                }
+            } as const satisfies __ctHelpers.JSONSchema), {})}
       </div>),
     };
 }, {

@@ -58,6 +58,40 @@ const p = pattern(({ list }: { list: string[] }) => <div>{[0, 1].forEach(() => l
 );
 
 Deno.test(
+  "Capability-first: pattern JSX map still rewrites after prior JSX lowering",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern, UI } from "commontools";
+
+interface State {
+  items: Array<{ price: number }>;
+  discount: number;
+}
+
+export default pattern<State>((state) => {
+  return {
+    [UI]: (
+      <div>
+        {state.items.map((item) => (
+          <span>{item.price * state.discount}</span>
+        ))}
+      </div>
+    ),
+  };
+});
+`;
+
+    const output = await transformSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, ".mapWithPattern(");
+    assert(!output.includes("state.items.map((item) =>"));
+  },
+);
+
+Deno.test(
   "Capability-first: JSX map/filter chain keeps filter callback in compute context",
   async () => {
     const source = `/// <cts-enable />
