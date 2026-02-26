@@ -142,7 +142,7 @@ const GTDWishes = pattern<WishesInput, WishesOutput>(({ directives }) => {
           >
             <ct-textarea
               $value={commandDraft}
-              placeholder="Type a command..."
+              placeholder="What's your wish?"
               rows={2}
               style={{
                 width: "100%",
