@@ -68,36 +68,46 @@ const CfcPreparedDigestMismatchError = (
   actualDigest,
 });
 
+type CfcTxState = {
+  relevant: boolean;
+  prepared: boolean;
+  preparedActivityDigest: string | undefined;
+  reasons: string[];
+  outbox: Array<() => void>;
+};
+
 export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   private commitCallbacks = new Set<
     (tx: IExtendedStorageTransaction) => void
   >();
-  private cfcRelevantState = false;
-  private cfcPreparedState = false;
-  private preparedActivityDigestState: string | undefined;
-  private cfcReasonsState: string[] = [];
-  private cfcOutboxState: Array<() => void> = [];
+  private cfcState: CfcTxState = {
+    relevant: false,
+    prepared: false,
+    preparedActivityDigest: undefined,
+    reasons: [],
+    outbox: [],
+  };
 
   constructor(public tx: IStorageTransaction) {}
 
   get cfcRelevant(): boolean {
-    return this.cfcRelevantState;
+    return this.cfcState.relevant;
   }
 
   get cfcPrepared(): boolean {
-    return this.cfcPreparedState;
+    return this.cfcState.prepared;
   }
 
   get preparedActivityDigest(): string | undefined {
-    return this.preparedActivityDigestState;
+    return this.cfcState.preparedActivityDigest;
   }
 
   get cfcReasons(): readonly string[] {
-    return this.cfcReasonsState.slice();
+    return this.cfcState.reasons.slice();
   }
 
   get cfcOutboxSize(): number {
-    return this.cfcOutboxState.length;
+    return this.cfcState.outbox.length;
   }
 
   get journal(): ITransactionJournal {
@@ -270,39 +280,39 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   markCfcRelevant(reason: string): void {
-    this.cfcRelevantState = true;
-    if (reason && !this.cfcReasonsState.includes(reason)) {
-      this.cfcReasonsState.push(reason);
+    this.cfcState.relevant = true;
+    if (reason && !this.cfcState.reasons.includes(reason)) {
+      this.cfcState.reasons.push(reason);
     }
   }
 
   markCfcPrepared(digest: string): void {
-    this.cfcRelevantState = true;
-    this.cfcPreparedState = true;
-    this.preparedActivityDigestState = digest;
+    this.cfcState.relevant = true;
+    this.cfcState.prepared = true;
+    this.cfcState.preparedActivityDigest = digest;
   }
 
   invalidateCfcPreparation(): void {
-    this.cfcPreparedState = false;
-    this.preparedActivityDigestState = undefined;
+    this.cfcState.prepared = false;
+    this.cfcState.preparedActivityDigest = undefined;
   }
 
   enqueueCfcSideEffect(effect: () => void): void {
-    this.cfcOutboxState.push(effect);
+    this.cfcState.outbox.push(effect);
     this.invalidateCfcPreparation();
   }
 
   private isCommitBearingAttempt(): boolean {
-    return this.cfcOutboxState.length > 0 ||
+    return this.cfcState.outbox.length > 0 ||
       hasWriteActivity(this.journal.activity());
   }
 
   private clearCfcOutbox(): void {
-    this.cfcOutboxState.length = 0;
+    this.cfcState.outbox.length = 0;
   }
 
   private flushCfcOutbox(): void {
-    const effects = this.cfcOutboxState.splice(0, this.cfcOutboxState.length);
+    const effects = this.cfcState.outbox.splice(0, this.cfcState.outbox.length);
     for (const effect of effects) {
       try {
         effect();
@@ -320,7 +330,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     }
 
     const commitBearing = this.isCommitBearingAttempt();
-    if (!this.cfcRelevantState || !commitBearing) {
+    if (!this.cfcState.relevant || !commitBearing) {
       const commitResult = await this.tx.commit();
       if (commitResult.error) {
         this.clearCfcOutbox();
@@ -330,7 +340,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       return commitResult;
     }
 
-    if (!this.cfcPreparedState || !this.preparedActivityDigestState) {
+    if (!this.cfcState.prepared || !this.cfcState.preparedActivityDigest) {
       const error = CfcPrepareRequiredError();
       this.clearCfcOutbox();
       const abortResult = this.tx.abort(error);
@@ -350,9 +360,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     const actualDigest = await computeCfcActivityDigest(
       this.journal.activity(),
     );
-    if (actualDigest !== this.preparedActivityDigestState) {
+    if (actualDigest !== this.cfcState.preparedActivityDigest) {
       const error = CfcPreparedDigestMismatchError(
-        this.preparedActivityDigestState,
+        this.cfcState.preparedActivityDigest,
         actualDigest,
       );
       this.clearCfcOutbox();
