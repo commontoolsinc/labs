@@ -455,6 +455,31 @@ Deno.test("simplifySchemaForContext handles Stream with nested detail structure"
 
 // Tests for resolveRefsForLLM
 
+Deno.test("resolveRefsForLLM converts boolean true schema to empty object", () => {
+  const result = resolveRefsForLLM(true as any);
+  assertEquals(result, {});
+});
+
+Deno.test("resolveRefsForLLM converts boolean false schema to negated object", () => {
+  const result = resolveRefsForLLM(false as any);
+  // toSchemaObj(false) → { not: true }, then the boolean `true` inside
+  // is itself normalized to {} (also a valid "matches anything" schema)
+  assertEquals(result, { not: {} });
+});
+
+Deno.test("resolveRefsForLLM converts boolean sub-schemas in properties to objects", () => {
+  const schema: any = {
+    type: "object",
+    properties: {
+      anything: true,
+      nothing: false,
+    },
+  };
+  const result = resolveRefsForLLM(schema) as any;
+  assertEquals(result.properties?.anything, {});
+  assertEquals(result.properties?.nothing, { not: true });
+});
+
 Deno.test("resolveRefsForLLM resolves simple $ref", () => {
   const schema: any = {
     type: "object",

@@ -116,53 +116,58 @@ function resolveRefsForLLM(
   schema: JSONSchema,
   maxDepth = 4,
 ): JSONSchema {
-  if (typeof schema !== "object" || schema === null) return schema;
-
-  const defs = (schema as any).$defs ?? {};
+  const schemaObj = ContextualFlowControl.toSchemaObj(
+    typeof schema === "boolean" ? schema : schema ?? undefined,
+  );
 
   function resolve(
-    node: any,
+    node: unknown,
     refDepth: number,
     activeRefs: Set<string>,
   ): any {
-    if (typeof node !== "object" || node === null) return node;
+    const nodeObj = ContextualFlowControl.toSchemaObj(
+      typeof node === "boolean" ? node : (node as JSONSchema) ?? undefined,
+    );
 
-    // Handle $ref
-    if (node.$ref && typeof node.$ref === "string") {
-      const match = node.$ref.match(/^#\/\$defs\/(.+)$/);
-      if (match) {
-        const defName = match[1];
-        if (activeRefs.has(defName) || refDepth >= maxDepth) {
-          // Circular or too deep — truncate
-          return { type: "object", additionalProperties: true };
-        }
-        const def = defs[defName];
-        if (def) {
-          const { $ref: _, ...rest } = node; // preserve sibling props
-          const newActiveRefs = new Set(activeRefs);
-          newActiveRefs.add(defName);
-          const resolved = resolve(def, refDepth + 1, newActiveRefs);
-          return Object.keys(rest).length > 0
-            ? { ...resolved, ...rest }
-            : resolved;
-        }
+    // Handle $ref using CFC's resolveSchemaRefs for chain resolution
+    if (nodeObj.$ref && typeof nodeObj.$ref === "string") {
+      const refString = nodeObj.$ref;
+      if (activeRefs.has(refString) || refDepth >= maxDepth) {
+        // Circular or too deep — truncate
+        return { type: "object", additionalProperties: true };
       }
-      // Unresolvable ref — return as generic object
-      return { type: "object", additionalProperties: true };
+      const resolved = ContextualFlowControl.resolveSchemaRefs(
+        nodeObj,
+        schema,
+      );
+      if (resolved === undefined) {
+        // Unresolvable or cyclic — truncate
+        return { type: "object", additionalProperties: true };
+      }
+      const resolvedObj = ContextualFlowControl.toSchemaObj(
+        typeof resolved === "boolean" ? resolved : resolved ?? undefined,
+      );
+      const newActiveRefs = new Set(activeRefs);
+      newActiveRefs.add(refString);
+      return resolve(resolvedObj, refDepth + 1, newActiveRefs);
     }
 
     // Recurse into object properties (does not increment refDepth)
     const result: any = {};
-    for (const [key, value] of Object.entries(node)) {
+    for (const [key, value] of Object.entries(nodeObj)) {
       if (key === "$defs") continue; // strip $defs from output
       if (Array.isArray(value)) {
         result[key] = value.map((item) =>
           typeof item === "object" && item !== null
             ? resolve(item, refDepth, activeRefs)
+            : typeof item === "boolean"
+            ? ContextualFlowControl.toSchemaObj(item)
             : item
         );
       } else if (typeof value === "object" && value !== null) {
         result[key] = resolve(value, refDepth, activeRefs);
+      } else if (typeof value === "boolean") {
+        result[key] = ContextualFlowControl.toSchemaObj(value);
       } else {
         result[key] = value;
       }
@@ -170,7 +175,7 @@ function resolveRefsForLLM(
     return result;
   }
 
-  return resolve(schema, 0, new Set());
+  return resolve(schemaObj, 0, new Set());
 }
 
 /**
