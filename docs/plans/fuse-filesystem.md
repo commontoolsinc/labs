@@ -93,7 +93,7 @@ hardcoded file. Validates that Deno FFI to libfuse works at all.
   - [x] `meta.json` per piece (read-only): ID, entityId, pattern name
   - [x] `space.json` per space: DID, space name
   - [x] `pieces/.index.json`: name-to-ID mapping
-  - [x] `entities/` reverse-lookup directory with symlinks
+  - [x] `entities/` directory for direct cell access by entity ID
 - [x] **1.7 Event loop integration**
   - [x] Already solved by `nonblocking: true` + `threadSafe` callbacks
   - [x] WebSocket subscriptions + FUSE requests serviced concurrently
@@ -169,8 +169,8 @@ hardcoded file. Validates that Deno FFI to libfuse works at all.
   - [ ] Consider kernel page cache (`-o auto_cache`) with active invalidation
   - [ ] Tune subscription scope (subscribe/unsubscribe by access pattern)
 - [x] **4.3 Entity view**
-  - [x] `entities/` subtree with symlinks for reverse-lookup by entity ID
-  - [x] Both `<hash>` and `of:<hash>` forms resolve to `../pieces/<name>`
+  - [x] `entities/` on-demand resolution: access any known entity by ID
+  - [x] Both `<hash>` and `of:<hash>` forms supported
 - [ ] **4.4 Testing**
   - [x] Unit: `tree-builder.ts` (36 tests — JSON types, circular refs, symlinks,
     handlers, stream values, sigil links)

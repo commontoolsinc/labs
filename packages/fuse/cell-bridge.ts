@@ -394,6 +394,50 @@ export class CellBridge {
   }
 
   /**
+   * Resolve an entity ID under a space's entities/ directory on demand.
+   * Finds the matching piece (by ID with or without "of:" prefix) and
+   * builds its tree under entities/<entityId>.
+   * Returns true if resolved successfully.
+   */
+  async resolveEntity(
+    entitiesIno: bigint,
+    entityId: string,
+  ): Promise<boolean> {
+    // Already resolved?
+    if (this.tree.lookup(entitiesIno, entityId) !== undefined) return true;
+
+    // Find the space that owns this entities/ dir
+    let state: SpaceState | undefined;
+    let spaceName: string | undefined;
+    for (const [name, s] of this.spaces) {
+      if (s.entitiesIno === entitiesIno) {
+        state = s;
+        spaceName = name;
+        break;
+      }
+    }
+    if (!state || !spaceName) return false;
+
+    // Match entity ID against known pieces (with or without of: prefix)
+    const bareId = entityId.startsWith("of:") ? entityId.slice(3) : entityId;
+    let matchedPiece: PieceController | undefined;
+    for (const [, piece] of state.pieceControllers) {
+      const pieceBareid = piece.id.startsWith("of:")
+        ? piece.id.slice(3)
+        : piece.id;
+      if (pieceBareid === bareId) {
+        matchedPiece = piece;
+        break;
+      }
+    }
+    if (!matchedPiece) return false;
+
+    // Build the piece tree under entities/<entityId>
+    await this.loadPieceTree(matchedPiece, entitiesIno, entityId, spaceName);
+    return true;
+  }
+
+  /**
    * Add a single piece to a space's tree, subscribe to its cells.
    * Returns the assigned display name.
    */
@@ -420,15 +464,6 @@ export class CellBridge {
       spaceName,
     );
 
-    // Create entities/ symlink for reverse-lookup by entity ID.
-    // Sigil links use "of:<hash>" so we create entries for both forms.
-    this.tree.addSymlink(state.entitiesIno, piece.id, `../pieces/${name}`);
-    this.tree.addSymlink(
-      state.entitiesIno,
-      `of:${piece.id}`,
-      `../pieces/${name}`,
-    );
-
     const subs = await this.subscribePiece(piece, pieceIno, name, spaceName);
     state.pieceSubs.set(name, subs);
 
@@ -444,13 +479,6 @@ export class CellBridge {
     if (subs) {
       for (const cancel of subs) cancel();
       state.pieceSubs.delete(name);
-    }
-
-    // Remove entities/ symlinks
-    const entityId = state.pieceMap.get(name);
-    if (entityId) {
-      this.tree.removeChild(state.entitiesIno, entityId);
-      this.tree.removeChild(state.entitiesIno, `of:${entityId}`);
     }
 
     // Remove tree nodes

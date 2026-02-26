@@ -197,6 +197,26 @@ async function main() {
         return;
       }
 
+      // On-demand entity resolution under <space>/entities/
+      if (bridge && !name.startsWith(".")) {
+        bridge.resolveEntity(parent, name).then((resolved) => {
+          if (resolved) {
+            const newIno = tree.lookup(parent, name);
+            if (newIno !== undefined) {
+              const newNode = tree.getNode(newIno);
+              if (newNode) {
+                replyEntry(req, newIno, newNode);
+                return;
+              }
+            }
+          }
+          fuse.symbols.fuse_reply_err(req, ENOENT);
+        }).catch(() => {
+          fuse.symbols.fuse_reply_err(req, ENOENT);
+        });
+        return;
+      }
+
       fuse.symbols.fuse_reply_err(req, ENOENT);
     },
   );
