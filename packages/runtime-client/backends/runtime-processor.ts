@@ -418,6 +418,39 @@ export class RuntimeProcessor {
     const cell = getCell(this.runtime, request.cell);
 
     const cancel = cell.sink((value) => {
+      // If the value is a CellResult proxy (from a cell with no/empty schema),
+      // convert it to a link immediately rather than walking into it.
+      // This prevents deep proxy traversal that can exceed
+      // MAX_RECURSION_DEPTH when VNode trees reference other pieces.
+      // Only apply this for cells without a meaningful schema — cells with
+      // schemas produce resolved plain objects from validateAndTransform.
+      // TODO(CT-1273): Once all pattern callsites produce real result schemas
+      // (CTS now errors on `any`/`unknown` inference), remove this guard and
+      // replace with a console.error — hitting this path would then indicate
+      // a bug rather than a known limitation.
+      const hasSchema = request.cell.schema &&
+        typeof request.cell.schema === "object" &&
+        Object.keys(request.cell.schema).length > 0;
+      if (!hasSchema && isCellResult(value)) {
+        console.warn(
+          `[handleCellSubscribe] Cell subscription without schema produced ` +
+            `CellResult proxy — converting to link. This may indicate a ` +
+            `missing schema declaration. cell=${request.cell.id.slice(-20)} ` +
+            `path=${request.cell.path.join("/")}`,
+        );
+        const converted = getCellOrThrow(value).getAsLink({
+          includeSchema: true,
+          keepAsCell: true,
+        });
+        queueMicrotask(() =>
+          self.postMessage({
+            type: NotificationType.CellUpdate,
+            cell: request.cell,
+            value: converted,
+          })
+        );
+        return;
+      }
       const converted = convertCellsToLinks(value, {
         includeSchema: true,
         keepAsCell: true,
