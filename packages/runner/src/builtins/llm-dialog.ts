@@ -35,6 +35,7 @@ import {
   matchLLMFriendlyLink,
   parseLink,
   parseLLMFriendlyLink,
+  sanitizeSchemaForLinks,
 } from "../link-utils.ts";
 import {
   getCellOrThrow,
@@ -94,7 +95,93 @@ function normalizeInputSchema(schemaLike: unknown): JSONSchema {
     };
   }
   if (!isObject(inputSchema)) inputSchema = { type: "object" };
-  return stripInjectedResult(inputSchema) as JSONSchema;
+  const stripped = stripInjectedResult(inputSchema) as JSONSchema;
+  return prepareSchemaForLLM(stripped);
+}
+
+/**
+ * Inline all `$ref: "#/$defs/X"` references in a JSON schema, producing a
+ * self-contained schema with no `$ref` or `$defs`.
+ *
+ * Circular references are detected by tracking which definition names are
+ * currently being resolved on the active path. When a cycle is found (or
+ * `maxDepth` $ref resolutions are exceeded), the node is truncated to a
+ * permissive object.
+ *
+ * `refDepth` only increments when resolving a `$ref`, not when recursing into
+ * regular JSON properties, so deeply nested but non-recursive schemas pass
+ * through without truncation.
+ */
+function resolveRefsForLLM(
+  schema: JSONSchema,
+  maxDepth = 4,
+): JSONSchema {
+  if (typeof schema !== "object" || schema === null) return schema;
+
+  const defs = (schema as any).$defs ?? {};
+
+  function resolve(
+    node: any,
+    refDepth: number,
+    activeRefs: Set<string>,
+  ): any {
+    if (typeof node !== "object" || node === null) return node;
+
+    // Handle $ref
+    if (node.$ref && typeof node.$ref === "string") {
+      const match = node.$ref.match(/^#\/\$defs\/(.+)$/);
+      if (match) {
+        const defName = match[1];
+        if (activeRefs.has(defName) || refDepth >= maxDepth) {
+          // Circular or too deep — truncate
+          return { type: "object", additionalProperties: true };
+        }
+        const def = defs[defName];
+        if (def) {
+          const { $ref: _, ...rest } = node; // preserve sibling props
+          const newActiveRefs = new Set(activeRefs);
+          newActiveRefs.add(defName);
+          const resolved = resolve(def, refDepth + 1, newActiveRefs);
+          return Object.keys(rest).length > 0
+            ? { ...resolved, ...rest }
+            : resolved;
+        }
+      }
+      // Unresolvable ref — return as generic object
+      return { type: "object", additionalProperties: true };
+    }
+
+    // Recurse into object properties (does not increment refDepth)
+    const result: any = {};
+    for (const [key, value] of Object.entries(node)) {
+      if (key === "$defs") continue; // strip $defs from output
+      if (Array.isArray(value)) {
+        result[key] = value.map((item) =>
+          typeof item === "object" && item !== null
+            ? resolve(item, refDepth, activeRefs)
+            : item
+        );
+      } else if (typeof value === "object" && value !== null) {
+        result[key] = resolve(value, refDepth, activeRefs);
+      } else {
+        result[key] = value;
+      }
+    }
+    return result;
+  }
+
+  return resolve(schema, 0, new Set());
+}
+
+/**
+ * Prepare a schema for use in LLM tool definitions by:
+ * 1. Stripping internal markers (asCell, asStream, asOpaque)
+ * 2. Inlining all $ref references
+ */
+function prepareSchemaForLLM(schema: JSONSchema): JSONSchema {
+  if (typeof schema !== "object" || schema === null) return schema;
+  const sanitized = sanitizeSchemaForLinks(schema);
+  return resolveRefsForLLM(sanitized);
 }
 
 /**
@@ -1391,6 +1478,8 @@ export const llmDialogTestHelpers = {
   hasValidContent,
   PRESENT_RESULT_TOOL_NAME,
   simplifySchemaForContext,
+  prepareSchemaForLLM,
+  resolveRefsForLLM,
 };
 
 /**
@@ -1407,6 +1496,7 @@ export const llmToolExecutionHelpers = {
   hasValidContent,
   buildAvailableCellsDocumentation,
   traverseAndCellify,
+  prepareSchemaForLLM,
 };
 
 /**
@@ -2149,7 +2239,9 @@ async function startRequest(
     toolCatalog.llmTools[PRESENT_RESULT_TOOL_NAME] = {
       description:
         "Call this tool to present a structured result. This stores the result for the caller.",
-      inputSchema: JSON.parse(JSON.stringify(userResultSchema)),
+      inputSchema: prepareSchemaForLLM(
+        JSON.parse(JSON.stringify(userResultSchema)),
+      ),
     };
   }
 
