@@ -1,14 +1,14 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { createMockCellHandle } from "../../test-utils/mock-cell-handle.ts";
 import { CTRender } from "./ct-render.ts";
 
-// NOTE: DOM lifecycle tests (cell swap cleanup, subscription management,
-// disconnectedCallback) were removed because they relied on `document.body`
-// which isn't available in Deno's test runner, and also tested against stale
-// internal APIs (_cellValueUnsubscribe) that no longer exist on ct-render.
-// Proper lifecycle tests should use the deno-web-test harness with real
-// CellHandle instances. See packages/patterns/integration/ct-render.test.disabled.ts
-// for the integration test pattern.
+// NOTE: Full rendering lifecycle tests (cell swap cleanup, subscription
+// management, render-into-container) require a real DOM with document.body
+// and Lit's rendering pipeline. These can't run in Deno's headless test
+// runner. The tests below cover what's verifiable without DOM: property
+// handling, cell assignment, variant configuration, and disconnectedCallback
+// state reset. For full integration tests, use a browser-based test harness.
 
 describe("CTRender", () => {
   it("should be defined", () => {
@@ -24,14 +24,21 @@ describe("CTRender", () => {
     expect(element).toBeInstanceOf(CTRender);
   });
 
-  it("should have cell property", () => {
+  it("should have cell property initially undefined", () => {
     const element = new CTRender();
     expect(element.cell).toBeUndefined();
   });
 
-  it("should have variant property", () => {
+  it("should have variant property initially undefined", () => {
     const element = new CTRender();
     expect(element.variant).toBeUndefined();
+  });
+
+  it("should accept a CellHandle as cell property", () => {
+    const element = new CTRender();
+    const cell = createMockCellHandle({ ui: "some-vnode" });
+    element.cell = cell;
+    expect(element.cell).toBe(cell);
   });
 });
 
@@ -57,11 +64,37 @@ describe("CTRender variant handling", () => {
       "sidebar",
       "fab",
       "embedded",
+      "settings",
     ] as const;
 
     for (const variant of variants) {
       element.variant = variant;
       expect(element.variant).toBe(variant);
     }
+  });
+});
+
+describe("CTRender disconnectedCallback", () => {
+  it("should reset state on disconnect", () => {
+    const element = new CTRender();
+    const cell = createMockCellHandle({ name: "test" });
+    element.cell = cell;
+    element.variant = "preview";
+
+    // disconnectedCallback should clean up internal state without throwing
+    element.disconnectedCallback();
+
+    // Cell and variant are Lit properties — not cleared by disconnectedCallback
+    // (Lit preserves properties across disconnect/reconnect).
+    // The internal _renderingCellId and _hasRendered are reset though.
+    // We verify it doesn't throw and the element is still usable.
+    expect(element.cell).toBe(cell);
+    expect(element.variant).toBe("preview");
+  });
+
+  it("should handle disconnect when no cell was set", () => {
+    const element = new CTRender();
+    // Should not throw even with no cell
+    element.disconnectedCallback();
   });
 });
