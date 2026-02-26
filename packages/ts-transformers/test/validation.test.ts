@@ -640,6 +640,45 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
       "Map callback outside JSX in pattern should be allowed (transformed to pattern)",
     );
   });
+
+  await t.step(
+    "allows nested map/filter callbacks inside module-scope helpers",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      interface Entry {
+        label: string;
+        score: number;
+      }
+
+      const normalize = (entries: Entry[]) =>
+        entries
+          .map((entry) => ({
+            label: entry.label.trim(),
+            score: entry.score,
+          }))
+          .filter((entry) => entry.score > 0);
+
+      export default pattern<{ entries: Entry[] }>(({ entries }) => {
+        const normalized = normalize(entries);
+        return { normalized };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const creationErrors = errors.filter((error) =>
+        error.type === "pattern-context:function-creation"
+      );
+      assertEquals(
+        creationErrors.length,
+        0,
+        "Callbacks in standalone helpers should not be flagged as pattern-context function creation",
+      );
+    },
+  );
 });
 
 Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
@@ -1286,6 +1325,32 @@ Deno.test("Standalone Function Validation", async (t) => {
         errors.length,
         0,
         "Reactive operations inside patternTool() should be allowed",
+      );
+    },
+  );
+
+  await t.step(
+    "keeps unresolved patternTool callbacks in compute context",
+    async () => {
+      const source = `/// <cts-enable />
+      const helpers: Record<string, unknown> = {};
+
+      const tool = (helpers.patternTool as (fn: (input: { value?: string }) => string | undefined) => unknown)(
+        (input) => input?.value,
+      );
+      tool;
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const optionalErrors = errors.filter((error) =>
+        error.type === "pattern-context:optional-chaining"
+      );
+      assertEquals(
+        optionalErrors.length,
+        0,
+        "Callbacks passed to name-matched patternTool should not be treated as restricted pattern context",
       );
     },
   );

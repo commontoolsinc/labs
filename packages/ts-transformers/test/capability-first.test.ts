@@ -58,6 +58,48 @@ const p = pattern(({ list }: { list: string[] }) => <div>{[0, 1].forEach(() => l
 );
 
 Deno.test(
+  "Capability-first: JSX map/filter chain keeps filter callback in compute context",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern } from "commontools";
+
+interface Item {
+  name: string;
+  active: boolean;
+}
+
+const p = pattern<{ list: Item[] }>(({ list }) => (
+  <div>
+    {list
+      .map((item) => ({
+        name: item.name,
+        active: item.active,
+      }))
+      .filter((entry) => entry.active)
+      .map((entry) => <span>{entry.name}</span>)}
+  </div>
+));
+`;
+
+    const { diagnostics } = await validateSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
+    });
+    const output = await transformSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
+    });
+
+    const creationDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-context:function-creation"
+    );
+    assertEquals(creationDiagnostics.length, 0);
+    assertStringIncludes(output, ".filter((entry) => entry.active)");
+    assert(!output.includes('entry.key("active")'));
+  },
+);
+
+Deno.test(
   "Capability-first: rewritten mapWithPattern callback uses key(...) canonicalization",
   async () => {
     const source = `/// <cts-enable />
@@ -336,6 +378,28 @@ const p = pattern((input: Writable<{ foo: string; bar: string }>) => input.key("
     assertStringIncludes(output, "asCell: true");
     assertStringIncludes(output, '"foo"');
     assert(!output.includes('"bar"'));
+  },
+);
+
+Deno.test(
+  "Capability-first: shrunk undefined-union field stays optional in schema",
+  async () => {
+    const source = `/// <cts-enable />
+import { lift, type Writable } from "commontools";
+const fn = lift((input: Writable<{ foo: string | undefined; bar: string }>) =>
+  input.key("foo").get()
+);
+`;
+
+    const output = await transformSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, "asCell: true");
+    assertStringIncludes(output, '"foo"');
+    assert(!output.includes('"bar"'));
+    assert(!output.includes('required: ["foo"]'));
   },
 );
 

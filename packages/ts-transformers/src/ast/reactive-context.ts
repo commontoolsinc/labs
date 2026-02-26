@@ -7,6 +7,7 @@ export type ReactiveContextOwner =
   | "pattern"
   | "render"
   | "array-map"
+  | "jsx-callback"
   | "computed"
   | "derive"
   | "action"
@@ -78,6 +79,31 @@ function isInlineJsxEventHandler(
   return jsxExprParent.name.getText().startsWith("on");
 }
 
+function isWithinJsxExpression(node: ts.Node): boolean {
+  let current: ts.Node | undefined = node.parent;
+  while (current) {
+    if (ts.isJsxExpression(current)) {
+      return true;
+    }
+    current = current.parent;
+  }
+  return false;
+}
+
+function isNamedCallbackCall(
+  call: ts.CallExpression,
+  name: string,
+): boolean {
+  const expression = call.expression;
+  if (ts.isIdentifier(expression)) {
+    return expression.text === name;
+  }
+  if (ts.isPropertyAccessExpression(expression)) {
+    return expression.name.text === name;
+  }
+  return false;
+}
+
 export function isStandaloneFunctionDefinition(
   func: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration,
 ): boolean {
@@ -145,6 +171,12 @@ export function classifyReactiveContext(
     }
 
     if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
+      // Transformed mapWithPattern callbacks are explicitly tracked and should
+      // always be treated as pattern callbacks, regardless of symbol lookup.
+      if (lookup?.isMapCallback(current)) {
+        return { kind: "pattern", owner: "array-map", inJsxExpression };
+      }
+
       if (isInlineJsxEventHandler(current)) {
         return { kind: "compute", owner: "handler", inJsxExpression };
       }
@@ -177,11 +209,25 @@ export function classifyReactiveContext(
         }
 
         if (callKind?.kind === "array-map") {
-          // Only transformed mapWithPattern callbacks are treated as pattern callbacks.
-          if (!lookup || lookup.isMapCallback(current)) {
-            return { kind: "pattern", owner: "array-map", inJsxExpression };
-          }
-          // Non-transformed callbacks inherit the parent context.
+          // Non-transformed map callbacks inherit the parent context.
+          current = current.parent;
+          continue;
+        }
+
+        // Fallback for synthetic helper calls where symbol-based call-kind
+        // classification can fail transiently during transformation.
+        if (
+          isNamedCallbackCall(callParent, "pattern") ||
+          isNamedCallbackCall(callParent, "patternTool")
+        ) {
+          return { kind: "pattern", owner: "pattern", inJsxExpression };
+        }
+
+        // Unknown callbacks inside JSX expressions should run in compute context.
+        // This ensures chains like `list.map(...).filter(...)` are treated as
+        // compute callbacks rather than pattern callbacks.
+        if (inJsxExpression || isWithinJsxExpression(current)) {
+          return { kind: "compute", owner: "jsx-callback", inJsxExpression };
         }
       }
     }

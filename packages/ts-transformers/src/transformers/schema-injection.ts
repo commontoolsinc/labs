@@ -14,6 +14,7 @@ import {
   unwrapOpaqueLikeType,
   widenLiteralType,
 } from "../ast/mod.ts";
+import { createPropertyName } from "../utils/identifiers.ts";
 import {
   type CapabilityParamSummary,
   type CapabilitySummaryRegistry,
@@ -101,6 +102,27 @@ function groupPathsByHead(
   return grouped;
 }
 
+function typeIncludesUndefined(type: ts.Type): boolean {
+  if ((type.flags & ts.TypeFlags.Undefined) !== 0) {
+    return true;
+  }
+  if ((type.flags & ts.TypeFlags.Union) !== 0) {
+    const union = type as ts.UnionType;
+    return union.types.some((member) => typeIncludesUndefined(member));
+  }
+  return false;
+}
+
+function typeNodeIncludesUndefined(node: ts.TypeNode): boolean {
+  if (node.kind === ts.SyntaxKind.UndefinedKeyword) {
+    return true;
+  }
+  if (ts.isUnionTypeNode(node)) {
+    return node.types.some((member) => typeNodeIncludesUndefined(member));
+  }
+  return false;
+}
+
 function buildShrunkTypeNodeFromType(
   type: ts.Type,
   paths: readonly (readonly string[])[],
@@ -126,11 +148,35 @@ function buildShrunkTypeNodeFromType(
   const properties: ts.TypeElement[] = [];
 
   for (const [head, childPaths] of grouped) {
+    let propType: ts.Type | undefined;
+    let isOptional = false;
+
     const prop = type.getProperty(head);
-    if (!prop) continue;
-    const declaration = prop.valueDeclaration ?? prop.declarations?.[0] ??
-      sourceFile;
-    const propType = checker.getTypeOfSymbolAtLocation(prop, declaration);
+    if (prop) {
+      const declaration = prop.valueDeclaration ?? prop.declarations?.[0] ??
+        sourceFile;
+      propType = checker.getTypeOfSymbolAtLocation(prop, declaration);
+      isOptional = !!(prop.flags & ts.SymbolFlags.Optional) ||
+        (propType ? typeIncludesUndefined(propType) : false);
+    } else {
+      // Numeric/unknown-key accesses can be represented via index signatures
+      // rather than named properties. Use the index type when available.
+      const numericIndex = Number.isFinite(Number(head));
+      const indexType = checker.getIndexTypeOfType(
+        type,
+        numericIndex ? ts.IndexKind.Number : ts.IndexKind.String,
+      ) ?? checker.getIndexTypeOfType(type, ts.IndexKind.String);
+      if (!indexType) continue;
+      propType = indexType;
+      isOptional = typeIncludesUndefined(indexType);
+    }
+
+    if (!propType || isAnyOrUnknownType(propType)) {
+      // Preserve the original node-based type when type-based fallback
+      // cannot provide concrete property shape.
+      continue;
+    }
+
     const propTypeNode = buildShrunkTypeNodeFromType(
       propType,
       childPaths,
@@ -144,11 +190,10 @@ function buildShrunkTypeNodeFromType(
         ts.NodeBuilderFlags.UseStructuralFallback,
     ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
 
-    const isOptional = !!(prop.flags & ts.SymbolFlags.Optional);
     properties.push(
       factory.createPropertySignature(
         undefined,
-        factory.createIdentifier(head),
+        createPropertyName(head, factory),
         isOptional
           ? factory.createToken(ts.SyntaxKind.QuestionToken)
           : undefined,
@@ -211,7 +256,10 @@ function buildShrunkTypeNodeFromTypeNode(
           member,
           member.modifiers,
           member.name,
-          member.questionToken,
+          member.questionToken ??
+            (typeNodeIncludesUndefined(shrunkChild)
+              ? factory.createToken(ts.SyntaxKind.QuestionToken)
+              : undefined),
           shrunkChild,
         ),
       );

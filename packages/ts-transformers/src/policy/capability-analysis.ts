@@ -196,8 +196,87 @@ function isDeclarationIdentifier(node: ts.Identifier): boolean {
   return false;
 }
 
+function isNonValueIdentifierUsage(node: ts.Identifier): boolean {
+  const parent = node.parent;
+  if (!parent) return false;
+
+  if (ts.isPropertyAssignment(parent) && parent.name === node) return true;
+  if (ts.isPropertySignature(parent) && parent.name === node) return true;
+  if (ts.isPropertyDeclaration(parent) && parent.name === node) return true;
+  if (ts.isMethodDeclaration(parent) && parent.name === node) return true;
+  if (ts.isBindingElement(parent) && parent.propertyName === node) return true;
+
+  return false;
+}
+
 function isAssignmentOperator(kind: ts.SyntaxKind): boolean {
   return ASSIGNMENT_OPERATORS.has(kind);
+}
+
+function unwrapIdentifierUsageSite(node: ts.Identifier): ts.Expression {
+  let current: ts.Expression = node;
+  while (true) {
+    const parent = current.parent;
+    if (!parent) {
+      return current;
+    }
+    if (
+      (ts.isParenthesizedExpression(parent) ||
+        ts.isAsExpression(parent) ||
+        ts.isTypeAssertionExpression(parent) ||
+        ts.isSatisfiesExpression(parent) ||
+        ts.isNonNullExpression(parent)) &&
+      parent.expression === current
+    ) {
+      current = parent;
+      continue;
+    }
+    return current;
+  }
+}
+
+function isPassThroughIdentifierUsage(node: ts.Identifier): boolean {
+  const usage = unwrapIdentifierUsageSite(node);
+  const parent = usage.parent;
+  if (!parent) return false;
+
+  if (ts.isArrowFunction(parent) && parent.body === usage) return true;
+  if (ts.isReturnStatement(parent) && parent.expression === usage) return true;
+  if (ts.isVariableDeclaration(parent) && parent.initializer === usage) {
+    return true;
+  }
+  if (ts.isPropertyAssignment(parent) && parent.initializer === usage) {
+    return true;
+  }
+  if (ts.isShorthandPropertyAssignment(parent) && parent.name === usage) {
+    return true;
+  }
+  if (ts.isArrayLiteralExpression(parent) && parent.elements.includes(usage)) {
+    return true;
+  }
+  if (
+    ts.isBinaryExpression(parent) &&
+    parent.right === usage &&
+    isAssignmentOperator(parent.operatorToken.kind)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function isCallOrNewArgumentUsage(
+  usage: ts.Expression,
+): boolean {
+  const parent = usage.parent;
+  if (!parent) return false;
+  if (ts.isCallExpression(parent)) {
+    return parent.arguments.includes(usage);
+  }
+  if (ts.isNewExpression(parent) && parent.arguments) {
+    return parent.arguments.includes(usage);
+  }
+  return false;
 }
 
 function clearBindingAliases(
@@ -640,31 +719,53 @@ export function analyzeFunctionCapabilities(
     if (ts.isIdentifier(node)) {
       if (isDeclarationIdentifier(node)) {
         // Ignore declaration sites.
+      } else if (isNonValueIdentifierUsage(node)) {
+        // Ignore key names and non-value positions.
       } else {
         const source = aliases.get(node.text);
         if (source && !isMemberRootIdentifier(node)) {
-          const parent = node.parent;
-          if (
+          const usage = unwrapIdentifierUsageSite(node);
+          const parent = usage.parent;
+          if (!parent) {
+            // Synthetic identifiers can temporarily be detached from parent links.
+            // Preserve narrowed-path reads while avoiding false root-read expansion.
+            if (!source.dynamic && source.path.length === 0) {
+              markPassthrough(source.root);
+            } else {
+              trackReadRef(source);
+            }
+          } else if (
             !(
               parent &&
               ts.isPropertyAccessExpression(parent) &&
-              parent.name === node
+              parent.name === usage
             ) && !(
               parent &&
               ts.isBinaryExpression(parent) &&
-              parent.left === node &&
+              parent.left === usage &&
               isAssignmentOperator(parent.operatorToken.kind)
             ) && !(
               parent &&
               (ts.isPrefixUnaryExpression(parent) ||
                 ts.isPostfixUnaryExpression(parent)) &&
+              parent.operand === usage &&
               (
                 parent.operator === ts.SyntaxKind.PlusPlusToken ||
                 parent.operator === ts.SyntaxKind.MinusMinusToken
               )
             )
           ) {
-            markPassthrough(source.root);
+            if (isCallOrNewArgumentUsage(usage)) {
+              if (source.path.length === 0 && !source.dynamic) {
+                markPassthrough(source.root);
+              } else {
+                trackReadRef(source);
+              }
+            } else if (isPassThroughIdentifierUsage(node)) {
+              markPassthrough(source.root);
+            } else {
+              trackReadRef(source);
+            }
           }
         }
       }
@@ -714,6 +815,17 @@ export function analyzeFunctionCapabilities(
             trackReadRef(receiver);
           }
         }
+      }
+
+      // Passing a tracked root object into an opaque helper can conceal
+      // indirect traversal/mutation; conservatively disable shrinking.
+      for (const argument of node.arguments) {
+        const unwrappedArgument = unwrapExpression(argument);
+        if (!ts.isIdentifier(unwrappedArgument)) continue;
+        const source = resolveSourceRef(unwrappedArgument);
+        if (!source) continue;
+        if (source.dynamic || source.path.length > 0) continue;
+        markWildcard(source.root);
       }
 
       // Full-shape operations.

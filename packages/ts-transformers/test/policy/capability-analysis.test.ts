@@ -182,3 +182,38 @@ Deno.test("Capability analysis classifies pure passthrough as opaque", () => {
   assertEquals(input.writePaths.length, 0);
   assertEquals(input.passthrough, true);
 });
+
+Deno.test("Capability analysis marks root call arguments as wildcard", () => {
+  const fn = parseFirstCallback(
+    `const fn = (input) => {
+      consume(input);
+    };`,
+  );
+  const summary = analyzeFunctionCapabilities(fn);
+  const input = getPaths(summary, "input");
+
+  assertEquals(input.capability, "opaque");
+  assertEquals(input.passthrough, true);
+  assertEquals(input.wildcard, true);
+  assertEquals(input.readPaths.length, 0);
+  assertEquals(input.writePaths.length, 0);
+});
+
+Deno.test(
+  "Capability analysis treats new-expression root arguments as passthrough",
+  () => {
+    const fn = parseFirstCallback(
+      `const fn = (input) => {
+        return new Wrapper(input);
+      };`,
+    );
+    const summary = analyzeFunctionCapabilities(fn);
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.capability, "opaque");
+    assertEquals(input.passthrough, true);
+    assertEquals(input.wildcard, false);
+    assertEquals(input.readPaths.length, 0);
+    assertEquals(input.writePaths.length, 0);
+  },
+);

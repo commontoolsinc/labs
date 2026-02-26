@@ -188,6 +188,72 @@ function isFallbackOperator(kind: ts.SyntaxKind): boolean {
     kind === ts.SyntaxKind.BarBarToken;
 }
 
+function bindingContainsName(
+  binding: ts.BindingName,
+  name: string,
+): boolean {
+  if (ts.isIdentifier(binding)) {
+    return binding.text === name;
+  }
+  for (const element of binding.elements) {
+    if (ts.isOmittedExpression(element)) continue;
+    if (bindingContainsName(element.name, name)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isPatternBuilderCallback(
+  node: ts.ArrowFunction | ts.FunctionExpression,
+  context: TransformationContext,
+): boolean {
+  const parent = node.parent;
+  if (!parent || !ts.isCallExpression(parent)) {
+    return false;
+  }
+  if (!parent.arguments.includes(node)) {
+    return false;
+  }
+
+  const kind = detectCallKind(parent, context.checker);
+  if (kind?.kind === "builder" && kind.builderName === "pattern") {
+    return true;
+  }
+
+  const expression = unwrapExpression(parent.expression);
+  if (ts.isIdentifier(expression)) {
+    return expression.text === "pattern";
+  }
+  if (ts.isPropertyAccessExpression(expression)) {
+    return expression.name.text === "pattern";
+  }
+  return false;
+}
+
+function isIdentifierBoundInPatternCallback(
+  identifier: ts.Identifier,
+  context: TransformationContext,
+): boolean {
+  let current: ts.Node | undefined = identifier.parent;
+  while (current) {
+    if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
+      if (!isPatternBuilderCallback(current, context)) {
+        current = current.parent;
+        continue;
+      }
+
+      const firstParam = current.parameters[0];
+      if (!firstParam) {
+        return false;
+      }
+      return bindingContainsName(firstParam.name, identifier.text);
+    }
+    current = current.parent;
+  }
+  return false;
+}
+
 function isReactiveMapOrigin(
   expression: ts.Expression,
   context: TransformationContext,
@@ -250,6 +316,10 @@ function isReactiveMapOrigin(
     return false;
   }
 
+  if (isIdentifierBoundInPatternCallback(current, context)) {
+    return true;
+  }
+
   const symbol = context.checker.getSymbolAtLocation(current);
   if (!symbol || seenSymbols.has(symbol)) {
     return false;
@@ -257,6 +327,23 @@ function isReactiveMapOrigin(
   seenSymbols.add(symbol);
 
   for (const declaration of symbol.declarations ?? []) {
+    if (ts.isParameter(declaration)) {
+      return true;
+    }
+
+    if (ts.isBindingElement(declaration)) {
+      let current: ts.Node | undefined = declaration.parent;
+      while (current) {
+        if (ts.isParameter(current)) {
+          return true;
+        }
+        if (ts.isSourceFile(current)) {
+          break;
+        }
+        current = current.parent;
+      }
+    }
+
     if (ts.isVariableDeclaration(declaration) && declaration.initializer) {
       if (isReactiveMapOrigin(declaration.initializer, context, seenSymbols)) {
         return true;
@@ -542,6 +629,11 @@ export function transformMapCallback(
   visitor: ts.Visitor,
 ): ts.CallExpression {
   const { checker } = context;
+
+  // Mark the authored callback before visiting nested expressions so context
+  // classification during this transform can treat nested map calls as being
+  // inside a transformed map callback.
+  context.markAsMapCallback(callback);
 
   // Collect captured variables from the callback
   const collector = new CaptureCollector(checker);

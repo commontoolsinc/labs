@@ -1,6 +1,5 @@
 import ts from "typescript";
 import {
-  classifyReactiveContext,
   detectCallKind,
   isFunctionLikeExpression,
   visitEachChildWithJsx,
@@ -95,6 +94,7 @@ function getAccessInfo(expr: ts.Expression): {
 
 function isTopmostMemberAccess(node: ts.Node): boolean {
   const parent = node.parent;
+  if (!parent) return true;
   return !(
     (ts.isPropertyAccessExpression(parent) ||
       ts.isElementAccessExpression(parent)) &&
@@ -416,15 +416,6 @@ function rewritePatternBody(
 
     const visited = visitEachChildWithJsx(node, visit, context.tsContext);
 
-    const contextInfo = classifyReactiveContext(
-      visited,
-      context.checker,
-      context,
-    );
-    if (contextInfo.kind !== "pattern") {
-      return visited;
-    }
-
     if (
       (ts.isPropertyAccessExpression(visited) ||
         ts.isElementAccessExpression(visited)) &&
@@ -444,8 +435,22 @@ function rewritePatternBody(
         return visited;
       }
 
+      if (
+        ts.isPropertyAccessExpression(visited) &&
+        KNOWN_PATH_TERMINAL_METHODS.has(visited.name.text)
+      ) {
+        const parent = visited.parent;
+        if (
+          !parent ||
+          (ts.isCallExpression(parent) && parent.expression === visited)
+        ) {
+          return visited;
+        }
+      }
+
       const parent = visited.parent;
       if (
+        !!parent &&
         ts.isCallExpression(parent) &&
         parent.expression === visited &&
         ts.isPropertyAccessExpression(visited)

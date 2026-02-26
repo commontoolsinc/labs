@@ -75,7 +75,7 @@ export class PatternContextValidationTransformer extends Transformer {
         ts.isPropertyAccessExpression(node) &&
         node.questionDotToken
       ) {
-        if (isInRestrictedReactiveContext(node, checker)) {
+        if (isInRestrictedReactiveContext(node, checker, context)) {
           context.reportDiagnostic({
             severity: "error",
             type: "pattern-context:optional-chaining",
@@ -97,7 +97,7 @@ export class PatternContextValidationTransformer extends Transformer {
         // Note: We use isInsideRestrictedContext, not isInRestrictedReactiveContext, because
         // the map-on-fallback pattern fails even inside JSX expressions (which are "safe" for
         // other validations but still need this check).
-        if (isInsideRestrictedContext(node, checker)) {
+        if (isInsideRestrictedContext(node, checker, context)) {
           if (useLegacy) {
             this.validateMapOnFallbackExpression(node, context, checker);
           }
@@ -106,7 +106,7 @@ export class PatternContextValidationTransformer extends Transformer {
         // Check for .get() calls
         if (
           this.isGetCall(node) &&
-          isInRestrictedReactiveContext(node, checker)
+          isInRestrictedReactiveContext(node, checker, context)
         ) {
           context.reportDiagnostic({
             severity: "error",
@@ -166,7 +166,7 @@ export class PatternContextValidationTransformer extends Transformer {
     analyze: ReturnType<typeof createDataFlowAnalyzer>,
   ): void {
     // Skip if not in restricted reactive context
-    if (!isInRestrictedReactiveContext(node, checker)) {
+    if (!isInRestrictedReactiveContext(node, checker, context)) {
       return;
     }
 
@@ -251,14 +251,14 @@ export class PatternContextValidationTransformer extends Transformer {
     if (this.isInsideJsx(node)) return;
 
     // Skip if inside safe wrapper callback (computed, action, derive, lift, handler)
-    if (isInsideSafeCallbackWrapper(node, checker)) return;
+    if (isInsideSafeCallbackWrapper(node, checker, context)) return;
 
     // Skip if this function IS a callback to a safe wrapper
     // e.g., computed(() => ...), action(() => ...), derive(() => ...)
     if (this.isSafeWrapperCallback(node, checker)) return;
 
     // Only error if inside restricted context (pattern/render)
-    if (!isInsideRestrictedContext(node, checker)) return;
+    if (!isInsideRestrictedContext(node, checker, context)) return;
 
     context.reportDiagnostic({
       severity: "error",
@@ -337,7 +337,7 @@ export class PatternContextValidationTransformer extends Transformer {
       : "handler";
 
     // Only error if inside restricted context
-    if (!isInsideRestrictedContext(node, checker)) return;
+    if (!isInsideRestrictedContext(node, checker, context)) return;
 
     // Check if lift() is immediately invoked: lift(fn)(args)
     // In this case, suggest computed() instead
