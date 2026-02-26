@@ -30,6 +30,25 @@ const exactCopyNumberSchema = {
   },
 } as unknown as JSONSchema;
 
+const secretObjectSchema = {
+  type: "object",
+  properties: {
+    count: { type: "number" },
+  },
+  ifc: { classification: ["secret"] },
+} as unknown as JSONSchema;
+
+const projectionNumberSchema = {
+  type: "number",
+  ifc: {
+    classification: ["secret"],
+    projection: {
+      from: "/",
+      path: "/count",
+    },
+  },
+} as unknown as JSONSchema;
+
 describe("CFC prepare output transitions", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
@@ -50,7 +69,7 @@ describe("CFC prepare output transitions", () => {
 
   async function seedInputClassification(
     id: URI,
-    value: number,
+    value: unknown,
     classification: string,
   ): Promise<void> {
     const tx = runtime.edit();
@@ -59,7 +78,7 @@ describe("CFC prepare output transitions", () => {
       id,
       type: "application/json",
       path: ["value"],
-    }, value);
+    }, value as any);
     tx.writeOrThrow({
       space,
       id,
@@ -162,5 +181,61 @@ describe("CFC prepare output transitions", () => {
     expect(
       (thrown as { requirement?: string } | undefined)?.requirement,
     ).toBe("exactCopyOf");
+  });
+
+  it("allows prepare when projection assertion is satisfied", async () => {
+    const sourceId = runtime.getCell(space, "cfc-output-projection-source")
+      .getAsNormalizedFullLink().id;
+    await seedInputClassification(sourceId, { count: 7 }, "secret");
+
+    const tx = runtime.edit();
+    const sourceCell = runtime.getCell<{ count: number }>(
+      space,
+      "cfc-output-projection-source",
+    );
+    const targetCell = runtime.getCell<number>(space, "cfc-output-projection-target");
+    const source = sourceCell.withTx(tx).asSchema(secretObjectSchema).get() ?? {
+      count: 0,
+    };
+    targetCell.withTx(tx).asSchema(projectionNumberSchema).set(source.count);
+
+    await prepareCfcCommitIfNeeded(tx);
+    const { error } = await tx.commit();
+    expect(error).toBeUndefined();
+  });
+
+  it("rejects prepare when projection assertion is violated", async () => {
+    const sourceId = runtime.getCell(space, "cfc-output-projection-fail-source")
+      .getAsNormalizedFullLink().id;
+    await seedInputClassification(sourceId, { count: 7 }, "secret");
+
+    const tx = runtime.edit();
+    const sourceCell = runtime.getCell<{ count: number }>(
+      space,
+      "cfc-output-projection-fail-source",
+    );
+    const targetCell = runtime.getCell<number>(
+      space,
+      "cfc-output-projection-fail-target",
+    );
+    const source = sourceCell.withTx(tx).asSchema(secretObjectSchema).get() ?? {
+      count: 0,
+    };
+    targetCell.withTx(tx).asSchema(projectionNumberSchema).set(source.count + 1);
+
+    let thrown: unknown;
+    try {
+      await prepareCfcCommitIfNeeded(tx);
+    } catch (error) {
+      thrown = error;
+    }
+    tx.abort(thrown);
+
+    expect((thrown as { name?: string } | undefined)?.name).toBe(
+      "CfcOutputTransitionViolationError",
+    );
+    expect(
+      (thrown as { requirement?: string } | undefined)?.requirement,
+    ).toBe("projection");
   });
 });
