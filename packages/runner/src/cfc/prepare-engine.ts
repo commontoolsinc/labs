@@ -160,6 +160,51 @@ function CfcOutputProjectionViolationError(
   };
 }
 
+type CollectionTransitionRequirement =
+  | "subsetOf"
+  | "permutationOf"
+  | "filteredFrom"
+  | "lengthPreserved";
+
+function CfcOutputCollectionViolationError(
+  entity: EntityAddress,
+  path: string,
+  requirement: CollectionTransitionRequirement,
+  sourcePath?: string,
+): ICfcOutputTransitionViolationError {
+  const detail = requirement === "lengthPreserved"
+    ? "lengthPreserved assertion was not satisfied"
+    : `${requirement} collection assertion was not satisfied`;
+  return {
+    name: "CfcOutputTransitionViolationError",
+    message: `CFC prepare output transition failed: ${detail}`,
+    requirement,
+    space: entity.space,
+    id: entity.id,
+    type: entity.type,
+    path,
+    ...(sourcePath ? { sourcePath } : {}),
+  };
+}
+
+function CfcOutputRecomposeProjectionsViolationError(
+  entity: EntityAddress,
+  path: string,
+  sourcePath: string,
+): ICfcOutputTransitionViolationError {
+  return {
+    name: "CfcOutputTransitionViolationError",
+    message:
+      "CFC prepare output transition failed: recomposeProjections assertion was not satisfied",
+    requirement: "recomposeProjections",
+    space: entity.space,
+    id: entity.id,
+    type: entity.type,
+    path,
+    sourcePath,
+  };
+}
+
 function collectWrittenEntities(
   tx: IExtendedStorageTransaction,
 ): EntityAddress[] {
@@ -412,6 +457,25 @@ type ProjectionSpec = {
   readonly path: string;
 };
 
+type CollectionConstraintSpec = {
+  readonly subsetOf?: string;
+  readonly permutationOf?: string;
+  readonly filteredFrom?: string;
+  readonly sourceCollection?: string;
+  readonly lengthPreserved?: boolean;
+};
+
+type RecomposeProjectionPart = {
+  readonly outputPath: string;
+  readonly projectionPath: string;
+};
+
+type RecomposeProjectionsSpec = {
+  readonly from: string;
+  readonly baseIntegrityType: string;
+  readonly parts: readonly RecomposeProjectionPart[];
+};
+
 function readProjection(schema: JSONSchema | undefined): ProjectionSpec | undefined {
   if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
     return undefined;
@@ -436,6 +500,129 @@ function readProjection(schema: JSONSchema | undefined): ProjectionSpec | undefi
     return undefined;
   }
   return { from, path };
+}
+
+function isCanonicalPathString(value: unknown): value is string {
+  return typeof value === "string" && value.startsWith("/");
+}
+
+function readCollectionConstraints(
+  schema: JSONSchema | undefined,
+): CollectionConstraintSpec | undefined {
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
+    return undefined;
+  }
+  const rawIfc = (schema as { ifc?: unknown }).ifc;
+  if (!rawIfc || typeof rawIfc !== "object" || Array.isArray(rawIfc)) {
+    return undefined;
+  }
+  const rawCollection = (rawIfc as { collection?: unknown }).collection;
+  if (
+    !rawCollection || typeof rawCollection !== "object" ||
+    Array.isArray(rawCollection)
+  ) {
+    return undefined;
+  }
+
+  const subsetOf = isCanonicalPathString(
+      (rawCollection as { subsetOf?: unknown }).subsetOf,
+    )
+    ? (rawCollection as { subsetOf: string }).subsetOf
+    : undefined;
+  const permutationOf = isCanonicalPathString(
+      (rawCollection as { permutationOf?: unknown }).permutationOf,
+    )
+    ? (rawCollection as { permutationOf: string }).permutationOf
+    : undefined;
+  const filteredFrom = isCanonicalPathString(
+      (rawCollection as { filteredFrom?: unknown }).filteredFrom,
+    )
+    ? (rawCollection as { filteredFrom: string }).filteredFrom
+    : undefined;
+  const sourceCollection = isCanonicalPathString(
+      (rawCollection as { sourceCollection?: unknown }).sourceCollection,
+    )
+    ? (rawCollection as { sourceCollection: string }).sourceCollection
+    : undefined;
+  const lengthPreserved = (rawCollection as { lengthPreserved?: unknown })
+    .lengthPreserved === true;
+
+  if (
+    subsetOf === undefined &&
+    permutationOf === undefined &&
+    filteredFrom === undefined &&
+    sourceCollection === undefined &&
+    lengthPreserved === false
+  ) {
+    return undefined;
+  }
+
+  return {
+    ...(subsetOf ? { subsetOf } : {}),
+    ...(permutationOf ? { permutationOf } : {}),
+    ...(filteredFrom ? { filteredFrom } : {}),
+    ...(sourceCollection ? { sourceCollection } : {}),
+    ...(lengthPreserved ? { lengthPreserved } : {}),
+  };
+}
+
+function readRecomposeProjections(
+  schema: JSONSchema | undefined,
+): RecomposeProjectionsSpec | undefined {
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
+    return undefined;
+  }
+  const rawIfc = (schema as { ifc?: unknown }).ifc;
+  if (!rawIfc || typeof rawIfc !== "object" || Array.isArray(rawIfc)) {
+    return undefined;
+  }
+  const rawRecompose =
+    (rawIfc as { recomposeProjections?: unknown }).recomposeProjections;
+  if (
+    !rawRecompose || typeof rawRecompose !== "object" ||
+    Array.isArray(rawRecompose)
+  ) {
+    return undefined;
+  }
+
+  const from = (rawRecompose as { from?: unknown }).from;
+  const baseIntegrityType = (rawRecompose as { baseIntegrityType?: unknown })
+    .baseIntegrityType;
+  const rawParts = (rawRecompose as { parts?: unknown }).parts;
+  if (
+    !isCanonicalPathString(from) ||
+    typeof baseIntegrityType !== "string" || baseIntegrityType.length === 0 ||
+    !Array.isArray(rawParts)
+  ) {
+    return undefined;
+  }
+
+  const parts: RecomposeProjectionPart[] = [];
+  for (const rawPart of rawParts) {
+    if (!rawPart || typeof rawPart !== "object" || Array.isArray(rawPart)) {
+      return undefined;
+    }
+    const outputPath = (rawPart as { outputPath?: unknown }).outputPath;
+    const projectionPath = (rawPart as { projectionPath?: unknown })
+      .projectionPath;
+    if (
+      !isCanonicalPathString(outputPath) ||
+      !isCanonicalPathString(projectionPath)
+    ) {
+      return undefined;
+    }
+    parts.push({ outputPath, projectionPath });
+  }
+
+  if (parts.length === 0) {
+    return undefined;
+  }
+
+  return {
+    from,
+    baseIntegrityType,
+    parts,
+  };
 }
 
 function readValueAtCanonicalPath(
@@ -502,6 +689,130 @@ function valueAtCanonicalPath(value: unknown, path: string): unknown {
     cursor = (cursor as Record<string, unknown>)[segment];
   }
   return cursor;
+}
+
+function arrayContainsByValue(
+  values: readonly unknown[],
+  value: unknown,
+): number {
+  for (let index = 0; index < values.length; index++) {
+    if (deepEqual(values[index], value)) {
+      return index;
+    }
+  }
+  return -1;
+}
+
+function isSubsetMultiset(
+  source: readonly unknown[],
+  subset: readonly unknown[],
+): boolean {
+  const remaining = [...source];
+  for (const member of subset) {
+    const matchIndex = arrayContainsByValue(remaining, member);
+    if (matchIndex < 0) {
+      return false;
+    }
+    remaining.splice(matchIndex, 1);
+  }
+  return true;
+}
+
+function isPermutationMultiset(
+  source: readonly unknown[],
+  permutation: readonly unknown[],
+): boolean {
+  if (source.length !== permutation.length) {
+    return false;
+  }
+  return isSubsetMultiset(source, permutation);
+}
+
+function readConsumedArraySource(
+  tx: IExtendedStorageTransaction,
+  consumedReadLabels: readonly ConsumedReadWithEffectiveLabel[],
+  sourcePath: string,
+): readonly unknown[] | undefined {
+  const source = resolveConsumedSourceValue(tx, consumedReadLabels, sourcePath);
+  if (!source.found || !Array.isArray(source.value)) {
+    return undefined;
+  }
+  return source.value;
+}
+
+function lengthPreservedSourcePath(
+  collection: CollectionConstraintSpec,
+): string | undefined {
+  return collection.sourceCollection ??
+    collection.subsetOf ??
+    collection.filteredFrom ??
+    collection.permutationOf;
+}
+
+function escapeCanonicalSegment(segment: string): string {
+  return segment.replaceAll("~", "~0").replaceAll("/", "~1");
+}
+
+function appendCanonicalSegment(path: string, segment: string): string {
+  const escaped = escapeCanonicalSegment(segment);
+  return path === "/" ? `/${escaped}` : `${path}/${escaped}`;
+}
+
+function collectLeafPaths(
+  value: unknown,
+  path: string,
+  leafPaths: Set<string>,
+): void {
+  if (value === null || typeof value !== "object") {
+    leafPaths.add(path);
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      leafPaths.add(path);
+      return;
+    }
+    for (let index = 0; index < value.length; index++) {
+      collectLeafPaths(
+        value[index],
+        appendCanonicalSegment(path, String(index)),
+        leafPaths,
+      );
+    }
+    return;
+  }
+
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.length === 0) {
+    leafPaths.add(path);
+    return;
+  }
+  for (const [key, child] of entries) {
+    collectLeafPaths(child, appendCanonicalSegment(path, key), leafPaths);
+  }
+}
+
+function verifyRecomposeCoverage(
+  outputValue: unknown,
+  outputObjectPath: string,
+  parts: readonly RecomposeProjectionPart[],
+): boolean {
+  if (
+    outputValue === null || typeof outputValue !== "object" ||
+    Array.isArray(outputValue)
+  ) {
+    return false;
+  }
+  const declared = new Set(parts.map((part) => part.outputPath));
+  const actual = new Set<string>();
+  collectLeafPaths(outputValue, outputObjectPath, actual);
+  for (const leafPath of actual) {
+    if (!declared.has(leafPath)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function verifyOutputTransitionsForAttempt(
@@ -585,6 +896,118 @@ function verifyOutputTransitionsForAttempt(
           projection.from,
           projection.path,
         );
+      }
+    }
+
+    const collection = readCollectionConstraints(schemaAtWritePath);
+    if (collection) {
+      const outputValue = readValueAtCanonicalPath(tx, entity, write.path);
+      const outputArray = Array.isArray(outputValue) ? outputValue : undefined;
+
+      if (collection.subsetOf) {
+        const sourceArray = readConsumedArraySource(
+          tx,
+          consumedReadLabels,
+          collection.subsetOf,
+        );
+        if (!sourceArray || !outputArray || !isSubsetMultiset(sourceArray, outputArray)) {
+          throw CfcOutputCollectionViolationError(
+            entity,
+            write.path,
+            "subsetOf",
+            collection.subsetOf,
+          );
+        }
+      }
+
+      if (collection.permutationOf) {
+        const sourceArray = readConsumedArraySource(
+          tx,
+          consumedReadLabels,
+          collection.permutationOf,
+        );
+        if (
+          !sourceArray || !outputArray ||
+          !isPermutationMultiset(sourceArray, outputArray)
+        ) {
+          throw CfcOutputCollectionViolationError(
+            entity,
+            write.path,
+            "permutationOf",
+            collection.permutationOf,
+          );
+        }
+      }
+
+      if (collection.filteredFrom) {
+        const sourceArray = readConsumedArraySource(
+          tx,
+          consumedReadLabels,
+          collection.filteredFrom,
+        );
+        if (!sourceArray || !outputArray || !isSubsetMultiset(sourceArray, outputArray)) {
+          throw CfcOutputCollectionViolationError(
+            entity,
+            write.path,
+            "filteredFrom",
+            collection.filteredFrom,
+          );
+        }
+      }
+
+      if (collection.lengthPreserved) {
+        const sourcePath = lengthPreservedSourcePath(collection);
+        const sourceArray = sourcePath
+          ? readConsumedArraySource(tx, consumedReadLabels, sourcePath)
+          : undefined;
+        if (!sourceArray || !outputArray || sourceArray.length !== outputArray.length) {
+          throw CfcOutputCollectionViolationError(
+            entity,
+            write.path,
+            "lengthPreserved",
+            sourcePath,
+          );
+        }
+      }
+    }
+
+    const recompose = readRecomposeProjections(schemaAtWritePath);
+    if (recompose) {
+      // The declaration is consumed for verification-side structure checks.
+      void recompose.baseIntegrityType;
+
+      const outputObjectValue = readValueAtCanonicalPath(tx, entity, write.path);
+      if (!verifyRecomposeCoverage(outputObjectValue, write.path, recompose.parts)) {
+        throw CfcOutputRecomposeProjectionsViolationError(
+          entity,
+          write.path,
+          recompose.from,
+        );
+      }
+
+      const source = resolveConsumedSourceValue(
+        tx,
+        consumedReadLabels,
+        recompose.from,
+      );
+      if (!source.found) {
+        throw CfcOutputRecomposeProjectionsViolationError(
+          entity,
+          write.path,
+          recompose.from,
+        );
+      }
+
+      for (const part of recompose.parts) {
+        const expected = valueAtCanonicalPath(source.value, part.projectionPath);
+        const actual = readValueAtCanonicalPath(tx, entity, part.outputPath);
+        if (!deepEqual(expected, actual)) {
+          throw CfcOutputRecomposeProjectionsViolationError(
+            entity,
+            write.path,
+            recompose.from,
+          );
+        }
       }
     }
   }
