@@ -45,10 +45,6 @@ describe("CTButton", () => {
     expect(listenerCalled).toBe(false);
   });
 
-  it("INTENTIONAL FAILURE — remove after verifying CI catches it", () => {
-    expect(1).toBe(2);
-  });
-
   it("should allow click events when not disabled", () => {
     const element = new CTButton();
     element.disabled = false;
