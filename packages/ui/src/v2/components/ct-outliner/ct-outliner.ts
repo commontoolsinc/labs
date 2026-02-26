@@ -5,15 +5,26 @@ import { BaseElement } from "../../core/base-element.ts";
 import { marked } from "marked";
 import {
   type CellHandle,
-  getEntityId,
   isCellHandle,
   NAME,
 } from "@commontools/runtime-client";
+import { getEntityId } from "@commontools/runner";
 import { MentionableArray } from "../../core/mentionable.ts";
 import { MentionController } from "../../core/mention-controller.ts";
 
 /**
- * Executes a mutation on a Cell within a transaction
+ * Executes a mutation on a Cell within a transaction.
+ *
+ * BUG: This function is typed for CellHandle but uses Cell (runner) APIs:
+ *   - `cell.runtime.edit()` — CellHandle has no `.runtime` property
+ *   - `cell.withTx(tx)` — CellHandle has no `.withTx()` method
+ * In production with real CellHandle instances these calls will throw.
+ * The function needs to be rewritten to use CellHandle's `.set()` API
+ * (CellHandle mutations don't use transactions).
+ *
+ * Tests pass because test-utils provides Cell objects (from @commontools/runner)
+ * which DO have these methods — the tests exercise the wrong code path.
+ *
  * @param cell - The Cell to mutate
  * @param mutator - Function that performs the mutation
  */
@@ -429,7 +440,7 @@ export class CTOutliner extends BaseElement
 
     const nodeChildrenCell = getNodeChildrenCell(this.value, this.tree, node);
     if (nodeChildrenCell) {
-      await mutateCell(nodeChildrenCell, (cell) => {
+      await mutateCellHandle(nodeChildrenCell, (cell) => {
         const currentChildren = cell.get();
         const newChildren = [newNode, ...currentChildren];
         cell.set(newChildren);
@@ -584,7 +595,7 @@ export class CTOutliner extends BaseElement
 
     const nodeBodyCell = getNodeBodyCellByPath(this.value, path);
     if (nodeBodyCell) {
-      mutateCell(nodeBodyCell, (cell) => {
+      mutateCellHandle(nodeBodyCell, (cell) => {
         const currentBody = cell.get();
 
         // Set checkbox to the specified state
@@ -1063,7 +1074,7 @@ export class CTOutliner extends BaseElement
       this.editingNodePath,
     );
     if (nodeBodyCell) {
-      mutateCell(nodeBodyCell, (cell) => cell.set(this.editingContent));
+      mutateCellHandle(nodeBodyCell, (cell) => cell.set(this.editingContent));
     }
 
     this.focusedNodePath = this.editingNodePath;
@@ -1199,7 +1210,7 @@ export class CTOutliner extends BaseElement
           parentNode,
         );
         if (parentChildrenCell) {
-          mutateCell(parentChildrenCell, (cell) => {
+          mutateCellHandle(parentChildrenCell, (cell) => {
             const currentChildren = cell.get();
             const newChildren = [...currentChildren];
 
@@ -1364,7 +1375,7 @@ export class CTOutliner extends BaseElement
       parentNode,
     );
     if (parentChildrenCell) {
-      await mutateCell(parentChildrenCell, (cell) => {
+      await mutateCellHandle(parentChildrenCell, (cell) => {
         const currentChildren = cell.get();
 
         // Build new children array with the new node inserted
@@ -1622,7 +1633,7 @@ export class CTOutliner extends BaseElement
         ) as CellHandle<
           OutlineTreeNode[]
         >;
-        mutateCell(rootChildrenCell, (cell) => {
+        mutateCellHandle(rootChildrenCell, (cell) => {
           cell.set([newNode]);
         });
       }
@@ -1688,7 +1699,7 @@ export class CTOutliner extends BaseElement
           parentNode,
         );
         if (parentChildrenCell) {
-          mutateCell(parentChildrenCell, (cell) => {
+          mutateCellHandle(parentChildrenCell, (cell) => {
             const currentChildren = cell.get();
             const beforeInsert = currentChildren.slice(0, nodeIndex + 1);
             const afterInsert = currentChildren.slice(nodeIndex + 1);
@@ -1717,7 +1728,7 @@ export class CTOutliner extends BaseElement
         ) as CellHandle<
           OutlineTreeNode[]
         >;
-        mutateCell(rootChildrenCell, (cell) => {
+        mutateCellHandle(rootChildrenCell, (cell) => {
           cell.set(parsedTree.root.children);
         });
       }
@@ -1731,7 +1742,7 @@ export class CTOutliner extends BaseElement
         ) as CellHandle<
           OutlineTreeNode[]
         >;
-        mutateCell(rootChildrenCell, (cell) => {
+        mutateCellHandle(rootChildrenCell, (cell) => {
           const currentChildren = cell.get();
           const newChildren = [...currentChildren, ...parsedTree.root.children];
           cell.set(newChildren);

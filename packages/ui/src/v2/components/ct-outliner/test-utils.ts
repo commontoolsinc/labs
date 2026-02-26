@@ -10,17 +10,20 @@ import type {
 } from "./types.ts";
 import { TreeOperations } from "./tree-operations.ts";
 import { getNodeByPath } from "./node-path.ts";
-import { type CellHandle, Runtime } from "@commontools/runtime-client";
+import { type Cell, Runtime } from "@commontools/runner";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 
 /**
- * Create a real Cell for a tree structure using a fresh runtime
- * This is the async version that should be preferred when possible
+ * Create a real Cell for a tree structure using a fresh runtime.
+ *
+ * Returns a Cell<Tree> from @commontools/runner. The outliner component
+ * expects CellHandle<Tree> (from runtime-client) in production, but Cell
+ * provides the same .key()/.set()/.getAsQueryResult() surface the tests need.
  */
 export const createMockTreeCellAsync = async (
   tree: Tree,
-): Promise<CellHandle<Tree>> => {
+): Promise<Cell<Tree>> => {
   const signer = await Identity.fromPassphrase("test-outliner-user");
   const space = signer.did();
   const storageManager = StorageManager.emulate({ as: signer });
@@ -31,7 +34,7 @@ export const createMockTreeCellAsync = async (
   });
 
   const tx = runtime.edit();
-  const cell = runtime.getCellHandle<Tree>(
+  const cell = runtime.getCell<Tree>(
     space as any,
     "test-tree",
     undefined,
@@ -119,9 +122,10 @@ export const setupMockOutlinerAsync = async () => {
   });
 
   // Setup basic tree with real Cell
+  // Cell<Tree> and CellHandle<Tree> share the same .key()/.set() surface
   const tree = createTestTree();
   const treeCell = await createMockTreeCellAsync(tree);
-  outliner.value = treeCell;
+  outliner.value = treeCell as any;
   // Set focused node path to the first child
   outliner.focusedNodePath = [0];
 

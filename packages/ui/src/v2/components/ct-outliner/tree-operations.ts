@@ -2,7 +2,12 @@ import type { MutableNode, Node, NodeCreationOptions, Tree } from "./types.ts";
 import { CellHandle, ID } from "@commontools/runtime-client";
 
 /**
- * Executes a mutation on a Cell within a transaction
+ * Executes a mutation on a Cell within a transaction.
+ *
+ * BUG: Same issue as the copy in ct-outliner.ts — uses Cell (runner) APIs
+ * (.runtime.edit(), .withTx()) that don't exist on CellHandle. See the
+ * doc comment there for details. Needs rewrite for CellHandle's .set() API.
+ *
  * @param cell - The Cell to mutate
  * @param mutator - Function that performs the mutation
  */
@@ -298,7 +303,7 @@ export const TreeOperations = {
     const parentChildrenCell = parentNode.key("children") as CellHandle<Node[]>;
 
     // V-DOM style: swap positions directly
-    await mutateCell(parentChildrenCell, (cell) => {
+    await mutateCellHandle(parentChildrenCell, (cell) => {
       const currentChildren = cell.get();
       const newChildren = [...currentChildren];
 
@@ -340,7 +345,7 @@ export const TreeOperations = {
     const parentChildrenCell = parentNode.key("children") as CellHandle<Node[]>;
 
     // V-DOM style: swap positions directly
-    await mutateCell(parentChildrenCell, (cell) => {
+    await mutateCellHandle(parentChildrenCell, (cell) => {
       const currentChildren = cell.get();
       const newChildren = [...currentChildren];
 
@@ -430,7 +435,7 @@ export const TreeOperations = {
     const nodeChildrenCell = nodeCell.key("children") as CellHandle<Node[]>;
     const childrenToPromote = nodeChildrenCell.getAsQueryResult();
 
-    await mutateCell(parentChildrenCell, (cell) => {
+    await mutateCellHandle(parentChildrenCell, (cell) => {
       const currentChildren = cell.get();
 
       // Build new children array without the deleted node

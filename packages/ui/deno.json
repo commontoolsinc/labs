@@ -5,7 +5,7 @@
   },
   "tasks": {
     "bundle": "../../scripts/bundle.ts src/index.ts",
-    "test": "echo 'No tests to run.'"
+    "test": "deno test --no-check --allow-env --allow-ffi --allow-read"
   },
   "imports": {
     "@codemirror/commands": "npm:@codemirror/commands@^6.8.1",
