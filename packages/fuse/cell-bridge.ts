@@ -422,7 +422,6 @@ export class CellBridge {
 
     const subs = await this.subscribePiece(piece, pieceIno, name, spaceName);
     state.pieceSubs.set(name, subs);
-    state.unsubscribes.push(...subs);
 
     return name;
   }
