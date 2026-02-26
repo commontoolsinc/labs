@@ -116,18 +116,23 @@ function resolveRefsForLLM(
   schema: JSONSchema,
   maxDepth = 4,
 ): JSONSchema {
-  const schemaObj = ContextualFlowControl.toSchemaObj(
-    typeof schema === "boolean" ? schema : schema ?? undefined,
-  );
+  // Like toSchemaObj but maps false to a permissive object instead of
+  // { not: true } which LLMs don't handle well.
+  const toObj = (s: unknown) =>
+    s === false
+      ? ({ type: "object", properties: {} } as Record<string, unknown>)
+      : ContextualFlowControl.toSchemaObj(
+        typeof s === "boolean" ? s : (s as JSONSchema) ?? undefined,
+      );
+
+  const schemaObj = toObj(schema);
 
   function resolve(
     node: unknown,
     refDepth: number,
     activeRefs: Set<string>,
   ): any {
-    const nodeObj = ContextualFlowControl.toSchemaObj(
-      typeof node === "boolean" ? node : (node as JSONSchema) ?? undefined,
-    );
+    const nodeObj = toObj(node);
 
     // Handle $ref using CFC's resolveSchemaRefs for chain resolution
     if (nodeObj.$ref && typeof nodeObj.$ref === "string") {
@@ -144,9 +149,7 @@ function resolveRefsForLLM(
         // Unresolvable or cyclic — truncate
         return { type: "object", additionalProperties: true };
       }
-      const resolvedObj = ContextualFlowControl.toSchemaObj(
-        typeof resolved === "boolean" ? resolved : resolved ?? undefined,
-      );
+      const resolvedObj = toObj(resolved);
       const newActiveRefs = new Set(activeRefs);
       newActiveRefs.add(refString);
       return resolve(resolvedObj, refDepth + 1, newActiveRefs);
@@ -158,16 +161,15 @@ function resolveRefsForLLM(
       if (key === "$defs") continue; // strip $defs from output
       if (Array.isArray(value)) {
         result[key] = value.map((item) =>
-          typeof item === "object" && item !== null
+          typeof item === "object" && item !== null || typeof item === "boolean"
             ? resolve(item, refDepth, activeRefs)
-            : typeof item === "boolean"
-            ? ContextualFlowControl.toSchemaObj(item)
             : item
         );
-      } else if (typeof value === "object" && value !== null) {
+      } else if (
+        typeof value === "object" && value !== null ||
+        typeof value === "boolean"
+      ) {
         result[key] = resolve(value, refDepth, activeRefs);
-      } else if (typeof value === "boolean") {
-        result[key] = ContextualFlowControl.toSchemaObj(value);
       } else {
         result[key] = value;
       }

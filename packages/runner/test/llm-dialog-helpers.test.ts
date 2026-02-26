@@ -460,11 +460,11 @@ Deno.test("resolveRefsForLLM converts boolean true schema to empty object", () =
   assertEquals(result, {});
 });
 
-Deno.test("resolveRefsForLLM converts boolean false schema to negated object", () => {
+Deno.test("resolveRefsForLLM converts boolean false schema to permissive object", () => {
   const result = resolveRefsForLLM(false as any);
-  // toSchemaObj(false) → { not: true }, then the boolean `true` inside
-  // is itself normalized to {} (also a valid "matches anything" schema)
-  assertEquals(result, { not: {} });
+  // false schemas are mapped to a permissive object instead of { not: true }
+  // since LLMs don't handle JSON Schema `not` well
+  assertEquals(result, { type: "object", properties: {} });
 });
 
 Deno.test("resolveRefsForLLM converts boolean sub-schemas in properties to objects", () => {
@@ -477,7 +477,7 @@ Deno.test("resolveRefsForLLM converts boolean sub-schemas in properties to objec
   };
   const result = resolveRefsForLLM(schema) as any;
   assertEquals(result.properties?.anything, {});
-  assertEquals(result.properties?.nothing, { not: true });
+  assertEquals(result.properties?.nothing, { type: "object", properties: {} });
 });
 
 Deno.test("resolveRefsForLLM resolves simple $ref", () => {
