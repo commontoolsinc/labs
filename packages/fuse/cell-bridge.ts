@@ -420,6 +420,15 @@ export class CellBridge {
       spaceName,
     );
 
+    // Create entities/ symlink for reverse-lookup by entity ID.
+    // Sigil links use "of:<hash>" so we create entries for both forms.
+    this.tree.addSymlink(state.entitiesIno, piece.id, `../pieces/${name}`);
+    this.tree.addSymlink(
+      state.entitiesIno,
+      `of:${piece.id}`,
+      `../pieces/${name}`,
+    );
+
     const subs = await this.subscribePiece(piece, pieceIno, name, spaceName);
     state.pieceSubs.set(name, subs);
 
@@ -435,6 +444,13 @@ export class CellBridge {
     if (subs) {
       for (const cancel of subs) cancel();
       state.pieceSubs.delete(name);
+    }
+
+    // Remove entities/ symlinks
+    const entityId = state.pieceMap.get(name);
+    if (entityId) {
+      this.tree.removeChild(state.entitiesIno, entityId);
+      this.tree.removeChild(state.entitiesIno, `of:${entityId}`);
     }
 
     // Remove tree nodes

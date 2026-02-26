@@ -1,7 +1,7 @@
 # Implementation Plan: FUSE Filesystem for Common Tools
 
 **Spec:** [`docs/specs/fuse-filesystem/`](../specs/fuse-filesystem/README.md)
-**Status:** Phase 0–2 complete
+**Status:** Phase 0–3 complete, Phase 4 in progress
 
 ## Architecture Decision
 
@@ -168,16 +168,18 @@ hardcoded file. Validates that Deno FFI to libfuse works at all.
   - [ ] Profile `getattr` latency (target <1ms from cache)
   - [ ] Consider kernel page cache (`-o auto_cache`) with active invalidation
   - [ ] Tune subscription scope (subscribe/unsubscribe by access pattern)
-- [ ] **4.3 Entity view**
-  - [ ] `entities/` subtree for direct entity ID access
+- [x] **4.3 Entity view**
+  - [x] `entities/` subtree with symlinks for reverse-lookup by entity ID
+  - [x] Both `<hash>` and `of:<hash>` forms resolve to `../pieces/<name>`
 - [ ] **4.4 Testing**
-  - [ ] Unit: `tree-builder.ts` (JSON -> tree -> JSON round-trips)
+  - [x] Unit: `tree-builder.ts` (36 tests — JSON types, circular refs, symlinks,
+    handlers, stream values, sigil links)
   - [ ] Unit: `cell-bridge.ts` (mock PieceManager)
   - [ ] Integration: mount, perform ops, verify (requires FUSE in test env)
   - [ ] Fuzz: random JSON -> tree -> reads -> compare
 - [ ] **4.5 Documentation**
-  - [ ] `packages/fuse/README.md`
-  - [ ] `ct fuse --help` with examples
+  - [x] `packages/fuse/README.md` (210 lines — layout, usage, architecture)
+  - [x] `ct fuse --help` with examples
   - [ ] Troubleshooting: macFUSE/FUSE-T install, permissions, common errors
 
 ---
