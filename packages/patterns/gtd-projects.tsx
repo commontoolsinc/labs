@@ -251,7 +251,7 @@ const GTDProjects = pattern<ProjectsInput, ProjectsOutput>(({ items }) => {
   // --- Styles ---
 
   const itemRowBase = {
-    padding: "10px 12px",
+    padding: "10px 0",
     borderBottom: "0.5px solid " + color.separator,
     display: "flex",
     alignItems: "center",
@@ -259,15 +259,15 @@ const GTDProjects = pattern<ProjectsInput, ProjectsOutput>(({ items }) => {
   };
 
   const iconBtn = {
-    width: "28px",
-    height: "28px",
-    borderRadius: "6px",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
     cursor: "pointer",
     flexShrink: "0",
-    fontSize: "14px",
+    fontSize: "10px",
+    fontWeight: "600",
+    padding: "2px 8px",
+    borderRadius: "100px",
   };
 
   // --- Render ---
@@ -538,7 +538,7 @@ const GTDProjects = pattern<ProjectsInput, ProjectsOutput>(({ items }) => {
                     <div
                       style={{
                         flex: "1",
-                        fontSize: "14px",
+                        fontSize: "13px",
                         color: color.label,
                         cursor: "pointer",
                         overflow: "hidden" as const,
@@ -551,50 +551,51 @@ const GTDProjects = pattern<ProjectsInput, ProjectsOutput>(({ items }) => {
                     </div>
                   )}
 
-                  {/* Note icon */}
-                  <div
+                  {/* Note pill */}
+                  <span
                     onClick={() => openNote.send({ id: item.id, note: item.note })}
                     style={{
                       ...iconBtn,
                       color: hasNote ? color.blue : color.tertiaryLabel,
-                      background: hasNote ? "rgba(0, 122, 255, 0.08)" : "transparent",
+                      background: hasNote ? "rgba(0, 122, 255, 0.12)" : color.fillPrimary,
+                      cursor: "pointer",
                     }}
-                    title={hasNote ? "Edit note" : "Add note"}
                   >
-                    {hasNote ? "N" : "n"}
-                  </div>
+                    {hasNote ? "note" : "note"}
+                  </span>
 
-                  {/* Wish icon */}
-                  <div
+                  {/* Wish pill */}
+                  <span
                     onClick={() => openWishes.send({ id: item.id })}
                     style={{
                       ...iconBtn,
                       color: pendingWishes > 0 ? color.orange : wishCount > 0 ? color.green : color.tertiaryLabel,
                       background:
                         pendingWishes > 0
-                          ? "rgba(255, 149, 0, 0.08)"
+                          ? "rgba(255, 149, 0, 0.12)"
                           : wishCount > 0
-                            ? "rgba(52, 199, 89, 0.08)"
-                            : "transparent",
-                      fontSize: "12px",
-                      fontWeight: "600",
+                            ? "rgba(52, 199, 89, 0.12)"
+                            : color.fillPrimary,
+                      cursor: "pointer",
                     }}
-                    title="Wishes"
                   >
-                    {wishCount > 0 ? wishCount.toString() : "+"}
-                  </div>
+                    {wishCount > 0 ? wishCount + " wish" : "wish"}
+                  </span>
 
                   {/* Drill-in chevron */}
                   {hasChildren ? (
-                    <div
+                    <span
                       onClick={() => drillIn.send({ id: item.id, text: item.text })}
                       style={{
-                        ...iconBtn,
+                        fontSize: "14px",
                         color: color.tertiaryLabel,
+                        flexShrink: "0",
+                        cursor: "pointer",
+                        padding: "0 4px",
                       }}
                     >
                       {">"}
-                    </div>
+                    </span>
                   ) : null}
                 </div>
 
