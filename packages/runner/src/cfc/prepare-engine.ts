@@ -13,6 +13,7 @@ import type {
 import { computeCfcActivityDigest } from "./activity-digest.ts";
 import {
   type CanonicalBoundaryRead,
+  canonicalizeStoragePath,
   canonicalizeBoundaryActivity,
 } from "./canonical-activity.ts";
 import { partitionConsumedBoundaryReads } from "./consumed-reads.ts";
@@ -100,6 +101,46 @@ function CfcRequiredIntegrityViolationError(
     path,
     requiredIntegrity: [...requiredIntegrity],
     actualIntegrity: [...actualIntegrity],
+  };
+}
+
+function CfcStatePreconditionReadViolationError(
+  entity: EntityAddress,
+  path: string,
+  requiredReadPath: string,
+): ICfcInputRequirementViolationError {
+  return {
+    name: "CfcInputRequirementViolationError",
+    message:
+      "CFC prepare input requirement failed: state precondition required read was not observed in this attempt",
+    requirement: "statePreconditionRead",
+    space: entity.space,
+    id: entity.id,
+    type: entity.type,
+    path,
+    requiredReadPath,
+  };
+}
+
+function CfcStatePreconditionPredicateViolationError(
+  entity: EntityAddress,
+  path: string,
+  predicatePath: string,
+  expectedValue: unknown,
+  actualValue: unknown,
+): ICfcInputRequirementViolationError {
+  return {
+    name: "CfcInputRequirementViolationError",
+    message:
+      "CFC prepare input requirement failed: state precondition predicate did not hold",
+    requirement: "statePreconditionPredicate",
+    space: entity.space,
+    id: entity.id,
+    type: entity.type,
+    path,
+    predicatePath,
+    expectedValue,
+    actualValue,
   };
 }
 
@@ -522,6 +563,13 @@ type RecomposeProjectionsSpec = {
   readonly parts: readonly RecomposeProjectionPart[];
 };
 
+type StatePreconditionSpec = {
+  readonly requiredReadPath?: string;
+  readonly predicatePath?: string;
+  readonly equals?: unknown;
+  readonly predicate?: string;
+};
+
 function readProjection(schema: JSONSchema | undefined): ProjectionSpec | undefined {
   if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
     return undefined;
@@ -671,6 +719,58 @@ function readRecomposeProjections(
   };
 }
 
+function readStatePrecondition(
+  schema: JSONSchema | undefined,
+): StatePreconditionSpec | undefined {
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
+    return undefined;
+  }
+  const rawIfc = (schema as { ifc?: unknown }).ifc;
+  if (!rawIfc || typeof rawIfc !== "object" || Array.isArray(rawIfc)) {
+    return undefined;
+  }
+  const rawPrecondition =
+    (rawIfc as { statePrecondition?: unknown }).statePrecondition;
+  if (
+    !rawPrecondition || typeof rawPrecondition !== "object" ||
+    Array.isArray(rawPrecondition)
+  ) {
+    return undefined;
+  }
+
+  const requiredReadPath = isCanonicalPathString(
+      (rawPrecondition as { requiredRead?: unknown }).requiredRead,
+    )
+    ? (rawPrecondition as { requiredRead: string }).requiredRead
+    : undefined;
+  const predicatePath = isCanonicalPathString(
+      (rawPrecondition as { path?: unknown }).path,
+    )
+    ? (rawPrecondition as { path: string }).path
+    : undefined;
+  const predicate = typeof (rawPrecondition as { predicate?: unknown }).predicate ===
+      "string"
+    ? (rawPrecondition as { predicate: string }).predicate
+    : undefined;
+  const equals = (rawPrecondition as { equals?: unknown }).equals;
+
+  if (
+    requiredReadPath === undefined &&
+    predicatePath === undefined &&
+    predicate === undefined &&
+    equals === undefined
+  ) {
+    return undefined;
+  }
+
+  return {
+    ...(requiredReadPath ? { requiredReadPath } : {}),
+    ...(predicatePath ? { predicatePath } : {}),
+    ...(predicate ? { predicate } : {}),
+    ...(equals !== undefined ? { equals } : {}),
+  };
+}
+
 function readValueAtCanonicalPath(
   tx: IExtendedStorageTransaction,
   address: EntityAddress,
@@ -720,6 +820,65 @@ function resolveConsumedSourceValue(
     };
   }
   return { found: false, value: undefined };
+}
+
+function observedReadValueForPath(
+  tx: IExtendedStorageTransaction,
+  entity: EntityAddress,
+  path: string,
+): ConsumedSourceLookup {
+  let found = false;
+  let value: unknown = undefined;
+  for (const attestation of tx.journal.history(entity.space)) {
+    if (
+      attestation.address.id !== entity.id ||
+      attestation.address.type !== entity.type
+    ) {
+      continue;
+    }
+    if (canonicalizeStoragePath(attestation.address.path) !== path) {
+      continue;
+    }
+    found = true;
+    value = attestation.value;
+  }
+  return { found, value };
+}
+
+function hasConsumedReadForPath(
+  consumedReadLabels: readonly ConsumedReadWithEffectiveLabel[],
+  entity: EntityAddress,
+  path: string,
+): boolean {
+  return consumedReadLabels.some((consumed) =>
+    consumed.read.space === entity.space &&
+    consumed.read.id === entity.id &&
+    consumed.read.type === entity.type &&
+    consumed.read.path === path
+  );
+}
+
+function evaluatePredicate(
+  predicate: string | undefined,
+  actualValue: unknown,
+): boolean {
+  if (!predicate || predicate === "equals") {
+    return true;
+  }
+  if (predicate === "exists") {
+    return actualValue !== undefined;
+  }
+  if (predicate === "notExists") {
+    return actualValue === undefined;
+  }
+  if (predicate === "truthy") {
+    return Boolean(actualValue);
+  }
+  if (predicate === "falsy") {
+    return !actualValue;
+  }
+  // Unknown predicates are fail-closed.
+  return false;
 }
 
 function valueAtCanonicalPath(value: unknown, path: string): unknown {
@@ -913,6 +1072,51 @@ function verifyOutputTransitionsForAttempt(
       rootSchema,
       fromCanonicalPath(write.path),
     );
+    const statePrecondition = readStatePrecondition(schemaAtWritePath);
+    if (statePrecondition) {
+      const requiredReadPath = statePrecondition.requiredReadPath ??
+        statePrecondition.predicatePath;
+      if (
+        requiredReadPath &&
+        !hasConsumedReadForPath(consumedReadLabels, entity, requiredReadPath)
+      ) {
+        throw CfcStatePreconditionReadViolationError(
+          entity,
+          write.path,
+          requiredReadPath,
+        );
+      }
+
+      const predicatePath = statePrecondition.predicatePath ??
+        requiredReadPath ?? write.path;
+      const observedRead = observedReadValueForPath(tx, entity, predicatePath);
+      const actualValue = observedRead.found
+        ? observedRead.value
+        : readValueAtCanonicalPath(tx, entity, predicatePath);
+      if (
+        statePrecondition.equals !== undefined &&
+        !deepEqual(actualValue, statePrecondition.equals)
+      ) {
+        throw CfcStatePreconditionPredicateViolationError(
+          entity,
+          write.path,
+          predicatePath,
+          statePrecondition.equals,
+          actualValue,
+        );
+      }
+
+      if (!evaluatePredicate(statePrecondition.predicate, actualValue)) {
+        throw CfcStatePreconditionPredicateViolationError(
+          entity,
+          write.path,
+          predicatePath,
+          statePrecondition.predicate ?? "equals",
+          actualValue,
+        );
+      }
+    }
+
     const exactCopyOf = readExactCopyOf(schemaAtWritePath);
     if (exactCopyOf) {
       const source = resolveConsumedSourceValue(
