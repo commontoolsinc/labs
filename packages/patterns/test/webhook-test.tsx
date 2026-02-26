@@ -1,5 +1,13 @@
 /// <cts-enable />
-import { Default, NAME, pattern, UI, type VNode, Writable } from "commontools";
+import {
+  computed,
+  Default,
+  NAME,
+  pattern,
+  UI,
+  type VNode,
+  Writable,
+} from "commontools";
 
 // ===== Types =====
 
@@ -40,6 +48,12 @@ declare global {
 
 const WebhookTest = pattern<WebhookPatternInput, WebhookPatternOutput>(
   ({ webhookInbox, webhookConfig }) => {
+    const inboxDisplay = computed(() => {
+      const val = webhookInbox.get();
+      if (val == null) return "No events received yet.";
+      return JSON.stringify(val, null, 2);
+    });
+
     return {
       [NAME]: "Webhook Test Pattern",
       [UI]: (
@@ -76,40 +90,25 @@ const WebhookTest = pattern<WebhookPatternInput, WebhookPatternOutput>(
                 <div style={{ fontWeight: "600", fontSize: "1rem" }}>
                   Last Received Event
                 </div>
-                {webhookInbox == null
-                  ? (
-                    <div
-                      style={{
-                        color: "var(--ct-color-gray-500)",
-                        fontSize: "0.875rem",
-                      }}
-                    >
-                      No events received yet. Create a webhook and send a POST
-                      to its URL.
-                    </div>
-                  )
-                  : (
-                    <div
-                      style={{
-                        fontSize: "0.8rem",
-                        fontFamily: "monospace",
-                        background: "var(--ct-color-gray-100, #f3f4f6)",
-                        padding: "0.5rem",
-                        borderRadius: "0.25rem",
-                        whiteSpace: "pre-wrap",
-                        wordBreak: "break-all",
-                      }}
-                    >
-                      {JSON.stringify(webhookInbox)}
-                    </div>
-                  )}
+                <div
+                  style={{
+                    fontSize: "0.8rem",
+                    fontFamily: "monospace",
+                    background: "var(--ct-color-gray-100, #f3f4f6)",
+                    padding: "0.5rem",
+                    borderRadius: "0.25rem",
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-all",
+                  }}
+                >
+                  {inboxDisplay}
+                </div>
               </ct-vstack>
             </ct-card>
           </ct-vstack>
         </ct-screen>
       ),
       webhookConfig,
-      // The inbox value updates reactively when toolshed sends to the stream.
       lastEvent: webhookInbox,
     };
   },
