@@ -1,0 +1,140 @@
+{
+  "rubric_version": "1.0",
+  "pattern": "parking-coordinator",
+  "run_id": "2026-02-24-parking-coordinator-k21l",
+  "dimensions": {
+    "correctness": {
+      "score": 20,
+      "pass_count": 1,
+      "fail_count": 4,
+      "na_count": 0,
+      "failures": [
+        {
+          "check_id": "COR-2",
+          "description": "Runtime TypeErrors fire in computed bodies during normal use. Manual tester observed persistent 'Cannot read properties of undefined (reading \"number\")' at main.tsx:623, 'Cannot read properties of undefined (reading \"name\")' at ~line 4461, and 'Cannot read properties of undefined (reading \"personId\")' at ~line 1730. These fire on every piece step as data accumulates. Rule: runtime errors in computed/action bodies = cap dimension at 20.",
+          "line_number": 623,
+          "suggested_fix": "Add null guards in computed bodies before accessing properties on array-looked-up items: use optional chaining (item?.number) and filter out undefined results before property access, rather than relying on the reactive system to never produce undefined references."
+        },
+        {
+          "check_id": "COR-3",
+          "description": "submitRequest action always shows 'Denied: no spots available for this date.' even when a spot is successfully allocated. Root cause: at line 663, requestParking.send() is called, which triggers requests.push() inside the requestParking action. At line 665, requests.get() is called in the same submitRequest action body expecting to see the pushed request synchronously. If CT action execution model does not make the push visible within the same outer action's .get() call, newReq will be undefined and the else branch fires 'Denied' regardless of actual outcome. Manual tester confirmed all successful allocations show 'Denied' in the UI.",
+          "line_number": 663,
+          "suggested_fix": "Remove the read-after-send pattern at lines 665-679. Instead, compute the expected result before calling requestParking.send() (you already have the data needed: personId, date, spots.get(), etc.), then set reqMessage based on what allocateSpot() would return. Alternatively, expose the result via a computed that watches the requests array reactively rather than reading it synchronously within the action."
+        },
+        {
+          "check_id": "COR-4",
+          "description": "Week-ahead grid shows incomplete rows when all spots are allocated for today. Manual tester observed that with 3 spots present and all 3 allocated for today, the week-ahead grid displayed only 1 row (spot #1) instead of 3 rows. This indicates the weekGrid computed or its JSX rendering is not correctly propagating all spot rows to the UI when allocations exist.",
+          "line_number": null,
+          "suggested_fix": "Investigate the weekGrid computed and its JSX rendering. The likely cause is a reactive dependency issue where the grid computation does not correctly iterate over all spots when all spots have active allocations. Add defensive logging or simplify the derived computation to ensure all spots always render a row regardless of allocation status."
+        },
+        {
+          "check_id": "COR-5",
+          "description": "Initial state not seeded: INITIAL_SPOTS constant is defined at line 73 with the three office spots (#1, #5, #12) but is never used to initialize the spots Writable. The input type declares spots as Default<ParkingSpot[], []>, so the pattern starts with an empty array. The spec explicitly states 'The system starts with the three office parking spots pre-loaded' and the first acceptance criterion requires them to be visible on first load. Verified by manual tester: initial Today panel is empty.",
+          "line_number": 73,
+          "suggested_fix": "Change the input type default: spots?: Writable<Default<ParkingSpot[], typeof INITIAL_SPOTS>> or, more practically, initialize a local Writable inside the pattern body: const spots = inputSpots ?? Writable.of(INITIAL_SPOTS). The simplest fix is to seed the data at the pattern scope: ensure the spots input falls back to INITIAL_SPOTS instead of []."
+        }
+      ],
+      "justification": "COR-2 triggers the critical cap at 20. Manual testing confirmed persistent runtime TypeErrors in computed bodies (accessing undefined properties during reactive updates at lines 623, ~1730, ~4461). COR-1 passes cleanly (compile is error-free). The remaining three failures are noted for completeness: COR-3 (submitRequest always shows 'Denied' due to synchronous read-after-send producing stale data), COR-4 (week-ahead grid renders only 1 row when all spots are allocated), and COR-5 (INITIAL_SPOTS constant defined but never used, pattern starts empty). The COR-2 cap of 20 is applied per the rubric's critical failure rules."
+    },
+    "idiomaticity": {
+      "score": 100,
+      "pass_count": 13,
+      "fail_count": 0,
+      "na_count": 1,
+      "failures": [],
+      "justification": "Excellent idiomaticity across all 13 applicable checks. action() used correctly throughout for all pattern-scope handlers. No handler()/lift() defined inside pattern body. All derived values wrapped in computed(). Default<T[], []> on all array inputs. Writable<> correctly typed. Stream<T> for all output actions. [NAME] and [UI] both present. $value/$checked bindings correct throughout. Object-style syntax on HTML elements, string-style on ct-* elements. No Map/Set in cell data. No Stream.of()/.subscribe(). No async/await in handlers. IDI-8 is N/A (cts-enable directive is present but no LLM functions are used). Two full passes of pattern-critic review confirmed these results."
+    },
+    "reactivity": {
+      "score": 50,
+      "pass_count": 7,
+      "fail_count": 1,
+      "na_count": 1,
+      "failures": [
+        {
+          "check_id": "REA-9",
+          "description": "10 inline arrow functions created per-item inside .map() loops across 4 list renders. Per-item handlers in .map() should use handler() at module scope with per-item binding. Violations: (1) line 1162 cancelRequest in myRequests.map(), (2) line 1208 movePriorityUp in priorityList.map(), (3) line 1215 movePriorityDown in priorityList.map(), (4) line 1222 removePerson in priorityList.map(), (5) line 1223 openEditPerson in priorityList.map(), (6) line 1289 openEditSpot in spots.map(), (7) line 1296 removeSpot in spots.map(), (8) line 1464 movePrefUp in editPersonPrefDetails.map(), (9) line 1471 movePrefDown in editPersonPrefDetails.map(), (10) line 1478 removePrefSpot in editPersonPrefDetails.map(). The fix pass added 4 new violations to the 6 deferred from pass 1, growing this consistently from 6 to 10.",
+          "line_number": 1162,
+          "suggested_fix": "Extract module-scope handler() instances for each per-item operation. For example: const handleCancelRequest = handler<void, { requestId: string }>((_, { requestId }) => { ... }); then in .map(): onClick={handleCancelRequest({ requestId: r.id })}. Since module-scope handlers cannot close over pattern-scope actions, the action logic must be duplicated into the handler body or the pattern refactored so the core logic lives at module scope."
+        }
+      ],
+      "justification": "All major reactivity checks pass: no stale .get() on computeds, no Writable.of(reactive), no inline array operations in JSX, no handler()/lift() inside pattern body. The single failure is REA-9: 10 inline arrow functions created per-item in .map() loops, applying the -5 per instance rule for a total -50 deduction. This was a consistent design decision deferred across both critic passes, but the rubric applies the penalty mechanically. REA-8 is N/A (lift() not used). [NAME] is a static string literal so REA-5 is satisfied trivially."
+    },
+    "ui_quality": {
+      "score": 90,
+      "pass_count": 5,
+      "fail_count": 2,
+      "na_count": 0,
+      "failures": [
+        {
+          "check_id": "UIQ-4",
+          "description": "Horizontal layout overflow in admin mode. When admin navigation tabs (People/Spots) are visible, the pattern content overflows horizontally. The title 'Parking Coordinator' is clipped (shows as 'arking Coordinator'), spot labels are truncated, and the Admin button is partially hidden. Admin layout is functionally usable but visually broken. Manual test confirmed with screenshots.",
+          "line_number": null,
+          "suggested_fix": "Reduce the number of top-level navigation tabs shown simultaneously, or use a responsive layout that wraps tabs. Consider moving admin navigation to a sidebar or collapsible menu rather than inline tabs alongside user-facing navigation. Ensure the header container does not clip overflow."
+        },
+        {
+          "check_id": "UIQ-6",
+          "description": "The 'Spots' admin navigation tab is permanently highlighted blue (active state) even when viewing the main Today view, My Requests view, and Request Parking form. The active tab indicator does not correctly reflect the current view, misleading users about which section they are in.",
+          "line_number": null,
+          "suggested_fix": "Audit the active tab computation. The tab's variant/style should be driven by a computed that checks currentView.get() against the tab's associated view name. Ensure 'Spots' only shows active when currentView is 'admin-spots' or a sub-view of the spots section."
+        }
+      ],
+      "justification": "Strong UI implementation overall: all form inputs correctly use ct-* components, $value/$checked bindings are thorough, ct-screen with appropriate header/footer slots is used, ct-vstack/ct-hstack for layout, no <option> elements in ct-select, and empty states are handled (admin People panel shows a prompt when empty). Two minor layout issues found by manual testing: horizontal overflow when admin tabs are visible (UIQ-4, -5) and permanent 'Spots' tab highlight regardless of current view (UIQ-6, -5)."
+    },
+    "test_coverage": {
+      "score": 30,
+      "pass_count": 4,
+      "fail_count": 1,
+      "na_count": 0,
+      "failures": [
+        {
+          "check_id": "TST-2",
+          "description": "4 test failures when running ct test. Failures: (1) action_6 (editSpot) times out after 5000ms — reactive change detection does not reliably detect same-length array replacements via .set(toSpliced()) after .push() has been called on the same Writable; (2) assertion_19 (spot1 label = 'Covered') fails as cascade from action_6 timeout; (3) assertion_20 (spot1 notes = 'Near lobby') fails as cascade; (4) assertion_63 (charlie manual override spot-12) fails intermittently due to insufficient propagation warmup. The test-report characterizes these as test harness limitations rather than pattern logic bugs, but the rubric requires all tests to pass.",
+          "line_number": null,
+          "suggested_fix": "For editSpot: run the test in isolation before any .push() calls, or add more propagation warmup cycles. For manualOverride: increase warmup assertions beyond 10 to ensure sufficient propagation cycles after multiple preceding state mutations. Alternatively, restructure editSpot to use .set() with a full new array rather than splice to make changes more detectable."
+        }
+      ],
+      "justification": "TST-2 triggers the critical cap at 30. Test file exists (TST-1 PASS) with 60/64 tests passing. The 4 failures are attributed to test harness reactive detection limitations (same-length array mutation detection, propagation cycle timing) rather than pattern logic errors — the editSpot action was verified correct in isolation. Within the cap, coverage quality is strong: non-trivial state transitions are thoroughly tested (TST-3 PASS), the pattern-as-test idiom is used correctly (TST-4 PASS), and edge cases are covered including duplicate prevention and cascade operations (TST-5 PASS). Coverage gaps exist (direct denial scenario, past-date validation, clearing defaults) but these do not change the capped score."
+    },
+    "code_quality": {
+      "score": 100,
+      "pass_count": 7,
+      "fail_count": 0,
+      "na_count": 0,
+      "failures": [],
+      "justification": "Exemplary code quality throughout. Types are clearly named after domain concepts (ParkingSpot, Person, SpotRequest, CommuteMode, RequestStatus). Single-file structure is appropriate for intermediate complexity. No over-abstraction: allocateSpot is a pure module-scope helper for the most complex logic, cleanly separated from pattern body. All helpers at module scope (getTodayDate, getDateOffset, formatShortDate, genId, hasActiveRequest, allocateSpot). Consistent naming: camelCase variables, PascalCase types, action names match user intent (requestParking, cancelRequest, manualOverride, movePriorityUp, etc.). Normalized state with no duplication — SpotRequest references Person and ParkingSpot by ID. Unidirectional data flow throughout. Both critic passes gave Design Review all PASSes."
+    },
+    "spec_fidelity": {
+      "score": 70,
+      "pass_count": 1,
+      "fail_count": 3,
+      "na_count": 0,
+      "failures": [
+        {
+          "check_id": "SPF-1",
+          "description": "INITIAL_SPOTS defined but never used to seed the pattern. The spec states 'The system starts with the three office parking spots pre-loaded: spot #1, spot #5, and spot #12.' The first acceptance criterion is 'On first load, the today panel shows all three parking spots (#1, #5, #12) as available.' The INITIAL_SPOTS constant at line 73 is defined correctly but never passed as the default value for the spots input. The input uses Default<ParkingSpot[], []> which seeds to an empty array. Manual test confirmed: Today panel is empty on first load.",
+          "line_number": 73,
+          "suggested_fix": "Change the spots input default from Default<ParkingSpot[], []> to use INITIAL_SPOTS as the fallback. Since input types cannot reference module-level constants directly in their Default<> generics, the fix is likely at the pattern function body level: ensure spots resolves to INITIAL_SPOTS when no external data is present."
+        },
+        {
+          "check_id": "SPF-3",
+          "description": "Past date prevention is only enforced at submit time (line 653: if (date < TODAY) return with error message), not at the form level. The spec states: 'The form does not allow selecting past dates. Only today and future dates (up to 30 days ahead) are selectable.' The date input at line 1079 is a plain ct-input with placeholder text, not constrained with min/max attributes.",
+          "line_number": 1079,
+          "suggested_fix": "Add min={TODAY} and max={getDateOffset(30)} attributes to the ct-input used for date entry, or use a date picker component that supports date range constraints. This prevents invalid input at the UI level rather than only catching it on submit."
+        },
+        {
+          "check_id": "SPF-4",
+          "description": "The pattern feels incomplete for its intended use case due to the combined effect of missing initial spots, the incorrect request result message (always showing 'Denied'), and the week-ahead grid rendering failure when all spots are occupied. The single most critical user interaction — requesting a parking spot and learning whether you got one — is visually broken. Users who do not know to navigate to the Today panel after seeing 'Denied' would believe their request failed even when it succeeded.",
+          "line_number": null,
+          "suggested_fix": "Fix the three issues identified: (1) seed INITIAL_SPOTS, (2) correct the request result message display logic, (3) fix the week-ahead grid row rendering when all spots are allocated. These together would make the pattern feel complete and production-ready."
+        }
+      ],
+      "justification": "The data model closely matches the spec (SPF-2 PASS): ParkingSpot with number/label/notes, Person with name/email/commuteMode/spotPreferences/defaultSpotId, SpotRequest with personId/date/status/assignedSpotId/autoAllocated, and a separate priorityOrder list. However, three spec fidelity failures are present. SPF-1 (FAIL, -15): The initial spot pre-loading requirement from spec assumption 11 and the first acceptance criterion is not met — INITIAL_SPOTS exists but is never used to seed the Writable. SPF-3 (FAIL, -5): Form-level past date prevention is not implemented (only submit-time validation). SPF-4 (FAIL, -10): The pattern feels incomplete given that the core user journey (request parking, see result) is visually broken by the 'Denied' message bug and empty initial state."
+    }
+  },
+  "overall": {
+    "score": 48,
+    "classification": "failed",
+    "recommendation": "reject",
+    "summary": "The Parking Coordinator pattern demonstrates excellent code structure, idioms, and business logic — all 14 handlers work correctly at the state level — but three critical runtime failures prevent acceptance. COR-2 (runtime TypeErrors in computed bodies) caps the correctness dimension at 20; COR-3 (request result always shows 'Denied' due to synchronous read-after-send) breaks the most important user interaction; and COR-5 (INITIAL_SPOTS defined but never used) means the pattern starts empty rather than with the three spec-required spots. TST-2 caps the test dimension at 30 (4 harness-timing failures). The raw weighted score is 63 (marginal) but the process efficiency modifier of -15 (6 build iterations: 5 build cycles + 1 fix pass) reduces the final score to 48. Recommend rejection and re-run with targeted fixes for: (1) seed INITIAL_SPOTS, (2) fix submitRequest to compute allocation result without synchronous read-after-send, (3) add null guards in computeds to eliminate the TypeErrors, (4) fix week-ahead grid row rendering when all spots are allocated."
+  }
+}
