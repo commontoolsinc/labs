@@ -5,10 +5,9 @@ import {
   AuthorizationError,
   Invocation,
   Proof,
-  Reference,
   Signer,
 } from "./interface.ts";
-import { refer } from "./reference.ts";
+import { type ContentId, refer } from "./reference.ts";
 import { unauthorized } from "./error.ts";
 import { type DID } from "@commontools/identity";
 import { fromDID } from "./util.ts";
@@ -87,7 +86,7 @@ export const claim = async <Access extends Invocation>(
 /**
  * Issues verifiable authorization signed by the given signer.
  */
-export const authorize = async <Access extends Reference[]>(
+export const authorize = async <Access extends ContentId[]>(
   access: Access,
   as: Signer,
 ): AsyncResult<Authorization<Access[number]>, Error> => {

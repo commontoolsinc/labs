@@ -5,7 +5,6 @@ import {
   FactSelection,
   Invariant,
   MIME,
-  Reference,
   Retraction,
   Revision,
   State,
@@ -47,7 +46,7 @@ export const assert = <
   the: T;
   of: Of;
   is: Is;
-  cause?: Fact | Reference<Fact> | null | undefined;
+  cause?: Fact | ContentId<Fact> | null | undefined;
 }) =>
   ({
     the,
@@ -116,9 +115,9 @@ export function normalizeFact<
     of: Of;
     is: Is;
     cause?:
-      | Reference<Assertion<T, Of, Is>>
-      | Reference<Retraction<T, Of, Is>>
-      | Reference<Unclaimed<T, Of>>
+      | ContentId<Assertion<T, Of, Is>>
+      | ContentId<Retraction<T, Of, Is>>
+      | ContentId<Unclaimed<T, Of>>
       | Fact
       | { "/": string };
   },
@@ -133,9 +132,9 @@ export function normalizeFact<
     the: T;
     of: Of;
     cause?:
-      | Reference<Assertion<T, Of, Is>>
-      | Reference<Retraction<T, Of, Is>>
-      | Reference<Unclaimed<T, Of>>
+      | ContentId<Assertion<T, Of, Is>>
+      | ContentId<Retraction<T, Of, Is>>
+      | ContentId<Unclaimed<T, Of>>
       | Fact
       | { "/": string };
   },
@@ -151,9 +150,9 @@ export function normalizeFact<
     of: Of;
     is?: Is;
     cause?:
-      | Reference<Assertion<T, Of, Is>>
-      | Reference<Retraction<T, Of, Is>>
-      | Reference<Unclaimed<T, Of>>
+      | ContentId<Assertion<T, Of, Is>>
+      | ContentId<Retraction<T, Of, Is>>
+      | ContentId<Unclaimed<T, Of>>
       | Fact
       | { "/": string };
   },
@@ -186,6 +185,6 @@ export function normalizeFact<
   }
 }
 
-export const factReference = (fact: Fact): Reference<Fact> => {
+export const factReference = (fact: Fact): ContentId<Fact> => {
   return refer(normalizeFact(fact));
 };

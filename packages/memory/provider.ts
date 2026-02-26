@@ -24,7 +24,6 @@ import {
   ProviderSession,
   Query,
   QueryError,
-  Reference,
   Result,
   Revision,
   SchemaQuery,
@@ -37,7 +36,11 @@ import {
 } from "./interface.ts";
 import * as SelectionBuilder from "./selection.ts";
 import * as Memory from "./memory.ts";
-import { fromString as causeFromString, refer } from "./reference.ts";
+import {
+  type ContentId,
+  fromString as causeFromString,
+  refer,
+} from "./reference.ts";
 import {
   redactCommitData,
   selectFact,
@@ -126,7 +129,7 @@ export * as Subscription from "./subscription.ts";
 export * from "./util.ts";
 
 // Convenient shorthand so I don't need this long type for this string
-type JobId = InvocationURL<Reference<ConsumerCommandInvocation<Protocol>>>;
+type JobId = InvocationURL<ContentId<ConsumerCommandInvocation<Protocol>>>;
 export type Options = Memory.Options;
 
 export const open = async (
@@ -229,7 +232,7 @@ class MemoryProviderSession<
     | ReadableStreamDefaultController<ProviderCommand<MemoryProtocol>>
     | undefined;
 
-  channels: Map<InvocationURL<Reference<Subscribe>>, Set<string>> = new Map();
+  channels: Map<InvocationURL<ContentId<Subscribe>>, Set<string>> = new Map();
   schemaChannels: Map<JobId, SchemaSubscription> = new Map();
   // Mapping from fact key to since value of the last fact sent to the client
   lastRevision: Map<string, number> = new Map();
@@ -380,14 +383,14 @@ class MemoryProviderSession<
       return this.perform({
         the: "task/return",
         of: `job:${refer(invocation)}` as InvocationURL<
-          Reference<ConsumerCommandInvocation<MemoryProtocol>>
+          ContentId<ConsumerCommandInvocation<MemoryProtocol>>
         >,
         is: { error },
       });
     }
 
     const of = `job:${refer(invocation)}` as InvocationURL<
-      Reference<ConsumerCommandInvocation<Protocol>>
+      ContentId<ConsumerCommandInvocation<Protocol>>
     >;
 
     switch (invocation.cmd) {
@@ -657,7 +660,7 @@ class MemoryProviderSession<
 
       // Send commits with revisions to commit log subscriptions
       // The client's startSynchronization() reads revisions to update its heap
-      const commitJobIds: InvocationURL<Reference<Subscribe>>[] = [];
+      const commitJobIds: InvocationURL<ContentId<Subscribe>>[] = [];
       for (const [id, channels] of this.channels) {
         if (Subscription.match(redactedData.transaction, channels)) {
           commitJobIds.push(id);

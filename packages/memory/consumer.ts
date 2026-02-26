@@ -29,7 +29,6 @@ import type {
   Query,
   QueryArgs,
   QueryError,
-  Reference,
   Result,
   Revision,
   SchemaPathSelector,
@@ -49,7 +48,7 @@ import type {
   URI,
   UTCUnixTimestampInSeconds,
 } from "./interface.ts";
-import { contentIdFromJSON, refer } from "./reference.ts";
+import { type ContentId, contentIdFromJSON, refer } from "./reference.ts";
 import * as Socket from "./socket.ts";
 import {
   getSelectorRevision,
@@ -135,7 +134,7 @@ class MemoryConsumerSession<
     >
     | undefined;
   invocations: Map<
-    InvocationURL<Reference<Invocation>>,
+    InvocationURL<ContentId<Invocation>>,
     Job<Abilities<MemoryProtocol>, MemoryProtocol>
   > = new Map();
 
@@ -361,7 +360,7 @@ class MemoryConsumerSession<
 
   private executeAuthorized<
     Ability extends string,
-    Access extends Reference[],
+    Access extends ContentId[],
   >(
     authorizationResult: Result<Authorization<Access[number]>, Error>,
     invocation: ConsumerInvocation<Ability, MemoryProtocol>,
@@ -564,7 +563,7 @@ class ConsumerInvocation<Ability extends string, Protocol extends Proto> {
 
   source: ConsumerInvocationFor<Ability, Protocol>;
 
-  #reference: Reference<Invocation>;
+  #reference: ContentId<Invocation>;
 
   static create<Ability extends string, Protocol extends Proto>(
     as: DID,

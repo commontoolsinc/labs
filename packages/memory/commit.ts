@@ -5,10 +5,10 @@ import type {
   CommitFact,
   Fact,
   MemorySpace,
-  Reference,
   Revision,
   Transaction,
 } from "./interface.ts";
+import type { ContentId } from "./reference.ts";
 import { assert } from "./fact.ts";
 import { fromString } from "merkle-reference";
 
@@ -22,7 +22,7 @@ export const create = <Space extends MemorySpace>({
   space: Space;
   since?: number;
   transaction: Transaction;
-  cause?: Reference<Assertion> | Assertion | null | undefined;
+  cause?: ContentId<Assertion> | Assertion | null | undefined;
 }): Assertion<typeof COMMIT_LOG_TYPE, Space, CommitData> =>
   assert({
     the: COMMIT_LOG_TYPE,
@@ -45,7 +45,7 @@ export const toRevision = (
       the: COMMIT_LOG_TYPE,
       of: space as MemorySpace,
       is,
-      cause: fromString(cause) as Reference<Fact>,
+      cause: fromString(cause) as ContentId<Fact>,
     }),
     since: is.since,
   };

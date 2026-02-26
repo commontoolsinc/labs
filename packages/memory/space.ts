@@ -8,7 +8,7 @@ import {
 import { COMMIT_LOG_TYPE, create as createCommit } from "./commit.ts";
 import * as SelectionBuilder from "./selection.ts";
 import { unclaimedRef } from "./fact.ts";
-import { fromString, refer } from "./reference.ts";
+import { type ContentId, fromString, refer } from "./reference.ts";
 import { addMemoryAttributes, traceAsync, traceSync } from "./telemetry.ts";
 import type {
   Assert,
@@ -31,7 +31,6 @@ import type {
   OfTheCause,
   Query,
   QueryError,
-  Reference,
   Result,
   Retract,
   Revision,
@@ -541,9 +540,9 @@ const recall = <Space extends MemorySpace>(
     const revision: RevisionWithFact<Fact> = {
       the,
       of,
-      cause: row.cause
-        ? (fromString(row.cause) as Reference<Assertion>)
-        : unclaimedRef({ the, of }),
+      cause: (row.cause
+        ? fromString(row.cause)
+        : unclaimedRef({ the, of })) as ContentId<Assertion>,
       since: row.since,
       fact: row.fact, // Include stored hash to avoid recomputing with refer()
     };
@@ -621,9 +620,10 @@ const getFact = <Space extends MemorySpace>(
   const revision: Revision<Fact> = {
     the: row.the as MIME,
     of: row.of as URI,
-    cause: row.cause
-      ? (fromString(row.cause) as Reference<Assertion>)
-      : unclaimedRef(row as FactAddress),
+    cause:
+      (row.cause
+        ? fromString(row.cause)
+        : unclaimedRef(row as FactAddress)) as ContentId<Assertion>,
     since: row.since,
   };
   if (row.is) {
@@ -804,7 +804,7 @@ const swap = <Space extends MemorySpace>(
     : [source.claim, source.claim.fact];
   const cause = expect.toString();
   const base = unclaimedRef({ the, of }).toString();
-  const expected = cause === base ? null : (expect as Reference<Fact>);
+  const expected = cause === base ? null : (expect as ContentId<Fact>);
 
   // Derive the merkle reference to the fact that memory will have after
   // successful update. If we have an assertion or retraction we derive fact
@@ -925,9 +925,9 @@ const commit = <Space extends MemorySpace>(
   const [since, cause] = row
     ? [
       (JSON.parse(row.is as string) as CommitData).since + 1,
-      fromString(row.fact) as Reference<Assertion>,
+      fromString(row.fact) as ContentId<Assertion>,
     ]
-    : [0, unclaimedRef({ the, of })];
+    : [0, unclaimedRef({ the, of }) as ContentId as ContentId<Assertion>];
 
   const commit = createCommit({
     space: of,

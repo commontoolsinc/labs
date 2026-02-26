@@ -1,4 +1,4 @@
-import type { Reference } from "merkle-reference";
+import type { ContentId } from "./reference.ts";
 import type { JSONSchema, JSONValue } from "@commontools/api";
 import type { StorableInstance } from "./storable-protocol.ts";
 import type {
@@ -11,7 +11,7 @@ export type SchemaPathSelector = {
   schema?: JSONSchema;
 };
 
-export type { JSONValue, Reference };
+export type { JSONValue };
 
 /**
  * A value that can be stored in the storage layer. This is similar to
@@ -129,7 +129,7 @@ export interface Principal<ID extends DID = DID> {
  */
 export interface Authority extends Principal {
   authorize<T extends JSONValue>(
-    access: Iterable<Reference<T> | T>,
+    access: Iterable<ContentId<T> | T>,
   ): AwaitResult<Authorization<T>, AuthorizationError>;
 }
 
@@ -167,7 +167,7 @@ export type UCAN<Command extends Invocation> = {
  * Proof of authorization for a given access.
  */
 export interface Proof<Access extends JSONValue> {
-  [link: AsString<Reference<Access>>]: Unit;
+  [link: AsString<ContentId<Access>>]: Unit;
 }
 
 /**
@@ -506,18 +506,18 @@ export type Receipt<
 > =
   | {
     the: "task/return";
-    of: InvocationURL<Reference<Command>>;
+    of: InvocationURL<ContentId<Command>>;
     is: Awaited<Result>;
   }
   | (Effect extends never ? never
     : {
       the: "task/effect";
-      of: InvocationURL<Reference<Command>>;
+      of: InvocationURL<ContentId<Command>>;
       is: Effect;
     });
 
 export type Effect<Of extends NonNullable<unknown>, Command> = {
-  of: Reference<Of>;
+  of: ContentId<Of>;
   run: Command;
   is?: undefined;
 };
@@ -526,7 +526,7 @@ export type Return<
   Of extends NonNullable<unknown>,
   Result extends NonNullable<unknown> | null,
 > = {
-  of: Reference<Of>;
+  of: ContentId<Of>;
   is: Result;
   run?: undefined;
 };
@@ -677,9 +677,9 @@ export interface Assertion<
   of: Of;
   is: Is;
   cause:
-    | Reference<Assertion<T, Of, Is>>
-    | Reference<Retraction<T, Of, Is>>
-    | Reference<Unclaimed<T, Of>>;
+    | ContentId<Assertion<T, Of, Is>>
+    | ContentId<Retraction<T, Of, Is>>
+    | ContentId<Unclaimed<T, Of>>;
 }
 
 /**
@@ -694,7 +694,7 @@ export interface Retraction<
   the: T;
   of: Of;
   is?: undefined;
-  cause: Reference<Assertion<T, Of, Is>>;
+  cause: ContentId<Assertion<T, Of, Is>>;
 }
 
 export interface Invariant<
@@ -704,7 +704,7 @@ export interface Invariant<
 > {
   the: T;
   of: Of;
-  fact: Reference<Fact<T, Of, Is>>;
+  fact: ContentId<Fact<T, Of, Is>>;
 
   is?: undefined;
   cause?: undefined;
@@ -883,7 +883,7 @@ export type Subscribe<Space extends MemorySpace = MemorySpace> = Invocation<
 export type Unsubscribe<Space extends MemorySpace = MemorySpace> = Invocation<
   "/memory/query/unsubscribe",
   Space,
-  { source: InvocationURL<Reference<Subscribe<Space>>> }
+  { source: InvocationURL<ContentId<Subscribe<Space>>> }
 >;
 
 export type SchemaQueryArgs = {
@@ -1032,7 +1032,7 @@ export type Conflict = {
   /**
    * Expected state in the replica.
    */
-  expected: Reference<Fact> | null;
+  expected: ContentId<Fact> | null;
 
   /**
    * Actual memory state in the replica repository.
