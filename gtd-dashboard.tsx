@@ -1594,7 +1594,21 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                 {/* Breadcrumb bar */}
                 {computed(() => {
                   const crumbStrs = projectBreadcrumbs.get() || [];
-                  if (crumbStrs.length === 0) {
+                  // Validate breadcrumbs against current data
+                  const projectItems2: Project[] = [...displayProjects].filter(Boolean);
+                  const knownIds2 = new Set<string>();
+                  for (const p of projectItems2) {
+                    knownIds2.add(p.id);
+                    if (p.parentId) knownIds2.add(p.parentId);
+                  }
+                  let crumbs = crumbStrs.map((s: string) => {
+                    const bar = s.indexOf("|");
+                    return { id: bar >= 0 ? s.substring(0, bar) : s, name: bar >= 0 ? s.substring(bar + 1) : s };
+                  });
+                  if (crumbs.length > 0 && crumbs.some((c: { id: string; name: string }) => !knownIds2.has(c.id))) {
+                    crumbs = [];
+                  }
+                  if (crumbs.length === 0) {
                     return (
                       <div style={{ ...groupHeaderStyle, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                         <span>Projects</span>
@@ -1612,11 +1626,6 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                       </div>
                     );
                   }
-                  // Parse "id|name" strings
-                  const crumbs = crumbStrs.map((s: string) => {
-                    const bar = s.indexOf("|");
-                    return { id: bar >= 0 ? s.substring(0, bar) : s, name: bar >= 0 ? s.substring(bar + 1) : s };
-                  });
                   const currentCrumb = crumbs[crumbs.length - 1];
                   const dirOpen = breadcrumbDirectiveOpen.get();
                   return (
