@@ -17,6 +17,7 @@ import { IntersectionFormatter } from "./formatters/intersection-formatter.ts";
 import {
   detectWrapperViaNode,
   getNamedTypeKey,
+  getPropertyNameText,
   isDefaultTypeRef,
   safeGetIndexTypeOfType,
   safeGetTypeOfSymbolAtLocation,
@@ -657,13 +658,11 @@ export class SchemaGenerator implements ISchemaGenerator {
       const required: string[] = [];
 
       for (const member of typeNode.members) {
-        if (
-          ts.isPropertySignature(member) &&
-          member.name &&
-          ts.isIdentifier(member.name) &&
-          member.type
-        ) {
-          const propName = member.name.text;
+        if (ts.isPropertySignature(member) && member.name && member.type) {
+          const propName = getPropertyNameText(member.name);
+          if (!propName) {
+            continue;
+          }
 
           // Get the property type - check typeRegistry first, then resolve from node
           let propType: ts.Type;

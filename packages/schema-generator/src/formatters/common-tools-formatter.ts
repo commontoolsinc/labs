@@ -14,6 +14,7 @@ import type {
 import type { SchemaGenerator } from "../schema-generator.ts";
 import {
   detectWrapperViaNode,
+  getPropertyNameText,
   resolveWrapperNode,
   type TypeWithInternals,
 } from "../type-utils.ts";
@@ -692,11 +693,11 @@ export class CommonToolsFormatter implements TypeFormatter {
     if (ts.isTypeLiteralNode(typeNode)) {
       const obj: Record<string, unknown> = {};
       for (const member of typeNode.members) {
-        if (
-          ts.isPropertySignature(member) && member.name &&
-          ts.isIdentifier(member.name) && member.type
-        ) {
-          const propName = member.name.text;
+        if (ts.isPropertySignature(member) && member.name && member.type) {
+          const propName = getPropertyNameText(member.name);
+          if (!propName) {
+            continue;
+          }
           obj[propName] = this.extractDefaultValueFromNode(
             member.type,
             context,

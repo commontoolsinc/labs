@@ -16,7 +16,12 @@ export default pattern((state) => {
                 properties: {
                     element: {
                         type: "object",
-                        properties: {}
+                        properties: {
+                            "0": {
+                                type: "number"
+                            }
+                        },
+                        required: ["0"]
                     }
                 },
                 required: ["element"]
