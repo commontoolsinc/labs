@@ -140,6 +140,26 @@ function CfcOutputExactCopyViolationError(
   };
 }
 
+function CfcOutputProjectionViolationError(
+  entity: EntityAddress,
+  path: string,
+  sourcePath: string,
+  projectionPath: string,
+): ICfcOutputTransitionViolationError {
+  return {
+    name: "CfcOutputTransitionViolationError",
+    message:
+      "CFC prepare output transition failed: projection assertion was not satisfied",
+    requirement: "projection",
+    space: entity.space,
+    id: entity.id,
+    type: entity.type,
+    path,
+    sourcePath,
+    projectionPath,
+  };
+}
+
 function collectWrittenEntities(
   tx: IExtendedStorageTransaction,
 ): EntityAddress[] {
@@ -387,6 +407,37 @@ function readExactCopyOf(schema: JSONSchema | undefined): string | undefined {
   return rawExactCopyOf;
 }
 
+type ProjectionSpec = {
+  readonly from: string;
+  readonly path: string;
+};
+
+function readProjection(schema: JSONSchema | undefined): ProjectionSpec | undefined {
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
+    return undefined;
+  }
+  const rawIfc = (schema as { ifc?: unknown }).ifc;
+  if (!rawIfc || typeof rawIfc !== "object" || Array.isArray(rawIfc)) {
+    return undefined;
+  }
+  const rawProjection = (rawIfc as { projection?: unknown }).projection;
+  if (
+    !rawProjection || typeof rawProjection !== "object" ||
+    Array.isArray(rawProjection)
+  ) {
+    return undefined;
+  }
+  const from = (rawProjection as { from?: unknown }).from;
+  const path = (rawProjection as { path?: unknown }).path;
+  if (
+    typeof from !== "string" || !from.startsWith("/") ||
+    typeof path !== "string" || !path.startsWith("/")
+  ) {
+    return undefined;
+  }
+  return { from, path };
+}
+
 function readValueAtCanonicalPath(
   tx: IExtendedStorageTransaction,
   address: EntityAddress,
@@ -401,12 +452,16 @@ function readValueAtCanonicalPath(
   );
 }
 
+type ConsumedSourceLookup = {
+  readonly found: boolean;
+  readonly value: unknown;
+};
+
 function resolveConsumedSourceValue(
   tx: IExtendedStorageTransaction,
   consumedReadLabels: readonly ConsumedReadWithEffectiveLabel[],
   sourcePath: string,
-): unknown | undefined {
-  const values: unknown[] = [];
+): ConsumedSourceLookup {
   const seen = new Set<string>();
   for (const consumed of consumedReadLabels) {
     if (consumed.read.path !== sourcePath) {
@@ -422,20 +477,31 @@ function resolveConsumedSourceValue(
       continue;
     }
     seen.add(key);
-    values.push(readValueAtCanonicalPath(tx, {
-      space: consumed.read.space as EntityAddress["space"],
-      id: consumed.read.id as EntityAddress["id"],
-      type: consumed.read.type as EntityAddress["type"],
-    }, consumed.read.path));
+    return {
+      found: true,
+      value: readValueAtCanonicalPath(tx, {
+        space: consumed.read.space as EntityAddress["space"],
+        id: consumed.read.id as EntityAddress["id"],
+        type: consumed.read.type as EntityAddress["type"],
+      }, consumed.read.path),
+    };
   }
-  if (values.length === 0) {
-    return undefined;
+  return { found: false, value: undefined };
+}
+
+function valueAtCanonicalPath(value: unknown, path: string): unknown {
+  const segments = fromCanonicalPath(path);
+  let cursor = value;
+  for (const segment of segments) {
+    if (cursor === null || cursor === undefined) {
+      return undefined;
+    }
+    if (typeof cursor !== "object") {
+      return undefined;
+    }
+    cursor = (cursor as Record<string, unknown>)[segment];
   }
-  const first = values[0];
-  if (values.every((value) => deepEqual(value, first))) {
-    return first;
-  }
-  return undefined;
+  return cursor;
 }
 
 function verifyOutputTransitionsForAttempt(
@@ -491,18 +557,35 @@ function verifyOutputTransitionsForAttempt(
       fromCanonicalPath(write.path),
     );
     const exactCopyOf = readExactCopyOf(schemaAtWritePath);
-    if (!exactCopyOf) {
-      continue;
+    if (exactCopyOf) {
+      const source = resolveConsumedSourceValue(
+        tx,
+        consumedReadLabels,
+        exactCopyOf,
+      );
+      const outputValue = readValueAtCanonicalPath(tx, entity, write.path);
+      if (!source.found || !deepEqual(source.value, outputValue)) {
+        throw CfcOutputExactCopyViolationError(entity, write.path, exactCopyOf);
+      }
     }
 
-    const sourceValue = resolveConsumedSourceValue(
-      tx,
-      consumedReadLabels,
-      exactCopyOf,
-    );
-    const outputValue = readValueAtCanonicalPath(tx, entity, write.path);
-    if (sourceValue === undefined || !deepEqual(sourceValue, outputValue)) {
-      throw CfcOutputExactCopyViolationError(entity, write.path, exactCopyOf);
+    const projection = readProjection(schemaAtWritePath);
+    if (projection) {
+      const source = resolveConsumedSourceValue(
+        tx,
+        consumedReadLabels,
+        projection.from,
+      );
+      const outputValue = readValueAtCanonicalPath(tx, entity, write.path);
+      const expectedValue = valueAtCanonicalPath(source.value, projection.path);
+      if (!source.found || !deepEqual(expectedValue, outputValue)) {
+        throw CfcOutputProjectionViolationError(
+          entity,
+          write.path,
+          projection.from,
+          projection.path,
+        );
+      }
     }
   }
 }

@@ -762,12 +762,16 @@ export interface ICfcInputRequirementViolationError extends IStorageError {
 
 export interface ICfcOutputTransitionViolationError extends IStorageError {
   readonly name: "CfcOutputTransitionViolationError";
-  readonly requirement: "confidentialityMonotonicity" | "exactCopyOf";
+  readonly requirement:
+    | "confidentialityMonotonicity"
+    | "exactCopyOf"
+    | "projection";
   readonly space: MemorySpace;
   readonly id: URI;
   readonly type: string;
   readonly path: string;
   readonly sourcePath?: string;
+  readonly projectionPath?: string;
   readonly minClassification?: string;
   readonly actualClassification?: string;
 }
