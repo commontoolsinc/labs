@@ -49,7 +49,7 @@ import type {
 } from "@commontools/api";
 import type { Schema } from "@commontools/api/schema";
 import { toSchema } from "@commontools/api";
-import { AuthSchema } from "./schema-lib.ts";
+import { AuthSchema, WebhookConfigSchema } from "./schema-lib.ts";
 import {
   type IExtendedStorageTransaction,
   type MemorySpace,
@@ -74,7 +74,7 @@ export const SELF: typeof SELFSymbol = Symbol("SELF") as any;
 
 export const schema: typeof schemaFunction = (schema) => schema;
 
-export { AuthSchema } from "./schema-lib.ts";
+export { AuthSchema, WebhookConfigSchema } from "./schema-lib.ts";
 export type {
   AnyCell,
   AnyCellWrapping,
@@ -293,6 +293,7 @@ export interface BuilderFunctionsAndConstants {
   schema: typeof schema;
   toSchema: typeof toSchema;
   AuthSchema: typeof AuthSchema;
+  WebhookConfigSchema: typeof WebhookConfigSchema;
 
   // Render utils
   h: HFunction;
