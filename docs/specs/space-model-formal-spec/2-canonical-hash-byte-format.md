@@ -24,7 +24,7 @@ The hash function is **SHA-256** (FIPS 180-4). All byte sequences described in
 this document are fed to a SHA-256 context in the order specified.
 
 The digest output is **32 raw bytes** (256 bits). The `canonicalHash()` function
-wraps the raw bytes into a `StorableContentId` instance (Section 1.4.8 of the
+wraps the raw bytes into a `StorableContentId` instance (Section 1.4.9 of the
 formal spec) with algorithm tag `fid1`. Callers who need a string
 representation call `toString()` on the result, which produces
 `fid1:<base64hash>` (unpadded base64).
@@ -302,7 +302,7 @@ Bytes: TAG_INSTANCE  TYPE_TAG_LEN_LEB128  TYPE_TAG_UTF8  STATE_HASH
 - **Type tag length**: The byte length of the type tag string in UTF-8,
   encoded as unsigned LEB128.
 - **Type tag**: The `StorableInstance`'s type tag string (e.g., `"Error@1"`,
-  `"Map@1"`, `"Set@1"`), encoded as raw UTF-8 bytes.
+  `"Map@1"`, `"Set@1"`, `"RegExp@1"`), encoded as raw UTF-8 bytes.
 - **Deconstructed state**: The value returned by `[DECONSTRUCT]()`, hashed
   recursively as a complete tagged value.
 
@@ -487,7 +487,40 @@ Hash payload is 4 bytes: `0xDE`, `0xAD`, `0xBE`, `0xEF`.
 `TAG_CONTENT_ID` (`0x29`), algorithm tag length 4 (`0x04`), algorithm tag
 `"fid1"`, hash byte length 4 (`0x04`), hash bytes.
 
-### 7.12 `[1, , 3]` (sparse array)
+### 7.12 `StorableRegExp(/abc/gi)`
+
+`StorableRegExp` is a `StorableInstance` and is hashed via `TAG_INSTANCE`.
+
+Type tag `"RegExp@1"` is 8 bytes in UTF-8: `0x52`, `0x65`, `0x67`, `0x45`,
+`0x78`, `0x70`, `0x40`, `0x31`.
+
+Deconstructed state is `{ source: "abc", flags: "gi" }`, an object with keys
+sorted by UTF-8 bytes: `"flags"` (0x66...) < `"source"` (0x73...).
+
+- Instance tag: `12`
+- Type tag length 8 (LEB128): `08`
+- Type tag `"RegExp@1"`: `52 65 67 45 78 70 40 31`
+- State (object):
+  - Object tag: `11`
+  - Key `"flags"` (5 bytes): `24 05 66 6C 61 67 73`
+  - Value `"gi"` (2 bytes): `24 02 67 69`
+  - Key `"source"` (6 bytes): `24 06 73 6F 75 72 63 65`
+  - Value `"abc"` (3 bytes): `24 03 61 62 63`
+  - End: `00`
+
+Full byte stream:
+```
+12
+08  52 65 67 45 78 70 40 31
+11
+24 05 66 6C 61 67 73
+24 02 67 69
+24 06 73 6F 75 72 63 65
+24 03 61 62 63
+00
+```
+
+### 7.13 `[1, , 3]` (sparse array)
 
 Three elements: number `1`, one hole, number `3`. Terminated by `TAG_END`.
 
@@ -506,7 +539,7 @@ Full byte stream:
 00
 ```
 
-### 7.13 `[]` (empty array)
+### 7.14 `[]` (empty array)
 
 ```
 10 00
@@ -514,7 +547,7 @@ Full byte stream:
 
 `TAG_ARRAY` immediately followed by `TAG_END`.
 
-### 7.14 `{ a: 1, b: 2 }` (object)
+### 7.15 `{ a: 1, b: 2 }` (object)
 
 Two keys. UTF-8 sort order: `"a"` (0x61) < `"b"` (0x62). Terminated by
 `TAG_END`.
@@ -536,7 +569,7 @@ Full byte stream:
 00
 ```
 
-### 7.15 `{}` (empty object)
+### 7.16 `{}` (empty object)
 
 ```
 11 00
@@ -544,7 +577,7 @@ Full byte stream:
 
 `TAG_OBJECT` immediately followed by `TAG_END`.
 
-### 7.16 `[1, undefined, 3]` vs. `[1, , 3]` vs. `[1, null, 3]`
+### 7.17 `[1, undefined, 3]` vs. `[1, , 3]` vs. `[1, null, 3]`
 
 These three arrays produce different byte streams at the middle element:
 
