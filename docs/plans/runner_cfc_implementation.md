@@ -68,7 +68,7 @@ effects and deterministic schema binding.
 
 ### 1.2 Design Decisions to Lock in Code Comments/Types
 
-- [ ] Define `CfcTxState` type (relevance, preparation, digest, outbox).
+- [x] Define `CfcTxState` type (relevance, preparation, digest, outbox).
 - [x] Define `prepareBoundaryCommit` contract shape.
 - [x] Define `internalVerifierRead` metadata marker key and semantics.
 - [x] Define `AttemptedWrite` canonical shape used by verifier.
@@ -189,9 +189,9 @@ Primary files:
 
 ### 4.2 Effective-Label Trigger
 
-- [ ] When read resolves through link/doc context with effective label
+- [x] When read resolves through link/doc context with effective label
       constraints, mark tx CFC-relevant.
-- [ ] Ensure detection occurs after schema/label accumulation across link hops.
+- [x] Ensure detection occurs after schema/label accumulation across link hops.
 
 ### 4.3 Write-Path Trigger (Write-Only Actions)
 
@@ -207,10 +207,10 @@ Primary files:
 
 ### 4.5 Acceptance Criteria
 
-- [ ] Test: read through link with IFC schema marks tx relevant.
-- [ ] Test: read on plain schema/no labels does not mark relevant.
-- [ ] Test: write-only to labeled target marks relevant.
-- [ ] Test: dependency collection path does not require prepare.
+- [x] Test: read through link with IFC schema marks tx relevant.
+- [x] Test: read on plain schema/no labels does not mark relevant.
+- [x] Test: write-only to labeled target marks relevant.
+- [x] Test: dependency collection path does not require prepare.
 
 ## 5. Boundary Prepare Engine
 
@@ -224,7 +224,7 @@ Primary files:
 ### 5.1 Input Requirement Verification
 
 - [x] Implement consumed-input label gathering from canonical reads.
-- [ ] Implement coherent `requiredIntegrity` verification for object-level
+- [x] Implement coherent `requiredIntegrity` verification for object-level
       annotations.
 - [x] Implement `maxConfidentiality` checks.
 - [x] Respect same-attempt semantics only.
@@ -239,13 +239,13 @@ Primary files:
 
 ### 5.3 State-Dependent Preconditions (7.5.3)
 
-- [ ] Add same-attempt read precondition protocol enforcement.
-- [ ] Require state predicate check before write commit eligibility.
-- [ ] Reject attempt when required read/predicate is missing/fails.
+- [x] Add same-attempt read precondition protocol enforcement.
+- [x] Require state predicate check before write commit eligibility.
+- [x] Reject attempt when required read/predicate is missing/fails.
 
 ### 5.4 Label + SchemaHash Persistence in Prepare
 
-- [ ] Compute new effective labels for outputs/writes.
+- [x] Compute new effective labels for outputs/writes.
 - [x] Resolve schema to canonical bytes and compute hash.
 - [x] Write `cfc.schemaHash` and `cfc.labels` as part of prepare path.
 - [x] Ensure prepare fails if schema hash cannot be resolved.
@@ -356,13 +356,13 @@ Primary files:
 
 - [x] Resolve schema from read/write context at prepare time.
 - [x] Reject prepare if schema is absent for required CFC write.
-- [ ] Cache resolved schema hashes per attempt for performance.
+- [x] Cache resolved schema hashes per attempt for performance.
 
 ### 8.3 Existing Entity Rules
 
 - [x] Read existing `cfc.schemaHash` when present.
 - [x] Enforce immutability by default on existing entities.
-- [ ] Add explicit hook point for future migration mode.
+- [x] Add explicit hook point for future migration mode.
 
 ### 8.4 Acceptance Criteria
 
@@ -420,7 +420,7 @@ Primary files:
 
 ### 10.3 Acceptance Criteria
 
-- [ ] Existing non-CFC tests still pass.
+- [x] Existing non-CFC tests still pass.
 - [ ] No references to removed legacy path remain.
 
 ## 11. Test Plan (Detailed Matrix)
@@ -437,10 +437,10 @@ Primary test location:
 
 ### 11.2 Relevance Detection Tests
 
-- [ ] `cfc-relevance-from-ifc-schema-read.test.ts`
-- [ ] `cfc-relevance-from-effective-label-read.test.ts`
-- [ ] `cfc-relevance-from-write-target-label.test.ts`
-- [ ] `cfc-no-relevance-for-dependency-collection.test.ts`
+- [x] `cfc-relevance-from-ifc-schema-read.test.ts`
+- [x] `cfc-relevance-from-effective-label-read.test.ts`
+- [x] `cfc-relevance-from-write-target-label.test.ts`
+- [x] `cfc-no-relevance-for-dependency-collection.test.ts`
 
 ### 11.3 Activity Canonicalization Tests
 
@@ -453,8 +453,8 @@ Primary test location:
 
 - [x] `cfc-input-required-integrity-fail.test.ts`
 - [x] `cfc-output-transition-fail.test.ts`
-- [ ] `cfc-state-precondition-read-required.test.ts`
-- [ ] `cfc-state-precondition-predicate-required.test.ts`
+- [x] `cfc-state-precondition-read-required.test.ts`
+- [x] `cfc-state-precondition-predicate-required.test.ts`
 - [x] `cfc-prepare-persists-schemahash-and-labels.test.ts`
 - [ ] `cfc-policy-fixpoint-fuel-exhaustion-fail-closed.test.ts`
 - [ ] `cfc-declassify-guard-false-no-rewrite.test.ts`
@@ -485,7 +485,7 @@ Primary test location:
 
 - [x] Run existing scheduler/transaction regression tests.
 - [x] Run existing CFC-related tests.
-- [ ] Add a smoke benchmark around prepare overhead in reactive loops.
+- [x] Add a smoke benchmark around prepare overhead in reactive loops.
 
 ## 12. Rollout and Guardrails
 
@@ -496,7 +496,7 @@ Primary test location:
 
 ### 12.2 Observability
 
-- [ ] Add debug counters:
+- [x] Add debug counters:
       `cfcRelevantTx`, `cfcPreparedTx`, `cfcGateRejects`, `cfcOutboxFlushes`.
 - [ ] Add structured logs for rejection reasons.
 - [ ] Ensure sensitive values are not logged.
@@ -523,10 +523,10 @@ Primary docs:
 
 ### 13.2 Spec Cross-Check
 
-- [ ] Confirm implementation aligns with attempted-write semantics.
-- [ ] Confirm fixed `/value` stripping behavior is reflected.
-- [ ] Confirm state-precondition same-attempt rule coverage.
-- [ ] Confirm schemaHash persistence policy is represented.
+- [x] Confirm implementation aligns with attempted-write semantics.
+- [x] Confirm fixed `/value` stripping behavior is reflected.
+- [x] Confirm state-precondition same-attempt rule coverage.
+- [x] Confirm schemaHash persistence policy is represented.
 - [ ] Confirm declassification gate is conjunctive (condition true + evidence +
       trusted control).
 - [ ] Confirm ambient control-integrity tokens are not treated as value evidence.
@@ -537,12 +537,12 @@ Primary docs:
 
 ## 14. Execution Order (Recommended)
 
-- [ ] Step A: complete Section 2 (transaction model extensions).
+- [x] Step A: complete Section 2 (transaction model extensions).
 - [ ] Step B: complete Section 3 (canonical activity + digest).
-- [ ] Step C: complete Section 4 (relevance detection).
+- [x] Step C: complete Section 4 (relevance detection).
 - [ ] Step D: complete Section 5 (prepare engine).
 - [ ] Step E: complete Section 6 and 7 (scheduler integration + side effects).
-- [ ] Step F: complete Section 8 and 9 (schema hash plumbing + verifier marker).
+- [x] Step F: complete Section 8 and 9 (schema hash plumbing + verifier marker).
 - [ ] Step G: complete Section 10 (legacy cleanup).
 - [ ] Step H: complete Section 11 (full test matrix).
 - [ ] Step I: complete Section 12 and 13 (rollout/docs).
