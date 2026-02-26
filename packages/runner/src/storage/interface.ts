@@ -293,8 +293,8 @@ export interface ICommitNotification {
    */
   changes: IMergedChanges;
   /**
-   * Transaction that committed changes. If legacy API is used it will not have
-   * a source transaction.
+   * Transaction that committed changes when available. Notifications produced
+   * from external integrations may omit a source transaction.
    */
   source?: IStorageTransaction;
 }
@@ -328,8 +328,8 @@ export interface IRevertNotification {
   reason: StorageTransactionRejected;
 
   /**
-   * Transaction that committed changes. If legacy API is used it will not have
-   * a source transaction.
+   * Transaction that committed changes when available. Notifications produced
+   * from external integrations may omit a source transaction.
    */
   source?: IStorageTransaction;
 }

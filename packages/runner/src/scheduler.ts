@@ -50,6 +50,7 @@ import {
   isCommitBearingAttempt,
   prepareCfcCommitIfNeeded,
 } from "./cfc/prepare-shim.ts";
+import { isCfcCommitError, toCfcRejectLog } from "./cfc/rejection-log.ts";
 import { markCfcHandlerTransaction } from "./cfc/handler-transaction.ts";
 import type {
   ActionStats,
@@ -922,11 +923,20 @@ export class Scheduler {
             // even after we run out of retries, this will be re-triggered when
             // input data changes.
             if (error) {
-              logger.info(
-                "schedule-run-error",
-                "Error committing transaction",
-                error,
-              );
+              const cfcReject = toCfcRejectLog(error);
+              if (cfcReject) {
+                logger.warn(
+                  "cfc-reject",
+                  "Reactive commit rejected by CFC boundary gate",
+                  cfcReject,
+                );
+              } else {
+                logger.info(
+                  "schedule-run-error",
+                  "Error committing transaction",
+                  error,
+                );
+              }
 
               if (!shouldRetryCommitError(error)) {
                 this.retries.delete(action);
@@ -2799,11 +2809,20 @@ export class Scheduler {
               this.queueExecution();
             } else {
               if (commitError) {
-                logger.error(
-                  "schedule-error",
-                  "Event handler transaction failed after exhausting all retries",
-                  { error: commitError, handlerId },
-                );
+                const cfcReject = toCfcRejectLog(commitError);
+                if (cfcReject) {
+                  logger.warn(
+                    "cfc-reject",
+                    "Event handler commit rejected by CFC boundary gate",
+                    { handlerId, ...cfcReject },
+                  );
+                } else {
+                  logger.error(
+                    "schedule-error",
+                    "Event handler transaction failed after exhausting all retries",
+                    { error: commitError, handlerId },
+                  );
+                }
               }
               if (onCommit) {
                 // Call commit callback when:
@@ -3472,20 +3491,6 @@ function transactionAbortedFromError(
   };
 }
 
-function isCfcCommitError(error: unknown): error is CommitError {
-  if (!error || typeof error !== "object") {
-    return false;
-  }
-  const name = (error as { name?: unknown }).name;
-  return name === "CfcPrepareRequiredError" ||
-    name === "CfcPreparedDigestMismatchError" ||
-    name === "CfcPrepareSchemaUnavailableError" ||
-    name === "CfcSchemaHashMismatchError" ||
-    name === "CfcInputRequirementViolationError" ||
-    name === "CfcOutputTransitionViolationError" ||
-    name === "CfcPolicyNonConvergenceError";
-}
-
 function shouldRetryCommitError(error: CommitError): boolean {
   return !isCfcCommitError(error);
 }
@@ -3509,6 +3514,17 @@ function commitWithCfcPrepare(
     .catch((error) => {
       tx.abort(error);
       if (isCfcCommitError(error)) {
+        const cfcReject = toCfcRejectLog(error);
+        if (cfcReject) {
+          logger.warn(
+            "cfc-reject",
+            "Prepare step rejected commit at CFC boundary",
+            {
+              cfcReasons: tx.cfcReasons,
+              ...cfcReject,
+            },
+          );
+        }
         return { error };
       }
       const status = tx.status();

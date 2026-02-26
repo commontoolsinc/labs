@@ -42,8 +42,6 @@ import {
   parseLinkPrimitive,
 } from "../link-types.ts";
 import type {
-  Assert,
-  Claim,
   IRemoteStorageProviderSettings,
   IStorageManager,
   IStorageProvider,
@@ -53,6 +51,8 @@ import type {
   IStoreError,
   ITransaction,
   PullError,
+  Retract,
+  PushError,
   Retract,
   StorageValue,
   URI,
@@ -2259,14 +2259,4 @@ export const getChanges = (
     }
   }
   return changes;
-};
-
-// Given an Assert statement with labels, return a Schema with the ifc tags
-const _generateSchemaFromLabels = (
-  change: Assert | Retract | Claim,
-): JSONSchema | undefined => {
-  if (isObject(change?.is) && "labels" in change.is) {
-    return { ifc: change.is.labels } as JSONSchema;
-  }
-  return undefined;
 };
