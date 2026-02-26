@@ -1,5 +1,15 @@
 /// <cts-enable />
-import { Default, NAME, pattern, UI, type VNode, Writable } from "commontools";
+import {
+  Cell,
+  Default,
+  handler,
+  NAME,
+  pattern,
+  Stream,
+  UI,
+  type VNode,
+  Writable,
+} from "commontools";
 
 // ===== Types =====
 
@@ -9,8 +19,9 @@ interface WebhookConfig {
 }
 
 interface WebhookPatternInput {
-  webhookInbox: Writable<Default<unknown, null>>;
+  webhookInbox: Stream<unknown>;
   webhookConfig: Writable<Default<WebhookConfig | null, null>>;
+  lastEvent: Writable<Default<unknown, null>>;
 }
 
 interface WebhookPatternOutput {
@@ -38,8 +49,19 @@ declare global {
 
 // ===== Pattern =====
 
+// Handler to store the latest stream event into a cell for display.
+const onWebhookEvent = handler<
+  unknown,
+  { lastEvent: Cell<unknown> }
+>((event, { lastEvent }) => {
+  lastEvent.set(event);
+});
+
 const WebhookTest = pattern<WebhookPatternInput, WebhookPatternOutput>(
-  ({ webhookInbox, webhookConfig }) => {
+  ({ webhookInbox, webhookConfig, lastEvent }) => {
+    // Subscribe to the stream — each event updates the lastEvent cell.
+    onWebhookEvent(webhookInbox, { lastEvent });
+
     return {
       [NAME]: "Webhook Test Pattern",
       [UI]: (
@@ -76,7 +98,7 @@ const WebhookTest = pattern<WebhookPatternInput, WebhookPatternOutput>(
                 <div style={{ fontWeight: "600", fontSize: "1rem" }}>
                   Last Received Event
                 </div>
-                {webhookInbox == null
+                {lastEvent == null
                   ? (
                     <div
                       style={{
@@ -100,7 +122,7 @@ const WebhookTest = pattern<WebhookPatternInput, WebhookPatternOutput>(
                         wordBreak: "break-all",
                       }}
                     >
-                      {JSON.stringify(webhookInbox)}
+                      {JSON.stringify(lastEvent)}
                     </div>
                   )}
               </ct-vstack>
@@ -109,9 +131,7 @@ const WebhookTest = pattern<WebhookPatternInput, WebhookPatternOutput>(
         </ct-screen>
       ),
       webhookConfig,
-      // Export the stream value so linked patterns can observe it.
-      // The inbox is a stream — each POST delivers the latest payload here.
-      lastEvent: webhookInbox,
+      lastEvent,
     };
   },
 );
