@@ -31,7 +31,7 @@ describe("CFC relevance from write target labels", () => {
     await storageManager.close();
   });
 
-  it("marks tx relevant on write-only IFC target path", async () => {
+  it("marks tx relevant on write-only IFC target path", () => {
     const tx = runtime.edit();
     const targetCell = runtime.getCell<number>(
       space,

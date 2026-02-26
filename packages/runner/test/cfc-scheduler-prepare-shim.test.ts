@@ -68,7 +68,7 @@ describe("CFC scheduler prepare shim", () => {
   });
 
   it("commits reactive action with IFC-relevant read/write via prepare shim", async () => {
-    let tx = runtime.edit();
+    const tx = runtime.edit();
     const input = runtime.getCell<number>(
       space,
       "cfc-prepare-input",
@@ -104,7 +104,7 @@ describe("CFC scheduler prepare shim", () => {
   });
 
   it("commits event handler path with IFC-relevant read/write via prepare shim", async () => {
-    let tx = runtime.edit();
+    const tx = runtime.edit();
     const eventCell = runtime.getCell<number>(
       space,
       "cfc-prepare-event",
@@ -159,7 +159,7 @@ describe("CFC scheduler prepare shim", () => {
   });
 
   it("retries event handler attempts and still commits through prepare shim", async () => {
-    let tx = runtime.edit();
+    const tx = runtime.edit();
     const eventCell = runtime.getCell<number>(
       space,
       "cfc-prepare-retry-event",
@@ -370,7 +370,8 @@ describe("CFC scheduler prepare shim", () => {
     const action = (actionTx: IExtendedStorageTransaction) => {
       attempts++;
       const source = Number(
-        sourceCell.withTx(actionTx).asSchema(maxConfidentialInputSchema).get() ?? 0,
+        sourceCell.withTx(actionTx).asSchema(maxConfidentialInputSchema)
+          .get() ?? 0,
       );
       targetCell.withTx(actionTx).set(source + 1);
     };

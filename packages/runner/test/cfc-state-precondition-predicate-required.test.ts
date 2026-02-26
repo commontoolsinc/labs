@@ -53,7 +53,9 @@ describe("CFC state precondition predicate requirement", () => {
     expect(seeded.error).toBeUndefined();
 
     tx = runtime.edit();
-    const current = Number(guardedCell.withTx(tx).asSchema(casSchema).get() ?? 0);
+    const current = Number(
+      guardedCell.withTx(tx).asSchema(casSchema).get() ?? 0,
+    );
     guardedCell.withTx(tx).asSchema(casSchema).set(current + 1);
 
     await prepareCfcCommitIfNeeded(tx);
@@ -74,7 +76,9 @@ describe("CFC state precondition predicate requirement", () => {
     expect(seeded.error).toBeUndefined();
 
     tx = runtime.edit();
-    const current = Number(guardedCell.withTx(tx).asSchema(casSchema).get() ?? 0);
+    const current = Number(
+      guardedCell.withTx(tx).asSchema(casSchema).get() ?? 0,
+    );
     guardedCell.withTx(tx).asSchema(casSchema).set(current + 1);
 
     let thrown: unknown;

@@ -364,7 +364,9 @@ function annotateWithBackToCellSymbols(
   return value;
 }
 
-function readIfcInputMeta(schema: JSONSchema | undefined): Metadata | undefined {
+function readIfcInputMeta(
+  schema: JSONSchema | undefined,
+): Metadata | undefined {
   if (!isObject(schema) || !isObject(schema.ifc)) {
     return undefined;
   }

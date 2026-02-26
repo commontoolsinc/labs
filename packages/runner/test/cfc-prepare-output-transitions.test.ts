@@ -198,9 +198,17 @@ describe("CFC prepare output transitions", () => {
     await seedInputClassification(sourceId, 1, "secret");
 
     const tx = runtime.edit();
-    const sourceCell = runtime.getCell<number>(space, "cfc-output-monotone-source");
-    const targetCell = runtime.getCell<number>(space, "cfc-output-monotone-target");
-    const value = Number(sourceCell.withTx(tx).asSchema(secretNumberSchema).get() ?? 0);
+    const sourceCell = runtime.getCell<number>(
+      space,
+      "cfc-output-monotone-source",
+    );
+    const targetCell = runtime.getCell<number>(
+      space,
+      "cfc-output-monotone-target",
+    );
+    const value = Number(
+      sourceCell.withTx(tx).asSchema(secretNumberSchema).get() ?? 0,
+    );
     targetCell.withTx(tx).asSchema(secretNumberSchema).set(value + 1);
 
     await prepareCfcCommitIfNeeded(tx);
@@ -214,9 +222,17 @@ describe("CFC prepare output transitions", () => {
     await seedInputClassification(sourceId, 1, "secret");
 
     const tx = runtime.edit();
-    const sourceCell = runtime.getCell<number>(space, "cfc-output-downgrade-source");
-    const targetCell = runtime.getCell<number>(space, "cfc-output-downgrade-target");
-    const value = Number(sourceCell.withTx(tx).asSchema(secretNumberSchema).get() ?? 0);
+    const sourceCell = runtime.getCell<number>(
+      space,
+      "cfc-output-downgrade-source",
+    );
+    const targetCell = runtime.getCell<number>(
+      space,
+      "cfc-output-downgrade-target",
+    );
+    const value = Number(
+      sourceCell.withTx(tx).asSchema(secretNumberSchema).get() ?? 0,
+    );
     targetCell.withTx(tx).asSchema(confidentialNumberSchema).set(value + 1);
 
     let thrown: unknown;
@@ -241,9 +257,17 @@ describe("CFC prepare output transitions", () => {
     await seedInputClassification(sourceId, 11, "secret");
 
     const tx = runtime.edit();
-    const sourceCell = runtime.getCell<number>(space, "cfc-output-exact-copy-source");
-    const targetCell = runtime.getCell<number>(space, "cfc-output-exact-copy-target");
-    const value = Number(sourceCell.withTx(tx).asSchema(secretNumberSchema).get() ?? 0);
+    const sourceCell = runtime.getCell<number>(
+      space,
+      "cfc-output-exact-copy-source",
+    );
+    const targetCell = runtime.getCell<number>(
+      space,
+      "cfc-output-exact-copy-target",
+    );
+    const value = Number(
+      sourceCell.withTx(tx).asSchema(secretNumberSchema).get() ?? 0,
+    );
     targetCell.withTx(tx).asSchema(exactCopyNumberSchema).set(value);
 
     await prepareCfcCommitIfNeeded(tx);
@@ -265,7 +289,9 @@ describe("CFC prepare output transitions", () => {
       space,
       "cfc-output-exact-copy-fail-target",
     );
-    const value = Number(sourceCell.withTx(tx).asSchema(secretNumberSchema).get() ?? 0);
+    const value = Number(
+      sourceCell.withTx(tx).asSchema(secretNumberSchema).get() ?? 0,
+    );
     targetCell.withTx(tx).asSchema(exactCopyNumberSchema).set(value + 1);
 
     let thrown: unknown;
@@ -294,7 +320,10 @@ describe("CFC prepare output transitions", () => {
       space,
       "cfc-output-projection-source",
     );
-    const targetCell = runtime.getCell<number>(space, "cfc-output-projection-target");
+    const targetCell = runtime.getCell<number>(
+      space,
+      "cfc-output-projection-target",
+    );
     const source = sourceCell.withTx(tx).asSchema(secretObjectSchema).get() ?? {
       count: 0,
     };
@@ -358,7 +387,8 @@ describe("CFC prepare output transitions", () => {
       space,
       "cfc-output-subset-target",
     );
-    const source = sourceCell.withTx(tx).asSchema(subsetArraySchema).get() ?? [];
+    const source = sourceCell.withTx(tx).asSchema(subsetArraySchema).get() ??
+      [];
     targetCell.withTx(tx).asSchema(subsetArraySchema).set(
       source.filter((value: number) => value !== 1),
     );
@@ -415,8 +445,9 @@ describe("CFC prepare output transitions", () => {
       space,
       "cfc-output-permutation-target",
     );
-    const source = sourceCell.withTx(tx).asSchema(permutationArraySchema).get() ??
-      [];
+    const source =
+      sourceCell.withTx(tx).asSchema(permutationArraySchema).get() ??
+        [];
     targetCell.withTx(tx).asSchema(permutationArraySchema).set([
       source[2] ?? 0,
       source[0] ?? 0,
@@ -429,8 +460,9 @@ describe("CFC prepare output transitions", () => {
   });
 
   it("rejects prepare when permutationOf collection assertion is violated", async () => {
-    const sourceId = runtime.getCell(space, "cfc-output-permutation-fail-source")
-      .getAsNormalizedFullLink().id;
+    const sourceId =
+      runtime.getCell(space, "cfc-output-permutation-fail-source")
+        .getAsNormalizedFullLink().id;
     await seedInputClassification(sourceId, [1, 2, 3], "secret");
 
     const tx = runtime.edit();
@@ -475,8 +507,9 @@ describe("CFC prepare output transitions", () => {
       space,
       "cfc-output-filtered-target",
     );
-    const source = sourceCell.withTx(tx).asSchema(filteredFromArraySchema).get() ??
-      [];
+    const source =
+      sourceCell.withTx(tx).asSchema(filteredFromArraySchema).get() ??
+        [];
     targetCell.withTx(tx).asSchema(filteredFromArraySchema).set(
       source.filter((value: number) => value > 1),
     );
@@ -533,8 +566,9 @@ describe("CFC prepare output transitions", () => {
       space,
       "cfc-output-length-target",
     );
-    const source = sourceCell.withTx(tx).asSchema(lengthPreservedArraySchema).get() ??
-      [];
+    const source =
+      sourceCell.withTx(tx).asSchema(lengthPreservedArraySchema).get() ??
+        [];
     targetCell.withTx(tx).asSchema(lengthPreservedArraySchema).set(
       source.map((value: number) => value + 10),
     );

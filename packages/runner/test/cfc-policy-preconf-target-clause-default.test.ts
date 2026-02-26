@@ -7,7 +7,9 @@ import { prepareCfcCommitIfNeeded } from "../src/cfc/prepare-shim.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { URI } from "../src/storage/interface.ts";
 
-const signer = await Identity.fromPassphrase("cfc policy preconf target clause test");
+const signer = await Identity.fromPassphrase(
+  "cfc policy preconf target clause test",
+);
 const space = signer.did();
 
 const secretSourceSchema = {
@@ -120,9 +122,12 @@ describe("CFC policy preConf scope default", () => {
     );
 
     tx = runtime.edit();
-    const a = Number(secretSource.withTx(tx).asSchema(secretSourceSchema).get() ?? 0);
+    const a = Number(
+      secretSource.withTx(tx).asSchema(secretSourceSchema).get() ?? 0,
+    );
     const b = Number(
-      confidentialSource.withTx(tx).asSchema(confidentialSourceSchema).get() ?? 0,
+      confidentialSource.withTx(tx).asSchema(confidentialSourceSchema).get() ??
+        0,
     );
     target.withTx(tx).asSchema(targetClauseScopedPolicySchema).set(a + b);
 

@@ -60,8 +60,18 @@ describe("CFC declassify guard condition", () => {
 
   it("allows declassification rewrite when release condition is true", async () => {
     let tx = runtime.edit();
-    const source = runtime.getCell<number>(space, "cfc-declassify-guard-source", undefined, tx);
-    const target = runtime.getCell<number>(space, "cfc-declassify-guard-target", undefined, tx);
+    const source = runtime.getCell<number>(
+      space,
+      "cfc-declassify-guard-source",
+      undefined,
+      tx,
+    );
+    const target = runtime.getCell<number>(
+      space,
+      "cfc-declassify-guard-target",
+      undefined,
+      tx,
+    );
     source.set(10);
     target.set(0);
     tx.writeOrThrow({
