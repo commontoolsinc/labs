@@ -272,7 +272,7 @@ const Note = pattern<NoteInput, NoteOutput>(
     const appendLink = action(
       ({ piece }: { piece: Writable<MentionablePiece> }) => {
         const name = piece.get()[NAME] ?? "";
-        const resolved = (piece as any)?.resolveAsCell?.();
+        const resolved = (piece as any).resolveAsCell();
         const entityId = resolved?.entityId?.["/"];
         if (!name || !entityId) return;
 
