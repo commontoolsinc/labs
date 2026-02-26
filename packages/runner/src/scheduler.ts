@@ -2707,7 +2707,8 @@ function isCfcCommitError(error: unknown): error is CommitError {
     name === "CfcPrepareSchemaUnavailableError" ||
     name === "CfcSchemaHashMismatchError" ||
     name === "CfcInputRequirementViolationError" ||
-    name === "CfcOutputTransitionViolationError";
+    name === "CfcOutputTransitionViolationError" ||
+    name === "CfcPolicyNonConvergenceError";
 }
 
 function shouldRetryCommitError(error: CommitError): boolean {

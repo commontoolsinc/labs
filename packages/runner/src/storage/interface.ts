@@ -789,6 +789,15 @@ export interface ICfcOutputTransitionViolationError extends IStorageError {
   readonly actualClassification?: string;
 }
 
+export interface ICfcPolicyNonConvergenceError extends IStorageError {
+  readonly name: "CfcPolicyNonConvergenceError";
+  readonly space: MemorySpace;
+  readonly id: URI;
+  readonly type: string;
+  readonly path: string;
+  readonly fuel: number;
+}
+
 /**
  * Error that indicating that no change could be made to a transaction is it is
  * no longer active.
@@ -817,7 +826,8 @@ export type CommitError =
   | ICfcPrepareSchemaUnavailableError
   | ICfcSchemaHashMismatchError
   | ICfcInputRequirementViolationError
-  | ICfcOutputTransitionViolationError;
+  | ICfcOutputTransitionViolationError
+  | ICfcPolicyNonConvergenceError;
 
 /**
  * Error returned when a read or write operation fails because the intra-value

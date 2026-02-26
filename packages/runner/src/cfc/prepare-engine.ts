@@ -3,6 +3,7 @@ import { deepEqual } from "@commontools/utils/deep-equal";
 import { ContextualFlowControl } from "../cfc.ts";
 import type {
   ICfcInputRequirementViolationError,
+  ICfcPolicyNonConvergenceError,
   ICfcOutputTransitionViolationError,
   ICfcPrepareSchemaUnavailableError,
   ICfcSchemaHashMismatchError,
@@ -252,6 +253,23 @@ function CfcOutputRecomposeProjectionsViolationError(
     type: entity.type,
     path,
     sourcePath,
+  };
+}
+
+function CfcPolicyNonConvergenceError(
+  entity: EntityAddress,
+  path: string,
+  fuel: number,
+): ICfcPolicyNonConvergenceError {
+  return {
+    name: "CfcPolicyNonConvergenceError",
+    message:
+      "CFC prepare policy evaluation did not converge before fuel exhaustion",
+    space: entity.space,
+    id: entity.id,
+    type: entity.type,
+    path,
+    fuel,
   };
 }
 
@@ -655,6 +673,25 @@ function strongestConsumedClassification(
     return "unclassified";
   }
   return cfc.lub(consumed);
+}
+
+function effectiveWriteClassification(
+  rootSchema: JSONSchema,
+  writeSchema: JSONSchema | undefined,
+  cfc: ContextualFlowControl,
+): string {
+  const rootClassification = cfc.lubSchema(rootSchema);
+  const writeClassification = writeSchema ? cfc.lubSchema(writeSchema) : undefined;
+
+  if (rootClassification && writeClassification) {
+    try {
+      return cfc.lub(new Set([rootClassification, writeClassification]));
+    } catch {
+      return writeClassification;
+    }
+  }
+
+  return writeClassification ?? rootClassification ?? "unclassified";
 }
 
 function fromCanonicalPath(path: string): string[] {
@@ -1163,6 +1200,511 @@ function verifyRecomposeCoverage(
   return true;
 }
 
+type PolicyPreConfScope = "targetClause" | "anywhere";
+
+type PolicyRewriteRule = {
+  readonly confidentialityPre: readonly string[];
+  readonly integrityPre: readonly string[];
+  readonly preConfScope: PolicyPreConfScope;
+  readonly addAlternatives: readonly string[];
+  readonly addIntegrity: readonly string[];
+  readonly removeMatchedClauses: boolean;
+  readonly releaseCondition: unknown;
+};
+
+type PolicyRewriteConfig = {
+  readonly fuel: number;
+  readonly rules: readonly PolicyRewriteRule[];
+};
+
+type PolicyLabelState = {
+  readonly confidentiality: readonly (readonly string[])[];
+  readonly integrity: readonly string[];
+};
+
+type PolicyFixpointResult =
+  | { readonly nonConverged: true; readonly fuel: number }
+  | {
+    readonly nonConverged: false;
+    readonly label: PolicyLabelState;
+    readonly fuel: number;
+  };
+
+type PolicyDowngradeDecision = {
+  readonly allowed: boolean;
+  readonly nonConverged: boolean;
+  readonly fuel: number;
+};
+
+const DEFAULT_POLICY_FUEL = 8;
+
+function toStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string =>
+      typeof entry === "string" && entry.length > 0
+    )
+    : [];
+}
+
+function readPolicyPreConfScope(
+  value: unknown,
+  fallback: PolicyPreConfScope,
+): PolicyPreConfScope {
+  return value === "anywhere" || value === "targetClause" ? value : fallback;
+}
+
+function parsePolicyRule(
+  rawRule: unknown,
+  defaultScope: PolicyPreConfScope,
+): PolicyRewriteRule | undefined {
+  if (!rawRule || typeof rawRule !== "object" || Array.isArray(rawRule)) {
+    return undefined;
+  }
+
+  const preCondition = (rawRule as { preCondition?: unknown }).preCondition;
+  const preConditionObject = (preCondition &&
+      typeof preCondition === "object" &&
+      !Array.isArray(preCondition))
+    ? preCondition as {
+      confidentiality?: unknown;
+      integrity?: unknown;
+    }
+    : undefined;
+  const postCondition = (rawRule as { postCondition?: unknown }).postCondition;
+  const postConditionObject = (postCondition &&
+      typeof postCondition === "object" &&
+      !Array.isArray(postCondition))
+    ? postCondition as {
+      confidentiality?: unknown;
+      integrity?: unknown;
+    }
+    : undefined;
+
+  const confidentialityPre = toStringArray(
+    (rawRule as { confidentialityPre?: unknown }).confidentialityPre ??
+      preConditionObject?.confidentiality,
+  );
+  const integrityPre = toStringArray(
+    (rawRule as { integrityPre?: unknown }).integrityPre ??
+      preConditionObject?.integrity,
+  );
+  const addAlternatives = toStringArray(
+    (rawRule as { addAlternatives?: unknown }).addAlternatives ??
+      postConditionObject?.confidentiality,
+  );
+  const addIntegrity = toStringArray(
+    (rawRule as { addIntegrity?: unknown }).addIntegrity ??
+      postConditionObject?.integrity,
+  );
+  const removeMatchedClauses =
+    (rawRule as { removeMatchedClauses?: unknown }).removeMatchedClauses ===
+      true;
+  const preConfScope = readPolicyPreConfScope(
+    (rawRule as { preConfScope?: unknown }).preConfScope,
+    defaultScope,
+  );
+  const releaseCondition =
+    (rawRule as { releaseCondition?: unknown }).releaseCondition ??
+      (rawRule as { guard?: { releaseCondition?: unknown } }).guard
+        ?.releaseCondition;
+
+  if (confidentialityPre.length === 0) {
+    return undefined;
+  }
+  if (!removeMatchedClauses && addAlternatives.length === 0) {
+    return undefined;
+  }
+
+  return {
+    confidentialityPre,
+    integrityPre,
+    preConfScope,
+    addAlternatives,
+    addIntegrity,
+    removeMatchedClauses,
+    releaseCondition,
+  };
+}
+
+function normalizePolicyFuel(rawFuel: unknown): number | undefined {
+  if (
+    typeof rawFuel === "number" && Number.isFinite(rawFuel) &&
+    Number.isInteger(rawFuel) && rawFuel >= 0
+  ) {
+    return rawFuel;
+  }
+  return undefined;
+}
+
+function collectPolicyRulesFromRaw(
+  rawConfig: unknown,
+  defaultScope: PolicyPreConfScope,
+  rules: PolicyRewriteRule[],
+  fuel: { value: number | undefined },
+): void {
+  if (rawConfig === undefined) {
+    return;
+  }
+  if (Array.isArray(rawConfig)) {
+    for (const rawRule of rawConfig) {
+      const parsed = parsePolicyRule(rawRule, defaultScope);
+      if (parsed) {
+        rules.push(parsed);
+      }
+    }
+    return;
+  }
+  if (!rawConfig || typeof rawConfig !== "object") {
+    return;
+  }
+
+  const rawFuel = normalizePolicyFuel((rawConfig as { fuel?: unknown }).fuel);
+  if (rawFuel !== undefined) {
+    fuel.value = fuel.value === undefined ? rawFuel : Math.min(fuel.value, rawFuel);
+  }
+
+  const nestedRules = (rawConfig as { rules?: unknown }).rules;
+  if (Array.isArray(nestedRules)) {
+    for (const rawRule of nestedRules) {
+      const parsed = parsePolicyRule(rawRule, defaultScope);
+      if (parsed) {
+        rules.push(parsed);
+      }
+    }
+    return;
+  }
+
+  const parsed = parsePolicyRule(rawConfig, defaultScope);
+  if (parsed) {
+    rules.push(parsed);
+  }
+}
+
+function readPolicyRewriteConfig(
+  schema: JSONSchema | undefined,
+): PolicyRewriteConfig | undefined {
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
+    return undefined;
+  }
+  const rawIfc = (schema as { ifc?: unknown }).ifc;
+  if (!rawIfc || typeof rawIfc !== "object" || Array.isArray(rawIfc)) {
+    return undefined;
+  }
+  const defaultScope = readPolicyPreConfScope(
+    (rawIfc as { preConfScope?: unknown }).preConfScope,
+    "targetClause",
+  );
+  const rules: PolicyRewriteRule[] = [];
+  const fuel = { value: undefined as number | undefined };
+
+  collectPolicyRulesFromRaw(
+    (rawIfc as { declassify?: unknown }).declassify,
+    defaultScope,
+    rules,
+    fuel,
+  );
+  collectPolicyRulesFromRaw(
+    (rawIfc as { exchange?: unknown }).exchange,
+    defaultScope,
+    rules,
+    fuel,
+  );
+
+  if (rules.length === 0) {
+    return undefined;
+  }
+
+  return {
+    fuel: fuel.value ?? DEFAULT_POLICY_FUEL,
+    rules,
+  };
+}
+
+function buildPolicyLabelFromConsumedReads(
+  consumedReadLabels: readonly ConsumedReadWithEffectiveLabel[],
+): PolicyLabelState {
+  const confidentiality: string[][] = [];
+  const integrity = new Set<string>();
+
+  for (const consumed of consumedReadLabels) {
+    const clause = toStringArray(consumed.effectiveLabel?.classification);
+    confidentiality.push(clause.length > 0 ? [...new Set(clause)] : [
+      "unclassified",
+    ]);
+    for (const atom of toStringArray(consumed.effectiveLabel?.integrity)) {
+      integrity.add(atom);
+    }
+  }
+
+  return {
+    confidentiality,
+    integrity: [...integrity].sort(),
+  };
+}
+
+function policyRuleConfidentialityMatches(
+  label: PolicyLabelState,
+  clauseIndex: number,
+  rule: PolicyRewriteRule,
+): boolean {
+  const clause = label.confidentiality[clauseIndex];
+  const targetAtom = rule.confidentialityPre[0];
+  if (!clause || !clause.includes(targetAtom)) {
+    return false;
+  }
+
+  for (const sideCondition of rule.confidentialityPre.slice(1)) {
+    if (rule.preConfScope === "anywhere") {
+      const found = label.confidentiality.some((candidateClause) =>
+        candidateClause.includes(sideCondition)
+      );
+      if (!found) {
+        return false;
+      }
+      continue;
+    }
+    if (!clause.includes(sideCondition)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function policyRuleIntegrityMatches(
+  label: PolicyLabelState,
+  rule: PolicyRewriteRule,
+): boolean {
+  if (rule.integrityPre.length === 0) {
+    return true;
+  }
+  const integrity = new Set(label.integrity);
+  return rule.integrityPre.every((required) => integrity.has(required));
+}
+
+function evaluatePolicyReleaseCondition(
+  condition: unknown,
+  tx: IExtendedStorageTransaction,
+  entity: EntityAddress,
+  writePath: string,
+): boolean {
+  if (condition === undefined) {
+    return true;
+  }
+  if (typeof condition === "boolean") {
+    return condition;
+  }
+  if (!condition || typeof condition !== "object" || Array.isArray(condition)) {
+    return false;
+  }
+
+  const allOf = (condition as { allOf?: unknown }).allOf;
+  if (Array.isArray(allOf)) {
+    return allOf.every((entry) =>
+      evaluatePolicyReleaseCondition(entry, tx, entity, writePath)
+    );
+  }
+
+  const anyOf = (condition as { anyOf?: unknown }).anyOf;
+  if (Array.isArray(anyOf)) {
+    return anyOf.some((entry) =>
+      evaluatePolicyReleaseCondition(entry, tx, entity, writePath)
+    );
+  }
+
+  const path = isCanonicalPathString((condition as { path?: unknown }).path)
+    ? (condition as { path: string }).path
+    : writePath;
+  const actualValue = readValueAtCanonicalPath(tx, entity, path);
+  if ("equals" in condition) {
+    return deepEqual(actualValue, (condition as { equals?: unknown }).equals);
+  }
+  const predicate = typeof (condition as { predicate?: unknown }).predicate ===
+      "string"
+    ? (condition as { predicate: string }).predicate
+    : undefined;
+  if (predicate) {
+    return evaluatePredicate(predicate, actualValue);
+  }
+  if (typeof (condition as { value?: unknown }).value === "boolean") {
+    return (condition as { value: boolean }).value;
+  }
+  return false;
+}
+
+function addPolicyIntegrity(
+  integrity: readonly string[],
+  additions: readonly string[],
+): readonly string[] {
+  if (additions.length === 0) {
+    return integrity;
+  }
+  const result = new Set(integrity);
+  for (const atom of additions) {
+    result.add(atom);
+  }
+  return [...result].sort();
+}
+
+function applyPolicyRuleOnce(
+  label: PolicyLabelState,
+  rule: PolicyRewriteRule,
+  tx: IExtendedStorageTransaction,
+  entity: EntityAddress,
+  writePath: string,
+): { readonly changed: boolean; readonly label: PolicyLabelState } {
+  if (!policyRuleIntegrityMatches(label, rule)) {
+    return { changed: false, label };
+  }
+  if (!evaluatePolicyReleaseCondition(rule.releaseCondition, tx, entity, writePath)) {
+    return { changed: false, label };
+  }
+
+  const target = rule.confidentialityPre[0];
+  for (let clauseIndex = 0; clauseIndex < label.confidentiality.length; clauseIndex++) {
+    if (!policyRuleConfidentialityMatches(label, clauseIndex, rule)) {
+      continue;
+    }
+    const clause = [...label.confidentiality[clauseIndex]];
+    const targetIndex = clause.indexOf(target);
+    if (targetIndex < 0) {
+      continue;
+    }
+
+    if (rule.removeMatchedClauses && rule.addAlternatives.length === 0) {
+      clause.splice(targetIndex, 1);
+      const nextConfidentiality = label.confidentiality.map((entry) => [...entry]);
+      if (clause.length === 0) {
+        nextConfidentiality.splice(clauseIndex, 1);
+      } else {
+        nextConfidentiality[clauseIndex] = clause;
+      }
+      return {
+        changed: true,
+        label: {
+          confidentiality: nextConfidentiality,
+          integrity: addPolicyIntegrity(label.integrity, rule.addIntegrity),
+        },
+      };
+    }
+
+    let clauseChanged = false;
+    for (const alternative of rule.addAlternatives) {
+      if (!clause.includes(alternative)) {
+        clause.push(alternative);
+        clauseChanged = true;
+      }
+    }
+    const nextIntegrity = addPolicyIntegrity(label.integrity, rule.addIntegrity);
+    const integrityChanged =
+      nextIntegrity.length !== label.integrity.length ||
+      nextIntegrity.some((atom, index) => atom !== label.integrity[index]);
+    if (!clauseChanged && !integrityChanged) {
+      continue;
+    }
+
+    const nextConfidentiality = label.confidentiality.map((entry) => [...entry]);
+    nextConfidentiality[clauseIndex] = clause;
+    return {
+      changed: true,
+      label: {
+        confidentiality: nextConfidentiality,
+        integrity: nextIntegrity,
+      },
+    };
+  }
+
+  return { changed: false, label };
+}
+
+function evaluatePolicyOnce(
+  label: PolicyLabelState,
+  config: PolicyRewriteConfig,
+  tx: IExtendedStorageTransaction,
+  entity: EntityAddress,
+  writePath: string,
+): { readonly changed: boolean; readonly label: PolicyLabelState } {
+  let current = label;
+  let changed = false;
+  for (const rule of config.rules) {
+    while (true) {
+      const applied = applyPolicyRuleOnce(current, rule, tx, entity, writePath);
+      if (!applied.changed) {
+        break;
+      }
+      changed = true;
+      current = applied.label;
+    }
+  }
+  return { changed, label: current };
+}
+
+function evaluatePolicyFixpoint(
+  label: PolicyLabelState,
+  config: PolicyRewriteConfig,
+  tx: IExtendedStorageTransaction,
+  entity: EntityAddress,
+  writePath: string,
+): PolicyFixpointResult {
+  let current = label;
+  let remainingFuel = config.fuel;
+
+  while (true) {
+    const next = evaluatePolicyOnce(current, config, tx, entity, writePath);
+    if (!next.changed) {
+      return { nonConverged: false, label: current, fuel: config.fuel };
+    }
+    if (remainingFuel === 0) {
+      return { nonConverged: true, fuel: config.fuel };
+    }
+    remainingFuel--;
+    current = next.label;
+  }
+}
+
+function policyAllowsClassification(
+  label: PolicyLabelState,
+  classification: string,
+  cfc: ContextualFlowControl,
+): boolean {
+  if (label.confidentiality.length === 0) {
+    return true;
+  }
+  return label.confidentiality.every((clause) =>
+    clause.some((atom) => classificationDominates(classification, atom, cfc))
+  );
+}
+
+function evaluatePolicyDowngradeDecision(
+  tx: IExtendedStorageTransaction,
+  entity: EntityAddress,
+  writePath: string,
+  schemaAtWritePath: JSONSchema | undefined,
+  consumedReadLabels: readonly ConsumedReadWithEffectiveLabel[],
+  outputClassification: string,
+  cfc: ContextualFlowControl,
+): PolicyDowngradeDecision {
+  const policyConfig = readPolicyRewriteConfig(schemaAtWritePath);
+  if (!policyConfig) {
+    return { allowed: false, nonConverged: false, fuel: 0 };
+  }
+  const initialLabel = buildPolicyLabelFromConsumedReads(consumedReadLabels);
+  const policyResult = evaluatePolicyFixpoint(
+    initialLabel,
+    policyConfig,
+    tx,
+    entity,
+    writePath,
+  );
+  if (policyResult.nonConverged) {
+    return { allowed: false, nonConverged: true, fuel: policyResult.fuel };
+  }
+  return {
+    allowed: policyAllowsClassification(policyResult.label, outputClassification, cfc),
+    nonConverged: false,
+    fuel: policyResult.fuel,
+  };
+}
+
 function verifyOutputTransitionsForAttempt(
   tx: IExtendedStorageTransaction,
   consumedReadLabels: readonly ConsumedReadWithEffectiveLabel[],
@@ -1171,35 +1713,8 @@ function verifyOutputTransitionsForAttempt(
   if (canonical.attemptedWrites.length === 0) {
     return;
   }
-
-  const writtenEntities = collectWrittenEntities(tx);
   const cfc = new ContextualFlowControl();
   const minClassification = strongestConsumedClassification(consumedReadLabels, cfc);
-  for (const entity of writtenEntities) {
-    const schema = getCfcWriteSchemaContext(tx, {
-      ...entity,
-      path: [],
-    });
-    if (!schema) {
-      continue;
-    }
-
-    const actualClassification = cfc.lubSchema(schema) ?? "unclassified";
-    if (
-      !classificationDominates(
-        actualClassification,
-        minClassification,
-        cfc,
-      )
-    ) {
-      throw CfcOutputTransitionViolationError(
-        entity,
-        "/",
-        minClassification,
-        actualClassification,
-      );
-    }
-  }
 
   for (const write of canonical.finalAttemptedWrites) {
     const entity: EntityAddress = {
@@ -1215,6 +1730,40 @@ function verifyOutputTransitionsForAttempt(
       rootSchema,
       fromCanonicalPath(write.path),
     );
+    const actualClassification = effectiveWriteClassification(
+      rootSchema,
+      schemaAtWritePath,
+      cfc,
+    );
+    if (
+      !classificationDominates(
+        actualClassification,
+        minClassification,
+        cfc,
+      )
+    ) {
+      const decision = evaluatePolicyDowngradeDecision(
+        tx,
+        entity,
+        write.path,
+        schemaAtWritePath,
+        consumedReadLabels,
+        actualClassification,
+        cfc,
+      );
+      if (decision.nonConverged) {
+        throw CfcPolicyNonConvergenceError(entity, write.path, decision.fuel);
+      }
+      if (!decision.allowed) {
+        throw CfcOutputTransitionViolationError(
+          entity,
+          write.path,
+          minClassification,
+          actualClassification,
+        );
+      }
+    }
+
     const statePrecondition = readStatePrecondition(schemaAtWritePath);
     if (statePrecondition) {
       const requiredReadPath = statePrecondition.requiredReadPath ??
