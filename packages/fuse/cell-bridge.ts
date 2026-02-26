@@ -63,7 +63,9 @@ export class CellBridge {
   private apiUrl: string = "";
   private connecting: Set<string> = new Set();
   /** Guard against concurrent syncPieceList per space. */
-  private syncing: Map<string, boolean> = new Map();
+  private syncing: Set<string> = new Set();
+  /** Flag: re-run sync after current pass completes. */
+  private syncAgain: Set<string> = new Set();
 
   private startedAt = new Date().toISOString();
   /** Inode of the .status file (created by initStatus). */
@@ -546,21 +548,19 @@ export class CellBridge {
     state: SpaceState,
     spaceName: string,
   ): Promise<void> {
-    if (this.syncing.get(spaceName)) {
+    if (this.syncing.has(spaceName)) {
       // A sync is in flight — mark for re-run when it finishes.
-      this.syncing.set(spaceName, true);
+      this.syncAgain.add(spaceName);
       return;
     }
-    this.syncing.set(spaceName, true);
+    this.syncing.add(spaceName);
 
     try {
       // Loop until no new events arrived during our sync.
       do {
-        // Clear the flag; if a new event arrives during the await below
-        // it will set it back to true, causing another iteration.
-        this.syncing.set(spaceName, false);
+        this.syncAgain.delete(spaceName);
         await this.syncPieceListOnce(state, spaceName);
-      } while (this.syncing.get(spaceName));
+      } while (this.syncAgain.has(spaceName));
     } finally {
       this.syncing.delete(spaceName);
     }
