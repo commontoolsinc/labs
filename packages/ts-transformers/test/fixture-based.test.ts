@@ -17,6 +17,7 @@ interface FixtureConfig {
   describe: string;
   groups?: Array<{ pattern: RegExp; name: string }>;
   formatTestName?: (fileName: string) => string;
+  useLegacyOpaqueRefSemantics?: boolean;
 }
 
 const configs: FixtureConfig[] = [
@@ -52,6 +53,7 @@ const configs: FixtureConfig[] = [
     groups: [
       { pattern: /with-opaque-ref/, name: "OpaqueRef integration" },
     ],
+    useLegacyOpaqueRefSemantics: false,
   },
   {
     directory: "closures",
@@ -257,6 +259,8 @@ for (const config of configs) {
             "commontools.d.ts": commontools,
             "commontools-schema.d.ts": commontoolsSchema,
           },
+          useLegacyOpaqueRefSemantics:
+            config.useLegacyOpaqueRefSemantics ?? true,
           typeCheck: !Deno.env.get("SKIP_INPUT_CHECK"),
           precomputedDiagnostics,
         },

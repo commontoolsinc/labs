@@ -21,13 +21,13 @@ export default pattern((cell) => {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __ctHelpers.JSONSchema, cell.value, (v: number) => v * 2);
+    } as const satisfies __ctHelpers.JSONSchema, cell.key("value"), (v: number) => v * 2);
     return {
         [UI]: (<div>
-        <p>Value: {cell.value}</p>
+        <p>Value: {cell.key("value")}</p>
         <p>Doubled: {doubled}</p>
       </div>),
-        value: cell.value,
+        value: cell.key("value"),
     };
 }, {
     type: "object",
