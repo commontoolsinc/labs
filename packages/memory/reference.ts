@@ -2,7 +2,18 @@ import * as Reference from "merkle-reference";
 import { LRUCache } from "@commontools/utils/cache";
 import { canonicalHash } from "./canonical-hash.ts";
 import { sha256 } from "./hash-impl.ts";
-export * from "merkle-reference";
+/** Content identifier -- a hash-based reference to a value. */
+export type ContentId<T = unknown> = Reference.View<T>;
+
+/** Type guard: returns true if the value is a content identifier. */
+export const isContentId = Reference.is;
+
+/**
+ * Reconstructs a content identifier from its JSON representation
+ * (`{"/": "base32..."}` format).
+ */
+export const contentIdFromJSON: (source: { "/": string }) => Reference.View =
+  Reference.fromJSON;
 
 /**
  * Module-level flag for canonical hashing mode, set by the `Runtime`

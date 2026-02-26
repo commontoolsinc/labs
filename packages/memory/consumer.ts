@@ -49,7 +49,7 @@ import type {
   URI,
   UTCUnixTimestampInSeconds,
 } from "./interface.ts";
-import { fromJSON, refer } from "./reference.ts";
+import { contentIdFromJSON, refer } from "./reference.ts";
 import * as Socket from "./socket.ts";
 import {
   getSelectorRevision,
@@ -862,7 +862,7 @@ class QuerySubscriptionInvocation<
     // This is a bit strange, but the revisions in here aren't proper
     // They've lost their Reference methods, so recreate them
     commit.revisions.forEach((item) => {
-      item.cause = fromJSON(JSON.parse(JSON.stringify(item.cause)));
+      item.cause = contentIdFromJSON(JSON.parse(JSON.stringify(item.cause)));
     });
 
     return { ok: {} };

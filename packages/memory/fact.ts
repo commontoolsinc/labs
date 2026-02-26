@@ -11,8 +11,13 @@ import {
   State,
   Unclaimed,
 } from "./interface.ts";
-import * as Ref from "./reference.ts";
-import { fromJSON, fromString, is as isReference, refer } from "./reference.ts";
+import {
+  ContentId,
+  contentIdFromJSON,
+  fromString,
+  isContentId,
+  refer,
+} from "./reference.ts";
 
 /**
  * Creates an unclaimed fact.
@@ -27,7 +32,7 @@ export const unclaimed = (
  */
 export const unclaimedRef = (
   { the, of }: { the: MIME; of: URI },
-): Ref.View<Unclaimed> => refer({ the, of });
+): ContentId<Unclaimed> => refer({ the, of });
 
 export const assert = <
   Is extends StorableDatum,
@@ -48,7 +53,7 @@ export const assert = <
     the,
     of,
     is,
-    cause: isReference(cause)
+    cause: isContentId(cause)
       ? cause
       : cause == null
       ? unclaimedRef({ the, of })
@@ -153,12 +158,12 @@ export function normalizeFact<
       | { "/": string };
   },
 ): Assertion<T, Of, Is> | Retraction<T, Of, Is> {
-  const newCause = isReference(arg.cause)
+  const newCause = isContentId(arg.cause)
     ? arg.cause
     : arg.cause == null
     ? unclaimedRef({ the: arg.the, of: arg.of })
     : "/" in arg.cause
-    ? fromJSON(arg.cause as unknown as { "/": string })
+    ? contentIdFromJSON(arg.cause as unknown as { "/": string })
     : refer({
       the: arg.cause.the,
       of: arg.cause.of,
