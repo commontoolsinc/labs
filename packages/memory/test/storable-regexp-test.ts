@@ -65,11 +65,12 @@ describe("StorableRegExp", () => {
   // --------------------------------------------------------------------------
 
   describe("[DECONSTRUCT]", () => {
-    it("returns source and flags", () => {
+    it("returns source, flags, and flavor", () => {
       const sr = new StorableRegExp(/abc/gi);
       const state = sr[DECONSTRUCT]() as Record<string, StorableValue>;
       expect(state.source).toBe("abc");
       expect(state.flags).toBe("gi");
+      expect(state.flavor).toBe("es2025");
     });
 
     it("returns correct source for complex pattern", () => {
@@ -77,6 +78,7 @@ describe("StorableRegExp", () => {
       const state = sr[DECONSTRUCT]() as Record<string, StorableValue>;
       expect(state.source).toBe("^foo\\d+\\.bar$");
       expect(state.flags).toBe("");
+      expect(state.flavor).toBe("es2025");
     });
 
     it("returns empty flags for no-flag regexp", () => {
@@ -106,13 +108,27 @@ describe("StorableRegExp", () => {
       expect(result).toBeInstanceOf(StorableRegExp);
       expect(result.regex.source).toBe("abc");
       expect(result.regex.flags).toBe("gi");
+      expect(result.flavor).toBe("es2025");
     });
 
-    it("defaults to empty source and flags", () => {
+    it("defaults to empty source, flags, and es2025 flavor", () => {
       const state = {} as StorableValue;
       const result = StorableRegExp[RECONSTRUCT](state, dummyContext);
       expect(result.regex.source).toBe("(?:)");
       expect(result.regex.flags).toBe("");
+      expect(result.flavor).toBe("es2025");
+    });
+
+    it("preserves explicit flavor from state", () => {
+      const state = {
+        source: "abc",
+        flags: "g",
+        flavor: "pcre2",
+      } as StorableValue;
+      const result = StorableRegExp[RECONSTRUCT](state, dummyContext);
+      expect(result.regex.source).toBe("abc");
+      expect(result.regex.flags).toBe("g");
+      expect(result.flavor).toBe("pcre2");
     });
   });
 
@@ -128,6 +144,7 @@ describe("StorableRegExp", () => {
       const restored = StorableRegExp[RECONSTRUCT](state, dummyContext);
       expect(restored.regex.source).toBe(original.source);
       expect(restored.regex.flags).toBe(original.flags);
+      expect(restored.flavor).toBe("es2025");
     });
 
     it("round-trips with various flag combinations", () => {
@@ -138,7 +155,18 @@ describe("StorableRegExp", () => {
         const state = sr[DECONSTRUCT]();
         const restored = StorableRegExp[RECONSTRUCT](state, dummyContext);
         expect(restored.regex.flags).toBe(re.flags);
+        expect(restored.flavor).toBe("es2025");
       }
+    });
+
+    it("round-trips with custom flavor", () => {
+      const sr = new StorableRegExp(/abc/gi, "pcre2");
+      expect(sr.flavor).toBe("pcre2");
+      const state = sr[DECONSTRUCT]();
+      const restored = StorableRegExp[RECONSTRUCT](state, dummyContext);
+      expect(restored.regex.source).toBe("abc");
+      expect(restored.regex.flags).toBe("gi");
+      expect(restored.flavor).toBe("pcre2");
     });
   });
 

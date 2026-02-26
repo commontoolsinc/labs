@@ -228,7 +228,7 @@ implement `[DECONSTRUCT]`, `[RECONSTRUCT]`, or carry a `typeTag` property.
 | `StorableError` | `Error` | `Error@1` | `{ type, name, message, stack?, cause?, ...custom }` | `type` is the constructor name (e.g. `"TypeError"`). `name` is the `.name` property if it differs from `type`, or `null` if it matches (the common case). Includes `message`, `stack` (if present), `cause` (if present), and custom enumerable properties. The conversion layer (Section 8.2) recursively converts nested values (including `cause` and custom properties) before wrapping, ensuring all values are `StorableValue` when `[DECONSTRUCT]` runs. |
 | `StorableMap` | `Map` | `Map@1` | `[[key, value], ...]` | Entry pairs as an array of two-element arrays. Insertion order is preserved. Keys and values are recursively processed. |
 | `StorableSet` | `Set` | `Set@1` | `[value, ...]` | Elements as an array. Iteration order is preserved. Values are recursively processed. |
-| `StorableRegExp` | `RegExp` | `RegExp@1` | `{ source, flags }` | `source` is the pattern string (`regex.source`); `flags` is the flag string (`regex.flags`). Extra enumerable properties cause rejection. |
+| `StorableRegExp` | `RegExp` | `RegExp@1` | `{ source, flags, flavor }` | `source` is the pattern string (`regex.source`); `flags` is the flag string (`regex.flags`); `flavor` is the regex dialect identifier (e.g. `"es2025"`). Extra enumerable properties cause rejection. |
 | `StorableUint8Array` | `Uint8Array` | `Bytes@1` | `string` (unpadded base64; see Section 5.3) | Deconstructed state is a string. |
 
 Each wrapper class above:
@@ -419,7 +419,12 @@ import {
  * regular expressions participate in the standard serialization and hashing
  * paths.
  *
- * Essential state is the pattern `source` string and the `flags` string.
+ * Essential state is the pattern `source` string, the `flags` string, and
+ * the `flavor` string identifying the regex dialect. The only initially
+ * defined flavor is `"es2025"` (ECMAScript 2025 regular expressions).
+ * The `flavor` field is forward-looking for multi-runtime scenarios where
+ * different regex engines may be in use.
+ *
  * Extra enumerable properties on the wrapped `RegExp` cause rejection
  * (death before confusion).
  *
@@ -433,18 +438,26 @@ import {
 export class StorableRegExp implements StorableInstance {
   readonly typeTag = 'RegExp@1';
 
-  constructor(readonly regexp: RegExp) {}
+  constructor(
+    readonly regexp: RegExp,
+    readonly flavor: string = 'es2025',
+  ) {}
 
   [DECONSTRUCT](): StorableValue {
-    return { source: this.regexp.source, flags: this.regexp.flags };
+    return {
+      source: this.regexp.source,
+      flags: this.regexp.flags,
+      flavor: this.flavor,
+    };
   }
 
   static [RECONSTRUCT](
     state: StorableValue,
     _context: ReconstructionContext,
   ): StorableRegExp {
-    const s = state as { source: string; flags: string };
-    return new StorableRegExp(new RegExp(s.source, s.flags));
+    const s = state as { source: string; flags: string; flavor?: string };
+    const flavor = s.flavor ?? 'es2025';
+    return new StorableRegExp(new RegExp(s.source, s.flags), flavor);
   }
 }
 ```
@@ -1896,7 +1909,7 @@ export function canonicalHash(
   //                         where entries are hashed in insertion order
   // - `StorableSet`:        hash(TAG_INSTANCE, ..., "Set@1", canonicalHash(elements))
   //                         where elements are hashed in insertion order
-  // - `StorableRegExp`:     hash(TAG_INSTANCE, ..., "RegExp@1", canonicalHash({source, flags}))
+  // - `StorableRegExp`:     hash(TAG_INSTANCE, ..., "RegExp@1", canonicalHash({source, flags, flavor}))
   // - `StorableEpochNsec`:  hash(TAG_EPOCH_NSEC, leb128(byteLen), twosComplementBytes)
   // - `StorableEpochDays`:  hash(TAG_EPOCH_DAYS, leb128(byteLen), twosComplementBytes)
   // - `StorableContentId`:  hash(TAG_CONTENT_ID, leb128(algTagLen), algTagUtf8,
@@ -2126,7 +2139,7 @@ export function toDeepStorableValue(
 | `Map` | Wrapped into `StorableMap`. Keys and values are recursively converted (deep variant only). Extra enumerable properties on the `Map` object cause **rejection** (throw) — it is better to fail loudly than silently lose data. |
 | `Set` | Wrapped into `StorableSet`. Elements are recursively converted (deep variant only). Extra enumerable properties on the `Set` object cause **rejection** (throw) — it is better to fail loudly than silently lose data. |
 | `Date` | Wrapped into `StorableEpochNsec`. The `Date`'s millisecond timestamp is converted to nanoseconds: `BigInt(date.getTime()) * 1_000_000n`. Note the millisecond precision limitation — sub-millisecond information is not available from `Date`. Extra enumerable properties on the `Date` object cause **rejection** (throw) — it is better to fail loudly than silently lose data. |
-| `RegExp` | Wrapped into `StorableRegExp`. The `source` and `flags` properties are extracted to form the deconstructed state. Extra enumerable properties on the `RegExp` object cause **rejection** (throw) — it is better to fail loudly than silently lose data. |
+| `RegExp` | Wrapped into `StorableRegExp`. The `source`, `flags`, and `flavor` properties are extracted to form the deconstructed state. The `flavor` defaults to `"es2025"`. Extra enumerable properties on the `RegExp` object cause **rejection** (throw) — it is better to fail loudly than silently lose data. |
 | `Uint8Array` | Wrapped into `StorableUint8Array`. Extra enumerable properties on the `Uint8Array` object cause **rejection** (throw) — it is better to fail loudly than silently lose data. |
 | `Blob` | **Throws.** `Blob` content is only accessible via asynchronous methods (`arrayBuffer()`, `stream()`), so the synchronous conversion path cannot extract its bytes. Callers must convert a `Blob` to `Uint8Array` before passing it to `toStorableValue()`. A future async conversion path may accept `Blob` directly. |
 | `StorableValue[]` | Shallow: returned as-is (frozen if `freeze` is true). Deep: elements recursively converted (frozen at each level if `freeze` is true). |

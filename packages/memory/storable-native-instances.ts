@@ -332,7 +332,8 @@ export class StorableSet extends StorableNativeWrapper<Set<StorableValue>> {
 /**
  * Wrapper for `RegExp` instances in the storable type system. Bridges native
  * `RegExp` (JS wild west) into the strongly-typed `StorableValue` layer by
- * implementing `StorableInstance`. The essential state is `{ source, flags }`.
+ * implementing `StorableInstance`. The essential state is
+ * `{ source, flags, flavor }`.
  * See Section 1.4.1 of the formal spec.
  */
 export class StorableRegExp extends StorableNativeWrapper<RegExp> {
@@ -342,20 +343,23 @@ export class StorableRegExp extends StorableNativeWrapper<RegExp> {
   constructor(
     /** The wrapped native `RegExp`. */
     readonly regex: RegExp,
+    /** Regex flavor/dialect identifier (e.g. `"es2025"`). */
+    readonly flavor: string = "es2025",
   ) {
     super();
   }
 
   /**
    * Deconstruct into essential state for serialization. Returns
-   * `{ source, flags }` -- the two values needed to reconstruct the RegExp.
-   * Extra enumerable properties on the RegExp cause rejection.
+   * `{ source, flags, flavor }` -- the values needed to reconstruct the
+   * RegExp. Extra enumerable properties on the RegExp cause rejection.
    */
   [DECONSTRUCT](): StorableValue {
     rejectExtraRegExpProperties(this.regex);
     return {
       source: this.regex.source,
       flags: this.regex.flags,
+      flavor: this.flavor,
     } as StorableValue;
   }
 
@@ -377,7 +381,8 @@ export class StorableRegExp extends StorableNativeWrapper<RegExp> {
   }
 
   /**
-   * Reconstruct a `StorableRegExp` from its essential state (`{ source, flags }`).
+   * Reconstruct a `StorableRegExp` from its essential state
+   * (`{ source, flags, flavor }`).
    */
   static [RECONSTRUCT](
     state: StorableValue,
@@ -386,7 +391,8 @@ export class StorableRegExp extends StorableNativeWrapper<RegExp> {
     const s = state as Record<string, StorableValue>;
     const source = (s.source as string) ?? "";
     const flags = (s.flags as string) ?? "";
-    return new StorableRegExp(new RegExp(source, flags));
+    const flavor = (s.flavor as string) ?? "es2025";
+    return new StorableRegExp(new RegExp(source, flags), flavor);
   }
 }
 
