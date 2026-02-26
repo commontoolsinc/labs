@@ -28,25 +28,24 @@ export type ContentId<
   T extends DefinedReferent = DefinedReferent,
 > = MerkleReference<T>;
 
+// ---------------------------------------------------------------------------
+// Flag-dispatched public API
+//
+// These four symbols are reassigned by `configureDispatch()` whenever
+// canonical hashing mode changes.  The two implementation worlds (canonical
+// vs. legacy/merkle-reference) are kept in separate blocks for clarity.
+// ---------------------------------------------------------------------------
+
 /**
  * Type guard: returns true if the value is a content identifier
  * (`Reference.View` or `StorableContentId`).
  */
-export const isContentId: <T extends DefinedReferent>(
+export let isContentId: <T extends DefinedReferent>(
   value: unknown | ContentId<T>,
-): value is ContentId<T> => {
-  if (value instanceof StorableContentId) {
-    return true;
-  }
-  return Reference.is(value);
-};
+) => value is ContentId<T>;
 
 /**
  * Reconstructs a content identifier from its JSON representation.
- *
- * When canonical hashing is enabled, parses the `fid1:<base64>` string
- * from `source["/"]` and returns a `StorableContentId`. Otherwise delegates
- * to `Reference.fromJSON` for `b`-prefixed base32 strings.
  *
  * The return type is `Reference.View` (the class type) rather than the bare
  * `ContentId` interface because the class exposes runtime methods (`.toJSON()`,
@@ -54,41 +53,35 @@ export const isContentId: <T extends DefinedReferent>(
  * of `ContentId`, so the result is assignable wherever a `ContentId` is
  * expected.
  */
-export const contentIdFromJSON = (
+export let contentIdFromJSON: (
   source: { "/": string },
-): Reference.View => {
-  if (canonicalHashingEnabled) {
-    return contentIdFromString(source["/"]) as unknown as Reference.View;
-  }
-  return Reference.fromJSON(source);
-};
+) => Reference.View;
 
+/**
+ * Reconstruct a content identifier from its string representation.
+ */
+export let fromString: (source: string) => Reference.View;
+
+/**
+ * Compute a content identifier for the given source value.
+ *
+ * In server environments, uses node:crypto SHA-256 (hardware accelerated).
+ * In browsers, uses hash-wasm (WASM, ~3x faster than pure JS).
+ * Falls back to @noble/hashes if neither is available.
+ */
+export let refer: <T>(source: T) => Reference.View<T>;
+
+// ---------------------------------------------------------------------------
+// Canonical hashing mode flag and dispatch configuration
 // ---------------------------------------------------------------------------
 
 /**
  * Module-level flag for canonical hashing mode, set by the `Runtime`
- * constructor via `setCanonicalHashConfig()`. When enabled, `refer()`
- * dispatches to the canonical hash stub instead of merkle-reference.
+ * constructor via `setCanonicalHashConfig()`. When enabled, the public API
+ * symbols dispatch to canonical hash implementations instead of
+ * merkle-reference.
  */
 let canonicalHashingEnabled = false;
-
-/**
- * Activates or deactivates canonical hashing mode. Called by the `Runtime`
- * constructor to propagate `ExperimentalOptions.canonicalHashing` into the
- * memory layer.
- */
-export function setCanonicalHashConfig(enabled: boolean): void {
-  canonicalHashingEnabled = enabled;
-}
-
-/**
- * Restores canonical hashing mode to its default (disabled). Called by
- * `Runtime.dispose()` to avoid leaking flags between runtime instances or
- * test runs.
- */
-export function resetCanonicalHashConfig(): void {
-  canonicalHashingEnabled = false;
-}
 
 /**
  * Parse a `StorableContentId` from its string representation
@@ -105,17 +98,86 @@ function contentIdFromString(source: string): StorableContentId {
 }
 
 /**
- * Reconstruct a content identifier from its string representation.
- *
- * When canonical hashing is enabled, parses `fid1:<base64>` format.
- * Otherwise delegates to `Reference.fromString` for base32 multibase strings.
+ * Reassign the public API symbols based on the current value of
+ * `canonicalHashingEnabled`. Called at module load and whenever the flag
+ * changes.
  */
-export const fromString = (source: string): Reference.View => {
+function configureDispatch(): void {
   if (canonicalHashingEnabled) {
-    return contentIdFromString(source) as unknown as Reference.View;
+    // ----- Canonical hashing implementations -----
+
+    isContentId = (<T extends DefinedReferent>(
+      value: unknown | ContentId<T>,
+    ): value is ContentId<T> => {
+      if (value instanceof StorableContentId) return true;
+      return Reference.is(value);
+    }) as typeof isContentId;
+
+    contentIdFromJSON = (source: { "/": string }): Reference.View => {
+      return contentIdFromString(source["/"]) as unknown as Reference.View;
+    };
+
+    fromString = (source: string): Reference.View => {
+      return contentIdFromString(source) as unknown as Reference.View;
+    };
+
+    refer = <T>(source: T): Reference.View<T> => {
+      return canonicalHash(source) as unknown as Reference.View<T>;
+    };
+  } else {
+    // ----- Legacy merkle-reference implementations -----
+
+    isContentId = (<T extends DefinedReferent>(
+      value: unknown | ContentId<T>,
+    ): value is ContentId<T> => {
+      if (value instanceof StorableContentId) return true;
+      return Reference.is(value);
+    }) as typeof isContentId;
+
+    contentIdFromJSON = Reference.fromJSON;
+
+    fromString = Reference.fromString as (
+      source: string,
+    ) => Reference.View;
+
+    refer = <T>(source: T): Reference.View<T> => {
+      // Cache {the, of} patterns (unclaimed facts)
+      if (isUnclaimed(source)) {
+        const key = `${source.the}\0${source.of}`;
+        const cached = unclaimedCache.get(key);
+        if (cached) return cached as Reference.View<T>;
+        const result = referImpl(source);
+        unclaimedCache.put(key, result);
+        return result;
+      }
+      return referImpl(source);
+    };
   }
-  return (Reference.fromString as (source: string) => Reference.View)(source);
-};
+}
+
+/**
+ * Activates or deactivates canonical hashing mode. Called by the `Runtime`
+ * constructor to propagate `ExperimentalOptions.canonicalHashing` into the
+ * memory layer.
+ */
+export function setCanonicalHashConfig(enabled: boolean): void {
+  canonicalHashingEnabled = enabled;
+  configureDispatch();
+}
+
+/**
+ * Restores canonical hashing mode to its default (disabled). Called by
+ * `Runtime.dispose()` to avoid leaking flags between runtime instances or
+ * test runs.
+ */
+export function resetCanonicalHashConfig(): void {
+  canonicalHashingEnabled = false;
+  configureDispatch();
+}
+
+// ---------------------------------------------------------------------------
+// Merkle-reference tree builder (used by legacy `refer` path)
+// ---------------------------------------------------------------------------
 
 /**
  * Get the default nodeBuilder from merkle-reference, then wrap it to intercept
@@ -188,34 +250,8 @@ const isUnclaimed = (
   return typeof obj.the === "string" && typeof obj.of === "string";
 };
 
-/**
- * Compute a merkle reference for the given source.
- *
- * For {the, of} objects (unclaimed facts), results are cached since these
- * patterns repeat constantly in claims.
- *
- * In server environments, uses node:crypto SHA-256 (hardware accelerated).
- * In browsers, uses hash-wasm (WASM, ~3x faster than pure JS).
- * Falls back to @noble/hashes if neither is available.
- */
-export const refer = <T>(source: T): Reference.View<T> => {
-  if (canonicalHashingEnabled) {
-    const contentId = canonicalHash(source);
-    return contentId as unknown as Reference.View<T>;
-  }
+// ---------------------------------------------------------------------------
+// Initialize dispatch to legacy mode at module load.
+// ---------------------------------------------------------------------------
 
-  // Cache {the, of} patterns (unclaimed facts)
-  if (isUnclaimed(source)) {
-    // Use null character as delimiter to avoid collisions if the/of contain '|'
-    const key = `${source.the}\0${source.of}`;
-    const cached = unclaimedCache.get(key);
-    if (cached) {
-      return cached as Reference.View<T>;
-    }
-    const result = referImpl(source);
-    unclaimedCache.put(key, result);
-    return result;
-  }
-
-  return referImpl(source);
-};
+configureDispatch();
