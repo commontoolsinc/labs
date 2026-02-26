@@ -8,6 +8,7 @@ import { ExplicitTagStorable } from "./explicit-tag-storable.ts";
 import {
   StorableError,
   StorableMap,
+  StorableRegExp,
   StorableSet,
   StorableUint8Array,
 } from "./storable-native-instances.ts";
@@ -47,6 +48,7 @@ export class JsonEncodingContext
     // StorableDatum and is handled by a TypeHandler (like UndefinedHandler),
     // not a StorableInstance wrapper.
     this.registry.set(TAGS.Bytes, StorableUint8Array);
+    this.registry.set(TAGS.RegExp, StorableRegExp);
   }
 
   /** Get the wire format tag for a storable instance's type. */
