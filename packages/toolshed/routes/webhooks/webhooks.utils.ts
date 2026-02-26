@@ -96,19 +96,15 @@ function serviceCellLink(entityId: string) {
   };
 }
 
-// Read a cell from toolshed's service space, returning its value
+// Read a cell from toolshed's service space, returning its value.
+// Throws on storage errors so callers can distinguish "not found" from "storage failure".
 async function readServiceCell<T>(entityId: string): Promise<T | null> {
-  try {
-    const link = serviceCellLink(entityId);
-    const cell = runtime.getCellFromLink(link as any);
-    await cell.sync();
-    await runtime.storageManager.synced();
-    const data = cell.get();
-    return data as T | null;
-  } catch (error) {
-    logger.error("service-cell-read", "Error reading service cell", error);
-    return null;
-  }
+  const link = serviceCellLink(entityId);
+  const cell = runtime.getCellFromLink(link as any);
+  await cell.sync();
+  await runtime.storageManager.synced();
+  const data = cell.get();
+  return data as T | null;
 }
 
 // Write a value to a cell in toolshed's service space

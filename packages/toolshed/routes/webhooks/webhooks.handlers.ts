@@ -109,8 +109,18 @@ export const ingest: AppRouteHandler<IngestRoute> = async (c) => {
   }
   const token = authHeader.slice(7);
 
-  // Look up registration from shared storage
-  const registration = await getRegistration(id);
+  // Look up registration from shared storage.
+  // Storage errors must not be swallowed — they should 502, not masquerade as 401.
+  let registration: Awaited<ReturnType<typeof getRegistration>>;
+  try {
+    registration = await getRegistration(id);
+  } catch (error) {
+    logger.error(
+      { error, id },
+      "Storage error looking up webhook registration",
+    );
+    return c.json({ error: "Failed to process webhook" }, 502);
+  }
 
   if (!registration || !registration.enabled) {
     // Match the real verification path to prevent timing oracle on missing webhooks

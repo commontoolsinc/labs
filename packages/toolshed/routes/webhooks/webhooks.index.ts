@@ -13,9 +13,26 @@ router.use(
     onError: (c) => c.json({ error: "Payload too large (max 1MB)" }, 413),
   }),
 );
+router.use(
+  "/api/webhooks",
+  bodyLimit({
+    maxSize: 1_000_000,
+    onError: (c) => c.json({ error: "Payload too large (max 1MB)" }, 413),
+  }),
+);
 
 router.use(
   "/api/webhooks/*",
+  cors({
+    origin: "*",
+    allowMethods: ["GET", "POST", "DELETE", "OPTIONS"],
+    allowHeaders: ["Content-Type", "Authorization"],
+    exposeHeaders: ["Content-Length"],
+    maxAge: 3600,
+  }),
+);
+router.use(
+  "/api/webhooks",
   cors({
     origin: "*",
     allowMethods: ["GET", "POST", "DELETE", "OPTIONS"],

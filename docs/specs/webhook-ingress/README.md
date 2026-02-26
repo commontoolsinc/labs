@@ -161,15 +161,17 @@ System-level admin endpoint. Not intended for use by patterns.
 
 `secretHash` is stripped from the response.
 
-### `DELETE /api/webhooks/:id` — Delete webhook
+### `DELETE /api/webhooks/:id?space=...` — Delete webhook
 
-Removes a webhook registration. Space is derived from the stored registration's cellLink.
+Removes a webhook registration. Requires a `space` query parameter for a soft ownership check (the caller-provided space must match `createdBy` on the registration). This is not cryptographic auth — it will be replaced by DID-based auth when the platform adds it.
 
 **Response (200):** `{ "deleted": true }`
 
-**Response (404):** Webhook not found
+**Response (400):** Missing required query parameter: `space`
 
-**Response (400):** Failed to delete webhook
+**Response (404):** Webhook not found (or space mismatch)
+
+**Response (500):** Failed to delete webhook
 
 ## Security Properties
 
