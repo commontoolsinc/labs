@@ -26,7 +26,7 @@ effects and deterministic schema binding.
 - [x] Any consumed read with effective IFC label constraints can trigger
       prepare-before-commit enforcement.
 - [x] Canonical wrapper stripping is fixed to `/value` (not runtime-configured).
-- [ ] Legacy classification-only compatibility paths are removable.
+- [x] Legacy classification-only compatibility paths are removable.
 - [x] Handler side effects are commit-gated: queue first, flush after success.
 - [x] Retry semantics stay at CAS/conflict level in spec (implementation can map
       concrete errors internally).
@@ -40,8 +40,8 @@ effects and deterministic schema binding.
       resolved.
 - [x] For existing entities, schema hash is immutable by default unless
       explicit migration flow is used.
-- [ ] Prepare/check uses the exact schema identified by `cfc.schemaHash`.
-- [ ] Full write-time schema validation is tracked as a later strict pass.
+- [-] Prepare/check uses the exact schema identified by `cfc.schemaHash`.
+- [-] Full write-time schema validation is tracked as a later strict pass.
 
 ### 0.3 Non-Goals for This Pass
 
@@ -53,15 +53,15 @@ effects and deterministic schema binding.
 
 ### 1.1 Current-State Audit (Code)
 
-- [ ] Confirm current commit-bearing tx creation points:
+- [x] Confirm current commit-bearing tx creation points:
       `packages/runner/src/scheduler.ts`.
-- [ ] Confirm dependency-discovery tx points (must be excluded from CFC commit
+- [x] Confirm dependency-discovery tx points (must be excluded from CFC commit
       semantics): `collectDependenciesForAction` flow.
-- [ ] Confirm journal activity shape and metadata propagation:
+- [x] Confirm journal activity shape and metadata propagation:
       `packages/runner/src/storage/transaction/journal.ts`.
-- [ ] Confirm current read metadata markers and scheduling behavior:
+- [x] Confirm current read metadata markers and scheduling behavior:
       `packages/runner/src/scheduler.ts`.
-- [ ] Confirm existing schema/transform traversal entry points:
+- [x] Confirm existing schema/transform traversal entry points:
       `packages/runner/src/schema.ts`,
       `packages/runner/src/traverse.ts`,
       `packages/runner/src/cell.ts`.
@@ -76,19 +76,19 @@ effects and deterministic schema binding.
 
 ### 1.3 Invariants (Must Hold)
 
-- [ ] No CFC-relevant commit may succeed without prepare.
+- [x] No CFC-relevant commit-bearing attempt may succeed without prepare.
 - [x] Prepare must be same-attempt (same tx journal, no stale reuse).
 - [x] Any activity change after prepare invalidates preparation.
 - [x] Side effects from handler/event sends must not escape before commit.
 - [x] Retry uses fresh tx and recomputes reads/writes/checks.
-- [ ] Boundary policy evaluation must be fail-closed: non-converged fixpoint
+- [x] Boundary policy evaluation must be fail-closed: non-converged fixpoint
       (fuel exhaustion) rejects the attempt.
-- [ ] Confidentiality rewrites must use conjunctive declassification gates:
+- [x] Confidentiality rewrites must use conjunctive declassification gates:
       release condition true, required integrity evidence present, trusted
       control scope present.
-- [ ] Guard evidence must come from evaluated value integrity (guard/result
+- [x] Guard evidence must come from evaluated value integrity (guard/result
       labels), not ambient control-integrity context alone.
-- [ ] Multi-atom confidentiality preconditions default to clause-local matching;
+- [x] Multi-atom confidentiality preconditions default to clause-local matching;
       cross-clause matching must be explicit.
 
 ## 2. Transaction Model Extensions
@@ -160,8 +160,8 @@ Primary files:
 
 ### 3.4 Digest Material
 
-- [ ] Define deterministic digest input fields:
-      canonical reads, attempted writes, internal flags, tx identity scope.
+- [x] Define deterministic digest input fields:
+      canonical reads, attempted writes, internal flags.
 - [x] Exclude unstable fields (timestamps/non-deterministic IDs unless needed).
 - [x] Use stable serialization before hashing.
 
@@ -258,14 +258,14 @@ Primary files:
 
 ### 5.6 Policy Evaluation Semantics Lock
 
-- [ ] In declassification/exchange guard checks, require release condition to be
+- [x] In declassification/exchange guard checks, require release condition to be
       true before confidentiality rewrite.
-- [ ] Keep control-integrity (`pcI`) as control-only context; do not auto-inject
+- [x] Keep control-integrity (`pcI`) as control-only context; do not auto-inject
       ambient `pcI` tokens into value integrity labels.
-- [ ] Implement policy precondition scope default as clause-local
+- [x] Implement policy precondition scope default as clause-local
       (`preConfScope = targetClause`) with explicit opt-in for global
       (`anywhere`) matching.
-- [ ] Return explicit non-convergence signal from bounded policy fixpoint
+- [x] Return explicit non-convergence signal from bounded policy fixpoint
       evaluation and reject boundary attempt on that signal.
 
 ### 5.7 Acceptance Criteria
@@ -298,7 +298,7 @@ Primary file:
 - [x] Map commit failures into retryable vs terminal classes.
 - [x] Treat CAS/conflict/inconsistency as retryable in implementation.
 - [x] Treat prepare-gate failures as terminal unless policy says otherwise.
-- [ ] Treat policy non-convergence/fuel exhaustion as terminal boundary failure
+- [x] Treat policy non-convergence/fuel exhaustion as terminal boundary failure
       (fail closed), not retryable-without-new-input.
 
 ### 6.4 Acceptance Criteria
@@ -409,19 +409,19 @@ Primary files:
 
 ### 10.1 Identify Dead Compatibility Paths
 
-- [ ] Inventory classification-only legacy branches.
-- [ ] Confirm no tests depend on removed paths.
+- [x] Inventory classification-only legacy branches.
+- [x] Confirm no tests depend on removed paths.
 
 ### 10.2 Remove/Refactor
 
-- [ ] Remove unused compatibility translation code.
-- [ ] Keep needed schema traversal helpers not tied to legacy mode.
-- [ ] Update typing/docs to remove legacy mentions.
+- [x] Remove unused compatibility translation code.
+- [x] Keep needed schema traversal helpers not tied to legacy mode.
+- [x] Update typing/docs to remove legacy mentions.
 
 ### 10.3 Acceptance Criteria
 
 - [x] Existing non-CFC tests still pass.
-- [ ] No references to removed legacy path remain.
+- [x] No references to removed legacy path remain.
 
 ## 11. Test Plan (Detailed Matrix)
 
@@ -456,12 +456,12 @@ Primary test location:
 - [x] `cfc-state-precondition-read-required.test.ts`
 - [x] `cfc-state-precondition-predicate-required.test.ts`
 - [x] `cfc-prepare-persists-schemahash-and-labels.test.ts`
-- [ ] `cfc-policy-fixpoint-fuel-exhaustion-fail-closed.test.ts`
-- [ ] `cfc-declassify-guard-false-no-rewrite.test.ts`
-- [ ] `cfc-declassify-ambient-pci-token-not-sufficient.test.ts`
-- [ ] `cfc-policy-preconf-target-clause-default.test.ts`
-- [ ] `cfc-policy-preconf-anywhere-opt-in.test.ts`
-- [ ] `cfc-exchange-ambient-pci-token-not-sufficient.test.ts`
+- [x] `cfc-policy-fixpoint-fuel-exhaustion-fail-closed.test.ts`
+- [x] `cfc-declassify-guard-false-no-rewrite.test.ts`
+- [x] `cfc-declassify-ambient-pci-token-not-sufficient.test.ts`
+- [x] `cfc-policy-preconf-target-clause-default.test.ts`
+- [x] `cfc-policy-preconf-anywhere-opt-in.test.ts`
+- [x] `cfc-exchange-ambient-pci-token-not-sufficient.test.ts`
 
 ### 11.5 Side-Effect Gating Tests
 
@@ -491,15 +491,15 @@ Primary test location:
 
 ### 12.1 Feature Flagging
 
-- [ ] Add runtime feature flag for staged enablement (if needed).
-- [ ] Start with CI-on, production-off mode if runtime supports staged rollout.
+- [x] Add runtime feature flag for staged enablement (if needed).
+- [-] Start with CI-on, production-off mode if runtime supports staged rollout.
 
 ### 12.2 Observability
 
 - [x] Add debug counters:
       `cfcRelevantTx`, `cfcPreparedTx`, `cfcGateRejects`, `cfcOutboxFlushes`.
-- [ ] Add structured logs for rejection reasons.
-- [ ] Ensure sensitive values are not logged.
+- [x] Add structured logs for rejection reasons.
+- [x] Ensure sensitive values are not logged.
 
 ### 12.3 Backward Compatibility Checks
 
@@ -517,9 +517,9 @@ Primary docs:
 
 ### 13.1 Runner Documentation
 
-- [ ] Add runner-internal design note for prepare-before-commit.
-- [ ] Add lifecycle doc for tx outbox and flush behavior.
-- [ ] Document internal verifier read marker.
+- [x] Add runner-internal design note for prepare-before-commit.
+- [x] Add lifecycle doc for tx outbox and flush behavior.
+- [x] Document internal verifier read marker.
 
 ### 13.2 Spec Cross-Check
 
@@ -527,25 +527,25 @@ Primary docs:
 - [x] Confirm fixed `/value` stripping behavior is reflected.
 - [x] Confirm state-precondition same-attempt rule coverage.
 - [x] Confirm schemaHash persistence policy is represented.
-- [ ] Confirm declassification gate is conjunctive (condition true + evidence +
+- [x] Confirm declassification gate is conjunctive (condition true + evidence +
       trusted control).
-- [ ] Confirm ambient control-integrity tokens are not treated as value evidence.
-- [ ] Confirm policy side-condition scope defaults to clause-local matching.
-- [ ] Confirm bounded fixpoint evaluation rejects on non-convergence.
-- [ ] Confirm runner tests cover guard-false, ambient-token-smuggling, and
+- [x] Confirm ambient control-integrity tokens are not treated as value evidence.
+- [x] Confirm policy side-condition scope defaults to clause-local matching.
+- [x] Confirm bounded fixpoint evaluation rejects on non-convergence.
+- [x] Confirm runner tests cover guard-false, ambient-token-smuggling, and
       cross-clause-mixing attack shapes.
 
 ## 14. Execution Order (Recommended)
 
 - [x] Step A: complete Section 2 (transaction model extensions).
-- [ ] Step B: complete Section 3 (canonical activity + digest).
+- [x] Step B: complete Section 3 (canonical activity + digest).
 - [x] Step C: complete Section 4 (relevance detection).
-- [ ] Step D: complete Section 5 (prepare engine).
-- [ ] Step E: complete Section 6 and 7 (scheduler integration + side effects).
+- [x] Step D: complete Section 5 (prepare engine).
+- [x] Step E: complete Section 6 and 7 (scheduler integration + side effects).
 - [x] Step F: complete Section 8 and 9 (schema hash plumbing + verifier marker).
-- [ ] Step G: complete Section 10 (legacy cleanup).
-- [ ] Step H: complete Section 11 (full test matrix).
-- [ ] Step I: complete Section 12 and 13 (rollout/docs).
+- [x] Step G: complete Section 10 (legacy cleanup).
+- [x] Step H: complete Section 11 (full test matrix).
+- [x] Step I: complete Section 12 and 13 (rollout/docs).
 
 ## 15. Open Items Tracked Separately
 
