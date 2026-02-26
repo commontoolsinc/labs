@@ -490,6 +490,8 @@ const GTDProjects = pattern<ProjectsInput, ProjectsOutput>(({ items }) => {
               (w: Wish) => w.status === "pending",
             ).length;
 
+            const showPills = isSelected;
+
             return (
               <div>
                 <div
@@ -551,36 +553,40 @@ const GTDProjects = pattern<ProjectsInput, ProjectsOutput>(({ items }) => {
                     </div>
                   )}
 
-                  {/* Note pill */}
-                  <span
-                    onClick={() => openNote.send({ id: item.id, note: item.note })}
-                    style={{
-                      ...iconBtn,
-                      color: hasNote ? color.blue : color.tertiaryLabel,
-                      background: hasNote ? "rgba(0, 122, 255, 0.12)" : color.fillPrimary,
-                      cursor: "pointer",
-                    }}
-                  >
-                    {hasNote ? "note" : "note"}
-                  </span>
+                  {/* Note pill — visible on hover/select or when note exists */}
+                  {showPills || hasNote ? (
+                    <span
+                      onClick={() => openNote.send({ id: item.id, note: item.note })}
+                      style={{
+                        ...iconBtn,
+                        color: hasNote ? color.blue : color.tertiaryLabel,
+                        background: hasNote ? "rgba(0, 122, 255, 0.12)" : color.fillPrimary,
+                        cursor: "pointer",
+                      }}
+                    >
+                      note
+                    </span>
+                  ) : null}
 
-                  {/* Wish pill */}
-                  <span
-                    onClick={() => openWishes.send({ id: item.id })}
-                    style={{
-                      ...iconBtn,
-                      color: pendingWishes > 0 ? color.orange : wishCount > 0 ? color.green : color.tertiaryLabel,
-                      background:
-                        pendingWishes > 0
-                          ? "rgba(255, 149, 0, 0.12)"
-                          : wishCount > 0
-                            ? "rgba(52, 199, 89, 0.12)"
-                            : color.fillPrimary,
-                      cursor: "pointer",
-                    }}
-                  >
-                    {wishCount > 0 ? wishCount + " wish" : "wish"}
-                  </span>
+                  {/* Wish pill — visible on hover/select or when wishes exist */}
+                  {showPills || wishCount > 0 ? (
+                    <span
+                      onClick={() => openWishes.send({ id: item.id })}
+                      style={{
+                        ...iconBtn,
+                        color: pendingWishes > 0 ? color.orange : wishCount > 0 ? color.green : color.tertiaryLabel,
+                        background:
+                          pendingWishes > 0
+                            ? "rgba(255, 149, 0, 0.12)"
+                            : wishCount > 0
+                              ? "rgba(52, 199, 89, 0.12)"
+                              : color.fillPrimary,
+                        cursor: "pointer",
+                      }}
+                    >
+                      {wishCount > 0 ? wishCount + " wish" : "wish"}
+                    </span>
+                  ) : null}
 
                   {/* Drill-in chevron */}
                   {hasChildren ? (
