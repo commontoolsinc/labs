@@ -24,7 +24,7 @@ import {
   saveRegistration,
   verifyWebhookSecret,
   writeConfidentialConfig,
-  writeToCell,
+  sendToStream,
 } from "./webhooks.utils.ts";
 
 const DUMMY_HASH = "0".repeat(64);
@@ -37,7 +37,6 @@ export const create: AppRouteHandler<CreateRoute> = async (c) => {
       name,
       cellLink,
       confidentialCellLink,
-      mode,
     } = c.req.valid("json");
 
     // Validate cellLink format and extract space
@@ -72,7 +71,6 @@ export const create: AppRouteHandler<CreateRoute> = async (c) => {
       createdBy: space,
       createdAt: new Date().toISOString(),
       enabled: true,
-      mode,
     };
 
     // Store registration in toolshed's service space
@@ -81,9 +79,9 @@ export const create: AppRouteHandler<CreateRoute> = async (c) => {
     // Update the per-space index
     await addToServiceIndex(space, id);
 
-    logger.info({ id, name, mode, space }, "Webhook created");
+    logger.info({ id, name, space }, "Webhook created");
 
-    return c.json({ id, name, mode }, 200);
+    return c.json({ id, name }, 200);
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     const stack = error instanceof Error ? error.stack : undefined;
@@ -126,8 +124,8 @@ export const ingest: AppRouteHandler<IngestRoute> = async (c) => {
   }
 
   try {
-    await writeToCell(registration.cellLink, payload, registration.mode);
-    logger.info({ id, mode: registration.mode }, "Webhook payload received");
+    await sendToStream(registration.cellLink, payload);
+    logger.info({ id }, "Webhook payload received");
     return c.json({ received: true }, 200);
   } catch (error) {
     logger.error({ error, id }, "Failed to write webhook payload to cell");

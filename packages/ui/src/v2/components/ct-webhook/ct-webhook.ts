@@ -23,16 +23,14 @@ export interface WebhookConfig {
  * @element ct-webhook
  *
  * @attr {string} name - Human-readable label for the webhook
- * @attr {CellHandle<any>} inbox - Cell that receives webhook payloads (pass via $inbox)
+ * @attr {CellHandle<any>} inbox - Stream that receives webhook payloads (pass via $inbox)
  * @attr {CellHandle<WebhookConfig | null>} config - Cell for URL+secret storage (pass via $config)
- * @attr {"replace" | "append"} mode - Write mode for incoming payloads (default: "replace")
  *
  * @example
  * <ct-webhook
  *   name="GitHub Push Events"
  *   $inbox={webhookInbox}
  *   $config={webhookConfig}
- *   mode="append"
  * />
  */
 export class CTWebhook extends BaseElement {
@@ -40,7 +38,6 @@ export class CTWebhook extends BaseElement {
     name: { type: String },
     inbox: { type: Object, attribute: false },
     config: { type: Object, attribute: false },
-    mode: { type: String },
     _isLoading: { type: Boolean, state: true },
     _error: { type: String, state: true },
   };
@@ -48,7 +45,6 @@ export class CTWebhook extends BaseElement {
   declare name: string;
   declare inbox: CellHandle<unknown>;
   declare config: CellHandle<WebhookConfig | null>;
-  declare mode: "replace" | "append";
 
   declare _isLoading: boolean;
   declare _error: string;
@@ -58,7 +54,6 @@ export class CTWebhook extends BaseElement {
   constructor() {
     super();
     this.name = "";
-    this.mode = "replace";
     this._isLoading = false;
     this._error = "";
   }
@@ -102,11 +97,6 @@ export class CTWebhook extends BaseElement {
       return;
     }
 
-    if (this.mode !== "replace" && this.mode !== "append") {
-      this._error = "Invalid mode: must be 'replace' or 'append'";
-      return;
-    }
-
     this._isLoading = true;
     this._error = "";
 
@@ -121,7 +111,6 @@ export class CTWebhook extends BaseElement {
           name: this.name,
           cellLink,
           confidentialCellLink,
-          mode: this.mode || "replace",
         }),
       });
 

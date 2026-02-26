@@ -8,7 +8,6 @@ const logger = getLogger("webhooks.utils");
 
 const WEBHOOK_ID_LENGTH = 20;
 const WEBHOOK_SECRET_BYTES = 32;
-const MAX_APPEND_ITEMS = 1000;
 
 // Base62 alphabet for generating IDs and secrets
 const BASE62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
@@ -21,7 +20,6 @@ export interface WebhookRegistration {
   createdBy: string;
   createdAt: string;
   enabled: boolean;
-  mode: "replace" | "append";
 }
 
 function randomBase62(length: number): string {
@@ -214,46 +212,20 @@ export async function removeFromServiceIndex(
   if (error) throw error;
 }
 
-// Write incoming webhook payload to the target inbox cell
-export async function writeToCell(
+// Send incoming webhook payload to the target inbox stream
+export async function sendToStream(
   cellLink: string,
   payload: unknown,
-  mode: "replace" | "append",
 ): Promise<void> {
   const parsedCellLink = JSON.parse(cellLink);
   const cell = runtime.getCellFromLink(parsedCellLink);
   await cell.sync();
   await runtime.storageManager.synced();
 
-  if (mode === "replace") {
-    const { error } = await cell.runtime.editWithRetry((tx) => {
-      cell.withTx(tx).set(payload);
-    });
-    if (error) throw error;
-  } else {
-    // append mode
-    const receivedAt = new Date().toISOString();
-    const { error } = await cell.runtime.editWithRetry((tx) => {
-      const current = cell.get();
-      const items = Array.isArray(current)
-        ? current
-        : current != null
-        ? [current]
-        : [];
-      const updated = [
-        ...items.slice(-(MAX_APPEND_ITEMS - 1)),
-        typeof payload === "object" && payload !== null &&
-          !Array.isArray(payload)
-          ? {
-            ...(payload as Record<string, unknown>),
-            _receivedAt: receivedAt,
-          }
-          : { data: payload, _receivedAt: receivedAt },
-      ];
-      cell.withTx(tx).set(updated);
-    });
-    if (error) throw error;
-  }
+  const { error } = await cell.runtime.editWithRetry((tx) => {
+    cell.withTx(tx).send(payload);
+  });
+  if (error) throw error;
 }
 
 // Extract space DID from a serialized cell link

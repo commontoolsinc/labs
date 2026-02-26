@@ -6,15 +6,15 @@ Draft — seeking framework author review
 
 ## Overview
 
-The webhook ingress system allows external services (GitHub, Stripe, Slack, etc.) to push data into Common Tools patterns via standard HTTP webhooks. Each webhook is a stable HTTPS endpoint that accepts JSON payloads authenticated with a bearer token and writes them into a reactive cell.
+The webhook ingress system allows external services (GitHub, Stripe, Slack, etc.) to push data into Common Tools patterns via standard HTTP webhooks. Each webhook is a stable HTTPS endpoint that accepts JSON payloads authenticated with a bearer token and sends them into a reactive stream.
 
-This is a generalization of the OAuth callback flow: any external service that can POST to a URL can inject data into the reactive cell graph. Patterns subscribe to the inbox cell and react to new payloads automatically.
+This is a generalization of the OAuth callback flow: any external service that can POST to a URL can inject data into the reactive cell graph. Patterns subscribe to the inbox stream and react to new payloads automatically.
 
 ## Trust Model
 
 Secrets (the webhook URL and bearer token) flow through the system without patterns needing to read them directly:
 
-1. A pattern creates an inbox cell and a **confidential config cell** (CFC-labeled)
+1. A pattern creates an inbox stream and a **confidential config cell** (CFC-labeled)
 2. The pattern calls `POST /api/webhooks` with both cell links
 3. Toolshed generates the ID and secret, stores the registration in its own service space, and writes `{ url, secret }` into the confidential config cell
 4. The pattern binds the confidential config cell to `<ct-secret-viewer>` components
@@ -30,7 +30,7 @@ This approach means even a compromised or malicious pattern cannot exfiltrate we
 ```
 Pattern                     Toolshed                    External Service
   │                           │                              │
-  ├─ Creates inbox cell       │                              │
+  ├─ Creates inbox stream     │                              │
   ├─ Creates config cell      │                              │
   │  (CFC "confidential")    │                              │
   │                           │                              │
@@ -42,7 +42,7 @@ Pattern                     Toolshed                    External Service
   │                           │  service space               │
   │                           ├─ Write URL+secret to         │
   │                           │  config cell                 │
-  │◄── { id, name, mode } ───┤                              │
+  │◄── { id, name } ─────────┤                              │
   │                           │                              │
   ├─ Bind config cell to      │                              │
   │  <ct-secret-viewer>       │                              │
@@ -57,10 +57,10 @@ Pattern                     Toolshed                    External Service
   │                           │   { payload }                │
   │                           │                              │
   │                           ├─ Verify bearer token         │
-  │                           ├─ Write payload to inbox cell │
+  │                           ├─ Send payload to inbox stream│
   │                           │                              │
   ├─ Reactively observes      │                              │
-  │  inbox cell update        │                              │
+  │  inbox stream event       │                              │
 ```
 
 ## Storage Architecture
@@ -71,7 +71,7 @@ All state lives in cells — no in-memory indexes, no server-side registries tha
 
 Stored in **toolshed's service space** (`identity.did()`):
 - Entity: `of:${sha256("ct:webhook:" + webhookId)}`
-- Contains: `{ id, secretHash, cellLink, mode, enabled, name, createdBy, createdAt }`
+- Contains: `{ id, secretHash, cellLink, enabled, name, createdBy, createdAt }`
 - Any of the 21 toolshed instances can read this via shared storage
 
 ### Confidential config cell
@@ -81,14 +81,11 @@ Stored in **user's space** (pattern-created, CFC-labeled):
 - Contains: `{ url, secret }`
 - Displayed to user via `<ct-secret-viewer>`
 
-### Inbox cell
+### Inbox stream
 
-Stored in **user's space** (pattern-created, plain cell):
-- Written on each webhook delivery
-- Mode "replace": overwrites with latest payload
-- Mode "append": maintains array of recent payloads (max 1000)
-  - Each item has `_receivedAt: string` (ISO timestamp) injected by toolshed
-  - Non-object payloads are wrapped as `{ data: payload, _receivedAt }`
+Stored in **user's space** (pattern-created):
+- Each webhook delivery calls `.send(payload)` on the stream
+- Patterns that want to accumulate payloads handle that themselves via a handler
 
 ### Per-space webhook index
 
@@ -112,8 +109,7 @@ Called by pattern handlers to register a new webhook.
 {
   "name": "GitHub Push Events",
   "cellLink": "<serialized inbox cell link>",
-  "confidentialCellLink": "<serialized config cell link>",
-  "mode": "append"
+  "confidentialCellLink": "<serialized config cell link>"
 }
 ```
 
@@ -121,8 +117,7 @@ Called by pattern handlers to register a new webhook.
 ```json
 {
   "id": "wh_abc123...",
-  "name": "GitHub Push Events",
-  "mode": "append"
+  "name": "GitHub Push Events"
 }
 ```
 
@@ -157,7 +152,6 @@ System-level admin endpoint. Not intended for use by patterns.
       "name": "GitHub Push Events",
       "cellLink": "...",
       "enabled": true,
-      "mode": "append",
       "createdAt": "2026-02-23T...",
       "createdBy": "did:key:..."
     }
@@ -198,7 +192,7 @@ The config cell is CFC-labeled as confidential by the pattern that creates it. T
 All webhook routes have permissive CORS (`origin: *`) to support both browser-based pattern handlers and server-to-server webhook delivery.
 
 ### Scoped writes
-Each webhook writes to exactly one cell. A compromised bearer token can only affect that single cell.
+Each webhook writes to exactly one stream. A compromised bearer token can only affect that single stream.
 
 ## `ct-secret-viewer` Component
 
@@ -238,7 +232,7 @@ Shows greeked text: `••••••••••••hJ9k` (last 4 character
 Toolshed runs across 21 instances behind a load balancer. The webhook system has no in-memory state — all data lives in cells via shared storage. Any instance can:
 
 - Create webhooks (writes to service space)
-- Ingest payloads (reads registration from service space, writes to user space)
+- Ingest payloads (reads registration from service space, sends to user stream)
 - List or delete webhooks (reads from service space)
 
 No coordination between instances is required.

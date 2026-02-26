@@ -1,6 +1,5 @@
 /// <cts-enable />
 import {
-  computed,
   Default,
   NAME,
   pattern,
@@ -24,7 +23,6 @@ interface WebhookPatternInput {
 interface WebhookPatternOutput {
   [NAME]: string;
   [UI]: VNode;
-  webhookInbox: unknown;
   webhookConfig: WebhookConfig | null;
 }
 
@@ -38,7 +36,6 @@ declare global {
         name?: string;
         "$inbox"?: unknown;
         "$config"?: unknown;
-        mode?: "replace" | "append";
         [key: string]: unknown;
       };
     }
@@ -49,16 +46,6 @@ declare global {
 
 const WebhookTest = pattern<WebhookPatternInput, WebhookPatternOutput>(
   ({ webhookInbox, webhookConfig }) => {
-    const inboxDisplay = computed(() => {
-      const val = webhookInbox.get();
-      if (val === null || val === undefined) return "(empty — no payloads yet)";
-      try {
-        return JSON.stringify(val, null, 2);
-      } catch {
-        return String(val);
-      }
-    });
-
     return {
       [NAME]: "Webhook Test Pattern",
       [UI]: (
@@ -86,43 +73,12 @@ const WebhookTest = pattern<WebhookPatternInput, WebhookPatternOutput>(
                   name="Test Webhook"
                   $inbox={webhookInbox}
                   $config={webhookConfig}
-                  mode="replace"
                 />
-              </ct-vstack>
-            </ct-card>
-
-            <ct-card>
-              <ct-vstack gap="2">
-                <div style={{ fontWeight: "600", fontSize: "1rem" }}>
-                  Inbox Contents
-                </div>
-                <div
-                  style={{
-                    color: "var(--ct-color-gray-500)",
-                    fontSize: "0.875rem",
-                  }}
-                >
-                  Payloads received by this webhook will appear here.
-                </div>
-                <pre
-                  style={{
-                    background: "#f4f4f5",
-                    borderRadius: "6px",
-                    padding: "12px",
-                    fontSize: "0.8rem",
-                    overflowX: "auto",
-                    whiteSpace: "pre-wrap",
-                    wordBreak: "break-all",
-                  }}
-                >
-                  {inboxDisplay}
-                </pre>
               </ct-vstack>
             </ct-card>
           </ct-vstack>
         </ct-screen>
       ),
-      webhookInbox,
       webhookConfig,
     };
   },

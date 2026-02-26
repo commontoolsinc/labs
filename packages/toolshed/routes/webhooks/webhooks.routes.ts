@@ -25,10 +25,6 @@ export const create = createRoute({
                 .describe(
                   "Serialized cell link JSON for the confidential config cell (receives URL+secret)",
                 ),
-              mode: z
-                .enum(["replace", "append"])
-                .default("replace")
-                .describe("Write mode: replace cell value or append to array"),
             })
             .openapi({
               example: {
@@ -37,7 +33,6 @@ export const create = createRoute({
                   '{"/" : {"link@1" : {"id" : "of:bafe...", "space" : "did:key:bafe...", "path" : ["webhooks", "github"]}}}',
                 confidentialCellLink:
                   '{"/" : {"link@1" : {"id" : "of:cafe...", "space" : "did:key:bafe...", "path" : ["webhooks", "github", "config"]}}}',
-                mode: "append",
               },
             }),
         },
@@ -51,7 +46,6 @@ export const create = createRoute({
           schema: z.object({
             id: z.string(),
             name: z.string(),
-            mode: z.enum(["replace", "append"]),
           }),
         },
       },
@@ -142,7 +136,6 @@ export const list = createRoute({
                 name: z.string(),
                 cellLink: z.string(),
                 enabled: z.boolean(),
-                mode: z.enum(["replace", "append"]),
                 createdAt: z.string(),
                 createdBy: z.string(),
               }),
