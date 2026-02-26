@@ -3,6 +3,7 @@ import {
   action,
   computed,
   type Default,
+  ifElse,
   NAME,
   pattern,
   UI,
@@ -12,29 +13,44 @@ import {
 
 // ===== Types =====
 
-interface ProjectItem {
+interface Project {
   id: string;
-  text: string;
+  name: string;
+  status: string;
   parentId: string;
-  note: string;
-  wishes: Wish[];
+  childIds: string[];
 }
 
-interface Wish {
+interface Person {
+  id: string;
+  name: string;
+  role: string;
+  context: string;
+}
+
+interface Directive {
+  id: string;
+  target: string;
   text: string;
   createdAt: string;
-  status: string; // "pending" | "done"
+  status: string;
+  response: string;
+  assignedTo: string;
+  noteUrl: string;
 }
 
 interface UserAction {
   type: string;
-  target?: string;
+  panel?: string;
   text?: string;
+  target?: string;
   ts: string;
 }
 
 interface ProjectsInput {
-  items: Writable<Default<ProjectItem[], []>>;
+  projects: Writable<Default<Project[], []>>;
+  people: Writable<Default<Person[], []>>;
+  directives: Writable<Default<Directive[], []>>;
 }
 
 interface ProjectsOutput {
@@ -60,254 +76,151 @@ const color = {
   green: "#34c759",
   orange: "#ff9500",
   red: "#ff3b30",
-  indigo: "#5856d6",
   purple: "#af52de",
+  indigo: "#5856d6",
 };
 
-// ===== Helpers =====
+const panelCardStyle = {
+  background: color.background,
+  borderRadius: "14px",
+  padding: "16px 18px",
+  margin: "0 0 10px",
+  boxShadow: "0 0.5px 0 rgba(0,0,0,0.04), 0 1px 3px rgba(0,0,0,0.04)",
+};
 
-let counter = 0;
-function nextId(): string {
-  counter++;
-  return "item-" + Date.now().toString(36) + "-" + counter;
-}
+const groupHeaderStyle = {
+  fontSize: "12px",
+  fontWeight: "600",
+  textTransform: "uppercase" as const,
+  color: color.secondaryLabel,
+  letterSpacing: "0.5px",
+  padding: "8px 0 4px",
+};
+
+const itemRowStyle = {
+  fontSize: "14px",
+  lineHeight: "1.5",
+  padding: "6px 0",
+  borderBottom: `0.5px solid ${color.separator}`,
+  color: color.label,
+};
+
+const directiveInputRowStyle = {
+  display: "flex",
+  gap: "8px",
+  marginTop: "8px",
+  alignItems: "center",
+};
+
+const directiveSendBtnStyle = {
+  padding: "8px 16px",
+  borderRadius: "100px",
+  fontSize: "13px",
+  fontWeight: "600",
+  background: color.indigo,
+  color: "#fff",
+  cursor: "pointer",
+  flexShrink: "0",
+};
+
+const actionBtnDirective = {
+  padding: "5px 14px",
+  borderRadius: "100px",
+  fontSize: "12px",
+  fontWeight: "600",
+  background: "rgba(88, 86, 214, 0.12)",
+  color: "#5856d6",
+  cursor: "pointer",
+};
 
 // ===== Pattern =====
 
-const GTDProjects = pattern<ProjectsInput, ProjectsOutput>(({ items }) => {
-  // --- Local UI state ---
-  const breadcrumbs = Writable.of<string[]>([]); // "id|text" encoded
-  const addDraft = Writable.of<string>("");
-  const editingId = Writable.of<string>(""); // id of item being inline-edited
-  const editingText = Writable.of<string>("");
-  const selectedId = Writable.of<string>(""); // id of selected item (for actions)
+const GTDProjects = pattern<ProjectsInput, ProjectsOutput>(
+  ({ projects, people, directives }) => {
+    // Breadcrumb navigation state — stores "id|name" strings
+    const projectBreadcrumbs = Writable.of<string[]>([]);
+    const showCompleted = Writable.of<boolean>(false);
 
-  // Note modal state
-  const noteEditId = Writable.of<string>(""); // id of item whose note is open
-  const noteEditText = Writable.of<string>("");
+    // Per-item selection state
+    const selectedItem = Writable.of<string>("");
+    const itemDirectiveDraft = Writable.of<string>("");
+    const itemDirectiveOpen = Writable.of<boolean>(false);
 
-  // Wish modal state
-  const wishViewId = Writable.of<string>(""); // id of item whose wishes are shown
-  const wishDraft = Writable.of<string>("");
+    // userActions output
+    const userActions = Writable.of<UserAction[]>([]);
 
-  // userActions output (for directive wishes)
-  const userActions = Writable.of<UserAction[]>([]);
+    // --- Actions ---
 
-  // --- Actions ---
+    const drillIntoProject = action(
+      ({ id, name }: { id: string; name: string }) => {
+        const crumbs = [...(projectBreadcrumbs.get() || [])];
+        crumbs.push(id + "|" + name);
+        projectBreadcrumbs.set(crumbs);
+        selectedItem.set("");
+        itemDirectiveOpen.set(false);
+        itemDirectiveDraft.set("");
+      },
+    );
 
-  const addItem = action(() => {
-    const text = addDraft.get().trim();
-    if (!text) return;
-    const all = [...(items.get() || [])];
-    const crumbs = breadcrumbs.get() || [];
-    let parentId = "";
-    if (crumbs.length > 0) {
-      const last = crumbs[crumbs.length - 1];
-      parentId = last.substring(0, last.indexOf("|"));
-    }
-    all.push({ id: nextId(), text, parentId, note: "", wishes: [] });
-    items.set(all);
-    addDraft.set("");
-  });
+    const toggleShowCompleted = action(() => {
+      showCompleted.set(!showCompleted.get());
+    });
 
-  const deleteItem = action(({ id }: { id: string }) => {
-    const all = [...(items.get() || [])];
-    // Recursively collect ids to delete
-    const toDelete = new Set<string>();
-    const queue = [id];
-    while (queue.length > 0) {
-      const current = queue.pop()!;
-      toDelete.add(current);
-      for (const item of all) {
-        if (item.parentId === current) queue.push(item.id);
+    const navigateBreadcrumb = action(({ depth }: { depth: number }) => {
+      if (depth < 0) {
+        projectBreadcrumbs.set([]);
+      } else {
+        const crumbs = [...(projectBreadcrumbs.get() || [])];
+        projectBreadcrumbs.set(crumbs.slice(0, depth + 1));
       }
-    }
-    items.set(all.filter((item: ProjectItem) => !toDelete.has(item.id)));
-    if (selectedId.get() === id) selectedId.set("");
-  });
+      selectedItem.set("");
+      itemDirectiveOpen.set(false);
+      itemDirectiveDraft.set("");
+    });
 
-  const startEdit = action(({ id, text }: { id: string; text: string }) => {
-    editingId.set(id);
-    editingText.set(text);
-  });
+    const selectItem = action(({ key }: { key: string }) => {
+      const current = selectedItem.get();
+      selectedItem.set(current === key ? "" : key);
+      itemDirectiveOpen.set(false);
+      itemDirectiveDraft.set("");
+    });
 
-  const saveEdit = action(() => {
-    const id = editingId.get();
-    const newText = editingText.get().trim();
-    if (!id || !newText) {
-      editingId.set("");
-      editingText.set("");
-      return;
-    }
-    const all = [...(items.get() || [])];
-    const idx = all.findIndex((item: ProjectItem) => item.id === id);
-    if (idx >= 0) {
-      all[idx] = { ...all[idx], text: newText };
-      items.set(all);
-    }
-    editingId.set("");
-    editingText.set("");
-  });
+    const openItemDirective = action(() => {
+      itemDirectiveOpen.set(true);
+    });
 
-  const cancelEdit = action(() => {
-    editingId.set("");
-    editingText.set("");
-  });
+    const sendItemDirective = action(() => {
+      const key = selectedItem.get();
+      if (!key) return;
+      const text = itemDirectiveDraft.get().trim();
+      if (!text) return;
 
-  const selectItem = action(({ id }: { id: string }) => {
-    selectedId.set(selectedId.get() === id ? "" : id);
-  });
+      const idx = parseInt(key.split(":")[1]);
+      const item = (projects.get() || [])[idx];
+      const prefix = item ? "Re: " + item.name + " — " : "";
 
-  const drillIn = action(({ id, text }: { id: string; text: string }) => {
-    const crumbs = [...(breadcrumbs.get() || [])];
-    crumbs.push(id + "|" + text);
-    breadcrumbs.set(crumbs);
-    selectedId.set("");
-  });
+      const now = new Date().toISOString();
+      userActions.set([
+        ...userActions.get(),
+        {
+          type: "directive",
+          target: "projects",
+          text: prefix + text,
+          ts: now,
+        },
+      ]);
 
-  const navigateBreadcrumb = action(({ depth }: { depth: number }) => {
-    if (depth < 0) {
-      breadcrumbs.set([]);
-    } else {
-      const crumbs = [...(breadcrumbs.get() || [])];
-      breadcrumbs.set(crumbs.slice(0, depth + 1));
-    }
-    selectedId.set("");
-  });
+      itemDirectiveDraft.set("");
+      itemDirectiveOpen.set(false);
+      selectedItem.set("");
+    });
 
-  // Note modal
-  const openNote = action(({ id, note }: { id: string; note: string }) => {
-    noteEditId.set(id);
-    noteEditText.set(note || "");
-  });
+    // --- Render ---
 
-  const saveNote = action(() => {
-    const id = noteEditId.get();
-    if (!id) return;
-    const all = [...(items.get() || [])];
-    const idx = all.findIndex((item: ProjectItem) => item.id === id);
-    if (idx >= 0) {
-      all[idx] = { ...all[idx], note: noteEditText.get() };
-      items.set(all);
-    }
-    noteEditId.set("");
-    noteEditText.set("");
-  });
-
-  const closeNote = action(() => {
-    noteEditId.set("");
-    noteEditText.set("");
-  });
-
-  // Wish modal
-  const openWishes = action(({ id }: { id: string }) => {
-    wishViewId.set(id);
-    wishDraft.set("");
-  });
-
-  const closeWishes = action(() => {
-    wishViewId.set("");
-    wishDraft.set("");
-  });
-
-  const addWish = action(() => {
-    const id = wishViewId.get();
-    const text = wishDraft.get().trim();
-    if (!id || !text) return;
-    const now = new Date().toISOString();
-    const all = [...(items.get() || [])];
-    const idx = all.findIndex((item: ProjectItem) => item.id === id);
-    if (idx >= 0) {
-      const wishes = [...(all[idx].wishes || [])];
-      wishes.push({ text, createdAt: now, status: "pending" });
-      all[idx] = { ...all[idx], wishes };
-      items.set(all);
-    }
-    // Emit as directive userAction
-    const itemText = idx >= 0 ? all[idx].text : id;
-    userActions.set([
-      ...userActions.get(),
-      { type: "directive", target: id, text: "Wish on [" + itemText + "]: " + text, ts: now },
-    ]);
-    wishDraft.set("");
-  });
-
-  const toggleWishStatus = action(({ itemId, wishIdx }: { itemId: string; wishIdx: number }) => {
-    const all = [...(items.get() || [])];
-    const idx = all.findIndex((item: ProjectItem) => item.id === itemId);
-    if (idx >= 0) {
-      const wishes = [...(all[idx].wishes || [])];
-      if (wishIdx >= 0 && wishIdx < wishes.length) {
-        wishes[wishIdx] = {
-          ...wishes[wishIdx],
-          status: wishes[wishIdx].status === "done" ? "pending" : "done",
-        };
-        all[idx] = { ...all[idx], wishes };
-        items.set(all);
-      }
-    }
-  });
-
-  // --- Styles ---
-
-  const itemRowBase = {
-    padding: "10px 0",
-    borderBottom: "0.5px solid " + color.separator,
-    display: "flex",
-    alignItems: "center",
-    gap: "8px",
-  };
-
-  const iconBtn = {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    cursor: "pointer",
-    flexShrink: "0",
-    fontSize: "10px",
-    fontWeight: "600",
-    padding: "2px 8px",
-    borderRadius: "100px",
-  };
-
-  // --- Render ---
-
-  return {
-    [NAME]: "GTD Projects",
-    userActions,
-    [UI]: computed(() => {
-      const all: ProjectItem[] = [...(items.get() || [])];
-      const crumbStrs = breadcrumbs.get() || [];
-      const crumbs = crumbStrs.map((s: string) => {
-        const bar = s.indexOf("|");
-        return { id: bar >= 0 ? s.substring(0, bar) : s, text: bar >= 0 ? s.substring(bar + 1) : s };
-      });
-
-      // Current parent
-      const currentParentId = crumbs.length > 0 ? crumbs[crumbs.length - 1].id : "";
-
-      // Children at this level
-      const levelItems = all.filter((item: ProjectItem) =>
-        currentParentId ? item.parentId === currentParentId : !item.parentId
-      );
-
-      // Children-of map for chevron display
-      const childCount: Record<string, number> = {};
-      for (const item of all) {
-        if (item.parentId) {
-          childCount[item.parentId] = (childCount[item.parentId] || 0) + 1;
-        }
-      }
-
-      // Note modal item
-      const noteId = noteEditId.get();
-      const noteItem = noteId ? all.find((item: ProjectItem) => item.id === noteId) : null;
-
-      // Wish modal item
-      const wishId = wishViewId.get();
-      const wishItem = wishId ? all.find((item: ProjectItem) => item.id === wishId) : null;
-
-      return (
+    return {
+      [NAME]: "GTD Projects",
+      userActions,
+      [UI]: (
         <div
           style={{
             fontFamily: font,
@@ -321,542 +234,553 @@ const GTDProjects = pattern<ProjectsInput, ProjectsOutput>(({ items }) => {
           {/* Header */}
           <div
             style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
+              fontSize: "28px",
+              fontWeight: "700",
+              color: color.label,
+              letterSpacing: "-0.5px",
               marginBottom: "16px",
             }}
           >
-            <div
-              style={{
-                fontSize: "28px",
-                fontWeight: "700",
-                color: color.label,
-                letterSpacing: "-0.5px",
-              }}
-            >
-              GTD Projects
-            </div>
-            <div
-              style={{
-                fontSize: "13px",
-                fontWeight: "600",
-                color: color.secondaryLabel,
-                padding: "4px 12px",
-                borderRadius: "100px",
-                background: color.fillPrimary,
-              }}
-            >
-              {all.length + " items"}
-            </div>
+            GTD Projects
           </div>
 
-          {/* Breadcrumbs */}
-          {crumbs.length > 0 ? (
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "0",
-                flexWrap: "wrap" as const,
-                padding: "4px 0 12px",
-              }}
-            >
-              <span
-                style={{
-                  fontSize: "13px",
-                  fontWeight: "500",
-                  color: color.blue,
-                  cursor: "pointer",
-                }}
-                onClick={() => navigateBreadcrumb.send({ depth: -1 })}
-              >
-                Root
-              </span>
-              {crumbs.map(
-                (c: { id: string; text: string }, i: number) => (
-                  <span style={{ display: "inline-flex", alignItems: "center" }}>
-                    <span
-                      style={{
-                        fontSize: "12px",
-                        color: color.tertiaryLabel,
-                        margin: "0 6px",
-                      }}
-                    >
-                      /
-                    </span>
-                    {i < crumbs.length - 1 ? (
-                      <span
-                        style={{
-                          fontSize: "13px",
-                          fontWeight: "500",
-                          color: color.blue,
-                          cursor: "pointer",
-                        }}
-                        onClick={() => navigateBreadcrumb.send({ depth: i })}
-                      >
-                        {c.text}
-                      </span>
-                    ) : (
-                      <span
-                        style={{
-                          fontSize: "13px",
-                          fontWeight: "600",
-                          color: color.label,
-                        }}
-                      >
-                        {c.text}
-                      </span>
-                    )}
-                  </span>
-                ),
-              )}
-            </div>
-          ) : null}
-
-          {/* Add Item Input */}
-          <div
-            style={{
-              display: "flex",
-              gap: "8px",
-              marginBottom: "16px",
-              alignItems: "center",
-            }}
-          >
-            <ct-input
-              $value={addDraft}
-              placeholder={crumbs.length > 0 ? "Add sub-item..." : "Add item..."}
-              style={{
-                flex: "1",
-                fontSize: "14px",
-                borderRadius: "10px",
-              }}
-            />
-            <div
-              onClick={addItem}
-              style={{
-                padding: "8px 16px",
-                borderRadius: "100px",
-                fontSize: "13px",
-                fontWeight: "600",
-                background: color.blue,
-                color: "#fff",
-                cursor: "pointer",
-                flexShrink: "0",
-              }}
-            >
-              Add
-            </div>
-          </div>
-
-          {/* Section label */}
-          <div
-            style={{
-              fontSize: "11px",
-              fontWeight: "600",
-              color: color.secondaryLabel,
-              textTransform: "uppercase" as const,
-              letterSpacing: "0.5px",
-              marginBottom: "4px",
-            }}
-          >
-            {crumbs.length > 0
-              ? crumbs[crumbs.length - 1].text + " (" + levelItems.length + ")"
-              : "Items (" + levelItems.length + ")"}
-          </div>
-
-          {/* Empty state */}
-          {levelItems.length === 0 ? (
-            <div
-              style={{
-                fontSize: "14px",
-                color: color.tertiaryLabel,
-                padding: "24px 0",
-                textAlign: "center" as const,
-              }}
-            >
-              {crumbs.length > 0 ? "No sub-items yet" : "No items yet"}
-            </div>
-          ) : null}
-
-          {/* Item list */}
-          {levelItems.map((item: ProjectItem) => {
-            const isSelected = selectedId.get() === item.id;
-            const isEditing = editingId.get() === item.id;
-            const hasChildren = (childCount[item.id] || 0) > 0;
-            const hasNote = item.note && item.note.trim().length > 0;
-            const wishCount = (item.wishes || []).length;
-            const pendingWishes = (item.wishes || []).filter(
-              (w: Wish) => w.status === "pending",
-            ).length;
-
-            return (
-              <div>
-                <div
-                  style={
-                    isSelected
-                      ? {
-                          ...itemRowBase,
-                          background: "rgba(0, 122, 255, 0.06)",
-                          borderRadius: "8px",
-                        }
-                      : itemRowBase
-                  }
-                >
-                  {/* Item text or inline edit */}
-                  {isEditing ? (
-                    <div style={{ display: "flex", gap: "6px", flex: "1", alignItems: "center" }}>
-                      <ct-input
-                        $value={editingText}
-                        style={{ flex: "1", fontSize: "14px", borderRadius: "8px" }}
-                      />
-                      <div
-                        onClick={saveEdit}
-                        style={{
-                          ...iconBtn,
-                          background: "rgba(52, 199, 89, 0.12)",
-                          color: color.green,
-                          fontSize: "12px",
-                          fontWeight: "700",
-                        }}
-                      >
-                        OK
-                      </div>
-                      <div
-                        onClick={cancelEdit}
-                        style={{
-                          ...iconBtn,
-                          background: "rgba(255, 59, 48, 0.12)",
-                          color: color.red,
-                          fontSize: "16px",
-                        }}
-                      >
-                        x
-                      </div>
-                    </div>
-                  ) : (
-                    <div
-                      style={{
-                        flex: "1",
-                        fontSize: "13px",
-                        color: color.label,
-                        cursor: "pointer",
-                        overflow: "hidden" as const,
-                        textOverflow: "ellipsis" as const,
-                        whiteSpace: "nowrap" as const,
-                      }}
-                      onClick={() => selectItem.send({ id: item.id })}
-                    >
-                      {item.text}
-                    </div>
-                  )}
-
-                  {/* Note pill */}
-                  <span
-                    onClick={() => openNote.send({ id: item.id, note: item.note })}
-                    style={{
-                      ...iconBtn,
-                      color: hasNote ? color.blue : color.tertiaryLabel,
-                      background: hasNote ? "rgba(0, 122, 255, 0.12)" : color.fillPrimary,
-                      cursor: "pointer",
-                    }}
-                  >
-                    {hasNote ? "note" : "note"}
-                  </span>
-
-                  {/* Wish pill */}
-                  <span
-                    onClick={() => openWishes.send({ id: item.id })}
-                    style={{
-                      ...iconBtn,
-                      color: pendingWishes > 0 ? color.orange : wishCount > 0 ? color.green : color.tertiaryLabel,
-                      background:
-                        pendingWishes > 0
-                          ? "rgba(255, 149, 0, 0.12)"
-                          : wishCount > 0
-                            ? "rgba(52, 199, 89, 0.12)"
-                            : color.fillPrimary,
-                      cursor: "pointer",
-                    }}
-                  >
-                    {wishCount > 0 ? wishCount + " wish" : "wish"}
-                  </span>
-
-                  {/* Drill-in chevron */}
-                  {hasChildren ? (
-                    <span
-                      onClick={() => drillIn.send({ id: item.id, text: item.text })}
-                      style={{
-                        fontSize: "14px",
-                        color: color.tertiaryLabel,
-                        flexShrink: "0",
-                        cursor: "pointer",
-                        padding: "0 4px",
-                      }}
-                    >
-                      {">"}
-                    </span>
-                  ) : null}
-                </div>
-
-                {/* Selected item actions */}
-                {isSelected && !isEditing ? (
+          <div style={panelCardStyle}>
+            {/* Breadcrumb bar */}
+            {computed(() => {
+              const crumbStrs = projectBreadcrumbs.get() || [];
+              // Validate breadcrumbs against current data
+              const projectItems = [...(projects.get() || [])] as Project[];
+              const knownIds = new Set<string>();
+              for (const p of projectItems) {
+                knownIds.add(p.id);
+                if (p.parentId) knownIds.add(p.parentId);
+              }
+              let crumbs = crumbStrs.map((s: string) => {
+                const bar = s.indexOf("|");
+                return {
+                  id: bar >= 0 ? s.substring(0, bar) : s,
+                  name: bar >= 0 ? s.substring(bar + 1) : s,
+                };
+              });
+              // If any crumb references an ID not in current data, treat as root
+              if (crumbs.length > 0 && crumbs.some(
+                (c: { id: string; name: string }) => !knownIds.has(c.id),
+              )) {
+                crumbs = [];
+              }
+              if (crumbs.length === 0) {
+                return (
                   <div
                     style={{
+                      ...groupHeaderStyle,
                       display: "flex",
-                      gap: "8px",
-                      padding: "6px 12px 10px",
-                      flexWrap: "wrap" as const,
+                      alignItems: "center",
+                      justifyContent: "space-between",
                     }}
                   >
-                    <div
-                      onClick={() => startEdit.send({ id: item.id, text: item.text })}
+                    <span>Projects</span>
+                    <span
                       style={{
-                        padding: "4px 12px",
-                        borderRadius: "100px",
                         fontSize: "11px",
-                        fontWeight: "600",
-                        background: "rgba(0, 122, 255, 0.12)",
-                        color: color.blue,
+                        fontWeight: "500",
+                        color: showCompleted.get()
+                          ? color.blue
+                          : color.tertiaryLabel,
                         cursor: "pointer",
                       }}
+                      onClick={toggleShowCompleted}
                     >
-                      Edit
-                    </div>
-                    <div
-                      onClick={() => drillIn.send({ id: item.id, text: item.text })}
-                      style={{
-                        padding: "4px 12px",
-                        borderRadius: "100px",
-                        fontSize: "11px",
-                        fontWeight: "600",
-                        background: "rgba(175, 82, 222, 0.12)",
-                        color: color.purple,
-                        cursor: "pointer",
-                      }}
-                    >
-                      Sub-items
-                    </div>
-                    <div
-                      onClick={() => deleteItem.send({ id: item.id })}
-                      style={{
-                        padding: "4px 12px",
-                        borderRadius: "100px",
-                        fontSize: "11px",
-                        fontWeight: "600",
-                        background: "rgba(255, 59, 48, 0.12)",
-                        color: color.red,
-                        cursor: "pointer",
-                      }}
-                    >
-                      Delete
-                    </div>
+                      {showCompleted.get() ? "Hide Done" : "Show Done"}
+                    </span>
                   </div>
-                ) : null}
-              </div>
-            );
-          })}
-
-          {/* ===== Note Modal ===== */}
-          <ct-modal
-            $open={computed(() => noteEditId.get() !== "")}
-            dismissable
-            size="md"
-            onct-modal-close={closeNote}
-          >
-            <span slot="header">
-              {noteItem ? "Note: " + noteItem.text : "Note"}
-            </span>
-            <ct-textarea
-              $value={noteEditText}
-              placeholder="Add notes..."
-              rows={6}
-              style={{ width: "100%", resize: "vertical" }}
-            />
-            <ct-hstack
-              slot="footer"
-              gap="3"
-              style={{ justifyContent: "flex-end" }}
-            >
-              <ct-button variant="ghost" onClick={closeNote}>
-                Cancel
-              </ct-button>
-              <ct-button variant="primary" onClick={saveNote}>
-                Save Note
-              </ct-button>
-            </ct-hstack>
-          </ct-modal>
-
-          {/* ===== Wish Modal ===== */}
-          <ct-modal
-            $open={computed(() => wishViewId.get() !== "")}
-            dismissable
-            size="md"
-            onct-modal-close={closeWishes}
-          >
-            <span slot="header">
-              {wishItem ? "Wishes: " + wishItem.text : "Wishes"}
-            </span>
-            <div>
-              {/* Add wish input */}
-              <div
-                style={{
-                  display: "flex",
-                  gap: "8px",
-                  marginBottom: "16px",
-                  alignItems: "center",
-                }}
-              >
-                <ct-input
-                  $value={wishDraft}
-                  placeholder="Make a wish..."
-                  style={{ flex: "1", fontSize: "14px", borderRadius: "10px" }}
-                />
+                );
+              }
+              return (
                 <div
-                  onClick={addWish}
                   style={{
-                    padding: "8px 16px",
-                    borderRadius: "100px",
-                    fontSize: "13px",
-                    fontWeight: "600",
-                    background: color.indigo,
-                    color: "#fff",
-                    cursor: "pointer",
-                    flexShrink: "0",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0",
+                    flexWrap: "wrap" as const,
+                    padding: "4px 0 8px",
                   }}
                 >
-                  Send
-                </div>
-              </div>
-
-              {/* Existing wishes */}
-              {wishItem && (wishItem.wishes || []).length > 0 ? (
-                <div>
-                  <div
+                  <span
                     style={{
-                      fontSize: "11px",
-                      fontWeight: "600",
-                      color: color.secondaryLabel,
-                      textTransform: "uppercase" as const,
-                      letterSpacing: "0.5px",
-                      marginBottom: "8px",
+                      fontSize: "13px",
+                      fontWeight: "500",
+                      color: color.blue,
+                      cursor: "pointer",
                     }}
+                    onClick={() =>
+                      navigateBreadcrumb.send({ depth: -1 })
+                    }
                   >
-                    {"Wishes (" + (wishItem.wishes || []).length + ")"}
-                  </div>
-                  {(wishItem.wishes || []).map((w: Wish, wi: number) => (
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "8px",
-                        padding: "8px 0",
-                        borderBottom: "0.5px solid " + color.separator,
-                      }}
-                    >
-                      <div
-                        onClick={() =>
-                          toggleWishStatus.send({
-                            itemId: wishViewId.get(),
-                            wishIdx: wi,
-                          })
-                        }
+                    Projects
+                  </span>
+                  {crumbs.map(
+                    (
+                      c: { id: string; name: string },
+                      i: number,
+                    ) => (
+                      <span
                         style={{
-                          width: "20px",
-                          height: "20px",
-                          borderRadius: "4px",
-                          border:
-                            w.status === "done"
-                              ? "2px solid " + color.green
-                              : "2px solid " + color.tertiaryLabel,
-                          background:
-                            w.status === "done"
-                              ? "rgba(52, 199, 89, 0.12)"
-                              : "transparent",
-                          display: "flex",
+                          display: "inline-flex",
                           alignItems: "center",
-                          justifyContent: "center",
-                          cursor: "pointer",
-                          flexShrink: "0",
-                          fontSize: "12px",
-                          color: color.green,
                         }}
                       >
-                        {w.status === "done" ? "v" : ""}
-                      </div>
-                      <div style={{ flex: "1" }}>
-                        <div
+                        <span
                           style={{
-                            fontSize: "13px",
-                            color:
-                              w.status === "done"
-                                ? color.tertiaryLabel
-                                : color.label,
-                            textDecoration:
-                              w.status === "done" ? "line-through" : "none",
+                            fontSize: "12px",
+                            color: color.tertiaryLabel,
+                            margin: "0 6px",
                           }}
                         >
-                          {w.text}
-                        </div>
-                        <div
+                          /
+                        </span>
+                        {i < crumbs.length - 1 ? (
+                          <span
+                            style={{
+                              fontSize: "13px",
+                              fontWeight: "500",
+                              color: color.blue,
+                              cursor: "pointer",
+                            }}
+                            onClick={() =>
+                              navigateBreadcrumb.send({
+                                depth: i,
+                              })
+                            }
+                          >
+                            {c.name}
+                          </span>
+                        ) : (
+                          <span
+                            style={{
+                              fontSize: "13px",
+                              fontWeight: "600",
+                              color: color.label,
+                            }}
+                          >
+                            {c.name}
+                          </span>
+                        )}
+                      </span>
+                    ),
+                  )}
+                </div>
+              );
+            })}
+            {computed(() => {
+              const projectItems = [...(projects.get() || [])] as Project[];
+              const peopleItems = [...(people.get() || [])] as Person[];
+              const crumbStrs2 = projectBreadcrumbs.get() || [];
+              let crumbs = crumbStrs2.map((s: string) => {
+                const bar = s.indexOf("|");
+                return {
+                  id: bar >= 0 ? s.substring(0, bar) : s,
+                  name: bar >= 0 ? s.substring(bar + 1) : s,
+                };
+              });
+
+              // Build project name -> noteUrl lookup from directives
+              const projectNotes: Record<string, string> = {};
+              const allDirs: Directive[] = [
+                ...(directives.get() || []),
+              ].filter(
+                (d: Directive) => d && d.id && d.noteUrl,
+              );
+              for (const d of allDirs) {
+                const m = d.text.match(/^Re:\s*(.+?)\s*—/);
+                if (m) projectNotes[m[1]] = d.noteUrl;
+              }
+
+              if (projectItems.length === 0) {
+                return (
+                  <div
+                    style={{
+                      fontSize: "13px",
+                      color: color.tertiaryLabel,
+                      padding: "12px 0",
+                    }}
+                  >
+                    No projects
+                  </div>
+                );
+              }
+
+              const hideCompleted = !showCompleted.get();
+              const isCompleted = (s: string) =>
+                s === "Done" || s === "Archived";
+
+              // Build children-of map
+              const childrenOf: Record<string, Project[]> = {};
+              const visibleChildrenOf: Record<string, Project[]> =
+                {};
+              // Also collect all known IDs (projects + person parents)
+              const knownIds = new Set<string>();
+              for (const p of projectItems) {
+                knownIds.add(p.id);
+                if (p.parentId) {
+                  knownIds.add(p.parentId);
+                  if (!childrenOf[p.parentId])
+                    childrenOf[p.parentId] = [];
+                  childrenOf[p.parentId].push(p);
+                  if (
+                    !hideCompleted ||
+                    !isCompleted(p.status)
+                  ) {
+                    if (!visibleChildrenOf[p.parentId])
+                      visibleChildrenOf[p.parentId] = [];
+                    visibleChildrenOf[p.parentId].push(p);
+                  }
+                }
+              }
+
+              // Validate breadcrumbs: if any crumb ID doesn't
+              // exist in the current data, treat as root level
+              if (crumbs.length > 0) {
+                const invalid = crumbs.some(
+                  (c: { id: string; name: string }) => !knownIds.has(c.id),
+                );
+                if (invalid) {
+                  crumbs = [];
+                }
+              }
+
+              // Determine visible items at current breadcrumb depth
+              let visibleItems: {
+                type: string;
+                id: string;
+                name: string;
+                project: Project | null;
+                idx: number;
+                hasChildren: boolean;
+              }[] = [];
+
+              if (crumbs.length === 0) {
+                // Root level: person groups + top-level projects
+                for (const parentId of Object.keys(
+                  visibleChildrenOf,
+                )) {
+                  if (parentId.startsWith("PPL:")) {
+                    const person = peopleItems.find(
+                      (pp: Person) => pp.id === parentId,
+                    );
+                    const name = person
+                      ? person.name
+                      : parentId.split(":")[1];
+                    visibleItems.push({
+                      type: "person",
+                      id: parentId,
+                      name,
+                      project: null,
+                      idx: -1,
+                      hasChildren: true,
+                    });
+                  }
+                }
+                for (const p of projectItems) {
+                  if (!p.parentId) {
+                    if (hideCompleted && isCompleted(p.status))
+                      continue;
+                    const idx = projectItems.indexOf(p);
+                    const hasKids =
+                      (visibleChildrenOf[p.id] || []).length >
+                      0;
+                    visibleItems.push({
+                      type: "project",
+                      id: p.id,
+                      name: p.name,
+                      project: p,
+                      idx,
+                      hasChildren: hasKids,
+                    });
+                  }
+                }
+              } else {
+                // Drilled into a node — show its children
+                const currentId =
+                  crumbs[crumbs.length - 1].id;
+                const children =
+                  childrenOf[currentId] || [];
+                for (const child of children) {
+                  if (
+                    hideCompleted &&
+                    isCompleted(child.status)
+                  )
+                    continue;
+                  const idx = projectItems.indexOf(child);
+                  const hasKids =
+                    (visibleChildrenOf[child.id] || [])
+                      .length > 0;
+                  visibleItems.push({
+                    type: "project",
+                    id: child.id,
+                    name: child.name,
+                    project: child,
+                    idx,
+                    hasChildren: hasKids,
+                  });
+                }
+              }
+
+              if (visibleItems.length === 0) {
+                return (
+                  <div
+                    style={{
+                      fontSize: "13px",
+                      color: color.tertiaryLabel,
+                      padding: "12px 0",
+                    }}
+                  >
+                    {crumbs.length > 0 ? "No child items" : "No projects"}
+                  </div>
+                );
+              }
+
+              return visibleItems.map(
+                (item: {
+                  type: string;
+                  id: string;
+                  name: string;
+                  project: Project | null;
+                  idx: number;
+                  hasChildren: boolean;
+                }) => {
+                  if (item.type === "person") {
+                    return (
+                      <div
+                        style={{
+                          ...itemRowStyle,
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "10px",
+                          cursor: "pointer",
+                        }}
+                        onClick={() =>
+                          drillIntoProject.send({
+                            id: item.id,
+                            name: item.name,
+                          })
+                        }
+                      >
+                        <span
+                          style={{
+                            fontSize: "13px",
+                            fontWeight: "600",
+                            color: color.purple,
+                            flex: "1",
+                          }}
+                        >
+                          {item.name}
+                        </span>
+                        <span
                           style={{
                             fontSize: "11px",
                             color: color.tertiaryLabel,
-                            marginTop: "2px",
                           }}
                         >
-                          {w.createdAt.substring(0, 10)}
-                        </div>
+                          {(
+                            visibleChildrenOf[item.id] || []
+                          ).length + " items"}
+                        </span>
+                        <span
+                          style={{
+                            fontSize: "14px",
+                            color: color.tertiaryLabel,
+                            flexShrink: "0",
+                          }}
+                        >
+                          {">"}
+                        </span>
                       </div>
-                      <span
-                        style={{
-                          fontSize: "10px",
-                          fontWeight: "600",
-                          color:
-                            w.status === "pending" ? color.orange : color.green,
-                          padding: "2px 8px",
-                          borderRadius: "100px",
-                          background:
-                            w.status === "pending"
-                              ? "rgba(255, 149, 0, 0.12)"
-                              : "rgba(52, 199, 89, 0.12)",
-                          flexShrink: "0",
-                        }}
-                      >
-                        {w.status}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
+                    );
+                  }
 
-              {wishItem && (wishItem.wishes || []).length === 0 ? (
-                <div
-                  style={{
-                    fontSize: "13px",
-                    color: color.tertiaryLabel,
-                    textAlign: "center" as const,
-                    padding: "12px 0",
-                  }}
-                >
-                  No wishes yet
-                </div>
-              ) : null}
-            </div>
-            <ct-hstack
-              slot="footer"
-              gap="3"
-              style={{ justifyContent: "flex-end" }}
-            >
-              <ct-button variant="primary" onClick={closeWishes}>
-                Done
-              </ct-button>
-            </ct-hstack>
-          </ct-modal>
+                  // Project row
+                  const p = item.project!;
+                  const idx = item.idx;
+                  return (
+                    <div>
+                      <div
+                        style={computed(() =>
+                          selectedItem.get() ===
+                          "projects:" + idx
+                            ? {
+                                ...itemRowStyle,
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "0px",
+                                cursor: "pointer",
+                                background:
+                                  "rgba(0, 122, 255, 0.06)",
+                                borderRadius: "8px",
+                                padding: "8px",
+                              }
+                            : {
+                                ...itemRowStyle,
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "0px",
+                                cursor: "pointer",
+                              },
+                        )}
+                      >
+                        {/* Item content — click to select */}
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "10px",
+                            flex: "1",
+                            cursor: "pointer",
+                          }}
+                          onClick={() =>
+                            selectItem.send({
+                              key: "projects:" + idx,
+                            })
+                          }
+                        >
+                          <span
+                            style={{
+                              fontSize: "12px",
+                              color: color.tertiaryLabel,
+                              fontWeight: "500",
+                              minWidth: "32px",
+                              flexShrink: "0",
+                            }}
+                          >
+                            {p.id}
+                          </span>
+                          <span style={{ flex: "1" }}>
+                            {p.name}
+                          </span>
+                          <span
+                            style={{
+                              padding: "2px 10px",
+                              borderRadius: "100px",
+                              fontSize: "11px",
+                              fontWeight: "500",
+                              background:
+                                p.status === "Active"
+                                  ? "rgba(52, 199, 89, 0.12)"
+                                  : p.status === "Done"
+                                    ? "rgba(142, 142, 147, 0.12)"
+                                    : "rgba(255, 149, 0, 0.12)",
+                              color:
+                                p.status === "Active"
+                                  ? "#34c759"
+                                  : p.status === "Done"
+                                    ? "#8e8e93"
+                                    : "#ff9500",
+                              flexShrink: "0",
+                            }}
+                          >
+                            {p.status}
+                          </span>
+                        </div>
+                        {projectNotes[p.name] ? (
+                          <a
+                            href={projectNotes[p.name]}
+                            target="_blank"
+                            style={{
+                              textDecoration: "none",
+                              fontSize: "16px",
+                              flexShrink: "0",
+                              cursor: "pointer",
+                              marginLeft: "4px",
+                            }}
+                          >
+                            {"📎"}
+                          </a>
+                        ) : null}
+                        {/* Drill-in chevron */}
+                        {item.hasChildren ? (
+                          <div
+                            style={{
+                              padding: "4px 0 4px 8px",
+                              cursor: "pointer",
+                              flexShrink: "0",
+                            }}
+                            onClick={() =>
+                              drillIntoProject.send({
+                                id: item.id,
+                                name: p.name,
+                              })
+                            }
+                          >
+                            <span
+                              style={{
+                                fontSize: "14px",
+                                color: color.tertiaryLabel,
+                              }}
+                            >
+                              {">"}
+                            </span>
+                          </div>
+                        ) : null}
+                      </div>
+                      {ifElse(
+                        computed(
+                          () =>
+                            selectedItem.get() ===
+                            "projects:" + idx,
+                        ),
+                        <div>
+                          <div
+                            style={{
+                              display: "flex",
+                              gap: "8px",
+                              padding: "6px 0 8px",
+                            }}
+                          >
+                            <div
+                              style={actionBtnDirective}
+                              onClick={openItemDirective}
+                            >
+                              → Directive
+                            </div>
+                          </div>
+                          {ifElse(
+                            computed(() =>
+                              itemDirectiveOpen.get(),
+                            ),
+                            <div
+                              style={directiveInputRowStyle}
+                            >
+                              <ct-textarea
+                                $value={itemDirectiveDraft}
+                                placeholder="Directive about this project..."
+                                rows={1}
+                                style={{
+                                  flex: "1",
+                                  borderRadius: "10px",
+                                  fontSize: "14px",
+                                }}
+                              />
+                              <div
+                                style={directiveSendBtnStyle}
+                                onClick={sendItemDirective}
+                              >
+                                Send
+                              </div>
+                            </div>,
+                            null,
+                          )}
+                        </div>,
+                        null,
+                      )}
+                    </div>
+                  );
+                },
+              );
+            })}
+          </div>
         </div>
-      );
-    }),
-  };
-});
+      ),
+    };
+  },
+);
 
 export default GTDProjects;
