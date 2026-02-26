@@ -86,9 +86,20 @@ const _hashCache = new WeakMap<object, string>();
 // structurally-identical operations return the same object identity.
 // This ensures downstream stableStringify hits the _hashCache WeakMap
 // (O(1) identity lookup) instead of re-walking the schema tree.
+// Capped to prevent unbounded growth in long-running servers.
+const INTERN_CACHE_MAX = 10_000;
 const _mergeSchemaOptionCache = new Map<string, JSONSchema>();
 const _combineSchemaCache = new Map<string, JSONSchema>();
 const _mergeSchemaFlagsCache = new Map<string, JSONSchema>();
+
+function internSet(
+  cache: Map<string, JSONSchema>,
+  key: string,
+  value: JSONSchema,
+) {
+  if (cache.size >= INTERN_CACHE_MAX) cache.clear();
+  cache.set(key, value);
+}
 
 function stableStringify(value: unknown): string {
   if (value === null) return "n";
@@ -96,7 +107,7 @@ function stableStringify(value: unknown): string {
   const t = typeof value;
   if (t === "boolean") return value ? "T" : "F";
   if (t === "number") return `#${value}`;
-  if (t === "string") return `s${value}`;
+  if (t === "string") return `s${(value as string).length}:${value}`;
 
   const obj = value as object;
   const cached = _hashCache.get(obj);
@@ -1271,7 +1282,7 @@ export function mergeSchemaFlags(flagSchema: JSONSchema, schema: JSONSchema) {
   const cached = _mergeSchemaFlagsCache.get(key);
   if (cached !== undefined) return cached;
   const result = _mergeSchemaFlagsUncached(flagSchema, schema);
-  _mergeSchemaFlagsCache.set(key, result);
+  internSet(_mergeSchemaFlagsCache, key, result);
   return result;
 }
 
@@ -1333,7 +1344,7 @@ export function combineSchema(
   const cached = _combineSchemaCache.get(key);
   if (cached !== undefined) return cached;
   const result = _combineSchemaUncached(parentSchema, linkSchema);
-  _combineSchemaCache.set(key, result);
+  internSet(_combineSchemaCache, key, result);
   return result;
 }
 
@@ -2654,7 +2665,7 @@ function mergeSchemaOption(
     : innerSchema
     ? outerSchema // innerSchema === true
     : false; // innerSchema === false
-  _mergeSchemaOptionCache.set(key, result as JSONSchema);
+  internSet(_mergeSchemaOptionCache, key, result as JSONSchema);
   return result;
 }
 

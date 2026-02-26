@@ -222,7 +222,7 @@ function renderTiming(timingStats) {
   rows.sort((a, b) => b.total - a.total);
   let h = '<table><thead><tr><th>Logger</th><th>Operation</th><th class="num">Count</th><th class="num">Total ms</th><th class="num">Avg ms</th><th class="num">P50 ms</th><th class="num">P95 ms</th><th class="num">Max ms</th></tr></thead><tbody>';
   for (const r of rows) {
-    h += '<tr><td>' + r.logger + '</td><td>' + r.op + '</td><td class="num">' + r.count.toLocaleString() + '</td><td class="num">' + fmtMs(r.total) + '</td><td class="num">' + fmtMs(r.avg) + '</td><td class="num">' + fmtMs(r.p50) + '</td><td class="num">' + fmtMs(r.p95) + '</td><td class="num">' + fmtMs(r.max) + '</td></tr>';
+    h += '<tr><td>' + escHtml(r.logger) + '</td><td>' + escHtml(r.op) + '</td><td class="num">' + r.count.toLocaleString() + '</td><td class="num">' + fmtMs(r.total) + '</td><td class="num">' + fmtMs(r.avg) + '</td><td class="num">' + fmtMs(r.p50) + '</td><td class="num">' + fmtMs(r.p95) + '</td><td class="num">' + fmtMs(r.max) + '</td></tr>';
   }
   h += '</tbody></table>';
   $timing.innerHTML = h;
@@ -265,9 +265,9 @@ function renderSlow(slowQueries) {
     h += '<tr>'
       + '<td>' + fmtTime(q.timestamp) + '</td>'
       + '<td class="num"' + cls + '>' + fmtMs(q.elapsed) + '</td>'
-      + '<td>' + (q.operation || "-") + '</td>'
-      + '<td class="truncated copyable" title="' + escHtml(q.space || "") + '" onclick="copySlow(this,'+i+',\\'space\\')">' + fmtSpace(q.space) + '</td>'
-      + '<td class="truncated copyable" title="' + escHtml(docsFull) + '" onclick="copySlow(this,'+i+',\\'docs\\')">' + docsShort + '</td>'
+      + '<td>' + escHtml(q.operation || "-") + '</td>'
+      + '<td class="truncated copyable" title="' + escHtml(q.space || "") + '" onclick="copySlow(this,'+i+',\\'space\\')">' + escHtml(fmtSpace(q.space)) + '</td>'
+      + '<td class="truncated copyable" title="' + escHtml(docsFull) + '" onclick="copySlow(this,'+i+',\\'docs\\')">' + escHtml(docsShort) + '</td>'
       + '<td class="num copyable" title="Click to copy full selector JSON" onclick="copySlow(this,'+i+',\\'selector\\')">' + (q.selectorCount ?? "-") + '</td>'
       + '<td class="num">' + v(q.factCount) + '</td>'
       + '<td class="num">' + v(q.docsLoaded) + '</td>'
@@ -312,7 +312,7 @@ function renderLogs(logCounts) {
         error += v.error || 0;
       }
     }
-    h += '<tr><td>' + name + '</td><td class="num">' + t.toLocaleString() + '</td><td class="num">' + debug.toLocaleString() + '</td><td class="num">' + info.toLocaleString() + '</td><td class="num' + (warn > 0 ? " warn" : "") + '">' + warn.toLocaleString() + '</td><td class="num' + (error > 0 ? " error" : "") + '">' + error.toLocaleString() + '</td></tr>';
+    h += '<tr><td>' + escHtml(name) + '</td><td class="num">' + t.toLocaleString() + '</td><td class="num">' + debug.toLocaleString() + '</td><td class="num">' + info.toLocaleString() + '</td><td class="num' + (warn > 0 ? " warn" : "") + '">' + warn.toLocaleString() + '</td><td class="num' + (error > 0 ? " error" : "") + '">' + error.toLocaleString() + '</td></tr>';
   }
   h += '</tbody></table>';
   $logs.innerHTML = h;
