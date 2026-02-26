@@ -17,14 +17,14 @@ const maxConfidentialSchema = {
   ifc: {
     maxConfidentiality: ["confidential"],
   },
-} as unknown as JSONSchema;
+} as const satisfies JSONSchema;
 
 const requiredIntegritySchema = {
   type: "number",
   ifc: {
     requiredIntegrity: ["trusted-source"],
   },
-} as unknown as JSONSchema;
+} as const satisfies JSONSchema;
 
 describe("CFC prepare input requirements", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;

@@ -1235,6 +1235,39 @@ export type JSONSchemaObj = {
   readonly ifc?: {
     readonly classification?: readonly string[];
     readonly integrity?: readonly string[];
+    readonly maxConfidentiality?: readonly string[];
+    readonly requiredIntegrity?: readonly string[];
+    readonly exactCopyOf?: string;
+    readonly projection?: {
+      readonly from?: string;
+      readonly path?: string;
+    };
+    readonly collection?: {
+      readonly sourceCollection?: string;
+      readonly subsetOf?: string;
+      readonly permutationOf?: string;
+      readonly filteredFrom?: string;
+      readonly lengthPreserved?: boolean;
+      readonly predicate?: string;
+    };
+    readonly recomposeProjections?: {
+      readonly from?: string;
+      readonly baseIntegrityType?: string;
+      readonly parts?: readonly {
+        readonly outputPath?: string;
+        readonly projectionPath?: string;
+      }[];
+    };
+    readonly statePrecondition?: {
+      readonly requiredRead?: string;
+      readonly predicate?: string;
+      readonly path?: string;
+      readonly equals?: JSONValue;
+    };
+    readonly declassify?: JSONValue;
+    readonly exchange?: JSONValue;
+    readonly preConfScope?: "targetClause" | "anywhere";
+    readonly predicate?: string;
   };
 };
 
