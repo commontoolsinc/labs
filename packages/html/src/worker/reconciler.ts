@@ -842,6 +842,7 @@ export class WorkerReconciler {
         // Props cleared - remove everything
         for (const key of knownKeys) {
           this.removeSingleProp(ctx, state, key);
+          state.propSubscriptions.delete(key);
         }
         for (const [, c] of perPropSinks) c();
         perPropSinks.clear();

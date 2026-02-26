@@ -77,7 +77,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
       if (!this.propCells.has(propName)) {
         this.propCells.set(
           propName,
-          new MockPropCell(this.value?.[propName]),
+          new MockPropCell(this.value?.[propName], this, propName),
         );
       }
       return this.propCells.get(propName)!;
@@ -97,16 +97,29 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
    * Supports asSchema(), resolveAsCell(), getAsNormalizedFullLink().
    */
   class MockPropCell extends MockCell {
+    private parentCell?: MockPropsCell;
+    private propKey?: string;
+
+    constructor(value: any, parentCell?: MockPropsCell, propKey?: string) {
+      super(value);
+      this.parentCell = parentCell;
+      this.propKey = propKey;
+    }
+
     asSchema(_schema: any) {
       return this;
     }
 
     resolveAsCell() {
-      // If the value is itself a Cell/Stream, return it (for events/bindings)
+      // Read live value from parent (matches real Cell.key().resolveAsCell()
+      // which navigates the live data, not a stale cache)
+      const liveValue = this.parentCell
+        ? this.parentCell.value?.[this.propKey!]
+        : this.value;
       if (
-        this.value && typeof this.value === "object" && "sink" in this.value
+        liveValue && typeof liveValue === "object" && "sink" in liveValue
       ) {
-        return this.value;
+        return liveValue;
       }
       return this;
     }
@@ -421,6 +434,67 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
         setPropOps.length,
         0,
         "Should emit NO set-prop ops when same Cell<Props> is re-used",
+      );
+    },
+  );
+
+  await t.step(
+    "Cell<Props> props cleared then re-emitted re-registers handlers",
+    async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+      });
+
+      const mockStream = new MockStream();
+      const propsCell = new MockPropsCell({
+        className: "foo",
+        onclick: mockStream,
+      });
+      const rootCell = new MockCell({
+        type: "vnode",
+        name: "button",
+        props: propsCell,
+        children: ["Click"],
+      });
+
+      reconciler.mount(rootCell as any);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const initialEvents = collector.getOpsOfType("set-event");
+      assertEquals(initialEvents.length >= 1, true, "Initial set-event");
+      const initialProps = collector.getOpsOfType("set-prop");
+      assertEquals(
+        initialProps.some((op: any) => op.key === "className"),
+        true,
+        "Initial className",
+      );
+      collector.clear();
+
+      // Clear all props
+      propsCell.set(null);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const removeOps = collector.getOps();
+      assertEquals(removeOps.length > 0, true, "Should emit removal ops");
+      collector.clear();
+
+      // Re-emit the same props — handlers must be re-registered
+      propsCell.set({ className: "foo", onclick: mockStream });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const reEvents = collector.getOpsOfType("set-event");
+      assertEquals(
+        reEvents.length >= 1,
+        true,
+        "Must re-register event handler after props were cleared",
+      );
+
+      const reProps = collector.getOpsOfType("set-prop");
+      assertEquals(
+        reProps.some((op: any) => op.key === "className"),
+        true,
+        "Must re-set className after props were cleared",
       );
     },
   );
