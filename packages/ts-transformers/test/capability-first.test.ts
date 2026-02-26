@@ -170,6 +170,53 @@ const p = pattern(({ ["foo"]: foo }) => <div>{foo}</div>);
 );
 
 Deno.test(
+  "Capability-first: mapWithPattern array destructuring reports diagnostic and keeps bindings",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern, UI } from "commontools";
+type Row = [left: string, right: string];
+interface State {
+  rows: Row[];
+}
+const p = pattern<State>((state) => {
+  return {
+    [UI]: (
+      <div>
+        {state.rows.map(([left, right]) => <span>{left}:{right}</span>)}
+      </div>
+    ),
+  };
+});
+`;
+
+    const { diagnostics } = await validateSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
+    });
+    const output = await transformSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
+    });
+
+    const computationDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-context:computation"
+    );
+
+    assert(computationDiagnostics.length >= 1);
+    assertStringIncludes(
+      computationDiagnostics[0]!.message,
+      "Array destructuring is not lowerable",
+    );
+    assertStringIncludes(
+      output,
+      "{ element: [left, right], params: {} }",
+    );
+    assertStringIncludes(output, ".mapWithPattern(");
+    assert(!output.includes("__ct_pattern_input => <span>{left}:{right}</span>"));
+  },
+);
+
+Deno.test(
   "Capability-first diagnostics: optional-call stays blocked in pattern context",
   async () => {
     const source = `/// <cts-enable />

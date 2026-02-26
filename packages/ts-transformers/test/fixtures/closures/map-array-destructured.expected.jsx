@@ -12,7 +12,7 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Map with array destructured parameter */}
-        {state.pizzas.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => (<div>
+        {state.pizzas.mapWithPattern(__ctHelpers.pattern(({ element: [date, pizza], params: {} }) => (<div>
             {date}: {pizza}
           </div>), {
                 type: "object",
@@ -58,14 +58,14 @@ export default pattern((state) => {
             } as const satisfies __ctHelpers.JSONSchema), {})}
 
         {/* Map with array destructured parameter and capture */}
-        {state.pizzas.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
-                const state = __ct_pattern_input.key("params", "state");
-                return (<div>
-            {date}: {pizza} (scale: {state.key("scale")})
-          </div>);
-            }, {
+        {state.pizzas.mapWithPattern(__ctHelpers.pattern(({ element: [date, pizza], params: { state } }) => (<div>
+            {date}: {pizza} (scale: {state.scale})
+          </div>), {
                 type: "object",
                 properties: {
+                    element: {
+                        $ref: "#/$defs/PizzaEntry"
+                    },
                     params: {
                         type: "object",
                         properties: {
@@ -83,7 +83,15 @@ export default pattern((state) => {
                         required: ["state"]
                     }
                 },
-                required: ["params"]
+                required: ["element", "params"],
+                $defs: {
+                    PizzaEntry: {
+                        type: "array",
+                        items: {
+                            type: "string"
+                        }
+                    }
+                }
             } as const satisfies __ctHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"

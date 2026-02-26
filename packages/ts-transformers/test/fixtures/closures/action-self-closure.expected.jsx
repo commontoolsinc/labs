@@ -10,8 +10,7 @@ interface TestOutput {
     title: string;
     count: number;
 }
-export default pattern((__ct_pattern_input) => {
-    const title = __ct_pattern_input.key("title");
+export default pattern(({ title, [SELF]: self }) => {
     const count = Writable.of(0, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema);

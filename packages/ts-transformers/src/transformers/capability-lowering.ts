@@ -551,6 +551,7 @@ function transformPatternCallback(
   const firstParam = callback.parameters[0];
   const opaqueRoots = new Set<string>();
   const diagnostics: string[] = [];
+  let hasUnsupportedDestructuring = false;
 
   let updatedParameters = callback.parameters;
   let prologue: ts.Statement[] = [];
@@ -565,6 +566,7 @@ function transformPatternCallback(
         for (const message of diagnostics) {
           reportComputationError(context, firstParam, message);
         }
+        hasUnsupportedDestructuring = true;
       }
 
       const inputIdentifier = factory.createIdentifier("__ct_pattern_input");
@@ -612,13 +614,22 @@ function transformPatternCallback(
         firstParam,
         "Array destructuring in pattern parameters is not lowerable. Use an object parameter and explicit input.key(...) bindings.",
       );
+      hasUnsupportedDestructuring = true;
     } else {
       reportComputationError(
         context,
         firstParam,
         "Pattern parameter destructuring form is not lowerable. Use an object parameter and explicit input.key(...) bindings.",
       );
+      hasUnsupportedDestructuring = true;
     }
+  }
+
+  // Keep authored callback parameter bindings intact when we already know
+  // lowering is non-lowerable. This avoids generating unbound identifiers.
+  if (hasUnsupportedDestructuring) {
+    registerCapabilitySummary(callback, context);
+    return callback;
   }
 
   let body: ts.ConciseBody = callback.body;
