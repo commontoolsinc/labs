@@ -23,11 +23,19 @@ export default pattern((__ct_pattern_input) => {
                             type: "object",
                             properties: {
                                 reactions: {
-                                    type: "array",
-                                    items: {
-                                        $ref: "#/$defs/Reaction"
-                                    },
-                                    asOpaque: true
+                                    anyOf: [{
+                                            type: "undefined"
+                                        }, {
+                                            anyOf: [{
+                                                    type: "undefined"
+                                                }, {
+                                                    type: "array",
+                                                    items: {
+                                                        $ref: "#/$defs/Reaction"
+                                                    }
+                                                }],
+                                            asOpaque: true
+                                        }]
                                 }
                             }
                         }
@@ -46,10 +54,14 @@ export default pattern((__ct_pattern_input) => {
                     }
                 } as const satisfies __ctHelpers.JSONSchema, {
                     anyOf: [{
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/Reaction"
-                            },
+                            anyOf: [{
+                                    type: "undefined"
+                                }, {
+                                    type: "array",
+                                    items: {
+                                        $ref: "#/$defs/Reaction"
+                                    }
+                                }],
                             asOpaque: true
                         }, {
                             type: "array",
@@ -73,16 +85,22 @@ export default pattern((__ct_pattern_input) => {
               {messageReactions.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                         const reaction = __ct_pattern_input.key("element");
                         const msg = __ct_pattern_input.key("params", "msg");
-                        return (<button data-msg-id={msg.key("id")}>{reaction.key("emoji")}</button>);
+                        return (<button type="button" data-msg-id={msg.key("id")}>
+                  {reaction.key("emoji")}
+                </button>);
                     }, {
                         type: "object",
                         properties: {
                             element: {
                                 anyOf: [{
-                                        type: "array",
-                                        items: {
-                                            $ref: "#/$defs/Reaction"
-                                        },
+                                        anyOf: [{
+                                                type: "undefined"
+                                            }, {
+                                                type: "array",
+                                                items: {
+                                                    $ref: "#/$defs/Reaction"
+                                                }
+                                            }],
                                         asOpaque: true
                                     }, {
                                         type: "array",

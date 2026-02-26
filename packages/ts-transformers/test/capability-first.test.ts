@@ -937,6 +937,10 @@ export default pattern<Input>(({ messages }) => {
     assertEquals(fallbackDiagnostics.length, 0);
     assertStringIncludes(output, "messageReactions.mapWithPattern(");
     assertStringIncludes(output, 'data-msg-id={msg.key("id")}');
+    assertStringIncludes(output, "reactions: {");
+    assertStringIncludes(output, '$ref: "#/$defs/Reaction"');
+    assert(!output.includes("reactions: true"));
+    assert(!output.includes("element: true"));
   },
 );
 

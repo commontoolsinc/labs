@@ -469,16 +469,98 @@ function findOpaqueRefInUnion(
   return undefined;
 }
 
+function combineExtractedElementTypes(
+  extracted: ts.Type[],
+  checker: ts.TypeChecker,
+): ts.Type | undefined {
+  if (extracted.length === 0) return undefined;
+  if (extracted.length === 1) return extracted[0];
+
+  const seen = new Set<number>();
+  const unique: ts.Type[] = [];
+  for (const candidate of extracted) {
+    const id = (candidate as { id?: number }).id ?? -1;
+    if (!seen.has(id)) {
+      seen.add(id);
+      unique.push(candidate);
+    }
+  }
+
+  if (unique.length === 1) {
+    return unique[0];
+  }
+
+  const getUnionType = (checker as ts.TypeChecker & {
+    getUnionType?: (types: readonly ts.Type[]) => ts.Type;
+  }).getUnionType;
+  return getUnionType?.(unique) ?? unique[0];
+}
+
 /**
- * Extract element type from an array type (T[] → T)
+ * Extract element type from array-like types (T[] -> T), including unions,
+ * intersections, and wrapped/reference forms used by reactive cell types.
  */
 function extractElementFromArrayType(
   type: ts.Type,
   checker: ts.TypeChecker,
+  seen = new Set<ts.Type>(),
 ): ts.Type | undefined {
-  if (checker.isArrayType(type)) {
+  if (seen.has(type)) return undefined;
+  seen.add(type);
+
+  if (checker.isArrayType(type) || checker.isTupleType(type)) {
     return checker.getIndexTypeOfType(type, ts.IndexKind.Number);
   }
+
+  if (type.flags & ts.TypeFlags.Union) {
+    const extracted = (type as ts.UnionType).types
+      .filter((member) => !(member.flags & ts.TypeFlags.Undefined))
+      .map((member) => extractElementFromArrayType(member, checker, seen))
+      .filter((member): member is ts.Type => !!member);
+    return combineExtractedElementTypes(extracted, checker);
+  }
+
+  if (type.flags & ts.TypeFlags.Intersection) {
+    const extracted = (type as ts.IntersectionType).types
+      .map((member) => extractElementFromArrayType(member, checker, seen))
+      .filter((member): member is ts.Type => !!member);
+    return combineExtractedElementTypes(extracted, checker);
+  }
+
+  if (type.flags & ts.TypeFlags.Object) {
+    const objectType = type as ts.ObjectType;
+    if (objectType.objectFlags & ts.ObjectFlags.Reference) {
+      const ref = objectType as ts.TypeReference;
+      const typeArgs = checker.getTypeArguments(ref);
+      const innerType = typeArgs[0];
+      if (innerType) {
+        const extractedInner = extractElementFromArrayType(
+          innerType,
+          checker,
+          seen,
+        );
+        if (extractedInner) {
+          return extractedInner;
+        }
+
+        const innerAlias = innerType as {
+          aliasSymbol?: ts.Symbol;
+          aliasTypeArguments?: readonly ts.Type[];
+        };
+        if (
+          isDefaultAliasSymbol(innerAlias.aliasSymbol) &&
+          innerAlias.aliasTypeArguments?.[0]
+        ) {
+          return extractElementFromArrayType(
+            innerAlias.aliasTypeArguments[0],
+            checker,
+            seen,
+          );
+        }
+      }
+    }
+  }
+
   return undefined;
 }
 
