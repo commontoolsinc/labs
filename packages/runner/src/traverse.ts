@@ -105,6 +105,10 @@ function stableStringify(value: unknown): string {
   let result: string;
   if (Array.isArray(obj)) {
     result = "[" + obj.map(stableStringify).join(",") + "]";
+  } else if (obj instanceof Date) {
+    result = `D${(obj as Date).getTime()}`;
+  } else if (obj instanceof RegExp) {
+    result = `R${(obj as RegExp).toString()}`;
   } else {
     const keys = Object.keys(obj).sort();
     result = "{" +
