@@ -133,7 +133,6 @@ export const backlinkEditFilter = EditorState.transactionFilter.of((tr) => {
   if (needsModification) {
     // Build a modified changes array that respects backlink boundaries
     const specs: { from: number; to: number; insert: string }[] = [];
-    let blocked = false;
 
     tr.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
       const adjustedFrom = fromA;
@@ -146,7 +145,6 @@ export const backlinkEditFilter = EditorState.transactionFilter.of((tr) => {
         // Block edits that start in ID area
         if (fromA > bl.nameTo && fromA < bl.to) {
           shouldInclude = false;
-          blocked = true;
           break;
         }
 
@@ -165,14 +163,14 @@ export const backlinkEditFilter = EditorState.transactionFilter.of((tr) => {
       }
     });
 
-    if (blocked) {
-      // Return a modified transaction with adjusted changes
-      return {
-        changes: specs,
-        selection: tr.selection,
-        effects: tr.effects,
-      };
-    }
+    // Return the modified transaction whenever any change was blocked or
+    // truncated (blocked covers ID-start edits; the truncation path only sets
+    // adjustedTo, so we always need to return specs when needsModification).
+    return {
+      changes: specs,
+      selection: tr.selection,
+      effects: tr.effects,
+    };
   }
 
   return tr;
