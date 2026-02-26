@@ -31,6 +31,7 @@ const configs: FixtureConfig[] = [
     directory: "handler-schema",
     describe: "Handler Schema Transformation",
     formatTestName: (name) => `transforms ${name.replace(/-/g, " ")}`,
+    useLegacyOpaqueRefSemantics: false,
   },
   {
     directory: "jsx-expressions",
@@ -95,6 +96,7 @@ const configs: FixtureConfig[] = [
       }
       return name.replace(/-/g, " ");
     },
+    useLegacyOpaqueRefSemantics: false,
   },
 ];
 
