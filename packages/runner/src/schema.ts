@@ -9,8 +9,8 @@ import { type StorableDatum } from "@commontools/memory/interface";
 import { createCell, isCell } from "./cell.ts";
 import { readMaybeLink, resolveLink } from "./link-resolution.ts";
 import {
+  type ICfcReadAnnotations,
   type IExtendedStorageTransaction,
-  type Metadata,
 } from "./storage/interface.ts";
 import { getTransactionForChildCells } from "./storage/extended-storage-transaction.ts";
 import { type Runtime } from "./runtime.ts";
@@ -24,10 +24,6 @@ import {
   markCfcRelevantForEffectiveLabels,
   markCfcRelevantForSchema,
 } from "./cfc/relevance.ts";
-import {
-  CFC_READ_MAX_CONFIDENTIALITY_MARKER,
-  CFC_READ_REQUIRED_INTEGRITY_MARKER,
-} from "./cfc/internal-markers.ts";
 import {
   combineSchema,
   IObjectCreator,
@@ -358,9 +354,9 @@ function annotateWithBackToCellSymbols(
   return value;
 }
 
-function readIfcInputMeta(
+function readIfcInputAnnotations(
   schema: JSONSchema | undefined,
-): Metadata | undefined {
+): ICfcReadAnnotations | undefined {
   if (!isObject(schema) || !isObject(schema.ifc)) {
     return undefined;
   }
@@ -382,12 +378,8 @@ function readIfcInputMeta(
     return undefined;
   }
   return {
-    ...(maxConfidentiality.length > 0
-      ? { [CFC_READ_MAX_CONFIDENTIALITY_MARKER]: maxConfidentiality }
-      : {}),
-    ...(requiredIntegrity.length > 0
-      ? { [CFC_READ_REQUIRED_INTEGRITY_MARKER]: requiredIntegrity }
-      : {}),
+    ...(maxConfidentiality.length > 0 ? { maxConfidentiality } : {}),
+    ...(requiredIntegrity.length > 0 ? { requiredIntegrity } : {}),
   };
 }
 
@@ -497,12 +489,12 @@ export function validateAndTransform(
   // Link paths don't include value, but doc address should
   const { space, id, type, path } = ref;
   const address = { space, id, type, path: ["value", ...path] };
-  const readMeta = readIfcInputMeta(ref.schema ?? link.schema);
+  const readCfc = readIfcInputAnnotations(ref.schema ?? link.schema);
   const doc = {
     address,
     value: tx!.readValueOrThrow(
       ref,
-      readMeta ? { meta: readMeta } : undefined,
+      readCfc ? { cfc: readCfc } : undefined,
     ),
   };
   // If we have a ref with a schema, use that; otherwise, use the link's schema

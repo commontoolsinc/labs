@@ -2,7 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { Activity } from "../src/storage/interface.ts";
 import { partitionConsumedBoundaryReads } from "../src/cfc/consumed-reads.ts";
-import { internalVerifierReadMeta } from "../src/cfc/internal-markers.ts";
+import { internalVerifierReadAnnotations } from "../src/cfc/internal-markers.ts";
 
 describe("partitionConsumedBoundaryReads", () => {
   it("excludes internal verifier reads from consumed reads", () => {
@@ -22,7 +22,8 @@ describe("partitionConsumedBoundaryReads", () => {
           id: "of:doc",
           type: "application/json",
           path: ["value", "cfc", "schemaHash"],
-          meta: internalVerifierReadMeta,
+          meta: {},
+          cfc: internalVerifierReadAnnotations,
         },
       },
     ];
