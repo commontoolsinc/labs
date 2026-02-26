@@ -11,21 +11,37 @@ import type { URI } from "../src/storage/interface.ts";
 const signer = await Identity.fromPassphrase("cfc prepare schemahash test");
 const space = signer.did();
 
-const ifcObjectSchema: JSONSchema = {
+const ifcObjectSchema = {
   type: "object",
   properties: {
     count: { type: "number" },
   },
   ifc: { classification: ["secret"] },
-};
+} as const satisfies JSONSchema;
 
-const differentIfcObjectSchema: JSONSchema = {
+const differentIfcObjectSchema = {
   type: "object",
   properties: {
     count: { type: "string" },
   },
   ifc: { classification: ["secret"] },
-};
+} as const satisfies JSONSchema;
+
+const nestedIfcObjectSchema = {
+  type: "object",
+  properties: {
+    public: { type: "number" },
+    secret: {
+      type: "number",
+      ifc: { classification: ["secret"] },
+    },
+    signed: {
+      type: "string",
+      ifc: { integrity: ["trusted-source"] },
+    },
+  },
+  ifc: { classification: ["confidential"] },
+} as const satisfies JSONSchema;
 
 describe("CFC prepare schema hash", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -84,7 +100,7 @@ describe("CFC prepare schema hash", () => {
     expect(persistedSchemaHash).toBe(expectedSchemaHash);
   });
 
-  it("persists cfc.labels root classification during prepare", async () => {
+  it("persists cfc.labels including inherited path classifications", async () => {
     const tx = runtime.edit();
     const cell = runtime.getCell<{ count: number }>(
       space,
@@ -103,6 +119,48 @@ describe("CFC prepare schema hash", () => {
     expect(persistedLabels).toEqual({
       "/": {
         classification: ["secret"],
+      },
+      "/count": {
+        classification: ["secret"],
+      },
+    });
+  });
+
+  it("persists nested path labels with classification joins and integrity", async () => {
+    const tx = runtime.edit();
+    const cell = runtime.getCell<
+      { public: number; secret: number; signed: string }
+    >(
+      space,
+      "cfc-prepare-labels-nested-persist",
+      nestedIfcObjectSchema,
+      tx,
+    );
+    const link = cell.getAsNormalizedFullLink();
+    cell.set({
+      public: 1,
+      secret: 2,
+      signed: "ok",
+    });
+
+    await prepareCfcCommitIfNeeded(tx);
+    const { error } = await tx.commit();
+    expect(error).toBeUndefined();
+
+    const persistedLabels = await readCfcPath(link.id, ["labels"]);
+    expect(persistedLabels).toEqual({
+      "/": {
+        classification: ["confidential"],
+      },
+      "/public": {
+        classification: ["confidential"],
+      },
+      "/secret": {
+        classification: ["secret"],
+      },
+      "/signed": {
+        classification: ["confidential"],
+        integrity: ["trusted-source"],
       },
     });
   });

@@ -335,15 +335,150 @@ function normalizeLabelsByPath(value: unknown): Record<string, Labels> {
 
 function computePreparedLabels(schema: JSONSchema): Record<string, Labels> {
   const cfc = new ContextualFlowControl();
-  const rootClassification = cfc.lubSchema(schema);
-  if (!rootClassification) {
-    return {};
-  }
-  return {
-    "/": {
-      classification: [rootClassification],
-    },
+  type LabelAccumulator = {
+    classification: Set<string>;
+    integrity: Set<string>;
   };
+  const byPath = new Map<string, LabelAccumulator>();
+
+  const ensureAccumulator = (path: string): LabelAccumulator => {
+    let accumulator = byPath.get(path);
+    if (!accumulator) {
+      accumulator = {
+        classification: new Set<string>(),
+        integrity: new Set<string>(),
+      };
+      byPath.set(path, accumulator);
+    }
+    return accumulator;
+  };
+
+  const pushLabelsForPath = (
+    path: string,
+    classification: Set<string>,
+    integrity: Set<string>,
+  ) => {
+    if (classification.size === 0 && integrity.size === 0) {
+      return;
+    }
+    const accumulator = ensureAccumulator(path);
+    for (const value of classification) {
+      accumulator.classification.add(value);
+    }
+    for (const value of integrity) {
+      accumulator.integrity.add(value);
+    }
+  };
+
+  const collect = (
+    node: JSONSchema | undefined,
+    path: string,
+    inheritedClassification: Set<string>,
+    inheritedIntegrity: Set<string>,
+    stack: Set<object>,
+  ) => {
+    if (!node || typeof node !== "object" || Array.isArray(node)) {
+      return;
+    }
+    if (stack.has(node)) {
+      return;
+    }
+    stack.add(node);
+
+    const classification = new Set(inheritedClassification);
+    const integrity = new Set(inheritedIntegrity);
+
+    const ifc = (node as { ifc?: unknown }).ifc;
+    if (ifc && typeof ifc === "object" && !Array.isArray(ifc)) {
+      const localClassification = (ifc as { classification?: unknown })
+        .classification;
+      if (Array.isArray(localClassification)) {
+        for (const value of localClassification) {
+          if (typeof value === "string" && value.length > 0) {
+            classification.add(value);
+          }
+        }
+      }
+
+      const localIntegrity = (ifc as { integrity?: unknown }).integrity;
+      if (Array.isArray(localIntegrity)) {
+        for (const value of localIntegrity) {
+          if (typeof value === "string" && value.length > 0) {
+            integrity.add(value);
+          }
+        }
+      }
+    }
+
+    pushLabelsForPath(path, classification, integrity);
+
+    const properties = (node as { properties?: unknown }).properties;
+    if (properties && typeof properties === "object" && !Array.isArray(properties)) {
+      for (const [key, child] of Object.entries(properties)) {
+        const childPath = appendCanonicalSegment(path, key);
+        collect(
+          child as JSONSchema,
+          childPath,
+          classification,
+          integrity,
+          stack,
+        );
+      }
+    }
+
+    const additionalProperties =
+      (node as { additionalProperties?: unknown }).additionalProperties;
+    if (
+      additionalProperties && typeof additionalProperties === "object" &&
+      !Array.isArray(additionalProperties)
+    ) {
+      const childPath = appendCanonicalSegment(path, "*");
+      collect(
+        additionalProperties as JSONSchema,
+        childPath,
+        classification,
+        integrity,
+        stack,
+      );
+    }
+
+    const items = (node as { items?: unknown }).items;
+    if (items && typeof items === "object" && !Array.isArray(items)) {
+      const childPath = appendCanonicalSegment(path, "*");
+      collect(items as JSONSchema, childPath, classification, integrity, stack);
+    }
+
+    const prefixItems = (node as { prefixItems?: unknown }).prefixItems;
+    if (Array.isArray(prefixItems)) {
+      for (let index = 0; index < prefixItems.length; index++) {
+        collect(
+          prefixItems[index] as JSONSchema,
+          appendCanonicalSegment(path, String(index)),
+          classification,
+          integrity,
+          stack,
+        );
+      }
+    }
+
+    stack.delete(node);
+  };
+
+  collect(schema, "/", new Set(), new Set(), new Set());
+
+  const result: Record<string, Labels> = {};
+  for (const [path, { classification, integrity }] of byPath) {
+    if (classification.size === 0 && integrity.size === 0) {
+      continue;
+    }
+    result[path] = {
+      ...(classification.size > 0
+        ? { classification: [cfc.lub(classification)] }
+        : {}),
+      ...(integrity.size > 0 ? { integrity: [...integrity].sort() } : {}),
+    };
+  }
+  return result;
 }
 
 function classificationSatisfiesMaxConfidentiality(
