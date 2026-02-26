@@ -199,7 +199,7 @@ async function main() {
       }
 
       // On-demand entity resolution under <space>/entities/
-      if (bridge && !name.startsWith(".")) {
+      if (bridge && !name.startsWith(".") && bridge.isEntitiesDir(parent)) {
         bridge.resolveEntity(parent, name).then((resolved) => {
           if (resolved) {
             const newIno = tree.lookup(parent, name);

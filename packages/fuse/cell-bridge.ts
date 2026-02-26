@@ -478,9 +478,23 @@ export class CellBridge {
     }
     if (!matchedPiece) return false;
 
-    // Build the piece tree under entities/<entityId>
-    await this.loadPieceTree(matchedPiece, entitiesIno, entityId, spaceName);
+    // Build the piece tree under entities/<entityId> and subscribe for updates
+    const pieceIno = await this.loadPieceTree(
+      matchedPiece,
+      entitiesIno,
+      entityId,
+      spaceName,
+    );
+    await this.subscribePiece(matchedPiece, pieceIno, entityId, spaceName);
     return true;
+  }
+
+  /** Check whether an inode is any space's entities/ directory. */
+  isEntitiesDir(ino: bigint): boolean {
+    for (const state of this.spaces.values()) {
+      if (state.entitiesIno === ino) return true;
+    }
+    return false;
   }
 
   /**
