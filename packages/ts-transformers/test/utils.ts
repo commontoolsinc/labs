@@ -262,7 +262,7 @@ export async function transformFiles(
 ): Promise<Record<string, string>> {
   const {
     mode = "transform",
-    useLegacyOpaqueRefSemantics = true,
+    useLegacyOpaqueRefSemantics = false,
     types = {},
     logger,
     typeCheck = false,
@@ -598,7 +598,7 @@ export async function validateFiles(
 }> {
   const {
     mode = "transform",
-    useLegacyOpaqueRefSemantics = true,
+    useLegacyOpaqueRefSemantics = false,
     types = {},
     logger,
   } = options;

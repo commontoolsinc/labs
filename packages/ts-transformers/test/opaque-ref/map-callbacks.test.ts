@@ -133,6 +133,7 @@ describe("OpaqueRef map callbacks", () => {
 
   it("derives map callback parameters and unary negations", async () => {
     const output = await transformSource(SOURCE, {
+      useLegacyOpaqueRefSemantics: true,
       types: { "commontools.d.ts": commontools },
     });
 
