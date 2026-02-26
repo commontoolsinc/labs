@@ -91,6 +91,7 @@ const INTERN_CACHE_MAX = 10_000;
 const _mergeSchemaOptionCache = new Map<string, JSONSchema>();
 const _combineSchemaCache = new Map<string, JSONSchema>();
 const _mergeSchemaFlagsCache = new Map<string, JSONSchema>();
+const _mergeAnyOfBranchCache = new Map<string, JSONSchema | null>();
 
 function internSet(
   cache: Map<string, JSONSchema>,
@@ -1688,6 +1689,8 @@ export class SchemaObjectTraverser<V extends StorableDatum>
   traverseObjectCalls = 0;
   override traverseDAGCalls = 0;
   anyOfBranches = 0;
+  anyOfFastRejects = 0;
+  anyOfPropertyMerges = 0;
   override getDocAtPathCalls = 0;
   // Track per-doc visit counts and unique paths
   private docVisits = new Map<string, number>();
@@ -1723,6 +1726,8 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     this.traverseObjectCalls = 0;
     this.traverseDAGCalls = 0;
     this.anyOfBranches = 0;
+    this.anyOfFastRejects = 0;
+    this.anyOfPropertyMerges = 0;
     this.getDocAtPathCalls = 0;
     this.docVisits.clear();
     this.uniquePaths.clear();
@@ -1763,6 +1768,8 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         `traverseObj=${this.traverseObjectCalls}`,
         `traverseDAG=${this.traverseDAGCalls}`,
         `anyOfBranches=${this.anyOfBranches}`,
+        `anyOfFastRejects=${this.anyOfFastRejects}`,
+        `anyOfPropertyMerges=${this.anyOfPropertyMerges}`,
         `getDocAtPath=${this.getDocAtPathCalls}`,
         `dagMemo=${this.dagMemo.size}`,
         `uniqueDocs=${this.docVisits.size}`,
@@ -1931,12 +1938,50 @@ export class SchemaObjectTraverser<V extends StorableDatum>
           ),
           ...anyOf.filter(SchemaObjectTraverser.asCellOrStream),
         ];
-        const matches: Immutable<StorableValue>[] = [];
+
+        // Layer 1: Fast-reject branches that clearly can't match the value
+        const survivingBranches: JSONSchema[] = [];
         for (const optionSchema of sortedAnyOf) {
-          this.anyOfBranches++;
           if (ContextualFlowControl.isFalseSchema(optionSchema)) {
             continue;
           }
+          if (!canBranchMatch(optionSchema, doc.value)) {
+            this.anyOfFastRejects++;
+            continue;
+          }
+          survivingBranches.push(optionSchema);
+        }
+
+        // Layer 2: For object values with multiple surviving branches,
+        // try to merge branch schemas into a single object schema
+        if (
+          isRecord(doc.value) &&
+          survivingBranches.length >= 2
+        ) {
+          const mergedBranchSchema = mergeAnyOfBranchSchemas(
+            survivingBranches,
+            restSchema,
+          );
+          if (mergedBranchSchema !== null) {
+            this.anyOfPropertyMerges++;
+            this.anyOfBranches++;
+            const { ok: val, error } = this.traverseWithSchema(
+              doc,
+              mergedBranchSchema,
+              link,
+            );
+            if (error === undefined) {
+              return { ok: val };
+            }
+            // Merged schema failed — fall through to branch-by-branch
+          }
+        }
+
+        // Branch-by-branch fallback (also handles non-object values
+        // and cases where merge failed)
+        const matches: Immutable<StorableValue>[] = [];
+        for (const optionSchema of survivingBranches) {
+          this.anyOfBranches++;
           const mergedSchema = mergeSchemaOption(restSchema, optionSchema);
           // TODO(@ubik2): do i need to merge the link schema?
           const { ok: val, error } = this.traverseWithSchema(
@@ -2728,6 +2773,237 @@ function mergeSchemaOption(
     : false; // innerSchema === false
   internSet(_mergeSchemaOptionCache, key, result as JSONSchema);
   return result;
+}
+
+/**
+ * Cheap pre-check: can this anyOf branch possibly match the given value?
+ * Returns `true` (don't reject) when uncertain — conservative by design.
+ * Never rejects asCell/asStream branches since they represent cell boundaries.
+ *
+ * Checks performed (all on the top-level resolved branch):
+ * - Type mismatch: branch.type vs actual JS type of value
+ * - Const mismatch: branch.const or branch.properties[k].const
+ * - Enum mismatch: branch.enum or branch.properties[k].enum
+ * - Missing required properties
+ */
+export function canBranchMatch(
+  branch: JSONSchema,
+  value: unknown,
+): boolean {
+  // Boolean schemas: true matches everything, false matches nothing
+  if (!isObject(branch)) return branch !== false;
+
+  // Never reject asCell/asStream branches
+  if (branch.asCell || branch.asStream) return true;
+
+  // Resolve top-level $ref if present
+  let resolved: JSONSchema | undefined = branch;
+  if ("$ref" in branch) {
+    resolved = ContextualFlowControl.resolveSchemaRefs(branch);
+    if (resolved === undefined || !isObject(resolved)) return true;
+  }
+
+  // Type mismatch check
+  if (resolved.type !== undefined) {
+    const actualType = getJsonType(value);
+    if (actualType !== null) {
+      const schemaTypes = Array.isArray(resolved.type)
+        ? resolved.type
+        : [resolved.type];
+      if (!schemaTypes.includes(actualType)) return false;
+    }
+  }
+
+  // Root const mismatch
+  if ("const" in resolved) {
+    if (!deepEqual(resolved.const, value)) return false;
+  }
+
+  // Root enum mismatch
+  if (Array.isArray(resolved.enum)) {
+    if (!resolved.enum.some((e: unknown) => deepEqual(e, value))) return false;
+  }
+
+  // For object values, check property-level discriminators and required fields
+  if (
+    isRecord(value) &&
+    (resolved.type === "object" || resolved.type === undefined)
+  ) {
+    // Missing required properties
+    if (Array.isArray(resolved.required)) {
+      for (const req of resolved.required) {
+        if (!(req as string in value)) return false;
+      }
+    }
+
+    // Property-level const/enum checks
+    if (isObject(resolved.properties)) {
+      for (const [propKey, propSchema] of Object.entries(resolved.properties)) {
+        if (!isObject(propSchema) || !(propKey in value)) continue;
+        if ("const" in propSchema) {
+          if (
+            !deepEqual(
+              propSchema.const,
+              (value as Record<string, unknown>)[propKey],
+            )
+          ) {
+            return false;
+          }
+        }
+        if (Array.isArray(propSchema.enum)) {
+          const propVal = (value as Record<string, unknown>)[propKey];
+          if (!propSchema.enum.some((e: unknown) => deepEqual(e, propVal))) {
+            return false;
+          }
+        }
+      }
+    }
+  }
+
+  return true;
+}
+
+/** Map JS typeof to JSON Schema type string, or null if unknown */
+function getJsonType(
+  value: unknown,
+): string | null {
+  if (value === null) return "null";
+  if (value === undefined) return "undefined";
+  if (isString(value)) return "string";
+  if (isNumber(value)) return "number";
+  if (isBoolean(value)) return "boolean";
+  if (Array.isArray(value)) return "array";
+  if (isObject(value)) return "object";
+  return null;
+}
+
+/**
+ * Merge multiple anyOf object branches into a single object schema.
+ * Instead of traversing each branch independently, this produces ONE merged
+ * schema where:
+ * - Properties that appear in all branches with identical schemas → used directly
+ * - Properties that differ across branches → wrapped in { anyOf: [s1, s2, ...] }
+ * - `required`: intersection (only required if ALL branches require it)
+ * - `additionalProperties`: union (allow if ANY branch allows)
+ * - `$defs`: merged from all branches
+ *
+ * Returns null when merging isn't applicable (non-object branches, boolean schemas,
+ * or fewer than 2 branches).
+ */
+export function mergeAnyOfBranchSchemas(
+  branches: JSONSchema[],
+  outerSchema: JSONSchemaObj,
+): JSONSchema | null {
+  if (branches.length < 2) return null;
+
+  const key = stableStringify(outerSchema) + "||" +
+    branches.map(stableStringify).join("|");
+  const cached = _mergeAnyOfBranchCache.get(key);
+  if (cached !== undefined) return cached;
+
+  const result = _mergeAnyOfBranchSchemasUncached(branches, outerSchema);
+  if (_mergeAnyOfBranchCache.size >= INTERN_CACHE_MAX) {
+    _mergeAnyOfBranchCache.clear();
+  }
+  _mergeAnyOfBranchCache.set(key, result);
+  return result;
+}
+
+function _mergeAnyOfBranchSchemasUncached(
+  branches: JSONSchema[],
+  outerSchema: JSONSchemaObj,
+): JSONSchema | null {
+  // Resolve and merge each branch with the outer schema, then check they're all objects
+  const resolvedBranches: JSONSchemaObj[] = [];
+  for (const branch of branches) {
+    const merged = mergeSchemaOption(outerSchema, branch);
+    if (!isObject(merged)) return null;
+    // Must be object type or unspecified (compatible with object)
+    if (merged.type !== undefined && merged.type !== "object") return null;
+    resolvedBranches.push(merged);
+  }
+
+  // Collect all property schemas from all branches, keyed by property name
+  const allProps = new Map<string, JSONSchema[]>();
+  const allRequiredSets: Set<string>[] = [];
+  let mergedDefs: Record<string, JSONSchema> | undefined;
+  let anyAllowsAdditional = false;
+
+  for (const branch of resolvedBranches) {
+    // Collect properties
+    if (isObject(branch.properties)) {
+      for (const [k, v] of Object.entries(branch.properties)) {
+        let arr = allProps.get(k);
+        if (!arr) {
+          arr = [];
+          allProps.set(k, arr);
+        }
+        arr.push(v as JSONSchema);
+      }
+    }
+
+    // Collect required sets
+    if (Array.isArray(branch.required)) {
+      allRequiredSets.push(new Set(branch.required as string[]));
+    } else {
+      allRequiredSets.push(new Set());
+    }
+
+    // Merge $defs
+    if (isObject(branch.$defs)) {
+      if (!mergedDefs) mergedDefs = {};
+      Object.assign(mergedDefs, branch.$defs);
+    }
+
+    // additionalProperties: union
+    if (
+      branch.additionalProperties === undefined ||
+      branch.additionalProperties === true ||
+      (isObject(branch.additionalProperties))
+    ) {
+      anyAllowsAdditional = true;
+    }
+  }
+
+  // If no branches have properties, merging isn't useful
+  if (allProps.size === 0) return null;
+
+  // Build merged properties
+  const mergedProperties: Record<string, JSONSchema> = {};
+  for (const [propKey, schemas] of allProps) {
+    // Deduplicate schemas using stableStringify
+    const uniqueHashes = new Map<string, JSONSchema>();
+    for (const s of schemas) {
+      uniqueHashes.set(stableStringify(s), s);
+    }
+    if (uniqueHashes.size === 1) {
+      // All branches agree on this property's schema
+      mergedProperties[propKey] = schemas[0];
+    } else {
+      // Different schemas across branches — wrap in anyOf
+      mergedProperties[propKey] = { anyOf: [...uniqueHashes.values()] };
+    }
+  }
+
+  // Required: intersection — only required if ALL branches require it
+  const requiredSet = new Set<string>();
+  if (allRequiredSets.length > 0) {
+    for (const r of allRequiredSets[0]) {
+      if (allRequiredSets.every((s) => s.has(r))) {
+        requiredSet.add(r);
+      }
+    }
+  }
+
+  return {
+    type: "object",
+    properties: mergedProperties,
+    ...(requiredSet.size > 0 && { required: [...requiredSet] }),
+    ...(!anyAllowsAdditional && { additionalProperties: false }),
+    ...(mergedDefs && { $defs: mergedDefs }),
+    ...(outerSchema.asCell && { asCell: true }),
+    ...(outerSchema.asStream && { asStream: true }),
+  } as JSONSchemaObj;
 }
 
 // Utility function used for debugging so we can convert proxy objects into
