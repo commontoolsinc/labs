@@ -15,7 +15,7 @@ import {
   BuiltInLLMParams,
 } from "@commontools/api";
 import type { Schema } from "@commontools/api/schema";
-import { refer } from "merkle-reference/json";
+import { refer } from "@commontools/memory/reference";
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { Runtime } from "../runtime.ts";

@@ -1,4 +1,4 @@
-import { fromJSON, refer } from "./reference.ts";
+import { contentIdFromJSON, refer } from "./reference.ts";
 
 export interface Entity<T extends null | NonNullable<unknown>> {
   "@": ToString<Entity<T>>;
@@ -31,7 +31,7 @@ export const fromString = <T extends null | NonNullable<unknown>>(
       }`,
     );
   } else {
-    return { "@": fromJSON({ "/": source.slice(1) }).toJSON()["/"] };
+    return { "@": contentIdFromJSON({ "/": source.slice(1) }).toJSON()["/"] };
   }
 };
 

@@ -5,14 +5,18 @@ import {
   FactSelection,
   Invariant,
   MIME,
-  Reference,
   Retraction,
   Revision,
   State,
   Unclaimed,
 } from "./interface.ts";
-import * as Ref from "./reference.ts";
-import { fromJSON, fromString, is as isReference, refer } from "./reference.ts";
+import {
+  ContentId,
+  contentIdFromJSON,
+  fromString,
+  isContentId,
+  refer,
+} from "./reference.ts";
 
 /**
  * Creates an unclaimed fact.
@@ -27,7 +31,7 @@ export const unclaimed = (
  */
 export const unclaimedRef = (
   { the, of }: { the: MIME; of: URI },
-): Ref.View<Unclaimed> => refer({ the, of });
+): ContentId<Unclaimed> => refer({ the, of });
 
 export const assert = <
   Is extends StorableDatum,
@@ -42,13 +46,13 @@ export const assert = <
   the: T;
   of: Of;
   is: Is;
-  cause?: Fact | Reference<Fact> | null | undefined;
+  cause?: Fact | ContentId<Fact> | null | undefined;
 }) =>
   ({
     the,
     of,
     is,
-    cause: isReference(cause)
+    cause: isContentId(cause)
       ? cause
       : cause == null
       ? unclaimedRef({ the, of })
@@ -111,9 +115,9 @@ export function normalizeFact<
     of: Of;
     is: Is;
     cause?:
-      | Reference<Assertion<T, Of, Is>>
-      | Reference<Retraction<T, Of, Is>>
-      | Reference<Unclaimed<T, Of>>
+      | ContentId<Assertion<T, Of, Is>>
+      | ContentId<Retraction<T, Of, Is>>
+      | ContentId<Unclaimed<T, Of>>
       | Fact
       | { "/": string };
   },
@@ -128,9 +132,9 @@ export function normalizeFact<
     the: T;
     of: Of;
     cause?:
-      | Reference<Assertion<T, Of, Is>>
-      | Reference<Retraction<T, Of, Is>>
-      | Reference<Unclaimed<T, Of>>
+      | ContentId<Assertion<T, Of, Is>>
+      | ContentId<Retraction<T, Of, Is>>
+      | ContentId<Unclaimed<T, Of>>
       | Fact
       | { "/": string };
   },
@@ -146,19 +150,19 @@ export function normalizeFact<
     of: Of;
     is?: Is;
     cause?:
-      | Reference<Assertion<T, Of, Is>>
-      | Reference<Retraction<T, Of, Is>>
-      | Reference<Unclaimed<T, Of>>
+      | ContentId<Assertion<T, Of, Is>>
+      | ContentId<Retraction<T, Of, Is>>
+      | ContentId<Unclaimed<T, Of>>
       | Fact
       | { "/": string };
   },
 ): Assertion<T, Of, Is> | Retraction<T, Of, Is> {
-  const newCause = isReference(arg.cause)
+  const newCause = isContentId(arg.cause)
     ? arg.cause
     : arg.cause == null
     ? unclaimedRef({ the: arg.the, of: arg.of })
     : "/" in arg.cause
-    ? fromJSON(arg.cause as unknown as { "/": string })
+    ? contentIdFromJSON(arg.cause as unknown as { "/": string })
     : refer({
       the: arg.cause.the,
       of: arg.cause.of,
@@ -181,6 +185,6 @@ export function normalizeFact<
   }
 }
 
-export const factReference = (fact: Fact): Reference<Fact> => {
+export const factReference = (fact: Fact): ContentId<Fact> => {
   return refer(normalizeFact(fact));
 };

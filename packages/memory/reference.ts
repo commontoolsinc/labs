@@ -1,8 +1,44 @@
 import * as Reference from "merkle-reference";
+import type { Reference as MerkleReference } from "merkle-reference";
 import { LRUCache } from "@commontools/utils/cache";
 import { canonicalHash } from "./canonical-hash.ts";
 import { sha256 } from "./hash-impl.ts";
-export * from "merkle-reference";
+
+// ---------------------------------------------------------------------------
+// Public re-exports: narrowed subset of merkle-reference API
+// ---------------------------------------------------------------------------
+
+/**
+ * Content identifier -- a hash-based reference to a value.
+ *
+ * Drop-in replacement for the `Reference<T>` type previously re-exported from
+ * `merkle-reference`. Uses the same underlying interface type so it remains
+ * assignable everywhere `Reference` was (e.g., `JSONValue` constraints).
+ */
+export type ContentId<
+  T extends NonNullable<unknown> | null = NonNullable<unknown> | null,
+> = MerkleReference<T>;
+
+/** Type guard: returns true if the value is a content identifier. */
+export const isContentId: <T extends NonNullable<unknown> | null>(
+  value: unknown | ContentId<T>,
+) => value is ContentId<T> = Reference.is;
+
+/**
+ * Reconstructs a content identifier from its JSON representation
+ * (`{"/": "base32..."}` format).
+ *
+ * The return type is `Reference.View` (the class type) rather than the bare
+ * `ContentId` interface because the class exposes runtime methods (`.toJSON()`,
+ * `.bytes`, etc.) that some call sites rely on. `Reference.View` is a subtype
+ * of `ContentId`, so the result is assignable wherever a `ContentId` is
+ * expected.
+ */
+export const contentIdFromJSON: (
+  source: { "/": string },
+) => Reference.View = Reference.fromJSON;
+
+// ---------------------------------------------------------------------------
 
 /**
  * Module-level flag for canonical hashing mode, set by the `Runtime`
