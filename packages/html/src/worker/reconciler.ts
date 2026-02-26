@@ -466,39 +466,14 @@ export class WorkerReconciler {
         logger.debug("props-same-cell", () => ({ nodeId: state.nodeId }));
         return;
       }
-      // Different Cell - cancel old and set up new
-      if (existingState) {
-        existingState.cancel();
-        state.propSubscriptions.delete("__cellProps__");
-      }
-      // Clear all individual prop subscriptions since we're switching to Cell<Props>
-      for (const [key, propState] of state.propSubscriptions) {
-        if (key !== "__cellProps__") {
-          propState.cancel();
-        }
+      // Different Cell - cancel all old subscriptions
+      for (const [, propState] of state.propSubscriptions) {
+        propState.cancel();
       }
       state.propSubscriptions.clear();
 
-      // Set up new Cell<Props> subscription
-      let currentPropsCancel: Cancel | undefined;
-      const cancel = newProps.sink((resolvedProps) => {
-        logger.debug(
-          "cell-props-update",
-          () => ({ nodeId: state.nodeId, props: resolvedProps }),
-        );
-        if (currentPropsCancel) {
-          currentPropsCancel();
-          currentPropsCancel = undefined;
-        }
-        if (resolvedProps) {
-          // When Cell<Props> emits, update individual props
-          this.updatePropsInPlace(ctx, state, resolvedProps as WorkerProps);
-        }
-      });
-      state.propSubscriptions.set("__cellProps__", {
-        cell: newProps as Cell<unknown>,
-        cancel,
-      });
+      // Set up new Cell<Props> binding
+      this.bindCellProps(ctx, state, newProps as Cell<WorkerProps>);
       return;
     }
 
@@ -839,6 +814,240 @@ export class WorkerReconciler {
   }
 
   /**
+   * Bind Cell<Props> with per-prop handling strategy.
+   *
+   * - Event props: resolved via .key().resolveAsCell() → stream/handler registration
+   * - Binding props: resolved via .key().resolveAsCell() → cell reference
+   * - Object/array props: per-prop sink via .key().asSchema(true) for deep values
+   * - Primitive props: set directly from resolved Cell<Props> value
+   */
+  private bindCellProps(
+    ctx: ReconcileContext,
+    state: NodeState,
+    propsCell: Cell<WorkerProps>,
+  ): Cancel {
+    const [cancel, addCancel] = useCancelGroup();
+
+    // Per-prop sinks for object/array values (need deep resolution)
+    const perPropSinks = new Map<string, Cancel>();
+    let knownKeys = new Set<string>();
+
+    const sinkCancel = propsCell.sink((resolvedProps) => {
+      logger.debug("cell-props-emit", () => ({
+        nodeId: state.nodeId,
+        props: resolvedProps,
+      }));
+
+      if (!resolvedProps || typeof resolvedProps !== "object") {
+        // Props cleared - remove everything
+        for (const key of knownKeys) {
+          this.removeSingleProp(ctx, state, key);
+        }
+        for (const [, c] of perPropSinks) c();
+        perPropSinks.clear();
+        knownKeys.clear();
+        return;
+      }
+
+      const props = resolvedProps as Record<string, unknown>;
+      const newKeys = new Set(Object.keys(props));
+
+      // Remove props that no longer exist
+      for (const key of knownKeys) {
+        if (!newKeys.has(key)) {
+          const pc = perPropSinks.get(key);
+          if (pc) {
+            pc();
+            perPropSinks.delete(key);
+          }
+          this.removeSingleProp(ctx, state, key);
+          state.propSubscriptions.delete(key);
+        }
+      }
+
+      // Process each prop
+      for (const [key, value] of Object.entries(props)) {
+        if (isEventProp(key)) {
+          // Event prop - resolve target via Cell navigation
+          const resolvedTarget = propsCell.key(key).resolveAsCell();
+          const existingState = state.propSubscriptions.get(key);
+
+          // Skip if same target reference
+          if (existingState?.currentValue === resolvedTarget) continue;
+
+          const eventType = getEventType(key);
+
+          // Clean up old handler
+          const oldHandlerId = state.eventHandlers.get(eventType);
+          if (oldHandlerId !== undefined) {
+            ctx.unregisterHandler(oldHandlerId);
+            state.eventHandlers.delete(eventType);
+            this.queueOps([{
+              op: "remove-event",
+              nodeId: state.nodeId,
+              eventType,
+            }]);
+          }
+          if (existingState) existingState.cancel();
+
+          if (isStream(resolvedTarget)) {
+            const stream = resolvedTarget as Stream<unknown>;
+            const handlerId = ctx.registerHandler((event: unknown) =>
+              stream.send(event)
+            );
+            state.eventHandlers.set(eventType, handlerId);
+            this.queueOps([{
+              op: "set-event",
+              nodeId: state.nodeId,
+              eventType,
+              handlerId,
+            }]);
+            state.propSubscriptions.set(key, {
+              cell: undefined,
+              cancel: () => {},
+              currentValue: resolvedTarget,
+            });
+          } else if (isEventHandler(resolvedTarget)) {
+            const handlerId = ctx.registerHandler(
+              resolvedTarget as (event: unknown) => void,
+            );
+            state.eventHandlers.set(eventType, handlerId);
+            this.queueOps([{
+              op: "set-event",
+              nodeId: state.nodeId,
+              eventType,
+              handlerId,
+            }]);
+            state.propSubscriptions.set(key, {
+              cell: undefined,
+              cancel: () => {},
+              currentValue: resolvedTarget,
+            });
+          }
+        } else if (isBindingProp(key)) {
+          // Binding prop - resolve target Cell via navigation
+          const resolvedTarget = propsCell.key(key).resolveAsCell();
+          const existingState = state.propSubscriptions.get(key);
+
+          // Skip if same Cell
+          if (
+            existingState?.cell &&
+            areLinksSame(existingState.cell, resolvedTarget)
+          ) {
+            continue;
+          }
+          if (existingState) existingState.cancel();
+
+          const propName = getBindingPropName(key);
+          const cellRef = resolvedTarget.getAsNormalizedFullLink();
+          this.queueOps([{
+            op: "set-binding",
+            nodeId: state.nodeId,
+            propName,
+            cellRef,
+          }]);
+          state.propSubscriptions.set(key, {
+            cell: resolvedTarget as Cell<unknown>,
+            cancel: () => {},
+          });
+        } else if (
+          value !== null && value !== undefined && typeof value === "object"
+        ) {
+          // Object/array value - needs per-prop sink for deep resolution
+          if (perPropSinks.has(key)) continue; // Already subscribed
+
+          // Cancel any existing primitive subscription for this key
+          const existing = state.propSubscriptions.get(key);
+          if (existing) existing.cancel();
+
+          // deno-lint-ignore no-explicit-any
+          const propKeyCell = propsCell.key(key).asSchema(true as any);
+          const propSinkCancel = propKeyCell.sink((deepValue: unknown) => {
+            const propValue = this.transformPropValue(key, deepValue);
+            this.queueOps([{
+              op: "set-prop",
+              nodeId: state.nodeId,
+              key,
+              value: propValue,
+            }]);
+          });
+          perPropSinks.set(key, propSinkCancel);
+          addCancel(propSinkCancel);
+          state.propSubscriptions.set(key, {
+            cell: propKeyCell as Cell<unknown>,
+            cancel: propSinkCancel,
+          });
+        } else {
+          // Primitive value - set directly
+          // Cancel per-prop sink if value transitioned from object to primitive
+          const pc = perPropSinks.get(key);
+          if (pc) {
+            pc();
+            perPropSinks.delete(key);
+          }
+
+          const propValue = this.transformPropValue(key, value);
+          this.queueOps([{
+            op: "set-prop",
+            nodeId: state.nodeId,
+            key,
+            value: propValue,
+          }]);
+          state.propSubscriptions.set(key, {
+            cell: undefined,
+            cancel: () => {},
+          });
+        }
+      }
+
+      knownKeys = newKeys;
+    });
+
+    addCancel(sinkCancel);
+    state.propSubscriptions.set("__cellProps__", {
+      cell: propsCell as Cell<unknown>,
+      cancel: sinkCancel,
+    });
+
+    return cancel;
+  }
+
+  /**
+   * Remove a single prop from a node (DOM side + handler cleanup).
+   */
+  private removeSingleProp(
+    ctx: ReconcileContext,
+    state: NodeState,
+    key: string,
+  ): void {
+    if (isEventProp(key)) {
+      const eventType = getEventType(key);
+      const handlerId = state.eventHandlers.get(eventType);
+      if (handlerId !== undefined) {
+        ctx.unregisterHandler(handlerId);
+        state.eventHandlers.delete(eventType);
+      }
+      this.queueOps([{
+        op: "remove-event",
+        nodeId: state.nodeId,
+        eventType,
+      }]);
+    } else if (isBindingProp(key)) {
+      this.queueOps([{
+        op: "remove-prop",
+        nodeId: state.nodeId,
+        key: getBindingPropName(key),
+      }]);
+    } else {
+      this.queueOps([{
+        op: "remove-prop",
+        nodeId: state.nodeId,
+        key,
+      }]);
+    }
+  }
+
+  /**
    * Update children in place with proper diffing.
    * If children Cell is the same, leave subscription in place.
    */
@@ -1134,27 +1343,12 @@ export class WorkerReconciler {
 
     // Handle Cell<Props>
     if (isCell(props)) {
-      let currentPropsCancel: Cancel | undefined;
-      const sinkCancel = props.sink((resolvedProps) => {
-        if (currentPropsCancel) {
-          currentPropsCancel();
-          currentPropsCancel = undefined;
-        }
-        if (resolvedProps) {
-          currentPropsCancel = this.bindProps(
-            ctx,
-            state,
-            resolvedProps as WorkerProps,
-          );
-          addCancel(currentPropsCancel);
-        }
-      });
-      addCancel(sinkCancel);
-      // Track the Cell<Props> for diffing
-      state.propSubscriptions.set("__cellProps__", {
-        cell: props as Cell<unknown>,
-        cancel: sinkCancel,
-      });
+      const cellPropsCancel = this.bindCellProps(
+        ctx,
+        state,
+        props as Cell<WorkerProps>,
+      );
+      addCancel(cellPropsCancel);
       return cancel;
     }
 

@@ -51,8 +51,8 @@ export const rendererVDOMSchema = {
               type: "array",
               items: { type: "null" }, // stop query from descending
             }],
-            asCell: true,
           },
+          asCell: true,
         },
         children: {
           type: "array",
