@@ -4,7 +4,7 @@ import { runtime } from "@/index.ts";
 import { identity } from "@/lib/identity.ts";
 import { WebhookConfigSchema } from "@commontools/runner";
 
-const logger = getLogger("webhooks.utils");
+const _logger = getLogger("webhooks.utils");
 
 const WEBHOOK_ID_LENGTH = 20;
 const WEBHOOK_SECRET_BYTES = 32;
