@@ -437,6 +437,71 @@ describe("CFC scheduler prepare shim", () => {
     expect(targetCell.get()).toBe(0);
   });
 
+  it("skips CFC boundary prepare enforcement when feature flag is disabled", async () => {
+    const disabledStorageManager = StorageManager.emulate({ as: signer });
+    const disabledRuntime = new Runtime({
+      storageManager: disabledStorageManager,
+      apiUrl: new URL(import.meta.url),
+      experimental: {
+        cfcBoundaryEnforcement: false,
+      },
+    });
+    disabledRuntime.scheduler.disablePullMode();
+
+    try {
+      let tx = disabledRuntime.edit();
+      const sourceCell = disabledRuntime.getCell<number>(
+        space,
+        "cfc-prepare-disabled-source",
+        undefined,
+        tx,
+      );
+      const targetCell = disabledRuntime.getCell<number>(
+        space,
+        "cfc-prepare-disabled-target",
+        undefined,
+        tx,
+      );
+      sourceCell.set(10);
+      targetCell.set(0);
+      await tx.commit();
+
+      tx = disabledRuntime.edit();
+      tx.writeOrThrow({
+        space,
+        id: sourceCell.getAsNormalizedFullLink().id,
+        type: "application/json",
+        path: ["cfc", "labels"],
+      }, {
+        "/": {
+          classification: ["secret"],
+        },
+      });
+      await tx.commit();
+
+      let attempts = 0;
+      const action = (actionTx: IExtendedStorageTransaction) => {
+        attempts++;
+        const source = Number(
+          sourceCell.withTx(actionTx).asSchema(ifcNumberSchema).get() ?? 0,
+        );
+        targetCell.withTx(actionTx).asSchema(ifcConfidentialNumberSchema).set(
+          source + 1,
+        );
+      };
+
+      await disabledRuntime.scheduler.run(action);
+      await disabledRuntime.scheduler.idle();
+      await targetCell.pull();
+
+      expect(attempts).toBeGreaterThanOrEqual(1);
+      expect(targetCell.get()).toBe(11);
+    } finally {
+      await disabledRuntime.dispose();
+      await disabledStorageManager.close();
+    }
+  });
+
   it("does not retry event handlers on exactCopyOf output transition failures", async () => {
     let tx = runtime.edit();
     const eventCell = runtime.getCell<number>(

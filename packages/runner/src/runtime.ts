@@ -101,6 +101,12 @@ export interface ExperimentalOptions {
   unifiedJsonEncoding?: boolean;
   /** Enable canonical hashing, replacing merkle-reference CID-based hashing. */
   canonicalHashing?: boolean;
+  /**
+   * Enable CFC boundary policy enforcement (prepare engine) before commit.
+   * When disabled, transactions are still digest-prepared so commit-gate
+   * same-attempt checks remain active.
+   */
+  cfcBoundaryEnforcement?: boolean;
 }
 
 export interface RuntimeOptions {
@@ -198,6 +204,7 @@ export class Runtime {
       storableProtocol: false,
       unifiedJsonEncoding: false,
       canonicalHashing: false,
+      cfcBoundaryEnforcement: true,
       ...options.experimental,
     };
 

@@ -911,7 +911,10 @@ export class Scheduler {
           // retry logic below will have re-scheduled this action, so
           // topological sorting should move it before the dependencies.
           logger.timeStart("scheduler", "run", "commit");
-          const commitPromise = commitWithCfcPrepare(tx);
+          const commitPromise = commitWithCfcPrepare(
+            tx,
+            this.runtime.experimental.cfcBoundaryEnforcement,
+          );
           logger.timeEnd("scheduler", "run", "commit");
           commitPromise.then(({ error }) => {
             // On error, retry up to MAX_RETRIES_FOR_REACTIVE times. Note that
@@ -2765,7 +2768,10 @@ export class Scheduler {
           try {
             if (error) this.handleError(error as Error, action);
           } finally {
-            const { error: commitError } = await commitWithCfcPrepare(tx);
+            const { error: commitError } = await commitWithCfcPrepare(
+              tx,
+              this.runtime.experimental.cfcBoundaryEnforcement,
+            );
             // If the transaction failed, and we have retries left, queue the
             // event again at the beginning of the queue. This isn't guaranteed
             // to be the same order as the original event, but it's close
@@ -3485,6 +3491,7 @@ function shouldRetryCommitError(error: CommitError): boolean {
 
 function commitWithCfcPrepare(
   tx: IExtendedStorageTransaction,
+  enforceBoundary: boolean,
 ): Promise<Result<Unit, CommitError>> {
   if (tx.status().status !== "ready") {
     return tx.commit();
@@ -3494,7 +3501,9 @@ function commitWithCfcPrepare(
     return tx.commit();
   }
 
-  return prepareCfcCommitIfNeeded(tx)
+  return prepareCfcCommitIfNeeded(tx, {
+    enforceBoundary,
+  })
     .then(() => tx.commit())
     .catch((error) => {
       tx.abort(error);
