@@ -410,7 +410,30 @@ function detectSchemaArguments(
  *
  * @returns The transformed node, or undefined if no transformation was performed
  */
-function handleBuilderSchemaInjection(
+
+/**
+ * Reports a diagnostic error when a pattern()'s return type resolves to `any`
+ * or `unknown`, meaning CTS cannot generate a structural result schema.
+ *
+ * This produces `resultSchema: true` at runtime (schema-less), which can cause
+ * proxy depth crashes. The fix is to add an explicit Output type parameter:
+ * `pattern<Input, Output>(...)`.
+ */
+function reportAnyResultSchema(
+  context: TransformationContext,
+  node: ts.CallExpression,
+): void {
+  context.reportDiagnostic({
+    severity: "error",
+    type: "pattern:any-result-schema",
+    message: `pattern() return type resolves to 'any' or 'unknown'. ` +
+      `This produces a schema-less result cell (resultSchema: true) which can cause runtime crashes. ` +
+      `Add an explicit Output type parameter: pattern<Input, Output>(...).`,
+    node: node.expression,
+  });
+}
+
+function handlePatternSchemaInjection(
   node: ts.CallExpression,
   context: TransformationContext,
   typeRegistry: TypeRegistry | undefined,
@@ -471,6 +494,9 @@ function handleBuilderSchemaInjection(
       undefined,
       typeRegistry,
     );
+    if (!inferred.result) {
+      reportAnyResultSchema(context, node);
+    }
     resultTypeNode = inferred.result ??
       factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
     resultType = getTypeFromRegistryOrFallback(
@@ -498,6 +524,9 @@ function handleBuilderSchemaInjection(
         undefined,
         typeRegistry,
       );
+      if (!inferred.result) {
+        reportAnyResultSchema(context, node);
+      }
       resultTypeNode = inferred.result ??
         factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
       resultType = getTypeFromRegistryOrFallback(
@@ -533,6 +562,9 @@ function handleBuilderSchemaInjection(
         typeRegistry,
       );
 
+      if (!inferred.result) {
+        reportAnyResultSchema(context, node);
+      }
       resultTypeNode = inferred.result ??
         factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
       resultType = getTypeFromRegistryOrFallback(
@@ -575,7 +607,7 @@ export class SchemaInjectionTransformer extends Transformer {
       const callKind = detectCallKind(node, checker);
 
       if (callKind?.kind === "builder" && callKind.builderName === "pattern") {
-        const result = handleBuilderSchemaInjection(
+        const result = handlePatternSchemaInjection(
           node,
           context,
           typeRegistry,

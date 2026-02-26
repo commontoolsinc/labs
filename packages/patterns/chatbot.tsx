@@ -111,7 +111,8 @@ type ChatOutput = {
 };
 
 export const TitleGenerator = pattern<
-  { model?: string; messages: Array<BuiltInLLMMessage> }
+  { model?: string; messages: Array<BuiltInLLMMessage> },
+  string
 >(({ model, messages }) => {
   const previewMessage = computed(() => {
     if (!messages || messages.length === 0) return "";

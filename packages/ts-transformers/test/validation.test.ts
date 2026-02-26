@@ -1053,6 +1053,105 @@ Deno.test("Pattern Context Validation - Map on Fallback", async (t) => {
   );
 });
 
+Deno.test("Pattern Any Result Schema", async (t) => {
+  await t.step(
+    "errors when pattern return type infers as any (one type arg)",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      declare function fetchAny(): any;
+
+      export default pattern<{ prompt: string }>(({ prompt }) => {
+        return fetchAny();
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics).filter(
+        (e) => e.type === "pattern:any-result-schema",
+      );
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertEquals(errors[0]!.type, "pattern:any-result-schema");
+    },
+  );
+
+  await t.step(
+    "errors when pattern return type infers as any (no type args)",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      declare function fetchAny(): any;
+
+      export default pattern(({ prompt }: { prompt: string }) => {
+        return fetchAny();
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics).filter(
+        (e) => e.type === "pattern:any-result-schema",
+      );
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertEquals(errors[0]!.type, "pattern:any-result-schema");
+    },
+  );
+
+  await t.step(
+    "no error when pattern has explicit Output type",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      declare function fetchAny(): any;
+
+      export default pattern<{ prompt: string }, string>(({ prompt }) => {
+        const result = fetchAny();
+        return result?.title || prompt;
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics).filter(
+        (e) => e.type === "pattern:any-result-schema",
+      );
+      assertEquals(
+        errors.length,
+        0,
+        "Explicit Output type should prevent the error",
+      );
+    },
+  );
+
+  await t.step(
+    "no error when pattern returns a concrete type",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern } from "commontools";
+
+      export default pattern<{ count: number }>(({ count }) => {
+        return { doubled: count * 2 };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics).filter(
+        (e) => e.type === "pattern:any-result-schema",
+      );
+      assertEquals(
+        errors.length,
+        0,
+        "Concrete return type should not trigger error",
+      );
+    },
+  );
+});
+
 Deno.test("Standalone Function Validation", async (t) => {
   await t.step(
     "errors on computed() inside standalone function",
