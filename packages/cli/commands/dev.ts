@@ -37,10 +37,15 @@ async function devAction(
     mainExport?: string;
     verboseErrors?: boolean;
     patternJson?: boolean;
+    root?: string;
   },
   ...files: string[]
 ) {
   let hasError = false;
+
+  const rootPath = options.root
+    ? (isAbsolute(options.root) ? options.root : join(Deno.cwd(), options.root))
+    : Deno.cwd();
 
   for (const file of files) {
     const mainPath = isAbsolute(file) ? file : join(Deno.cwd(), file);
@@ -48,7 +53,7 @@ async function devAction(
     try {
       const { main: exports } = await process({
         main: mainPath,
-        rootPath: Deno.cwd(),
+        rootPath,
         check: options.check,
         run: options.run,
         output: files.length === 1 ? options.output : undefined,
@@ -145,6 +150,10 @@ function createDevCommand(cmdName: string): Command<any> {
     .option(
       "--pattern-json",
       "Print the evaluated pattern export as JSON.",
+    )
+    .option(
+      "--root <path:string>",
+      "Root directory for resolving imports. Allows imports from parent directories within this root.",
     )
     .arguments("<files...:string>")
     .action(devAction);
