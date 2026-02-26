@@ -40,7 +40,7 @@ effects and deterministic schema binding.
       resolved.
 - [x] For existing entities, schema hash is immutable by default unless
       explicit migration flow is used.
-- [-] Prepare/check uses the exact schema identified by `cfc.schemaHash`.
+- [x] Prepare/check uses the exact schema identified by `cfc.schemaHash`.
 - [-] Full write-time schema validation is tracked as a later strict pass.
 
 ### 0.3 Non-Goals for This Pass

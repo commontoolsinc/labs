@@ -44,6 +44,21 @@ const nestedIfcObjectSchema = {
   ifc: { classification: ["confidential"] },
 } as const satisfies JSONSchema;
 
+const exactCopyIfcObjectSchema = {
+  type: "object",
+  properties: {
+    count: {
+      type: "number",
+      ifc: {
+        exactCopyOf: "/source",
+      },
+    },
+  },
+  ifc: {
+    classification: ["secret"],
+  },
+} as const satisfies JSONSchema;
+
 describe("CFC prepare schema hash", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
@@ -244,6 +259,49 @@ describe("CFC prepare schema hash", () => {
       (thrown as { expectedSchemaHash?: string } | undefined)
         ?.expectedSchemaHash,
     ).toBe(mismatchedSchemaHash);
+  });
+
+  it("rejects on schema hash mismatch before output transition checks", async () => {
+    const id = runtime.getCell(space, "cfc-prepare-schemahash-priority")
+      .getAsNormalizedFullLink().id;
+    const mismatchedSchemaHash = await computeCfcSchemaHash(ifcObjectSchema);
+
+    const seedTx = runtime.edit();
+    seedTx.writeOrThrow({
+      space,
+      id,
+      type: "application/json",
+      path: ["value"],
+    }, { count: 0 });
+    seedTx.writeOrThrow({
+      space,
+      id,
+      type: "application/json",
+      path: ["cfc", "schemaHash"],
+    }, mismatchedSchemaHash);
+    const seeded = await seedTx.commit();
+    expect(seeded.error).toBeUndefined();
+
+    const tx = runtime.edit();
+    const cell = runtime.getCell<{ count: number }>(
+      space,
+      "cfc-prepare-schemahash-priority",
+      exactCopyIfcObjectSchema,
+      tx,
+    );
+    cell.set({ count: 1 });
+
+    let thrown: unknown;
+    try {
+      await prepareCfcCommitIfNeeded(tx);
+    } catch (error) {
+      thrown = error;
+    }
+    tx.abort(thrown);
+
+    expect((thrown as { name?: string } | undefined)?.name).toBe(
+      "CfcSchemaHashMismatchError",
+    );
   });
 
   it("rejects prepare when relevant write has no captured schema", async () => {
