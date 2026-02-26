@@ -1,3 +1,8 @@
+import { canonicalHash } from "@commontools/memory/canonical-hash";
+import {
+  DECONSTRUCT,
+  isStorableInstance,
+} from "@commontools/memory/storable-protocol";
 import type { Activity } from "../storage/interface.ts";
 import { canonicalizeStoragePath } from "./canonical-activity.ts";
 import { hasInternalVerifierReadMarker } from "./internal-markers.ts";
@@ -32,6 +37,13 @@ type NormalizedSet = {
   values: NormalizedValue[];
 };
 
+type NormalizedStorableInstance = {
+  __type: "storable-instance";
+  id: number;
+  typeTag: string;
+  state: NormalizedValue;
+};
+
 type NormalizedRef = {
   __type: "ref";
   id: number;
@@ -61,6 +73,7 @@ type NormalizedValue =
   | NormalizedArray
   | NormalizedMap
   | NormalizedSet
+  | NormalizedStorableInstance
   | NormalizedRef
   | NormalizedSpecial;
 
@@ -73,6 +86,14 @@ const isEnumerable = Object.prototype.propertyIsEnumerable;
 
 function toHex(bytes: Uint8Array): string {
   return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function storableInstanceTypeTag(value: object): string {
+  const candidate = (value as { typeTag?: unknown }).typeTag;
+  if (typeof candidate === "string" && candidate.length > 0) {
+    return candidate;
+  }
+  return value.constructor?.name ?? "StorableInstance";
 }
 
 function normalizeUnknown(
@@ -122,6 +143,20 @@ function normalizeUnknown(
 
   const id = state.nextId++;
   state.seen.set(objectValue, id);
+
+  if (isStorableInstance(value)) {
+    const instance = value as { [DECONSTRUCT](): unknown };
+    try {
+      return {
+        __type: "storable-instance",
+        id,
+        typeTag: storableInstanceTypeTag(value),
+        state: normalizeUnknown(instance[DECONSTRUCT](), state),
+      };
+    } catch {
+      // Some wrappers are still stubbed; fall back to structural normalization.
+    }
+  }
 
   if (Array.isArray(value)) {
     return {
@@ -253,13 +288,10 @@ function normalizeActivity(
   return normalized;
 }
 
-export async function computeCfcActivityDigest(
+export function computeCfcActivityDigest(
   activity: Iterable<Activity>,
 ): Promise<string> {
-  const canonical = JSON.stringify(normalizeActivity(activity));
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(canonical),
+  return Promise.resolve(
+    toHex(canonicalHash(normalizeActivity(activity)).hash),
   );
-  return toHex(new Uint8Array(digest));
 }

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { DECONSTRUCT } from "@commontools/memory/storable-protocol";
 import { Runtime } from "../src/runtime.ts";
 import { computeCfcActivityDigest } from "../src/cfc/activity-digest.ts";
 import type { Activity, Metadata } from "../src/storage/interface.ts";
@@ -140,6 +141,19 @@ describe("CFC commit gate", () => {
 });
 
 describe("computeCfcActivityDigest", () => {
+  class HiddenStateStorable {
+    readonly typeTag = "HiddenState@1";
+    #value: number;
+
+    constructor(value: number) {
+      this.#value = value;
+    }
+
+    [DECONSTRUCT](): { readonly value: number } {
+      return { value: this.#value };
+    }
+  }
+
   it("is stable for identical activity and metadata with reordered keys", async () => {
     const symbolKey = Symbol("internal");
     const meta1: Metadata = {
@@ -228,5 +242,24 @@ describe("computeCfcActivityDigest", () => {
       readActivity,
     ]);
     expect(digestA).not.toBe(digestB);
+  });
+
+  it("includes StorableInstance deconstructed state in the digest", async () => {
+    const activityWithValue = (value: number): Activity[] => [{
+      read: {
+        space: "did:key:test-space",
+        id: "of:test-doc",
+        type: "application/json",
+        path: ["value", "field"],
+        meta: { payload: new HiddenStateStorable(value) },
+      },
+    }];
+
+    const digestA1 = await computeCfcActivityDigest(activityWithValue(1));
+    const digestA2 = await computeCfcActivityDigest(activityWithValue(1));
+    const digestB = await computeCfcActivityDigest(activityWithValue(2));
+
+    expect(digestA1).toBe(digestA2);
+    expect(digestA1).not.toBe(digestB);
   });
 });
