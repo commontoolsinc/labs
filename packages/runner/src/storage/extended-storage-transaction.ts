@@ -34,6 +34,12 @@ import { ignoreReadForScheduling } from "../scheduler.ts";
 import { isArrayIndexPropertyName } from "@commontools/memory/storable-value";
 import { computeCfcActivityDigest } from "../cfc/activity-digest.ts";
 import { hasWriteActivity } from "../cfc/canonical-activity.ts";
+import {
+  recordCfcGateReject,
+  recordCfcOutboxFlush,
+  recordCfcPreparedTx,
+  recordCfcRelevantTx,
+} from "../cfc/debug-counters.ts";
 
 const logger = getLogger("extended-storage-transaction", {
   enabled: false,
@@ -280,6 +286,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   markCfcRelevant(reason: string): void {
+    if (!this.cfcState.relevant) {
+      recordCfcRelevantTx();
+    }
     this.cfcState.relevant = true;
     if (reason && !this.cfcState.reasons.includes(reason)) {
       this.cfcState.reasons.push(reason);
@@ -287,6 +296,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   markCfcPrepared(digest: string): void {
+    if (!this.cfcState.prepared) {
+      recordCfcPreparedTx();
+    }
     this.cfcState.relevant = true;
     this.cfcState.prepared = true;
     this.cfcState.preparedActivityDigest = digest;
@@ -313,6 +325,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   private flushCfcOutbox(): void {
     const effects = this.cfcState.outbox.splice(0, this.cfcState.outbox.length);
+    if (effects.length > 0) {
+      recordCfcOutboxFlush();
+    }
     for (const effect of effects) {
       try {
         effect();
@@ -342,6 +357,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
     if (!this.cfcState.prepared || !this.cfcState.preparedActivityDigest) {
       const error = CfcPrepareRequiredError();
+      recordCfcGateReject();
       this.clearCfcOutbox();
       const abortResult = this.tx.abort(error);
       if (abortResult.error) {
@@ -365,6 +381,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         this.cfcState.preparedActivityDigest,
         actualDigest,
       );
+      recordCfcGateReject();
       this.clearCfcOutbox();
       const abortResult = this.tx.abort(error);
       if (abortResult.error) {
