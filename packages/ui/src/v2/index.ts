@@ -97,8 +97,6 @@ export * from "./components/ct-vstack/index.ts";
 export * from "./components/ct-select/index.ts";
 export * from "./components/ct-message-input/ct-message-input.ts";
 export * from "./components/ct-prompt-input/index.ts";
-// TODO(runtime-worker-refactor)
-// export * from "./components/ct-outliner/index.ts";
 export * from "./components/ct-keybind/index.ts";
 export * from "./components/ct-tools-chip/index.ts";
 export * from "./components/keyboard-context.ts";
