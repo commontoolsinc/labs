@@ -91,7 +91,7 @@ const getLangExtFromMimeType = (mime: MimeType) => {
 /**
  * Represents a parsed backlink with position and content info
  */
-interface BacklinkInfo {
+export interface BacklinkInfo {
   from: number; // Start of [[
   to: number; // End of ]]
   nameFrom: number; // Start of name (after [[)
@@ -103,7 +103,7 @@ interface BacklinkInfo {
 /**
  * Parse all backlinks from a document string
  */
-function parseBacklinks(doc: string): BacklinkInfo[] {
+export function parseBacklinks(doc: string): BacklinkInfo[] {
   const backlinks: BacklinkInfo[] = [];
   const backlinkRegex = /\[\[([^\]]+)\]\]/g;
   let match;
@@ -132,7 +132,7 @@ function parseBacklinks(doc: string): BacklinkInfo[] {
  * StateField to track all backlink positions in the document.
  * Updated whenever the document changes.
  */
-const backlinkField = StateField.define<BacklinkInfo[]>({
+export const backlinkField = StateField.define<BacklinkInfo[]>({
   create(state) {
     return parseBacklinks(state.doc.toString());
   },
@@ -147,7 +147,7 @@ const backlinkField = StateField.define<BacklinkInfo[]>({
  * This prevents the cursor from entering the ID area during navigation.
  * Note: We must ensure ranges don't span line breaks.
  */
-const atomicBacklinkRanges = EditorView.atomicRanges.of((view) => {
+export const atomicBacklinkRanges = EditorView.atomicRanges.of((view) => {
   const backlinks = view.state.field(backlinkField);
   const doc = view.state.doc;
   const decorations: Range<Decoration>[] = [];
@@ -181,7 +181,7 @@ const atomicBacklinkRanges = EditorView.atomicRanges.of((view) => {
  * - Truncates edits that span from name into ID
  * - Allows full backlink deletions
  */
-const backlinkEditFilter = EditorState.transactionFilter.of((tr) => {
+export const backlinkEditFilter = EditorState.transactionFilter.of((tr) => {
   if (!tr.docChanged) return tr;
 
   const backlinks = tr.startState.field(backlinkField);
