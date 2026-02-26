@@ -40,8 +40,6 @@ import { ContextualFlowControl } from "../cfc.ts";
 import { deepEqual } from "@commontools/utils/deep-equal";
 import { BaseMemoryAddress, MapSet } from "../traverse.ts";
 import type {
-  Assert,
-  Claim,
   IRemoteStorageProviderSettings,
   IStorageManager,
   IStorageProvider,
@@ -53,7 +51,6 @@ import type {
   OptStorageValue,
   PullError,
   PushError,
-  Retract,
   StorageValue,
   URI,
 } from "./interface.ts";
@@ -2228,14 +2225,4 @@ export const getChanges = (
     }
   }
   return changes;
-};
-
-// Given an Assert statement with labels, return a Schema with the ifc tags
-const _generateSchemaFromLabels = (
-  change: Assert | Retract | Claim,
-): JSONSchema | undefined => {
-  if (isObject(change?.is) && "labels" in change.is) {
-    return { ifc: change.is.labels } as JSONSchema;
-  }
-  return undefined;
 };
