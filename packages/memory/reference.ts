@@ -3,6 +3,8 @@ import type { Reference as MerkleReference } from "merkle-reference";
 import { LRUCache } from "@commontools/utils/cache";
 import { canonicalHash } from "./canonical-hash.ts";
 import { sha256 } from "./hash-impl.ts";
+import { StorableContentId } from "./storable-content-id.ts";
+import { fromBase64 } from "./bigint-encoding.ts";
 
 // ---------------------------------------------------------------------------
 // Public re-exports: narrowed subset of merkle-reference API
@@ -26,14 +28,25 @@ export type ContentId<
   T extends DefinedReferent = DefinedReferent,
 > = MerkleReference<T>;
 
-/** Type guard: returns true if the value is a content identifier. */
+/**
+ * Type guard: returns true if the value is a content identifier
+ * (`Reference.View` or `StorableContentId`).
+ */
 export const isContentId: <T extends DefinedReferent>(
   value: unknown | ContentId<T>,
-) => value is ContentId<T> = Reference.is;
+): value is ContentId<T> => {
+  if (value instanceof StorableContentId) {
+    return true;
+  }
+  return Reference.is(value);
+};
 
 /**
- * Reconstructs a content identifier from its JSON representation
- * (`{"/": "base32..."}` format).
+ * Reconstructs a content identifier from its JSON representation.
+ *
+ * When canonical hashing is enabled, parses the `fid1:<base64>` string
+ * from `source["/"]` and returns a `StorableContentId`. Otherwise delegates
+ * to `Reference.fromJSON` for `b`-prefixed base32 strings.
  *
  * The return type is `Reference.View` (the class type) rather than the bare
  * `ContentId` interface because the class exposes runtime methods (`.toJSON()`,
@@ -41,9 +54,14 @@ export const isContentId: <T extends DefinedReferent>(
  * of `ContentId`, so the result is assignable wherever a `ContentId` is
  * expected.
  */
-export const contentIdFromJSON: (
+export const contentIdFromJSON = (
   source: { "/": string },
-) => Reference.View = Reference.fromJSON;
+): Reference.View => {
+  if (canonicalHashingEnabled) {
+    return contentIdFromString(source["/"]) as unknown as Reference.View;
+  }
+  return Reference.fromJSON(source);
+};
 
 // ---------------------------------------------------------------------------
 
@@ -72,11 +90,32 @@ export function resetCanonicalHashConfig(): void {
   canonicalHashingEnabled = false;
 }
 
-// Don't know why deno does not seem to see there is a `fromString` so we just
-// workaround it like this.
-export const fromString = Reference.fromString as (
-  source: string,
-) => Reference.View;
+/**
+ * Parse a `StorableContentId` from its string representation
+ * (`<algorithmTag>:<base64hash>`).
+ */
+function contentIdFromString(source: string): StorableContentId {
+  const colonIndex = source.indexOf(":");
+  if (colonIndex === -1) {
+    throw new ReferenceError(`Invalid content ID string: ${source}`);
+  }
+  const algorithmTag = source.substring(0, colonIndex);
+  const hashBase64 = source.substring(colonIndex + 1);
+  return new StorableContentId(fromBase64(hashBase64), algorithmTag);
+}
+
+/**
+ * Reconstruct a content identifier from its string representation.
+ *
+ * When canonical hashing is enabled, parses `fid1:<base64>` format.
+ * Otherwise delegates to `Reference.fromString` for base32 multibase strings.
+ */
+export const fromString = (source: string): Reference.View => {
+  if (canonicalHashingEnabled) {
+    return contentIdFromString(source) as unknown as Reference.View;
+  }
+  return (Reference.fromString as (source: string) => Reference.View)(source);
+};
 
 /**
  * Get the default nodeBuilder from merkle-reference, then wrap it to intercept
@@ -162,7 +201,7 @@ const isUnclaimed = (
 export const refer = <T>(source: T): Reference.View<T> => {
   if (canonicalHashingEnabled) {
     const contentId = canonicalHash(source);
-    return Reference.fromDigest(contentId.hash) as Reference.View<T>;
+    return contentId as unknown as Reference.View<T>;
   }
 
   // Cache {the, of} patterns (unclaimed facts)
