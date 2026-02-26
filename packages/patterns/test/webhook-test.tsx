@@ -34,7 +34,9 @@ interface WebhookPatternOutput {
 const WebhookTest = pattern<WebhookPatternInput, WebhookPatternOutput>(
   ({ webhookInbox, webhookConfig }) => {
     const inboxDisplay = computed(() => {
-      const val = webhookInbox.get();
+      // Stream<T> doesn't expose .get() in its type, but at runtime the
+      // closure transformer captures the cell and we need to read its value.
+      const val = (webhookInbox as unknown as { get(): unknown }).get();
       if (val == null) return "No events received yet.";
       return JSON.stringify(val, null, 2);
     });
