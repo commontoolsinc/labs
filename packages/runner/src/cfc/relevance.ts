@@ -1,6 +1,12 @@
 import { isObject } from "@commontools/utils/types";
 import type { JSONSchema } from "../builder/types.ts";
-import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import type {
+  IExtendedStorageTransaction,
+  IMemorySpaceAddress,
+  Labels,
+} from "../storage/interface.ts";
+import { canonicalizeStoragePath } from "./canonical-activity.ts";
+import { internalVerifierReadMeta } from "./internal-markers.ts";
 
 function hasIfcInObjectSchema(
   schema: Record<string, unknown>,
@@ -116,6 +122,114 @@ export function markCfcRelevantForSchema(
     return;
   }
   if (schemaHasIfcAnnotations(schema)) {
+    tx.markCfcRelevant(reason);
+  }
+}
+
+function normalizePersistedLabels(value: unknown): Record<string, Labels> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  const labelsByPath: Record<string, Labels> = {};
+  for (const [path, rawLabel] of Object.entries(value)) {
+    if (!path.startsWith("/")) {
+      continue;
+    }
+    if (!rawLabel || typeof rawLabel !== "object" || Array.isArray(rawLabel)) {
+      continue;
+    }
+    const rawClassification = (rawLabel as { classification?: unknown })
+      .classification;
+    const classification = Array.isArray(rawClassification)
+      ? rawClassification.filter((entry): entry is string =>
+        typeof entry === "string" && entry.length > 0
+      )
+      : [];
+    const rawIntegrity = (rawLabel as { integrity?: unknown }).integrity;
+    const integrity = Array.isArray(rawIntegrity)
+      ? rawIntegrity.filter((entry): entry is string =>
+        typeof entry === "string" && entry.length > 0
+      )
+      : [];
+    if (classification.length === 0 && integrity.length === 0) {
+      continue;
+    }
+    labelsByPath[path] = {
+      ...(classification.length > 0 ? { classification } : {}),
+      ...(integrity.length > 0 ? { integrity } : {}),
+    };
+  }
+  return labelsByPath;
+}
+
+function jsonPointerPrefixes(path: string): string[] {
+  if (path === "/") {
+    return ["/"];
+  }
+
+  const segments = path.slice(1).split("/");
+  const prefixes = ["/"];
+  let current = "";
+  for (const segment of segments) {
+    if (!segment) {
+      continue;
+    }
+    current += `/${segment}`;
+    prefixes.push(current);
+  }
+  return prefixes;
+}
+
+function hasEffectiveLabelConstraint(
+  labelsByPath: Record<string, Labels>,
+  canonicalPath: string,
+): boolean {
+  for (const prefix of jsonPointerPrefixes(canonicalPath)) {
+    const label = labelsByPath[prefix];
+    if (!label) {
+      continue;
+    }
+    if ((label.classification?.length ?? 0) > 0) {
+      return true;
+    }
+    if ((label.integrity?.length ?? 0) > 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function labelsAddress(
+  readAddress: Pick<IMemorySpaceAddress, "space" | "id" | "type">,
+): IMemorySpaceAddress {
+  return {
+    space: readAddress.space,
+    id: readAddress.id,
+    type: readAddress.type,
+    path: ["cfc", "labels"],
+  };
+}
+
+export function markCfcRelevantForEffectiveLabels(
+  tx: IExtendedStorageTransaction | undefined,
+  readAddress: IMemorySpaceAddress,
+  reason = "ifc-read-effective-label",
+): void {
+  if (!tx) {
+    return;
+  }
+
+  const labelsValue = tx.readOrThrow(labelsAddress(readAddress), {
+    meta: internalVerifierReadMeta,
+  });
+  const labelsByPath = normalizePersistedLabels(labelsValue);
+  if (Object.keys(labelsByPath).length === 0) {
+    return;
+  }
+
+  const canonicalPath = canonicalizeStoragePath(readAddress.path);
+  if (hasEffectiveLabelConstraint(labelsByPath, canonicalPath)) {
     tx.markCfcRelevant(reason);
   }
 }

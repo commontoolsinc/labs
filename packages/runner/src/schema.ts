@@ -20,7 +20,10 @@ import {
   isCellResultForDereferencing,
 } from "./query-result-proxy.ts";
 import { toCell } from "./back-to-cell.ts";
-import { markCfcRelevantForSchema } from "./cfc/relevance.ts";
+import {
+  markCfcRelevantForEffectiveLabels,
+  markCfcRelevantForSchema,
+} from "./cfc/relevance.ts";
 import {
   CFC_READ_MAX_CONFIDENTIALITY_MARKER,
   CFC_READ_REQUIRED_INTEGRITY_MARKER,
@@ -454,6 +457,7 @@ export function validateAndTransform(
   // This gets me the result of following all the links, so I can get the value
   const ref = resolveLink(runtime, tx, link);
   markCfcRelevantForSchema(tx, ref.schema ?? link.schema, "ifc-read-schema");
+  markCfcRelevantForEffectiveLabels(tx, ref);
   const objectCreator = new TransformObjectCreator(
     runtime,
     tx!,
