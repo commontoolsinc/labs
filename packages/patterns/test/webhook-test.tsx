@@ -2,6 +2,7 @@
 import {
   computed,
   Default,
+  handler,
   NAME,
   pattern,
   Stream,
@@ -18,25 +19,35 @@ interface WebhookConfig {
 }
 
 interface WebhookPatternInput {
-  webhookInbox: Stream<Default<unknown, null>>;
   webhookConfig: Writable<Default<WebhookConfig | null, null>>;
 }
 
 interface WebhookPatternOutput {
   [NAME]: string;
   [UI]: VNode;
+  webhookInbox: Stream<unknown>;
   webhookConfig: WebhookConfig | null;
   lastEvent: unknown;
 }
 
+// ===== Handler =====
+
+const onWebhookEvent = handler<
+  unknown,
+  { lastEvent: Writable<unknown> }
+>((event, { lastEvent }) => {
+  lastEvent.set(event);
+});
+
 // ===== Pattern =====
 
 const WebhookTest = pattern<WebhookPatternInput, WebhookPatternOutput>(
-  ({ webhookInbox, webhookConfig }) => {
+  ({ webhookConfig }) => {
+    const lastEvent = Writable.of(null as unknown);
+    const webhookInbox = onWebhookEvent({ lastEvent });
+
     const inboxDisplay = computed(() => {
-      // Stream<T> doesn't expose .get() in its type, but at runtime the
-      // closure transformer captures the cell and we need to read its value.
-      const val = (webhookInbox as unknown as { get(): unknown }).get();
+      const val = lastEvent.get();
       if (val == null) return "No events received yet.";
       return JSON.stringify(val, null, 2);
     });
@@ -95,8 +106,9 @@ const WebhookTest = pattern<WebhookPatternInput, WebhookPatternOutput>(
           </ct-vstack>
         </ct-screen>
       ),
+      webhookInbox,
       webhookConfig,
-      lastEvent: webhookInbox,
+      lastEvent,
     };
   },
 );
