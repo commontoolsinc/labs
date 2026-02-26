@@ -15,10 +15,12 @@ import { sha256 } from "./hash-impl.ts";
  * `merkle-reference`. Uses the same underlying interface type so it remains
  * assignable everywhere `Reference` was (e.g., `JSONValue` constraints).
  */
-export type ContentId<T extends {} | null = {} | null> = MerkleReference<T>;
+export type ContentId<
+  T extends NonNullable<unknown> | null = NonNullable<unknown> | null,
+> = MerkleReference<T>;
 
 /** Type guard: returns true if the value is a content identifier. */
-export const isContentId: <T extends {} | null>(
+export const isContentId: <T extends NonNullable<unknown> | null>(
   value: unknown | ContentId<T>,
 ) => value is ContentId<T> = Reference.is;
 
