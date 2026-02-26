@@ -62,4 +62,13 @@ describe("cli dev", () => {
     expect(stdout.length).toBe(0);
     expect(code).toBe(0);
   });
+
+  it("Resolves imports with --root flag", async () => {
+    const { code, stdout, stderr } = await ct(
+      "dev --root fixtures fixtures/pow-5.tsx --pattern-json",
+    );
+    checkStderr(stderr);
+    expect(stdout[stdout.length - 1]).toBe("25");
+    expect(code).toBe(0);
+  });
 });
