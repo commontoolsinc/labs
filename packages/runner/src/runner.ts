@@ -1,4 +1,4 @@
-import { refer } from "merkle-reference/json";
+import { refer } from "@commontools/memory/reference";
 import { getLogger } from "@commontools/utils/logger";
 import { isObject, isRecord, type Mutable } from "@commontools/utils/types";
 import { rendererVDOMSchema } from "./schemas.ts";

@@ -1,4 +1,4 @@
-import { refer } from "merkle-reference/json";
+import { refer } from "@commontools/memory/reference";
 import { isRecord } from "@commontools/utils/types";
 import { getTopFrame } from "./builder/pattern.ts";
 import { isStreamValue } from "./builder/types.ts";

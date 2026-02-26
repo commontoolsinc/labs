@@ -1,4 +1,4 @@
-import { refer } from "merkle-reference/json";
+import { refer } from "@commontools/memory/reference";
 import { type Cell } from "../cell.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
