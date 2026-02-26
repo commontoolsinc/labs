@@ -32,6 +32,7 @@ export function isConvertibleNativeInstance(value: object): boolean {
     case NATIVE_TAGS.Set:
     case NATIVE_TAGS.Date:
     case NATIVE_TAGS.Uint8Array:
+    case NATIVE_TAGS.RegExp:
       return true;
     default:
       return false;
@@ -325,6 +326,86 @@ export class StorableSet extends StorableNativeWrapper<Set<StorableValue>> {
     _context: ReconstructionContext,
   ): StorableSet {
     throw new Error("StorableSet: not yet implemented");
+  }
+}
+
+/**
+ * Wrapper for `RegExp` instances in the storable type system. Bridges native
+ * `RegExp` (JS wild west) into the strongly-typed `StorableValue` layer by
+ * implementing `StorableInstance`. The essential state is
+ * `{ source, flags, flavor }`.
+ * See Section 1.4.1 of the formal spec.
+ */
+export class StorableRegExp extends StorableNativeWrapper<RegExp> {
+  /** The type tag used in the wire format (`TAGS.RegExp`). */
+  readonly typeTag = TAGS.RegExp;
+
+  constructor(
+    /** The wrapped native `RegExp`. */
+    readonly regex: RegExp,
+    /** Regex flavor/dialect identifier (e.g. `"es2025"`). */
+    readonly flavor: string = "es2025",
+  ) {
+    super();
+  }
+
+  /**
+   * Deconstruct into essential state for serialization. Returns
+   * `{ source, flags, flavor }` -- the values needed to reconstruct the
+   * RegExp. Extra enumerable properties on the RegExp cause rejection.
+   */
+  [DECONSTRUCT](): StorableValue {
+    rejectExtraRegExpProperties(this.regex);
+    return {
+      source: this.regex.source,
+      flags: this.regex.flags,
+      flavor: this.flavor,
+    } as StorableValue;
+  }
+
+  protected get wrappedValue(): RegExp {
+    return this.regex;
+  }
+
+  /**
+   * Return a frozen copy of the RegExp. A frozen RegExp has an immutable
+   * `lastIndex`, so stateful methods (`exec()`, `test()`) won't work
+   * correctly -- but that matches the "death before confusion" principle.
+   */
+  protected toNativeFrozen(): RegExp {
+    return Object.freeze(new RegExp(this.regex));
+  }
+
+  protected toNativeThawed(): RegExp {
+    return new RegExp(this.regex);
+  }
+
+  /**
+   * Reconstruct a `StorableRegExp` from its essential state
+   * (`{ source, flags, flavor }`).
+   */
+  static [RECONSTRUCT](
+    state: StorableValue,
+    _context: ReconstructionContext,
+  ): StorableRegExp {
+    const s = state as Record<string, StorableValue>;
+    const source = (s.source as string) ?? "";
+    const flags = (s.flags as string) ?? "";
+    const flavor = (s.flavor as string) ?? "es2025";
+    return new StorableRegExp(new RegExp(source, flags), flavor);
+  }
+}
+
+/**
+ * Reject RegExp instances with extra enumerable properties. The built-in
+ * `lastIndex` property is not enumerable, so `Object.keys()` won't see it.
+ * Any enumerable own property is therefore user-added and causes rejection.
+ */
+function rejectExtraRegExpProperties(regex: RegExp): void {
+  if (Object.keys(regex).length > 0) {
+    throw new Error(
+      "Cannot store RegExp with extra enumerable properties",
+    );
   }
 }
 

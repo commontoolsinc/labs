@@ -10,6 +10,7 @@ import {
   isConvertibleNativeInstance,
   StorableEpochNsec,
   StorableError,
+  StorableRegExp,
   UNSAFE_KEYS,
 } from "./storable-native-instances.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./type-tags.ts";
@@ -81,6 +82,17 @@ export function toRichStorableValue(
         const wrapped = new StorableEpochNsec(nsec);
         if (freeze) Object.freeze(wrapped);
         return wrapped;
+      }
+
+      case NATIVE_TAGS.RegExp: {
+        // RegExp instances are wrapped in StorableRegExp. Extra enumerable
+        // properties cause rejection ("death before confusion"). The
+        // rejectExtraProperties check is done inside StorableRegExp's
+        // DECONSTRUCT, but we also reject eagerly here at conversion time.
+        rejectExtraProperties(value, "RegExp");
+        const wrappedRegExp = new StorableRegExp(value as RegExp);
+        if (freeze) Object.freeze(wrappedRegExp);
+        return wrappedRegExp;
       }
 
       case NATIVE_TAGS.Array: {

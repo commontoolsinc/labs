@@ -24,6 +24,7 @@ export const TAGS = Object.freeze(
     EpochNsec: "EpochNsec@1",
     EpochDays: "EpochDays@1",
     Bytes: "Bytes@1",
+    RegExp: "RegExp@1",
 
     // -- Primitive type handlers --
     BigInt: "BigInt@1",
@@ -64,6 +65,7 @@ export const NATIVE_TAGS = Object.freeze(
     Set: "Set",
     Date: "Date",
     Uint8Array: "Uint8Array",
+    RegExp: "RegExp",
     EpochNsec: "EpochNsec",
     EpochDays: "EpochDays",
     ContentId: "ContentId",
@@ -112,6 +114,8 @@ export function tagFromNativeClass(
       return NATIVE_TAGS.Date;
     case Uint8Array:
       return NATIVE_TAGS.Uint8Array;
+    case RegExp:
+      return NATIVE_TAGS.RegExp;
     case StorableEpochNsec:
       return NATIVE_TAGS.EpochNsec;
     case StorableEpochDays:

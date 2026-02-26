@@ -760,8 +760,8 @@ describe("storable-native-instances", () => {
       expect(tagFromNativeValue([])).toBe(NATIVE_TAGS.Array);
     });
 
-    it("returns null for RegExp", () => {
-      expect(tagFromNativeValue(/abc/)).toBe(null);
+    it("returns RegExp tag for RegExp instances", () => {
+      expect(tagFromNativeValue(/abc/)).toBe(NATIVE_TAGS.RegExp);
     });
 
     it("returns Object tag for null-prototype objects (no constructor)", () => {
@@ -838,8 +838,11 @@ describe("storable-native-instances", () => {
       expect(tagFromNativeClass(Uint8Array)).toBe(NATIVE_TAGS.Uint8Array);
     });
 
+    it("returns RegExp tag for RegExp constructor", () => {
+      expect(tagFromNativeClass(RegExp)).toBe(NATIVE_TAGS.RegExp);
+    });
+
     it("returns null for unrecognized constructors", () => {
-      expect(tagFromNativeClass(RegExp)).toBe(null);
       expect(tagFromNativeClass(WeakMap)).toBe(null);
       expect(tagFromNativeClass(Promise)).toBe(null);
     });
@@ -888,10 +891,13 @@ describe("storable-native-instances", () => {
       expect(isConvertibleNativeInstance(new WeirdError("weird"))).toBe(true);
     });
 
+    it("returns true for RegExp", () => {
+      expect(isConvertibleNativeInstance(/abc/)).toBe(true);
+    });
+
     it("returns false for non-convertible types", () => {
       expect(isConvertibleNativeInstance({})).toBe(false);
       expect(isConvertibleNativeInstance([])).toBe(false);
-      expect(isConvertibleNativeInstance(/abc/)).toBe(false);
       expect(isConvertibleNativeInstance(new WeakMap())).toBe(false);
     });
 

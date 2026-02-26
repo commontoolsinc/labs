@@ -31,7 +31,7 @@ JavaScript "wild west" (unknown/any) <-> Strongly typed (StorableValue) <-> Seri
 ```
 
 - **Left layer — JS wild west.** Arbitrary JavaScript values (`unknown`/`any`),
-  including native objects like `Error`, `Map`, `Set`, `Date`, and `Uint8Array`.
+  including native objects like `Error`, `Map`, `Set`, `Date`, `RegExp`, and `Uint8Array`.
   Code in this layer has no type guarantees about what it is handling.
 
 - **Middle layer — `StorableValue`.** The strongly typed core of the data model.
@@ -56,7 +56,7 @@ the full specification of these functions.
 
 A `StorableValue` is defined as the following union. This is the **middle
 layer** — the strongly typed core. Raw native JS objects (`Error`, `Map`, `Set`,
-`Date`, `Uint8Array`) do not appear here; they are handled by the conversion
+`Date`, `RegExp`, `Uint8Array`) do not appear here; they are handled by the conversion
 layer (Section 8) and represented in `StorableValue` trees as `StorableInstance`
 wrapper classes (Section 1.4).
 
@@ -94,7 +94,7 @@ type StorableValue =
   // (c) Branded storables (custom types implementing the storable protocol)
   //     This arm covers:
   //       - Native object wrappers: `StorableError`, `StorableMap`,
-  //         `StorableSet`, `StorableUint8Array` (Section 1.4)
+  //         `StorableSet`, `StorableRegExp`, `StorableUint8Array` (Section 1.4)
   //       - User-defined types: `Cell`, `Stream`, etc.
   //       - System types: `UnknownStorable`, `ProblematicStorable`
   | StorableInstance
@@ -135,7 +135,7 @@ native JS object types that the conversion layer can handle:
  *
  * Primitives like `bigint` and `undefined` are NOT included — they are
  * directly part of `StorableValue`. The wrapper classes (`StorableError`,
- * `StorableMap`, etc.) are also NOT this type — they are `StorableInstance`
+ * `StorableMap`, `StorableRegExp`, etc.) are also NOT this type — they are `StorableInstance`
  * implementations that live inside `StorableValue`.
  */
 type StorableNativeObject =
@@ -143,6 +143,7 @@ type StorableNativeObject =
   | Map<StorableValue | StorableNativeObject, StorableValue | StorableNativeObject>
   | Set<StorableValue | StorableNativeObject>
   | Date
+  | RegExp
   | Uint8Array
   | Blob
   | { toJSON(): unknown }; // Legacy — see below.
@@ -197,7 +198,7 @@ member of `StorableValue` or `StorableDatum`.
 
 ### 1.4 Native Object Wrapper Classes
 
-Certain built-in JS types (`Error`, `Map`, `Set`, `Uint8Array`) cannot
+Certain built-in JS types (`Error`, `Map`, `Set`, `RegExp`, `Uint8Array`) cannot
 have `Symbol`-keyed methods added via prototype patching in a reliable,
 cross-realm way. Rather than handling them with special-case logic in the
 serializer, the system defines **wrapper classes** — one per native type — that
@@ -215,7 +216,7 @@ with a dedicated `TAG_BYTES` tag for content-level identity (see Section 6.3).
 The **special primitive** types (`StorableEpochNsec`, `StorableEpochDays`,
 `StorableContentId`) are **not** `StorableInstance`s — they are direct members
 of `StorableDatum`, like `bigint`. They all extend `SpecialPrimitiveValue`
-(Section 1.4.5), which marks them as always-frozen value types that bypass the
+(Section 1.4.6), which marks them as always-frozen value types that bypass the
 `freeze` option in conversion functions. They have dedicated canonical hash tags
 and dedicated `TypeHandler`s for wire format serialization, but they do not
 implement `[DECONSTRUCT]`, `[RECONSTRUCT]`, or carry a `typeTag` property.
@@ -227,6 +228,7 @@ implement `[DECONSTRUCT]`, `[RECONSTRUCT]`, or carry a `typeTag` property.
 | `StorableError` | `Error` | `Error@1` | `{ type, name, message, stack?, cause?, ...custom }` | `type` is the constructor name (e.g. `"TypeError"`). `name` is the `.name` property if it differs from `type`, or `null` if it matches (the common case). Includes `message`, `stack` (if present), `cause` (if present), and custom enumerable properties. The conversion layer (Section 8.2) recursively converts nested values (including `cause` and custom properties) before wrapping, ensuring all values are `StorableValue` when `[DECONSTRUCT]` runs. |
 | `StorableMap` | `Map` | `Map@1` | `[[key, value], ...]` | Entry pairs as an array of two-element arrays. Insertion order is preserved. Keys and values are recursively processed. |
 | `StorableSet` | `Set` | `Set@1` | `[value, ...]` | Elements as an array. Iteration order is preserved. Values are recursively processed. |
+| `StorableRegExp` | `RegExp` | `RegExp@1` | `{ source, flags, flavor }` | `source` is the pattern string (`regex.source`); `flags` is the flag string (`regex.flags`); `flavor` is the regex dialect identifier (e.g. `"es2025"`). Extra enumerable properties cause rejection. |
 | `StorableUint8Array` | `Uint8Array` | `Bytes@1` | `string` (unpadded base64; see Section 5.3) | Deconstructed state is a string. |
 
 Each wrapper class above:
@@ -244,14 +246,14 @@ Each wrapper class above:
 Unlike the wrappers above, the special primitive types (`StorableEpochNsec`,
 `StorableEpochDays`, `StorableContentId`) are **direct members of
 `StorableDatum`** and do not implement `StorableInstance`. They all extend
-`SpecialPrimitiveValue` (Section 1.4.5), which provides always-frozen semantics.
-See Sections 1.4.5 through 1.4.8.
+`SpecialPrimitiveValue` (Section 1.4.6), which provides always-frozen semantics.
+See Sections 1.4.6 through 1.4.9.
 
 | Direct Datum Type | Extends | Wire Tag | Stored Value | Notes |
 |-------------------|---------|----------|--------------|-------|
 | `StorableEpochNsec` | `SpecialPrimitiveValue` | `EpochNsec@1` | `bigint` (signed nanoseconds from POSIX Epoch) | Primary temporal type. JS `Date` has only millisecond precision; conversion from `Date` multiplies by 10^6. When `Temporal` is available, `Temporal.Instant` maps naturally (it uses nanoseconds from epoch internally). |
 | `StorableEpochDays` | `SpecialPrimitiveValue` | `EpochDays@1` | `bigint` (signed days from POSIX Epoch) | Day-precision temporal type. Anticipates `Temporal.PlainDate`. Mostly nascent — class and spec entry are defined, but full integration (Temporal types, calendar concerns) is deferred. |
-| `StorableContentId` | `SpecialPrimitiveValue` | _(none — see Section 1.4.8)_ | `Uint8Array` (hash bytes) + `string` (algorithm tag) | Content identifier / hash. Stringifies as `<algorithmTag>:<base64hash>` (unpadded base64). The first algorithm tag is `fid1` ("fabric ID, v1"). |
+| `StorableContentId` | `SpecialPrimitiveValue` | _(none — see Section 1.4.9)_ | `Uint8Array` (hash bytes) + `string` (algorithm tag) | Content identifier / hash. Stringifies as `<algorithmTag>:<base64hash>` (unpadded base64). The first algorithm tag is `fid1` ("fabric ID, v1"). |
 
 #### Extra Enumerable Properties
 
@@ -261,8 +263,9 @@ objects are common JavaScript practice (e.g., `error.code`, `error.statusCode`),
 so `StorableError` preserves them: `[DECONSTRUCT]` includes them in its output,
 and `[RECONSTRUCT]` restores them on the reconstructed `Error`.
 
-**`StorableMap`, `StorableSet`, `StorableEpochNsec`, `StorableEpochDays`,
-`StorableContentId`, `StorableUint8Array`** must NOT carry extra enumerable
+**`StorableMap`, `StorableSet`, `StorableRegExp`, `StorableEpochNsec`,
+`StorableEpochDays`, `StorableContentId`, `StorableUint8Array`** must NOT carry
+extra enumerable
 properties. Their
 stored value contains only the essential native data (entries, items,
 epoch value, bytes respectively). Extra enumerable properties on the source
@@ -401,7 +404,65 @@ export class StorableSet implements StorableInstance {
 }
 ```
 
-#### 1.4.5 `SpecialPrimitiveValue` (Base Class)
+#### 1.4.5 `StorableRegExp`
+
+```typescript
+// file: packages/common/storable-native-wrappers.ts
+
+import {
+  DECONSTRUCT, RECONSTRUCT,
+  type StorableInstance, type ReconstructionContext,
+} from './storable-protocol';
+
+/**
+ * Wrapper for native `RegExp` values. Implements `StorableInstance` so that
+ * regular expressions participate in the standard serialization and hashing
+ * paths.
+ *
+ * Essential state is the pattern `source` string, the `flags` string, and
+ * the `flavor` string identifying the regex dialect. The only initially
+ * defined flavor is `"es2025"` (ECMAScript 2025 regular expressions).
+ * The `flavor` field is forward-looking for multi-runtime scenarios where
+ * different regex engines may be in use.
+ *
+ * Extra enumerable properties on the wrapped `RegExp` cause rejection
+ * (death before confusion).
+ *
+ * **Freeze behavior:** A frozen `RegExp` has an immutable `lastIndex`,
+ * which prevents stateful use of `exec()` and `test()` with the `g`
+ * (global) and `y` (sticky) flags. This is an inherent consequence of
+ * `Object.freeze()` on `RegExp` objects and is consistent with the
+ * immutable-forward design — callers who need stateful matching should
+ * construct a new `RegExp` from the source and flags.
+ */
+export class StorableRegExp implements StorableInstance {
+  readonly typeTag = 'RegExp@1';
+
+  constructor(
+    readonly regexp: RegExp,
+    readonly flavor: string = 'es2025',
+  ) {}
+
+  [DECONSTRUCT](): StorableValue {
+    return {
+      source: this.regexp.source,
+      flags: this.regexp.flags,
+      flavor: this.flavor,
+    };
+  }
+
+  static [RECONSTRUCT](
+    state: StorableValue,
+    _context: ReconstructionContext,
+  ): StorableRegExp {
+    const s = state as { source: string; flags: string; flavor?: string };
+    const flavor = s.flavor ?? 'es2025';
+    return new StorableRegExp(new RegExp(s.source, s.flags), flavor);
+  }
+}
+```
+
+#### 1.4.6 `SpecialPrimitiveValue` (Base Class)
 
 `SpecialPrimitiveValue` is the abstract base class for non-`StorableInstance`
 datum types that sit directly in the `StorableValue` union alongside JS
@@ -442,7 +503,7 @@ content IDs). The base class holds no state — its purpose is to provide a sing
 `instanceof SpecialPrimitiveValue` check where code needs to identify these
 types uniformly (e.g., the conversion functions' freeze-bypass logic).
 
-#### 1.4.6 `StorableEpochNsec`
+#### 1.4.7 `StorableEpochNsec`
 
 ```typescript
 /**
@@ -466,7 +527,7 @@ export class StorableEpochNsec extends SpecialPrimitiveValue {
 }
 ```
 
-#### 1.4.7 `StorableEpochDays`
+#### 1.4.8 `StorableEpochDays`
 
 ```typescript
 /**
@@ -486,7 +547,7 @@ export class StorableEpochDays extends SpecialPrimitiveValue {
 }
 ```
 
-#### 1.4.8 `StorableContentId`
+#### 1.4.9 `StorableContentId`
 
 ```typescript
 // file: packages/memory/storable-content-id.ts
@@ -534,7 +595,7 @@ content-addressing schemes. The algorithm tag is part of the content ID's
 identity — two `StorableContentId` instances with the same hash bytes but
 different algorithm tags are distinct values.
 
-#### 1.4.9 `StorableUint8Array`
+#### 1.4.10 `StorableUint8Array`
 
 ```typescript
 export class StorableUint8Array implements StorableInstance {
@@ -555,7 +616,7 @@ export class StorableUint8Array implements StorableInstance {
 }
 ```
 
-#### 1.4.10 `bigint` — Not Wrapped
+#### 1.4.11 `bigint` — Not Wrapped
 
 `bigint` is a JavaScript primitive (`typeof x === 'bigint'`), not an object. It
 rides through the `StorableValue` layer directly, like `undefined`. No
@@ -563,7 +624,7 @@ rides through the `StorableValue` layer directly, like `undefined`. No
 `bigint` with a dedicated handler (analogous to `UndefinedHandler`); see
 Section 4.5.
 
-#### 1.4.11 Design Notes
+#### 1.4.12 Design Notes
 
 > **Why wrapper classes instead of inline serializer branches?** Each wrapper
 > genuinely implements `StorableInstance`, so `isStorableInstance()` returns `true` for
@@ -580,7 +641,7 @@ Section 4.5.
 > `nativeValueFromStorableValue()` (Section 8) as a separate step.
 >
 > **File organization.** The native object wrapper classes (`StorableError`,
-> `StorableMap`, `StorableSet`, `StorableUint8Array`) and the
+> `StorableMap`, `StorableSet`, `StorableRegExp`, `StorableUint8Array`) and the
 > `SpecialPrimitiveValue` subclasses (`StorableEpochNsec`,
 > `StorableEpochDays`, `StorableContentId`) are each small (~30 lines) and
 > may be organized into one or a few files as an implementation decision.
@@ -687,7 +748,7 @@ export const RECONSTRUCT = Symbol.for('common.reconstruct');
  * no separate marker is needed.
  *
  * The native object wrapper classes (`StorableError`, `StorableMap`,
- * `StorableSet`, `StorableUint8Array`) implement this interface, as do
+ * `StorableSet`, `StorableRegExp`, `StorableUint8Array`) implement this interface, as do
  * user-defined types (`Cell`, `Stream`) and system types
  * (`UnknownStorable`, `ProblematicStorable`).
  *
@@ -904,7 +965,7 @@ aligns with the reactive system's assumption that values don't mutate in place.
 
 > **Immutability of native object wrappers.** Under the three-layer
 > architecture, deserialization produces `StorableInstance` wrappers
-> (`StorableMap`, `StorableSet`, etc.), not raw native types. Because the
+> (`StorableMap`, `StorableSet`, `StorableRegExp`, etc.), not raw native types. Because the
 > system controls the shape of these wrapper classes, they can be properly
 > frozen with `Object.freeze()` — unlike the native types they wrap (e.g.,
 > `Object.freeze()` on a `Map` does not prevent mutation via `set()`/`delete()`).
@@ -1761,7 +1822,7 @@ nibble range.
  * Specific hashing contexts (e.g., pattern ID generation vs. request
  * deduplication) specify which algorithm is used in that context.
  *
- * The return value is a `StorableContentId` instance (Section 1.4.8),
+ * The return value is a `StorableContentId` instance (Section 1.4.9),
  * which encapsulates the raw hash bytes and the algorithm tag. The
  * algorithm tag for SHA-256 is `fid1` ("fabric ID, v1"). Callers who
  * need a string representation can call `toString()` on the result,
@@ -1831,9 +1892,9 @@ export function canonicalHash(
   //
   // The native object wrappers and temporal types are hashed as follows:
   //
-  // - `StorableError`, `StorableMap`, `StorableSet`, and other
-  //   `StorableInstance`s with recursively-processable deconstructed
-  //   state are hashed via TAG_INSTANCE:
+  // - `StorableError`, `StorableMap`, `StorableSet`, `StorableRegExp`,
+  //   and other `StorableInstance`s with recursively-processable
+  //   deconstructed state are hashed via TAG_INSTANCE:
   //     hash(TAG_INSTANCE, leb128(typeTagLen), typeTag,
   //          canonicalHash(deconstructedState))
   //
@@ -1848,6 +1909,7 @@ export function canonicalHash(
   //                         where entries are hashed in insertion order
   // - `StorableSet`:        hash(TAG_INSTANCE, ..., "Set@1", canonicalHash(elements))
   //                         where elements are hashed in insertion order
+  // - `StorableRegExp`:     hash(TAG_INSTANCE, ..., "RegExp@1", canonicalHash({source, flags, flavor}))
   // - `StorableEpochNsec`:  hash(TAG_EPOCH_NSEC, leb128(byteLen), twosComplementBytes)
   // - `StorableEpochDays`:  hash(TAG_EPOCH_DAYS, leb128(byteLen), twosComplementBytes)
   // - `StorableContentId`:  hash(TAG_CONTENT_ID, leb128(algTagLen), algTagUtf8,
@@ -2071,12 +2133,13 @@ export function toDeepStorableValue(
 | Input Type | Output |
 |------------|--------|
 | `null`, `boolean`, `number`, `string`, `undefined`, `bigint` | Returned as-is (primitives are `StorableValue` directly). `-0` is normalized to `0`. Non-finite numbers (`NaN`, `Infinity`) cause rejection. |
-| `SpecialPrimitiveValue` (`StorableEpochNsec`, `StorableEpochDays`, `StorableContentId`) | Returned as-is. Always-frozen: the `freeze` option has no effect on these types (see Section 1.4.5). |
+| `SpecialPrimitiveValue` (`StorableEpochNsec`, `StorableEpochDays`, `StorableContentId`) | Returned as-is. Always-frozen: the `freeze` option has no effect on these types (see Section 1.4.6). |
 | `StorableInstance` (including wrapper classes) | Returned as-is (already `StorableValue`). |
 | `Error` | Wrapped into `StorableError`. Before wrapping, `cause` and custom enumerable properties are recursively converted to `StorableValue` (deep variant) or left as-is (shallow variant). Extra enumerable properties are preserved (see Section 1.4.1). This ensures that by the time `StorableError.[DECONSTRUCT]` runs, all nested values are already valid `StorableValue`. |
 | `Map` | Wrapped into `StorableMap`. Keys and values are recursively converted (deep variant only). Extra enumerable properties on the `Map` object cause **rejection** (throw) — it is better to fail loudly than silently lose data. |
 | `Set` | Wrapped into `StorableSet`. Elements are recursively converted (deep variant only). Extra enumerable properties on the `Set` object cause **rejection** (throw) — it is better to fail loudly than silently lose data. |
 | `Date` | Wrapped into `StorableEpochNsec`. The `Date`'s millisecond timestamp is converted to nanoseconds: `BigInt(date.getTime()) * 1_000_000n`. Note the millisecond precision limitation — sub-millisecond information is not available from `Date`. Extra enumerable properties on the `Date` object cause **rejection** (throw) — it is better to fail loudly than silently lose data. |
+| `RegExp` | Wrapped into `StorableRegExp`. The `source` and `flags` are extracted from the native `RegExp`; `flavor` defaults to `"es2025"` (it is a wrapper-level property, not a native `RegExp` property). Extra enumerable properties on the `RegExp` object cause **rejection** (throw) — it is better to fail loudly than silently lose data. |
 | `Uint8Array` | Wrapped into `StorableUint8Array`. Extra enumerable properties on the `Uint8Array` object cause **rejection** (throw) — it is better to fail loudly than silently lose data. |
 | `Blob` | **Throws.** `Blob` content is only accessible via asynchronous methods (`arrayBuffer()`, `stream()`), so the synchronous conversion path cannot extract its bytes. Callers must convert a `Blob` to `Uint8Array` before passing it to `toStorableValue()`. A future async conversion path may accept `Blob` directly. |
 | `StorableValue[]` | Shallow: returned as-is (frozen if `freeze` is true). Deep: elements recursively converted (frozen at each level if `freeze` is true). |
@@ -2109,7 +2172,7 @@ and pass through unchanged regardless of the `freeze` setting.
 `StorableContentId`) are treated the same way — they are always returned as-is,
 never copied or modified by the freeze/thaw logic. Their state is immutable by
 construction (readonly fields, no mutation methods), so `Object.freeze()` is
-unnecessary and thawing is meaningless. See Section 1.4.5.
+unnecessary and thawing is meaningless. See Section 1.4.6.
 
 If the input is already frozen (or deep-frozen for the deep variant), the same
 object is returned — no defensive copying. This avoids unnecessary allocation
@@ -2229,8 +2292,8 @@ if the value is:
 - A primitive (`null`, `boolean`, `number` (finite), `string`, `undefined`,
   `bigint`)
 - A `StorableInstance` (including the native object wrapper classes)
-- A `StorableNativeObject` (`Error`, `Map`, `Set`, `Date`, `Uint8Array`,
-  or an object with a `toJSON()` method — legacy)
+- A `StorableNativeObject` (`Error`, `Map`, `Set`, `Date`, `RegExp`,
+  `Uint8Array`, or an object with a `toJSON()` method — legacy)
 - An array where every present element satisfies `canBeStored()`
 - A plain object where every value satisfies `canBeStored()`
 
@@ -2258,9 +2321,10 @@ etc.).
  * - `StorableError`      -> `Error` (original if freeze state matches; copy otherwise)
  * - `StorableMap`        -> `FrozenMap` / `Map` (original if freeze state matches; copy otherwise)
  * - `StorableSet`        -> `FrozenSet` / `Set` (original if freeze state matches; copy otherwise)
+ * - `StorableRegExp`     -> `RegExp` (frozen or unfrozen; see note on `lastIndex`)
  * - `StorableEpochNsec`  -> the bigint value (nanoseconds from POSIX Epoch)
  * - `StorableEpochDays`  -> the bigint value (days from POSIX Epoch)
- * - `StorableContentId`  -> passed through unchanged (always-frozen; Section 1.4.5)
+ * - `StorableContentId`  -> passed through unchanged (always-frozen; Section 1.4.6)
  * - `StorableUint8Array` -> `Blob` (when frozen) or original `Uint8Array` (when not)
  *
  * Non-wrapper `StorableInstance` values (`Cell`, `Stream`, `UnknownStorable`,
@@ -2316,9 +2380,10 @@ export function deepNativeValueFromStorableValue(
 | `StorableError` | `Error` (original if already frozen; frozen copy otherwise) | `Error` (original if already unfrozen; mutable copy otherwise) |
 | `StorableMap` | `FrozenMap` (original if already `FrozenMap`; new wrapper otherwise) | `Map` (original if already plain `Map`; mutable copy otherwise) |
 | `StorableSet` | `FrozenSet` (original if already `FrozenSet`; new wrapper otherwise) | `Set` (original if already plain `Set`; mutable copy otherwise) |
+| `StorableRegExp` | `RegExp` (frozen via `Object.freeze()`; `lastIndex` immutable) | `RegExp` (original reference; mutable `lastIndex`) |
 | `StorableEpochNsec` | `bigint` (the nanosecond value; inherently immutable) | `bigint` (same — primitives have no mutable/immutable distinction) |
 | `StorableEpochDays` | `bigint` (the day value; inherently immutable) | `bigint` (same) |
-| `StorableContentId` | Passed through unchanged (always-frozen; Section 1.4.5) | Passed through unchanged (same) |
+| `StorableContentId` | Passed through unchanged (always-frozen; Section 1.4.6) | Passed through unchanged (same) |
 | `StorableUint8Array` | `Blob` (inherently immutable; always new) | `Uint8Array` (original reference) |
 | Other `StorableInstance` | Passed through unchanged | Passed through unchanged |
 | Primitives | Passed through unchanged | Passed through unchanged |

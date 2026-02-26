@@ -103,6 +103,7 @@ export type StorableNativeObject =
   | Map<unknown, unknown>
   | Set<unknown>
   | Date
+  | RegExp
   | Uint8Array
   | Blob
   | { toJSON(): unknown };
