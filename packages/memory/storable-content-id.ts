@@ -12,7 +12,7 @@ import { toUnpaddedBase64 } from "./bigint-encoding.ts";
 
 export class StorableContentId extends SpecialPrimitiveValue {
   constructor(
-    /** The raw 32-byte hash digest. */
+    /** The raw hash bytes. */
     readonly hash: Uint8Array,
     /** Algorithm identifier (e.g., `"fid1"` for fabric ID v1). */
     readonly algorithmTag: string,
