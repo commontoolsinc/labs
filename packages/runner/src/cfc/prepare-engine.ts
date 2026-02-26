@@ -32,6 +32,14 @@ import { computeCfcSchemaHash } from "./schema-hash.ts";
 
 type EntityAddress = Pick<IMemorySpaceAddress, "space" | "id" | "type">;
 
+export interface PrepareBoundaryCommitOptions {
+  readonly allowSchemaHashMigration?: (
+    entity: EntityAddress,
+    expectedSchemaHash: string,
+    actualSchemaHash: string,
+  ) => boolean;
+}
+
 function entityKey(entity: EntityAddress): string {
   return `${entity.space}\u0000${entity.id}\u0000${entity.type}`;
 }
@@ -1400,6 +1408,7 @@ function verifyOutputTransitionsForAttempt(
 
 export async function prepareBoundaryCommit(
   tx: IExtendedStorageTransaction,
+  options: PrepareBoundaryCommitOptions = {},
 ): Promise<void> {
   const consumedReadLabels = verifyInputRequirementsForAttempt(tx);
   verifyOutputTransitionsForAttempt(tx, consumedReadLabels);
@@ -1407,6 +1416,7 @@ export async function prepareBoundaryCommit(
   const writtenEntities = collectWrittenEntities(tx);
   const hasIfcWriteReason = tx.cfcReasons.includes("ifc-write-schema");
   let enforcedSchemaHashCount = 0;
+  const schemaHashCache = new WeakMap<object, string>();
 
   if (hasIfcWriteReason) {
     for (const entity of writtenEntities) {
@@ -1419,7 +1429,11 @@ export async function prepareBoundaryCommit(
       }
       enforcedSchemaHashCount++;
 
-      const actualSchemaHash = await resolvePreparedSchemaHash(schema);
+      let actualSchemaHash = schemaHashCache.get(schema as object);
+      if (!actualSchemaHash) {
+        actualSchemaHash = await resolvePreparedSchemaHash(schema);
+        schemaHashCache.set(schema as object, actualSchemaHash);
+      }
       const address = schemaHashAddress(entity);
       const labels = computePreparedLabels(schema);
       const existingSchemaHash = tx.readOrThrow(address, {
@@ -1436,6 +1450,16 @@ export async function prepareBoundaryCommit(
         typeof existingSchemaHash !== "string" ||
         existingSchemaHash !== actualSchemaHash
       ) {
+        const allowMigration = options.allowSchemaHashMigration?.(
+          entity,
+          String(existingSchemaHash),
+          actualSchemaHash,
+        ) ?? false;
+        if (allowMigration) {
+          tx.writeOrThrow(address, actualSchemaHash);
+          tx.writeOrThrow(labelsAddress(entity), labels);
+          continue;
+        }
         throw CfcSchemaHashMismatchError(
           entity,
           String(existingSchemaHash),

@@ -4,6 +4,7 @@ import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { prepareCfcCommitIfNeeded } from "../src/cfc/prepare-shim.ts";
+import { prepareBoundaryCommit } from "../src/cfc/prepare-engine.ts";
 import { computeCfcSchemaHash } from "../src/cfc/schema-hash.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { URI } from "../src/storage/interface.ts";
@@ -270,5 +271,48 @@ describe("CFC prepare schema hash", () => {
     expect((thrown as { name?: string } | undefined)?.name).toBe(
       "CfcPrepareSchemaUnavailableError",
     );
+  });
+
+  it("allows schema hash migration when explicit hook authorizes it", async () => {
+    const id = runtime.getCell(space, "cfc-prepare-schemahash-migration-hook")
+      .getAsNormalizedFullLink().id;
+    const mismatchedSchemaHash = await computeCfcSchemaHash(
+      differentIfcObjectSchema,
+    );
+
+    const seedTx = runtime.edit();
+    seedTx.writeOrThrow({
+      space,
+      id,
+      type: "application/json",
+      path: ["value"],
+    }, { count: 0 });
+    seedTx.writeOrThrow({
+      space,
+      id,
+      type: "application/json",
+      path: ["cfc", "schemaHash"],
+    }, mismatchedSchemaHash);
+    const seeded = await seedTx.commit();
+    expect(seeded.error).toBeUndefined();
+
+    const tx = runtime.edit();
+    const cell = runtime.getCell<{ count: number }>(
+      space,
+      "cfc-prepare-schemahash-migration-hook",
+      ifcObjectSchema,
+      tx,
+    );
+    cell.set({ count: 1 });
+
+    await prepareBoundaryCommit(tx, {
+      allowSchemaHashMigration: () => true,
+    });
+    const { error } = await tx.commit();
+    expect(error).toBeUndefined();
+
+    const persistedSchemaHash = await readSchemaHash(id);
+    const expectedSchemaHash = await computeCfcSchemaHash(ifcObjectSchema);
+    expect(persistedSchemaHash).toBe(expectedSchemaHash);
   });
 });
