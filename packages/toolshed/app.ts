@@ -17,6 +17,7 @@ import shell from "@/routes/shell/shell.index.ts";
 import staticRoute from "@/routes/static/static.index.ts";
 import patterns from "@/routes/patterns/patterns.index.ts";
 import sandboxExec from "@/routes/sandbox/exec/exec.index.ts";
+import webhooks from "@/routes/webhooks/webhooks.index.ts";
 
 const app = createApp();
 
@@ -39,6 +40,7 @@ const routes = [
   staticRoute,
   patterns,
   sandboxExec,
+  webhooks,
 ] as const;
 
 routes.forEach((route) => {

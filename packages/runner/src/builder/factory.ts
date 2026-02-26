@@ -21,6 +21,7 @@ import {
   SELF,
   TYPE,
   UI,
+  WebhookConfigSchema,
 } from "./types.ts";
 import { h } from "@commontools/html";
 import { pattern } from "./pattern.ts";
@@ -140,6 +141,7 @@ export const createBuilder = (): {
       schema,
       toSchema,
       AuthSchema,
+      WebhookConfigSchema,
 
       // Render utils
       h,
