@@ -4,6 +4,10 @@ import { LRUCache } from "@commontools/utils/cache";
 import { canonicalHash } from "./canonical-hash.ts";
 import { sha256 } from "./hash-impl.ts";
 
+// ---------------------------------------------------------------------------
+// Public re-exports: narrowed subset of merkle-reference API
+// ---------------------------------------------------------------------------
+
 /**
  * Content identifier -- a hash-based reference to a value.
  *
