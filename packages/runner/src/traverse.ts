@@ -1952,33 +1952,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
           survivingBranches.push(optionSchema);
         }
 
-        // Layer 2: For object values with multiple surviving branches,
-        // try to merge branch schemas into a single object schema
-        if (
-          isRecord(doc.value) &&
-          survivingBranches.length >= 2
-        ) {
-          const mergedBranchSchema = mergeAnyOfBranchSchemas(
-            survivingBranches,
-            restSchema,
-          );
-          if (mergedBranchSchema !== null) {
-            this.anyOfPropertyMerges++;
-            this.anyOfBranches++;
-            const { ok: val, error } = this.traverseWithSchema(
-              doc,
-              mergedBranchSchema,
-              link,
-            );
-            if (error === undefined) {
-              return { ok: val };
-            }
-            // Merged schema failed — fall through to branch-by-branch
-          }
-        }
-
-        // Branch-by-branch fallback (also handles non-object values
-        // and cases where merge failed)
+        // Branch-by-branch traversal on surviving branches
         const matches: Immutable<StorableValue>[] = [];
         for (const optionSchema of survivingBranches) {
           this.anyOfBranches++;
@@ -2796,6 +2770,13 @@ export function canBranchMatch(
   // Never reject asCell/asStream branches
   if (branch.asCell || branch.asStream) return true;
 
+  // If the value is an object that could be a link/pointer, bail out entirely.
+  // Links are dereferenced during traversal, so the current shape of the value
+  // tells us nothing about the resolved type or properties.
+  if (isObject(value) && (isPrimitiveCellLink(value) || !isRecord(value))) {
+    return true;
+  }
+
   // Resolve top-level $ref if present
   let resolved: JSONSchema | undefined = branch;
   if ("$ref" in branch) {
@@ -2803,7 +2784,8 @@ export function canBranchMatch(
     if (resolved === undefined || !isObject(resolved)) return true;
   }
 
-  // Type mismatch check
+  // Type mismatch check — only safe for non-link primitive values and
+  // plain record objects / arrays
   if (resolved.type !== undefined) {
     const actualType = getJsonType(value);
     if (actualType !== null) {
@@ -2824,7 +2806,8 @@ export function canBranchMatch(
     if (!resolved.enum.some((e: unknown) => deepEqual(e, value))) return false;
   }
 
-  // For object values, check property-level discriminators and required fields
+  // For plain object values, check property-level discriminators and
+  // required fields.
   if (
     isRecord(value) &&
     (resolved.type === "object" || resolved.type === undefined)
