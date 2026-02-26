@@ -3,7 +3,8 @@ import { pattern, UI, VNode, } from "commontools";
 // Simulates `any` leaking through a generic function (like generateObject)
 declare function fetchAny(): any;
 // Case 1: Explicit Output type overrides inferred `any` return
-export const TypedFromAny = pattern(({ prompt }) => {
+export const TypedFromAny = pattern((__ct_pattern_input) => {
+    const prompt = __ct_pattern_input.key("prompt");
     const result = fetchAny();
     return result?.title || prompt || "Untitled";
 }, {
@@ -21,7 +22,8 @@ export const TypedFromAny = pattern(({ prompt }) => {
 type Entry = {
     name: string;
 };
-export const TypedUIOutput = pattern(({ name }) => {
+export const TypedUIOutput = pattern((__ct_pattern_input) => {
+    const name = __ct_pattern_input.key("name");
     return {
         [UI]: (<div>{name}</div>),
     };
