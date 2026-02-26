@@ -424,6 +424,10 @@ export class RuntimeProcessor {
       // MAX_RECURSION_DEPTH when VNode trees reference other pieces.
       // Only apply this for cells without a meaningful schema — cells with
       // schemas produce resolved plain objects from validateAndTransform.
+      // TODO(CT-1271): Once all pattern callsites produce real result schemas
+      // (CTS now errors on `any`/`unknown` inference), remove this guard and
+      // replace with a console.error — hitting this path would then indicate
+      // a bug rather than a known limitation.
       const hasSchema = request.cell.schema &&
         typeof request.cell.schema === "object" &&
         Object.keys(request.cell.schema).length > 0;
