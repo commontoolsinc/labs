@@ -16,6 +16,7 @@ import {
   ManagedStorageTransaction,
   mergeAnyOfBranchSchemas,
   MapSet,
+  mergeAnyOfBranchSchemas,
   PointerCycleTracker,
   SchemaObjectTraverser,
 } from "../src/traverse.ts";
