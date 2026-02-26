@@ -74,7 +74,9 @@ describe("CFC commit-gated outbox", () => {
 
   it("delivers queued event after successful parent commit", async () => {
     const triggerStream = await createStreamCell("cfc-outbox-success-trigger");
-    const sideEffectStream = await createStreamCell("cfc-outbox-success-sidefx");
+    const sideEffectStream = await createStreamCell(
+      "cfc-outbox-success-sidefx",
+    );
     const delivered: unknown[] = [];
     let callbackStatus: string | undefined;
 

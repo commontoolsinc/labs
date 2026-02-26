@@ -34,7 +34,7 @@ describe("CFC dependency collection transactions", () => {
   });
 
   it("does not require prepare for read-only relevant dependency collection commits", async () => {
-    let tx = runtime.edit();
+    const tx = runtime.edit();
     const eventCell = runtime.getCell<number>(
       space,
       "cfc-no-prepare-dependency-event",

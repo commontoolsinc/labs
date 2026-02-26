@@ -5,7 +5,9 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 
-const signer = await Identity.fromPassphrase("cfc relevance from ifc schema read");
+const signer = await Identity.fromPassphrase(
+  "cfc relevance from ifc schema read",
+);
 const space = signer.did();
 
 const ifcNumberSchema = {

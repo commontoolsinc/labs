@@ -6,7 +6,9 @@ import { Runtime } from "../src/runtime.ts";
 import { prepareCfcCommitIfNeeded } from "../src/cfc/prepare-shim.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 
-const signer = await Identity.fromPassphrase("cfc policy preconf anywhere test");
+const signer = await Identity.fromPassphrase(
+  "cfc policy preconf anywhere test",
+);
 const space = signer.did();
 
 const secretSourceSchema = {
@@ -99,9 +101,12 @@ describe("CFC policy preConf anywhere opt-in", () => {
     await tx.commit();
 
     tx = runtime.edit();
-    const a = Number(secretSource.withTx(tx).asSchema(secretSourceSchema).get() ?? 0);
+    const a = Number(
+      secretSource.withTx(tx).asSchema(secretSourceSchema).get() ?? 0,
+    );
     const b = Number(
-      confidentialSource.withTx(tx).asSchema(confidentialSourceSchema).get() ?? 0,
+      confidentialSource.withTx(tx).asSchema(confidentialSourceSchema).get() ??
+        0,
     );
     target.withTx(tx).asSchema(anywherePolicySchema).set(a + b);
 

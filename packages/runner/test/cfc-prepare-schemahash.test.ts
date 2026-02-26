@@ -77,7 +77,10 @@ describe("CFC prepare schema hash", () => {
     await storageManager.close();
   });
 
-  async function readCfcPath(id: URI, path: readonly string[]): Promise<unknown> {
+  async function readCfcPath(
+    id: URI,
+    path: readonly string[],
+  ): Promise<unknown> {
     const tx = runtime.edit();
     const value = tx.readOrThrow({
       space,

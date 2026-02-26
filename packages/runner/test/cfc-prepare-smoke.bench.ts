@@ -56,7 +56,9 @@ Deno.bench(
 
     for (let index = 0; index < 50; index++) {
       const tx = runtime.edit();
-      const value = Number(source.withTx(tx).asSchema(ifcNumberSchema).get() ?? 0);
+      const value = Number(
+        source.withTx(tx).asSchema(ifcNumberSchema).get() ?? 0,
+      );
       target.withTx(tx).asSchema(ifcNumberSchema).set(value + index);
       await prepareCfcCommitIfNeeded(tx);
       await tx.commit();

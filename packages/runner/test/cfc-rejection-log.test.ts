@@ -1,9 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import {
-  isCfcCommitError,
-  toCfcRejectLog,
-} from "../src/cfc/rejection-log.ts";
+import { isCfcCommitError, toCfcRejectLog } from "../src/cfc/rejection-log.ts";
 
 describe("CFC rejection log sanitization", () => {
   it("returns undefined for non-CFC errors", () => {
@@ -74,8 +71,10 @@ describe("CFC rejection log sanitization", () => {
       maxConfidentialityCount: undefined,
       requiredIntegrityCount: undefined,
     });
-    expect((digestMismatch as Record<string, unknown>).expectedDigest).toBeUndefined();
-    expect((digestMismatch as Record<string, unknown>).actualDigest).toBeUndefined();
+    expect((digestMismatch as Record<string, unknown>).expectedDigest)
+      .toBeUndefined();
+    expect((digestMismatch as Record<string, unknown>).actualDigest)
+      .toBeUndefined();
 
     const schemaMismatch = toCfcRejectLog({
       name: "CfcSchemaHashMismatchError",

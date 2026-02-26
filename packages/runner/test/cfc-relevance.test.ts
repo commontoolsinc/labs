@@ -80,7 +80,7 @@ describe("CFC relevance detection", () => {
     tx.abort("test-complete");
   });
 
-  it("marks tx relevant on write-only IFC target path", async () => {
+  it("marks tx relevant on write-only IFC target path", () => {
     const tx = runtime.edit();
     const targetCell = runtime.getCell<number>(
       space,
@@ -126,7 +126,7 @@ describe("CFC relevance detection", () => {
   it("does not require prepare for read-only relevant dependency collection commits", async () => {
     runtime.scheduler.enablePullMode();
 
-    let tx = runtime.edit();
+    const tx = runtime.edit();
     const eventCell = runtime.getCell<number>(
       space,
       "cfc-relevance-dependency-event",

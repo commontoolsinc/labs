@@ -36,13 +36,19 @@ function hasIfcInObjectSchema(
   const additionalProperties = schema.additionalProperties;
   if (
     isObject(additionalProperties) &&
-    hasIfcInObjectSchema(additionalProperties as Record<string, unknown>, visited)
+    hasIfcInObjectSchema(
+      additionalProperties as Record<string, unknown>,
+      visited,
+    )
   ) {
     return true;
   }
 
   const items = schema.items;
-  if (isObject(items) && hasIfcInObjectSchema(items as Record<string, unknown>, visited)) {
+  if (
+    isObject(items) &&
+    hasIfcInObjectSchema(items as Record<string, unknown>, visited)
+  ) {
     return true;
   }
 

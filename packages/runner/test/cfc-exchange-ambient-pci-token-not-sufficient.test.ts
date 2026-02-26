@@ -61,8 +61,18 @@ describe("CFC exchange ambient pcI handling", () => {
 
   it("allows exchange rewrite when integrity evidence is value-derived", async () => {
     let tx = runtime.edit();
-    const source = runtime.getCell<number>(space, "cfc-exchange-pci-source", undefined, tx);
-    const target = runtime.getCell<number>(space, "cfc-exchange-pci-target", undefined, tx);
+    const source = runtime.getCell<number>(
+      space,
+      "cfc-exchange-pci-source",
+      undefined,
+      tx,
+    );
+    const target = runtime.getCell<number>(
+      space,
+      "cfc-exchange-pci-target",
+      undefined,
+      tx,
+    );
     source.set(10);
     target.set(0);
     tx.writeOrThrow({

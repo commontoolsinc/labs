@@ -3,8 +3,8 @@ import { deepEqual } from "@commontools/utils/deep-equal";
 import { ContextualFlowControl } from "../cfc.ts";
 import type {
   ICfcInputRequirementViolationError,
-  ICfcPolicyNonConvergenceError,
   ICfcOutputTransitionViolationError,
+  ICfcPolicyNonConvergenceError,
   ICfcPrepareSchemaUnavailableError,
   ICfcSchemaHashMismatchError,
   IExtendedStorageTransaction,
@@ -14,14 +14,14 @@ import type {
 import { computeCfcActivityDigest } from "./activity-digest.ts";
 import {
   type CanonicalBoundaryRead,
-  canonicalizeStoragePath,
   canonicalizeBoundaryActivity,
+  canonicalizeStoragePath,
 } from "./canonical-activity.ts";
 import { partitionConsumedBoundaryReads } from "./consumed-reads.ts";
 import {
   collectConsumedInputLabels,
-  type ConsumedReadWithEffectiveLabel,
   consumedReadEntityKey,
+  type ConsumedReadWithEffectiveLabel,
 } from "./consumed-input-labels.ts";
 import {
   internalVerifierReadMeta,
@@ -439,7 +439,9 @@ function computePreparedLabels(schema: JSONSchema): Record<string, Labels> {
     pushLabelsForPath(path, classification, integrity);
 
     const properties = (node as { properties?: unknown }).properties;
-    if (properties && typeof properties === "object" && !Array.isArray(properties)) {
+    if (
+      properties && typeof properties === "object" && !Array.isArray(properties)
+    ) {
       for (const [key, child] of Object.entries(properties)) {
         const childPath = appendCanonicalSegment(path, key);
         collect(
@@ -652,7 +654,9 @@ function findRequiredIntegrityCoherenceViolation(
       continue;
     }
     const actualIntegrity = label.integrity ?? [];
-    if (!integritySatisfiesRequiredIntegrity(actualIntegrity, requiredIntegrity)) {
+    if (
+      !integritySatisfiesRequiredIntegrity(actualIntegrity, requiredIntegrity)
+    ) {
       return { path, actualIntegrity };
     }
   }
@@ -662,7 +666,9 @@ function findRequiredIntegrityCoherenceViolation(
 function verifyInputRequirementsForAttempt(
   tx: IExtendedStorageTransaction,
 ): readonly ConsumedReadWithEffectiveLabel[] {
-  const { consumedReads } = partitionConsumedBoundaryReads(tx.journal.activity());
+  const { consumedReads } = partitionConsumedBoundaryReads(
+    tx.journal.activity(),
+  );
   const labelsByEntity = new Map<string, Record<string, Labels>>();
 
   for (const read of consumedReads) {
@@ -670,20 +676,28 @@ function verifyInputRequirementsForAttempt(
     if (labelsByEntity.has(key)) {
       continue;
     }
-    const rawLabels = tx.readOrThrow(readLabelsAddress({
-      space: read.space as IMemorySpaceAddress["space"],
-      id: read.id as IMemorySpaceAddress["id"],
-      type: read.type as IMemorySpaceAddress["type"],
-    }), {
-      meta: internalVerifierReadMeta,
-    });
+    const rawLabels = tx.readOrThrow(
+      readLabelsAddress({
+        space: read.space as IMemorySpaceAddress["space"],
+        id: read.id as IMemorySpaceAddress["id"],
+        type: read.type as IMemorySpaceAddress["type"],
+      }),
+      {
+        meta: internalVerifierReadMeta,
+      },
+    );
     labelsByEntity.set(key, normalizeLabelsByPath(rawLabels));
   }
 
-  const consumedReadLabels = collectConsumedInputLabels(consumedReads, labelsByEntity);
+  const consumedReadLabels = collectConsumedInputLabels(
+    consumedReads,
+    labelsByEntity,
+  );
   const cfc = new ContextualFlowControl();
   for (const consumed of consumedReadLabels) {
-    const maxConfidentiality = readMaxConfidentialityFromMeta(consumed.read.meta);
+    const maxConfidentiality = readMaxConfidentialityFromMeta(
+      consumed.read.meta,
+    );
     if (maxConfidentiality && maxConfidentiality.length > 0) {
       const actualClassification =
         consumed.effectiveLabel?.classification?.[0] ?? "unclassified";
@@ -704,8 +718,9 @@ function verifyInputRequirementsForAttempt(
 
     const requiredIntegrity = readRequiredIntegrityFromMeta(consumed.read.meta);
     if (requiredIntegrity && requiredIntegrity.length > 0) {
-      const labelsByPath = labelsByEntity.get(consumedReadEntityKey(consumed.read)) ??
-        {};
+      const labelsByPath =
+        labelsByEntity.get(consumedReadEntityKey(consumed.read)) ??
+          {};
       const coherenceViolation = findRequiredIntegrityCoherenceViolation(
         labelsByPath,
         consumed.read.path,
@@ -771,7 +786,9 @@ function effectiveWriteClassification(
   cfc: ContextualFlowControl,
 ): string {
   const rootClassification = cfc.lubSchema(rootSchema);
-  const writeClassification = writeSchema ? cfc.lubSchema(writeSchema) : undefined;
+  const writeClassification = writeSchema
+    ? cfc.lubSchema(writeSchema)
+    : undefined;
 
   if (rootClassification && writeClassification) {
     try {
@@ -840,7 +857,9 @@ type StatePreconditionSpec = {
   readonly predicate?: string;
 };
 
-function readProjection(schema: JSONSchema | undefined): ProjectionSpec | undefined {
+function readProjection(
+  schema: JSONSchema | undefined,
+): ProjectionSpec | undefined {
   if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
     return undefined;
   }
@@ -1018,10 +1037,11 @@ function readStatePrecondition(
     )
     ? (rawPrecondition as { path: string }).path
     : undefined;
-  const predicate = typeof (rawPrecondition as { predicate?: unknown }).predicate ===
-      "string"
-    ? (rawPrecondition as { predicate: string }).predicate
-    : undefined;
+  const predicate =
+    typeof (rawPrecondition as { predicate?: unknown }).predicate ===
+        "string"
+      ? (rawPrecondition as { predicate: string }).predicate
+      : undefined;
   const equals = (rawPrecondition as { equals?: unknown }).equals;
 
   if (
@@ -1450,7 +1470,9 @@ function collectPolicyRulesFromRaw(
 
   const rawFuel = normalizePolicyFuel((rawConfig as { fuel?: unknown }).fuel);
   if (rawFuel !== undefined) {
-    fuel.value = fuel.value === undefined ? rawFuel : Math.min(fuel.value, rawFuel);
+    fuel.value = fuel.value === undefined
+      ? rawFuel
+      : Math.min(fuel.value, rawFuel);
   }
 
   const nestedRules = (rawConfig as { rules?: unknown }).rules;
@@ -1518,9 +1540,11 @@ function buildPolicyLabelFromConsumedReads(
 
   for (const consumed of consumedReadLabels) {
     const clause = toStringArray(consumed.effectiveLabel?.classification);
-    confidentiality.push(clause.length > 0 ? [...new Set(clause)] : [
-      "unclassified",
-    ]);
+    confidentiality.push(
+      clause.length > 0 ? [...new Set(clause)] : [
+        "unclassified",
+      ],
+    );
     for (const atom of toStringArray(consumed.effectiveLabel?.integrity)) {
       integrity.add(atom);
     }
@@ -1645,12 +1669,23 @@ function applyPolicyRuleOnce(
   if (!policyRuleIntegrityMatches(label, rule)) {
     return { changed: false, label };
   }
-  if (!evaluatePolicyReleaseCondition(rule.releaseCondition, tx, entity, writePath)) {
+  if (
+    !evaluatePolicyReleaseCondition(
+      rule.releaseCondition,
+      tx,
+      entity,
+      writePath,
+    )
+  ) {
     return { changed: false, label };
   }
 
   const target = rule.confidentialityPre[0];
-  for (let clauseIndex = 0; clauseIndex < label.confidentiality.length; clauseIndex++) {
+  for (
+    let clauseIndex = 0;
+    clauseIndex < label.confidentiality.length;
+    clauseIndex++
+  ) {
     if (!policyRuleConfidentialityMatches(label, clauseIndex, rule)) {
       continue;
     }
@@ -1662,7 +1697,9 @@ function applyPolicyRuleOnce(
 
     if (rule.removeMatchedClauses && rule.addAlternatives.length === 0) {
       clause.splice(targetIndex, 1);
-      const nextConfidentiality = label.confidentiality.map((entry) => [...entry]);
+      const nextConfidentiality = label.confidentiality.map((
+        entry,
+      ) => [...entry]);
       if (clause.length === 0) {
         nextConfidentiality.splice(clauseIndex, 1);
       } else {
@@ -1684,15 +1721,19 @@ function applyPolicyRuleOnce(
         clauseChanged = true;
       }
     }
-    const nextIntegrity = addPolicyIntegrity(label.integrity, rule.addIntegrity);
-    const integrityChanged =
-      nextIntegrity.length !== label.integrity.length ||
+    const nextIntegrity = addPolicyIntegrity(
+      label.integrity,
+      rule.addIntegrity,
+    );
+    const integrityChanged = nextIntegrity.length !== label.integrity.length ||
       nextIntegrity.some((atom, index) => atom !== label.integrity[index]);
     if (!clauseChanged && !integrityChanged) {
       continue;
     }
 
-    const nextConfidentiality = label.confidentiality.map((entry) => [...entry]);
+    const nextConfidentiality = label.confidentiality.map((
+      entry,
+    ) => [...entry]);
     nextConfidentiality[clauseIndex] = clause;
     return {
       changed: true,
@@ -1789,7 +1830,11 @@ function evaluatePolicyDowngradeDecision(
     return { allowed: false, nonConverged: true, fuel: policyResult.fuel };
   }
   return {
-    allowed: policyAllowsClassification(policyResult.label, outputClassification, cfc),
+    allowed: policyAllowsClassification(
+      policyResult.label,
+      outputClassification,
+      cfc,
+    ),
     nonConverged: false,
     fuel: policyResult.fuel,
   };
@@ -1805,7 +1850,10 @@ function verifyOutputTransitionsForAttempt(
     return;
   }
   const cfc = new ContextualFlowControl();
-  const minClassification = strongestConsumedClassification(consumedReadLabels, cfc);
+  const minClassification = strongestConsumedClassification(
+    consumedReadLabels,
+    cfc,
+  );
 
   for (const write of canonical.finalAttemptedWrites) {
     const entity: EntityAddress = {
@@ -1944,7 +1992,10 @@ function verifyOutputTransitionsForAttempt(
           consumedReadLabels,
           collection.subsetOf,
         );
-        if (!sourceArray || !outputArray || !isSubsetMultiset(sourceArray, outputArray)) {
+        if (
+          !sourceArray || !outputArray ||
+          !isSubsetMultiset(sourceArray, outputArray)
+        ) {
           throw CfcOutputCollectionViolationError(
             entity,
             write.path,
@@ -1979,7 +2030,10 @@ function verifyOutputTransitionsForAttempt(
           consumedReadLabels,
           collection.filteredFrom,
         );
-        if (!sourceArray || !outputArray || !isSubsetMultiset(sourceArray, outputArray)) {
+        if (
+          !sourceArray || !outputArray ||
+          !isSubsetMultiset(sourceArray, outputArray)
+        ) {
           throw CfcOutputCollectionViolationError(
             entity,
             write.path,
@@ -1994,7 +2048,10 @@ function verifyOutputTransitionsForAttempt(
         const sourceArray = sourcePath
           ? readConsumedArraySource(tx, consumedReadLabels, sourcePath)
           : undefined;
-        if (!sourceArray || !outputArray || sourceArray.length !== outputArray.length) {
+        if (
+          !sourceArray || !outputArray ||
+          sourceArray.length !== outputArray.length
+        ) {
           throw CfcOutputCollectionViolationError(
             entity,
             write.path,
@@ -2010,8 +2067,14 @@ function verifyOutputTransitionsForAttempt(
       // The declaration is consumed for verification-side structure checks.
       void recompose.baseIntegrityType;
 
-      const outputObjectValue = readValueAtCanonicalPath(tx, entity, write.path);
-      if (!verifyRecomposeCoverage(outputObjectValue, write.path, recompose.parts)) {
+      const outputObjectValue = readValueAtCanonicalPath(
+        tx,
+        entity,
+        write.path,
+      );
+      if (
+        !verifyRecomposeCoverage(outputObjectValue, write.path, recompose.parts)
+      ) {
         throw CfcOutputRecomposeProjectionsViolationError(
           entity,
           write.path,
@@ -2033,7 +2096,10 @@ function verifyOutputTransitionsForAttempt(
       }
 
       for (const part of recompose.parts) {
-        const expected = valueAtCanonicalPath(source.value, part.projectionPath);
+        const expected = valueAtCanonicalPath(
+          source.value,
+          part.projectionPath,
+        );
         const actual = readValueAtCanonicalPath(tx, entity, part.outputPath);
         if (!deepEqual(expected, actual)) {
           throw CfcOutputRecomposeProjectionsViolationError(
@@ -2057,13 +2123,19 @@ export async function prepareBoundaryCommit(
     ? await resolvePreparedWriteSchemas(tx, writtenEntities, options)
     : [];
 
-  if (hasIfcWriteReason && writtenEntities.length > 0 && preparedWriteSchemas.length === 0) {
+  if (
+    hasIfcWriteReason && writtenEntities.length > 0 &&
+    preparedWriteSchemas.length === 0
+  ) {
     throw CfcPrepareSchemaUnavailableError(writtenEntities[0]);
   }
 
   const preparedRootSchemasByEntity = new Map<string, JSONSchema>();
   for (const prepared of preparedWriteSchemas) {
-    preparedRootSchemasByEntity.set(entityKey(prepared.entity), prepared.schema);
+    preparedRootSchemasByEntity.set(
+      entityKey(prepared.entity),
+      prepared.schema,
+    );
   }
 
   const consumedReadLabels = verifyInputRequirementsForAttempt(tx);

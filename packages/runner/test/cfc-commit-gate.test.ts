@@ -92,7 +92,9 @@ describe("CFC commit gate", () => {
     expect(initialWrite.error).toBeUndefined();
 
     tx.markCfcRelevant("prepared-mismatch");
-    const preparedDigest = await computeCfcActivityDigest(tx.journal.activity());
+    const preparedDigest = await computeCfcActivityDigest(
+      tx.journal.activity(),
+    );
     tx.markCfcPrepared(preparedDigest);
 
     const postPrepareWrite = tx.write({
@@ -217,8 +219,14 @@ describe("computeCfcActivityDigest", () => {
       },
     };
 
-    const digestA = await computeCfcActivityDigest([readActivity, writeActivity]);
-    const digestB = await computeCfcActivityDigest([writeActivity, readActivity]);
+    const digestA = await computeCfcActivityDigest([
+      readActivity,
+      writeActivity,
+    ]);
+    const digestB = await computeCfcActivityDigest([
+      writeActivity,
+      readActivity,
+    ]);
     expect(digestA).not.toBe(digestB);
   });
 });

@@ -61,8 +61,18 @@ describe("CFC declassify ambient pcI handling", () => {
 
   it("allows declassification when required integrity evidence is value-derived", async () => {
     let tx = runtime.edit();
-    const source = runtime.getCell<number>(space, "cfc-declassify-pci-source", undefined, tx);
-    const target = runtime.getCell<number>(space, "cfc-declassify-pci-target", undefined, tx);
+    const source = runtime.getCell<number>(
+      space,
+      "cfc-declassify-pci-source",
+      undefined,
+      tx,
+    );
+    const target = runtime.getCell<number>(
+      space,
+      "cfc-declassify-pci-target",
+      undefined,
+      tx,
+    );
     source.set(10);
     target.set(0);
     tx.writeOrThrow({
