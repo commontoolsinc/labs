@@ -215,6 +215,30 @@ const GTDProjects = pattern<ProjectsInput, ProjectsOutput>(
       selectedItem.set("");
     });
 
+    // Helper: find completed directives targeting a project by name
+    const directivesForProject = (
+      projectName: string,
+      allDirectives: Directive[],
+    ): Directive[] => {
+      return allDirectives.filter((d: Directive) => {
+        if (!d || d.status !== "done" || !d.response) return false;
+        const m = d.text.match(/^Re:\s*(.+?)\s*—/);
+        return m && m[1] === projectName;
+      });
+    };
+
+    // Action: drill into a directive response
+    const drillIntoDirective = action(
+      ({ directiveId }: { directiveId: string }) => {
+        const crumbs = [...(projectBreadcrumbs.get() || [])];
+        crumbs.push("DIR:" + directiveId + "|" + directiveId);
+        projectBreadcrumbs.set(crumbs);
+        selectedItem.set("");
+        itemDirectiveOpen.set(false);
+        itemDirectiveDraft.set("");
+      },
+    );
+
     // --- Render ---
 
     return {
@@ -254,6 +278,11 @@ const GTDProjects = pattern<ProjectsInput, ProjectsOutput>(
               for (const p of projectItems) {
                 knownIds.add(p.id);
                 if (p.parentId) knownIds.add(p.parentId);
+              }
+              // Also add directive IDs as known
+              const allDirs: Directive[] = [...(directives.get() || [])];
+              for (const d of allDirs) {
+                if (d && d.id) knownIds.add("DIR:" + d.id);
               }
               let crumbs = crumbStrs.map((s: string) => {
                 const bar = s.indexOf("|");
@@ -352,17 +381,17 @@ const GTDProjects = pattern<ProjectsInput, ProjectsOutput>(
                               })
                             }
                           >
-                            {c.name}
+                            {c.id.startsWith("DIR:") ? c.id.replace("DIR:", "") : c.name}
                           </span>
                         ) : (
                           <span
                             style={{
                               fontSize: "13px",
                               fontWeight: "600",
-                              color: color.label,
+                              color: c.id.startsWith("DIR:") ? color.indigo : color.label,
                             }}
                           >
-                            {c.name}
+                            {c.id.startsWith("DIR:") ? c.id.replace("DIR:", "") : c.name}
                           </span>
                         )}
                       </span>
@@ -374,6 +403,7 @@ const GTDProjects = pattern<ProjectsInput, ProjectsOutput>(
             {computed(() => {
               const projectItems = [...(projects.get() || [])] as Project[];
               const peopleItems = [...(people.get() || [])] as Person[];
+              const allDirectives: Directive[] = [...(directives.get() || [])];
               const crumbStrs2 = projectBreadcrumbs.get() || [];
               let crumbs = crumbStrs2.map((s: string) => {
                 const bar = s.indexOf("|");
@@ -385,14 +415,11 @@ const GTDProjects = pattern<ProjectsInput, ProjectsOutput>(
 
               // Build project name -> noteUrl lookup from directives
               const projectNotes: Record<string, string> = {};
-              const allDirs: Directive[] = [
-                ...(directives.get() || []),
-              ].filter(
-                (d: Directive) => d && d.id && d.noteUrl,
-              );
-              for (const d of allDirs) {
-                const m = d.text.match(/^Re:\s*(.+?)\s*—/);
-                if (m) projectNotes[m[1]] = d.noteUrl;
+              for (const d of allDirectives) {
+                if (d && d.id && d.noteUrl) {
+                  const m = d.text.match(/^Re:\s*(.+?)\s*—/);
+                  if (m) projectNotes[m[1]] = d.noteUrl;
+                }
               }
 
               if (projectItems.length === 0) {
@@ -436,6 +463,10 @@ const GTDProjects = pattern<ProjectsInput, ProjectsOutput>(
                   }
                 }
               }
+              // Also add directive IDs as known
+              for (const d of allDirectives) {
+                if (d && d.id) knownIds.add("DIR:" + d.id);
+              }
 
               // Validate breadcrumbs: if any crumb ID doesn't
               // exist in the current data, treat as root level
@@ -448,6 +479,133 @@ const GTDProjects = pattern<ProjectsInput, ProjectsOutput>(
                 }
               }
 
+              // Check if last breadcrumb is a directive detail view
+              if (crumbs.length > 0 && crumbs[crumbs.length - 1].id.startsWith("DIR:")) {
+                const dirId = crumbs[crumbs.length - 1].id.replace("DIR:", "");
+                const dir = allDirectives.find((d: Directive) => d.id === dirId);
+                if (!dir) {
+                  return (
+                    <div style={{ fontSize: "13px", color: color.tertiaryLabel, padding: "12px 0" }}>
+                      Directive not found
+                    </div>
+                  );
+                }
+                // Extract the question part (after "Re: ProjectName — ")
+                const questionMatch = dir.text.match(/^Re:\s*.+?\s*—\s*(.+)$/);
+                const question = questionMatch ? questionMatch[1] : dir.text;
+                const dateStr = dir.createdAt
+                  ? new Date(dir.createdAt).toLocaleDateString("en-US", {
+                      month: "short",
+                      day: "numeric",
+                      year: "numeric",
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })
+                  : "";
+                return (
+                  <div style={{ padding: "4px 0" }}>
+                    {/* Directive header */}
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                        marginBottom: "12px",
+                      }}
+                    >
+                      <span
+                        style={{
+                          padding: "2px 8px",
+                          borderRadius: "6px",
+                          fontSize: "11px",
+                          fontWeight: "600",
+                          background: "rgba(88, 86, 214, 0.12)",
+                          color: color.indigo,
+                        }}
+                      >
+                        {dir.id}
+                      </span>
+                      <span style={{ fontSize: "12px", color: color.secondaryLabel }}>
+                        {dateStr}
+                      </span>
+                    </div>
+                    {/* Question */}
+                    <div style={{ marginBottom: "16px" }}>
+                      <div
+                        style={{
+                          fontSize: "11px",
+                          fontWeight: "600",
+                          textTransform: "uppercase" as const,
+                          color: color.secondaryLabel,
+                          letterSpacing: "0.5px",
+                          marginBottom: "6px",
+                        }}
+                      >
+                        Asked
+                      </div>
+                      <div
+                        style={{
+                          fontSize: "14px",
+                          lineHeight: "1.5",
+                          color: color.label,
+                          background: color.fillPrimary,
+                          borderRadius: "8px",
+                          padding: "10px 12px",
+                        }}
+                      >
+                        {question}
+                      </div>
+                    </div>
+                    {/* Response */}
+                    <div style={{ marginBottom: "12px" }}>
+                      <div
+                        style={{
+                          fontSize: "11px",
+                          fontWeight: "600",
+                          textTransform: "uppercase" as const,
+                          color: color.secondaryLabel,
+                          letterSpacing: "0.5px",
+                          marginBottom: "6px",
+                        }}
+                      >
+                        Response
+                      </div>
+                      <div
+                        style={{
+                          fontSize: "14px",
+                          lineHeight: "1.6",
+                          color: color.label,
+                          whiteSpace: "pre-wrap" as const,
+                        }}
+                      >
+                        {dir.response}
+                      </div>
+                    </div>
+                    {/* Note link */}
+                    {dir.noteUrl ? (
+                      <a
+                        href={dir.noteUrl}
+                        target="_blank"
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "6px",
+                          fontSize: "13px",
+                          color: color.blue,
+                          textDecoration: "none",
+                          padding: "6px 12px",
+                          borderRadius: "8px",
+                          background: "rgba(0, 122, 255, 0.08)",
+                          cursor: "pointer",
+                        }}
+                      >
+                        {"📎 View attached note"}
+                      </a>
+                    ) : null}
+                  </div>
+                );
+              }
+
               // Determine visible items at current breadcrumb depth
               let visibleItems: {
                 type: string;
@@ -457,6 +615,9 @@ const GTDProjects = pattern<ProjectsInput, ProjectsOutput>(
                 idx: number;
                 hasChildren: boolean;
               }[] = [];
+
+              // Find the current project name for directive matching
+              let currentProjectName = "";
 
               if (crumbs.length === 0) {
                 // Root level: person groups + top-level projects
@@ -488,13 +649,15 @@ const GTDProjects = pattern<ProjectsInput, ProjectsOutput>(
                     const hasKids =
                       (visibleChildrenOf[p.id] || []).length >
                       0;
+                    // Check if this project has directives
+                    const projDirs = directivesForProject(p.name, allDirectives);
                     visibleItems.push({
                       type: "project",
                       id: p.id,
                       name: p.name,
                       project: p,
                       idx,
-                      hasChildren: hasKids,
+                      hasChildren: hasKids || projDirs.length > 0,
                     });
                   }
                 }
@@ -502,6 +665,12 @@ const GTDProjects = pattern<ProjectsInput, ProjectsOutput>(
                 // Drilled into a node — show its children
                 const currentId =
                   crumbs[crumbs.length - 1].id;
+                // Look up the project name for directive matching
+                const currentProject = projectItems.find(
+                  (p: Project) => p.id === currentId,
+                );
+                currentProjectName = currentProject ? currentProject.name : "";
+
                 const children =
                   childrenOf[currentId] || [];
                 for (const child of children) {
@@ -514,18 +683,26 @@ const GTDProjects = pattern<ProjectsInput, ProjectsOutput>(
                   const hasKids =
                     (visibleChildrenOf[child.id] || [])
                       .length > 0;
+                  const childDirs = directivesForProject(child.name, allDirectives);
                   visibleItems.push({
                     type: "project",
                     id: child.id,
                     name: child.name,
                     project: child,
                     idx,
-                    hasChildren: hasKids,
+                    hasChildren: hasKids || childDirs.length > 0,
                   });
                 }
               }
 
-              if (visibleItems.length === 0) {
+              // Get directives for the current drilled-in project
+              const currentDirs = currentProjectName
+                ? directivesForProject(currentProjectName, allDirectives)
+                : [];
+
+              const hasContent = visibleItems.length > 0 || currentDirs.length > 0;
+
+              if (!hasContent) {
                 return (
                   <div
                     style={{
@@ -539,241 +716,348 @@ const GTDProjects = pattern<ProjectsInput, ProjectsOutput>(
                 );
               }
 
-              return visibleItems.map(
-                (item: {
-                  type: string;
-                  id: string;
-                  name: string;
-                  project: Project | null;
-                  idx: number;
-                  hasChildren: boolean;
-                }) => {
-                  if (item.type === "person") {
-                    return (
-                      <div
-                        style={{
-                          ...itemRowStyle,
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "10px",
-                          cursor: "pointer",
-                        }}
-                        onClick={() =>
-                          drillIntoProject.send({
-                            id: item.id,
-                            name: item.name,
-                          })
-                        }
-                      >
-                        <span
-                          style={{
-                            fontSize: "13px",
-                            fontWeight: "600",
-                            color: color.purple,
-                            flex: "1",
-                          }}
-                        >
-                          {item.name}
-                        </span>
-                        <span
-                          style={{
-                            fontSize: "11px",
-                            color: color.tertiaryLabel,
-                          }}
-                        >
-                          {(
-                            visibleChildrenOf[item.id] || []
-                          ).length + " items"}
-                        </span>
-                        <span
-                          style={{
-                            fontSize: "14px",
-                            color: color.tertiaryLabel,
-                            flexShrink: "0",
-                          }}
-                        >
-                          {">"}
-                        </span>
-                      </div>
-                    );
-                  }
-
-                  // Project row
-                  const p = item.project!;
-                  const idx = item.idx;
-                  return (
-                    <div>
-                      <div
-                        style={computed(() =>
-                          selectedItem.get() ===
-                          "projects:" + idx
-                            ? {
-                                ...itemRowStyle,
-                                display: "flex",
-                                alignItems: "center",
-                                gap: "0px",
-                                cursor: "pointer",
-                                background:
-                                  "rgba(0, 122, 255, 0.06)",
-                                borderRadius: "8px",
-                                padding: "8px",
-                              }
-                            : {
-                                ...itemRowStyle,
-                                display: "flex",
-                                alignItems: "center",
-                                gap: "0px",
-                                cursor: "pointer",
-                              },
-                        )}
-                      >
-                        {/* Item content — click to select */}
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "10px",
-                            flex: "1",
-                            cursor: "pointer",
-                          }}
-                          onClick={() =>
-                            selectItem.send({
-                              key: "projects:" + idx,
-                            })
-                          }
-                        >
-                          <span
-                            style={{
-                              fontSize: "12px",
-                              color: color.tertiaryLabel,
-                              fontWeight: "500",
-                              minWidth: "32px",
-                              flexShrink: "0",
-                            }}
-                          >
-                            {p.id}
-                          </span>
-                          <span style={{ flex: "1" }}>
-                            {p.name}
-                          </span>
-                          <span
-                            style={{
-                              padding: "2px 10px",
-                              borderRadius: "100px",
-                              fontSize: "11px",
-                              fontWeight: "500",
-                              background:
-                                p.status === "Active"
-                                  ? "rgba(52, 199, 89, 0.12)"
-                                  : p.status === "Done"
-                                    ? "rgba(142, 142, 147, 0.12)"
-                                    : "rgba(255, 149, 0, 0.12)",
-                              color:
-                                p.status === "Active"
-                                  ? "#34c759"
-                                  : p.status === "Done"
-                                    ? "#8e8e93"
-                                    : "#ff9500",
-                              flexShrink: "0",
-                            }}
-                          >
-                            {p.status}
-                          </span>
-                        </div>
-                        {projectNotes[p.name] ? (
-                          <a
-                            href={projectNotes[p.name]}
-                            target="_blank"
-                            style={{
-                              textDecoration: "none",
-                              fontSize: "16px",
-                              flexShrink: "0",
-                              cursor: "pointer",
-                              marginLeft: "4px",
-                            }}
-                          >
-                            {"📎"}
-                          </a>
-                        ) : null}
-                        {/* Drill-in chevron */}
-                        {item.hasChildren ? (
+              return (
+                <div>
+                  {visibleItems.map(
+                    (item: {
+                      type: string;
+                      id: string;
+                      name: string;
+                      project: Project | null;
+                      idx: number;
+                      hasChildren: boolean;
+                    }) => {
+                      if (item.type === "person") {
+                        return (
                           <div
                             style={{
-                              padding: "4px 0 4px 8px",
+                              ...itemRowStyle,
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "10px",
                               cursor: "pointer",
-                              flexShrink: "0",
                             }}
                             onClick={() =>
                               drillIntoProject.send({
                                 id: item.id,
-                                name: p.name,
+                                name: item.name,
                               })
                             }
                           >
                             <span
                               style={{
+                                fontSize: "13px",
+                                fontWeight: "600",
+                                color: color.purple,
+                                flex: "1",
+                              }}
+                            >
+                              {item.name}
+                            </span>
+                            <span
+                              style={{
+                                fontSize: "11px",
+                                color: color.tertiaryLabel,
+                              }}
+                            >
+                              {(
+                                visibleChildrenOf[item.id] || []
+                              ).length + " items"}
+                            </span>
+                            <span
+                              style={{
                                 fontSize: "14px",
                                 color: color.tertiaryLabel,
+                                flexShrink: "0",
                               }}
                             >
                               {">"}
                             </span>
                           </div>
-                        ) : null}
-                      </div>
-                      {ifElse(
-                        computed(
-                          () =>
-                            selectedItem.get() ===
-                            "projects:" + idx,
-                        ),
+                        );
+                      }
+
+                      // Project row
+                      const p = item.project!;
+                      const idx = item.idx;
+                      return (
                         <div>
                           <div
-                            style={{
-                              display: "flex",
-                              gap: "8px",
-                              padding: "6px 0 8px",
-                            }}
+                            style={computed(() =>
+                              selectedItem.get() ===
+                              "projects:" + idx
+                                ? {
+                                    ...itemRowStyle,
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: "0px",
+                                    cursor: "pointer",
+                                    background:
+                                      "rgba(0, 122, 255, 0.06)",
+                                    borderRadius: "8px",
+                                    padding: "8px",
+                                  }
+                                : {
+                                    ...itemRowStyle,
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: "0px",
+                                    cursor: "pointer",
+                                  },
+                            )}
                           >
+                            {/* Item content — click to select */}
                             <div
-                              style={actionBtnDirective}
-                              onClick={openItemDirective}
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "10px",
+                                flex: "1",
+                                cursor: "pointer",
+                              }}
+                              onClick={() =>
+                                selectItem.send({
+                                  key: "projects:" + idx,
+                                })
+                              }
                             >
-                              → Directive
+                              <span
+                                style={{
+                                  fontSize: "12px",
+                                  color: color.tertiaryLabel,
+                                  fontWeight: "500",
+                                  minWidth: "32px",
+                                  flexShrink: "0",
+                                }}
+                              >
+                                {p.id}
+                              </span>
+                              <span style={{ flex: "1" }}>
+                                {p.name}
+                              </span>
+                              <span
+                                style={{
+                                  padding: "2px 10px",
+                                  borderRadius: "100px",
+                                  fontSize: "11px",
+                                  fontWeight: "500",
+                                  background:
+                                    p.status === "Active"
+                                      ? "rgba(52, 199, 89, 0.12)"
+                                      : p.status === "Done"
+                                        ? "rgba(142, 142, 147, 0.12)"
+                                        : "rgba(255, 149, 0, 0.12)",
+                                  color:
+                                    p.status === "Active"
+                                      ? "#34c759"
+                                      : p.status === "Done"
+                                        ? "#8e8e93"
+                                        : "#ff9500",
+                                  flexShrink: "0",
+                                }}
+                              >
+                                {p.status}
+                              </span>
                             </div>
+                            {projectNotes[p.name] ? (
+                              <a
+                                href={projectNotes[p.name]}
+                                target="_blank"
+                                style={{
+                                  textDecoration: "none",
+                                  fontSize: "16px",
+                                  flexShrink: "0",
+                                  cursor: "pointer",
+                                  marginLeft: "4px",
+                                }}
+                              >
+                                {"📎"}
+                              </a>
+                            ) : null}
+                            {/* Drill-in chevron */}
+                            {item.hasChildren ? (
+                              <div
+                                style={{
+                                  padding: "4px 0 4px 8px",
+                                  cursor: "pointer",
+                                  flexShrink: "0",
+                                }}
+                                onClick={() =>
+                                  drillIntoProject.send({
+                                    id: item.id,
+                                    name: p.name,
+                                  })
+                                }
+                              >
+                                <span
+                                  style={{
+                                    fontSize: "14px",
+                                    color: color.tertiaryLabel,
+                                  }}
+                                >
+                                  {">"}
+                                </span>
+                              </div>
+                            ) : null}
                           </div>
                           {ifElse(
-                            computed(() =>
-                              itemDirectiveOpen.get(),
+                            computed(
+                              () =>
+                                selectedItem.get() ===
+                                "projects:" + idx,
                             ),
-                            <div
-                              style={directiveInputRowStyle}
-                            >
-                              <ct-textarea
-                                $value={itemDirectiveDraft}
-                                placeholder="Directive about this project..."
-                                rows={1}
-                                style={{
-                                  flex: "1",
-                                  borderRadius: "10px",
-                                  fontSize: "14px",
-                                }}
-                              />
+                            <div>
                               <div
-                                style={directiveSendBtnStyle}
-                                onClick={sendItemDirective}
+                                style={{
+                                  display: "flex",
+                                  gap: "8px",
+                                  padding: "6px 0 8px",
+                                }}
                               >
-                                Send
+                                <div
+                                  style={actionBtnDirective}
+                                  onClick={openItemDirective}
+                                >
+                                  → Directive
+                                </div>
                               </div>
+                              {ifElse(
+                                computed(() =>
+                                  itemDirectiveOpen.get(),
+                                ),
+                                <div
+                                  style={directiveInputRowStyle}
+                                >
+                                  <ct-textarea
+                                    $value={itemDirectiveDraft}
+                                    placeholder="Directive about this project..."
+                                    rows={1}
+                                    style={{
+                                      flex: "1",
+                                      borderRadius: "10px",
+                                      fontSize: "14px",
+                                    }}
+                                  />
+                                  <div
+                                    style={directiveSendBtnStyle}
+                                    onClick={sendItemDirective}
+                                  >
+                                    Send
+                                  </div>
+                                </div>,
+                                null,
+                              )}
                             </div>,
                             null,
                           )}
-                        </div>,
-                        null,
-                      )}
+                        </div>
+                      );
+                    },
+                  )}
+                  {/* Directive responses section — only when drilled into a project */}
+                  {currentDirs.length > 0 ? (
+                    <div style={{ marginTop: "4px" }}>
+                      <div style={{ ...groupHeaderStyle, padding: "10px 0 6px" }}>
+                        Responses ({currentDirs.length})
+                      </div>
+                      {currentDirs.map((d: Directive) => {
+                        const questionMatch = d.text.match(/^Re:\s*.+?\s*—\s*(.+)$/);
+                        const question = questionMatch ? questionMatch[1] : d.text;
+                        const truncatedResponse =
+                          d.response.length > 120
+                            ? d.response.substring(0, 120) + "..."
+                            : d.response;
+                        const dateStr = d.createdAt
+                          ? new Date(d.createdAt).toLocaleDateString("en-US", {
+                              month: "short",
+                              day: "numeric",
+                            })
+                          : "";
+                        return (
+                          <div
+                            style={{
+                              ...itemRowStyle,
+                              display: "flex",
+                              alignItems: "flex-start",
+                              gap: "10px",
+                              cursor: "pointer",
+                            }}
+                            onClick={() =>
+                              drillIntoDirective.send({
+                                directiveId: d.id,
+                              })
+                            }
+                          >
+                            <span
+                              style={{
+                                padding: "2px 6px",
+                                borderRadius: "4px",
+                                fontSize: "10px",
+                                fontWeight: "600",
+                                background: "rgba(88, 86, 214, 0.12)",
+                                color: color.indigo,
+                                flexShrink: "0",
+                                marginTop: "2px",
+                              }}
+                            >
+                              {d.id}
+                            </span>
+                            <div style={{ flex: "1", minWidth: "0" }}>
+                              <div
+                                style={{
+                                  fontSize: "13px",
+                                  fontWeight: "500",
+                                  color: color.label,
+                                  marginBottom: "2px",
+                                }}
+                              >
+                                {question}
+                              </div>
+                              <div
+                                style={{
+                                  fontSize: "12px",
+                                  color: color.secondaryLabel,
+                                  lineHeight: "1.4",
+                                }}
+                              >
+                                {truncatedResponse}
+                              </div>
+                            </div>
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "6px",
+                                flexShrink: "0",
+                                marginTop: "2px",
+                              }}
+                            >
+                              {d.noteUrl ? (
+                                <span style={{ fontSize: "14px" }}>{"📎"}</span>
+                              ) : null}
+                              <span
+                                style={{
+                                  fontSize: "11px",
+                                  color: color.tertiaryLabel,
+                                }}
+                              >
+                                {dateStr}
+                              </span>
+                              <span
+                                style={{
+                                  fontSize: "14px",
+                                  color: color.tertiaryLabel,
+                                }}
+                              >
+                                {">"}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
-                  );
-                },
+                  ) : null}
+                </div>
               );
             })}
           </div>
