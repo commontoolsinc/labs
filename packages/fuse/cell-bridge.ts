@@ -65,6 +65,10 @@ export class CellBridge {
   /** Guard against concurrent syncPieceList per space. */
   private syncing: Map<string, boolean> = new Map();
 
+  private startedAt = new Date().toISOString();
+  /** Inode of the .status file (created by initStatus). */
+  private statusIno: bigint | null = null;
+
   constructor(tree: FsTree) {
     this.tree = tree;
   }
@@ -75,6 +79,45 @@ export class CellBridge {
   }): void {
     this.apiUrl = config.apiUrl;
     this.identity = config.identity;
+  }
+
+  /** Create the .status file at the mount root. Call once after init. */
+  initStatus(): void {
+    this.statusIno = this.tree.addFile(
+      this.tree.rootIno,
+      ".status",
+      this.getStatusJson(),
+      "object",
+    );
+  }
+
+  /** Update the .status file content in the tree. */
+  private updateStatus(): void {
+    if (this.statusIno === null) return;
+    const node = this.tree.getNode(this.statusIno);
+    if (node?.kind === "file") {
+      node.content = new TextEncoder().encode(this.getStatusJson());
+    }
+  }
+
+  /** Generate current status as JSON. */
+  private getStatusJson(): string {
+    const spaces: Record<string, { did: string; pieces: number }> = {};
+    for (const [name, state] of this.spaces) {
+      spaces[name] = {
+        did: state.did,
+        pieces: state.pieceMap.size,
+      };
+    }
+    return JSON.stringify(
+      {
+        apiUrl: this.apiUrl,
+        startedAt: this.startedAt,
+        spaces,
+      },
+      null,
+      2,
+    );
   }
 
   /** Connect to a space and populate its tree. */
@@ -390,6 +433,7 @@ export class CellBridge {
     });
     state.unsubscribes.push(piecesListCancel);
 
+    this.updateStatus();
     return state;
   }
 
@@ -576,6 +620,7 @@ export class CellBridge {
     if (this.onInvalidateInode) {
       this.onInvalidateInode(state.piecesIno);
     }
+    this.updateStatus();
   }
 
   /** Update the pieces/.index.json file for a space. */

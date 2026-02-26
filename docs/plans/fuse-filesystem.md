@@ -163,7 +163,7 @@ hardcoded file. Validates that Deno FFI to libfuse works at all.
 - [ ] **4.1 Graceful degradation**
   - [ ] Serve stale cache on toolshed disconnect
   - [ ] Background reconnection
-  - [ ] `.status` virtual file at root
+  - [x] `.status` virtual file at root (apiUrl, startedAt, spaces + piece counts)
 - [ ] **4.2 Performance tuning**
   - [ ] Profile `getattr` latency (target <1ms from cache)
   - [ ] Consider kernel page cache (`-o auto_cache`) with active invalidation
@@ -180,7 +180,7 @@ hardcoded file. Validates that Deno FFI to libfuse works at all.
 - [ ] **4.5 Documentation**
   - [x] `packages/fuse/README.md` (210 lines — layout, usage, architecture)
   - [x] `ct fuse --help` with examples
-  - [ ] Troubleshooting: macFUSE/FUSE-T install, permissions, common errors
+  - [x] Troubleshooting: FUSE install, stale mounts, permissions, debug mode
 
 ---
 

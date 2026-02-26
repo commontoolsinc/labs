@@ -200,6 +200,87 @@ Writes are fire-and-forget: the FUSE reply is sent before the cell write
 completes, so subscription rebuilds don't block the callback chain (required to
 avoid FUSE-T crashes from `notify_inval_entry` during callbacks).
 
+## Troubleshooting
+
+### FUSE not found / `Could not open libfuse`
+
+Install a FUSE provider:
+
+```bash
+# FUSE-T (recommended — no kernel extension required)
+brew install fuse-t
+
+# or macFUSE (requires allowing a kernel extension in System Settings)
+brew install --cask macfuse
+```
+
+After installing macFUSE, go to **System Settings > Privacy & Security** and
+allow the kernel extension. A reboot may be required.
+
+### Mount point is not empty / stale mount
+
+If a previous FUSE process crashed, the mount point may be stale:
+
+```bash
+umount /tmp/ct          # macOS
+# or
+fusermount -u /tmp/ct   # Linux
+
+# If umount fails with "not currently mounted" but the dir looks broken:
+diskutil unmount force /tmp/ct   # macOS last resort
+rm -rf /tmp/ct && mkdir /tmp/ct
+```
+
+### `ls` shows stale directory contents
+
+FUSE-T uses NFS under the hood, so the kernel may cache directory listings
+briefly. New pieces should appear within 1-2 seconds. If `ls` still shows stale
+data:
+
+```bash
+# Force a fresh listing (bypass shell hash)
+command ls /tmp/ct/home/pieces/
+
+# Or use a stat-based tool
+find /tmp/ct/home/pieces/ -maxdepth 1
+```
+
+### Permission denied / Operation not permitted
+
+The Deno process needs FFI and file access:
+
+```bash
+deno run --unstable-ffi --allow-ffi --allow-read --allow-write --allow-env --allow-net \
+  packages/fuse/mod.ts /tmp/ct ...
+```
+
+If using `ct fuse mount`, these permissions are set automatically.
+
+### `Resource fork` / `._*` files from macOS
+
+macOS Finder creates `._` resource fork files. These are silently rejected by
+the filesystem (EACCES). This is expected — use the terminal, not Finder.
+
+### Writes not persisting
+
+Writes are fire-and-forget. If the toolshed is down, writes silently fail. Check
+`ct fuse status` or verify the toolshed is reachable:
+
+```bash
+curl http://localhost:8000/api/storage/memory
+# Should return a JSON error (WebSocket endpoint), not HTML
+```
+
+### Debug mode
+
+Add `--debug` for verbose FUSE operation logging:
+
+```bash
+ct fuse mount /tmp/ct --debug
+# or
+deno run ... packages/fuse/mod.ts /tmp/ct --debug
+```
+
 ## Direct Invocation
 
 You can also run the FUSE filesystem directly without the CLI:

@@ -91,6 +91,7 @@ async function main() {
       apiUrl,
       identity: args.identity || "",
     });
+    bridge.initStatus();
 
     // Connect initial spaces (default: "home")
     const spaces = (args.space as string[]).length > 0
