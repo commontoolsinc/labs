@@ -294,6 +294,18 @@ function buildShrunkTypeNodeFromTypeNode(
   return node;
 }
 
+function printTypeNode(
+  node: ts.TypeNode,
+  sourceFile: ts.SourceFile,
+): string {
+  const printer = ts.createPrinter({ removeComments: true });
+  return printer.printNode(ts.EmitHint.Unspecified, node, sourceFile);
+}
+
+function normalizeTypeNodeText(text: string): string {
+  return text.replace(/\s+/g, "");
+}
+
 function wrapTypeNodeWithCapability(
   node: ts.TypeNode,
   capability: ReactiveCapability,
@@ -405,15 +417,19 @@ function applyCapabilitySummaryToArgument(
 
   let next = baseTypeNode;
   if (!paramSummary.wildcard && paths.length > 0) {
-    let shrunk = buildShrunkTypeNodeFromTypeNode(baseTypeNode, paths, factory);
-    if (!shrunk && baseType) {
-      shrunk = buildShrunkTypeNodeFromType(
+    // Prefer type-driven shrinking when possible because synthetic type nodes
+    // can lose wrapper/property precision for object-literal shorthand values.
+    let shrunk = baseType
+      ? buildShrunkTypeNodeFromType(
         baseType,
         paths,
         checker,
         sourceFile,
         factory,
-      );
+      )
+      : undefined;
+    if (!shrunk) {
+      shrunk = buildShrunkTypeNodeFromTypeNode(baseTypeNode, paths, factory);
     }
     if (shrunk) {
       next = shrunk;
@@ -461,15 +477,19 @@ function applyCapabilitySummaryToParameter(
 
   let next = baseTypeNode;
   if (!paramSummary.wildcard && paths.length > 0) {
-    let shrunk = buildShrunkTypeNodeFromTypeNode(baseTypeNode, paths, factory);
-    if (!shrunk && baseType) {
-      shrunk = buildShrunkTypeNodeFromType(
+    // Prefer type-driven shrinking when possible because synthetic type nodes
+    // can lose wrapper/property precision for object-literal shorthand values.
+    let shrunk = baseType
+      ? buildShrunkTypeNodeFromType(
         baseType,
         paths,
         checker,
         sourceFile,
         factory,
-      );
+      )
+      : undefined;
+    if (!shrunk) {
+      shrunk = buildShrunkTypeNodeFromTypeNode(baseTypeNode, paths, factory);
     }
     if (shrunk) {
       next = shrunk;
@@ -540,6 +560,7 @@ function collectFunctionSchemaTypeNodes(
 
   // Capability-based shrinking and wrapper selection for the first parameter.
   const originalArgumentNode = argumentNode;
+  const originalArgumentType = argumentType;
   argumentNode = applyCapabilitySummaryToArgument(
     fn,
     argumentNode,
@@ -553,8 +574,32 @@ function collectFunctionSchemaTypeNodes(
     argumentNode && originalArgumentNode &&
     argumentNode !== originalArgumentNode
   ) {
-    // The node was wrapped/shrunk synthetically; don't force legacy type fallback.
-    argumentType = undefined;
+    // The node was wrapped/shrunk synthetically; recover a concrete Type when
+    // possible so schema generation does not degrade to unknown/true.
+    let recovered: ts.Type | undefined;
+    try {
+      recovered = getTypeFromTypeNodeWithFallback(
+        argumentNode,
+        checker,
+        typeRegistry,
+      );
+    } catch {
+      recovered = undefined;
+    }
+
+    if (recovered && !isAnyOrUnknownType(recovered)) {
+      argumentType = recovered;
+    } else if (
+      originalArgumentType && !isAnyOrUnknownType(originalArgumentType) &&
+      normalizeTypeNodeText(printTypeNode(argumentNode, sourceFile)) ===
+        normalizeTypeNodeText(printTypeNode(originalArgumentNode, sourceFile))
+    ) {
+      // If lowering recreated an equivalent TypeNode (new identity, same shape),
+      // preserve the original inferred type to avoid degrading property schemas.
+      argumentType = originalArgumentType;
+    } else {
+      argumentType = undefined;
+    }
   }
 
   // 2. Get return type TypeNode

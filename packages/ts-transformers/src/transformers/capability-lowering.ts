@@ -1,6 +1,7 @@
 import ts from "typescript";
 import {
   detectCallKind,
+  getTypeAtLocationWithFallback,
   isFunctionLikeExpression,
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
@@ -200,6 +201,24 @@ function createKeyCall(
     path.map((segment) => factory.createStringLiteral(segment)),
   );
   return keyCall;
+}
+
+function registerReplacementType(
+  replacement: ts.Node,
+  original: ts.Node,
+  context: TransformationContext,
+): void {
+  const typeRegistry = context.options.typeRegistry;
+  if (!typeRegistry) return;
+
+  const originalType = getTypeAtLocationWithFallback(
+    original,
+    context.checker,
+    typeRegistry,
+  );
+  if (originalType) {
+    typeRegistry.set(replacement, originalType);
+  }
 }
 
 function isPatternBuilderCall(
@@ -478,11 +497,13 @@ function rewritePatternBody(
       }
 
       if (info.path.length > 0) {
-        return createKeyCall(
+        const rewritten = createKeyCall(
           context.factory.createIdentifier(info.root),
           info.path,
           context.factory,
         );
+        registerReplacementType(rewritten, visited, context);
+        return rewritten;
       }
     }
 

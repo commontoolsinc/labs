@@ -981,6 +981,87 @@ export default pattern<{ items?: Item[] }>(({ items }) => {
 );
 
 Deno.test(
+  "Capability-first: ternary lowered from key(...) keeps typed ifElse predicate schema",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern, UI } from "commontools";
+
+type State = {
+  user: {
+    settings: {
+      notifications: boolean;
+    };
+  };
+};
+
+export default pattern<State>((state) => ({
+  [UI]: (
+    <div>
+      {state.user.settings.notifications ? "enabled" : "disabled"}
+    </div>
+  ),
+}));
+`;
+
+    const output = await transformSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assert(
+      /__ctHelpers\.ifElse\(\{\s*type:\s*"boolean"/m.test(output),
+      "expected ifElse condition schema to stay boolean after key(...) lowering",
+    );
+    assert(!output.includes("__ctHelpers.ifElse(true as const"));
+  },
+);
+
+Deno.test(
+  "Capability-first: derive object-literal input preserves property schemas",
+  async () => {
+    const source = `/// <cts-enable />
+import { cell, derive, lift } from "commontools";
+
+const stage = cell<string>("initial");
+const attemptCount = cell<number>(0);
+const acceptedCount = cell<number>(0);
+const rejectedCount = cell<number>(0);
+
+const normalizedStage = lift((value: string) => value)(stage);
+const attempts = lift((count: number) => count)(attemptCount);
+const accepted = lift((count: number) => count)(acceptedCount);
+const rejected = lift((count: number) => count)(rejectedCount);
+
+const _summary = derive(
+  {
+    stage: normalizedStage,
+    attempts: attempts,
+    accepted: accepted,
+    rejected: rejected,
+  },
+  (snapshot) =>
+    \`stage:\${snapshot.stage} attempts:\${snapshot.attempts}\` +
+    \` accepted:\${snapshot.accepted} rejected:\${snapshot.rejected}\`,
+);
+`;
+
+    const output = await transformSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, "stage: {");
+    assertStringIncludes(output, "attempts: {");
+    assertStringIncludes(output, "accepted: {");
+    assertStringIncludes(output, "rejected: {");
+    assert(!output.includes("stage: true"));
+    assert(!output.includes("attempts: true"));
+    assert(!output.includes("accepted: true"));
+    assert(!output.includes("rejected: true"));
+  },
+);
+
+Deno.test(
   "Capability-first: derive wildcard usage keeps conservative full-shape input schema",
   async () => {
     const source = `/// <cts-enable />
