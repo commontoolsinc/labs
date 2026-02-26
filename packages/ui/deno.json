@@ -11,7 +11,6 @@
     "@codemirror/commands": "npm:@codemirror/commands@^6.8.1",
     "@lit/context": "npm:@lit/context@^1.1.2",
     "marked": "npm:marked@^4.0.0",
-
     "@codemirror/state": "npm:@codemirror/state@^6.5.1",
     "@codemirror/view": "npm:@codemirror/view@^6.26.0",
     "@codemirror/language": "npm:@codemirror/language@^6.10.8",

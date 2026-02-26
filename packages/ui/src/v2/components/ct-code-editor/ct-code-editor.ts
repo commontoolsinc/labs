@@ -39,6 +39,7 @@ import {
 } from "@codemirror/language";
 import { javascript as createJavaScript } from "@codemirror/lang-javascript";
 import { markdown as createMarkdown } from "@codemirror/lang-markdown";
+import { GFM } from "@lezer/markdown";
 import { css as createCss } from "@codemirror/lang-css";
 import { html as createHtml } from "@codemirror/lang-html";
 import { json as createJson } from "@codemirror/lang-json";
@@ -99,6 +100,7 @@ export type MimeType = (typeof MimeType)[keyof typeof MimeType];
 const langRegistry = new Map<MimeType, LanguageSupport>();
 const markdownLang = createMarkdown({
   defaultCodeLanguage: createJavaScript({ jsx: true }),
+  extensions: GFM,
 });
 const defaultLang = markdownLang;
 
@@ -1187,6 +1189,11 @@ export class CTCodeEditor extends BaseElement {
       ),
       // Theme (dark -> oneDark)
       this._themeComp.of(this.theme === "dark" ? oneDark : []),
+      // Prose/code mode extensions
+      this._modeComp.of(this._getModeExtension()),
+      this._proseMarkdownComp.of(
+        this.mode === "prose" ? createProseMarkdownPlugin() : [],
+      ),
       EditorView.updateListener.of((update) => {
         // Only process user-initiated changes, not Cell-originated updates.
         // Check if any transaction has the Cell sync annotation - if so, skip.
