@@ -1,7 +1,8 @@
-import { describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { FakeTime } from "@std/testing/time";
 import type { ReactiveControllerHost } from "lit";
-import { isCellHandle } from "@commontools/runtime-client";
+import { CellHandle, isCellHandle } from "@commontools/runtime-client";
 import {
   createMockCellHandle,
   pushUpdate,
@@ -469,5 +470,167 @@ describe("factory functions", () => {
   it("createArrayCellController returns ArrayCellController", () => {
     const ctrl = createArrayCellController<number>(createMockHost());
     expect(ctrl).toBeInstanceOf(ArrayCellController);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CellController — timing integration
+// ---------------------------------------------------------------------------
+
+describe("CellController — timing integration", () => {
+  let time: FakeTime;
+
+  beforeEach(() => {
+    time = new FakeTime();
+  });
+  afterEach(() => {
+    time.restore();
+  });
+
+  it("setValue with debounce delays the cell update", () => {
+    const host = createMockHost();
+    const ctrl = new CellController<string>(host, {
+      timing: { strategy: "debounce", delay: 200 },
+    });
+    const cell = createMockCellHandle("old");
+    ctrl.bind(cell);
+
+    ctrl.setValue("new");
+    // Debounce: cell should NOT be updated yet
+    expect(cell.get()).toBe("old");
+
+    time.tick(200);
+    expect(cell.get()).toBe("new");
+  });
+
+  it("setValue with blur strategy only commits on onBlur()", () => {
+    const host = createMockHost();
+    const ctrl = new CellController<string>(host, {
+      timing: { strategy: "blur" },
+    });
+    const cell = createMockCellHandle("before");
+    ctrl.bind(cell);
+
+    ctrl.setValue("pending");
+    expect(cell.get()).toBe("before");
+
+    ctrl.onBlur();
+    expect(cell.get()).toBe("pending");
+  });
+
+  it("setValue with throttle fires immediately on leading edge", () => {
+    const host = createMockHost();
+    const ctrl = new CellController<string>(host, {
+      timing: { strategy: "throttle", delay: 100 },
+    });
+    const cell = createMockCellHandle("start");
+    ctrl.bind(cell);
+
+    ctrl.setValue("first");
+    expect(cell.get()).toBe("first"); // leading edge fires immediately
+  });
+
+  it("cancel() prevents pending debounced update from firing", () => {
+    const host = createMockHost();
+    const ctrl = new CellController<string>(host, {
+      timing: { strategy: "debounce", delay: 100 },
+    });
+    const cell = createMockCellHandle("original");
+    ctrl.bind(cell);
+
+    ctrl.setValue("pending");
+    ctrl.cancel();
+    time.tick(200);
+    expect(cell.get()).toBe("original");
+  });
+
+  it("updateTimingOptions changes strategy at runtime", () => {
+    const host = createMockHost();
+    const ctrl = new CellController<string>(host, {
+      timing: { strategy: "debounce", delay: 100 },
+    });
+    const cell = createMockCellHandle("old");
+    ctrl.bind(cell);
+
+    ctrl.updateTimingOptions({ strategy: "immediate" });
+    ctrl.setValue("instant");
+    expect(cell.get()).toBe("instant");
+  });
+
+  it("onFocus/onBlur call custom option callbacks", () => {
+    const events: string[] = [];
+    const host = createMockHost();
+    const ctrl = new CellController<string>(host, {
+      timing: { strategy: "immediate" },
+      onFocus: () => events.push("focus"),
+      onBlur: () => events.push("blur"),
+    });
+    const cell = createMockCellHandle("x");
+    ctrl.bind(cell);
+
+    ctrl.onFocus();
+    ctrl.onBlur();
+    expect(events).toEqual(["focus", "blur"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CellController — custom options
+// ---------------------------------------------------------------------------
+
+describe("CellController — custom options", () => {
+  it("custom getValue transforms the cell value", () => {
+    const host = createMockHost();
+    const ctrl = new CellController<string>(host, {
+      timing: { strategy: "immediate" },
+      getValue: (value) => {
+        if (isCellHandle(value)) {
+          return ((value as CellHandle<string>).get() ?? "").toUpperCase();
+        }
+        return (value as string).toUpperCase();
+      },
+    });
+    const cell = createMockCellHandle("hello");
+    ctrl.bind(cell);
+    expect(ctrl.getValue()).toBe("HELLO");
+  });
+
+  it("custom setValue intercepts the write", () => {
+    const host = createMockHost();
+    const ctrl = new CellController<string>(host, {
+      timing: { strategy: "immediate" },
+      setValue: (value, newValue, _oldValue) => {
+        if (isCellHandle(value)) {
+          (value as CellHandle<string>).set(newValue + "!");
+        }
+      },
+    });
+    const cell = createMockCellHandle("start");
+    ctrl.bind(cell);
+    ctrl.setValue("hi");
+    expect(cell.get()).toBe("hi!");
+  });
+
+  it("triggerUpdate:false suppresses host.requestUpdate()", () => {
+    let updateCount = 0;
+    const host: ReactiveControllerHost = {
+      addController: () => {},
+      removeController: () => {},
+      requestUpdate: () => {
+        updateCount++;
+      },
+      updateComplete: Promise.resolve(true),
+    } as unknown as ReactiveControllerHost;
+
+    const ctrl = new CellController<string>(host, {
+      timing: { strategy: "immediate" },
+      triggerUpdate: false,
+    });
+    const cell = createMockCellHandle("a");
+    ctrl.bind(cell);
+    updateCount = 0;
+
+    pushUpdate(cell, "b");
+    expect(updateCount).toBe(0);
   });
 });
