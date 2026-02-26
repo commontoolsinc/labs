@@ -1,12 +1,5 @@
 /// <cts-enable />
-import {
-  Default,
-  NAME,
-  pattern,
-  UI,
-  type VNode,
-  Writable,
-} from "commontools";
+import { Default, NAME, pattern, UI, type VNode, Writable } from "commontools";
 
 // ===== Types =====
 
@@ -24,6 +17,7 @@ interface WebhookPatternOutput {
   [NAME]: string;
   [UI]: VNode;
   webhookConfig: WebhookConfig | null;
+  lastEvent: unknown;
 }
 
 // ===== JSX type declaration for ct-webhook =====
@@ -76,10 +70,48 @@ const WebhookTest = pattern<WebhookPatternInput, WebhookPatternOutput>(
                 />
               </ct-vstack>
             </ct-card>
+
+            <ct-card>
+              <ct-vstack gap="2">
+                <div style={{ fontWeight: "600", fontSize: "1rem" }}>
+                  Last Received Event
+                </div>
+                {webhookInbox == null
+                  ? (
+                    <div
+                      style={{
+                        color: "var(--ct-color-gray-500)",
+                        fontSize: "0.875rem",
+                      }}
+                    >
+                      No events received yet. Create a webhook and send a POST
+                      to its URL.
+                    </div>
+                  )
+                  : (
+                    <div
+                      style={{
+                        fontSize: "0.8rem",
+                        fontFamily: "monospace",
+                        background: "var(--ct-color-gray-100, #f3f4f6)",
+                        padding: "0.5rem",
+                        borderRadius: "0.25rem",
+                        whiteSpace: "pre-wrap",
+                        wordBreak: "break-all",
+                      }}
+                    >
+                      {JSON.stringify(webhookInbox)}
+                    </div>
+                  )}
+              </ct-vstack>
+            </ct-card>
           </ct-vstack>
         </ct-screen>
       ),
       webhookConfig,
+      // Export the stream value so linked patterns can observe it.
+      // The inbox is a stream — each POST delivers the latest payload here.
+      lastEvent: webhookInbox,
     };
   },
 );

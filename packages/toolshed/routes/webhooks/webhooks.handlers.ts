@@ -22,9 +22,9 @@ import {
   getServiceIndex,
   removeFromServiceIndex,
   saveRegistration,
+  sendToStream,
   verifyWebhookSecret,
   writeConfidentialConfig,
-  sendToStream,
 } from "./webhooks.utils.ts";
 
 const DUMMY_HASH = "0".repeat(64);
@@ -76,8 +76,16 @@ export const create: AppRouteHandler<CreateRoute> = async (c) => {
     // Store registration in toolshed's service space
     await saveRegistration(registration);
 
-    // Update the per-space index
-    await addToServiceIndex(space, id);
+    // Update the per-space index. If this fails the webhook is functional
+    // (config written, registration stored) — just not discoverable via list.
+    try {
+      await addToServiceIndex(space, id);
+    } catch (indexError) {
+      logger.warn(
+        { id, space, error: indexError },
+        "Webhook created but failed to update service index",
+      );
+    }
 
     logger.info({ id, name, space }, "Webhook created");
 
@@ -176,7 +184,9 @@ export const remove: AppRouteHandler<RemoveRoute> = async (c) => {
       return c.json({ error: "Webhook not found" }, 404);
     }
 
-    // Verify the caller owns this webhook
+    // Soft ownership check: `space` is caller-provided, not cryptographically
+    // verified. Sufficient for now since all admin endpoints are unauthed;
+    // will be replaced by DID-based auth when platform adds it.
     if (registration.createdBy !== space) {
       return c.json({ error: "Webhook not found" }, 404);
     }

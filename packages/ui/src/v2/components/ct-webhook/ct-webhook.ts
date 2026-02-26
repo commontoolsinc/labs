@@ -101,8 +101,17 @@ export class CTWebhook extends BaseElement {
     this._error = "";
 
     try {
-      const cellLink = JSON.stringify(this.inbox);
-      const confidentialCellLink = JSON.stringify(this.config);
+      const inboxJson = this.inbox?.toJSON?.() as Record<string, unknown>;
+      if (!inboxJson?.["/"]) {
+        throw new Error("inbox is not a valid cell link");
+      }
+      const cellLink = JSON.stringify(inboxJson);
+
+      const configJson = this.config?.toJSON?.() as Record<string, unknown>;
+      if (!configJson?.["/"]) {
+        throw new Error("config is not a valid cell link");
+      }
+      const confidentialCellLink = JSON.stringify(configJson);
 
       const response = await fetch("/api/webhooks", {
         method: "POST",
@@ -166,7 +175,8 @@ export class CTWebhook extends BaseElement {
         throw new Error(data.error || `HTTP ${response.status}`);
       }
 
-      // Clear the config cell
+      // Clear the config cell. The inbox stream reference remains on the
+      // pattern side but will simply stop receiving new events.
       await this.config.set(null);
       this._isLoading = false;
     } catch (error) {
