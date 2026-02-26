@@ -87,6 +87,7 @@ function CfcRequiredIntegrityViolationError(
   read: CanonicalBoundaryRead,
   requiredIntegrity: readonly string[],
   actualIntegrity: readonly string[],
+  path = read.path,
 ): ICfcInputRequirementViolationError {
   return {
     name: "CfcInputRequirementViolationError",
@@ -96,7 +97,7 @@ function CfcRequiredIntegrityViolationError(
     space: read.space as IMemorySpaceAddress["space"],
     id: read.id as IMemorySpaceAddress["id"],
     type: read.type,
-    path: read.path,
+    path,
     requiredIntegrity: [...requiredIntegrity],
     actualIntegrity: [...actualIntegrity],
   };
@@ -336,6 +337,36 @@ function integritySatisfiesRequiredIntegrity(
   return requiredIntegrity.every((atom) => actualSet.has(atom));
 }
 
+function isSameOrDescendantCanonicalPath(
+  basePath: string,
+  candidatePath: string,
+): boolean {
+  if (basePath === "/") {
+    return candidatePath.startsWith("/");
+  }
+  return candidatePath === basePath || candidatePath.startsWith(`${basePath}/`);
+}
+
+function findRequiredIntegrityCoherenceViolation(
+  labelsByPath: Record<string, Labels>,
+  readPath: string,
+  requiredIntegrity: readonly string[],
+): { path: string; actualIntegrity: readonly string[] } | undefined {
+  const sortedEntries = Object.entries(labelsByPath).sort(([a], [b]) =>
+    a.localeCompare(b)
+  );
+  for (const [path, label] of sortedEntries) {
+    if (!isSameOrDescendantCanonicalPath(readPath, path)) {
+      continue;
+    }
+    const actualIntegrity = label.integrity ?? [];
+    if (!integritySatisfiesRequiredIntegrity(actualIntegrity, requiredIntegrity)) {
+      return { path, actualIntegrity };
+    }
+  }
+  return undefined;
+}
+
 function verifyInputRequirementsForAttempt(
   tx: IExtendedStorageTransaction,
 ): readonly ConsumedReadWithEffectiveLabel[] {
@@ -381,6 +412,21 @@ function verifyInputRequirementsForAttempt(
 
     const requiredIntegrity = readRequiredIntegrityFromMeta(consumed.read.meta);
     if (requiredIntegrity && requiredIntegrity.length > 0) {
+      const labelsByPath = labelsByEntity.get(consumedReadEntityKey(consumed.read)) ??
+        {};
+      const coherenceViolation = findRequiredIntegrityCoherenceViolation(
+        labelsByPath,
+        consumed.read.path,
+        requiredIntegrity,
+      );
+      if (coherenceViolation) {
+        throw CfcRequiredIntegrityViolationError(
+          consumed.read,
+          requiredIntegrity,
+          coherenceViolation.actualIntegrity,
+          coherenceViolation.path,
+        );
+      }
       const actualIntegrity = consumed.effectiveLabel?.integrity ?? [];
       if (
         !integritySatisfiesRequiredIntegrity(

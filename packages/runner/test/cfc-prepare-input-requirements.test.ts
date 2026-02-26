@@ -26,6 +26,17 @@ const requiredIntegritySchema = {
   },
 } as const satisfies JSONSchema;
 
+const requiredIntegrityObjectSchema = {
+  type: "object",
+  properties: {
+    a: { type: "number" },
+    b: { type: "number" },
+  },
+  ifc: {
+    requiredIntegrity: ["trusted-source"],
+  },
+} as const satisfies JSONSchema;
+
 describe("CFC prepare input requirements", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
@@ -68,6 +79,31 @@ describe("CFC prepare input requirements", () => {
         ...(integrity ? { integrity } : {}),
       },
     });
+    const { error } = await tx.commit();
+    expect(error).toBeUndefined();
+  }
+
+  async function seedInputWithLabels(
+    id: URI,
+    value: unknown,
+    labelsByPath: Record<
+      string,
+      { classification?: readonly string[]; integrity?: readonly string[] }
+    >,
+  ): Promise<void> {
+    const tx = runtime.edit();
+    tx.writeOrThrow({
+      space,
+      id,
+      type: "application/json",
+      path: ["value"],
+    }, value as any);
+    tx.writeOrThrow({
+      space,
+      id,
+      type: "application/json",
+      path: ["cfc", "labels"],
+    }, labelsByPath);
     const { error } = await tx.commit();
     expect(error).toBeUndefined();
   }
@@ -191,6 +227,99 @@ describe("CFC prepare input requirements", () => {
       sourceCell.withTx(tx).asSchema(requiredIntegritySchema).get() ?? 0,
     );
     targetCell.withTx(tx).set(value + 1);
+
+    let thrown: unknown;
+    try {
+      await prepareCfcCommitIfNeeded(tx);
+    } catch (error) {
+      thrown = error;
+    }
+    tx.abort(thrown);
+
+    expect((thrown as { name?: string } | undefined)?.name).toBe(
+      "CfcInputRequirementViolationError",
+    );
+    expect(
+      (thrown as { requirement?: string } | undefined)?.requirement,
+    ).toBe("requiredIntegrity");
+  });
+
+  it("allows object-level requiredIntegrity when descendant labels are coherent", async () => {
+    const sourceId = runtime.getCell(
+      space,
+      "cfc-input-object-required-integrity-allow-source",
+    ).getAsNormalizedFullLink().id;
+    await seedInputWithLabels(
+      sourceId,
+      { a: 1, b: 2 },
+      {
+        "/": {
+          classification: ["confidential"],
+          integrity: ["trusted-source"],
+        },
+        "/a": {
+          integrity: ["trusted-source"],
+        },
+        "/b": {
+          integrity: ["trusted-source"],
+        },
+      },
+    );
+
+    const tx = runtime.edit();
+    const sourceCell = runtime.getCell<{ a: number; b: number }>(
+      space,
+      "cfc-input-object-required-integrity-allow-source",
+    );
+    const targetCell = runtime.getCell<number>(
+      space,
+      "cfc-input-object-required-integrity-allow-target",
+    );
+
+    const value = sourceCell.withTx(tx).asSchema(requiredIntegrityObjectSchema)
+      .get() ?? { a: 0, b: 0 };
+    targetCell.withTx(tx).set(Number(value.a) + Number(value.b));
+
+    await prepareCfcCommitIfNeeded(tx);
+    const { error } = await tx.commit();
+    expect(error).toBeUndefined();
+  });
+
+  it("rejects object-level requiredIntegrity when a descendant label misses requirement", async () => {
+    const sourceId = runtime.getCell(
+      space,
+      "cfc-input-object-required-integrity-reject-source",
+    ).getAsNormalizedFullLink().id;
+    await seedInputWithLabels(
+      sourceId,
+      { a: 1, b: 2 },
+      {
+        "/": {
+          classification: ["confidential"],
+          integrity: ["trusted-source"],
+        },
+        "/a": {
+          integrity: ["trusted-source"],
+        },
+        "/b": {
+          integrity: ["untrusted-source"],
+        },
+      },
+    );
+
+    const tx = runtime.edit();
+    const sourceCell = runtime.getCell<{ a: number; b: number }>(
+      space,
+      "cfc-input-object-required-integrity-reject-source",
+    );
+    const targetCell = runtime.getCell<number>(
+      space,
+      "cfc-input-object-required-integrity-reject-target",
+    );
+
+    const value = sourceCell.withTx(tx).asSchema(requiredIntegrityObjectSchema)
+      .get() ?? { a: 0, b: 0 };
+    targetCell.withTx(tx).set(Number(value.a) + Number(value.b));
 
     let thrown: unknown;
     try {
