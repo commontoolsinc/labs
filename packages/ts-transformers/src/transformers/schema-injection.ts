@@ -294,6 +294,10 @@ function buildShrunkTypeNodeFromTypeNode(
   return node;
 }
 
+function isSyntheticTypeNode(node: ts.TypeNode): boolean {
+  return node.pos < 0 || node.end < 0;
+}
+
 function printTypeNode(
   node: ts.TypeNode,
   sourceFile: ts.SourceFile,
@@ -417,19 +421,32 @@ function applyCapabilitySummaryToArgument(
 
   let next = baseTypeNode;
   if (!paramSummary.wildcard && paths.length > 0) {
-    // Prefer type-driven shrinking when possible because synthetic type nodes
-    // can lose wrapper/property precision for object-literal shorthand values.
-    let shrunk = baseType
-      ? buildShrunkTypeNodeFromType(
-        baseType,
+    const preferTypeDriven = !!baseType && isSyntheticTypeNode(baseTypeNode);
+    let shrunk: ts.TypeNode | undefined;
+    if (preferTypeDriven) {
+      // Synthetic inferred nodes can lose property precision in node-only mode.
+      shrunk = buildShrunkTypeNodeFromType(
+        baseType!,
         paths,
         checker,
         sourceFile,
         factory,
-      )
-      : undefined;
-    if (!shrunk) {
+      );
+      if (!shrunk) {
+        shrunk = buildShrunkTypeNodeFromTypeNode(baseTypeNode, paths, factory);
+      }
+    } else {
+      // Source-authored nodes preserve exact unions/aliases; keep them first.
       shrunk = buildShrunkTypeNodeFromTypeNode(baseTypeNode, paths, factory);
+      if (!shrunk && baseType) {
+        shrunk = buildShrunkTypeNodeFromType(
+          baseType,
+          paths,
+          checker,
+          sourceFile,
+          factory,
+        );
+      }
     }
     if (shrunk) {
       next = shrunk;
@@ -477,19 +494,32 @@ function applyCapabilitySummaryToParameter(
 
   let next = baseTypeNode;
   if (!paramSummary.wildcard && paths.length > 0) {
-    // Prefer type-driven shrinking when possible because synthetic type nodes
-    // can lose wrapper/property precision for object-literal shorthand values.
-    let shrunk = baseType
-      ? buildShrunkTypeNodeFromType(
-        baseType,
+    const preferTypeDriven = !!baseType && isSyntheticTypeNode(baseTypeNode);
+    let shrunk: ts.TypeNode | undefined;
+    if (preferTypeDriven) {
+      // Synthetic inferred nodes can lose property precision in node-only mode.
+      shrunk = buildShrunkTypeNodeFromType(
+        baseType!,
         paths,
         checker,
         sourceFile,
         factory,
-      )
-      : undefined;
-    if (!shrunk) {
+      );
+      if (!shrunk) {
+        shrunk = buildShrunkTypeNodeFromTypeNode(baseTypeNode, paths, factory);
+      }
+    } else {
+      // Source-authored nodes preserve exact unions/aliases; keep them first.
       shrunk = buildShrunkTypeNodeFromTypeNode(baseTypeNode, paths, factory);
+      if (!shrunk && baseType) {
+        shrunk = buildShrunkTypeNodeFromType(
+          baseType,
+          paths,
+          checker,
+          sourceFile,
+          factory,
+        );
+      }
     }
     if (shrunk) {
       next = shrunk;
