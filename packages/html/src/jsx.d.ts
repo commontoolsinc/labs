@@ -2922,6 +2922,8 @@ interface CTIFrameElement extends CTHTMLElement {}
 interface CTVoiceInputElement extends CTHTMLElement {}
 interface CTAudioVisualizerElement extends CTHTMLElement {}
 interface CTLocationElement extends CTHTMLElement {}
+interface CTWebhookElement extends CTHTMLElement {}
+interface CTSecretViewerElement extends CTHTMLElement {}
 
 // Chart components
 interface CTChartElement extends CTHTMLElement {}
@@ -2995,6 +2997,17 @@ interface CTPlaidLinkAttributes<T> extends CTHTMLAttributes<T> {
 interface CTGoogleOAuthAttributes<T> extends CTHTMLAttributes<T> {
   "$auth"?: any;
   "scopes"?: string[];
+}
+
+interface CTWebhookAttributes<T> extends CTHTMLAttributes<T> {
+  "name"?: string;
+  "$inbox"?: CellLike<any>;
+  "$config"?: CellLike<any>;
+}
+
+interface CTSecretViewerAttributes<T> extends CTHTMLAttributes<T> {
+  "value"?: string;
+  "trailing-chars"?: number;
 }
 
 interface CTUpdaterAttributes<T> extends CTHTMLAttributes<T> {
@@ -4772,6 +4785,14 @@ declare global {
       "ct-plaid-link": CTDOM.DetailedHTMLProps<
         CTPlaidLinkAttributes<CTPlaidLinkElement>,
         CTPlaidLinkElement
+      >;
+      "ct-webhook": CTDOM.DetailedHTMLProps<
+        CTWebhookAttributes<CTWebhookElement>,
+        CTWebhookElement
+      >;
+      "ct-secret-viewer": CTDOM.DetailedHTMLProps<
+        CTSecretViewerAttributes<CTSecretViewerElement>,
+        CTSecretViewerElement
       >;
       "ct-hstack": CTDOM.DetailedHTMLProps<
         CTStackAttributes<CTHStackElement>,

@@ -4,6 +4,7 @@ import {
   Default,
   NAME,
   pattern,
+  Stream,
   UI,
   type VNode,
   Writable,
@@ -17,7 +18,7 @@ interface WebhookConfig {
 }
 
 interface WebhookPatternInput {
-  webhookInbox: Writable<Default<unknown, null>>;
+  webhookInbox: Stream<Default<unknown, null>>;
   webhookConfig: Writable<Default<WebhookConfig | null, null>>;
 }
 
@@ -26,22 +27,6 @@ interface WebhookPatternOutput {
   [UI]: VNode;
   webhookConfig: WebhookConfig | null;
   lastEvent: unknown;
-}
-
-// ===== JSX type declaration for ct-webhook =====
-// ct-webhook is not yet in the global JSX intrinsic elements, so we declare it here.
-
-declare global {
-  namespace JSX {
-    interface IntrinsicElements {
-      "ct-webhook": {
-        name?: string;
-        "$inbox"?: unknown;
-        "$config"?: unknown;
-        [key: string]: unknown;
-      };
-    }
-  }
 }
 
 // ===== Pattern =====
