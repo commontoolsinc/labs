@@ -41,6 +41,8 @@ interface StatusData {
   waitingForCount: number;
   nextActionCount: number;
   lastSync: string;
+  spaceName?: string;
+  calendarPieceId?: string;
 }
 
 interface InboxItem {
@@ -123,6 +125,8 @@ interface DashboardInput {
         waitingForCount: 0;
         nextActionCount: 0;
         lastSync: "";
+        spaceName: "";
+        calendarPieceId: "";
       }
     >
   >;
@@ -1098,7 +1102,12 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                   Command
                 </div>
                 <a
-                  href="/GTDfeb24/baedreidwvwhpfptkvp7jgjpw3tfsiw4srklaayvthhey3h67xvbhd6qjba"
+                  href={computed(() => {
+                    const s = status.get();
+                    const space = s.spaceName || "GTDfeb26";
+                    const calId = s.calendarPieceId || "";
+                    return calId ? `/${space}/${calId}` : "#";
+                  })}
                   target="_blank"
                   style={{
                     padding: "5px 14px",
@@ -1454,11 +1463,17 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                   }
 
                   // Build inbox item -> noteUrl lookup from directives
+                  // Rewrite relative piece URLs to use the current space
+                  const currentSpaceInbox = status.get().spaceName || "GTDfeb26";
                   const inboxNotes: Record<string, string> = {};
                   const allDirsInbox: Directive[] = [...(directives.get() || [])].filter((d: Directive) => d && d.id && d.noteUrl && d.target === "inbox");
                   for (const d of allDirsInbox) {
                     const m = d.text.match(/^Re:\s*(.+?)\s*—/);
-                    if (m && d.noteUrl) inboxNotes[m[1]] = d.noteUrl;
+                    if (m && d.noteUrl) {
+                      let url = d.noteUrl;
+                      if (url.match(/^\/[^\/]+\/baedrei/)) url = "/" + currentSpaceInbox + url.substring(url.indexOf("/", 1));
+                      inboxNotes[m[1]] = url;
+                    }
                   }
 
                   return inboxItems.map((item: InboxItem, idx: number) => {
@@ -1663,11 +1678,17 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                   });
 
                   // Build project name -> noteUrl lookup from directives
+                  // Rewrite relative piece URLs to use the current space
+                  const currentSpace = status.get().spaceName || "GTDfeb26";
                   const projectNotes: Record<string, string> = {};
                   const allDirs: Directive[] = [...(directives.get() || [])].filter((d: Directive) => d && d.id && d.noteUrl);
                   for (const d of allDirs) {
                     const m = d.text.match(/^Re:\s*(.+?)\s*—/);
-                    if (m && d.noteUrl) projectNotes[m[1]] = d.noteUrl;
+                    if (m && d.noteUrl) {
+                      let url = d.noteUrl;
+                      if (url.match(/^\/[^\/]+\/baedrei/)) url = "/" + currentSpace + url.substring(url.indexOf("/", 1));
+                      projectNotes[m[1]] = url;
+                    }
                   }
 
                   if (projectItems.length === 0) {
@@ -1703,6 +1724,15 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                     if (a.projectId) projectsWithActions.add(a.projectId);
                   }
 
+                  // Build set of project names that have completed directive responses
+                  const allDirectives = [...(directives.get() || [])] as Directive[];
+                  const projectsWithResponses = new Set<string>();
+                  for (const d of allDirectives) {
+                    if (!d || d.status !== "done" || !d.response) continue;
+                    const dm = d.text.match(/^Re:\s*(.+?)\s*\u2014/);
+                    if (dm) projectsWithResponses.add(dm[1]);
+                  }
+
                   // Determine which items to show at current breadcrumb depth
                   let visibleItems: { type: string, id: string, name: string, project: Project | null, action: NextAction | null, idx: number, hasChildren: boolean }[] = [];
 
@@ -1719,18 +1749,19 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                       if (!p.parentId) {
                         if (hideCompleted && isCompleted(p.status)) continue;
                         const idx = projectItems.indexOf(p);
-                        const hasKids = (visibleChildrenOf[p.id] || []).length > 0 || projectsWithActions.has(p.id);
+                        const hasKids = (visibleChildrenOf[p.id] || []).length > 0 || projectsWithActions.has(p.id) || projectsWithResponses.has(p.name);
                         visibleItems.push({ type: "project", id: p.id, name: p.name, project: p, action: null, idx, hasChildren: hasKids });
                       }
                     }
                   } else {
-                    // Drilled into a node — show its children (sub-projects + related actions)
+                    // Drilled into a node — show its children (sub-projects + related actions + responses)
                     const currentId = crumbs[crumbs.length - 1].id;
+                    const currentProject = projectItems.find((p: Project) => p.id === currentId);
                     const children = childrenOf[currentId] || [];
                     for (const child of children) {
                       if (hideCompleted && isCompleted(child.status)) continue;
                       const idx = projectItems.indexOf(child);
-                      const hasKids = (visibleChildrenOf[child.id] || []).length > 0 || projectsWithActions.has(child.id);
+                      const hasKids = (visibleChildrenOf[child.id] || []).length > 0 || projectsWithActions.has(child.id) || projectsWithResponses.has(child.name);
                       visibleItems.push({ type: "project", id: child.id, name: child.name, project: child, action: null, idx, hasChildren: hasKids });
                     }
                     // Related next actions for this project
@@ -1740,6 +1771,16 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                       const pa = projectActions[ai];
                       const origIdx = allActionsForProject.indexOf(pa);
                       visibleItems.push({ type: "action", id: "action-" + origIdx, name: pa.text, project: null, action: pa, idx: origIdx, hasChildren: false });
+                    }
+                    // Completed directive responses as sub-items
+                    if (currentProject) {
+                      for (const d of allDirectives) {
+                        if (!d || d.status !== "done" || !d.response) continue;
+                        const dm = d.text.match(/^Re:\s*(.+?)\s*\u2014/);
+                        if (dm && dm[1] === currentProject.name) {
+                          visibleItems.push({ type: "response", id: d.id, name: d.text, project: null, action: null, idx: -1, hasChildren: false });
+                        }
+                      }
                     }
                   }
 
@@ -1783,6 +1824,53 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                         </div>
                       );
                     }
+                    // Directive response row
+                    if (item.type === "response") {
+                      const dir = allDirectives.find((dd: Directive) => dd.id === item.id);
+                      if (!dir) return <div />;
+                      const qMatch = dir.text.match(/^Re:\s*.+?\s*\u2014\s*(.+)$/);
+                      const question = qMatch ? qMatch[1] : dir.text;
+                      const dateStr = dir.createdAt
+                        ? new Date(dir.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+                        : "";
+                      let noteLink = dir.noteUrl || "";
+                      if (noteLink && noteLink.match(/^\/[^\/]+\/baedrei/)) noteLink = "/" + currentSpace + noteLink.substring(noteLink.indexOf("/", 1));
+                      return (
+                        <div style={{ ...itemRowStyle, padding: "10px 0" }}>
+                          <div style={{ display: "flex", alignItems: "flex-start", gap: "10px" }}>
+                            <span style={{
+                              padding: "2px 6px", borderRadius: "4px",
+                              fontSize: "10px", fontWeight: "600",
+                              background: "rgba(88, 86, 214, 0.12)",
+                              color: color.indigo, flexShrink: "0", marginTop: "2px",
+                            }}>{dir.id}</span>
+                            <div style={{ flex: "1" }}>
+                              <div style={{ fontSize: "13px", fontWeight: "500", color: color.label }}>
+                                {question}
+                              </div>
+                              <div style={{
+                                fontSize: "12px", color: color.secondaryLabel,
+                                marginTop: "4px", lineHeight: "1.5",
+                                whiteSpace: "pre-wrap" as const,
+                              }}>
+                                {dir.response}
+                              </div>
+                              <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "6px" }}>
+                                {dateStr ? (
+                                  <span style={{ fontSize: "11px", color: color.tertiaryLabel }}>{dateStr}</span>
+                                ) : null}
+                                {noteLink ? (
+                                  <a href={noteLink} target="_blank" style={{
+                                    fontSize: "11px", color: color.blue, textDecoration: "none",
+                                  }}>{"📎 View note"}</a>
+                                ) : null}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    }
+
                     if (item.type === "person") {
                       // Person row — click drills in
                       return (
@@ -2067,18 +2155,25 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                     });
                   }
 
-                  // Drilled into a person — show linked projects, actions, waiting
+                  // Drilled into a person or project — show linked items recursively
                   const crumbStr = crumbStrs[crumbStrs.length - 1];
                   const bar = crumbStr.indexOf("|");
-                  const personId = bar >= 0 ? crumbStr.substring(0, bar) : crumbStr;
-                  const linkedProjects = allProjects.filter((pr: Project) => pr.parentId === personId);
-                  const linkedActions = allActions.filter((a: NextAction) => a.projectId === personId);
-                  const linkedWaiting = allWaiting.filter((w: WaitingItem) => w.projectId === personId);
+                  const currentId = bar >= 0 ? crumbStr.substring(0, bar) : crumbStr;
+                  const isPersonLevel = currentId.startsWith("PPL:");
+
+                  const projItems: Project[] = [...displayProjects].filter(Boolean);
+                  const actItems: NextAction[] = displayActions;
+                  const waitItems: WaitingItem[] = displayWaiting;
+                  const linkedProjects = projItems.filter((pr: Project) => pr.parentId === currentId);
+                  const linkedActions = actItems.filter((a: NextAction) => a.projectId === currentId);
+                  const linkedWaiting = isPersonLevel ? waitItems.filter((w: WaitingItem) => w.projectId === currentId) : [];
 
                   if (linkedProjects.length === 0 && linkedActions.length === 0 && linkedWaiting.length === 0) {
                     return (
                       <div style={{ fontSize: "13px", color: color.tertiaryLabel, padding: "12px 0" }}>
-                        No linked items — tag projects with <strong>Parent: {personId}</strong> or tag actions/waiting with <strong>[{personId}]</strong>.
+                        {isPersonLevel
+                          ? (<span>No linked items — tag projects with <strong>Parent: {currentId}</strong> or tag actions/waiting with <strong>[{currentId}]</strong>.</span>)
+                          : "No items — use + New Project or + New Action below."}
                       </div>
                     );
                   }
@@ -2088,48 +2183,67 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                       {linkedProjects.length > 0 ? (
                         <div>
                           <div style={groupHeaderStyle}>Projects</div>
-                          {linkedProjects.map((pr: Project) => (
-                            <div style={{ ...itemRowStyle, display: "flex", alignItems: "center", gap: "10px" }}>
-                              <span style={{ fontSize: "12px", color: color.tertiaryLabel, fontWeight: "500", minWidth: "32px", flexShrink: "0" }}>
-                                {pr.id}
-                              </span>
-                              <span style={{ flex: "1" }}>{pr.name}</span>
-                              <span
-                                style={{
-                                  padding: "2px 10px",
-                                  borderRadius: "100px",
-                                  fontSize: "11px",
-                                  fontWeight: "500",
-                                  background:
-                                    pr.status === "Active"
-                                      ? "rgba(52, 199, 89, 0.12)"
-                                      : pr.status === "Done"
-                                        ? "rgba(142, 142, 147, 0.12)"
-                                        : "rgba(255, 149, 0, 0.12)",
-                                  color:
-                                    pr.status === "Active"
-                                      ? "#34c759"
-                                      : pr.status === "Done"
-                                        ? "#8e8e93"
-                                        : "#ff9500",
-                                  flexShrink: "0",
-                                }}
-                              >
-                                {pr.status}
-                              </span>
-                            </div>
-                          ))}
+                          {linkedProjects.map((pr: Project) => {
+                            const prIdx = projItems.indexOf(pr);
+                            const hasKids = projItems.some((p2: Project) => p2.parentId === pr.id) || actItems.some((a: NextAction) => a.projectId === pr.id);
+                            const pk = "projects:" + prIdx;
+                            return (
+                              <div>
+                                <div
+                                  style={computed(() =>
+                                    selectedItem.get() === pk
+                                      ? { ...itemRowStyle, display: "flex", alignItems: "center", gap: "0px", cursor: "pointer", background: "rgba(0, 122, 255, 0.06)", borderRadius: "8px", padding: "8px" }
+                                      : { ...itemRowStyle, display: "flex", alignItems: "center", gap: "0px", cursor: "pointer" }
+                                  )}
+                                >
+                                  <div
+                                    style={{ display: "flex", alignItems: "center", gap: "10px", flex: "1", cursor: "pointer" }}
+                                    onClick={() => hasKids ? drillIntoPerson.send({ id: pr.id, name: pr.name }) : selectItem.send({ key: pk })}
+                                  >
+                                    <span style={{ fontSize: "12px", color: color.tertiaryLabel, fontWeight: "500", minWidth: "32px", flexShrink: "0" }}>{pr.id}</span>
+                                    <span style={{ flex: "1" }}>{pr.name}</span>
+                                    <span style={{ padding: "2px 10px", borderRadius: "100px", fontSize: "11px", fontWeight: "500", background: pr.status === "Active" ? "rgba(52, 199, 89, 0.12)" : pr.status === "Done" ? "rgba(142, 142, 147, 0.12)" : "rgba(255, 149, 0, 0.12)", color: pr.status === "Active" ? "#34c759" : pr.status === "Done" ? "#8e8e93" : "#ff9500", flexShrink: "0" }}>
+                                      {pr.status}
+                                    </span>
+                                  </div>
+                                  {hasKids ? (
+                                    <span style={{ fontSize: "14px", color: color.tertiaryLabel, paddingLeft: "8px", flexShrink: "0", cursor: "pointer" }} onClick={() => drillIntoPerson.send({ id: pr.id, name: pr.name })}>{">"}</span>
+                                  ) : null}
+                                </div>
+                                {computed(() => {
+                                  if (selectedItem.get() !== pk) return null;
+                                  return (
+                                    <div style={{ display: "flex", gap: "8px", padding: "6px 0 8px", flexWrap: "wrap" as const }}>
+                                      <div style={actionBtnDone} onClick={() => markItemDone.send({ key: pk })}>✓ Done</div>
+                                      <div style={actionBtnDelete} onClick={() => deleteItem.send({ key: pk })}>✕ Delete</div>
+                                      <div style={actionBtnDirective} onClick={openItemDirective}>→ Directive</div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            );
+                          })}
                         </div>
                       ) : null}
                       {linkedActions.length > 0 ? (
                         <div>
                           <div style={groupHeaderStyle}>Actions</div>
-                          {linkedActions.map((a: NextAction) => (
-                            <div style={{ ...itemRowStyle, display: "flex", alignItems: "center", gap: "10px" }}>
-                              <span style={{ flex: "1" }}>{a.text}</span>
-                              <span style={{ fontSize: "11px", color: color.tertiaryLabel, flexShrink: "0" }}>{a.context}</span>
-                            </div>
-                          ))}
+                          {linkedActions.map((a: NextAction) => {
+                            const origIdx = actItems.indexOf(a);
+                            return (
+                              <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "5px 0 5px 12px", borderBottom: `0.5px solid ${color.separator}` }}>
+                                <ct-checkbox
+                                  checked={false}
+                                  style={{ width: "15px", height: "15px", flexShrink: "0", cursor: "pointer" }}
+                                  onClick={() => markItemDone.send({ key: "actions:" + origIdx })}
+                                />
+                                {a.context ? (
+                                  <span style={{ fontSize: "10px", color: color.blue, background: "rgba(0,122,255,0.08)", padding: "1px 6px", borderRadius: "100px", flexShrink: "0", fontWeight: "500" }}>{a.context}</span>
+                                ) : null}
+                                <span style={{ fontSize: "13px", color: color.secondaryLabel, flex: "1" }}>{a.text}</span>
+                              </div>
+                            );
+                          })}
                         </div>
                       ) : null}
                       {linkedWaiting.length > 0 ? (
@@ -2175,7 +2289,11 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                     );
                   }
                   const itype = addItemType.get();
-                  const placeholder = inPersonView ? (itype === "action" ? "New action for this person..." : "New project for this person...") : "New person...";
+                  const lastCrumb = crumbs.length > 0 ? crumbs[crumbs.length - 1] : "";
+                  const lastBar2 = lastCrumb.indexOf("|");
+                  const lastId = lastBar2 >= 0 ? lastCrumb.substring(0, lastBar2) : lastCrumb;
+                  const inProjectView = inPersonView && !lastId.startsWith("PPL:");
+                  const placeholder = inPersonView ? (itype === "action" ? "New action..." : (inProjectView ? "New subproject..." : "New project for this person...")) : "New person...";
                   return (
                     <div style={{ display: "flex", gap: "8px", marginTop: "10px", alignItems: "center" }}>
                       <ct-textarea $value={addItemDraft} placeholder={placeholder} rows={1} style={{ flex: "1", borderRadius: "10px", fontSize: "14px" }} />
