@@ -749,7 +749,11 @@ export interface ICfcSchemaHashMismatchError extends IStorageError {
 
 export interface ICfcInputRequirementViolationError extends IStorageError {
   readonly name: "CfcInputRequirementViolationError";
-  readonly requirement: "maxConfidentiality" | "requiredIntegrity";
+  readonly requirement:
+    | "maxConfidentiality"
+    | "requiredIntegrity"
+    | "statePreconditionRead"
+    | "statePreconditionPredicate";
   readonly space: MemorySpace;
   readonly id: URI;
   readonly type: string;
@@ -758,6 +762,10 @@ export interface ICfcInputRequirementViolationError extends IStorageError {
   readonly requiredIntegrity?: readonly string[];
   readonly actualClassification?: string;
   readonly actualIntegrity?: readonly string[];
+  readonly requiredReadPath?: string;
+  readonly predicatePath?: string;
+  readonly expectedValue?: unknown;
+  readonly actualValue?: unknown;
 }
 
 export interface ICfcOutputTransitionViolationError extends IStorageError {
