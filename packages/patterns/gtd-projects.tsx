@@ -133,6 +133,20 @@ const actionBtnDirective = {
   cursor: "pointer",
 };
 
+// ===== Helpers =====
+
+// Find completed directives targeting a project by name
+const directivesForProject = (
+  projectName: string,
+  allDirectives: Directive[],
+): Directive[] => {
+  return allDirectives.filter((d: Directive) => {
+    if (!d || d.status !== "done" || !d.response) return false;
+    const m = d.text.match(/^Re:\s*(.+?)\s*—/);
+    return m && m[1] === projectName;
+  });
+};
+
 // ===== Pattern =====
 
 const GTDProjects = pattern<ProjectsInput, ProjectsOutput>(
@@ -214,18 +228,6 @@ const GTDProjects = pattern<ProjectsInput, ProjectsOutput>(
       itemDirectiveOpen.set(false);
       selectedItem.set("");
     });
-
-    // Helper: find completed directives targeting a project by name
-    const directivesForProject = (
-      projectName: string,
-      allDirectives: Directive[],
-    ): Directive[] => {
-      return allDirectives.filter((d: Directive) => {
-        if (!d || d.status !== "done" || !d.response) return false;
-        const m = d.text.match(/^Re:\s*(.+?)\s*—/);
-        return m && m[1] === projectName;
-      });
-    };
 
     // Action: drill into a directive response
     const drillIntoDirective = action(
