@@ -95,7 +95,7 @@ describe("CellController", () => {
     expect(ctrl.getCell()).toBeNull();
   });
 
-  it("setValue updates the underlying CellHandle", async () => {
+  it("setValue updates the underlying CellHandle", () => {
     const host = createMockHost();
     const ctrl = new CellController<string>(host, {
       timing: { strategy: "immediate" },
@@ -150,7 +150,7 @@ describe("CellController", () => {
     expect(updateCount).toBeGreaterThan(initialCount);
   });
 
-  it("re-bind to a different cell cleans up old subscription", async () => {
+  it("re-bind to a different cell cleans up old subscription", () => {
     const host = createMockHost();
     const ctrl = new CellController<string>(host, {
       timing: { strategy: "immediate" },
