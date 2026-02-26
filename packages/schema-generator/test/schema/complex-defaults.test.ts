@@ -119,8 +119,8 @@ describe("Schema: Complex defaults", () => {
     const u = s.properties?.undefinable as any;
     // Typically no default field for undefined
     expect(u.default).toBeUndefined();
-    // For undefined unions, the undefined is stripped and we get the simplified schema
-    expect(u.type).toBe("string");
+    // For undefined unions, the undefined is kept
+    expect(u.type).toEqual(["string", "undefined"]);
     expect(u.anyOf).toBeUndefined();
   });
 

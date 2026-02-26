@@ -196,8 +196,12 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: "string",
-            asOpaque: true
+            anyOf: [{
+                    type: "undefined"
+                }, {
+                    type: "string",
+                    asOpaque: true
+                }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.items,
                 index: state.index
@@ -222,8 +226,12 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: "string",
-            asOpaque: true
+            anyOf: [{
+                    type: "undefined"
+                }, {
+                    type: "string",
+                    asOpaque: true
+                }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.items
             } }, ({ state }) => state.items[state.items.length - 1])}</p>
@@ -250,8 +258,12 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number",
-            asOpaque: true
+            anyOf: [{
+                    type: "undefined"
+                }, {
+                    type: "number",
+                    asOpaque: true
+                }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 numbers: state.numbers,
                 index: state.index

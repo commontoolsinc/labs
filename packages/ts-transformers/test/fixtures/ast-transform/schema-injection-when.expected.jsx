@@ -13,11 +13,7 @@ export default pattern(({ enabled, message }) => {
         type: "string",
         asOpaque: true
     } as const satisfies __ctHelpers.JSONSchema, {
-        anyOf: [{
-                type: "string"
-            }, {
-                type: "boolean"
-            }],
+        type: ["boolean", "string"],
         asOpaque: true
     } as const satisfies __ctHelpers.JSONSchema, enabled, message);
     return {

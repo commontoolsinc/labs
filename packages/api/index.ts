@@ -92,13 +92,13 @@ export interface IAnyCell<T> {
  * Readable cells can retrieve their current value.
  */
 export interface IReadable<T> {
-  get(options?: { traverseCells?: boolean }): Readonly<T>;
+  get(options?: { traverseCells?: boolean }): Readonly<StripDefaultBrand<T>>;
   /**
    * Read the cell's current value without creating a reactive dependency.
    * Unlike `get()`, calling `sample()` inside a lift won't cause the lift
    * to re-run when this cell's value changes.
    */
-  sample(): Readonly<T>;
+  sample(): Readonly<StripDefaultBrand<T>>;
 }
 
 /**
@@ -1404,17 +1404,23 @@ export interface BuiltInCompileAndRunState<T> {
 export interface PatternFunction {
   // Function-only overload: T and R inferred from function
   <T, R>(
-    fn: (input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<R> }) => Opaque<R>,
+    fn: (
+      input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<R> },
+    ) => Opaque<R>,
   ): PatternFactory<StripCell<T>, StripCell<R>>;
 
   // Function-only overload: T explicit, R inferred
   <T>(
-    fn: (input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<any> }) => any,
+    fn: (
+      input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<any> },
+    ) => any,
   ): PatternFactory<StripCell<T>, StripCell<ReturnType<typeof fn>>>;
 
   // Function + schema overload: T explicit, R inferred
   <T>(
-    fn: (input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<any> }) => any,
+    fn: (
+      input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<any> },
+    ) => any,
     argumentSchema: JSONSchema,
     resultSchema?: JSONSchema,
   ): PatternFactory<StripCell<T>, StripCell<ReturnType<typeof fn>>>;
@@ -1422,7 +1428,7 @@ export interface PatternFunction {
   // Function + schema overload: T and R explicit
   <T, R>(
     fn: (
-      input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<R> },
+      input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<R> },
     ) => Opaque<R>,
     argumentSchema: JSONSchema,
     resultSchema?: JSONSchema,
@@ -1443,7 +1449,7 @@ export type PatternToolFunction = <
   E extends object = Record<PropertyKey, never>,
 >(
   fnOrPattern:
-    | ((input: OpaqueRef<Required<T>>) => any)
+    | ((input: OpaqueRef<RequireDefaults<T>>) => any)
     | PatternFactory<T, any>,
   // Validate that E (after stripping cells) is a subset of T
   extraParams?: StripCell<E> extends Partial<T> ? Opaque<E> : never,
@@ -1672,8 +1678,94 @@ export type CreateNodeFactoryFunction = <T = any, R = any>(
   moduleSpec: Module,
 ) => ModuleFactory<T, R>;
 
-// Default type for specifying default values in type definitions
-export type Default<T, V extends T = T> = T;
+// Symbol used to brand Default<T,V> types so RequireDefaults<T> can detect them.
+// This is a compile-time-only brand; at runtime Default<> is just T.
+export declare const DEFAULT_MARKER: unique symbol;
+
+// Default type for specifying default values in type definitions.
+// The DEFAULT_MARKER brand enables RequireDefaults<T> to detect which fields
+// have runtime-provided defaults and make them non-optional in pattern bodies.
+// Detection uses conditional type inference (not keyof) for performance.
+export type Default<T, V extends T = T> =
+  | (T & { readonly [DEFAULT_MARKER]: T })
+  | T;
+
+/** Detect if T is `any` (used to avoid false positives in brand detection). */
+type IsAny<T> = 0 extends 1 & T ? true : false;
+
+/** Returns true if T is exactly the `boolean` type (i.e. `true | false`), and false for `true`, `false`, or any other type. */
+type IsBoolean<T> = [T] extends [boolean] ? [boolean] extends [T] ? true : false
+  : false;
+
+/**
+ * Inner helper for HasDefaultBrand. Distributes over union members of T —
+ * returning `true` for the branded member, `false` for the plain member,
+ * and therefore `boolean` when T is the full `Default<X, V>` union.
+ *
+ * IMPORTANT: uses `T extends { readonly [DEFAULT_MARKER]: any }` (T is the naked
+ * type parameter on the LEFT of extends) so TypeScript distributes over union
+ * members. The previous form `typeof DEFAULT_MARKER extends keyof T` was
+ * non-distributive — for union T, `keyof T` is the intersection of member keys,
+ * which drops DEFAULT_MARKER (it only appears in the branded member).
+ */
+type _HasDefaultBrand<T> = T extends { readonly [DEFAULT_MARKER]: any } ? true
+  : false;
+
+/** Returns true if T carries the DEFAULT_MARKER brand (i.e. is `Default<T, V>`), false otherwise. */
+type HasDefaultBrand<T> = IsAny<T> extends true ? false
+  : IsBoolean<_HasDefaultBrand<T>> extends true ? true
+  : _HasDefaultBrand<T>;
+
+/**
+ * Detect whether a type T is (or wraps) a Default<>-branded value.
+ * Handles both direct Default<T,V> and Cell-wrapped Default<T,V>.
+ */
+type IsDefaultField<T> = IsAny<T> extends true ? false
+  : HasDefaultBrand<NonNullable<T>> extends true ? true
+  : NonNullable<T> extends AnyBrandedCell<infer U>
+    ? IsAny<U> extends true ? false
+    : HasDefaultBrand<U> extends true ? true
+    : false
+  : false;
+
+/** Removes the DEFAULT_MARKER branded member from a `Default<T, V>` union, leaving plain `T`. */
+export type StripDefaultBrand<T> = Exclude<
+  T,
+  { readonly [DEFAULT_MARKER]: any }
+>;
+
+/**
+ * Maps a type T so that any fields carrying the DEFAULT_MARKER brand become required
+ * (removing `?`) and have their brand stripped, while all other fields are left
+ * unchanged — including preservation of their optional modifier `?`.
+ *
+ * Implementation note: uses an intersection of two mapped types:
+ * 1. A homomorphic map (so TypeScript can infer `T` from the result) that strips
+ *    Default brands and preserves the original optional modifier for every key.
+ * 2. A `-?` refinement that makes only the Default-branded keys required.
+ * TypeScript infers `T` from the homomorphic first part; the second part is then
+ * evaluated with the resolved `T` to enforce requiredness on Default fields.
+ */
+export type RequireDefaults<T> =
+  // Homomorphic: strip Default brands, preserve `?` for every key (TypeScript can infer T from this)
+  // Use `true extends IsDefaultField<T[K]>` (reversed) rather than `IsDefaultField<T[K]> extends true`
+  // because IsDefaultField can return `boolean` (= `true | false`) when T[K] is a union like
+  // `Default<X,V> | undefined`. In a non-distributive conditional context, `boolean extends true`
+  // is `false`, but `true extends boolean` is `true` — correctly triggering the true branch.
+  & {
+    [K in keyof T]: true extends IsDefaultField<T[K]> ? StripDefaultBrand<T[K]>
+      : T[K];
+  }
+  // Refinement: remove `?` from keys that carry the Default brand.
+  // Use Exclude<T[K], undefined> to strip the `| undefined` that TypeScript
+  // adds for optional fields (T[K] of `a?: X` includes `X | undefined`).
+  // Without this, the required field's value type would still include
+  // `| undefined`, which propagates through OpaqueRef and makes the field
+  // possibly-undefined in the pattern body despite being required.
+  & {
+    [K in keyof T as true extends IsDefaultField<T[K]> ? K : never]-?:
+      StripDefaultBrand<Exclude<T[K], undefined>>;
+  };
 
 // Internal-only way to instantiate internal modules
 export type ByRefFunction = <T, R>(ref: string) => ModuleFactory<T, R>;

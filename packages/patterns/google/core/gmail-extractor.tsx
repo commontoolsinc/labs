@@ -431,12 +431,14 @@ const GmailExtractor = pattern<GmailExtractorInput, GmailExtractorOutput>(
 
     // Auto-detect whether to run analysis based on presence of extraction config
     const shouldRunAnalysis = computed(() =>
-      !!(extraction.promptTemplate?.trim() && extraction.schema)
+      !!(extraction?.promptTemplate?.trim() && extraction.schema)
     );
 
     // Capture extraction config values for use inside .map() callback
-    const extractionSchema = extraction.schema;
-    const extractionPromptTemplate = extraction.promptTemplate;
+    const extractionSchema = computed(() => extraction?.schema ?? true);
+    const extractionPromptTemplate = computed(() =>
+      extraction?.promptTemplate ?? ""
+    );
 
     // Reactive LLM analysis - analyze each email (only if extraction is provided)
     // Note: consumers can access result via item.analysis.result or item.result

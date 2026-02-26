@@ -33,21 +33,18 @@ export default pattern((state) => {
                     properties: {
                         count: {
                             type: "number",
-                            "default": 0
-                        },
-                        label: {
-                            type: "string",
-                            "default": ""
+                            asOpaque: true
                         }
                     },
-                    required: ["count", "label"],
-                    asOpaque: true
+                    required: ["count"]
                 }
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { state: state }, ({ state }) => state && state.count > 0), <p>Positive</p>, <p>Non-positive</p>)}
+        } as const satisfies __ctHelpers.JSONSchema, { state: {
+                count: state.count
+            } }, ({ state }) => state.count > 0), <p>Positive</p>, <p>Non-positive</p>)}
       </section>),
     };
 }, {

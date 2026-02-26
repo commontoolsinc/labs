@@ -20,8 +20,12 @@ export default pattern((state) => {
                     },
                     required: ["element", "__ct_amount_key"]
                 } as const satisfies __ctHelpers.JSONSchema, {
-                    type: "number",
-                    asOpaque: true
+                    anyOf: [{
+                            type: "undefined"
+                        }, {
+                            type: "number",
+                            asOpaque: true
+                        }]
                 } as const satisfies __ctHelpers.JSONSchema, {
                     element: element,
                     __ct_amount_key: __ct_amount_key

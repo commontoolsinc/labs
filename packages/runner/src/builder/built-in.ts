@@ -8,6 +8,7 @@ import type {
   Opaque,
   OpaqueRef,
   PatternFactory,
+  RequireDefaults,
   Schema,
 } from "./types.ts";
 import type { Cell as CellType } from "./types.ts";
@@ -407,7 +408,7 @@ export const patternTool = (<
   E extends Partial<T> = Record<PropertyKey, never>,
 >(
   fnOrPattern:
-    | ((input: OpaqueRef<Required<T>>) => any)
+    | ((input: OpaqueRef<RequireDefaults<T>>) => any)
     | PatternFactory<T, any>,
   extraParams?: Opaque<E>,
 ): PatternToolResult<E> => {

@@ -39,7 +39,49 @@ export default pattern<State>((state) => {
 });
 `;
 
+const WISH_DEFAULT_ARRAY_SOURCE = `/// <cts-enable />
+import { Default, handler, NAME, pattern, UI, wish, Writable } from "commontools";
+
+type Item = { name: string; value: number };
+
+const removeItem = handler<
+  Record<string, never>,
+  { items: Writable<Default<Item[], []>>; item: Item }
+>((_, { items, item }) => {
+  items.remove(item);
+});
+
+export default pattern<Record<string, never>>((_) => {
+  const { result: items } = wish<Default<Item[], []>>({ query: "#items" });
+
+  return {
+    [NAME]: "Test",
+    [UI]: (
+      <ul>
+        {items.map((item) => (
+          <li>
+            {item.name}
+            <button onClick={removeItem({ items, item })}>Remove</button>
+          </li>
+        ))}
+      </ul>
+    ),
+  };
+});
+`;
+
 describe("OpaqueRef map callbacks", () => {
+  it("transforms wish<Default<Array<T>, []>>().result.map() to mapWithPattern", async () => {
+    const output = await transformSource(WISH_DEFAULT_ARRAY_SOURCE, {
+      types: { "commontools.d.ts": commontools },
+    });
+
+    // The map should be transformed to mapWithPattern, not left as .map()
+    assertStringIncludes(output, "mapWithPattern(");
+    // The outer items capture should appear in params
+    assertStringIncludes(output, "items: items");
+  });
+
   it("derives map callback parameters and unary negations", async () => {
     const output = await transformSource(SOURCE, {
       types: { "commontools.d.ts": commontools },

@@ -28,11 +28,7 @@ export default pattern(({ items }) => {
                     ItemTuple: {
                         type: "array",
                         items: {
-                            anyOf: [{
-                                    type: "string"
-                                }, {
-                                    type: "number"
-                                }]
+                            type: ["number", "string"]
                         }
                     }
                 }
@@ -81,11 +77,7 @@ export default pattern(({ items }) => {
                     ItemTuple: {
                         type: "array",
                         items: {
-                            anyOf: [{
-                                    type: "string"
-                                }, {
-                                    type: "number"
-                                }]
+                            type: ["number", "string"]
                         }
                     }
                 }
@@ -128,11 +120,7 @@ export default pattern(({ items }) => {
         ItemTuple: {
             type: "array",
             items: {
-                anyOf: [{
-                        type: "string"
-                    }, {
-                        type: "number"
-                    }]
+                type: ["number", "string"]
             }
         }
     }

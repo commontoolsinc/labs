@@ -10,7 +10,7 @@ import {
   registerTypeForNode,
   tryExplicitParameterType,
 } from "../../ast/type-inference.ts";
-import { isOptionalPropertyAccess } from "../../ast/mod.ts";
+import { isOptionalMemberSymbol } from "../../ast/mod.ts";
 
 export class SchemaFactory {
   constructor(
@@ -160,7 +160,7 @@ export class SchemaFactory {
       // Check if the original input is an optional property access (e.g., config.multiplier where multiplier?: number)
       let questionToken: ts.QuestionToken | undefined = undefined;
       if (ts.isPropertyAccessExpression(originalInput)) {
-        if (isOptionalPropertyAccess(originalInput, this.context.checker)) {
+        if (isOptionalMemberSymbol(originalInput, this.context.checker)) {
           questionToken = factory.createToken(ts.SyntaxKind.QuestionToken);
         }
       }

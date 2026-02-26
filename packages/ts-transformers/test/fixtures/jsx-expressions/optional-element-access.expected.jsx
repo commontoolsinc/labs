@@ -2,10 +2,14 @@ import * as __ctHelpers from "commontools";
 import { cell, NAME, pattern, UI } from "commontools";
 export default pattern(() => {
     const list = cell<string[] | undefined>(undefined, {
-        type: "array",
-        items: {
-            type: "string"
-        }
+        anyOf: [{
+                type: "undefined"
+            }, {
+                type: "array",
+                items: {
+                    type: "string"
+                }
+            }]
     } as const satisfies __ctHelpers.JSONSchema);
     return {
         [NAME]: "Optional element access",
@@ -28,10 +32,14 @@ export default pattern(() => {
             type: "object",
             properties: {
                 list: {
-                    type: "array",
-                    items: {
-                        type: "string"
-                    },
+                    anyOf: [{
+                            type: "undefined"
+                        }, {
+                            type: "array",
+                            items: {
+                                type: "string"
+                            }
+                        }],
                     asCell: true
                 }
             },

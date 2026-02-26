@@ -144,12 +144,12 @@ export default pattern(({ card }) => {
             type: "null"
         } as const satisfies __ctHelpers.JSONSchema, {
             anyOf: [{
+                    type: "null"
+                }, {
                     $ref: "https://commonfabric.org/schemas/vnode.json"
                 }, {
                     type: "object",
                     properties: {}
-                }, {
-                    type: "null"
                 }]
         } as const satisfies __ctHelpers.JSONSchema, hasDescription, <span>{card.description}</span>, null)}
             {/* Action in SAME branch - must be captured by the derive! */}

@@ -12,7 +12,14 @@ export interface CheckerOptions {
 // These symbols are exported from commontools but TypeScript's declaration
 // diagnostics have trouble with unique symbols in certain contexts.
 // Filter out these known false positives.
-const KNOWN_EXPORTED_SYMBOLS = ["CELL_BRAND", "CELL_INNER_TYPE"];
+// Note: TypeScript emits different phrasings for the same underlying issue:
+//   - "private name 'X'" (TS4053/4054) for symbols used as property keys
+//   - "name 'X' from external module" (TS4055) when the symbol type leaks into inferred declarations
+const KNOWN_EXPORTED_SYMBOLS = [
+  "CELL_BRAND",
+  "CELL_INNER_TYPE",
+  "DEFAULT_MARKER",
+];
 
 export class Checker {
   private program: Program;
@@ -45,7 +52,8 @@ export class Checker {
           ? diagnostic.messageText
           : diagnostic.messageText.messageText;
         const isKnownSymbol = KNOWN_EXPORTED_SYMBOLS.some((sym) =>
-          message.includes(`private name '${sym}'`)
+          message.includes(`private name '${sym}'`) ||
+          message.includes(`name '${sym}' from external module`)
         );
         if (!isKnownSymbol) {
           output.push({ diagnostic, source: sourceFile.text });

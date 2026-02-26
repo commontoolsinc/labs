@@ -32,8 +32,12 @@ export default pattern((state) => {
                 },
                 required: ["state", "tag"]
             } as const satisfies __ctHelpers.JSONSchema, {
-                type: "number",
-                asOpaque: true
+                anyOf: [{
+                        type: "undefined"
+                    }, {
+                        type: "number",
+                        asOpaque: true
+                    }]
             } as const satisfies __ctHelpers.JSONSchema, {
                 state: {
                     tagCounts: state.tagCounts

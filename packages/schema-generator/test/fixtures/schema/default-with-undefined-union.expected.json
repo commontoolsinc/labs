@@ -2,11 +2,17 @@
   "properties": {
     "maybeCount": {
       "default": 42,
-      "type": "number"
+      "type": [
+        "number",
+        "undefined"
+      ]
     },
     "maybeTitle": {
       "default": "untitled",
-      "type": "string"
+      "type": [
+        "string",
+        "undefined"
+      ]
     },
     "requiredTitle": {
       "default": "required",

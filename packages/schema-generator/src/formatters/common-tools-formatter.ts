@@ -5,13 +5,18 @@ import {
   getCellWrapperInfo,
   isCellBrand,
 } from "../typescript/cell-brand.ts";
+import { isDefaultAliasSymbol } from "../typescript/property-optionality.ts";
 import type {
   GenerationContext,
   SchemaDefinition,
   TypeFormatter,
 } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
-import { detectWrapperViaNode, resolveWrapperNode } from "../type-utils.ts";
+import {
+  detectWrapperViaNode,
+  resolveWrapperNode,
+  type TypeWithInternals,
+} from "../type-utils.ts";
 
 type WrapperKind = CellWrapperKind;
 
@@ -37,6 +42,13 @@ export class CommonToolsFormatter implements TypeFormatter {
       context.typeChecker,
     );
     if (wrapperViaNode === "Default") {
+      return true;
+    }
+
+    // Fallback: check via aliasSymbol for Default<T> when typeToTypeNode expanded the alias.
+    // typeToTypeNode expands Default<T,V> to its branded union representation, losing the
+    // "Default" type node. The type object itself still carries aliasSymbol = Default.
+    if (isDefaultAliasSymbol((type as TypeWithInternals).aliasSymbol)) {
       return true;
     }
 
@@ -105,6 +117,39 @@ export class CommonToolsFormatter implements TypeFormatter {
       if (nodeForDefault && ts.isTypeReferenceNode(nodeForDefault)) {
         return this.formatDefaultType(nodeForDefault, context);
       }
+    }
+
+    // Fallback: handle Default<T> detected via aliasSymbol when no type node is available.
+    // When typeToTypeNode expands Default<T,V), the node no longer says "Default" but
+    // the type object still carries aliasSymbol. Extract T from aliasTypeArguments[0]
+    // and V from aliasTypeArguments[1] so the default value is preserved in the schema.
+    const typeWithAlias = type as TypeWithInternals;
+    if (
+      isDefaultAliasSymbol(typeWithAlias.aliasSymbol) &&
+      typeWithAlias.aliasTypeArguments &&
+      typeWithAlias.aliasTypeArguments.length >= 1
+    ) {
+      const innerType = typeWithAlias.aliasTypeArguments[0]!;
+      const valueSchema = this.schemaGenerator.formatChildType(
+        innerType,
+        context,
+        undefined,
+      );
+
+      if (typeWithAlias.aliasTypeArguments.length >= 2) {
+        const defaultType = typeWithAlias.aliasTypeArguments[1]!;
+        const defaultValue = this.extractDefaultValue(defaultType, context);
+        if (defaultValue !== undefined) {
+          if (typeof valueSchema === "boolean") {
+            return (valueSchema === false
+              ? { not: true, default: defaultValue }
+              : { default: defaultValue }) as SchemaDefinition;
+          }
+          (valueSchema as Record<string, unknown>).default = defaultValue;
+        }
+      }
+
+      return valueSchema;
     }
 
     const wrapperInfo = getCellWrapperInfo(type, context.typeChecker);
@@ -813,8 +858,9 @@ export class CommonToolsFormatter implements TypeFormatter {
       const memberType = members[i]!;
       const memberNode = unionNode?.types[i];
 
-      // Skip undefined (optionality handled via JSON Schema required array)
+      // Include undefined as an explicit type in the schema
       if (this.isUndefinedType(memberType)) {
+        schemas.push({ type: "undefined" });
         continue;
       }
 

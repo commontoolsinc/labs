@@ -22,27 +22,29 @@ export default pattern((state) => {
                         type: "object",
                         properties: {
                             maybe: {
-                                type: "object",
-                                properties: {
-                                    value: {
-                                        type: "number"
-                                    }
-                                },
-                                required: ["value"],
-                                asOpaque: true
+                                anyOf: [{
+                                        type: "undefined"
+                                    }, {
+                                        anyOf: [{
+                                                type: "undefined"
+                                            }, {
+                                                type: "object",
+                                                properties: {
+                                                    value: {
+                                                        type: "number"
+                                                    }
+                                                },
+                                                required: ["value"]
+                                            }],
+                                        asOpaque: true
+                                    }]
                             }
                         }
                     }
                 },
                 required: ["item"]
             } as const satisfies __ctHelpers.JSONSchema, {
-                anyOf: [{
-                        type: "number",
-                        "enum": [0]
-                    }, {
-                        type: "number",
-                        asOpaque: true
-                    }]
+                type: "number"
             } as const satisfies __ctHelpers.JSONSchema, { item: {
                     maybe: item.maybe
                 } }, ({ item }) => item.maybe?.value ?? 0)}</span>), {

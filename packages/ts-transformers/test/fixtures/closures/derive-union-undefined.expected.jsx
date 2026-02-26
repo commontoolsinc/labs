@@ -22,10 +22,10 @@ export default function TestDerive(config: Config) {
                         type: "number"
                     },
                     unionUndefined: {
-                        type: "number"
+                        type: ["number", "undefined"]
                     }
                 },
-                required: ["required"]
+                required: ["required", "unionUndefined"]
             }
         },
         required: ["value", "config"]

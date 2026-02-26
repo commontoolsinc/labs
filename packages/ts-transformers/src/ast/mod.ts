@@ -24,8 +24,7 @@ export {
   getTypeAtLocationWithFallback,
   isFunctionParameter,
   isMethodCall,
-  isOptionalProperty,
-  isOptionalPropertyAccess,
+  isOptionalMemberSymbol,
   setParentPointers,
   visitEachChildWithJsx,
 } from "./utils.ts";

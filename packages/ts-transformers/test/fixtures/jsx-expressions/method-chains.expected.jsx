@@ -383,8 +383,12 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: "string",
-            asOpaque: true
+            anyOf: [{
+                    type: "undefined"
+                }, {
+                    type: "string",
+                    asOpaque: true
+                }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 names: state.names,
                 searchTerm: state.searchTerm

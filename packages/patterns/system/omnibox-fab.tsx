@@ -112,14 +112,18 @@ const handleExternalPin = handler<
 });
 
 /** Wish for a #tag or a custom query with optional linked context. Automatically navigates to the result. */
-type WishToolParameters = { query: string; context?: Record<string, any> };
+type WishToolParameters = {
+  query: string;
+  context?: Record<string, any>;
+};
 
 const wishTool = pattern<WishToolParameters, boolean>(
   ({ query, context }) => {
-    const wishResult = wish<any>({
-      query,
-      context,
+    // Context may not have been provided.
+    const wishParams = computed(() => {
+      return { query, ...(context && { context }) };
     });
+    const wishResult = wish<any>(wishParams);
 
     // Navigate to wishResult.result (the actual cell), not the entire wish state object
     return when(wishResult.result, navigateTo(wishResult.result));

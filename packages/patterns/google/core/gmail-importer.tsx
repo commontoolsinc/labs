@@ -1121,7 +1121,11 @@ export default pattern<
   const wishedAuth = authManager.auth;
   const authUI = authManager[UI];
 
-  const auth = ifElse(overrideAuth.token, overrideAuth, wishedAuth);
+  const auth = ifElse(
+    overrideAuth !== undefined && overrideAuth.token !== undefined,
+    overrideAuth,
+    wishedAuth,
+  );
   const isReady = computed(() => !!auth.token);
   const currentEmail = computed(() => auth.user?.email ?? "");
 

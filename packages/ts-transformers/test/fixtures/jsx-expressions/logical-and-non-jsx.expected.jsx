@@ -24,11 +24,7 @@ export default pattern((_state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "string"
-                }, {
-                    type: "boolean"
-                }]
+            type: ["boolean", "string"]
         } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
@@ -77,11 +73,7 @@ export default pattern((_state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "number"
-                }, {
-                    type: "boolean"
-                }]
+            type: ["boolean", "number"]
         } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {

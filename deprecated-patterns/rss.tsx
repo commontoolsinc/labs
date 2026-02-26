@@ -34,7 +34,7 @@ const feedUpdater = handler<never, {
       if (!query.result || typeof query.result !== "string") return;
       const newEntries = parseRSSFeed(
         query.result as string,
-        limit,
+        limit as number, // just casting, since derive is deprecated
         new Set(items.get().map((item) => item.id)),
       );
       items.push(...newEntries);

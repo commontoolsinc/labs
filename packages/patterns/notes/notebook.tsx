@@ -2,6 +2,7 @@
 import {
   action,
   computed,
+  Default,
   equals,
   handler,
   NAME,
@@ -260,7 +261,7 @@ const deleteSelectedNotes = handler<
   {
     notes: Writable<NotePiece[]>;
     selectedNoteIndices: Writable<number[]>;
-    allPieces: Writable<NotePiece[]>;
+    allPieces: Writable<Default<NotePiece[], []>>;
     notebooks: Writable<NotebookPiece[]>;
   }
 >((_, { notes, selectedNoteIndices, allPieces, notebooks }) => {

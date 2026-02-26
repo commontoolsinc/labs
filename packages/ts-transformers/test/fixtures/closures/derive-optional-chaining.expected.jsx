@@ -18,7 +18,7 @@ export default function TestDerive(config: Config) {
                 type: "object",
                 properties: {
                     multiplier: {
-                        type: "number"
+                        type: ["number", "undefined"]
                     }
                 }
             }

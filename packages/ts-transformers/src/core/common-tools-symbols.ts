@@ -82,11 +82,6 @@ function isCommonToolsDefaultTypeNode(
   visited: Set<ts.Symbol> = new Set(),
 ): boolean {
   if (!typeNode || !ts.isTypeReferenceNode(typeNode)) return false;
-  if (
-    ts.isIdentifier(typeNode.typeName) && typeNode.typeName.text === "Default"
-  ) {
-    return true;
-  }
   const symbol = checker.getSymbolAtLocation(typeNode.typeName);
   if (!symbol || visited.has(symbol)) return false;
   visited.add(symbol);

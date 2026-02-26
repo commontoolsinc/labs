@@ -47,48 +47,28 @@ export function isDefaultNodeWithUndefined(
   return isUnionWithUndefined(innerType);
 }
 
+export function isOptionalSymbol(symbol: ts.Symbol): boolean {
+  return (symbol.flags & ts.SymbolFlags.Optional) !== 0;
+}
+
 /**
- * Centralized optionality check for properties.
- * Returns true if the property is optional by ANY of these criteria:
+ * Returns true if `symbol` is the `Default` type alias from `@commontools/api`.
  *
- * 1. Symbol has `SymbolFlags.Optional` — this is the primary check.
- *    TypeScript correctly sets/clears this flag for mapped types like
- *    `Required<T>` and `Partial<T>`, even when the original declaration
- *    has a `?` token.
- * 2. Type is a union with `undefined` (e.g., `foo: T | undefined`)
- * 3. Type is `Default<T | undefined, V>` (when typeNode and checker provided)
- *
- * Note: We intentionally do NOT check the declaration's `questionToken` because
- * it reflects the *source* declaration, not the resolved property. For mapped
- * types like `Required<{ a?: string }>`, the declaration still has `?` but
- * `SymbolFlags.Optional` is correctly cleared.
- *
- * @param symbol - The property symbol (may be undefined)
- * @param type - The property type (may be undefined)
- * @param typeNode - Optional type node for Default<> checking
- * @param checker - Optional type checker for Default<> checking
+ * Checks both the symbol name AND its declaring source file so that any
+ * user-defined type that happens to be named "Default" is not treated as the
+ * framework's Default<T,V>.
  */
-export function isOptionalProperty(
-  symbol: ts.Symbol | undefined,
-  type: ts.Type | undefined,
-  typeNode?: ts.TypeNode,
-  checker?: ts.TypeChecker,
-): boolean {
-  // Primary: check SymbolFlags.Optional
-  // This correctly reflects Required<>, Partial<>, and ? modifiers
-  if (symbol && (symbol.flags & ts.SymbolFlags.Optional) !== 0) {
-    return true;
-  }
-
-  // Check if type is T | undefined
-  if (type && isUnionWithUndefined(type)) {
-    return true;
-  }
-
-  // Check Default<T | undefined, V>
-  if (typeNode && checker && isDefaultNodeWithUndefined(typeNode, checker)) {
-    return true;
-  }
-
-  return false;
+export function isDefaultAliasSymbol(symbol: ts.Symbol | undefined): boolean {
+  if (!symbol || symbol.getName() !== "Default") return false;
+  const decl = symbol.declarations?.[0];
+  if (!decl) return false;
+  const fileName = decl.getSourceFile().fileName;
+  // The canonical Default<T,V> is declared in @commontools/api (packages/api/index.ts).
+  // Cover both workspace-resolved paths (".../packages/api/index.ts") and any
+  // future npm-published form ("@commontools/api").
+  // Also accept "commontools.d.ts" which is the filename used in test environments
+  // where the types are registered under a synthetic path.
+  return fileName.endsWith("/packages/api/index.ts") ||
+    fileName.includes("@commontools/api") ||
+    fileName.endsWith("commontools.d.ts");
 }

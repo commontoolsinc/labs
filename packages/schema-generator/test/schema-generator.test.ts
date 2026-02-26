@@ -220,14 +220,9 @@ interface HasImage {
         | undefined;
 
       expect(objectSchema.$defs).toBeUndefined();
-      expect(props?.image).toEqual({
-        anyOf: [
-          { type: "string" },
-          true,
-          true,
-          { type: "string", format: "uri" },
-        ],
-      });
+      // Should collapse to a single permissive schema instead of a union,
+      // since at least one option was just true
+      expect(props?.image).toEqual(true);
     });
   });
 
