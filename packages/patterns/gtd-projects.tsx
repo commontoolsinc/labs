@@ -710,7 +710,7 @@ const GTDProjects = pattern<ProjectsInput, ProjectsOutput>(
                               },
                         )}
                       >
-                        {/* Item content — click to select */}
+                        {/* Item content — click to drill in if has children, else select */}
                         <div
                           style={{
                             display: "flex",
@@ -720,9 +720,14 @@ const GTDProjects = pattern<ProjectsInput, ProjectsOutput>(
                             cursor: "pointer",
                           }}
                           onClick={() =>
-                            selectItem.send({
-                              key: "projects:" + idx,
-                            })
+                            item.hasChildren
+                              ? drillIntoProject.send({
+                                  id: item.id,
+                                  name: p.name,
+                                })
+                              : selectItem.send({
+                                  key: "projects:" + idx,
+                                })
                           }
                         >
                           <span
