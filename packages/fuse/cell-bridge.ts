@@ -62,6 +62,8 @@ export class CellBridge {
   private identity: string = "";
   private apiUrl: string = "";
   private connecting: Set<string> = new Set();
+  /** Guard against concurrent syncPieceList per space. */
+  private syncing: Map<string, boolean> = new Map();
 
   constructor(tree: FsTree) {
     this.tree = tree;
@@ -447,8 +449,38 @@ export class CellBridge {
   /**
    * Sync the piece list: diff current tree against the live pieces cell,
    * adding new pieces and removing deleted ones.
+   *
+   * Guarded per-space: if a sync is already running, we flag a re-run so the
+   * in-flight sync will loop once more after completing (coalescing rapid
+   * sink events). This prevents concurrent async interleaving from producing
+   * duplicate tree entries or double-removal errors.
    */
   private async syncPieceList(
+    state: SpaceState,
+    spaceName: string,
+  ): Promise<void> {
+    if (this.syncing.get(spaceName)) {
+      // A sync is in flight — mark for re-run when it finishes.
+      this.syncing.set(spaceName, true);
+      return;
+    }
+    this.syncing.set(spaceName, true);
+
+    try {
+      // Loop until no new events arrived during our sync.
+      do {
+        // Clear the flag; if a new event arrives during the await below
+        // it will set it back to true, causing another iteration.
+        this.syncing.set(spaceName, false);
+        await this.syncPieceListOnce(state, spaceName);
+      } while (this.syncing.get(spaceName));
+    } finally {
+      this.syncing.delete(spaceName);
+    }
+  }
+
+  /** Single pass of piece list sync (called by guarded syncPieceList). */
+  private async syncPieceListOnce(
     state: SpaceState,
     spaceName: string,
   ): Promise<void> {
