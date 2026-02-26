@@ -38,7 +38,10 @@ export interface FunctionCapabilitySummary {
  * Type is used in multiple places with different access patterns.
  */
 export type SchemaHints = WeakMap<ts.Node, SchemaHint>;
-export type CapabilitySummaryRegistry = WeakMap<ts.Node, FunctionCapabilitySummary>;
+export type CapabilitySummaryRegistry = WeakMap<
+  ts.Node,
+  FunctionCapabilitySummary
+>;
 
 export interface TransformationOptions {
   readonly mode?: TransformMode;

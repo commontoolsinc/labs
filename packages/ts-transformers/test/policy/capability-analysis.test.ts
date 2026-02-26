@@ -2,7 +2,9 @@ import ts from "typescript";
 import { assert, assertEquals } from "@std/assert";
 import { analyzeFunctionCapabilities } from "../../src/policy/mod.ts";
 
-function parseFirstCallback(source: string): ts.ArrowFunction | ts.FunctionExpression {
+function parseFirstCallback(
+  source: string,
+): ts.ArrowFunction | ts.FunctionExpression {
   const file = ts.createSourceFile(
     "/test.ts",
     source,
@@ -29,7 +31,10 @@ function parseFirstCallback(source: string): ts.ArrowFunction | ts.FunctionExpre
   return callback;
 }
 
-function getPaths(summary: ReturnType<typeof analyzeFunctionCapabilities>, name: string): {
+function getPaths(
+  summary: ReturnType<typeof analyzeFunctionCapabilities>,
+  name: string,
+): {
   capability: string;
   readPaths: string[];
   writePaths: string[];

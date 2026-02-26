@@ -39,7 +39,11 @@ Deno.test("Rewrite policy: map rewrite matrix", () => {
     true,
   );
   assertEquals(
-    shouldRewriteCollectionMethod("pattern", "map", "celllike_requires_rewrite"),
+    shouldRewriteCollectionMethod(
+      "pattern",
+      "map",
+      "celllike_requires_rewrite",
+    ),
     true,
   );
 
@@ -53,17 +57,29 @@ Deno.test("Rewrite policy: map rewrite matrix", () => {
     false,
   );
   assertEquals(
-    shouldRewriteCollectionMethod("compute", "map", "celllike_requires_rewrite"),
+    shouldRewriteCollectionMethod(
+      "compute",
+      "map",
+      "celllike_requires_rewrite",
+    ),
     true,
   );
 
   // Neutral context never rewrites.
   assertEquals(
-    shouldRewriteCollectionMethod("neutral", "map", "celllike_requires_rewrite"),
+    shouldRewriteCollectionMethod(
+      "neutral",
+      "map",
+      "celllike_requires_rewrite",
+    ),
     false,
   );
   assertEquals(
-    shouldRewriteCollectionMethod("pattern", "filter", "celllike_requires_rewrite"),
+    shouldRewriteCollectionMethod(
+      "pattern",
+      "filter",
+      "celllike_requires_rewrite",
+    ),
     false,
   );
 });

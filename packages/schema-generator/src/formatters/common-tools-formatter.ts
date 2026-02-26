@@ -266,7 +266,10 @@ export class CommonToolsFormatter implements TypeFormatter {
     }
 
     if (wrapperKind === "Cell") {
-      const innerWrapper = resolveWrapperNode(innerTypeNode, context.typeChecker);
+      const innerWrapper = resolveWrapperNode(
+        innerTypeNode,
+        context.typeChecker,
+      );
       if (
         this.isStreamType(innerType, context.typeChecker) ||
         innerWrapper?.kind === "Stream"
@@ -403,7 +406,9 @@ export class CommonToolsFormatter implements TypeFormatter {
   }
 
   private isUnusableInnerType(type: ts.Type): boolean {
-    return (type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown | ts.TypeFlags.TypeParameter)) !==
+    return (type.flags &
+      (ts.TypeFlags.Any | ts.TypeFlags.Unknown |
+        ts.TypeFlags.TypeParameter)) !==
       0;
   }
 

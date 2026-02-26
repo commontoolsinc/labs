@@ -116,9 +116,15 @@ function shouldTransformMap(
   }
 
   const mapTarget = mapCall.expression.expression;
-  const contextInfo = classifyReactiveContext(mapCall, context.checker, context);
+  const contextInfo = classifyReactiveContext(
+    mapCall,
+    context.checker,
+    context,
+  );
 
-  if (contextInfo.kind === "pattern" && isReactiveMapOrigin(mapTarget, context)) {
+  if (
+    contextInfo.kind === "pattern" && isReactiveMapOrigin(mapTarget, context)
+  ) {
     return true;
   }
 
@@ -134,7 +140,10 @@ function shouldTransformMap(
     context.options.typeRegistry,
     context.options.logger,
   );
-  const receiverKind = classifyReactiveReceiverKind(targetType, context.checker);
+  const receiverKind = classifyReactiveReceiverKind(
+    targetType,
+    context.checker,
+  );
 
   return shouldRewriteCollectionMethod(
     contextInfo.kind,
@@ -229,7 +238,10 @@ function isReactiveMapOrigin(
     return isReactiveMapOrigin(current.expression, context, seenSymbols);
   }
 
-  if (ts.isBinaryExpression(current) && isFallbackOperator(current.operatorToken.kind)) {
+  if (
+    ts.isBinaryExpression(current) &&
+    isFallbackOperator(current.operatorToken.kind)
+  ) {
     return isReactiveMapOrigin(current.left, context, seenSymbols) ||
       isReactiveMapOrigin(current.right, context, seenSymbols);
   }
@@ -277,12 +289,19 @@ function shouldTransformMapLegacy(
 
   if (!targetType) return false;
 
-  const receiverKind = classifyReactiveReceiverKind(targetType, context.checker);
+  const receiverKind = classifyReactiveReceiverKind(
+    targetType,
+    context.checker,
+  );
   if (receiverKind === "plain") {
     return false;
   }
 
-  const contextInfo = classifyReactiveContext(mapCall, context.checker, context);
+  const contextInfo = classifyReactiveContext(
+    mapCall,
+    context.checker,
+    context,
+  );
   if (contextInfo.kind === "compute") {
     return receiverKind === "celllike_requires_rewrite";
   }

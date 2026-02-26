@@ -66,7 +66,9 @@ export class TransformationContext {
     }
   }
 
-  private resolveDiagnosticRange(node: ts.Node): { start: number; length: number } {
+  private resolveDiagnosticRange(
+    node: ts.Node,
+  ): { start: number; length: number } {
     let current: ts.Node | undefined = node;
     while (current) {
       const pos = current.pos;

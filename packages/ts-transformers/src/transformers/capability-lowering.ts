@@ -96,7 +96,8 @@ function getAccessInfo(expr: ts.Expression): {
 function isTopmostMemberAccess(node: ts.Node): boolean {
   const parent = node.parent;
   return !(
-    (ts.isPropertyAccessExpression(parent) || ts.isElementAccessExpression(parent)) &&
+    (ts.isPropertyAccessExpression(parent) ||
+      ts.isElementAccessExpression(parent)) &&
     parent.expression === node
   );
 }
@@ -218,7 +219,11 @@ function registerCapabilitySummary(
   registry.set(callback, analyzeFunctionCapabilities(callback));
 }
 
-function reportComputationError(context: TransformationContext, node: ts.Node, message: string): void {
+function reportComputationError(
+  context: TransformationContext,
+  node: ts.Node,
+  message: string,
+): void {
   context.reportDiagnostic({
     severity: "error",
     type: "pattern-context:computation",
@@ -260,7 +265,11 @@ function isOpaqueSourceExpression(
     if (ts.isPropertyAccessExpression(current.expression)) {
       const methodName = current.expression.name.text;
       if (methodName === "key" || methodName === "get") {
-        return isOpaqueSourceExpression(current.expression.expression, opaqueRoots, context);
+        return isOpaqueSourceExpression(
+          current.expression.expression,
+          opaqueRoots,
+          context,
+        );
       }
     }
   }
@@ -330,7 +339,10 @@ function collectOpaqueRootsFromBody(
     }
 
     if (ts.isVariableDeclaration(node)) {
-      if (node.initializer && isOpaqueSourceExpression(node.initializer, roots, context)) {
+      if (
+        node.initializer &&
+        isOpaqueSourceExpression(node.initializer, roots, context)
+      ) {
         addBindingTargets(node.name, roots);
       }
     }
@@ -357,7 +369,11 @@ function collectOpaqueRootsFromBody(
   return roots;
 }
 
-function reportOptionalError(context: TransformationContext, node: ts.Node, message: string): void {
+function reportOptionalError(
+  context: TransformationContext,
+  node: ts.Node,
+  message: string,
+): void {
   context.reportDiagnostic({
     severity: "error",
     type: "pattern-context:optional-chaining",
@@ -400,13 +416,18 @@ function rewritePatternBody(
 
     const visited = visitEachChildWithJsx(node, visit, context.tsContext);
 
-    const contextInfo = classifyReactiveContext(visited, context.checker, context);
+    const contextInfo = classifyReactiveContext(
+      visited,
+      context.checker,
+      context,
+    );
     if (contextInfo.kind !== "pattern") {
       return visited;
     }
 
     if (
-      (ts.isPropertyAccessExpression(visited) || ts.isElementAccessExpression(visited)) &&
+      (ts.isPropertyAccessExpression(visited) ||
+        ts.isElementAccessExpression(visited)) &&
       isTopmostMemberAccess(visited)
     ) {
       const info = getAccessInfo(visited);
@@ -633,7 +654,11 @@ function transformPatternCallback(
   }
 
   let body: ts.ConciseBody = callback.body;
-  const expandedOpaqueRoots = collectOpaqueRootsFromBody(body, opaqueRoots, context);
+  const expandedOpaqueRoots = collectOpaqueRootsFromBody(
+    body,
+    opaqueRoots,
+    context,
+  );
   for (const root of expandedOpaqueRoots) {
     opaqueRoots.add(root);
   }
@@ -745,7 +770,10 @@ export class CapabilityLoweringTransformer extends Transformer {
       if (isPatternBuilderCall(visitedNode, context.checker)) {
         const callbackArg = visitedNode.arguments[0];
         if (callbackArg && isFunctionLikeExpression(callbackArg)) {
-          const transformedCallback = transformPatternCallback(callbackArg, context);
+          const transformedCallback = transformPatternCallback(
+            callbackArg,
+            context,
+          );
           const rewritten = context.factory.updateCallExpression(
             visitedNode,
             visitedNode.expression,

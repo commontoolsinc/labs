@@ -2,9 +2,9 @@ import ts from "typescript";
 
 import {
   detectCallKind,
-  getTypeReferenceArgument,
   getTypeAtLocationWithFallback,
   getTypeFromTypeNodeWithFallback,
+  getTypeReferenceArgument,
   inferContextualType,
   inferParameterType,
   inferReturnType,
@@ -69,7 +69,9 @@ import { analyzeFunctionCapabilities } from "../policy/mod.ts";
  * - SchemaGeneratorTransformer uses it to create accurate schema for `foo`
  */
 
-function uniquePaths(paths: readonly (readonly string[])[]): readonly (readonly string[])[] {
+function uniquePaths(
+  paths: readonly (readonly string[])[],
+): readonly (readonly string[])[] {
   const seen = new Set<string>();
   const out: (readonly string[])[] = [];
   for (const path of paths) {
@@ -126,7 +128,8 @@ function buildShrunkTypeNodeFromType(
   for (const [head, childPaths] of grouped) {
     const prop = type.getProperty(head);
     if (!prop) continue;
-    const declaration = prop.valueDeclaration ?? prop.declarations?.[0] ?? sourceFile;
+    const declaration = prop.valueDeclaration ?? prop.declarations?.[0] ??
+      sourceFile;
     const propType = checker.getTypeOfSymbolAtLocation(prop, declaration);
     const propTypeNode = buildShrunkTypeNodeFromType(
       propType,
@@ -146,7 +149,9 @@ function buildShrunkTypeNodeFromType(
       factory.createPropertySignature(
         undefined,
         factory.createIdentifier(head),
-        isOptional ? factory.createToken(ts.SyntaxKind.QuestionToken) : undefined,
+        isOptional
+          ? factory.createToken(ts.SyntaxKind.QuestionToken)
+          : undefined,
         propTypeNode,
       ),
     );
@@ -280,7 +285,9 @@ function isCellLikeTypeNode(node: ts.TypeNode): boolean {
     name === "Stream";
 }
 
-function extractCellLikeInnerTypeNode(node: ts.TypeNode): ts.TypeNode | undefined {
+function extractCellLikeInnerTypeNode(
+  node: ts.TypeNode,
+): ts.TypeNode | undefined {
   if (!isCellLikeTypeNode(node)) return undefined;
   if (!ts.isTypeReferenceNode(node)) return undefined;
   if (!node.typeArguments || node.typeArguments.length === 0) return undefined;
@@ -305,7 +312,8 @@ function findCapabilitySummaryForParameter(
   capabilityRegistry?: CapabilitySummaryRegistry,
 ): CapabilityParamSummary | undefined {
   if (!capabilityRegistry) return undefined;
-  const summary = capabilityRegistry?.get(fn) ?? analyzeFunctionCapabilities(fn);
+  const summary = capabilityRegistry?.get(fn) ??
+    analyzeFunctionCapabilities(fn);
   if (!summary) return undefined;
   const parameter = fn.parameters[index];
   if (!parameter) return undefined;
@@ -413,7 +421,7 @@ function applyCapabilitySummaryToParameter(
         checker,
         sourceFile,
         factory,
-      )
+      );
     }
     if (shrunk) {
       next = shrunk;
@@ -493,7 +501,10 @@ function collectFunctionSchemaTypeNodes(
     factory,
     capabilityRegistry,
   );
-  if (argumentNode && originalArgumentNode && argumentNode !== originalArgumentNode) {
+  if (
+    argumentNode && originalArgumentNode &&
+    argumentNode !== originalArgumentNode
+  ) {
     // The node was wrapped/shrunk synthetically; don't force legacy type fallback.
     argumentType = undefined;
   }

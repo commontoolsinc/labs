@@ -88,7 +88,9 @@ export function isStandaloneFunctionDefinition(
   const parent = func.parent;
   if (ts.isVariableDeclaration(parent)) return true;
   if (ts.isPropertyAssignment(parent)) return true;
-  if (ts.isCallExpression(parent) && parent.arguments.includes(func)) return false;
+  if (ts.isCallExpression(parent) && parent.arguments.includes(func)) {
+    return false;
+  }
   if (ts.isJsxExpression(parent)) return false;
   return false;
 }

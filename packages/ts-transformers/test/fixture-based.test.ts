@@ -264,8 +264,8 @@ for (const config of configs) {
             "commontools.d.ts": commontools,
             "commontools-schema.d.ts": commontoolsSchema,
           },
-          useLegacyOpaqueRefSemantics:
-            config.useLegacyOpaqueRefSemantics ?? false,
+          useLegacyOpaqueRefSemantics: config.useLegacyOpaqueRefSemantics ??
+            false,
           typeCheck: !Deno.env.get("SKIP_INPUT_CHECK"),
           precomputedDiagnostics,
         },

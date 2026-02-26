@@ -60,7 +60,10 @@ function decodePath(path: string): readonly string[] {
 
 function isLiteralElement(
   expr: ts.Expression | undefined,
-): expr is ts.StringLiteral | ts.NumericLiteral | ts.NoSubstitutionTemplateLiteral {
+): expr is
+  | ts.StringLiteral
+  | ts.NumericLiteral
+  | ts.NoSubstitutionTemplateLiteral {
   return !!expr &&
     (ts.isStringLiteral(expr) ||
       ts.isNumericLiteral(expr) ||
@@ -165,7 +168,8 @@ function isMemberRootIdentifier(node: ts.Identifier): boolean {
   const parent = node.parent;
   if (!parent) return false;
   return (
-    (ts.isPropertyAccessExpression(parent) || ts.isElementAccessExpression(parent)) &&
+    (ts.isPropertyAccessExpression(parent) ||
+      ts.isElementAccessExpression(parent)) &&
     parent.expression === node
   );
 }
@@ -174,7 +178,8 @@ function isTopmostMemberNode(node: ts.Node): boolean {
   const parent = node.parent;
   if (!parent) return true;
   return !(
-    (ts.isPropertyAccessExpression(parent) || ts.isElementAccessExpression(parent)) &&
+    (ts.isPropertyAccessExpression(parent) ||
+      ts.isElementAccessExpression(parent)) &&
     parent.expression === node
   );
 }
@@ -357,7 +362,9 @@ export function analyzeFunctionCapabilities(
     return { params: [] };
   }
 
-  const resolveFromAccess = (expression: ts.Expression): SourceRef | undefined => {
+  const resolveFromAccess = (
+    expression: ts.Expression,
+  ): SourceRef | undefined => {
     const info = extractAccessPath(expression);
     if (!info) return undefined;
     const alias = aliases.get(info.root);
@@ -369,12 +376,17 @@ export function analyzeFunctionCapabilities(
     };
   };
 
-  const resolveSourceRef = (expression: ts.Expression): SourceRef | undefined => {
+  const resolveSourceRef = (
+    expression: ts.Expression,
+  ): SourceRef | undefined => {
     const current = unwrapExpression(expression);
     const byAccess = resolveFromAccess(current);
     if (byAccess) return byAccess;
 
-    if (ts.isCallExpression(current) && ts.isPropertyAccessExpression(current.expression)) {
+    if (
+      ts.isCallExpression(current) &&
+      ts.isPropertyAccessExpression(current.expression)
+    ) {
       const receiverRef = resolveSourceRef(current.expression.expression);
       if (!receiverRef) return undefined;
 
@@ -585,7 +597,10 @@ export function analyzeFunctionCapabilities(
   };
 
   const visit = (node: ts.Node): void => {
-    if (ts.isBinaryExpression(node) && isAssignmentOperator(node.operatorToken.kind)) {
+    if (
+      ts.isBinaryExpression(node) &&
+      isAssignmentOperator(node.operatorToken.kind)
+    ) {
       // Process RHS first so alias rebinding happens after reads in the assignment expression.
       visit(node.right);
       if (!ts.isIdentifier(node.left)) {
@@ -641,7 +656,8 @@ export function analyzeFunctionCapabilities(
               isAssignmentOperator(parent.operatorToken.kind)
             ) && !(
               parent &&
-              (ts.isPrefixUnaryExpression(parent) || ts.isPostfixUnaryExpression(parent)) &&
+              (ts.isPrefixUnaryExpression(parent) ||
+                ts.isPostfixUnaryExpression(parent)) &&
               (
                 parent.operator === ts.SyntaxKind.PlusPlusToken ||
                 parent.operator === ts.SyntaxKind.MinusMinusToken
@@ -660,7 +676,9 @@ export function analyzeFunctionCapabilities(
     ) {
       if (isTopmostMemberNode(node)) {
         const parent = node.parent;
-        if (!(parent && ts.isCallExpression(parent) && parent.expression === node)) {
+        if (
+          !(parent && ts.isCallExpression(parent) && parent.expression === node)
+        ) {
           const ref = resolveSourceRef(node);
           if (ref) {
             trackReadRef(ref);

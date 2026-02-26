@@ -212,7 +212,9 @@ const p = pattern<State>((state) => {
       "{ element: [left, right], params: {} }",
     );
     assertStringIncludes(output, ".mapWithPattern(");
-    assert(!output.includes("__ct_pattern_input => <span>{left}:{right}</span>"));
+    assert(
+      !output.includes("__ct_pattern_input => <span>{left}:{right}</span>"),
+    );
   },
 );
 
@@ -702,11 +704,13 @@ const p = pattern((input) => input.get());
       types: COMMONTOOLS_TYPES,
     });
 
-    const toComparable = (diagnostics: readonly {
-      type: string;
-      severity: string;
-      message: string;
-    }[]) =>
+    const toComparable = (
+      diagnostics: readonly {
+        type: string;
+        severity: string;
+        message: string;
+      }[],
+    ) =>
       diagnostics.map(({ type, severity, message }) => ({
         type,
         severity,
