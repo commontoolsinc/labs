@@ -13,8 +13,8 @@ import { cloneIfNecessary } from "@commontools/memory/storable-value";
 import { createCell, isCell } from "./cell.ts";
 import { readMaybeLink, resolveLink } from "./link-resolution.ts";
 import {
+  type ICfcReadAnnotations,
   type IExtendedStorageTransaction,
-  type Metadata,
 } from "./storage/interface.ts";
 import { getTransactionForChildCells } from "./storage/extended-storage-transaction.ts";
 import { type Runtime } from "./runtime.ts";
@@ -28,10 +28,6 @@ import {
   markCfcRelevantForEffectiveLabels,
   markCfcRelevantForSchema,
 } from "./cfc/relevance.ts";
-import {
-  CFC_READ_MAX_CONFIDENTIALITY_MARKER,
-  CFC_READ_REQUIRED_INTEGRITY_MARKER,
-} from "./cfc/internal-markers.ts";
 import {
   combineSchema,
   IMemorySpaceValueAddress,
@@ -364,9 +360,9 @@ function annotateWithBackToCellSymbols(
   return value;
 }
 
-function readIfcInputMeta(
+function readIfcInputAnnotations(
   schema: JSONSchema | undefined,
-): Metadata | undefined {
+): ICfcReadAnnotations | undefined {
   if (!isObject(schema) || !isObject(schema.ifc)) {
     return undefined;
   }
@@ -388,12 +384,8 @@ function readIfcInputMeta(
     return undefined;
   }
   return {
-    ...(maxConfidentiality.length > 0
-      ? { [CFC_READ_MAX_CONFIDENTIALITY_MARKER]: maxConfidentiality }
-      : {}),
-    ...(requiredIntegrity.length > 0
-      ? { [CFC_READ_REQUIRED_INTEGRITY_MARKER]: requiredIntegrity }
-      : {}),
+    ...(maxConfidentiality.length > 0 ? { maxConfidentiality } : {}),
+    ...(requiredIntegrity.length > 0 ? { requiredIntegrity } : {}),
   };
 }
 
@@ -508,16 +500,20 @@ export function validateAndTransform(
     type,
     path: ["value", ...path],
   };
-  const readMeta = readIfcInputMeta(ref.schema ?? link.schema);
-  const mergedReadMeta = { ...ignoreReadForScheduling, ...readMeta };
+  const readCfc = readIfcInputAnnotations(ref.schema ?? link.schema);
   const doc = {
     address,
     // Read the full document without scheduling it directly. The traverser
     // records the relevant shallow reads, while CFC input checks still receive
-    // read metadata derived from the schema.
+    // read annotations derived from the schema.
     value: tx!.readOrThrow(
       address,
-      { meta: mergedReadMeta },
+      {
+        meta: ignoreReadForScheduling,
+        ...(readCfc ? { cfc: readCfc } : {}),
+      },
+    ),
+  };
     ),
   };
   // If we have a ref with a schema, use that; otherwise, use the link's schema

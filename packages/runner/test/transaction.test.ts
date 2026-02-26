@@ -4,6 +4,10 @@ import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import * as Transaction from "../src/storage/transaction.ts";
 import { assert } from "@commontools/memory/fact";
+import {
+  ignoreReadForSchedulingMarker,
+  markReadAsPotentialWriteMarker,
+} from "../src/storage/read-metadata.ts";
 
 const signer = await Identity.fromPassphrase("transaction test");
 const signer2 = await Identity.fromPassphrase("transaction test 2");
@@ -135,7 +139,7 @@ describe("StorageTransaction", () => {
         path: [],
       } as const;
       const value = { name: "Bob", age: 25 };
-      const metadata = { source: "test", version: 1, priority: "high" };
+      const metadata = { [ignoreReadForSchedulingMarker]: true } as const;
 
       // Write value
       transaction.write(address, value);
@@ -168,7 +172,7 @@ describe("StorageTransaction", () => {
       }
     });
 
-    it("should handle various metadata types", () => {
+    it("should accept only scheduler metadata markers", () => {
       const address = {
         space,
         id: "test:metadata-types",
@@ -180,33 +184,50 @@ describe("StorageTransaction", () => {
       // Write value first
       transaction.write(address, value);
 
-      // Test string metadata
-      const stringMeta = { type: "string", data: "test string" };
-      const stringResult = transaction.read(address, { meta: stringMeta });
-      expect(stringResult.ok).toBeDefined();
+      const ignoreMeta = { [ignoreReadForSchedulingMarker]: true } as const;
+      const potentialWriteMeta = {
+        [markReadAsPotentialWriteMarker]: true,
+      } as const;
+      const bothMeta = {
+        [ignoreReadForSchedulingMarker]: true,
+        [markReadAsPotentialWriteMarker]: true,
+      } as const;
 
-      // Test number metadata
-      const numberMeta = { count: 42, weight: 3.14 };
-      const numberResult = transaction.read(address, { meta: numberMeta });
-      expect(numberResult.ok).toBeDefined();
+      const ignoreResult = transaction.read(address, { meta: ignoreMeta });
+      expect(ignoreResult.ok).toBeDefined();
 
-      // Test boolean metadata
-      const booleanMeta = { enabled: true, debug: false };
-      const booleanResult = transaction.read(address, { meta: booleanMeta });
-      expect(booleanResult.ok).toBeDefined();
+      const potentialWriteResult = transaction.read(address, {
+        meta: potentialWriteMeta,
+      });
+      expect(potentialWriteResult.ok).toBeDefined();
 
-      // Test nested object metadata
-      const nestedMeta = {
-        config: { nested: { value: "deep" } },
-        array: [1, 2, 3],
-      };
-      const nestedResult = transaction.read(address, { meta: nestedMeta });
-      expect(nestedResult.ok).toBeDefined();
+      const bothResult = transaction.read(address, { meta: bothMeta });
+      expect(bothResult.ok).toBeDefined();
 
       // Test empty metadata object
       const emptyMeta = {};
       const emptyResult = transaction.read(address, { meta: emptyMeta });
       expect(emptyResult.ok).toBeDefined();
+    });
+
+    it("should fail when metadata includes unsupported keys", () => {
+      const address = {
+        space,
+        id: "test:invalid-metadata",
+        type: "application/json",
+        path: [],
+      } as const;
+
+      transaction.write(address, { test: true });
+
+      const result = transaction.read(
+        address,
+        { meta: { source: "test" } as any },
+      );
+      expect(result.error?.name).toBe("InvalidReadOptionsError");
+      if (result.error?.name === "InvalidReadOptionsError") {
+        expect(result.error.option).toBe("meta");
+      }
     });
 
     it("should handle cross-space operations", () => {
@@ -253,8 +274,8 @@ describe("StorageTransaction", () => {
         type: "application/json",
         path: [],
       } as const;
-      const metadata1 = { space: "first", operation: "test" };
-      const metadata2 = { space: "second", operation: "test" };
+      const metadata1 = { [ignoreReadForSchedulingMarker]: true } as const;
+      const metadata2 = { [markReadAsPotentialWriteMarker]: true } as const;
 
       // Write to first space
       transaction.write(address1, { data: "space1" });
@@ -281,7 +302,9 @@ describe("StorageTransaction", () => {
         path: [],
       } as const;
       const value = { name: "Interface Test" };
-      const metadata = { interface: "reader", test: true };
+      const metadata = {
+        [markReadAsPotentialWriteMarker]: true,
+      } as const;
 
       // Get reader and writer
       const readerResult = transaction.reader(space);

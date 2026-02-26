@@ -4,6 +4,10 @@ import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import * as Journal from "../src/storage/transaction/journal.ts";
 import { assert } from "@commontools/memory/fact";
+import {
+  ignoreReadForSchedulingMarker,
+  markReadAsPotentialWriteMarker,
+} from "../src/storage/read-metadata.ts";
 
 const signer = await Identity.fromPassphrase("journal test");
 const signer2 = await Identity.fromPassphrase("journal test 2");
@@ -146,11 +150,7 @@ describe("Journal", () => {
         type: "application/json",
         path: [],
       } as const;
-      const metadata = {
-        source: "test",
-        operation: "read",
-        context: "journal",
-      };
+      const metadata = { [ignoreReadForSchedulingMarker]: true } as const;
 
       // Read with metadata
       const result = reader!.read(address, { meta: metadata });
@@ -158,7 +158,7 @@ describe("Journal", () => {
       expect(result.ok?.value).toEqual(testData);
     });
 
-    it("should handle various metadata types in reader", () => {
+    it("should accept scheduler metadata markers in reader", () => {
       const { ok: reader } = journal.reader(space);
       const address = {
         id: "test:reader-meta-types",
@@ -166,13 +166,14 @@ describe("Journal", () => {
         path: [],
       } as const;
 
-      // Test different metadata shapes
       const metadataVariants = [
-        { type: "string", value: "test" },
-        { numbers: [1, 2, 3], count: 42 },
-        { nested: { deep: { value: true } } },
-        { mixed: "string", count: 10, enabled: false },
-        {}, // empty metadata
+        { [ignoreReadForSchedulingMarker]: true } as const,
+        { [markReadAsPotentialWriteMarker]: true } as const,
+        {
+          [ignoreReadForSchedulingMarker]: true,
+          [markReadAsPotentialWriteMarker]: true,
+        } as const,
+        {},
       ];
 
       metadataVariants.forEach((meta, _index) => {
@@ -180,6 +181,18 @@ describe("Journal", () => {
         expect(result.ok).toBeDefined();
         expect(result.ok?.value).toBeUndefined(); // No data written
       });
+    });
+
+    it("should reject unsupported metadata keys in reader", () => {
+      const { ok: reader } = journal.reader(space);
+      const address = {
+        id: "test:reader-meta-invalid",
+        type: "application/json",
+        path: [],
+      } as const;
+
+      const result = reader!.read(address, { meta: { source: "test" } as any });
+      expect(result.error?.name).toBe("InvalidReadOptionsError");
     });
   });
 
@@ -282,7 +295,7 @@ describe("Journal", () => {
         path: [],
       } as const;
       const value = { name: "WriterMeta", test: true };
-      const metadata = { writer: "interface", operation: "read" };
+      const metadata = { [markReadAsPotentialWriteMarker]: true } as const;
 
       // Write first
       writer!.write(address, value);
@@ -305,7 +318,7 @@ describe("Journal", () => {
         type: "application/json",
         path: ["profile", "settings"],
       } as const;
-      const metadata = { path: "nested", level: 2 };
+      const metadata = { [ignoreReadForSchedulingMarker]: true } as const;
 
       // Write root object
       writer!.write(rootAddress, {
@@ -717,12 +730,7 @@ describe("Journal", () => {
         type: "application/json",
         path: [],
       } as const;
-      const metadata = {
-        source: "test",
-        operation: "read",
-        timestamp: Date.now(),
-        user: "test-user",
-      };
+      const metadata = { [ignoreReadForSchedulingMarker]: true } as const;
 
       // Write operation (no metadata for writes)
       writer!.write(address, { name: "ActivityUser" });
@@ -753,9 +761,12 @@ describe("Journal", () => {
         path: [],
       } as const;
 
-      const metadata1 = { context: "first", priority: "high" };
-      const metadata2 = { context: "second", priority: "low" };
-      const metadata3 = { context: "third", nested: { deep: "value" } };
+      const metadata1 = { [ignoreReadForSchedulingMarker]: true } as const;
+      const metadata2 = { [markReadAsPotentialWriteMarker]: true } as const;
+      const metadata3 = {
+        [ignoreReadForSchedulingMarker]: true,
+        [markReadAsPotentialWriteMarker]: true,
+      } as const;
 
       // Multiple read operations with different metadata
       reader!.read(address, { meta: metadata1 });
@@ -797,7 +808,7 @@ describe("Journal", () => {
         type: "application/json",
         path: ["profile", "name"],
       } as const;
-      const metadata = { path: "nested", level: 2, tracking: true };
+      const metadata = { [markReadAsPotentialWriteMarker]: true } as const;
 
       // Write root object
       writer!.write(rootAddress, {

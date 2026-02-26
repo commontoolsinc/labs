@@ -24,7 +24,7 @@ import {
   type ConsumedReadWithEffectiveLabel,
 } from "./consumed-input-labels.ts";
 import {
-  internalVerifierReadMeta,
+  internalVerifierReadAnnotations,
   readMaxConfidentialityFromMeta,
   readRequiredIntegrityFromMeta,
 } from "./internal-markers.ts";
@@ -548,7 +548,7 @@ async function resolvePreparedWriteSchemas(
     }
 
     const existingSchemaHash = tx.readOrThrow(schemaHashAddress(entity), {
-      meta: internalVerifierReadMeta,
+      cfc: internalVerifierReadAnnotations,
     });
     if (existingSchemaHash === undefined) {
       prepared.push({
@@ -683,7 +683,7 @@ function verifyInputRequirementsForAttempt(
         type: read.type as IMemorySpaceAddress["type"],
       }),
       {
-        meta: internalVerifierReadMeta,
+        cfc: internalVerifierReadAnnotations,
       },
     );
     labelsByEntity.set(key, normalizeLabelsByPath(rawLabels));
@@ -696,7 +696,7 @@ function verifyInputRequirementsForAttempt(
   const cfc = new ContextualFlowControl();
   for (const consumed of consumedReadLabels) {
     const maxConfidentiality = readMaxConfidentialityFromMeta(
-      consumed.read.meta,
+      consumed.read.cfc,
     );
     if (maxConfidentiality && maxConfidentiality.length > 0) {
       const actualClassification =
@@ -716,7 +716,7 @@ function verifyInputRequirementsForAttempt(
       }
     }
 
-    const requiredIntegrity = readRequiredIntegrityFromMeta(consumed.read.meta);
+    const requiredIntegrity = readRequiredIntegrityFromMeta(consumed.read.cfc);
     if (requiredIntegrity && requiredIntegrity.length > 0) {
       const labelsByPath =
         labelsByEntity.get(consumedReadEntityKey(consumed.read)) ??
@@ -1071,7 +1071,7 @@ function readValueAtCanonicalPath(
       ...address,
       path: fromCanonicalPath(path),
     },
-    { meta: internalVerifierReadMeta },
+    { cfc: internalVerifierReadAnnotations },
   );
 }
 

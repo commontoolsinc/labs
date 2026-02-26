@@ -39,6 +39,10 @@ import type {
   Unit,
 } from "./storage/interface.ts";
 import {
+  ignoreReadForSchedulingMarker,
+  markReadAsPotentialWriteMarker,
+} from "./storage/read-metadata.ts";
+import {
   addressesToPathByEntity,
   arraysOverlap,
   determineTriggeredActions,
@@ -124,14 +128,6 @@ export type ReactivityLog = {
   /** Reads marked as potential writes (e.g., for diffAndUpdate which reads then conditionally writes) */
   potentialWrites?: IMemorySpaceAddress[];
 };
-
-const ignoreReadForSchedulingMarker: unique symbol = Symbol(
-  "ignoreReadForSchedulingMarker",
-);
-
-const markReadAsPotentialWriteMarker: unique symbol = Symbol(
-  "markReadAsPotentialWriteMarker",
-);
 
 export const ignoreReadForScheduling: Metadata = {
   [ignoreReadForSchedulingMarker]: true,

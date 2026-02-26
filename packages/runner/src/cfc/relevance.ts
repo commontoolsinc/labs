@@ -6,7 +6,7 @@ import type {
   Labels,
 } from "../storage/interface.ts";
 import { canonicalizeStoragePath } from "./canonical-activity.ts";
-import { internalVerifierReadMeta } from "./internal-markers.ts";
+import { internalVerifierReadAnnotations } from "./internal-markers.ts";
 
 function hasIfcInObjectSchema(
   schema: Record<string, unknown>,
@@ -227,7 +227,7 @@ export function markCfcRelevantForEffectiveLabels(
   }
 
   const labelsValue = tx.readOrThrow(labelsAddress(readAddress), {
-    meta: internalVerifierReadMeta,
+    cfc: internalVerifierReadAnnotations,
   });
   const labelsByPath = normalizePersistedLabels(labelsValue);
   if (Object.keys(labelsByPath).length === 0) {

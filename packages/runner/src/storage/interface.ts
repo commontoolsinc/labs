@@ -24,6 +24,13 @@ import type {
 } from "@commontools/memory/interface";
 import { BaseMemoryAddress } from "@commontools/runner/traverse";
 import { Cell } from "../cell.ts";
+import type { ICfcReadAnnotations, Metadata } from "./read-metadata.ts";
+
+export {
+  ignoreReadForSchedulingMarker,
+  markReadAsPotentialWriteMarker,
+} from "./read-metadata.ts";
+export type { ICfcReadAnnotations, Metadata } from "./read-metadata.ts";
 
 export type {
   Assertion,
@@ -55,11 +62,6 @@ export interface IStorageError {
 }
 
 /**
- * Metadata that can be attached to read operations
- */
-export interface Metadata extends Record<PropertyKey, unknown> {}
-
-/**
  * Options for read operations
  */
 export interface IReadOptions {
@@ -77,6 +79,7 @@ export interface IReadOptions {
    * We also invalidate if we set the length of an array.
    */
   nonRecursive?: boolean;
+  cfc?: ICfcReadAnnotations;
 }
 
 // This type is used to tag a document with any important metadata.
@@ -843,10 +846,21 @@ export interface IInvalidDataURIError extends IStorageError {
   from(space: MemorySpace): IInvalidDataURIError;
 }
 
+/**
+ * Error returned when read options are malformed.
+ */
+export interface IInvalidReadOptionsError extends IStorageError {
+  readonly name: "InvalidReadOptionsError";
+  readonly option: "meta" | "cfc";
+  readonly reason: string;
+  from(space: MemorySpace): IInvalidReadOptionsError;
+}
+
 export type ReadError =
   | INotFoundError
   | InactiveTransactionError
   | IInvalidDataURIError
+  | IInvalidReadOptionsError
   | IUnsupportedMediaTypeError
   | ITypeMismatchError;
 
@@ -986,6 +1000,7 @@ export type Activity = Variant<{
 export interface IReadActivity extends IMemorySpaceAddress {
   meta: Metadata;
   nonRecursive?: boolean;
+  cfc?: ICfcReadAnnotations;
 }
 
 /**
