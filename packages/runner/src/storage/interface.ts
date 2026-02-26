@@ -765,7 +765,12 @@ export interface ICfcOutputTransitionViolationError extends IStorageError {
   readonly requirement:
     | "confidentialityMonotonicity"
     | "exactCopyOf"
-    | "projection";
+    | "projection"
+    | "subsetOf"
+    | "permutationOf"
+    | "filteredFrom"
+    | "lengthPreserved"
+    | "recomposeProjections";
   readonly space: MemorySpace;
   readonly id: URI;
   readonly type: string;

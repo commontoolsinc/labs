@@ -10,27 +10,44 @@ import { computeCfcSchemaHash } from "../src/cfc/schema-hash.ts";
 const signer = await Identity.fromPassphrase("cfc scheduler prepare shim test");
 const space = signer.did();
 
-const ifcNumberSchema: JSONSchema = {
+const exactCopyIfc = {
+  exactCopyOf: "/",
+} as const;
+
+const maxConfidentialityIfc = {
+  maxConfidentiality: ["confidential"],
+} as const;
+
+const ifcNumberSchema = {
   type: "number",
   ifc: { classification: ["secret"] },
-};
+} as const satisfies JSONSchema;
 
-const ifcStringSchema: JSONSchema = {
+const ifcStringSchema = {
   type: "string",
   ifc: { classification: ["secret"] },
-};
+} as const satisfies JSONSchema;
 
-const ifcConfidentialNumberSchema: JSONSchema = {
+const ifcConfidentialNumberSchema = {
   type: "number",
   ifc: { classification: ["confidential"] },
-};
+} as const satisfies JSONSchema;
+
+const ifcExactCopyNumberSchema = {
+  type: "number",
+  ifc: {
+    classification: ["secret"],
+    ...exactCopyIfc,
+  },
+} as const satisfies JSONSchema;
 
 const maxConfidentialInputSchema = {
   type: "number",
   ifc: {
-    maxConfidentiality: ["confidential"],
+    classification: ["secret"],
+    ...maxConfidentialityIfc,
   },
-} as unknown as JSONSchema;
+} as const satisfies JSONSchema;
 
 describe("CFC scheduler prepare shim", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -418,5 +435,87 @@ describe("CFC scheduler prepare shim", () => {
 
     expect(attempts).toBe(1);
     expect(targetCell.get()).toBe(0);
+  });
+
+  it("does not retry event handlers on exactCopyOf output transition failures", async () => {
+    let tx = runtime.edit();
+    const eventCell = runtime.getCell<number>(
+      space,
+      "cfc-prepare-terminal-exactcopy-event",
+      undefined,
+      tx,
+    );
+    const sourceCell = runtime.getCell<number>(
+      space,
+      "cfc-prepare-terminal-exactcopy-source",
+      undefined,
+      tx,
+    );
+    const targetCell = runtime.getCell<number>(
+      space,
+      "cfc-prepare-terminal-exactcopy-target",
+      undefined,
+      tx,
+    );
+    eventCell.set(0);
+    sourceCell.set(5);
+    targetCell.set(0);
+    await tx.commit();
+
+    tx = runtime.edit();
+    tx.writeOrThrow({
+      space,
+      id: sourceCell.getAsNormalizedFullLink().id,
+      type: "application/json",
+      path: ["cfc", "labels"],
+    }, {
+      "/": {
+        classification: ["secret"],
+      },
+    });
+    await tx.commit();
+
+    let attempts = 0;
+    let callbackStatus: string | undefined;
+    let callbackErrorName: string | undefined;
+    let callbackErrorReasonName: string | undefined;
+
+    runtime.scheduler.addEventHandler(
+      (handlerTx, _event) => {
+        attempts++;
+        const source = Number(
+          sourceCell.withTx(handlerTx).asSchema(ifcNumberSchema).get() ?? 0,
+        );
+        targetCell.withTx(handlerTx).asSchema(ifcExactCopyNumberSchema).set(
+          source + 1,
+        );
+      },
+      eventCell.getAsNormalizedFullLink(),
+    );
+
+    await new Promise<void>((resolve) => {
+      runtime.scheduler.queueEvent(
+        eventCell.getAsNormalizedFullLink(),
+        1,
+        2,
+        (commitTx) => {
+          const status = commitTx.status();
+          callbackStatus = status.status;
+          if (status.status === "error") {
+            callbackErrorName = status.error.name;
+            callbackErrorReasonName =
+              (status.error as { reason?: { name?: string } }).reason?.name;
+          }
+          resolve();
+        },
+      );
+    });
+    await runtime.scheduler.idle();
+    await runtime.scheduler.idle();
+
+    expect(attempts).toBe(1);
+    expect(callbackStatus).toBe("error");
+    expect(callbackErrorName).toBe("StorageTransactionAborted");
+    expect(callbackErrorReasonName).toBe("CfcOutputTransitionViolationError");
   });
 });
