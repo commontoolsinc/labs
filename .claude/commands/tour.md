@@ -224,11 +224,21 @@ The note has two parts to edit:
 
 Take a screenshot showing the edited note with the updated title in the breadcrumb.
 
-### Step 4: Return to Space Home
+### Step 4: Create a Second Note via Omnibox and Link It
 
-Click the space name link in the breadcrumb (e.g. "2026-02-16-claude") to navigate back to the space home. Verify the note you created appears in the Patterns list with its title. The breadcrumb should show an updated item count. Take a screenshot.
+Open the Omnibot (click the FAB in the bottom-right). Ask it to create a new note and then append a link to it from the first note. For example:
 
-### Step 5: Open the Chat
+> Create a new note called "Related Thoughts" with some placeholder content. Then append a link to it inside my "YOUR FIRST NOTE TITLE" note.
+
+(Replace "YOUR FIRST NOTE TITLE" with whatever you titled the note in Step 3.)
+
+Wait for the LLM to use `createNote` and then `appendLink` (or edit the first note's content). Once done, navigate to the first note and verify a `[[📝 Related Thoughts (...)]]` wiki-link appears at the bottom of its content. Click the wiki-link to confirm it navigates to the second note. Take screenshots of both notes showing the link.
+
+### Step 5: Return to Space Home
+
+Click the space name link in the breadcrumb (e.g. "2026-02-16-claude") to navigate back to the space home. Verify the notes you created appear in the Patterns list with their titles. The breadcrumb should show an updated item count. Take a screenshot.
+
+### Step 6: Open the Chat
 
 Find the **"Open" button** (the FAB) in the bottom-right corner of the page and click it. A chat panel will appear in the bottom-right with:
 - An input field: "Ask the LLM a question..."
@@ -239,7 +249,7 @@ Find the **"Open" button** (the FAB) in the bottom-right corner of the page and 
 
 Click Expand for better visibility. Take a screenshot.
 
-### Step 6: Reference the Note in Chat
+### Step 7: Reference the Note in Chat
 
 1. Click into the chat input textbox
 2. Type `@` to trigger the mention autocomplete — a dropdown list will appear
@@ -250,11 +260,11 @@ Click Expand for better visibility. Take a screenshot.
 
 The LLM should use the `read` tool and quote the note's content back. Take a screenshot of the response.
 
-### Step 7: Ask for the Pattern Index
+### Step 8: Ask for the Pattern Index
 
 In the chat, type: "Can you list the available patterns from the pattern index?" and send. Wait ~20 seconds. The LLM should use the `listPatternIndex` tool and return categorized lists of available patterns. Take a screenshot.
 
-### Step 8: Launch a Counter Pattern
+### Step 9: Launch a Counter Pattern
 
 In the chat, type: "Please launch the counter pattern with an initial value of 5" and send. Wait ~25 seconds. The LLM should:
 1. Use `fetchAndRunPattern` to compile and run the counter
@@ -280,7 +290,7 @@ The first button is Decrement, the second is Increment. Click at the coordinates
 
 Take a screenshot showing the changed value.
 
-### Step 9: Add To-Do Items via Omnibot
+### Step 10: Add To-Do Items via Omnibot
 
 Navigate back to the space home by clicking the space name in the breadcrumb. The space home has a two-column layout: the **Do List** on the left and **Recent / Pieces** on the right.
 
@@ -296,7 +306,7 @@ Wait ~15-25 seconds for the LLM to use the `addDoItem` or `addDoItems` tools. Th
 
 Verify the items appear in the do-list on the left side of the space home. Take a screenshot.
 
-### Step 10: Watch AI Suggestions Generate
+### Step 11: Watch AI Suggestions Generate
 
 Each do-list item has a collapsible **"AI Suggestions"** section (a `<details>` disclosure element). These elements are inside nested shadow DOM and will NOT appear in accessibility snapshots. Use the **Find Details Disclosures** helper from the Shadow DOM Helpers section. This returns an array of `{text, open, x, y}` objects — one per `<details>` element. Use coordinate-based clicking (`mouse move {x} {y}` + `mouse down left` + `mouse up left`) to toggle them open/closed. Re-run the JS eval after expanding to get updated positions, since expanding one item shifts the others down.
 
@@ -311,13 +321,13 @@ Narrate the bead activity as it happens — describe what tools are being called
 
 Expand the AI Suggestions on a second item too (e.g. "Research the best noise-canceling headphones under $200") and watch that one generate as well.
 
-### Step 11: Click Suggestions and Explore Results
+### Step 12: Click Suggestions and Explore Results
 
 Use the **Find Cell Link Chips** helper to locate `ct-cell-link` chips. The `text` field from the helper shows the chip's display name. Click the `ct-cell-link` chip on a completed suggestion to navigate to the resulting piece. Describe what the piece looks like — it could be a note with content, a web search result, a pattern output, etc.
 
 Navigate back to the space home (breadcrumb). Check the **Recent** section in the right column — the piece you just visited should now appear there at the top of the list. Take a screenshot showing the recent list with the new piece.
 
-### Step 12: View the Grid View
+### Step 13: View the Grid View
 
 On the space home, use the **Find Cell Link Chips** helper to locate the chip next to the **"Recent"** heading. The `text` field from the helper shows the chip's display name. Click it to navigate to the **PieceGrid** — a thumbnail grid view.
 
@@ -325,7 +335,7 @@ The grid shows a 3-column layout where each piece is rendered as a live scaled-d
 
 Navigate back to the space home.
 
-### Step 13: Suggestion Refinement / Follow-up
+### Step 14: Suggestion Refinement / Follow-up
 
 Back on the space home, find a do-list item with a completed suggestion (expand it if collapsed). The **"Refine suggestion..."** input is hidden by default. To reveal it, click the **"+"** button on the `ct-message-beads` widget (the row of colored dots at the bottom of the suggestion). Use the **Find Shadow DOM Buttons** helper (searching for '+') to locate the button coordinates. This toggles the `ct-prompt-input` visible, which allows you to continue the conversation with the suggestion LLM.
 
@@ -344,7 +354,7 @@ Try refinement on another suggestion too. For example, on the **repo summary ite
 
 Take a screenshot of each refined result.
 
-### Step 14: Rearrange the Do-List via Omnibot
+### Step 15: Rearrange the Do-List via Omnibot
 
 Navigate back to the space home. Open the Omnibot (FAB). Ask it to rearrange the do-list by making one item a subtask of another. For example:
 
@@ -354,7 +364,7 @@ Wait for the LLM to use the `updateDoItem` tool (setting `indent`). The do-list 
 
 Try another rearrangement — ask Omnibot to mark one item as done, or to add a new subtask under an existing item.
 
-### Step 15: Create a Note and @mention in Omnibot
+### Step 16: Create a Note and @mention in Omnibot
 
 Use the **"Notes ▾"** dropdown to create a new note (same as Step 2). Edit the title to something descriptive like "Tour Observations" using the shadow DOM coordinate technique from Step 3. Add body content summarizing interesting things you've seen during the tour so far.
 
@@ -362,7 +372,7 @@ Navigate back to the space home and verify the note appears in the Pieces list.
 
 Open the Omnibot, type `@` to trigger mention autocomplete. Find and select the new note (e.g. "📝 Tour Observations") from the dropdown. Type a question after the mention, like "Summarize this note and suggest what else I should add." Send and wait for the response. Take a screenshot.
 
-### Step 16: Free Exploration
+### Step 17: Free Exploration
 
 Spend 2-3 minutes freely exploring the platform. This is intentionally unstructured — follow your curiosity. Some ideas:
 
@@ -400,19 +410,20 @@ For each step, mark pass/fail with a one-line observation:
 - [x] Step 1: Space Home — description of what loaded
 - [x] Step 2: Create Note — how it went
 - [x] Step 3: Edit Note — title and body editing
-- [x] Step 4: Return Home — note appeared in list
-- [x] Step 5: Open Chat — FAB and chat panel
-- [x] Step 6: @mention Note — LLM read the note
-- [x] Step 7: Pattern Index — listing of available patterns
-- [x] Step 8: Counter Pattern — launch and interact
-- [x] Step 9: Add To-Do Items — Omnibot added items to do-list
-- [x] Step 10: AI Suggestions — watched suggestions generate
-- [x] Step 11: Explore Suggestions — clicked results, checked recent list
-- [x] Step 12: Grid View — viewed thumbnail grid
-- [x] Step 13: Suggestion Refinement — sent follow-up messages
-- [x] Step 14: Rearrange Do-List — Omnibot restructured tasks
-- [x] Step 15: Note + @mention — created note, mentioned in Omnibot
-- [x] Step 16: Free Exploration — what you discovered
+- [x] Step 4: Link Notes via Omnibox — created second note and appended link
+- [x] Step 5: Return Home — notes appeared in list
+- [x] Step 6: Open Chat — FAB and chat panel
+- [x] Step 7: @mention Note — LLM read the note
+- [x] Step 8: Pattern Index — listing of available patterns
+- [x] Step 9: Counter Pattern — launch and interact
+- [x] Step 10: Add To-Do Items — Omnibot added items to do-list
+- [x] Step 11: AI Suggestions — watched suggestions generate
+- [x] Step 12: Explore Suggestions — clicked results, checked recent list
+- [x] Step 13: Grid View — viewed thumbnail grid
+- [x] Step 14: Suggestion Refinement — sent follow-up messages
+- [x] Step 15: Rearrange Do-List — Omnibot restructured tasks
+- [x] Step 16: Note + @mention — created note, mentioned in Omnibot
+- [x] Step 17: Free Exploration — what you discovered
 - [ ] Some Step — FAILED: reason
 ...etc
 

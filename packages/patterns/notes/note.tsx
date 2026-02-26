@@ -43,6 +43,7 @@ interface NoteOutput {
   grep: PatternToolResult<{ content: string }>;
   translate: PatternToolResult<{ content: string }>;
   editContent: Stream<{ detail: { value: string } }>;
+  appendLink: Stream<{ piece: Writable<MentionablePiece> }>;
   createNewNote: Stream<void>;
   /** Parent notebook reference, null if not in a notebook */
   parentNotebook: NotebookPiece | null;
@@ -264,6 +265,22 @@ const Note = pattern<NoteInput, NoteOutput>(
     const editContent = action(
       ({ detail }: { detail: { value: string } }) => {
         content.set(detail.value);
+      },
+    );
+
+    // Append a wiki-link to another piece at the end of the note content
+    const appendLink = action(
+      ({ piece }: { piece: Writable<MentionablePiece> }) => {
+        const name = piece.get()[NAME] ?? "";
+        const resolved = (piece as any).resolveAsCell();
+        const entityId = resolved?.entityId?.["/"];
+        if (!name || !entityId) return;
+
+        const link = `[[${name} (${entityId})]]`;
+        const current = content.get();
+        content.set(current ? `${current}\n${link}` : link);
+
+        mentioned.push(piece);
       },
     );
 
@@ -536,6 +553,7 @@ const Note = pattern<NoteInput, NoteOutput>(
       grep: patternTool(grepPattern, { content }),
       translate: patternTool(translatePattern, { content }),
       editContent,
+      appendLink,
       createNewNote,
       embeddedUI: editorUI,
       // Test-accessible state
