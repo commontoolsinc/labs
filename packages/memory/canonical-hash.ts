@@ -11,10 +11,7 @@
  */
 import { createHasher, type IncrementalHasher } from "./hash-impl.ts";
 import { StorableContentId } from "./storable-content-id.ts";
-import {
-  StorableRegExp,
-  StorableUint8Array,
-} from "./storable-native-instances.ts";
+import { StorableUint8Array } from "./storable-native-instances.ts";
 import { DECONSTRUCT, isStorableInstance } from "./storable-protocol.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./type-tags.ts";
 import { encodeULEB128 } from "@commontools/leb128";
@@ -44,7 +41,6 @@ const TAG_BIGINT = 0x26;
 const TAG_EPOCH_NSEC = 0x27;
 const TAG_EPOCH_DAYS = 0x28;
 const TAG_CONTENT_ID = 0x29;
-const TAG_REGEXP = 0x2a;
 
 // ---------------------------------------------------------------------------
 // Pre-allocated tag byte arrays (avoids per-call allocation)
@@ -66,7 +62,6 @@ const TAG_BIGINT_BYTES = new Uint8Array([TAG_BIGINT]);
 const TAG_EPOCH_NSEC_BYTES = new Uint8Array([TAG_EPOCH_NSEC]);
 const TAG_EPOCH_DAYS_BYTES = new Uint8Array([TAG_EPOCH_DAYS]);
 const TAG_CONTENT_ID_BYTES = new Uint8Array([TAG_CONTENT_ID]);
-const TAG_REGEXP_BYTES = new Uint8Array([TAG_REGEXP]);
 
 // ---------------------------------------------------------------------------
 // Shared scratch buffer (safe in single-threaded synchronous JS -- see
@@ -168,19 +163,6 @@ function feedObjectValue(
     const bytes = value.bytes;
     feedLength(hasher, bytes.length);
     hasher.update(bytes);
-    return;
-  }
-
-  // StorableRegExp has a dedicated hash encoding (TAG_REGEXP). Encodes
-  // the source and flags strings (the essential state).
-  if (value instanceof StorableRegExp) {
-    hasher.update(TAG_REGEXP_BYTES);
-    const sourceUtf8 = encoder.encode(value.regex.source);
-    feedLength(hasher, sourceUtf8.length);
-    hasher.update(sourceUtf8);
-    const flagsUtf8 = encoder.encode(value.regex.flags);
-    feedLength(hasher, flagsUtf8.length);
-    hasher.update(flagsUtf8);
     return;
   }
 
