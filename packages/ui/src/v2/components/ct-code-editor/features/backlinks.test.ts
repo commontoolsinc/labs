@@ -243,18 +243,18 @@ describe("backlinkEditFilter", () => {
     expect(tr.state.doc.toString()).toBe("[[World (w1)]]");
   });
 
-  it("does NOT truncate edits spanning from name into ID (known bug)", () => {
-    // BUG: The filter detects the span (needsModification=true) and computes
-    // truncated specs, but only applies them when `blocked` is true. Since a
-    // span-only edit doesn't set `blocked`, the original transaction passes
-    // through unmodified, corrupting the ID.
+  it("truncates edits spanning from name into ID", () => {
+    // Edit from=5 (inside "Hello") to=10 (inside " (h1)") spans the name/ID boundary.
+    // The filter should truncate the deletion to bl.nameTo so the ID is preserved.
     const state = createState("[[Hello (h1)]]");
+    // [[Hello (h1)]]
+    //   ^    ^
+    //   2    7  ← nameFrom=2, nameTo=7
     const tr = state.update({
       changes: { from: 5, to: 10, insert: "X" },
     });
-    // Passes through unmodified — ID is corrupted
-    expect(tr.state.doc.toString()).toBe("[[HelX1)]]");
-    // If truncation worked, it would be "[[HelX (h1)]]" instead
+    // Deletion truncated to nameTo=7; insert "X" applied at position 5
+    expect(tr.state.doc.toString()).toBe("[[HelX (h1)]]");
   });
 
   it("allows deletion of an entire backlink", () => {
