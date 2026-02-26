@@ -74,80 +74,196 @@ interface IMemorySpaceAttestation {
  * @template K The type of keys in the map
  * @template V The type of values stored in the sets
  */
+/**
+ * Produces a canonical string representation for use as a hash key.
+ * Object keys are sorted for deterministic output so structurally-equal
+ * objects always hash identically. Results are cached per object identity
+ * via WeakMap, so repeated hashing of the same schema object is O(1).
+ */
+const _hashCache = new WeakMap<object, string>();
+
+// Schema operation intern caches: memoize merge/combine results so
+// structurally-identical operations return the same object identity.
+// This ensures downstream stableStringify hits the _hashCache WeakMap
+// (O(1) identity lookup) instead of re-walking the schema tree.
+// Capped to prevent unbounded growth in long-running servers.
+const INTERN_CACHE_MAX = 10_000;
+const _mergeSchemaOptionCache = new Map<string, JSONSchema>();
+const _combineSchemaCache = new Map<string, JSONSchema>();
+const _mergeSchemaFlagsCache = new Map<string, JSONSchema>();
+
+function internSet(
+  cache: Map<string, JSONSchema>,
+  key: string,
+  value: JSONSchema,
+) {
+  if (cache.size >= INTERN_CACHE_MAX) cache.clear();
+  cache.set(key, value);
+}
+
+function stableStringify(value: unknown): string {
+  if (value === null) return "n";
+  if (value === undefined) return "u";
+  const t = typeof value;
+  if (t === "boolean") return value ? "T" : "F";
+  if (t === "number") return `#${value}`;
+  if (t === "string") return `s${(value as string).length}:${value}`;
+
+  const obj = value as object;
+  const cached = _hashCache.get(obj);
+  if (cached !== undefined) return cached;
+
+  let result: string;
+  if (Array.isArray(obj)) {
+    result = "[" + obj.map(stableStringify).join(",") + "]";
+  } else if (obj instanceof Date) {
+    result = `D${(obj as Date).getTime()}`;
+  } else if (obj instanceof RegExp) {
+    result = `R${(obj as RegExp).toString()}`;
+  } else {
+    const keys = Object.keys(obj).sort();
+    result = "{" +
+      keys.map((k) =>
+        k + ":" + stableStringify((obj as Record<string, unknown>)[k])
+      ).join(",") +
+      "}";
+  }
+
+  _hashCache.set(obj, result);
+  return result;
+}
+
+/**
+ * A data structure that maps keys to sets of values, allowing multiple values
+ * to be associated with a single key without duplication.
+ *
+ * When an `equalFn` is provided, values are deduped using a canonical hash
+ * (stableStringify with WeakMap identity cache) for O(1) add/hasValue instead
+ * of O(n) linear scans with deepEqual. The hash path uses sorted object keys
+ * so structurally-equal values always produce the same hash.
+ *
+ * When no `equalFn` is provided, values are stored in a plain Set using
+ * reference equality.
+ *
+ * @template K The type of keys in the map
+ * @template V The type of values stored in the sets
+ */
 export class MapSet<K, V> {
-  private map = new Map<K, Set<V>>();
-  private equalFn?: (a: V, b: V) => boolean;
+  // When equalFn is provided, use hash-based dedup: key → (hash → value)
+  // When not, use plain Set: key → Set<value>
+  private hashMap?: Map<K, Map<string, V>>;
+  private setMap?: Map<K, Set<V>>;
+
+  // Instrumentation counters (kept for diagnostics)
+  deepEqualCalls = 0;
+  deepEqualMs = 0;
 
   constructor(equalFn?: (a: V, b: V) => boolean) {
-    this.equalFn = equalFn;
+    if (equalFn !== undefined) {
+      this.hashMap = new Map();
+    } else {
+      this.setMap = new Map();
+    }
+  }
+
+  /** Total number of keys in the map */
+  public get size(): number {
+    if (this.hashMap) return this.hashMap.size;
+    return this.setMap!.size;
+  }
+
+  /** Total number of values across all keys */
+  public get totalValues(): number {
+    let count = 0;
+    if (this.hashMap) {
+      for (const m of this.hashMap.values()) count += m.size;
+    } else {
+      for (const s of this.setMap!.values()) count += s.size;
+    }
+    return count;
   }
 
   public get(key: K): Set<V> | undefined {
-    return this.map.get(key);
+    if (this.hashMap) {
+      const m = this.hashMap.get(key);
+      return m ? new Set(m.values()) : undefined;
+    }
+    return this.setMap!.get(key);
   }
 
   public add(key: K, value: V) {
-    const values = this.map.get(key);
-    if (values === undefined) {
-      const values = new Set<V>([value]);
-      this.map.set(key, values);
-    } else if (
-      this.equalFn !== undefined &&
-      (values.values().some((item) => this.equalFn!(item, value)))
-    ) {
+    if (this.hashMap) {
+      let m = this.hashMap.get(key);
+      if (m === undefined) {
+        m = new Map<string, V>();
+        this.hashMap.set(key, m);
+      }
+      const hash = stableStringify(value);
+      if (!m.has(hash)) {
+        m.set(hash, value);
+      }
       return;
+    }
+    // Non-hash path (no equalFn)
+    const values = this.setMap!.get(key);
+    if (values === undefined) {
+      this.setMap!.set(key, new Set([value]));
     } else {
-      this.map.get(key)!.add(value);
+      values.add(value);
     }
   }
 
   public has(key: K): boolean {
-    return this.map.has(key);
+    if (this.hashMap) return this.hashMap.has(key);
+    return this.setMap!.has(key);
   }
 
   public hasValue(key: K, value: V): boolean {
-    const values = this.map.get(key);
-    if (values !== undefined && this.equalFn !== undefined) {
-      return values.values().some((item) => this.equalFn!(item, value));
+    if (this.hashMap) {
+      const m = this.hashMap.get(key);
+      if (!m) return false;
+      return m.has(stableStringify(value));
     }
+    const values = this.setMap!.get(key);
     return values !== undefined && values.has(value);
   }
 
   public deleteValue(key: K, value: V): boolean {
-    if (!this.map.has(key)) {
-      return false;
-    } else {
-      const values = this.map.get(key)!;
-      let existing: V = value;
-      if (values.has(value)) {
-        // Short cut via object identity
-        existing = value;
-      } else if (this.equalFn !== undefined) {
-        const match = values.values().find((item) =>
-          this.equalFn!(item, value)
-        );
-        if (match === undefined) {
-          return false;
-        }
-        existing = match;
-      }
-      const rv = values.delete(existing);
-      if (values.size === 0) {
-        this.map.delete(key);
-      }
+    if (this.hashMap) {
+      const m = this.hashMap.get(key);
+      if (!m) return false;
+      const hash = stableStringify(value);
+      const rv = m.delete(hash);
+      if (m.size === 0) this.hashMap.delete(key);
       return rv;
     }
+    const values = this.setMap!.get(key);
+    if (!values) return false;
+    const rv = values.delete(value);
+    if (values.size === 0) this.setMap!.delete(key);
+    return rv;
   }
 
   public delete(key: K) {
-    this.map.delete(key);
+    if (this.hashMap) {
+      this.hashMap.delete(key);
+    } else {
+      this.setMap!.delete(key);
+    }
   }
+
   /**
    * iterable
    */
   *[Symbol.iterator](): IterableIterator<[K, Set<V>]> {
-    for (const [key, values] of this.map) {
-      yield [key, values];
+    if (this.hashMap) {
+      for (const [key, m] of this.hashMap) {
+        yield [key, new Set(m.values())];
+      }
+    } else {
+      for (const [key, values] of this.setMap!) {
+        yield [key, values];
+      }
     }
   }
 }
@@ -189,48 +305,41 @@ export class CycleTracker<K> {
  * This will not work correctly if the key is modified after being added.
  */
 export class CompoundCycleTracker<EqualKey, DeepEqualKey, Value = unknown> {
-  private partial: Map<EqualKey, [DeepEqualKey, Value?][]>;
+  // partialKey (identity) → Map<hash(extraKey), Value?>
+  private partial: Map<EqualKey, Map<string, Value | undefined>>;
   constructor() {
-    this.partial = new Map<EqualKey, [DeepEqualKey, Value?][]>();
+    this.partial = new Map();
   }
 
   /**
-   * This will do an identity check on the `partialKey` and a deepEqual check on
-   * the `extraKey`.
+   * Identity check on `partialKey`, hash-based check on `extraKey`.
+   * Uses stableStringify (with WeakMap identity cache) so schema objects
+   * hash in O(1) amortized after the first stringify.
    */
   include(
     partialKey: EqualKey,
     extraKey: DeepEqualKey,
     value?: Value,
-    context?: unknown,
+    _context?: unknown,
   ): Disposable | null {
     let existing = this.partial.get(partialKey);
     if (existing === undefined) {
-      existing = [];
+      existing = new Map();
       this.partial.set(partialKey, existing);
     }
-    if (existing.some(([item, _value]) => deepEqual(item, extraKey))) {
+    const hash = stableStringify(extraKey);
+    if (existing.has(hash)) {
       return null;
     }
-    existing.push([extraKey, value]);
+    existing.set(hash, value);
     return {
       [Symbol.dispose]: () => {
-        const entries = this.partial.get(partialKey)!;
-        const index = entries.findIndex(([item, _value]) =>
-          deepEqual(item, extraKey)
-        );
-        if (index === -1) {
-          logger.error("traverse-error", () => [
-            "Failed to dispose of missing key",
-            extraKey,
-            context,
-          ]);
-          return;
-        }
-        if (entries.length === 0) {
-          this.partial.delete(partialKey);
-        } else {
-          entries.splice(index, 1);
+        const entries = this.partial.get(partialKey);
+        if (entries) {
+          entries.delete(hash);
+          if (entries.size === 0) {
+            this.partial.delete(partialKey);
+          }
         }
       },
     };
@@ -240,14 +349,10 @@ export class CompoundCycleTracker<EqualKey, DeepEqualKey, Value = unknown> {
   getExisting(partialKey: EqualKey, extraKey: DeepEqualKey): Value | undefined {
     const existing = this.partial.get(partialKey);
     if (existing === undefined) {
-      return undefined; // no match for partialKey
+      return undefined;
     }
-    const match = existing.find(([item, _value]) => deepEqual(item, extraKey));
-    if (match === undefined) {
-      return undefined; // no match for extraKey
-    }
-    const [_key, value] = match;
-    return value;
+    const hash = stableStringify(extraKey);
+    return existing.get(hash);
   }
 }
 
@@ -487,6 +592,8 @@ export abstract class BaseObjectTraverser {
     protected traverseCells = true,
   ) {}
   protected dagMemo = new Map<string, Immutable<StorableValue>>();
+  traverseDAGCalls = 0;
+  getDocAtPathCalls = 0;
   abstract traverse(doc: IMemorySpaceAttestation): Immutable<StorableValue>;
   /**
    * Attempt to traverse the document as a directed acyclic graph.
@@ -506,6 +613,7 @@ export abstract class BaseObjectTraverser {
     defaultValue?: StorableDatum,
     itemLink?: NormalizedFullLink,
   ): Immutable<StorableValue> {
+    this.traverseDAGCalls++;
     // Memoize by cell address + itemLink to avoid exponential path explosion
     // in DAGs. When multiple parents share children, every unique path triggers
     // a full re-traversal. Caching collapses this to one visit per cell.
@@ -700,6 +808,7 @@ export abstract class BaseObjectTraverser {
     selector?: SchemaPathSelector,
     lastNode: LastNode = "value",
   ) {
+    this.getDocAtPathCalls++;
     return getAtPath(
       this.tx,
       doc,
@@ -1169,6 +1278,18 @@ function combineOptionalSchema(
 
 // Merge any schema flags like asCell or asStream from flagSchema into schema.
 export function mergeSchemaFlags(flagSchema: JSONSchema, schema: JSONSchema) {
+  const key = stableStringify(flagSchema) + "|" + stableStringify(schema);
+  const cached = _mergeSchemaFlagsCache.get(key);
+  if (cached !== undefined) return cached;
+  const result = _mergeSchemaFlagsUncached(flagSchema, schema);
+  internSet(_mergeSchemaFlagsCache, key, result);
+  return result;
+}
+
+function _mergeSchemaFlagsUncached(
+  flagSchema: JSONSchema,
+  schema: JSONSchema,
+) {
   if (isObject(flagSchema)) {
     // we want to preserve asCell and asStream -- if true, these will override
     // the value in the schema
@@ -1216,6 +1337,18 @@ export function mergeSchemaFlags(flagSchema: JSONSchema, schema: JSONSchema) {
  * @returns
  */
 export function combineSchema(
+  parentSchema: JSONSchema,
+  linkSchema: JSONSchema,
+): JSONSchema {
+  const key = stableStringify(parentSchema) + "|" + stableStringify(linkSchema);
+  const cached = _combineSchemaCache.get(key);
+  if (cached !== undefined) return cached;
+  const result = _combineSchemaUncached(parentSchema, linkSchema);
+  internSet(_combineSchemaCache, key, result);
+  return result;
+}
+
+function _combineSchemaUncached(
   parentSchema: JSONSchema,
   linkSchema: JSONSchema,
 ): JSONSchema {
@@ -1507,8 +1640,19 @@ type TraverseResult<T> = { ok: T; error?: never } | {
   ok?: never;
   error: Error;
 };
+
+/** Opaque memo cache shared across SchemaObjectTraverser instances within a query */
+export type SchemaMemo = Map<string, TraverseResult<Immutable<StorableValue>>>;
+
+/** Create a shared memo cache to pass to multiple SchemaObjectTraverser instances */
+export function createSchemaMemo(): SchemaMemo {
+  return new Map();
+}
+
 export class SchemaObjectTraverser<V extends StorableDatum>
   extends BaseObjectTraverser {
+  private sharedSchemaMemo?: SchemaMemo;
+
   constructor(
     tx: IExtendedStorageTransaction,
     selector: SchemaPathSelector = DefaultSelector,
@@ -1523,6 +1667,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     cfc: ContextualFlowControl = new ContextualFlowControl(),
     objectCreator?: IObjectCreator<V>,
     traverseCells?: boolean,
+    sharedSchemaMemo?: SchemaMemo,
   ) {
     super(
       tx,
@@ -1533,18 +1678,101 @@ export class SchemaObjectTraverser<V extends StorableDatum>
       objectCreator,
       traverseCells,
     );
+    this.sharedSchemaMemo = sharedSchemaMemo;
+  }
+
+  // Traversal stats counters
+  traverseWithSchemaCalls = 0;
+  traversePointerCalls = 0;
+  traverseArrayCalls = 0;
+  traverseObjectCalls = 0;
+  override traverseDAGCalls = 0;
+  anyOfBranches = 0;
+  override getDocAtPathCalls = 0;
+  // Track per-doc visit counts and unique paths
+  private docVisits = new Map<string, number>();
+  private uniquePaths = new Set<string>();
+  private maxDepth = 0;
+  private currentDepth = 0;
+  // Memoization cache for traverseWithSchema: key → result
+  // Only used when traverseCells=true (query path) where the link
+  // parameter doesn't affect the result (StandardObjectCreator ignores it).
+  // When sharedSchemaMemo is provided, it's used instead (persists across
+  // multiple traverse() calls for the same selectSchema query).
+  private schemaMemo = new Map<
+    string,
+    TraverseResult<Immutable<StorableValue>>
+  >();
+  schemaMemoHits = 0;
+
+  private get activeMemo(): Map<
+    string,
+    TraverseResult<Immutable<StorableValue>>
+  > {
+    return this.sharedSchemaMemo ?? this.schemaMemo;
   }
 
   override traverse(
     doc: IMemorySpaceAttestation,
     link?: NormalizedFullLink,
   ): Immutable<StorableValue> {
+    // Reset per-traverse stats (but NOT the shared memo)
+    this.traverseWithSchemaCalls = 0;
+    this.traversePointerCalls = 0;
+    this.traverseArrayCalls = 0;
+    this.traverseObjectCalls = 0;
+    this.traverseDAGCalls = 0;
+    this.anyOfBranches = 0;
+    this.getDocAtPathCalls = 0;
+    this.docVisits.clear();
+    this.uniquePaths.clear();
+    this.maxDepth = 0;
+    this.currentDepth = 0;
+    this.schemaMemoHits = 0;
+    // Only clear private memo, not shared
+    if (!this.sharedSchemaMemo) {
+      this.schemaMemo.clear();
+    }
+    // Reset MapSet deepEqual counters
+    this.schemaTracker.deepEqualCalls = 0;
+    this.schemaTracker.deepEqualMs = 0;
+
+    logger.timeStart("traverse");
     this.schemaTracker.add(getTrackerKey(doc.address), this.selector);
     const { ok: val, error } = this.traverseWithSelector(
       doc,
       this.selector,
       link,
     );
+    const elapsed = logger.timeEnd("traverse") ?? 0;
+    if (elapsed > 100) {
+      // Find top visited docs
+      const topDocs = [...this.docVisits.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([id, count]) => `${id.slice(0, 20)}..=${count}`)
+        .join(" ");
+      logger.warn("slow-traverse", () => [
+        `${elapsed.toFixed(0)}ms`,
+        `doc=${doc.address.id}/${doc.address.type}`,
+        `trackerKeys=${this.schemaTracker.size}`,
+        `trackerVals=${this.schemaTracker.totalValues}`,
+        `traverseSchema=${this.traverseWithSchemaCalls}`,
+        `traversePtr=${this.traversePointerCalls}`,
+        `traverseArr=${this.traverseArrayCalls}`,
+        `traverseObj=${this.traverseObjectCalls}`,
+        `traverseDAG=${this.traverseDAGCalls}`,
+        `anyOfBranches=${this.anyOfBranches}`,
+        `getDocAtPath=${this.getDocAtPathCalls}`,
+        `dagMemo=${this.dagMemo.size}`,
+        `uniqueDocs=${this.docVisits.size}`,
+        `uniquePaths=${this.uniquePaths.size}`,
+        `maxDepth=${this.maxDepth}`,
+        `schemaMemo=${this.activeMemo.size}`,
+        `schemaMemoHits=${this.schemaMemoHits}`,
+        `topDocs=${topDocs}`,
+      ]);
+    }
     if (error !== undefined) {
       // This helps track down mismatched schemas, but may be fine
       logger.debug("traverse", () => [
@@ -1640,6 +1868,42 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     schema: JSONSchema,
     link?: NormalizedFullLink,
   ): TraverseResult<Immutable<StorableValue>> {
+    this.traverseWithSchemaCalls++;
+    this.currentDepth++;
+    if (this.currentDepth > this.maxDepth) this.maxDepth = this.currentDepth;
+    // Track doc visits
+    const docId = doc.address.id;
+    this.docVisits.set(docId, (this.docVisits.get(docId) ?? 0) + 1);
+    // Track unique doc+path combos
+    this.uniquePaths.add(docId + "/" + doc.address.path.join("/"));
+    try {
+      // Memoize by doc address + schema for the query path (traverseCells=true).
+      // In the query path, StandardObjectCreator ignores the link param,
+      // so the result is fully determined by address + schema.
+      if (this.traverseCells) {
+        const memo = this.activeMemo;
+        const memoKey = docId + "|" + doc.address.path.join("/") + "|" +
+          stableStringify(schema);
+        const cached = memo.get(memoKey);
+        if (cached !== undefined) {
+          this.schemaMemoHits++;
+          return cached;
+        }
+        const result = this._traverseWithSchemaInner(doc, schema, link);
+        memo.set(memoKey, result);
+        return result;
+      }
+      return this._traverseWithSchemaInner(doc, schema, link);
+    } finally {
+      this.currentDepth--;
+    }
+  }
+
+  private _traverseWithSchemaInner(
+    doc: IMemorySpaceAttestation,
+    schema: JSONSchema,
+    link?: NormalizedFullLink,
+  ): TraverseResult<Immutable<StorableValue>> {
     // Track both the unresolved version of our schema (possibly with top
     // level $ref) and the resolved version.
     let resolved: JSONSchema | undefined = schema;
@@ -1669,6 +1933,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         ];
         const matches: Immutable<StorableValue>[] = [];
         for (const optionSchema of sortedAnyOf) {
+          this.anyOfBranches++;
           if (ContextualFlowControl.isFalseSchema(optionSchema)) {
             continue;
           }
@@ -1928,6 +2193,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     schema: JSONSchemaObj,
     _link?: NormalizedFullLink,
   ): Immutable<StorableValue>[] | undefined {
+    this.traverseArrayCalls++;
     const arrayObj: Immutable<StorableValue>[] = [];
     for (
       const [index, item] of (doc.value as Immutable<StorableDatum>[]).entries()
@@ -2095,6 +2361,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     schema: JSONSchemaObj,
     _link?: NormalizedFullLink,
   ): Record<string, Immutable<StorableValue>> | undefined {
+    this.traverseObjectCalls++;
     const filteredObj: Record<string, Immutable<StorableValue>> = {};
     for (const [propKey, propValue] of Object.entries(doc.value!)) {
       // We'll use marker schemas to detect some places where we want special
@@ -2226,6 +2493,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     schema: JSONSchema,
     link?: NormalizedFullLink,
   ): TraverseResult<Immutable<StorableValue>> {
+    this.traversePointerCalls++;
     const selector = { path: doc.address.path, schema };
     const [redirDoc, redirSelector] = this.getDocAtPath(
       doc,
@@ -2389,11 +2657,16 @@ function mergeSchemaOption(
   // JSONSchema rules should.
   // For example, `{type: "object", anyOf: [{type: "string"}]}` schema should
   // never match
-  return isObject(innerSchema)
+  const key = stableStringify(outerSchema) + "|" + stableStringify(innerSchema);
+  const cached = _mergeSchemaOptionCache.get(key);
+  if (cached !== undefined) return cached;
+  const result = isObject(innerSchema)
     ? { ...outerSchema, ...innerSchema }
     : innerSchema
     ? outerSchema // innerSchema === true
     : false; // innerSchema === false
+  internSet(_mergeSchemaOptionCache, key, result as JSONSchema);
+  return result;
 }
 
 // Utility function used for debugging so we can convert proxy objects into

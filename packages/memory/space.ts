@@ -56,8 +56,17 @@ import {
   setRevision,
 } from "./selection.ts";
 import * as Error from "./error.ts";
-import { selectSchema, type SelectSchemaResult } from "./space-schema.ts";
-export type { SelectSchemaResult } from "./space-schema.ts";
+import {
+  selectSchema,
+  type SelectSchemaOptions,
+  type SelectSchemaResult,
+  type SelectSchemaStats,
+} from "./space-schema.ts";
+export type {
+  SelectSchemaOptions,
+  SelectSchemaResult,
+  SelectSchemaStats,
+} from "./space-schema.ts";
 import { StorableDatum, StorableValue } from "./interface.ts";
 import { isObject } from "../utils/src/types.ts";
 export type * from "./interface.ts";
@@ -1116,10 +1125,12 @@ export const querySchemaWithTracker = <Space extends MemorySpace>(
   session: Session<Space>,
   command: SchemaQuery<Space>,
   existingSchemaTracker?: SelectSchemaResult["schemaTracker"],
+  options?: SelectSchemaOptions,
 ): Result<
   {
     selection: Selection<Space>;
     schemaTracker: SelectSchemaResult["schemaTracker"];
+    stats?: SelectSchemaStats;
   },
   AuthorizationError | QueryError
 > => {
@@ -1130,10 +1141,13 @@ export const querySchemaWithTracker = <Space extends MemorySpace>(
     });
 
     try {
-      const { facts, schemaTracker } = session.store.transaction(selectSchema)(
+      const { facts, schemaTracker, stats } = session.store.transaction(
+        selectSchema,
+      )(
         session,
         command.args,
         existingSchemaTracker,
+        options,
       );
 
       const entities = Object.keys(facts || {}).length;
@@ -1145,6 +1159,7 @@ export const querySchemaWithTracker = <Space extends MemorySpace>(
             [command.sub]: facts,
           } as Selection<Space>,
           schemaTracker,
+          stats,
         },
       };
     } catch (error) {

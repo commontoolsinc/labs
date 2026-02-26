@@ -16,6 +16,8 @@ router.use(
 
 const Router = router
   .openapi(routes.index, handlers.index)
+  .openapi(routes.stats, handlers.stats)
+  .openapi(routes.dash, handlers.dash)
   .openapi(routes.llm, handlers.llm);
 
 export default Router;
