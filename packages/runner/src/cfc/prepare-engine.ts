@@ -507,6 +507,96 @@ function computePreparedLabels(schema: JSONSchema): Record<string, Labels> {
   return result;
 }
 
+type PreparedWriteSchema = {
+  readonly entity: EntityAddress;
+  readonly schema: JSONSchema;
+  readonly labels: Record<string, Labels>;
+  readonly actualSchemaHash: string;
+  readonly shouldWriteSchemaHash: boolean;
+};
+
+async function resolvePreparedWriteSchemas(
+  tx: IExtendedStorageTransaction,
+  writtenEntities: readonly EntityAddress[],
+  options: PrepareBoundaryCommitOptions,
+): Promise<PreparedWriteSchema[]> {
+  const prepared: PreparedWriteSchema[] = [];
+  const schemaHashCache = new WeakMap<object, string>();
+  const labelsCache = new WeakMap<object, Record<string, Labels>>();
+
+  for (const entity of writtenEntities) {
+    const schema = getCfcWriteSchemaContext(tx, {
+      ...entity,
+      path: [],
+    });
+    if (!schema) {
+      continue;
+    }
+
+    let actualSchemaHash = schemaHashCache.get(schema as object);
+    if (!actualSchemaHash) {
+      actualSchemaHash = await resolvePreparedSchemaHash(schema);
+      schemaHashCache.set(schema as object, actualSchemaHash);
+    }
+
+    let labels = labelsCache.get(schema as object);
+    if (!labels) {
+      labels = computePreparedLabels(schema);
+      labelsCache.set(schema as object, labels);
+    }
+
+    const existingSchemaHash = tx.readOrThrow(schemaHashAddress(entity), {
+      meta: internalVerifierReadMeta,
+    });
+    if (existingSchemaHash === undefined) {
+      prepared.push({
+        entity,
+        schema,
+        labels,
+        actualSchemaHash,
+        shouldWriteSchemaHash: true,
+      });
+      continue;
+    }
+
+    if (
+      typeof existingSchemaHash !== "string" ||
+      existingSchemaHash !== actualSchemaHash
+    ) {
+      const allowMigration = options.allowSchemaHashMigration?.(
+        entity,
+        String(existingSchemaHash),
+        actualSchemaHash,
+      ) ?? false;
+      if (!allowMigration) {
+        throw CfcSchemaHashMismatchError(
+          entity,
+          String(existingSchemaHash),
+          actualSchemaHash,
+        );
+      }
+      prepared.push({
+        entity,
+        schema,
+        labels,
+        actualSchemaHash,
+        shouldWriteSchemaHash: true,
+      });
+      continue;
+    }
+
+    prepared.push({
+      entity,
+      schema,
+      labels,
+      actualSchemaHash,
+      shouldWriteSchemaHash: false,
+    });
+  }
+
+  return prepared;
+}
+
 function classificationSatisfiesMaxConfidentiality(
   classification: string,
   maxConfidentiality: readonly string[],
@@ -1708,6 +1798,7 @@ function evaluatePolicyDowngradeDecision(
 function verifyOutputTransitionsForAttempt(
   tx: IExtendedStorageTransaction,
   consumedReadLabels: readonly ConsumedReadWithEffectiveLabel[],
+  rootSchemaByEntity?: ReadonlyMap<string, JSONSchema>,
 ): void {
   const canonical = canonicalizeBoundaryActivity(tx.journal.activity());
   if (canonical.attemptedWrites.length === 0) {
@@ -1722,7 +1813,8 @@ function verifyOutputTransitionsForAttempt(
       id: write.id as EntityAddress["id"],
       type: write.type as EntityAddress["type"],
     };
-    const rootSchema = getCfcWriteSchemaContext(tx, { ...entity, path: [] });
+    const rootSchema = rootSchemaByEntity?.get(entityKey(entity)) ??
+      getCfcWriteSchemaContext(tx, { ...entity, path: [] });
     if (!rootSchema) {
       continue;
     }
@@ -1959,68 +2051,37 @@ export async function prepareBoundaryCommit(
   tx: IExtendedStorageTransaction,
   options: PrepareBoundaryCommitOptions = {},
 ): Promise<void> {
-  const consumedReadLabels = verifyInputRequirementsForAttempt(tx);
-  verifyOutputTransitionsForAttempt(tx, consumedReadLabels);
-
   const writtenEntities = collectWrittenEntities(tx);
   const hasIfcWriteReason = tx.cfcReasons.includes("ifc-write-schema");
-  let enforcedSchemaHashCount = 0;
-  const schemaHashCache = new WeakMap<object, string>();
+  const preparedWriteSchemas = hasIfcWriteReason
+    ? await resolvePreparedWriteSchemas(tx, writtenEntities, options)
+    : [];
+
+  if (hasIfcWriteReason && writtenEntities.length > 0 && preparedWriteSchemas.length === 0) {
+    throw CfcPrepareSchemaUnavailableError(writtenEntities[0]);
+  }
+
+  const preparedRootSchemasByEntity = new Map<string, JSONSchema>();
+  for (const prepared of preparedWriteSchemas) {
+    preparedRootSchemasByEntity.set(entityKey(prepared.entity), prepared.schema);
+  }
+
+  const consumedReadLabels = verifyInputRequirementsForAttempt(tx);
+  verifyOutputTransitionsForAttempt(
+    tx,
+    consumedReadLabels,
+    preparedRootSchemasByEntity,
+  );
 
   if (hasIfcWriteReason) {
-    for (const entity of writtenEntities) {
-      const schema = getCfcWriteSchemaContext(tx, {
-        ...entity,
-        path: [],
-      });
-      if (!schema) {
-        continue;
-      }
-      enforcedSchemaHashCount++;
-
-      let actualSchemaHash = schemaHashCache.get(schema as object);
-      if (!actualSchemaHash) {
-        actualSchemaHash = await resolvePreparedSchemaHash(schema);
-        schemaHashCache.set(schema as object, actualSchemaHash);
-      }
-      const address = schemaHashAddress(entity);
-      const labels = computePreparedLabels(schema);
-      const existingSchemaHash = tx.readOrThrow(address, {
-        meta: internalVerifierReadMeta,
-      });
-
-      if (existingSchemaHash === undefined) {
-        tx.writeOrThrow(address, actualSchemaHash);
-        tx.writeOrThrow(labelsAddress(entity), labels);
-        continue;
-      }
-
-      if (
-        typeof existingSchemaHash !== "string" ||
-        existingSchemaHash !== actualSchemaHash
-      ) {
-        const allowMigration = options.allowSchemaHashMigration?.(
-          entity,
-          String(existingSchemaHash),
-          actualSchemaHash,
-        ) ?? false;
-        if (allowMigration) {
-          tx.writeOrThrow(address, actualSchemaHash);
-          tx.writeOrThrow(labelsAddress(entity), labels);
-          continue;
-        }
-        throw CfcSchemaHashMismatchError(
-          entity,
-          String(existingSchemaHash),
-          actualSchemaHash,
+    for (const prepared of preparedWriteSchemas) {
+      if (prepared.shouldWriteSchemaHash) {
+        tx.writeOrThrow(
+          schemaHashAddress(prepared.entity),
+          prepared.actualSchemaHash,
         );
       }
-
-      tx.writeOrThrow(labelsAddress(entity), labels);
-    }
-
-    if (writtenEntities.length > 0 && enforcedSchemaHashCount === 0) {
-      throw CfcPrepareSchemaUnavailableError(writtenEntities[0]);
+      tx.writeOrThrow(labelsAddress(prepared.entity), prepared.labels);
     }
   }
 
