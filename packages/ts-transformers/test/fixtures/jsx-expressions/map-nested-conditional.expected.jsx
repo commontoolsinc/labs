@@ -35,7 +35,10 @@ export default pattern((_state) => {
             {items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                 const item = __ct_pattern_input.key("element");
                 return (<div>
-                {__ctHelpers.when(true as const satisfies __ctHelpers.JSONSchema, {
+                {__ctHelpers.when({
+                    type: "string",
+                    asOpaque: true
+                } as const satisfies __ctHelpers.JSONSchema, {
                     anyOf: [{}, {
                             type: "object",
                             properties: {}

@@ -12,14 +12,20 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         <h3>Basic Ternary</h3>
-        <span>{__ctHelpers.ifElse(true as const satisfies __ctHelpers.JSONSchema, {
+        <span>{__ctHelpers.ifElse({
+            type: "boolean",
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             "enum": ["Active", "Inactive"]
         } as const satisfies __ctHelpers.JSONSchema, state.key("isActive"), "Active", "Inactive")}</span>
-        <span>{__ctHelpers.ifElse(true as const satisfies __ctHelpers.JSONSchema, {
+        <span>{__ctHelpers.ifElse({
+            type: "boolean",
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
@@ -157,7 +163,10 @@ export default pattern((state) => {
 
         <h3>Nested Ternary</h3>
         <span>
-          {__ctHelpers.ifElse(true as const satisfies __ctHelpers.JSONSchema, {
+          {__ctHelpers.ifElse({
+            type: "boolean",
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema, {
             "enum": ["Premium Active", "Regular Active"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
@@ -341,7 +350,10 @@ export default pattern((state) => {
         </span>
 
         <h3>IfElse Component</h3>
-        {ifElse(true as const satisfies __ctHelpers.JSONSchema, {
+        {ifElse({
+                type: "boolean",
+                asOpaque: true
+            } as const satisfies __ctHelpers.JSONSchema, {
                 anyOf: [{}, {
                         type: "object",
                         properties: {}

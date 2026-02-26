@@ -24,9 +24,7 @@ export default function TestComponent({ items, cellRef }: {
       <span>Name: {derive({
         type: "object",
         properties: {
-            name: {
-                type: "string"
-            }
+            name: true
         }
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "string"

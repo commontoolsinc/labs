@@ -38,16 +38,15 @@ export default pattern((state) => {
         [UI]: (<div>
         <ct-button onClick={decrement(state)}>-</ct-button>
         <ul>
-          <li>next number: {__ctHelpers.ifElse(true as const satisfies __ctHelpers.JSONSchema, {
+          <li>next number: {__ctHelpers.ifElse({
+            type: "number",
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "number"
-                }, {
-                    type: "string"
-                }]
+            type: ["number", "string"]
         } as const satisfies __ctHelpers.JSONSchema, state.key("value"), __ctHelpers.derive({
             type: "object",
             properties: {

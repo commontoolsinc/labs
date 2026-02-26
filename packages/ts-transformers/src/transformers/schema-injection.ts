@@ -171,19 +171,31 @@ function buildShrunkTypeNodeFromType(
       isOptional = typeIncludesUndefined(indexType);
     }
 
-    if (!propType || isAnyOrUnknownType(propType)) {
-      // Preserve the original node-based type when type-based fallback
-      // cannot provide concrete property shape.
+    const hasDirectAccess = childPaths.some((path) => path.length === 0);
+
+    if (!propType) {
       continue;
     }
 
-    const propTypeNode = buildShrunkTypeNodeFromType(
+    if (!hasDirectAccess && isAnyOrUnknownType(propType)) {
+      // Preserve node-based precision for unresolved nested members.
+      continue;
+    }
+
+    const shrunkChild = buildShrunkTypeNodeFromType(
       propType,
       childPaths,
       checker,
       sourceFile,
       factory,
-    ) ?? checker.typeToTypeNode(
+    );
+    if (!shrunkChild && !hasDirectAccess) {
+      // We failed to materialize a deeper path; let caller fall back to
+      // node-based shrinking instead of widening to the full property shape.
+      continue;
+    }
+
+    const propTypeNode = shrunkChild ?? checker.typeToTypeNode(
       propType,
       sourceFile,
       ts.NodeBuilderFlags.NoTruncation |
@@ -483,9 +495,17 @@ function applyCapabilitySummaryToParameter(
   const innerTypeNode = extractCellLikeInnerTypeNode(parameterNode);
   const shouldWrap = !!innerTypeNode;
   const baseTypeNode = innerTypeNode ?? parameterNode;
-  const baseType = shouldWrap && parameterType
+  let baseType = shouldWrap && parameterType
     ? (unwrapCellLikeType(parameterType, checker) ?? parameterType)
     : parameterType;
+
+  if (!baseType) {
+    try {
+      baseType = checker.getTypeFromTypeNode(baseTypeNode);
+    } catch {
+      baseType = undefined;
+    }
+  }
 
   const paths = uniquePaths([
     ...paramSummary.readPaths,

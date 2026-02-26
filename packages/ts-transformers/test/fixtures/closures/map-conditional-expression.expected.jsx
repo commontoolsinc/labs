@@ -21,7 +21,10 @@ export default pattern((state) => {
                     type: "boolean"
                 } as const satisfies __ctHelpers.JSONSchema, {
                     type: "number"
-                } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, {
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "number",
+                    asOpaque: true
+                } as const satisfies __ctHelpers.JSONSchema, {
                     type: "number"
                 } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
                     type: "object",

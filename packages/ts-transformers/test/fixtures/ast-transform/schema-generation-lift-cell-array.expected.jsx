@@ -11,27 +11,11 @@ const logCharmsList = lift({
     properties: {
         charmsList: {
             type: "array",
-            items: {
-                $ref: "#/$defs/CharmEntry"
-            },
+            items: true,
             asCell: true
         }
     },
-    required: ["charmsList"],
-    $defs: {
-        CharmEntry: {
-            type: "object",
-            properties: {
-                id: {
-                    type: "string"
-                },
-                name: {
-                    type: "string"
-                }
-            },
-            required: ["id", "name"]
-        }
-    }
+    required: ["charmsList"]
 } as const satisfies __ctHelpers.JSONSchema, {
     type: "array",
     items: {

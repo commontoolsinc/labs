@@ -37,7 +37,10 @@ export default pattern((state) => {
         <h3>Basic Property Access</h3>
         <h1>{state.key("user", "name")}</h1>
         <p>Age: {state.key("user", "age")}</p>
-        <p>Active: {__ctHelpers.ifElse(true as const satisfies __ctHelpers.JSONSchema, {
+        <p>Active: {__ctHelpers.ifElse({
+            type: "boolean",
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
@@ -51,7 +54,10 @@ export default pattern((state) => {
         <p>Theme: {state.key("user", "profile", "settings", "theme")}</p>
         <p>
           Notifications:{" "}
-          {__ctHelpers.ifElse(true as const satisfies __ctHelpers.JSONSchema, {
+          {__ctHelpers.ifElse({
+            type: "boolean",
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
@@ -306,7 +312,10 @@ export default pattern((state) => {
           Styled text
         </p>
         <div style={{
-            backgroundColor: __ctHelpers.ifElse(true as const satisfies __ctHelpers.JSONSchema, {
+            backgroundColor: __ctHelpers.ifElse({
+                type: "boolean",
+                asOpaque: true
+            } as const satisfies __ctHelpers.JSONSchema, {
                 type: "string"
             } as const satisfies __ctHelpers.JSONSchema, {
                 type: "string"

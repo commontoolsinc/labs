@@ -216,7 +216,10 @@ export default pattern((state) => {
         {/* Mixed depth accesses */}
         <p>
           Config summary: Dark mode{" "}
-          {__ctHelpers.ifElse(true as const satisfies __ctHelpers.JSONSchema, {
+          {__ctHelpers.ifElse({
+            type: "boolean",
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
@@ -265,7 +268,10 @@ export default pattern((state) => {
         <h3>Complex Expressions with Shared Bases</h3>
         {/* Conditional with multiple property accesses */}
         <p>
-          Status: {__ctHelpers.ifElse(true as const satisfies __ctHelpers.JSONSchema, {
+          Status: {__ctHelpers.ifElse({
+            type: "boolean",
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
@@ -542,7 +548,10 @@ export default pattern((state) => {
         <p>
           Nested refs: {state.key("config", "theme", "colors", "primary")} in{" "}
           {state.key("config", "theme", "fonts", "body")} with{" "}
-          {__ctHelpers.ifElse(true as const satisfies __ctHelpers.JSONSchema, {
+          {__ctHelpers.ifElse({
+            type: "boolean",
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
@@ -554,14 +563,92 @@ export default pattern((state) => {
         <h3>Extreme Parent Suppression Test</h3>
         {/* Using every level of a deep chain */}
         <p>
-          All levels: Root: {__ctHelpers.ifElse(true as const satisfies __ctHelpers.JSONSchema, {
+          All levels: Root: {__ctHelpers.ifElse({
+            type: "object",
+            properties: {
+                nested: {
+                    type: "object",
+                    properties: {
+                        structure: {
+                            type: "object",
+                            properties: {
+                                "with": {
+                                    type: "object",
+                                    properties: {
+                                        many: {
+                                            type: "object",
+                                            properties: {
+                                                levels: {
+                                                    type: "object",
+                                                    properties: {
+                                                        value: {
+                                                            type: "string"
+                                                        },
+                                                        count: {
+                                                            type: "number"
+                                                        }
+                                                    },
+                                                    required: ["value", "count"]
+                                                }
+                                            },
+                                            required: ["levels"]
+                                        }
+                                    },
+                                    required: ["many"]
+                                }
+                            },
+                            required: ["with"]
+                        }
+                    },
+                    required: ["structure"]
+                }
+            },
+            required: ["nested"],
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             "enum": ["exists", "missing"]
         } as const satisfies __ctHelpers.JSONSchema, state.key("deeply"), "exists", "missing")}, Nested:{" "}
-          {__ctHelpers.ifElse(true as const satisfies __ctHelpers.JSONSchema, {
+          {__ctHelpers.ifElse({
+            type: "object",
+            properties: {
+                structure: {
+                    type: "object",
+                    properties: {
+                        "with": {
+                            type: "object",
+                            properties: {
+                                many: {
+                                    type: "object",
+                                    properties: {
+                                        levels: {
+                                            type: "object",
+                                            properties: {
+                                                value: {
+                                                    type: "string"
+                                                },
+                                                count: {
+                                                    type: "number"
+                                                }
+                                            },
+                                            required: ["value", "count"]
+                                        }
+                                    },
+                                    required: ["levels"]
+                                }
+                            },
+                            required: ["many"]
+                        }
+                    },
+                    required: ["with"]
+                }
+            },
+            required: ["structure"],
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"

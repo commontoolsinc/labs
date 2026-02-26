@@ -16,6 +16,7 @@ export default pattern((state) => {
                 detail: {
                     type: "object",
                     properties: {
+                        value: true,
                         items: {
                             type: "array",
                             items: {
@@ -28,10 +29,9 @@ export default pattern((state) => {
                                 },
                                 required: ["label", "value"]
                             }
-                        },
-                        value: true
+                        }
                     },
-                    required: ["items", "value"]
+                    required: ["value", "items"]
                 }
             },
             required: ["detail"]

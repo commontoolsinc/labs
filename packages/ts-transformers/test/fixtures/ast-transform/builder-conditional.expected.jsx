@@ -43,7 +43,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                count: state.count
+                count: state.key("count")
             } }, ({ state }) => state.count > 0), <p>Positive</p>, <p>Non-positive</p>)}
       </section>),
     };

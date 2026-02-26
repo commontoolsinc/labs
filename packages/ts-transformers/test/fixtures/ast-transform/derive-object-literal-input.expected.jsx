@@ -35,10 +35,22 @@ const rejected = lift({
 const _summary = derive({
     type: "object",
     properties: {
-        stage: true,
-        attempts: true,
-        accepted: true,
-        rejected: true
+        stage: {
+            type: "string",
+            asOpaque: true
+        },
+        attempts: {
+            type: "number",
+            asOpaque: true
+        },
+        accepted: {
+            type: "number",
+            asOpaque: true
+        },
+        rejected: {
+            type: "number",
+            asOpaque: true
+        }
     },
     required: ["stage", "attempts", "accepted", "rejected"]
 } as const satisfies __ctHelpers.JSONSchema, {

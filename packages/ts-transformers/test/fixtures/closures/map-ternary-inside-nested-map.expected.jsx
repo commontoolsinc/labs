@@ -128,7 +128,10 @@ export default pattern((__ct_pattern_input) => {
               {/* Ternary in outer map, outside inner map - should also be ifElse */}
               <strong>{__ctHelpers.ifElse({
                 type: "boolean"
-            } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, {
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "string",
+                asOpaque: true
+            } as const satisfies __ctHelpers.JSONSchema, {
                 type: "string"
             } as const satisfies __ctHelpers.JSONSchema, {
                 type: "string"
@@ -191,7 +194,13 @@ export default pattern((__ct_pattern_input) => {
                     const showInactive = __ct_pattern_input.key("params", "showInactive");
                     return (<li>
                     {/* This ternary should be transformed to ifElse */}
-                    {__ctHelpers.ifElse(true as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, {
+                    {__ctHelpers.ifElse({
+                        type: "boolean",
+                        asOpaque: true
+                    } as const satisfies __ctHelpers.JSONSchema, {
+                        type: "string",
+                        asOpaque: true
+                    } as const satisfies __ctHelpers.JSONSchema, {
                         type: "string"
                     } as const satisfies __ctHelpers.JSONSchema, {
                         type: "string"

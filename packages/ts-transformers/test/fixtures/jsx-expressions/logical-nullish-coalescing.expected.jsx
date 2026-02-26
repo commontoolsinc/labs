@@ -20,10 +20,10 @@ export default pattern((_state) => {
                     }]
             },
             retries: {
-                type: "number"
+                type: ["number", "undefined"]
             }
         },
-        required: ["timeout"]
+        required: ["timeout", "retries"]
     } as const satisfies __ctHelpers.JSONSchema);
     const items = cell<string[]>([], {
         type: "array",
@@ -39,11 +39,7 @@ export default pattern((_state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "number"
-                }, {
-                    type: "string"
-                }]
+            type: ["number", "string"]
         } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
@@ -58,10 +54,10 @@ export default pattern((_state) => {
                                 }]
                         },
                         retries: {
-                            type: "number"
+                            type: ["number", "undefined"]
                         }
                     },
-                    required: ["timeout"],
+                    required: ["timeout", "retries"],
                     asCell: true
                 }
             },
@@ -91,10 +87,10 @@ export default pattern((_state) => {
                                 }]
                         },
                         retries: {
-                            type: "number"
+                            type: ["number", "undefined"]
                         }
                     },
-                    required: ["timeout"],
+                    required: ["timeout", "retries"],
                     asCell: true
                 }
             },
@@ -106,11 +102,7 @@ export default pattern((_state) => {
         {/* Mixed: ?? with && and || */}
         <span>
           {__ctHelpers.unless({
-            anyOf: [{
-                    type: "string"
-                }, {
-                    type: "boolean"
-                }]
+            type: ["boolean", "string"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {

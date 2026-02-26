@@ -115,11 +115,7 @@ export default pattern((_state) => {
         {/* Complex: (a && b) || (c && d) */}
         <span>
           {__ctHelpers.unless({
-            anyOf: [{
-                    type: "string"
-                }, {
-                    type: "boolean"
-                }]
+            type: ["boolean", "string"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {

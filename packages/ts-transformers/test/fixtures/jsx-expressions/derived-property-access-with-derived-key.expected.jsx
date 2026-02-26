@@ -17,9 +17,30 @@ export default pattern((__ct_pattern_input) => {
     const itemsWithAisles = derive({
         type: "object",
         properties: {
-            items: true
+            items: {
+                type: "array",
+                items: {
+                    $ref: "#/$defs/Item"
+                },
+                asOpaque: true
+            }
         },
-        required: ["items"]
+        required: ["items"],
+        $defs: {
+            Item: {
+                type: "object",
+                properties: {
+                    name: {
+                        type: "string"
+                    },
+                    done: {
+                        type: "boolean",
+                        asCell: true
+                    }
+                },
+                required: ["name", "done"]
+            }
+        }
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "array",
         items: {
@@ -59,9 +80,40 @@ export default pattern((__ct_pattern_input) => {
     const groupedByAisle = derive({
         type: "object",
         properties: {
-            itemsWithAisles: true
+            itemsWithAisles: {
+                type: "array",
+                items: {
+                    type: "object",
+                    properties: {
+                        aisle: {
+                            type: "string"
+                        },
+                        item: {
+                            $ref: "#/$defs/Item",
+                            asOpaque: true
+                        }
+                    },
+                    required: ["aisle", "item"]
+                },
+                asOpaque: true
+            }
         },
-        required: ["itemsWithAisles"]
+        required: ["itemsWithAisles"],
+        $defs: {
+            Item: {
+                type: "object",
+                properties: {
+                    name: {
+                        type: "string"
+                    },
+                    done: {
+                        type: "boolean",
+                        asCell: true
+                    }
+                },
+                required: ["name", "done"]
+            }
+        }
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "object",
         properties: {},

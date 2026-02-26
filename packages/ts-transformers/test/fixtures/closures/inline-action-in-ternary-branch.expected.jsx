@@ -19,7 +19,10 @@ interface State {
 export default pattern((state) => {
     return {
         [UI]: (<ct-card>
-        {__ctHelpers.ifElse(true as const satisfies __ctHelpers.JSONSchema, {
+        {__ctHelpers.ifElse({
+            type: "boolean",
+            asCell: true
+        } as const satisfies __ctHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}

@@ -23,11 +23,7 @@ export default pattern((_state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "number"
-                }, {
-                    type: "string"
-                }]
+            type: ["number", "string"]
         } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
             type: "object",
             properties: {
@@ -50,7 +46,7 @@ export default pattern((_state) => {
 
         {/* Triple || with mixed types */}
         <span>{__ctHelpers.unless({
-            type: "number"
+            type: ["number", "undefined"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, {
@@ -68,7 +64,7 @@ export default pattern((_state) => {
             },
             required: ["items"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
+            type: ["number", "undefined"]
         } as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => items.get()[0]?.length || items.get()[1]?.length), 0)}</span>
       </div>),
     };

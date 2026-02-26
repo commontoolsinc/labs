@@ -10,10 +10,10 @@ export default pattern((state) => {
     const wishQuery = derive({
         type: "object",
         properties: {
-            food: true,
-            prefs: true
+            prefs: true,
+            food: true
         },
-        required: ["food", "prefs"]
+        required: ["prefs", "food"]
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "string"
     } as const satisfies __ctHelpers.JSONSchema, { food: state.key("foodDescription"), prefs: state.key("preferences") }, ({ food, prefs }) => {

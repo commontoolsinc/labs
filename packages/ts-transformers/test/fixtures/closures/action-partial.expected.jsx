@@ -21,8 +21,7 @@ export default pattern((__ct_pattern_input) => {
                             asCell: true
                         }]
                 }
-            },
-            required: ["a"]
+            }
         } as const satisfies __ctHelpers.JSONSchema, (_, { a }) => console.log(a))({
             a: a
         }),
@@ -37,8 +36,7 @@ export default pattern((__ct_pattern_input) => {
                             asCell: true
                         }]
                 }
-            },
-            required: ["b"]
+            }
         } as const satisfies __ctHelpers.JSONSchema, (_, { b }) => console.log(b))({
             b: b
         }),

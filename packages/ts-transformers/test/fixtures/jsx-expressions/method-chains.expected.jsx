@@ -659,7 +659,10 @@ export default pattern((state) => {
         <ul>
           {state.users.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                 const u = __ct_pattern_input.key("element");
-                return (<li>{__ctHelpers.ifElse(true as const satisfies __ctHelpers.JSONSchema, {
+                return (<li>{__ctHelpers.ifElse({
+                    type: "boolean",
+                    asOpaque: true
+                } as const satisfies __ctHelpers.JSONSchema, {
                     type: "string"
                 } as const satisfies __ctHelpers.JSONSchema, {
                     type: "string"
