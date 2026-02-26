@@ -271,7 +271,7 @@ const Note = pattern<NoteInput, NoteOutput>(
     // Append a wiki-link to another piece at the end of the note content
     const appendLink = action(
       ({ piece }: { piece: Writable<MentionablePiece> }) => {
-        const name = (piece as any)?.[NAME] ?? "";
+        const name = piece.get()[NAME] ?? "";
         const resolved = (piece as any)?.resolveAsCell?.();
         const entityId = resolved?.entityId?.["/"];
         if (!name || !entityId) return;
