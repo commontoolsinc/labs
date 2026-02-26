@@ -251,7 +251,7 @@ See Sections 1.4.5 through 1.4.8.
 |-------------------|---------|----------|--------------|-------|
 | `StorableEpochNsec` | `SpecialPrimitiveValue` | `EpochNsec@1` | `bigint` (signed nanoseconds from POSIX Epoch) | Primary temporal type. JS `Date` has only millisecond precision; conversion from `Date` multiplies by 10^6. When `Temporal` is available, `Temporal.Instant` maps naturally (it uses nanoseconds from epoch internally). |
 | `StorableEpochDays` | `SpecialPrimitiveValue` | `EpochDays@1` | `bigint` (signed days from POSIX Epoch) | Day-precision temporal type. Anticipates `Temporal.PlainDate`. Mostly nascent — class and spec entry are defined, but full integration (Temporal types, calendar concerns) is deferred. |
-| `StorableContentId` | `SpecialPrimitiveValue` | `ContentId@1` | `Uint8Array` (hash bytes) + `string` (algorithm tag) | Content identifier / hash. Stringifies as `<algorithmTag>:<base64hash>` (unpadded base64). The first algorithm tag is `fid1` ("fabric ID, v1"). See Section 1.4.8. |
+| `StorableContentId` | `SpecialPrimitiveValue` | _(none — see Section 1.4.8)_ | `Uint8Array` (hash bytes) + `string` (algorithm tag) | Content identifier / hash. Stringifies as `<algorithmTag>:<base64hash>` (unpadded base64). The first algorithm tag is `fid1` ("fabric ID, v1"). |
 
 #### Extra Enumerable Properties
 

@@ -288,4 +288,6 @@ export class CTWebhook extends BaseElement {
   ];
 }
 
-globalThis.customElements.define("ct-webhook", CTWebhook);
+if (!globalThis.customElements.get("ct-webhook")) {
+  globalThis.customElements.define("ct-webhook", CTWebhook);
+}

@@ -22,7 +22,6 @@ router.use(
     allowHeaders: ["Content-Type", "Authorization"],
     exposeHeaders: ["Content-Length"],
     maxAge: 3600,
-    credentials: true,
   }),
 );
 
