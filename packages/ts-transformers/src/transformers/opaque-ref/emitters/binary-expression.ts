@@ -28,6 +28,51 @@ function isJsxExpression(expr: ts.Expression): boolean {
     ts.isJsxSelfClosingElement(expr);
 }
 
+function isMapReceiverBinary(expression: ts.BinaryExpression): boolean {
+  let current: ts.Node = expression;
+
+  while (
+    ts.isParenthesizedExpression(current.parent) ||
+    ts.isPartiallyEmittedExpression(current.parent)
+  ) {
+    current = current.parent;
+  }
+
+  const parent = current.parent;
+  return ts.isPropertyAccessExpression(parent) &&
+    parent.expression === current &&
+    parent.name.text === "map";
+}
+
+function unwrapExpression(expression: ts.Expression): ts.Expression {
+  let current = expression;
+  while (
+    ts.isParenthesizedExpression(current) ||
+    ts.isPartiallyEmittedExpression(current) ||
+    ts.isNonNullExpression(current)
+  ) {
+    current = current.expression;
+  }
+  return current;
+}
+
+function isFallbackOperator(kind: ts.SyntaxKind): boolean {
+  return kind === ts.SyntaxKind.QuestionQuestionToken ||
+    kind === ts.SyntaxKind.BarBarToken;
+}
+
+function canDeferFallbackMapReceiverDerive(
+  expression: ts.BinaryExpression,
+  checker: ts.TypeChecker,
+): boolean {
+  if (!isFallbackOperator(expression.operatorToken.kind)) {
+    return false;
+  }
+
+  const left = unwrapExpression(expression.left);
+  return isSimpleOpaqueRefAccess(left, checker);
+}
+
 export const emitBinaryExpression: Emitter = ({
   expression,
   dataFlows,
@@ -228,6 +273,17 @@ export const emitBinaryExpression: Emitter = ({
     context,
   );
   if (relevantDataFlows.length === 0) return undefined;
+
+  // Keep fallback receiver expressions intact in pattern context so
+  // ClosureTransformer can lower `(x ?? y).map(...)` / `(x || y).map(...)`
+  // into mapWithPattern with proper capture handling.
+  if (
+    reactiveContextKind === "pattern" &&
+    isMapReceiverBinary(expression) &&
+    canDeferFallbackMapReceiverDerive(expression, context.checker)
+  ) {
+    return undefined;
+  }
 
   const plan = createBindingPlan(relevantDataFlows);
   return createComputedCallForExpression(expression, plan, context);

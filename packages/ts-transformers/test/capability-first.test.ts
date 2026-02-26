@@ -781,6 +781,104 @@ const p = pattern(() => {
 );
 
 Deno.test(
+  "Capability-first: rewrites map after computed fallback alias",
+  async () => {
+    const source = `/// <cts-enable />
+import { computed, pattern, UI } from "commontools";
+
+interface Reaction {
+  emoji: string;
+}
+
+interface Message {
+  id: string;
+  reactions?: Reaction[];
+}
+
+interface Input {
+  messages: Message[];
+}
+
+export default pattern<Input>(({ messages }) => {
+  return {
+    [UI]: (
+      <div>
+        {messages.map((msg) => {
+          const messageReactions = computed(() => (msg.reactions) || []);
+          return (
+            <div>
+              {messageReactions.map((reaction) => (
+                <button data-msg-id={msg.id}>{reaction.emoji}</button>
+              ))}
+            </div>
+          );
+        })}
+      </div>
+    ),
+  };
+});
+`;
+
+    const { diagnostics } = await validateSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
+    });
+    const output = await transformSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
+    });
+
+    const fallbackDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-context:map-on-fallback"
+    );
+
+    assertEquals(fallbackDiagnostics.length, 0);
+    assertStringIncludes(output, "messageReactions.mapWithPattern(");
+    assertStringIncludes(output, 'data-msg-id={msg.key("id")}');
+  },
+);
+
+Deno.test(
+  "Capability-first: rewrites inline reactive fallback map",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern, UI } from "commontools";
+
+interface Item {
+  id: string;
+}
+
+export default pattern<{ items?: Item[] }>(({ items }) => {
+  return {
+    [UI]: (
+      <div>
+        {(items ?? []).map((item) => <span data-id={item.id}>{item.id}</span>)}
+      </div>
+    ),
+  };
+});
+`;
+
+    const { diagnostics } = await validateSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
+    });
+    const output = await transformSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
+    });
+
+    const fallbackDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-context:map-on-fallback"
+    );
+
+    assertEquals(fallbackDiagnostics.length, 0);
+    assertStringIncludes(output, ".mapWithPattern(");
+    assertStringIncludes(output, 'data-id={item.key("id")}');
+  },
+);
+
+Deno.test(
   "Capability-first: derive wildcard usage keeps conservative full-shape input schema",
   async () => {
     const source = `/// <cts-enable />

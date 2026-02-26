@@ -98,7 +98,9 @@ export class PatternContextValidationTransformer extends Transformer {
         // the map-on-fallback pattern fails even inside JSX expressions (which are "safe" for
         // other validations but still need this check).
         if (isInsideRestrictedContext(node, checker)) {
-          this.validateMapOnFallbackExpression(node, context, checker);
+          if (useLegacy) {
+            this.validateMapOnFallbackExpression(node, context, checker);
+          }
         }
 
         // Check for .get() calls

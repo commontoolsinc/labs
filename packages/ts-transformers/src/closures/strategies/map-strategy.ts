@@ -3,6 +3,7 @@ import type { TransformationContext } from "../../core/mod.ts";
 import type { ClosureTransformationStrategy } from "./strategy.ts";
 import {
   classifyReactiveContext,
+  detectCallKind,
   getTypeAtLocationWithFallback,
   isDeriveCall,
   isFunctionLikeExpression,
@@ -29,14 +30,11 @@ import { SchemaFactory } from "../utils/schema-factory.ts";
 export class MapStrategy implements ClosureTransformationStrategy {
   canTransform(
     node: ts.Node,
-    context: TransformationContext,
+    _context: TransformationContext,
   ): boolean {
-    return ts.isCallExpression(node) && isOpaqueRefArrayMapCall(
-      node,
-      context.checker,
-      context.options.typeRegistry,
-      context.options.logger,
-    );
+    return ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      node.expression.name.text === "map";
   }
 
   transform(
@@ -120,6 +118,10 @@ function shouldTransformMap(
   const mapTarget = mapCall.expression.expression;
   const contextInfo = classifyReactiveContext(mapCall, context.checker, context);
 
+  if (contextInfo.kind === "pattern" && isReactiveMapOrigin(mapTarget, context)) {
+    return true;
+  }
+
   // derive() returns an opaque value at runtime, but checker fallback may see the
   // unwrapped callback result type. Preserve policy by context.
   if (isDeriveCall(mapTarget)) {
@@ -133,11 +135,124 @@ function shouldTransformMap(
     context.options.logger,
   );
   const receiverKind = classifyReactiveReceiverKind(targetType, context.checker);
+
   return shouldRewriteCollectionMethod(
     contextInfo.kind,
     methodName,
     receiverKind,
   );
+}
+
+function unwrapExpression(expr: ts.Expression): ts.Expression {
+  let current = expr;
+  while (true) {
+    if (ts.isParenthesizedExpression(current)) {
+      current = current.expression;
+      continue;
+    }
+    if (ts.isAsExpression(current)) {
+      current = current.expression;
+      continue;
+    }
+    if (ts.isTypeAssertionExpression(current)) {
+      current = current.expression;
+      continue;
+    }
+    if (ts.isSatisfiesExpression(current)) {
+      current = current.expression;
+      continue;
+    }
+    if (ts.isNonNullExpression(current)) {
+      current = current.expression;
+      continue;
+    }
+    if (ts.isPartiallyEmittedExpression(current)) {
+      current = current.expression;
+      continue;
+    }
+    return current;
+  }
+}
+
+function isFallbackOperator(kind: ts.SyntaxKind): boolean {
+  return kind === ts.SyntaxKind.QuestionQuestionToken ||
+    kind === ts.SyntaxKind.BarBarToken;
+}
+
+function isReactiveMapOrigin(
+  expression: ts.Expression,
+  context: TransformationContext,
+  seenSymbols: Set<ts.Symbol> = new Set(),
+): boolean {
+  const current = unwrapExpression(expression);
+
+  if (isDeriveCall(current)) {
+    return true;
+  }
+
+  if (ts.isCallExpression(current)) {
+    const callee = unwrapExpression(current.expression);
+    if (ts.isIdentifier(callee)) {
+      if (callee.text === "derive" || callee.text === "computed") {
+        return true;
+      }
+    } else if (
+      ts.isPropertyAccessExpression(callee) &&
+      (callee.name.text === "derive" || callee.name.text === "computed")
+    ) {
+      return true;
+    }
+
+    const kind = detectCallKind(current, context.checker);
+    if (kind?.kind === "derive") {
+      return true;
+    }
+    if (kind?.kind === "builder" && kind.builderName === "computed") {
+      return true;
+    }
+  }
+
+  const type = getTypeAtLocationWithFallback(
+    current,
+    context.checker,
+    context.options.typeRegistry,
+    context.options.logger,
+  );
+  if (classifyReactiveReceiverKind(type, context.checker) !== "plain") {
+    return true;
+  }
+
+  if (
+    ts.isPropertyAccessExpression(current) ||
+    ts.isElementAccessExpression(current)
+  ) {
+    return isReactiveMapOrigin(current.expression, context, seenSymbols);
+  }
+
+  if (ts.isBinaryExpression(current) && isFallbackOperator(current.operatorToken.kind)) {
+    return isReactiveMapOrigin(current.left, context, seenSymbols) ||
+      isReactiveMapOrigin(current.right, context, seenSymbols);
+  }
+
+  if (!ts.isIdentifier(current)) {
+    return false;
+  }
+
+  const symbol = context.checker.getSymbolAtLocation(current);
+  if (!symbol || seenSymbols.has(symbol)) {
+    return false;
+  }
+  seenSymbols.add(symbol);
+
+  for (const declaration of symbol.declarations ?? []) {
+    if (ts.isVariableDeclaration(declaration) && declaration.initializer) {
+      if (isReactiveMapOrigin(declaration.initializer, context, seenSymbols)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 function shouldTransformMapLegacy(
