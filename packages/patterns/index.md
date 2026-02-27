@@ -1170,7 +1170,8 @@ type Input = {
 
 A pattern for collecting and browsing URLs/bookmarks. Users can add URLs to a
 collection, view them in a searchable grid with rich link previews (via
-ct-link-preview), and remove bookmarks. Designed to feed into the summary system.
+ct-link-preview), and remove bookmarks. Designed to feed into the summary
+system.
 
 **Keywords:** bookmarks, links, collection, urls, grid, preview, search,
 ct-link-preview, ct-grid
