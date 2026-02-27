@@ -355,16 +355,36 @@ function computePreparedLabels(schema: JSONSchema): Record<string, Labels> {
     }
   };
 
+  const resolveNodeRefs = (
+    node: JSONSchema,
+    fullSchema: JSONSchema,
+  ): JSONSchema | undefined => {
+    if (
+      typeof node !== "object" || node === null || Array.isArray(node) ||
+      !("$ref" in node)
+    ) {
+      return node;
+    }
+    return ContextualFlowControl.resolveSchemaRefs(node, fullSchema);
+  };
+
   const collect = (
     node: JSONSchema | undefined,
     path: string,
     inheritedClassification: Set<string>,
     inheritedIntegrity: Set<string>,
+    fullSchema: JSONSchema,
     stack: Set<object>,
   ) => {
     if (!node || typeof node !== "object" || Array.isArray(node)) {
       return;
     }
+    const resolved = resolveNodeRefs(node, fullSchema);
+    if (!resolved || typeof resolved !== "object" || Array.isArray(resolved)) {
+      return;
+    }
+    node = resolved;
+
     if (stack.has(node)) {
       return;
     }
@@ -408,6 +428,7 @@ function computePreparedLabels(schema: JSONSchema): Record<string, Labels> {
           childPath,
           classification,
           integrity,
+          fullSchema,
           stack,
         );
       }
@@ -425,6 +446,7 @@ function computePreparedLabels(schema: JSONSchema): Record<string, Labels> {
         childPath,
         classification,
         integrity,
+        fullSchema,
         stack,
       );
     }
@@ -432,7 +454,14 @@ function computePreparedLabels(schema: JSONSchema): Record<string, Labels> {
     const items = (node as { items?: unknown }).items;
     if (items && typeof items === "object" && !Array.isArray(items)) {
       const childPath = appendCanonicalSegment(path, "*");
-      collect(items as JSONSchema, childPath, classification, integrity, stack);
+      collect(
+        items as JSONSchema,
+        childPath,
+        classification,
+        integrity,
+        fullSchema,
+        stack,
+      );
     }
 
     const prefixItems = (node as { prefixItems?: unknown }).prefixItems;
@@ -443,6 +472,28 @@ function computePreparedLabels(schema: JSONSchema): Record<string, Labels> {
           appendCanonicalSegment(path, String(index)),
           classification,
           integrity,
+          fullSchema,
+          stack,
+        );
+      }
+    }
+
+    const composed = [
+      (node as { anyOf?: unknown }).anyOf,
+      (node as { oneOf?: unknown }).oneOf,
+      (node as { allOf?: unknown }).allOf,
+    ];
+    for (const options of composed) {
+      if (!Array.isArray(options)) {
+        continue;
+      }
+      for (const option of options) {
+        collect(
+          option as JSONSchema,
+          path,
+          classification,
+          integrity,
+          fullSchema,
           stack,
         );
       }
@@ -451,7 +502,7 @@ function computePreparedLabels(schema: JSONSchema): Record<string, Labels> {
     stack.delete(node);
   };
 
-  collect(schema, "/", new Set(), new Set(), new Set());
+  collect(schema, "/", new Set(), new Set(), schema, new Set());
 
   const result: Record<string, Labels> = {};
   for (const [path, { classification, integrity }] of byPath) {
