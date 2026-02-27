@@ -248,6 +248,12 @@ async function runSyncLoop(
 
 ### Building State with Stable Identity
 
+> **TODO(seefeld):** `Cell.of()` in handler frames creates cells scoped to that
+> handler invocation. For importers operating outside a pattern, we need a shared
+> frame so `Cell.of()` produces consistent cells across the whole import. Current
+> workaround: `pushFrameFromCause` with a stable cause string. This needs
+> platform-level support.
+
 The `buildStateFromFs` function (or equivalent) **must** use `Cell.of()` for
 every sub-item that has an external canonical ID. For example:
 
@@ -428,10 +434,8 @@ sync overwrites the state. No cleanup logic needed — reactivity handles it.
 
 ## API / Webhook Sync
 
-> **Status: TBD** — The principles above apply, but the implementation differs
-> in important ways.
-
-API-based sync is more complex than filesystem sync because:
+API-based sync (e.g., syncing GitHub issues) shares the same core principles as
+filesystem sync but differs in important ways:
 
 - **Operations are asynchronous and may fail independently.** A single "apply
   edits" step may involve multiple API calls, some of which succeed and some
@@ -442,30 +446,266 @@ API-based sync is more complex than filesystem sync because:
   filesystem as an implicit merge layer (write edits to files, read files back).
   With an API, you need explicit merge logic.
 
-### Polling-Based Sync
+For webhook infrastructure details, see
+[docs/specs/webhook-ingress/README.md](/docs/specs/webhook-ingress/README.md).
 
-TBD. Key differences from filesystem:
+### Edits as Lifecycle Entities
 
-- Poll interval must respect rate limits.
-- Need to track a sync cursor / last-modified timestamp to avoid re-fetching
-  everything.
-- Pending edits must be re-applied on top of each polled state, since there's no
-  filesystem to merge them into.
-- Consider optimistic locking (ETags, version numbers) on the API side.
+In filesystem sync, edits are simple intent records that get applied and cleared
+in a single transaction. API sync can't do that — API calls take time, may fail,
+and may be confirmed asynchronously via webhook. So each edit becomes a
+first-class entity with its own lifecycle:
 
-### Webhook-Based Sync
+```
+pending → in-flight → succeeded | failed
+```
 
-TBD. Key differences:
+An edit carries:
 
-- Webhooks provide push notifications but may arrive out of order or be
-  duplicated.
-- Still need polling as a fallback for missed webhooks.
-- Need idempotency keys for edit application.
+- **type** — the action (e.g., `"create-issue"`, `"close-pr"`, `"add-star"`)
+- **target** — cell reference or canonical ID indicating where to render this
+  edit (e.g., "this belongs on the issues list", "this belongs on PR #42")
+- **payload** — the data for the action
+- **stage** — `pending`, `in-flight`, `succeeded`, or `failed`
+- **error** — error info when `failed`
+- **timestamps** — `createdAt`, `sentAt`, `resolvedAt`
 
-### Hybrid (Webhook + Polling)
+```typescript
+interface ApiEdit {
+  type: string;
+  target: CellReference; // Where this edit should render
+  payload: Record<string, unknown>;
+  stage: "pending" | "in-flight" | "succeeded" | "failed";
+  error?: string;
+  createdAt: number;
+  sentAt?: number;
+  resolvedAt?: number;
+}
+```
 
-TBD. Most robust approach: webhooks for low-latency updates, periodic polling
-for consistency, edit queue for local changes.
+A computed index maps targets to their pending edits for efficient lookup:
+
+```typescript
+const editsByTarget = computed(() => {
+  const index = new Map<CellReference, ApiEdit[]>();
+  for (const edit of editsCell.get()) {
+    if (edit.stage === "pending" || edit.stage === "in-flight") {
+      const list = index.get(edit.target) ?? [];
+      list.push(edit);
+      index.set(edit.target, list);
+    }
+  }
+  return index;
+});
+```
+
+#### Heavy vs. Lightweight Actions
+
+Not all edits are treated the same:
+
+- **Heavy actions** (create issue, close PR, merge branch): Do NOT optimistically
+  apply to local state. Instead, render the edit itself as a pending action in the
+  UI — a grayed-out card with a spinner. When the API responds or a webhook
+  confirms success, write the real entity with `Cell.of(canonicalId)`. No write
+  redirects are needed because the edit was never materialized as a cell in the
+  state structure.
+
+- **Lightweight actions** (star, emoji react, label toggle): CAN be optimistically
+  applied to local state, just like filesystem edits. The next sync overwrites
+  with canonical data.
+
+The key insight: heavy actions avoid the write-redirect complexity entirely by
+keeping the edit and the canonical entity as separate things until confirmation.
+
+### Outbound: Triggering API Actions
+
+When the user performs an action:
+
+1. **Create the edit** — atomically append to the edits cell with
+   `stage: "pending"`
+2. **Fire the API call** — immediately dispatch the request and advance to
+   `stage: "in-flight"`
+3. **On success** — write the canonical entity via `Cell.of(canonicalId)`,
+   advance edit to `succeeded`, clean up
+4. **On failure** — mark edit as `failed` with error info
+
+```typescript
+const createIssue = handler<{ edits: ApiEdit[] }>(
+  ({ edits }, title: string, body: string) => {
+    const edit: ApiEdit = {
+      type: "create-issue",
+      target: issueListRef,
+      payload: { title, body },
+      stage: "pending",
+      createdAt: Date.now(),
+    };
+    edits.push(edit);
+
+    // Fire immediately — runs after the transaction commits
+    queueMicrotask(async () => {
+      edit.stage = "in-flight";
+      edit.sentAt = Date.now();
+      try {
+        const result = await github.createIssue({ title, body });
+        // Write canonical entity
+        Cell.of(`issue:${result.number}`).set({
+          number: result.number,
+          title: result.title,
+          body: result.body,
+          state: result.state,
+        });
+        edit.stage = "succeeded";
+        edit.resolvedAt = Date.now();
+      } catch (err) {
+        edit.stage = "failed";
+        edit.error = err.message;
+        edit.resolvedAt = Date.now();
+      }
+    });
+  },
+);
+```
+
+> **Future:** A retry mechanism for edits that never got a response (network
+> failure, process restart). For now, assume we always get a response — either
+> immediately from the API call or asynchronously via webhook.
+
+### Inbound: Webhook Incremental Updates
+
+Webhooks deliver events as they happen. Each event is applied as an incremental
+update in a single transaction:
+
+```typescript
+async function handleWebhookEvent(event: WebhookEvent) {
+  // Deduplicate via event ID (idempotency)
+  if (processedEvents.has(event.id)) return;
+  processedEvents.add(event.id);
+
+  // Handle out-of-order delivery: ignore stale updates
+  const existing = Cell.of(`issue:${event.issue.number}`).get();
+  if (existing && existing.updatedAt > event.issue.updatedAt) return;
+
+  // Apply the update
+  Cell.of(`issue:${event.issue.number}`).set({
+    number: event.issue.number,
+    title: event.issue.title,
+    body: event.issue.body,
+    state: event.issue.state,
+    updatedAt: event.issue.updatedAt,
+  });
+
+  // If this confirms a pending edit, advance it
+  const pendingEdit = findMatchingEdit(event);
+  if (pendingEdit) {
+    pendingEdit.stage = "succeeded";
+    pendingEdit.resolvedAt = Date.now();
+  }
+}
+```
+
+Key considerations:
+
+- **Idempotency** — Deduplicate via event ID. Webhooks may be delivered more than
+  once.
+- **Ordering** — Use timestamps or sequence numbers to ignore stale updates.
+  If event B has an older timestamp than data you already have, skip it.
+- **Confirming edits** — When a webhook confirms an action you initiated, advance
+  the corresponding edit to `succeeded`.
+
+For webhook infrastructure, see
+[docs/specs/webhook-ingress/README.md](/docs/specs/webhook-ingress/README.md).
+
+### Consistency Backstop: Full Rebuild
+
+Webhooks are best-effort. To catch missed events, drift, and eventual consistency
+gaps, periodically (or on user request) run a full rebuild:
+
+```typescript
+async function fullRebuild() {
+  // Read everything from the API
+  const allIssues = await github.listAllIssues();
+  const allPRs = await github.listAllPullRequests();
+
+  // Write full structure in a single transaction
+  const tx = runtime.edit();
+  const frame = pushFrameFromCause("github-importer", { runtime, tx, space });
+  try {
+    stateCell.set({
+      issues: allIssues.map((issue) =>
+        Cell.of(`issue:${issue.number}`).set({
+          number: issue.number,
+          title: issue.title,
+          body: issue.body,
+          state: issue.state,
+          updatedAt: issue.updatedAt,
+        })
+      ),
+      pullRequests: allPRs.map((pr) =>
+        Cell.of(`pr:${pr.number}`).set({
+          number: pr.number,
+          title: pr.title,
+          state: pr.state,
+          updatedAt: pr.updatedAt,
+        })
+      ),
+    });
+  } finally {
+    popFrame();
+  }
+  await tx.commit();
+}
+```
+
+This is the same pattern as filesystem sync: read everything, write with
+`Cell.of()`, single transaction. The only difference is the data source.
+
+### Pattern (UI) Integration for API Sync
+
+The pattern renders canonical state as normal, plus overlays pending and failed
+edits at the appropriate locations:
+
+```tsx
+const issueList = pattern<{ state: State; edits: ApiEdit[] }>(
+  ({ state, edits }) => {
+    const pendingEdits = computed(() =>
+      edits.filter((e) =>
+        e.target === issueListRef &&
+        (e.stage === "pending" || e.stage === "in-flight")
+      )
+    );
+    const failedEdits = computed(() =>
+      edits.filter((e) => e.target === issueListRef && e.stage === "failed")
+    );
+
+    return (
+      <div>
+        {/* Canonical state */}
+        {state.issues.map((issue) => <IssueCard issue={issue} />)}
+
+        {/* Pending edits: grayed-out cards with spinner */}
+        {pendingEdits.map((edit) => (
+          <div class="pending-card">
+            <Spinner /> {edit.payload.title}
+          </div>
+        ))}
+
+        {/* Failed edits: error + retry/cancel */}
+        {failedEdits.map((edit) => (
+          <div class="failed-card">
+            <span class="error">{edit.error}</span>
+            <button onClick={() => retryEdit(edit)}>Retry</button>
+            <button onClick={() => cancelEdit(edit)}>Cancel</button>
+          </div>
+        ))}
+      </div>
+    );
+  },
+);
+```
+
+Succeeded edits auto-disappear: once a webhook or full rebuild writes the
+canonical entity, the edit is marked `succeeded` and filtered out of the pending
+display. No manual cleanup needed — reactivity handles it.
 
 ---
 
@@ -501,4 +741,6 @@ need it.
 | System edit failures   | Keep in queue, crash daemon, operator restarts         |
 | Conflict edit failures | Move to failedEdits queue, surface to user             |
 | UI pending state       | Render from edit queue; auto-clears on sync            |
-| API sync               | TBD — same principles, different plumbing              |
+| Edit lifecycle         | Staged entities: pending → in-flight → succeeded/failed |
+| Heavy actions          | Render as pending edits, not optimistic state          |
+| Webhook sync           | Incremental updates via `Cell.of()`; full rebuild as backstop |
