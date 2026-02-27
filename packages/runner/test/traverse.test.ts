@@ -14,7 +14,6 @@ import {
   CompoundCycleTracker,
   getAtPath,
   ManagedStorageTransaction,
-  mergeAnyOfBranchSchemas,
   MapSet,
   mergeAnyOfBranchSchemas,
   PointerCycleTracker,
@@ -27,7 +26,6 @@ import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { Immutable } from "@commontools/utils/types";
 import { ContextualFlowControl, deepEqual } from "@commontools/runner";
 import {
-  canBranchMatch,
   IMemorySpaceAddress,
   IMemorySpaceAttestation,
 } from "../src/storage/interface.ts";
@@ -1246,103 +1244,6 @@ describe("CompoundCycleTracker cleanup", () => {
     expect(disposable).not.toBeNull();
     disposable![Symbol.dispose]();
     expect((tracker as any).partial.size).toBe(0);
-  });
-});
-
-  // fails schema validation, the traverser falls back in priority order:
-  //   1. undefined  — if the item schema allows "undefined"
-  //   2. null       — else if the item schema allows "null"
-  //   3. failure    — otherwise the whole array is returned as undefined
-  //
-  // All tests use an inline number (42) inside a string array to trigger a
-  // type-mismatch error without needing a broken link.
-
-  function makeArrayDoc(
-    docValue: StorableDatum[],
-  ): {
-    store: Map<string, Revision<State>>;
-    docUri: URI;
-    type: "application/json";
-  } {
-    const store = new Map<string, Revision<State>>();
-    const type = "application/json" as const;
-    const docUri = "of:doc-fallback-array" as URI;
-    const docEntity = docUri as Entity;
-    store.set(`${docEntity}/${type}`, {
-      the: type,
-      of: docEntity,
-      is: { value: docValue },
-      cause: refer({ the: type, of: docEntity }),
-      since: 1,
-    });
-    return { store, docUri, type };
-  }
-
-  it("uses undefined when element fails type check and schema allows undefined", () => {
-    const docValue = ["hello", 42, "world"];
-    const { store, docUri, type } = makeArrayDoc(docValue);
-    const schema = {
-      type: "array",
-      items: { anyOf: [{ type: "string" }, { type: "undefined" }] },
-    } as JSONSchema;
-
-    const result = getTraverser(store, { path: ["value"], schema }).traverse({
-      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
-      value: docValue,
-    });
-
-    expect(result).toEqual(["hello", undefined, "world"]);
-  });
-
-  it("uses null when element fails type check and schema allows null (not undefined)", () => {
-    const docValue = ["hello", 42, "world"];
-    const { store, docUri, type } = makeArrayDoc(docValue);
-    const schema = {
-      type: "array",
-      items: { anyOf: [{ type: "string" }, { type: "null" }] },
-    } as JSONSchema;
-
-    const result = getTraverser(store, { path: ["value"], schema }).traverse({
-      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
-      value: docValue,
-    });
-
-    expect(result).toEqual(["hello", null, "world"]);
-  });
-
-  it("prefers undefined over null when both are allowed by the item schema", () => {
-    // undefined is checked first, so it wins even when null is also valid.
-    const docValue = ["hello", 42, "world"];
-    const { store, docUri, type } = makeArrayDoc(docValue);
-    const schema = {
-      type: "array",
-      items: {
-        anyOf: [{ type: "string" }, { type: "null" }, { type: "undefined" }],
-      },
-    } as JSONSchema;
-
-    const result = getTraverser(store, { path: ["value"], schema }).traverse({
-      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
-      value: docValue,
-    });
-
-    expect(result).toEqual(["hello", undefined, "world"]);
-  });
-
-  it("returns undefined for the whole array when element fails and neither fallback is allowed", () => {
-    const docValue = ["hello", 42, "world"];
-    const { store, docUri, type } = makeArrayDoc(docValue);
-    const schema = {
-      type: "array",
-      items: { type: "string" },
-    } as JSONSchema;
-
-    const result = getTraverser(store, { path: ["value"], schema }).traverse({
-      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
-      value: docValue,
-    });
-
-    expect(result).toBeUndefined();
   });
 });
 
