@@ -36,13 +36,19 @@ export const synthesizeVoice: AppRouteHandler<SynthesizeVoiceRoute> = async (
     try {
       await Deno.stat(cachePath);
       logger.info({ cacheKey }, "TTS cache HIT");
-      return c.json({ audioUrl, cacheKey });
+      return c.json({
+        audioUrl,
+        cacheKey,
+        timing: { totalMs: 0, cached: true },
+      });
     } catch { /* cache miss */ }
 
     logger.info(
       { text: text.slice(0, 100), voice, model },
       "TTS cache MISS — calling OpenAI",
     );
+
+    const ttsStart = Date.now();
 
     // Call OpenAI TTS — streams audio back
     const response = await fetch(
@@ -73,12 +79,19 @@ export const synthesizeVoice: AppRouteHandler<SynthesizeVoiceRoute> = async (
     await ensureDir(CACHE_DIR);
     const audioBytes = new Uint8Array(await response.arrayBuffer());
     await Deno.writeFile(cachePath, audioBytes);
+
+    const ttsDurationMs = Date.now() - ttsStart;
     logger.info({
       cacheKey,
       bytes: audioBytes.byteLength,
+      ttsDurationMs,
     }, "TTS audio cached");
 
-    return c.json({ audioUrl, cacheKey });
+    return c.json({
+      audioUrl,
+      cacheKey,
+      timing: { totalMs: ttsDurationMs, cached: false },
+    });
   } catch (error) {
     logger.error({ error }, "TTS synthesis failed");
     return c.json({ error: "TTS synthesis failed" }, 500);

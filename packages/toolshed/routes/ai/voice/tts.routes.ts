@@ -15,6 +15,10 @@ export const SynthesizeRequestSchema = z.object({
 export const SynthesizeResponseSchema = z.object({
   audioUrl: z.string().describe("URL to GET the audio from"),
   cacheKey: z.string(),
+  timing: z.object({
+    totalMs: z.number().describe("Time in ms to synthesize audio"),
+    cached: z.boolean().describe("Whether the result was served from cache"),
+  }),
 });
 
 export const ErrorResponseSchema = z.object({ error: z.string() });

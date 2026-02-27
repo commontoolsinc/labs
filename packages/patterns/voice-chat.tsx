@@ -13,12 +13,26 @@ import {
   Writable,
 } from "commontools";
 
+// --- Helpers ---
+
+function formatDuration(ms: number | null | undefined): string {
+  if (ms == null) return "—";
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
 // --- Handlers ---
 
 const sendTextMessage = handler<
   { detail: { text: string } },
-  { addMessage: Stream<BuiltInLLMMessage> }
->((event, { addMessage }) => {
+  {
+    addMessage: Stream<BuiltInLLMMessage>;
+    messageSentAt: Writable<number | null>;
+    sttDurationMs: Writable<number | null>;
+  }
+>((event, { addMessage, messageSentAt, sttDurationMs }) => {
+  sttDurationMs.set(null);
+  messageSentAt.set(Date.now());
   addMessage.send({
     role: "user",
     content: [{ type: "text" as const, text: event.detail.text }],
@@ -26,11 +40,17 @@ const sendTextMessage = handler<
 });
 
 const sendVoiceMessage = handler<
-  { detail: { transcription: { text: string } } },
-  { addMessage: Stream<BuiltInLLMMessage> }
->((event, { addMessage }) => {
-  const text = event.detail.transcription.text;
+  { detail: { transcription: { text: string; timestamp?: number } } },
+  {
+    addMessage: Stream<BuiltInLLMMessage>;
+    messageSentAt: Writable<number | null>;
+    sttDurationMs: Writable<number | null>;
+  }
+>((event, { addMessage, messageSentAt, sttDurationMs }) => {
+  const { text, timestamp } = event.detail.transcription;
   if (text) {
+    sttDurationMs.set(timestamp ? Date.now() - timestamp : null);
+    messageSentAt.set(Date.now());
     addMessage.send({
       role: "user",
       content: [{ type: "text" as const, text }],
@@ -39,12 +59,16 @@ const sendVoiceMessage = handler<
 });
 
 const clearChat = handler(
-  (_: never, { messages, pending }: {
+  (_: never, ctx: {
     messages: Writable<Array<BuiltInLLMMessage>>;
     pending: Writable<boolean | undefined>;
+    sttDurationMs: Writable<number | null>;
+    messageSentAt: Writable<number | null>;
   }) => {
-    messages.set([]);
-    pending.set(false);
+    ctx.messages.set([]);
+    ctx.pending.set(false);
+    ctx.sttDurationMs.set(null);
+    ctx.messageSentAt.set(null);
   },
 );
 
@@ -67,11 +91,44 @@ const VOICE_SYSTEM_PROMPT =
   "and natural — 1-3 sentences unless asked for detail. No markdown, " +
   "no bullet points, no formatting. Speak like a person, not a document.";
 
+// --- Debug panel styles ---
+
+const rowStyle = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  padding: "0.375rem 0",
+  borderBottom: "1px solid var(--ct-color-gray-100)",
+  fontSize: "0.8125rem",
+};
+
+const labelStyle = {
+  color: "var(--ct-color-gray-500)",
+  fontWeight: "500",
+};
+
+const valueStyle = {
+  fontFamily: "monospace",
+  fontWeight: "600",
+};
+
+const totalRowStyle = {
+  ...rowStyle,
+  borderBottom: "none",
+  borderTop: "2px solid var(--ct-color-gray-200)",
+  marginTop: "0.25rem",
+  paddingTop: "0.5rem",
+};
+
 // --- Pattern ---
 
 export default pattern<Input, Output>(({ messages, system, voice }) => {
-  const model = Writable.of<string>("anthropic:claude-sonnet-4-5");
+  const model = Writable.of<string>("anthropic:claude-haiku-4-5");
   const transcription = Writable.of(null);
+
+  // Timing cells
+  const sttDurationMs = Writable.of<number | null>(null);
+  const messageSentAt = Writable.of<number | null>(null);
 
   const { addMessage, cancelGeneration, pending } = llmDialog({
     system: computed(() => system ?? VOICE_SYSTEM_PROMPT),
@@ -83,10 +140,8 @@ export default pattern<Input, Output>(({ messages, system, voice }) => {
   //
   // When the LLM finishes responding (pending → false, last msg is assistant),
   // POST the text to /api/ai/voice/synthesize via fetchData.
-  // The endpoint returns { audioUrl } which we set on <audio autoPlay>.
+  // The endpoint returns { audioUrl, timing } which we use for playback + debug.
 
-  // Extract latest assistant text only when generation is complete.
-  // Include message count so the computed updates on each new message.
   const ttsPayload = computed(() => {
     if (pending) return null;
     const msgs = messages?.get?.() ?? [];
@@ -103,10 +158,8 @@ export default pattern<Input, Output>(({ messages, system, voice }) => {
     }
     if (!text) return null;
 
-    // Include msg count as a cache-buster so fetchData re-fires
-    // for each new assistant message, even if the text happened
-    // to be the same.
-    return { text, msgCount: msgs.length };
+    // Capture when LLM generation completed (pending → false)
+    return { text, msgCount: msgs.length, completedAt: Date.now() };
   });
 
   const { result: ttsResult } = fetchData({
@@ -125,8 +178,40 @@ export default pattern<Input, Output>(({ messages, system, voice }) => {
     }),
   });
 
-  // The audio URL that <audio> will stream from
   const audioSrc = computed(() => (ttsResult as any)?.audioUrl ?? "");
+
+  // --- Derived timing ---
+
+  const llmDurationMs = computed(() => {
+    if (!ttsPayload) return null;
+    const sentAt = messageSentAt.get();
+    if (!sentAt) return null;
+    return ttsPayload.completedAt - sentAt;
+  });
+
+  const ttsTiming = computed(() => (ttsResult as any)?.timing ?? null);
+
+  const totalDurationMs = computed(() => {
+    const llm = llmDurationMs;
+    if (llm == null) return null;
+    const stt = sttDurationMs.get() ?? 0;
+    const tts = ttsTiming?.totalMs ?? 0;
+    return stt + llm + tts;
+  });
+
+  // Formatted display values
+  const sttDisplay = computed(() => formatDuration(sttDurationMs.get()));
+  const llmDisplay = computed(() => formatDuration(llmDurationMs));
+  const ttsDisplay = computed(() => {
+    if (!ttsTiming) return "—";
+    const label = formatDuration(ttsTiming.totalMs);
+    return ttsTiming.cached ? `${label} (cached)` : label;
+  });
+  const totalDisplay = computed(() => formatDuration(totalDurationMs));
+
+  // Handler contexts
+  const sendCtx = { addMessage, messageSentAt, sttDurationMs };
+  const clearCtx = { messages, pending, sttDurationMs, messageSentAt };
 
   return {
     [NAME]: "Voice Chat",
@@ -135,53 +220,100 @@ export default pattern<Input, Output>(({ messages, system, voice }) => {
         <div slot="header">
           <ct-hstack align="center" justify="between">
             <ct-heading level={4}>Voice Chat</ct-heading>
-            <ct-button
-              variant="pill"
-              onClick={clearChat({ messages, pending })}
-            >
+            <ct-button variant="pill" onClick={clearChat(clearCtx)}>
               Clear
             </ct-button>
           </ct-hstack>
         </div>
 
-        {/* Conversation transcript */}
-        <ct-vscroll
-          style="padding: 1rem;"
-          flex
-          showScrollbar
-          fadeEdges
-          snapToBottom
-        >
-          <ct-chat $messages={messages} pending={pending} />
-        </ct-vscroll>
+        <ct-resizable-panel-group direction="horizontal" style="flex: 1;">
+          {/* Left: Chat */}
+          <ct-resizable-panel default-size="70" min-size="50">
+            <ct-vstack style="height: 100%;">
+              <ct-vscroll
+                style="padding: 1rem;"
+                flex
+                showScrollbar
+                fadeEdges
+                snapToBottom
+              >
+                <ct-chat $messages={messages} pending={pending} />
+              </ct-vscroll>
+
+              <div
+                style={{
+                  padding: "0.5rem 1rem",
+                  borderTop: "1px solid var(--ct-color-gray-200)",
+                }}
+              >
+                <ct-voice-input
+                  $transcription={transcription}
+                  recordingMode="hold"
+                  autoTranscribe
+                  maxDuration={120}
+                  showWaveform
+                  onct-transcription-complete={sendVoiceMessage(sendCtx)}
+                />
+              </div>
+            </ct-vstack>
+          </ct-resizable-panel>
+
+          <ct-resizable-handle />
+
+          {/* Right: Debug Panel */}
+          <ct-resizable-panel default-size="30" min-size="20" max-size="45">
+            <ct-vstack
+              style={{
+                height: "100%",
+                padding: "1rem",
+                borderLeft: "1px solid var(--ct-color-gray-200)",
+                backgroundColor: "var(--ct-color-gray-50)",
+              }}
+            >
+              <ct-heading level={5} style="margin-bottom: 0.5rem;">
+                Debug
+              </ct-heading>
+              <div
+                style={{
+                  fontSize: "0.75rem",
+                  color: "var(--ct-color-gray-400)",
+                  fontFamily: "monospace",
+                  marginBottom: "1rem",
+                }}
+              >
+                {model}
+              </div>
+
+              <div style={rowStyle}>
+                <span style={labelStyle}>STT</span>
+                <span style={valueStyle}>{sttDisplay}</span>
+              </div>
+              <div style={rowStyle}>
+                <span style={labelStyle}>LLM</span>
+                <span style={valueStyle}>{llmDisplay}</span>
+              </div>
+              <div style={rowStyle}>
+                <span style={labelStyle}>TTS</span>
+                <span style={valueStyle}>{ttsDisplay}</span>
+              </div>
+              <div style={totalRowStyle}>
+                <span style={labelStyle}>Total</span>
+                <span style={valueStyle}>{totalDisplay}</span>
+              </div>
+            </ct-vstack>
+          </ct-resizable-panel>
+        </ct-resizable-panel-group>
 
         {/* Hidden audio — plays TTS when src updates */}
         {/* @ts-ignore autoplay must be lowercase for DOM property */}
         <audio autoplay src={audioSrc} />
-
-        {/* Voice input — hold mic to record */}
-        <div
-          style={{
-            padding: "0.5rem 1rem",
-            borderTop: "1px solid var(--ct-color-gray-200)",
-          }}
-        >
-          <ct-voice-input
-            $transcription={transcription}
-            recordingMode="hold"
-            autoTranscribe
-            maxDuration={120}
-            showWaveform
-            onct-transcription-complete={sendVoiceMessage({ addMessage })}
-          />
-        </div>
 
         {/* Text input — type or dictate via SuperWhisper */}
         <ct-prompt-input
           slot="footer"
           placeholder="Say something..."
           pending={pending}
-          onct-send={sendTextMessage({ addMessage })}
+          onct-send={sendTextMessage(sendCtx)}
           onct-stop={cancelGeneration}
         />
       </ct-screen>
