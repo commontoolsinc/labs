@@ -11,11 +11,7 @@ import {
   Writable,
 } from "commontools";
 
-import { default as Note } from "../notes/note.tsx";
-
-// Simple random ID generator (crypto.randomUUID not available in pattern env)
-const generateId = () =>
-  `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
+import { default as Note, type NotePiece } from "../notes/note.tsx";
 
 // Maximum number of recent pieces to track
 const MAX_RECENT_CHARMS = 10;
@@ -77,15 +73,15 @@ const removePiece = handler<
 
 // Handler for dropping a note onto a notebook row
 const dropOntoNotebook = handler<
-  { detail: { sourceCell: Writable<unknown> } },
-  { notebook: Writable<{ notes?: unknown[] }> }
+  { detail: { sourceCell: Writable<NotePiece> } },
+  { notebook: Writable<{ notes?: NotePiece[] }> }
 >((event, { notebook }) => {
   const sourceCell = event.detail.sourceCell;
   const notesCell = notebook.key("notes");
   const notesList = notesCell.get() ?? [];
 
   // Prevent duplicates using Writable.equals
-  const alreadyExists = notesList.some((n) => equals(sourceCell, n as any));
+  const alreadyExists = notesList.some((n) => equals(sourceCell, n));
   if (alreadyExists) return;
 
   // Hide from Patterns list
@@ -119,7 +115,6 @@ const menuNewNote = handler<void, { menuOpen: Writable<boolean> }>(
       Note({
         title: "New Note",
         content: "",
-        noteId: generateId(),
       }),
     );
   },

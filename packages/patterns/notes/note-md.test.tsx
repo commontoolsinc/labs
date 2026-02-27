@@ -13,7 +13,8 @@
  *
  * Run: deno task ct test packages/patterns/notes/note-md.test.tsx --verbose
  */
-import { action, computed, NAME, pattern, Writable } from "commontools";
+import { action, computed, pattern, Writable } from "commontools";
+const NAME = "$NAME";
 import NoteMd from "./note-md.tsx";
 import Note from "./note.tsx";
 
@@ -26,7 +27,6 @@ export default pattern(() => {
       title: "Test Note",
       content: "Simple content",
       backlinks: [],
-      noteId: "test-note-1",
     },
     content: contentCell,
   });
@@ -41,7 +41,6 @@ export default pattern(() => {
       title: "Wiki Note",
       content: "Fallback content",
       backlinks: [],
-      noteId: "test-note-2",
     },
     content: wikiContent,
   });
@@ -54,7 +53,6 @@ export default pattern(() => {
       title: "Plain Note",
       content: "Fallback",
       backlinks: [],
-      noteId: "test-note-3",
     },
     content: plainContent,
   });
@@ -69,7 +67,6 @@ export default pattern(() => {
       title: "Checkbox Note",
       content: "Fallback",
       backlinks: [],
-      noteId: "test-note-4",
     },
     content: checkboxContent,
   });
@@ -84,7 +81,6 @@ export default pattern(() => {
       title: "Regular Links Note",
       content: "Fallback",
       backlinks: [],
-      noteId: "test-note-5",
     },
     content: regularLinksContent,
   });
@@ -97,7 +93,6 @@ export default pattern(() => {
       title: "Special Chars Note",
       content: "Fallback",
       backlinks: [],
-      noteId: "test-note-6",
     },
     content: specialCharsContent,
   });
@@ -110,7 +105,6 @@ export default pattern(() => {
       title: "No Checkbox Note",
       content: "Fallback",
       backlinks: [],
-      noteId: "test-note-7",
     },
     content: noCheckboxContent,
   });
@@ -125,7 +119,6 @@ export default pattern(() => {
       title: "Mixed Note",
       content: "Fallback",
       backlinks: [],
-      noteId: "test-note-8",
     },
     content: mixedContent,
   });
@@ -138,7 +131,6 @@ export default pattern(() => {
       title: "Empty Note",
       content: "Fallback",
       backlinks: [],
-      noteId: "test-note-9",
     },
     content: emptyContent,
   });
@@ -151,7 +143,6 @@ export default pattern(() => {
       title: "Whitespace Note",
       content: "Fallback",
       backlinks: [],
-      noteId: "test-note-10",
     },
     content: whitespaceContent,
   });
@@ -160,7 +151,6 @@ export default pattern(() => {
   const sourceNote = Note({
     title: "Source Note",
     content: "Original editable content",
-    noteId: "source-note-1",
     isHidden: false,
   });
 
@@ -171,7 +161,6 @@ export default pattern(() => {
       title: "Source Note",
       content: "Original editable content",
       backlinks: [],
-      noteId: "source-note-1",
     },
     sourceNoteRef: sourceNote,
     content: sourceContent,
@@ -183,7 +172,6 @@ export default pattern(() => {
       title: "No Source Note",
       content: "Content without source ref",
       backlinks: [],
-      noteId: "no-source-1",
     },
     content: Writable.of("Direct content"),
   });
@@ -252,9 +240,6 @@ export default pattern(() => {
 
   const assert_note_title = computed(
     () => md.note?.title === "Test Note",
-  );
-  const assert_note_id = computed(
-    () => md.note?.noteId === "test-note-1",
   );
 
   // ==========================================================================
@@ -421,7 +406,6 @@ export default pattern(() => {
 
       // === Note passthrough ===
       { assertion: assert_note_title },
-      { assertion: assert_note_id },
 
       // === NAME ===
       { assertion: assert_name },

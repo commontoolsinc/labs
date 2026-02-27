@@ -5,16 +5,15 @@ import {
   Default,
   equals,
   handler,
-  NAME,
   navigateTo,
   pattern,
   SELF,
   Stream,
-  UI,
   type VNode,
   wish,
   Writable,
 } from "commontools";
+import { NAME, UI } from "@commontools/runner";
 
 import Note from "./note.tsx";
 import {

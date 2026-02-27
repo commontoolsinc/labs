@@ -132,7 +132,6 @@ export default pattern(() => {
     const note = Note({
       title: "Existing Note",
       content: "This note already exists",
-      noteId: "existing-note-1",
     });
     allPieces.push(note);
   });
@@ -153,7 +152,6 @@ export default pattern(() => {
         [{
           title: "Fresh Note",
           content: "Brand new content",
-          noteId: "fresh-1",
         }],
         [],
       ),
@@ -174,7 +172,6 @@ export default pattern(() => {
         [{
           title: "Fresh Note",
           content: "Brand new content",
-          noteId: "fresh-1",
         }],
         [{ title: "Fresh Notebook" }],
       ),
@@ -189,7 +186,6 @@ export default pattern(() => {
           {
             title: "Existing Note",
             content: "Duplicate content",
-            noteId: "dup-note-1",
           },
         ],
         [],
@@ -212,7 +208,6 @@ export default pattern(() => {
           {
             title: "Existing Note",
             content: "Duplicate content",
-            noteId: "dup-note-1",
           },
         ],
         [{ title: "Existing Notebook" }],
@@ -225,7 +220,6 @@ export default pattern(() => {
     const note = Note({
       title: "Second Note",
       content: "Second note content",
-      noteId: "existing-note-2",
     });
     allPieces.push(note);
   });
@@ -247,7 +241,6 @@ export default pattern(() => {
           {
             title: "Nested Note",
             content: "Note in parent notebook",
-            noteId: "nested-note-1",
             notebooks: "Parent Notebook",
           },
         ],
@@ -275,9 +268,8 @@ export default pattern(() => {
           {
             title: "Existing Note",
             content: "Duplicate content",
-            noteId: "dup-note-1",
           },
-          { title: "Fresh Note", content: "Brand new", noteId: "fresh-1" },
+          { title: "Fresh Note", content: "Brand new" },
         ],
         [{ title: "Existing Notebook" }, { title: "Fresh Notebook" }],
       ),

@@ -25,21 +25,20 @@
 import { action, computed, NAME, pattern } from "commontools";
 import Notebook from "./notebook.tsx";
 import Note from "./note.tsx";
-import { generateId } from "./schemas.tsx";
 
 export default pattern(() => {
   // Create some initial notes for testing
   const note1 = Note({
     title: "First Note",
     content: "Content of first note",
-    noteId: generateId(),
+
     isHidden: true,
   });
 
   const note2 = Note({
     title: "Second Note",
     content: "Content of second note",
-    noteId: generateId(),
+
     isHidden: true,
   });
 
@@ -63,13 +62,13 @@ export default pattern(() => {
       Note({
         title: "Note A",
         content: "Content A",
-        noteId: generateId(),
+
         isHidden: true,
       }),
       Note({
         title: "Note B",
         content: "Content B",
-        noteId: generateId(),
+
         isHidden: true,
       }),
     ],
@@ -314,13 +313,13 @@ export default pattern(() => {
       Note({
         title: "Original 1",
         content: "Content 1",
-        noteId: generateId(),
+
         isHidden: true,
       }),
       Note({
         title: "Original 2",
         content: "Content 2",
-        noteId: generateId(),
+
         isHidden: true,
       }),
     ],

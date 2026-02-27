@@ -38,7 +38,6 @@ export interface NotePiece {
   content?: string;
   summary?: string;
   isHidden?: boolean;
-  noteId?: string;
   backlinks?: MentionablePiece[];
   parentNotebook?: NotebookPiece | null;
 }
@@ -97,10 +96,10 @@ export interface NotebookInput {
 }
 
 export interface NoteMdInput {
-  /** Cell reference to note data (title + content + backlinks + noteId) */
+  /** Cell reference to note data (title + content + backlinks) */
   note?: Default<
     NotePiece,
-    { title: ""; content: ""; backlinks: []; noteId: "" }
+    { title: ""; content: ""; backlinks: [] }
   >;
   /** Direct reference to source note for Edit navigation */
   sourceNoteRef?: NotePiece;

@@ -6,14 +6,12 @@ import {
   equals,
   generateText,
   handler,
-  NAME,
   navigateTo,
   pattern,
   patternTool,
   type PatternToolResult,
   SELF,
-  Stream,
-  UI,
+  type Stream,
   type VNode,
   wish,
   Writable,
@@ -26,6 +24,8 @@ import {
   type NoteInput,
   type NotePiece,
 } from "./schemas.tsx";
+
+export { NotePiece };
 
 // ===== Output Type =====
 
