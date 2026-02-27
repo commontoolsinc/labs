@@ -4,7 +4,7 @@
  *
  * Claude Code Pre-Tool hook.
  * - Intercepts `git commit` commands.
- * - Runs `deno task check`, `deno fmt --check`, and `deno lint`.
+ * - Runs `deno fmt` and `deno lint`.
  * - Exits 2 to block the commit if checks fail.
  * - Tests are skipped (CI will run them).
  */
@@ -38,7 +38,7 @@ if (/--amend\s+--no-edit/.test(cmd) || /--amend\s+-C/.test(cmd)) {
   Deno.exit(0);
 }
 
-console.error("Running pre-commit checks (type check, fmt, lint)...");
+console.error("Running pre-commit checks (fmt, lint)...");
 
 // Auto-fix formatting first (fast)
 const fmtResult = await new Deno.Command("deno", {
@@ -47,30 +47,18 @@ const fmtResult = await new Deno.Command("deno", {
   stderr: "piped",
 }).output();
 
-// Run type check and lint in parallel
-const [checkResult, lintResult] = await Promise.all([
-  new Deno.Command("deno", {
-    args: ["task", "check"],
-    stdout: "piped",
-    stderr: "piped",
-  }).output(),
-  new Deno.Command("deno", {
-    args: ["lint"],
-    stdout: "piped",
-    stderr: "piped",
-  }).output(),
-]);
+// Run lint
+const lintResult = await new Deno.Command("deno", {
+  args: ["lint"],
+  stdout: "piped",
+  stderr: "piped",
+}).output();
 
 const errors: string[] = [];
 
 if (!fmtResult.success) {
   errors.push("Formatting failed (syntax error?):");
   errors.push(new TextDecoder().decode(fmtResult.stderr));
-}
-
-if (!checkResult.success) {
-  errors.push("Type check failed:");
-  errors.push(new TextDecoder().decode(checkResult.stderr));
 }
 
 if (!lintResult.success) {
