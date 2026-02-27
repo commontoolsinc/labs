@@ -287,8 +287,6 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
     const draftAnswer = Writable.of<string>("");
     const expandedPanel = Writable.of<string>("");
     const inboxDraft = Writable.of<string>("");
-    const expandedContext = Writable.of<string>("");
-
     // Command state
     const dispatchOpen = Writable.of<boolean>(false);
     const dispatchDraft = Writable.of<string>("");
@@ -536,21 +534,6 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
           : "1px solid transparent",
     }));
 
-    const actionsCardStyle = computed(() => ({
-      background:
-        expandedPanel.get() === "actions"
-          ? "rgba(0, 122, 255, 0.08)"
-          : color.fillPrimary,
-      borderRadius: "12px",
-      padding: "12px 14px",
-      cursor: "pointer",
-      transition: "background 0.2s ease",
-      border:
-        expandedPanel.get() === "actions"
-          ? "1px solid rgba(0, 122, 255, 0.2)"
-          : "1px solid transparent",
-    }));
-
     const inboxChevron = computed(() => ({
       fontSize: "10px",
       color: color.tertiaryLabel,
@@ -595,26 +578,12 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
       flexShrink: "0",
     }));
 
-    const actionsChevron = computed(() => ({
-      fontSize: "10px",
-      color: color.tertiaryLabel,
-      transition: "transform 0.2s ease",
-      transform:
-        expandedPanel.get() === "actions" ? "rotate(90deg)" : "rotate(0deg)",
-      marginLeft: "auto",
-      flexShrink: "0",
-    }));
-
     const togglePanel = action(({ panel }: { panel: string }) => {
       expandedPanel.set(panel);
       addItemOpen.set(false);
       addItemDraft.set("");
       addItemType.set("");
       if (panel !== "things") thingsBreadcrumbs.set([]);
-    });
-
-    const toggleContext = action(({ ctx }: { ctx: string }) => {
-      expandedContext.set(ctx);
     });
 
     const addInboxItem = action(() => {
@@ -960,13 +929,6 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
         syncPending.set(true);
         syncTriggeredAt.set(now);
         fetch("http://127.0.0.1:9876/sync", { method: "POST", mode: "cors" });
-      } else if (panel === "actions") {
-        const ctx = expandedContext.get();
-        const directiveText = ctx ? "Add action [" + ctx + "]: " + text : "Add action: " + text;
-        userActions.set([...userActions.get(), { type: "directive", target: "actions", text: directiveText, ts: now }]);
-        syncPending.set(true);
-        syncTriggeredAt.set(now);
-        fetch("http://127.0.0.1:9876/sync", { method: "POST", mode: "cors" });
       }
       addItemDraft.set("");
       addItemOpen.set(false);
@@ -1303,7 +1265,7 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr",
+                gridTemplateColumns: "1fr 1fr 1fr 1fr",
                 gap: "10px",
                 marginBottom: "16px",
               }}
@@ -1437,44 +1399,6 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                   }}
                 >
                   Things
-                </div>
-              </div>
-              {/* Actions card */}
-              <div
-                style={actionsCardStyle}
-                onClick={() => togglePanel.send({ panel: "actions" })}
-              >
-                <div style={{ display: "flex", alignItems: "center" }}>
-                  <div
-                    style={{
-                      fontSize: "22px",
-                      fontWeight: "600",
-                      letterSpacing: "-0.5px",
-                      lineHeight: "1.1",
-                    }}
-                  >
-                    {computed(() => {
-                      const all = displayActions;
-                      if (showCompleted.get()) return all.length;
-                      const projectItems: Project[] = (items.get()?.projects || []).filter(Boolean) as Project[];
-                      const completedIds = new Set(projectItems.filter((p: Project) => p.status === "Done" || p.status === "Archived").map((p: Project) => p.id));
-                      if (completedIds.size === 0) return all.length;
-                      return all.filter((a: NextAction) => !a.projectId || !completedIds.has(a.projectId)).length;
-                    })}
-                  </div>
-                  <span style={actionsChevron}>▶</span>
-                </div>
-                <div
-                  style={{
-                    fontSize: "11px",
-                    fontWeight: "500",
-                    color: color.secondaryLabel,
-                    marginTop: "2px",
-                    textTransform: "uppercase" as const,
-                    letterSpacing: "0.5px",
-                  }}
-                >
-                  Actions
                 </div>
               </div>
               {/* Weather removed to reduce memory footprint */}
@@ -2423,180 +2347,6 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                           <span style={{ color: color.secondaryLabel }}>{t.name}</span>
                         </div>
                       ))}
-                    </div>
-                  );
-                })}
-              </div>
-              );
-              if (panel === "actions") return (
-              <div style={panelCardStyle}>
-                <div style={{ ...groupHeaderStyle, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                  <span>Next Actions</span>
-                  <span
-                    style={computed(() => ({
-                      fontSize: "11px",
-                      fontWeight: "500",
-                      color: showCompleted.get() ? color.blue : color.tertiaryLabel,
-                      cursor: "pointer",
-                    }))}
-                    onClick={toggleShowCompleted}
-                  >
-                    {computed(() => showCompleted.get() ? "Hide Done" : "Show Done")}
-                  </span>
-                </div>
-                {computed(() => {
-                  const rawAll = displayActions;
-                  // Filter out actions belonging to Done/Archived projects if showCompleted is off
-                  const projectItems: Project[] = (items.get()?.projects || []).filter(Boolean) as Project[];
-                  const completedProjectIds = new Set(
-                    showCompleted.get() ? [] : projectItems.filter((p: Project) => p.status === "Done" || p.status === "Archived").map((p: Project) => p.id)
-                  );
-                  const all = completedProjectIds.size > 0
-                    ? rawAll.filter((a: NextAction) => !a.projectId || !completedProjectIds.has(a.projectId))
-                    : rawAll;
-                  if (all.length === 0) {
-                    return (
-                      <div
-                        style={{
-                          fontSize: "13px",
-                          color: color.tertiaryLabel,
-                          padding: "12px 0",
-                        }}
-                      >
-                        No next actions
-                      </div>
-                    );
-                  }
-                  // Group by context, preserving original indices
-                  const groups: Record<
-                    string,
-                    { a: NextAction; origIdx: number }[]
-                  > = {};
-                  for (let i = 0; i < all.length; i++) {
-                    const a = all[i];
-                    if (!groups[a.context]) groups[a.context] = [];
-                    groups[a.context].push({ a, origIdx: i });
-                  }
-                  const contexts = Object.keys(groups).sort();
-                  return contexts.map((ctx: string) => {
-                    const ctxActions = groups[ctx];
-                    return (
-                      <div>
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "6px",
-                            padding: "10px 0 4px",
-                            cursor: "pointer",
-                          }}
-                          onClick={() => toggleContext.send({ ctx })}
-                        >
-                          <span
-                            style={computed(() => ({
-                              fontSize: "10px",
-                              color: color.tertiaryLabel,
-                              transition: "transform 0.2s ease",
-                              transform:
-                                expandedContext.get() === ctx
-                                  ? "rotate(90deg)"
-                                  : "rotate(0deg)",
-                            }))}
-                          >
-                            ▶
-                          </span>
-                          <span
-                            style={{
-                              fontSize: "13px",
-                              fontWeight: "600",
-                              color: color.blue,
-                            }}
-                          >
-                            {ctx}
-                          </span>
-                          <span
-                            style={{
-                              fontSize: "12px",
-                              color: color.tertiaryLabel,
-                              marginLeft: "4px",
-                            }}
-                          >
-                            ({ctxActions.length})
-                          </span>
-                        </div>
-                        {computed(() => {
-                          if (expandedContext.get() !== ctx) return null;
-                          return (
-                          <div style={{ paddingLeft: "16px" }}>
-                            {ctxActions.map(({ a, origIdx }: { a: NextAction; origIdx: number }) => {
-                              const ak = "actions:" + origIdx;
-                              return (
-                                <div>
-                                  <div
-                                    style={computed(() =>
-                                      selectedItem.get() === ak
-                                        ? { ...itemRowStyle, display: "flex", alignItems: "center", gap: "8px", background: "rgba(0, 122, 255, 0.06)", borderRadius: "8px", padding: "8px" }
-                                        : { ...itemRowStyle, display: "flex", alignItems: "center", gap: "8px" },
-                                    )}
-                                  >
-                                    <div
-                                      style={{ width: "18px", height: "18px", borderRadius: "50%", border: `1.5px solid ${color.tertiaryLabel}`, flexShrink: "0", cursor: "pointer" }}
-                                      onClick={() => markItemDone.send({ key: ak })}
-                                    />
-                                    <div
-                                      style={{ flex: "1", display: "flex", alignItems: "center", gap: "4px", cursor: "pointer", minWidth: "0" }}
-                                      onClick={() => selectItem.send({ key: ak })}
-                                    >
-                                    {a.section ? (
-                                      <span style={{ fontSize: "11px", color: color.tertiaryLabel, marginRight: "6px", flexShrink: "0" }}>
-                                        [{a.section}]
-                                      </span>
-                                    ) : null}
-                                    <span style={{ flex: "1" }}>{a.text}</span>
-                                    {a.projectId ? (
-                                      <span style={{ padding: "1px 6px", borderRadius: "100px", fontSize: "10px", fontWeight: "500", background: "rgba(0, 122, 255, 0.08)", color: color.blue, marginLeft: "6px", flexShrink: "0" }}>
-                                        {a.projectId}
-                                      </span>
-                                    ) : null}
-                                    </div>
-                                  </div>
-                                  {computed(() => {
-                                    if (selectedItem.get() !== ak) return null;
-                                    return (
-                                      <div style={{ display: "flex", gap: "8px", padding: "6px 0 8px" }}>
-                                        <div style={actionBtnDone} onClick={() => markItemDone.send({ key: ak })}>✓ Done</div>
-                                        <div style={actionBtnDelete} onClick={() => deleteItem.send({ key: ak })}>✕ Delete</div>
-                                        <div style={actionBtnDirective} onClick={openItemDirective}>→ Directive</div>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              );
-                            })}
-                          </div>
-                          );
-                        })}
-                      </div>
-                    );
-                  });
-                })}
-                {/* Add action */}
-                {computed(() => {
-                  const isOpen = addItemOpen.get();
-                  const ctx = expandedContext.get();
-                  const label = ctx ? "+ New @" + ctx + " Action" : "+ New Action";
-                  const placeholder = ctx ? "New @" + ctx + " action..." : "New action...";
-                  if (!isOpen) return (
-                    <div style={{ marginTop: "10px", display: "inline-flex", alignItems: "center", gap: "5px", cursor: "pointer", color: color.blue, fontSize: "13px", fontWeight: "500", padding: "4px 0" }} onClick={openAddItem}>
-                      <span style={{ fontSize: "17px", fontWeight: "300", lineHeight: "1" }}>+</span>
-                      <span>{label}</span>
-                    </div>
-                  );
-                  return (
-                    <div style={{ display: "flex", gap: "8px", marginTop: "10px", alignItems: "center" }}>
-                      <ct-textarea $value={addItemDraft} placeholder={placeholder} rows={1} style="flex: 1; border-radius: 10px; font-size: 14px;" />
-                      <div style={{ padding: "7px 16px", borderRadius: "100px", fontSize: "13px", fontWeight: "600", background: color.blue, color: "#fff", cursor: "pointer", flexShrink: "0" }} onClick={sendAddItem}>Add</div>
-                      <div style={{ padding: "7px 10px", borderRadius: "100px", fontSize: "13px", color: color.secondaryLabel, cursor: "pointer", flexShrink: "0" }} onClick={() => { addItemOpen.set(false); addItemDraft.set(""); }}>Cancel</div>
                     </div>
                   );
                 })}
