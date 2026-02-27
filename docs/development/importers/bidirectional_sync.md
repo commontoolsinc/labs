@@ -254,15 +254,15 @@ every sub-item that has an external canonical ID. For example:
 ```typescript
 function buildStateFromFs(fsState: FsState): State {
   return {
-    items: fsState.items.map((item) => {
+    items: fsState.items.map((item) =>
       // Cell.of() ensures this item has a stable cell derived from
       // its canonical ID. Links to this item survive across syncs.
       Cell.of(item.canonicalId).set({
         name: item.name,
         path: item.path,
         // ...
-      });
-    }),
+      })
+    ),
   };
 }
 ```
