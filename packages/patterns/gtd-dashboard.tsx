@@ -1891,7 +1891,22 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                 {computed(() => {
                   const crumbStrs = peopleBreadcrumbs.get() || [];
                   if (crumbStrs.length === 0) {
-                    return <div style={groupHeaderStyle}>People</div>;
+                    return (
+                      <div style={{ ...groupHeaderStyle, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                        <span>People</span>
+                        <span
+                          style={{
+                            fontSize: "11px",
+                            fontWeight: "500",
+                            color: showCompleted.get() ? color.blue : color.tertiaryLabel,
+                            cursor: "pointer",
+                          }}
+                          onClick={toggleShowCompleted}
+                        >
+                          {showCompleted.get() ? "Hide Done" : "Show Done"}
+                        </span>
+                      </div>
+                    );
                   }
                   const crumbs = crumbStrs.map((s: string) => {
                     const bar = s.indexOf("|");
@@ -2047,11 +2062,35 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                   const projItems: Project[] = [...displayProjects].filter(Boolean);
                   const actItems: NextAction[] = displayActions;
                   const waitItems: WaitingItem[] = displayWaiting;
-                  const linkedProjects = projItems.filter((pr: Project) => pr.parentId === currentId);
+                  const hideCompleted = !showCompleted.get();
+                  const isCompleted = (s: string) => s === "Done" || s === "Archived";
+                  const linkedProjects = projItems.filter((pr: Project) => pr.parentId === currentId && !(hideCompleted && isCompleted(pr.status)));
                   const linkedActions = actItems.filter((a: NextAction) => a.projectId === currentId);
                   const linkedWaiting = isPersonLevel ? waitItems.filter((w: WaitingItem) => w.projectId === currentId) : [];
 
-                  if (linkedProjects.length === 0 && linkedActions.length === 0 && linkedWaiting.length === 0) {
+                  // Build project name -> noteUrl lookup from directives (same as Projects panel)
+                  const currentSpace = status.get().spaceName || "GTDfeb26";
+                  const allDirectives = [...(directives.get() || [])] as Directive[];
+                  const personNotes: Record<string, string> = {};
+                  for (const d of allDirectives) {
+                    if (!d || !d.noteUrl) continue;
+                    const m = d.text.match(/^Re:\s*(.+?)\s*\u2014/);
+                    if (m && d.noteUrl) {
+                      let url = d.noteUrl;
+                      if (url.match(/^\/[^\/]+\/baedrei/)) url = "/" + currentSpace + url.substring(url.indexOf("/", 1));
+                      personNotes[m[1]] = url;
+                    }
+                  }
+
+                  // Completed directive responses for the current entity
+                  const currentName = (bar >= 0 ? crumbStr.substring(bar + 1) : crumbStr);
+                  const entityResponses = allDirectives.filter((d: Directive) => {
+                    if (!d || d.status !== "done" || !d.response) return false;
+                    const dm = d.text.match(/^Re:\s*(.+?)\s*\u2014/);
+                    return dm && dm[1] === currentName;
+                  });
+
+                  if (linkedProjects.length === 0 && linkedActions.length === 0 && linkedWaiting.length === 0 && entityResponses.length === 0) {
                     return (
                       <div style={{ fontSize: "13px", color: color.tertiaryLabel, padding: "12px 0" }}>
                         {isPersonLevel
@@ -2089,6 +2128,11 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                                       {pr.status}
                                     </span>
                                   </div>
+                                  {personNotes[pr.name] ? (
+                                    <a href={personNotes[pr.name]} target="_blank" style={{ textDecoration: "none", fontSize: "16px", flexShrink: "0", cursor: "pointer", marginLeft: "4px" }}>
+                                      {"📎"}
+                                    </a>
+                                  ) : null}
                                   {hasKids ? (
                                     <span style={{ fontSize: "14px", color: color.tertiaryLabel, paddingLeft: "8px", flexShrink: "0", cursor: "pointer" }} onClick={() => drillIntoPerson.send({ id: pr.id, name: pr.name })}>{">"}</span>
                                   ) : null}
@@ -2138,6 +2182,54 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                               <span style={{ fontSize: "11px", color: color.tertiaryLabel, flexShrink: "0" }}>{w.entity}</span>
                             </div>
                           ))}
+                        </div>
+                      ) : null}
+                      {entityResponses.length > 0 ? (
+                        <div>
+                          <div style={groupHeaderStyle}>Directive Responses</div>
+                          {entityResponses.map((dir: Directive) => {
+                            const qMatch = dir.text.match(/^Re:\s*.+?\s*\u2014\s*(.+)$/);
+                            const question = qMatch ? qMatch[1] : dir.text;
+                            const dateStr = dir.createdAt
+                              ? new Date(dir.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+                              : "";
+                            let noteLink = dir.noteUrl || "";
+                            if (noteLink && noteLink.match(/^\/[^\/]+\/baedrei/)) noteLink = "/" + currentSpace + noteLink.substring(noteLink.indexOf("/", 1));
+                            return (
+                              <div style={{ ...itemRowStyle, padding: "10px 0" }}>
+                                <div style={{ display: "flex", alignItems: "flex-start", gap: "10px" }}>
+                                  <span style={{
+                                    padding: "2px 6px", borderRadius: "4px",
+                                    fontSize: "10px", fontWeight: "600",
+                                    background: "rgba(88, 86, 214, 0.12)",
+                                    color: color.indigo, flexShrink: "0", marginTop: "2px",
+                                  }}>{dir.id}</span>
+                                  <div style={{ flex: "1" }}>
+                                    <div style={{ fontSize: "13px", fontWeight: "500", color: color.label }}>
+                                      {question}
+                                    </div>
+                                    <div style={{
+                                      fontSize: "12px", color: color.secondaryLabel,
+                                      marginTop: "4px", lineHeight: "1.5",
+                                      whiteSpace: "pre-wrap" as const,
+                                    }}>
+                                      {dir.response}
+                                    </div>
+                                    <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "6px" }}>
+                                      {dateStr ? (
+                                        <span style={{ fontSize: "11px", color: color.tertiaryLabel }}>{dateStr}</span>
+                                      ) : null}
+                                      {noteLink ? (
+                                        <a href={noteLink} target="_blank" style={{
+                                          fontSize: "11px", color: color.blue, textDecoration: "none",
+                                        }}>{"📎 View note"}</a>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
                       ) : null}
                     </div>
