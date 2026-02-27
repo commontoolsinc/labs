@@ -13,6 +13,18 @@ describe("canonicalizeStoragePath", () => {
     expect(canonicalizeStoragePath(["value"])).toBe("/");
     expect(canonicalizeStoragePath([])).toBe("/");
   });
+
+  it("strips only the storage wrapper, preserving user properties named 'value'", () => {
+    // Storage path: ["value" (wrapper), "value" (user prop), "secret"]
+    // Should strip exactly one "value" wrapper, yielding /value/secret
+    expect(canonicalizeStoragePath(["value", "value", "secret"])).toBe(
+      "/value/secret",
+    );
+    // Deeper nesting: wrapper + user "value" + user "value" + field
+    expect(canonicalizeStoragePath(["value", "value", "value", "x"])).toBe(
+      "/value/value/x",
+    );
+  });
 });
 
 describe("canonicalizeBoundaryActivity", () => {
