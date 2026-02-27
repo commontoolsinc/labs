@@ -833,9 +833,20 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
 
       // Build context prefix based on item from display computeds
       let prefix = "";
+      let target = panel;
       if (panel === "inbox") {
         const item = displayInbox[idx];
-        if (item) prefix = "Re: " + item.text + " — ";
+        if (item) {
+          // Detect NEEDS_HUMAN inbox items: "D-NNN needs input — ..."
+          const nhMatch = item.text.match(/^(D-\d+) needs input/);
+          if (nhMatch) {
+            // Reply directly to the original directive
+            prefix = "Re: " + nhMatch[1] + " — ";
+            target = "system";
+          } else {
+            prefix = "Re: " + item.text + " — ";
+          }
+        }
       } else if (panel === "projects") {
         const item = displayProjects[idx];
         if (item) prefix = "Re: " + item.name + " — ";
@@ -851,7 +862,7 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
       }
 
       const now = new Date().toISOString();
-      userActions.set([...userActions.get(), { type: "directive", target: panel, text: prefix + text, ts: now }]);
+      userActions.set([...userActions.get(), { type: "directive", target, text: prefix + text, ts: now }]);
 
       itemDirectiveDraft.set("");
       itemDirectiveOpen.set(false);
