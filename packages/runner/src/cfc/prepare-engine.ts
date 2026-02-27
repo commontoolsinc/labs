@@ -30,6 +30,7 @@ import {
 } from "./internal-markers.ts";
 import { getCfcWriteSchemaContext } from "./schema-context.ts";
 import { computeCfcSchemaHash } from "./schema-hash.ts";
+import { cfcSchemaBlobAddress } from "./schema-blob.ts";
 
 type EntityAddress = Pick<IMemorySpaceAddress, "space" | "id" | "type">;
 
@@ -302,6 +303,13 @@ function schemaHashAddress(entity: EntityAddress): IMemorySpaceAddress {
     type: entity.type,
     path: ["cfc", "schemaHash"],
   };
+}
+
+function schemaBlobAddress(
+  entity: EntityAddress,
+  schemaHash: string,
+): IMemorySpaceAddress {
+  return cfcSchemaBlobAddress(entity.space, schemaHash);
 }
 
 function readLabelsAddress(entity: EntityAddress): IMemorySpaceAddress {
@@ -2146,7 +2154,27 @@ export async function prepareBoundaryCommit(
   );
 
   if (hasIfcWriteReason) {
+    const writtenSchemaBlobKeys = new Set<string>();
     for (const prepared of preparedWriteSchemas) {
+      const blobAddress = schemaBlobAddress(
+        prepared.entity,
+        prepared.actualSchemaHash,
+      );
+      const blobWriteKey = `${blobAddress.space}\u0000${blobAddress.id}`;
+      if (!writtenSchemaBlobKeys.has(blobWriteKey)) {
+        const existingBlobSchema = tx.readOrThrow(
+          { ...blobAddress, path: ["value"] },
+          { cfc: internalVerifierReadAnnotations },
+        );
+        if (existingBlobSchema === undefined) {
+          tx.writeOrThrow(
+            { ...blobAddress, path: ["value"] },
+            prepared.schema,
+          );
+        }
+        writtenSchemaBlobKeys.add(blobWriteKey);
+      }
+
       if (prepared.shouldWriteSchemaHash) {
         tx.writeOrThrow(
           schemaHashAddress(prepared.entity),

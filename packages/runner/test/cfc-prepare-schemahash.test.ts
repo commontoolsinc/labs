@@ -99,6 +99,21 @@ describe("CFC prepare schema hash", () => {
     return await readCfcPath(id, ["schemaHash"]);
   }
 
+  async function readSchemaBlob(hash: string): Promise<unknown> {
+    const tx = runtime.edit();
+    const value = tx.readOrThrow({
+      space,
+      id: `blob:${hash}` as URI,
+      type: "application/json",
+      path: ["value"],
+    });
+    const { error } = await tx.commit();
+    if (error) {
+      throw new Error(`failed to read schema blob: ${error.name}`);
+    }
+    return value;
+  }
+
   it("persists cfc.schemaHash during prepare for relevant writes", async () => {
     const tx = runtime.edit();
     const cell = runtime.getCell<{ count: number }>(
@@ -117,6 +132,27 @@ describe("CFC prepare schema hash", () => {
     const persistedSchemaHash = await readSchemaHash(link.id);
     const expectedSchemaHash = await computeCfcSchemaHash(ifcObjectSchema);
     expect(persistedSchemaHash).toBe(expectedSchemaHash);
+  });
+
+  it("persists schema blob document keyed by schema hash", async () => {
+    const tx = runtime.edit();
+    const cell = runtime.getCell<{ count: number }>(
+      space,
+      "cfc-prepare-schemahash-blob",
+      ifcObjectSchema,
+      tx,
+    );
+    cell.set({ count: 1 });
+
+    await prepareCfcCommitIfNeeded(tx);
+    const { error } = await tx.commit();
+    expect(error).toBeUndefined();
+
+    const schemaHash = String(
+      await readSchemaHash(cell.getAsNormalizedFullLink().id),
+    );
+    const blobSchema = await readSchemaBlob(schemaHash);
+    expect(blobSchema).toEqual(ifcObjectSchema);
   });
 
   it("persists cfc.labels including inherited path classifications", async () => {

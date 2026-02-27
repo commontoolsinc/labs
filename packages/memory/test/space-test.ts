@@ -342,6 +342,139 @@ for (const canonicalHashing of [false, true]) {
       });
     });
 
+    it("ignores blob URI cause-chain conflicts when blob already exists", async () => {
+      const hash = "cfc-schema-conflict-test";
+      const blobDoc = `blob:${hash}` as const;
+      const schemaV1 = { value: { type: "object" } };
+      const schemaV2 = { value: { type: "array" } };
+
+      const v1 = Fact.assert({
+        the,
+        of: blobDoc,
+        is: schemaV1,
+      });
+      const write1 = await Space.transact(
+        session,
+        Transaction.create({
+          issuer: alice.did(),
+          subject: space.did(),
+          changes: Changes.from([v1]),
+        }),
+      );
+      assert(write1.ok);
+
+      const v2 = Fact.assert({
+        the,
+        of: blobDoc,
+        is: schemaV2,
+        cause: v1,
+      });
+      const write2 = await Space.transact(
+        session,
+        Transaction.create({
+          issuer: alice.did(),
+          subject: space.did(),
+          changes: Changes.from([v2]),
+        }),
+      );
+      assert(write2.ok);
+
+      // This re-asserts the original fact with a stale base cause.
+      // Without the blob conflict carveout this is a ConflictError.
+      const staleWrite = Fact.assert({
+        the,
+        of: blobDoc,
+        is: schemaV1,
+      });
+      const write3 = await Space.transact(
+        session,
+        Transaction.create({
+          issuer: alice.did(),
+          subject: space.did(),
+          changes: Changes.from([staleWrite]),
+        }),
+      );
+      assert(
+        write3.ok,
+        "stale blob write should be treated as benign when blob already exists",
+      );
+    });
+
+    it("schema query includes cfc schema blob referenced by cfc.schemaHash", async () => {
+      const rootDoc = `of:${refer({ cfc: "schema-query-root" })}` as const;
+      const sourceDoc = `of:${refer({ cfc: "schema-query-source" })}` as const;
+      const schemaHash = "schema-query-hash";
+      const blobDoc = `blob:${schemaHash}` as const;
+
+      const sourceFact = Fact.assert({
+        the,
+        of: sourceDoc,
+        is: {
+          value: {
+            fromSource: "ok",
+          },
+        },
+      });
+      const rootFact = Fact.assert({
+        the,
+        of: rootDoc,
+        is: {
+          value: {
+            fromRoot: "ok",
+          },
+          source: {
+            "/": sourceDoc.slice(3),
+          },
+          cfc: {
+            schemaHash,
+          },
+        },
+      });
+      const blobFact = Fact.assert({
+        the,
+        of: blobDoc,
+        is: {
+          value: {
+            type: "object",
+            properties: {
+              fromRoot: { type: "string" },
+            },
+          },
+        },
+      });
+
+      const write = await session.transact(
+        Transaction.create({
+          issuer: alice.did(),
+          subject: space.did(),
+          changes: Changes.from([sourceFact, rootFact, blobFact]),
+        }),
+      );
+      assert(write.ok);
+
+      const result = session.querySchema({
+        cmd: "/memory/graph/query",
+        iss: alice.did(),
+        sub: space.did(),
+        args: {
+          selectSchema: {
+            [rootDoc]: {
+              [the]: {
+                _: {
+                  path: ["fromRoot"],
+                  schema: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        prf: [],
+      });
+
+      assertExists(getResultForDoc(result, space.did(), rootDoc));
+      assertExists(getResultForDoc(result, space.did(), blobDoc));
+    });
+
     it("create memory fails if already exists", async () => {
       const _base = refer(Fact.unclaimed({ the, of: doc }));
       const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
