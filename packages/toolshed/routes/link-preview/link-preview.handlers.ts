@@ -62,6 +62,9 @@ export const getLinkPreview: AppRouteHandler<GetLinkPreviewRoute> = async (
 
   // Fetch via Jina API with screenshot mode
   try {
+    const fetchController = new AbortController();
+    const fetchTimeout = setTimeout(() => fetchController.abort(), 15_000);
+
     const response = await fetch(JINA_API_ENDPOINT, {
       method: "POST",
       headers: {
@@ -71,7 +74,10 @@ export const getLinkPreview: AppRouteHandler<GetLinkPreviewRoute> = async (
         "X-Respond-With": "screenshot",
       },
       body: JSON.stringify({ url }),
+      signal: fetchController.signal,
     });
+
+    clearTimeout(fetchTimeout);
 
     if (!response.ok) {
       const errorText = await response.text();

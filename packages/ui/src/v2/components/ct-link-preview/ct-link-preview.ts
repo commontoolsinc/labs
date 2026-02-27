@@ -226,12 +226,13 @@ export class CTLinkPreview extends BaseElement {
         this._image = "";
 
         // Create new abort controller
-        this._abortController = new AbortController();
+        const controller = new AbortController();
+        this._abortController = controller;
 
         try {
           const apiUrl = `/api/link-preview/${encodeURIComponent(this.url)}`;
           const response = await fetch(apiUrl, {
-            signal: this._abortController.signal,
+            signal: controller.signal,
           });
 
           if (!response.ok) {
@@ -245,6 +246,10 @@ export class CTLinkPreview extends BaseElement {
           this._image = data.image || "";
           this._loading = false;
         } catch (error) {
+          // Only update state if this controller is still the active one;
+          // otherwise a newer fetch has already taken over.
+          if (this._abortController !== controller) return;
+
           if (error instanceof Error && error.name !== "AbortError") {
             this._error = true;
           }
@@ -259,6 +264,19 @@ export class CTLinkPreview extends BaseElement {
         } catch {
           return this.url;
         }
+      }
+
+      /** Only allow http/https hrefs to prevent javascript:/data: injection. */
+      private _getSafeHref(): string {
+        try {
+          const parsed = new URL(this.url);
+          if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+            return this.url;
+          }
+        } catch {
+          // invalid URL
+        }
+        return "#";
       }
 
       override render() {
@@ -284,7 +302,7 @@ export class CTLinkPreview extends BaseElement {
           return html`
             <a
               class="preview-card fallback"
-              href="${this.url}"
+              href="${this._getSafeHref()}"
               target="_blank"
               rel="noopener noreferrer"
             >
@@ -297,7 +315,7 @@ export class CTLinkPreview extends BaseElement {
         return html`
           <a
             class="preview-card"
-            href="${this.url}"
+            href="${this._getSafeHref()}"
             target="_blank"
             rel="noopener noreferrer"
           >
