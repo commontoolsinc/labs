@@ -271,8 +271,8 @@ const actionBtnDirective = {
   borderRadius: "100px",
   fontSize: "12px",
   fontWeight: "600",
-  background: "rgba(88, 86, 214, 0.12)",
-  color: "#5856d6",
+  background: "rgba(175, 82, 222, 0.12)",
+  color: "#af52de",
   cursor: "pointer",
 };
 
@@ -1078,33 +1078,6 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
               </span>
               <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                 <div
-                  style={computed(() => {
-                    const pending = syncPending.get();
-                    const triggered = syncTriggeredAt.get();
-                    const last = status.get().lastSync;
-                    const isSyncing = pending && (!last || triggered > last);
-                    return {
-                      padding: "5px 14px",
-                      borderRadius: "100px",
-                      fontSize: "13px",
-                      fontWeight: "600",
-                      background: isSyncing ? color.green : "rgba(52, 199, 89, 0.1)",
-                      color: isSyncing ? "#fff" : color.green,
-                      cursor: "pointer",
-                      transition: "all 0.3s ease",
-                    };
-                  })}
-                  onClick={syncNow}
-                >
-                  {computed(() => {
-                    const pending = syncPending.get();
-                    const triggered = syncTriggeredAt.get();
-                    const last = status.get().lastSync;
-                    const isSyncing = pending && (!last || triggered > last);
-                    return isSyncing ? "Syncing\u2026" : "Sync";
-                  })}
-                </div>
-                <div
                   style={computed(() => ({
                     padding: "5px 14px",
                     borderRadius: "100px",
@@ -1130,17 +1103,14 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                   })}
                   target="_blank"
                   style={{
-                    padding: "5px 14px",
-                    borderRadius: "100px",
-                    fontSize: "13px",
-                    fontWeight: "600",
-                    background: "rgba(255, 149, 0, 0.1)",
-                    color: color.orange,
+                    fontSize: "18px",
                     cursor: "pointer",
                     textDecoration: "none",
+                    opacity: 0.7,
+                    lineHeight: "1",
                   }}
                 >
-                  Calendar
+                  {"📅"}
                 </a>
                 <span
                   style={computed(() => {
@@ -1181,6 +1151,23 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                     return `Synced ${dayName} ${month} ${date} @ ${hours}:${mins}${ampm}`;
                   })}
                 </span>
+                <div
+                  style={computed(() => {
+                    const pending = syncPending.get();
+                    const triggered = syncTriggeredAt.get();
+                    const last = status.get().lastSync;
+                    const isSyncing = pending && (!last || triggered > last);
+                    return {
+                      fontSize: "18px",
+                      cursor: "pointer",
+                      opacity: isSyncing ? 1 : 0.5,
+                      lineHeight: "1",
+                    };
+                  })}
+                  onClick={syncNow}
+                >
+                  {"\uD83D\uDD04"}
+                </div>
               </div>
             </div>
 
@@ -1222,13 +1209,13 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                     const combined = [...optimistic, ...active].filter((d: Directive) => !cancelledIds.has(d.id));
                     if (combined.length === 0) return (
                       <div style={{ marginTop: "10px", fontSize: "13px", color: color.tertiaryLabel, padding: "8px 0" }}>
-                        No active directives.
+                        No active wishes.
                       </div>
                     );
                     return (
                       <div style={{ marginTop: "10px" }}>
                         <div style={{ fontSize: "11px", fontWeight: "600", color: color.secondaryLabel, textTransform: "uppercase" as const, letterSpacing: "0.5px", marginBottom: "6px" }}>
-                          Active Directives
+                          Active Wishes
                         </div>
                         {combined.map((d: Directive) => (
                           <div style={{ fontSize: "13px", padding: "6px 0", borderBottom: `0.5px solid ${color.separator}`, display: "flex", gap: "8px", alignItems: "center" }}>
@@ -1255,7 +1242,7 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                       </div>
                     );
                   })}
-                {/* Recent Directives — only visible in Command view */}
+                {/* Recent Wishes — only visible in Command view */}
                 {computed(() => {
                   const dirs: Directive[] = [...(directives.get() || [])].filter((d: Directive) => d && d.id);
                   const done = dirs.filter((d: Directive) => d.status === "done");
@@ -1266,7 +1253,7 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                   return (
                     <div style={{ marginTop: "12px" }}>
                       <div style={{ fontSize: "11px", fontWeight: "600", color: color.secondaryLabel, textTransform: "uppercase" as const, letterSpacing: "0.5px", marginBottom: "8px" }}>
-                        Recent Directives
+                        Recent Wishes
                       </div>
                       {recent.map((d: Directive) => (
                         <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "6px 0", borderBottom: "0.5px solid " + color.separator }}>
@@ -1529,7 +1516,7 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                         <div id={cssId("tb_", ik)} style={{ display: "none", gap: "8px", padding: "6px 0 8px", flexWrap: "wrap" as const }}>
                           <div style={actionBtnDone} onClick={() => markItemDone.send({ key: ik })}>✓ Done</div>
                           <div style={actionBtnDelete} onClick={() => deleteItem.send({ key: ik })}>✕ Delete</div>
-                          <div style={actionBtnDirective} onClick={openItemDirective}>→ Directive</div>
+                          <div style={actionBtnDirective} onClick={openItemDirective}>→ Wish</div>
                           <div style={actionBtnProject} onClick={() => makeProject.send({ key: ik })}>→ Project</div>
                           <div style={actionBtnPerson} onClick={() => makePerson.send({ key: ik })}>→ Person</div>
                           <div style={actionBtnThing} onClick={() => makeThing.send({ key: ik })}>→ Thing</div>
@@ -1640,14 +1627,14 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                           style={{ marginLeft: "auto", ...actionBtnDirective, fontSize: "11px", padding: "3px 10px" }}
                           onClick={() => openBreadcrumbDirective.send({ prefix: "Re: " + currentCrumb.name + " — ", ctx: "projects" })}
                         >
-                          → Directive
+                          → Wish
                         </div>
                       </div>
                       {dirOpen ? (
                         <div style={{ ...directiveInputRowStyle, marginBottom: "8px" }}>
                           <ct-textarea
                             $value={breadcrumbDirectiveDraft}
-                            placeholder={"Directive about " + currentCrumb.name + "..."}
+                            placeholder={"Wish about " + currentCrumb.name + "..."}
                             rows={1}
                             style="flex: 1; border-radius: 10px; font-size: 14px;"
                           />
@@ -1936,7 +1923,7 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                         <div id={cssId("tb_", "projects:" + idx)} style={{ display: "none", gap: "8px", padding: "6px 0 8px", flexWrap: "wrap" as const }}>
                           <div style={actionBtnDone} onClick={() => markItemDone.send({ key: "projects:" + idx })}>✓ Done</div>
                           <div style={actionBtnDelete} onClick={() => deleteItem.send({ key: "projects:" + idx })}>✕ Delete</div>
-                          <div style={actionBtnDirective} onClick={openItemDirective}>→ Directive</div>
+                          <div style={actionBtnDirective} onClick={openItemDirective}>→ Wish</div>
                         </div>
                       </div>
                     );
@@ -2023,14 +2010,14 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                           style={{ marginLeft: "auto", ...actionBtnDirective, fontSize: "11px", padding: "3px 10px" }}
                           onClick={() => openBreadcrumbDirective.send({ prefix: "Re: " + currentCrumb.name + " — ", ctx: "people" })}
                         >
-                          → Directive
+                          → Wish
                         </div>
                       </div>
                       {dirOpen ? (
                         <div style={{ ...directiveInputRowStyle, marginBottom: "8px" }}>
                           <ct-textarea
                             $value={breadcrumbDirectiveDraft}
-                            placeholder={"Directive about " + currentCrumb.name + "..."}
+                            placeholder={"Wish about " + currentCrumb.name + "..."}
                             rows={1}
                             style="flex: 1; border-radius: 10px; font-size: 14px;"
                           />
@@ -2101,7 +2088,7 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                           </div>
                           <div id={cssId("tb_", "people:" + idx)} style={{ display: "none", gap: "8px", padding: "6px 0 8px" }}>
                             <div style={actionBtnDelete} onClick={() => deleteItem.send({ key: "people:" + idx })}>✕ Delete</div>
-                            <div style={actionBtnDirective} onClick={openItemDirective}>→ Directive</div>
+                            <div style={actionBtnDirective} onClick={openItemDirective}>→ Wish</div>
                           </div>
                         </div>
                       );
@@ -2192,7 +2179,7 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                                 <div id={cssId("tb_", pk)} style={{ display: "none", gap: "8px", padding: "6px 0 8px", flexWrap: "wrap" as const }}>
                                   <div style={actionBtnDone} onClick={() => markItemDone.send({ key: pk })}>✓ Done</div>
                                   <div style={actionBtnDelete} onClick={() => deleteItem.send({ key: pk })}>✕ Delete</div>
-                                  <div style={actionBtnDirective} onClick={openItemDirective}>→ Directive</div>
+                                  <div style={actionBtnDirective} onClick={openItemDirective}>→ Wish</div>
                                 </div>
                               </div>
                             );
@@ -2233,7 +2220,7 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                       ) : null}
                       {entityResponses.length > 0 ? (
                         <div>
-                          <div style={groupHeaderStyle}>Directive Responses</div>
+                          <div style={groupHeaderStyle}>Wish Responses</div>
                           {entityResponses.map((dir: Directive) => {
                             const qMatch = dir.text.match(/^Re:\s*.+?\s*\u2014\s*(.+)$/);
                             const question = qMatch ? qMatch[1] : dir.text;
@@ -2373,7 +2360,7 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                             style={{ marginLeft: "auto", ...actionBtnDirective, fontSize: "11px", padding: "3px 10px" }}
                             onClick={() => openBreadcrumbDirective.send({ prefix: "Re: Things/" + crumbs.join("/") + " — ", ctx: "things" })}
                           >
-                            → Directive
+                            → Wish
                           </div>
                         ) : null}
                       </div>
@@ -2381,7 +2368,7 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                         <div style={{ ...directiveInputRowStyle, marginBottom: "8px" }}>
                           <ct-textarea
                             $value={breadcrumbDirectiveDraft}
-                            placeholder={"Directive about " + crumbs[crumbs.length - 1] + "..."}
+                            placeholder={"Wish about " + crumbs[crumbs.length - 1] + "..."}
                             rows={1}
                             style="flex: 1; border-radius: 10px; font-size: 14px;"
                           />
@@ -2430,7 +2417,7 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                               </span>
                             </div>
                             <div id={cssId("tb_", thingKey)} style={{ display: "none", gap: "8px", padding: "6px 0 8px" }}>
-                              <div style={actionBtnDirective} onClick={openItemDirective}>→ Directive</div>
+                              <div style={actionBtnDirective} onClick={openItemDirective}>→ Wish</div>
                             </div>
                           </div>
                         );
@@ -2457,7 +2444,7 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
             return (
               <div style={{ padding: "0 16px", marginBottom: "8px" }}>
                 <div style={directiveInputRowStyle}>
-                  <ct-textarea $value={itemDirectiveDraft} placeholder="Directive about this item..." rows={1} style="flex: 1; border-radius: 10px; font-size: 14px;" />
+                  <ct-textarea $value={itemDirectiveDraft} placeholder="Wish about this item..." rows={1} style="flex: 1; border-radius: 10px; font-size: 14px;" />
                   <div style={directiveSendBtnStyle} onClick={sendItemDirective}>Send</div>
                 </div>
               </div>
