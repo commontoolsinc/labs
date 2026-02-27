@@ -25,7 +25,7 @@ export const synthesizeVoice: AppRouteHandler<SynthesizeVoiceRoute> = async (
   c,
 ) => {
   const logger = c.get("logger");
-  const { text, voice, model, speed } = await c.req.json();
+  const { text, voice, model, speed } = c.req.valid("json");
 
   try {
     const cacheKey = await generateCacheKey(text, voice, model, speed);
