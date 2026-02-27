@@ -161,6 +161,16 @@ const actionBtnDirective = {
   cursor: "pointer",
 };
 
+const actionBtnAdd = {
+  padding: "5px 14px",
+  borderRadius: "100px",
+  fontSize: "12px",
+  fontWeight: "600",
+  background: "rgba(52, 199, 89, 0.12)",
+  color: "#34c759",
+  cursor: "pointer",
+};
+
 // ===== Pattern =====
 
 const GTDProjects = pattern<ProjectsInput, ProjectsOutput>(
@@ -316,6 +326,20 @@ const GTDProjects = pattern<ProjectsInput, ProjectsOutput>(
       selectedItem.set("");
       itemDirectiveOpen.set(false);
     });
+
+    const drillAndAddSubproject = action(
+      ({ id, name }: { id: string; name: string }) => {
+        const crumbs = [...(projectBreadcrumbs.get() || [])];
+        crumbs.push(id + "|" + name);
+        projectBreadcrumbs.set(crumbs);
+        selectedItem.set("");
+        itemDirectiveOpen.set(false);
+        itemDirectiveDraft.set("");
+        breadcrumbDirectiveOpen.set(false);
+        addItemOpen.set(true);
+        addItemDraft.set("");
+      },
+    );
 
     const sendAddItem = action(() => {
       const text = addItemDraft.get().trim();
@@ -936,6 +960,9 @@ const GTDProjects = pattern<ProjectsInput, ProjectsOutput>(
                             <div style={actionBtnDone} onClick={() => markItemDone.send({ key: pk })}>✓ Done</div>
                             <div style={actionBtnDelete} onClick={() => deleteItem.send({ key: pk })}>✕ Delete</div>
                             <div style={actionBtnDirective} onClick={openItemDirective}>→ Directive</div>
+                            {!item.hasChildren ? (
+                              <div style={actionBtnAdd} onClick={() => drillAndAddSubproject.send({ id: item.id, name: p.name })}>+ Subproject</div>
+                            ) : null}
                           </div>
                         );
                       })}
