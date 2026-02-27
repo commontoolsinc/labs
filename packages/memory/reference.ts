@@ -1,5 +1,4 @@
 import * as Reference from "merkle-reference";
-import type { Reference as MerkleReference } from "merkle-reference";
 import { LRUCache } from "@commontools/utils/cache";
 import { canonicalHash } from "./canonical-hash.ts";
 import { sha256 } from "./hash-impl.ts";
@@ -7,7 +6,7 @@ import { StorableContentId } from "./storable-content-id.ts";
 import { fromBase64 } from "./bigint-encoding.ts";
 
 // ---------------------------------------------------------------------------
-// Public re-exports: narrowed subset of merkle-reference API
+// Public type: union of both content identifier implementations
 // ---------------------------------------------------------------------------
 
 /**
@@ -20,20 +19,25 @@ export type DefinedReferent = NonNullable<unknown> | null;
 /**
  * Content identifier -- a hash-based reference to a value.
  *
- * Drop-in replacement for the `Reference<T>` type previously re-exported from
- * `merkle-reference`. Uses the same underlying interface type so it remains
- * assignable everywhere `Reference` was (e.g., `JSONValue` constraints).
+ * Union of `Reference.View` (legacy merkle-reference) and
+ * `StorableContentId` (canonical hashing). Both branches provide `.bytes`,
+ * `.toString()`, `.toJSON()`, and `"/"`.
+ *
+ * The phantom type parameter `T` is kept for compatibility with generic call
+ * sites; `StorableContentId` ignores it (no phantom member).
  */
 export type ContentId<
   T extends DefinedReferent = DefinedReferent,
-> = MerkleReference<T>;
+> = Reference.View<T> | StorableContentId;
 
 // ---------------------------------------------------------------------------
 // Flag-dispatched public API
 //
 // These four symbols are reassigned by `configureDispatch()` whenever
 // canonical hashing mode changes.  The two implementation worlds (canonical
-// vs. legacy/merkle-reference) are kept in separate blocks for clarity.
+// vs. legacy/merkle-reference) are kept in fully separate blocks so that
+// NO code changes when the experiment flag is off -- the legacy path is
+// identical to the pre-flag code.
 // ---------------------------------------------------------------------------
 
 /**
@@ -44,23 +48,13 @@ export let isContentId: <T extends DefinedReferent>(
   value: unknown | ContentId<T>,
 ) => value is ContentId<T>;
 
-/**
- * Reconstructs a content identifier from its JSON representation.
- *
- * The return type is `Reference.View` (the class type) rather than the bare
- * `ContentId` interface because the class exposes runtime methods (`.toJSON()`,
- * `.bytes`, etc.) that some call sites rely on. `Reference.View` is a subtype
- * of `ContentId`, so the result is assignable wherever a `ContentId` is
- * expected.
- */
+/** Reconstructs a content identifier from its JSON representation. */
 export let contentIdFromJSON: (
   source: { "/": string },
-) => Reference.View;
+) => ContentId;
 
-/**
- * Reconstruct a content identifier from its string representation.
- */
-export let fromString: (source: string) => Reference.View;
+/** Reconstruct a content identifier from its string representation. */
+export let fromString: (source: string) => ContentId;
 
 /**
  * Compute a content identifier for the given source value.
@@ -69,7 +63,9 @@ export let fromString: (source: string) => Reference.View;
  * In browsers, uses hash-wasm (WASM, ~3x faster than pure JS).
  * Falls back to @noble/hashes if neither is available.
  */
-export let refer: <T>(source: T) => Reference.View<T>;
+export let refer: <T extends NonNullable<unknown> | null>(
+  source: T,
+) => ContentId<T>;
 
 // ---------------------------------------------------------------------------
 // Canonical hashing mode flag and dispatch configuration
@@ -113,16 +109,16 @@ function configureDispatch(): void {
       return Reference.is(value);
     }) as typeof isContentId;
 
-    contentIdFromJSON = (source: { "/": string }): Reference.View => {
-      return contentIdFromString(source["/"]) as unknown as Reference.View;
+    contentIdFromJSON = (source) => {
+      return contentIdFromString(source["/"]);
     };
 
-    fromString = (source: string): Reference.View => {
-      return contentIdFromString(source) as unknown as Reference.View;
+    fromString = (source) => {
+      return contentIdFromString(source);
     };
 
-    refer = <T>(source: T): Reference.View<T> => {
-      return canonicalHash(source) as unknown as Reference.View<T>;
+    refer = (source) => {
+      return canonicalHash(source);
     };
   } else {
     // ----- Legacy merkle-reference implementations -----
@@ -138,14 +134,16 @@ function configureDispatch(): void {
 
     fromString = Reference.fromString as (
       source: string,
-    ) => Reference.View;
+    ) => ContentId;
 
-    refer = <T>(source: T): Reference.View<T> => {
+    refer = <T extends NonNullable<unknown> | null>(
+      source: T,
+    ): ContentId<T> => {
       // Cache {the, of} patterns (unclaimed facts)
       if (isUnclaimed(source)) {
         const key = `${source.the}\0${source.of}`;
         const cached = unclaimedCache.get(key);
-        if (cached) return cached as Reference.View<T>;
+        if (cached) return cached as ContentId<T>;
         const result = referImpl(source);
         unclaimedCache.put(key, result);
         return result;
@@ -221,8 +219,10 @@ const treeBuilder = Reference.Tree.createBuilder(
   wrappedNodeBuilder,
 );
 
-const referImpl = <T>(source: T): Reference.View<T> => {
-  return treeBuilder.refer(source) as unknown as Reference.View<T>;
+const referImpl = <T extends NonNullable<unknown> | null>(
+  source: T,
+): ContentId<T> => {
+  return treeBuilder.refer(source) as unknown as ContentId<T>;
 };
 
 /**
@@ -230,7 +230,7 @@ const referImpl = <T>(source: T): Reference.View<T> => {
  * These patterns repeat constantly in claims, so caching avoids redundant hashing.
  * Bounded with LRU eviction to prevent unbounded memory growth.
  */
-const unclaimedCache = new LRUCache<string, Reference.View<unknown>>({
+const unclaimedCache = new LRUCache<string, ContentId<NonNullable<unknown>>>({
   // ~50KB overhead (small string keys + refs)
   capacity: 50_000,
 });
