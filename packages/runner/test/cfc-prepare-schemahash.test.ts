@@ -59,6 +59,45 @@ const exactCopyIfcObjectSchema = {
   },
 } as const satisfies JSONSchema;
 
+const siblingIfcObjectSchema = {
+  type: "object",
+  properties: {
+    a: {
+      type: "number",
+      ifc: { classification: ["secret"] },
+    },
+    b: {
+      type: "string",
+      ifc: { classification: ["confidential"] },
+    },
+  },
+} as const satisfies JSONSchema;
+
+const composedAndRefIfcObjectSchema = {
+  type: "object",
+  properties: {
+    variant: {
+      anyOf: [
+        { $ref: "#/$defs/SecretNumber" },
+        { type: "number" },
+      ],
+    },
+    mirrored: {
+      $ref: "#/$defs/ConfidentialString",
+    },
+  },
+  $defs: {
+    SecretNumber: {
+      type: "number",
+      ifc: { classification: ["secret"] },
+    },
+    ConfidentialString: {
+      type: "string",
+      ifc: { classification: ["confidential"] },
+    },
+  },
+} as const satisfies JSONSchema;
+
 describe("CFC prepare schema hash", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
@@ -216,6 +255,37 @@ describe("CFC prepare schema hash", () => {
       "/signed": {
         classification: ["confidential"],
         integrity: ["trusted-source"],
+      },
+    });
+  });
+
+  it("persists labels from anyOf branches and $defs references", async () => {
+    const tx = runtime.edit();
+    const cell = runtime.getCell<
+      { variant: number; mirrored: string }
+    >(
+      space,
+      "cfc-prepare-labels-composed-ref-persist",
+      composedAndRefIfcObjectSchema,
+      tx,
+    );
+    const link = cell.getAsNormalizedFullLink();
+    cell.set({
+      variant: 1,
+      mirrored: "ok",
+    });
+
+    await prepareCfcCommitIfNeeded(tx);
+    const { error } = await tx.commit();
+    expect(error).toBeUndefined();
+
+    const persistedLabels = await readCfcPath(link.id, ["labels"]);
+    expect(persistedLabels).toEqual({
+      "/variant": {
+        classification: ["secret"],
+      },
+      "/mirrored": {
+        classification: ["confidential"],
       },
     });
   });
@@ -410,6 +480,41 @@ describe("CFC prepare schema hash", () => {
 
     const persistedSchemaHash = await readSchemaHash(id);
     const expectedSchemaHash = await computeCfcSchemaHash(ifcObjectSchema);
+    expect(persistedSchemaHash).toBe(expectedSchemaHash);
+  });
+
+  it("uses merged sibling write schema context for prepare hash checks", async () => {
+    let tx = runtime.edit();
+    const cell = runtime.getCell<{ a: number; b: string }>(
+      space,
+      "cfc-prepare-schemahash-sibling-context-merge",
+      siblingIfcObjectSchema,
+      tx,
+    );
+    const link = cell.getAsNormalizedFullLink();
+    cell.set({ a: 1, b: "one" });
+    await prepareCfcCommitIfNeeded(tx);
+    let commit = await tx.commit();
+    expect(commit.error).toBeUndefined();
+
+    tx = runtime.edit();
+    const sameCell = runtime.getCell<{ a: number; b: string }>(
+      space,
+      "cfc-prepare-schemahash-sibling-context-merge",
+      siblingIfcObjectSchema,
+      tx,
+    );
+    sameCell.key("a").set(2);
+    sameCell.key("b").set("two");
+
+    await prepareCfcCommitIfNeeded(tx);
+    commit = await tx.commit();
+    expect(commit.error).toBeUndefined();
+
+    const persistedSchemaHash = await readSchemaHash(link.id);
+    const expectedSchemaHash = await computeCfcSchemaHash(
+      siblingIfcObjectSchema,
+    );
     expect(persistedSchemaHash).toBe(expectedSchemaHash);
   });
 });
