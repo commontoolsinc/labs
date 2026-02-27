@@ -110,7 +110,8 @@ Deno.test("StorableContentId", async (t) => {
     () => {
       setCanonicalHashConfig(true);
       try {
-        const original = new StorableContentId(SAMPLE_HASH, "fid1");
+        // Use a non-fid1 tag to verify the parser doesn't hardcode it.
+        const original = new StorableContentId(SAMPLE_HASH, "sha3");
         const str = original.toString();
         const reconstructed = fromString(str);
 
@@ -118,6 +119,7 @@ Deno.test("StorableContentId", async (t) => {
         const cid = reconstructed as unknown as StorableContentId;
         assertEquals(cid.toString(), original.toString());
         assertEquals(cid.hash, original.hash);
+        assertEquals(cid.algorithmTag, "sha3");
       } finally {
         resetCanonicalHashConfig();
       }
