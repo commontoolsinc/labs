@@ -846,6 +846,9 @@ export const GoogleAuthManager = pattern<
           color: "#b45309",
         }}
       >
+        <style>
+          {"@keyframes ct-auth-spin { to { transform: rotate(360deg); } }"}
+        </style>
         <span
           style={{
             display: "inline-block",
@@ -854,7 +857,7 @@ export const GoogleAuthManager = pattern<
             border: "2px solid #f59e0b",
             borderTop: "2px solid transparent",
             borderRadius: "50%",
-            animation: "spin 1s linear infinite",
+            animation: "ct-auth-spin 1s linear infinite",
           }}
         />
         Refreshing session...

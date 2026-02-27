@@ -187,7 +187,7 @@ Use the `--bg-updater` flag with the local dev scripts:
 ./scripts/restart-local-dev.sh --bg-updater
 ```
 
-This automatically handles admin charm setup and starts the background service. The service log is at `packages/background-charm-service/local-dev-bg.log`. The stop script will also clean up the background service process.
+This waits for toolshed to be healthy, then starts the background service. The service log is at `packages/background-charm-service/local-dev-bg.log`. The stop script will also clean up the background service process. The system space cell is auto-created when a piece is first registered (e.g., during Google OAuth).
 
 ### Manual Setup
 

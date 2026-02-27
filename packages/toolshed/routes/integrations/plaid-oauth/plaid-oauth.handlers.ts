@@ -198,17 +198,17 @@ export const exchangeToken: AppRouteHandler<ExchangeTokenRoute> = async (c) => {
         : payload.authCellId as SigilLink;
       const parsedLink = parseLink(authCellLink) as NormalizedLink;
       const space = parsedLink.space;
-      const integrationCharmId = payload.integrationCharmId;
+      const integrationPieceId = payload.integrationPieceId;
 
-      if (space && integrationCharmId) {
+      if (space && integrationPieceId) {
         logger.info(
-          { space, integrationCharmId },
+          { space, integrationPieceId },
           "Adding Plaid integration charm",
         );
 
         await setBGCharm({
           space,
-          pieceId: integrationCharmId,
+          pieceId: integrationPieceId,
           integration: "plaid",
           runtime,
         });

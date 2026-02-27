@@ -141,15 +141,25 @@ if [[ "$BG_UPDATER" == "true" ]]; then
     echo ""
     echo "Starting background-charm-service..."
 
-    # Run add-admin-charm (idempotent, needed for service access to system space)
+    # Wait for toolshed to be healthy before starting bg service
+    echo "  Waiting for toolshed to be ready..."
+    for i in $(seq 1 30); do
+        if curl -s -o /dev/null -w "%{http_code}" --max-time 2 "http://localhost:$TOOLSHED_PORT/_health" 2>/dev/null | grep -q "200"; then
+            break
+        fi
+        if [[ $i -eq 30 ]]; then
+            echo "  Warning: Toolshed not ready after 30s, starting bg service anyway"
+        fi
+        sleep 1
+    done
+
+    # Start the background service directly (not via deno task, for reliable PID tracking)
     cd "$SCRIPT_DIR/../packages/background-charm-service"
     OPERATOR_PASS="implicit trust" API_URL="http://localhost:$TOOLSHED_PORT" \
-        deno task add-admin-charm > /dev/null 2>&1 || true
-
-    # Start the background service
-    OPERATOR_PASS="implicit trust" API_URL="http://localhost:$TOOLSHED_PORT" \
-        deno task start > "$SCRIPT_DIR/../packages/background-charm-service/local-dev-bg.log" 2>&1 &
+        deno run -A --unstable-worker-options src/main.ts \
+        > "$SCRIPT_DIR/../packages/background-charm-service/local-dev-bg.log" 2>&1 &
     BG_PID=$!
+    cd "$SCRIPT_DIR/.."
 
     # Save PID for stop script
     echo "$BG_PID" > "$SCRIPT_DIR/../.bg-charm-service.pid"

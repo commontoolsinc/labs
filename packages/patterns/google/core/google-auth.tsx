@@ -360,44 +360,50 @@ const toggleScope = handler<
   },
 );
 
+/**
+ * Shared token refresh logic. Calls the server refresh endpoint and updates
+ * the auth cell with new token data. Throws on failure.
+ */
+async function refreshAuthToken(
+  authCell: Writable<Auth>,
+): Promise<void> {
+  const currentAuth = authCell.get();
+  const refreshToken = currentAuth?.refreshToken;
+
+  if (!refreshToken) {
+    throw new Error("No refresh token available");
+  }
+
+  const res = await fetch(
+    new URL("/api/integrations/google-oauth/refresh", env.apiUrl),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refreshToken }),
+    },
+  );
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw new Error(`Token refresh failed: ${res.status} ${errorText}`);
+  }
+
+  const json = await res.json();
+  if (!json.tokenInfo) {
+    throw new Error("Invalid refresh response: no tokenInfo");
+  }
+
+  authCell.update({
+    ...json.tokenInfo,
+    user: currentAuth.user,
+  });
+}
+
 // Handler for refreshing OAuth tokens from UI button
 // Must be at module scope, not inside pattern
 const handleRefresh = handler<unknown, { auth: Writable<Auth> }>(
-  async (_event, { auth: authCell }) => {
-    const currentAuth = authCell.get();
-    const refreshToken = currentAuth?.refreshToken;
-
-    if (!refreshToken) {
-      console.error("[google-auth] No refresh token available");
-      throw new Error("No refresh token available");
-    }
-
-    const res = await fetch(
-      new URL("/api/integrations/google-oauth/refresh", env.apiUrl),
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refreshToken }),
-      },
-    );
-
-    if (!res.ok) {
-      const errorText = await res.text();
-      console.error("[google-auth] Refresh failed:", res.status, errorText);
-      throw new Error(`Token refresh failed: ${res.status}`);
-    }
-
-    const json = await res.json();
-    if (!json.tokenInfo) {
-      console.error("[google-auth] No tokenInfo in response:", json);
-      throw new Error("Invalid refresh response");
-    }
-
-    // Update auth with new token, keeping user info
-    authCell.update({
-      ...json.tokenInfo,
-      user: currentAuth.user,
-    });
+  async (_event, { auth }) => {
+    await refreshAuthToken(auth);
   },
 );
 
@@ -428,62 +434,17 @@ const refreshTokenHandler = handler<
   { auth: Writable<Auth> }
 >(async (_event, { auth }) => {
   authDebugLog("refreshTokenHandler called");
-  const currentAuth = auth.get();
-  const refreshToken = currentAuth?.refreshToken;
-
   authDebugLog(
     "Current token (first 20 chars):",
-    currentAuth?.token?.slice(0, 20),
+    auth.get()?.token?.slice(0, 20),
   );
-  authDebugLog("Has refreshToken:", !!refreshToken);
+  authDebugLog("Has refreshToken:", !!auth.get()?.refreshToken);
 
-  if (!refreshToken) {
-    console.error("[google-auth] No refresh token available");
-    throw new Error("No refresh token available");
-  }
-
-  authDebugLog("Refreshing OAuth token...");
-
-  const res = await fetch(
-    new URL("/api/integrations/google-oauth/refresh", env.apiUrl),
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refreshToken }),
-    },
-  );
-
-  if (!res.ok) {
-    const errorText = await res.text();
-    console.error("[google-auth] Refresh failed:", res.status, errorText);
-    throw new Error(`Token refresh failed: ${res.status}`);
-  }
-
-  const json = await res.json();
-  authDebugLog("Server response received");
-  authDebugLog(
-    "New token (first 20 chars):",
-    json.tokenInfo?.token?.slice(0, 20),
-  );
-  authDebugLog("New expiresAt:", json.tokenInfo?.expiresAt);
-
-  if (!json.tokenInfo) {
-    console.error("[google-auth] No tokenInfo in response:", json);
-    throw new Error("Invalid refresh response");
-  }
+  await refreshAuthToken(auth);
 
   authDebugLog("Token refreshed successfully");
-
-  // Update the auth cell with new token data
-  // Keep existing user info since refresh doesn't return it
-  authDebugLog("Calling auth.update()...");
-  auth.update({
-    ...json.tokenInfo,
-    user: currentAuth.user,
-  });
-  authDebugLog("auth.update() completed");
   authDebugLog(
-    "Verifying - token now (first 20 chars):",
+    "New token (first 20 chars):",
     auth.get()?.token?.slice(0, 20),
   );
 });
@@ -509,28 +470,26 @@ const bgRefreshHandler = handler<unknown, { auth: Writable<Auth> }>(
     const timeRemaining = expiresAt - Date.now();
     if (timeRemaining > REFRESH_THRESHOLD_MS) return; // Still fresh, skip
 
-    // Token is expiring soon or already expired — refresh it
     console.log("[google-auth bgUpdater] Token expiring soon, refreshing...");
 
-    const res = await fetch(
-      new URL("/api/integrations/google-oauth/refresh", env.apiUrl),
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refreshToken: currentAuth.refreshToken }),
-      },
-    );
-
-    if (!res.ok) {
-      console.error("[google-auth bgUpdater] Refresh failed:", res.status);
-      return; // Don't throw — bgUpdater should be resilient
+    try {
+      await refreshAuthToken(auth);
+      console.log("[google-auth bgUpdater] Token refreshed successfully");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      // Permanent failures (revoked token, invalid grant) — clear the token
+      // so the UI shows "expired" state instead of silently retrying forever
+      if (msg.includes("400") || msg.includes("401")) {
+        console.error(
+          "[google-auth bgUpdater] Permanent refresh failure, clearing token:",
+          msg,
+        );
+        auth.update({ ...currentAuth, token: "", expiresAt: 0 });
+      } else {
+        // Transient failure (network, 5xx) — log and retry next cycle
+        console.error("[google-auth bgUpdater] Transient refresh failure:", msg);
+      }
     }
-
-    const json = await res.json();
-    if (!json.tokenInfo) return;
-
-    auth.update({ ...json.tokenInfo, user: currentAuth.user });
-    console.log("[google-auth bgUpdater] Token refreshed successfully");
   },
 );
 

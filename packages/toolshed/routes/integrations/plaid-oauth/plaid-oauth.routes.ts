@@ -15,7 +15,7 @@ export const createLinkToken = createRoute({
           schema: z
             .object({
               authCellId: z.string().describe("The authentication cell ID"),
-              integrationCharmId: z
+              integrationPieceId: z
                 .string()
                 .describe("The charm ID of the integration charm"),
               products: z
@@ -36,7 +36,7 @@ export const createLinkToken = createRoute({
             .openapi({
               example: {
                 authCellId: "auth-cell-123",
-                integrationCharmId: "integration-charm-123",
+                integrationPieceId: "integration-charm-123",
                 products: ["accounts", "transactions"],
                 countryCodes: ["US"],
               },
@@ -82,7 +82,7 @@ export const exchangeToken = createRoute({
             .object({
               publicToken: z.string().describe("The Plaid public token"),
               authCellId: z.string().describe("The authentication cell ID"),
-              integrationCharmId: z
+              integrationPieceId: z
                 .string()
                 .describe("The charm ID of the integration charm"),
               metadata: z
@@ -108,7 +108,7 @@ export const exchangeToken = createRoute({
               example: {
                 publicToken: "public-sandbox-xxx",
                 authCellId: "auth-cell-123",
-                integrationCharmId: "integration-charm-123",
+                integrationPieceId: "integration-charm-123",
                 metadata: {
                   institution: {
                     institutionId: "ins_109508",
