@@ -6,12 +6,12 @@ import { StorableContentId } from "./storable-content-id.ts";
 import { fromBase64 } from "./bigint-encoding.ts";
 
 // ---------------------------------------------------------------------------
-// Public type: union of both content identifier implementations
+// Public types
 // ---------------------------------------------------------------------------
 
 /**
- * Type constraint for content identifier referents — i.e., any value
- * including `null` but _not_ `undefined`.
+ * Type constraint for content identifier referents. Equivalent to
+ * `NonNullable<unknown> | null` — accepts any value except `undefined`.
  * Used by `ContentId<T>` and related generic types.
  */
 export type DefinedReferent = NonNullable<unknown> | null;
