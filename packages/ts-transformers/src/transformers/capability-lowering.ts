@@ -137,6 +137,7 @@ function getAccessInfo(
   context: TransformationContext,
 ): {
   root?: string;
+  rootIdentifier?: ts.Identifier;
   path: PathSegment[];
   dynamic: boolean;
 } {
@@ -203,7 +204,7 @@ function getAccessInfo(
   }
 
   if (ts.isIdentifier(current)) {
-    return { root: current.text, path, dynamic };
+    return { root: current.text, rootIdentifier: current, path, dynamic };
   }
 
   return { path, dynamic };
@@ -631,11 +632,12 @@ function isOpaqueOriginCall(
 function isOpaqueSourceExpression(
   expression: ts.Expression,
   opaqueRoots: ReadonlySet<string>,
+  opaqueRootSymbols: ReadonlySet<ts.Symbol>,
   context: TransformationContext,
 ): boolean {
   const current = unwrapExpression(expression);
   const info = getAccessInfo(current, context);
-  if (info.root && opaqueRoots.has(info.root)) {
+  if (isOpaqueRootInfo(info, opaqueRoots, opaqueRootSymbols, context)) {
     return true;
   }
 
@@ -650,6 +652,7 @@ function isOpaqueSourceExpression(
         return isOpaqueSourceExpression(
           current.expression.expression,
           opaqueRoots,
+          opaqueRootSymbols,
           context,
         );
       }
@@ -659,96 +662,40 @@ function isOpaqueSourceExpression(
   return false;
 }
 
-function addBindingTargets(
+function isOpaqueRootInfo(
+  info: ReturnType<typeof getAccessInfo>,
+  opaqueRoots: ReadonlySet<string>,
+  opaqueRootSymbols: ReadonlySet<ts.Symbol>,
+  context: TransformationContext,
+): boolean {
+  const rootIdentifier = info.rootIdentifier;
+  if (rootIdentifier) {
+    const symbol = context.checker.getSymbolAtLocation(rootIdentifier);
+    if (symbol) {
+      if (opaqueRootSymbols.has(symbol)) return true;
+    }
+  }
+
+  return !!info.root && opaqueRoots.has(info.root);
+}
+
+function addBindingTargetSymbols(
   name: ts.BindingName,
-  bucket: Set<string>,
+  bucket: Set<ts.Symbol>,
+  checker: ts.TypeChecker,
 ): void {
   if (ts.isIdentifier(name)) {
-    bucket.add(name.text);
+    const symbol = checker.getSymbolAtLocation(name);
+    if (symbol) {
+      bucket.add(symbol);
+    }
     return;
   }
 
   for (const element of name.elements) {
     if (ts.isOmittedExpression(element)) continue;
-    addBindingTargets(element.name, bucket);
+    addBindingTargetSymbols(element.name, bucket, checker);
   }
-}
-
-function addAssignmentTargets(
-  target: ts.Expression,
-  bucket: Set<string>,
-): void {
-  if (ts.isParenthesizedExpression(target)) {
-    addAssignmentTargets(target.expression, bucket);
-    return;
-  }
-
-  if (ts.isIdentifier(target)) {
-    bucket.add(target.text);
-    return;
-  }
-
-  if (ts.isObjectLiteralExpression(target)) {
-    for (const property of target.properties) {
-      if (ts.isShorthandPropertyAssignment(property)) {
-        bucket.add(property.name.text);
-      } else if (ts.isPropertyAssignment(property)) {
-        addAssignmentTargets(property.initializer, bucket);
-      }
-    }
-    return;
-  }
-
-  if (ts.isArrayLiteralExpression(target)) {
-    for (const element of target.elements) {
-      if (ts.isSpreadElement(element)) continue;
-      addAssignmentTargets(element, bucket);
-    }
-  }
-}
-
-function collectOpaqueRootsFromBody(
-  body: ts.ConciseBody,
-  initialRoots: ReadonlySet<string>,
-  context: TransformationContext,
-): Set<string> {
-  const roots = new Set(initialRoots);
-
-  const visit = (node: ts.Node): void => {
-    if (ts.isFunctionLike(node) && node !== body) {
-      // Nested callbacks own their own origin tracking.
-      return;
-    }
-
-    if (ts.isVariableDeclaration(node)) {
-      if (
-        node.initializer &&
-        isOpaqueSourceExpression(node.initializer, roots, context)
-      ) {
-        addBindingTargets(node.name, roots);
-      }
-    }
-
-    if (
-      ts.isBinaryExpression(node) &&
-      node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
-      isOpaqueSourceExpression(node.right, roots, context)
-    ) {
-      addAssignmentTargets(node.left, roots);
-    }
-
-    ts.forEachChild(node, visit);
-  };
-
-  if (ts.isBlock(body)) {
-    for (const statement of body.statements) {
-      visit(statement);
-    }
-  } else {
-    visit(body);
-  }
-
-  return roots;
 }
 
 function reportOptionalError(
@@ -767,11 +714,55 @@ function reportOptionalError(
 function rewritePatternBody(
   body: ts.ConciseBody,
   opaqueRoots: Set<string>,
+  opaqueRootSymbols: Set<ts.Symbol>,
   context: TransformationContext,
 ): ts.ConciseBody {
-  if (opaqueRoots.size === 0) {
+  if (opaqueRoots.size === 0 && opaqueRootSymbols.size === 0) {
     return body;
   }
+
+  const activeOpaqueRoots = new Set(opaqueRoots);
+  const scopeStack: Map<string, boolean>[] = [];
+
+  const enterScope = (): void => {
+    scopeStack.push(new Map<string, boolean>());
+  };
+
+  const exitScope = (): void => {
+    const scope = scopeStack.pop();
+    if (!scope) return;
+    for (const [name, wasOpaque] of scope) {
+      if (wasOpaque) {
+        activeOpaqueRoots.add(name);
+      } else {
+        activeOpaqueRoots.delete(name);
+      }
+    }
+  };
+
+  const setBindingOpaqueState = (
+    binding: ts.BindingName,
+    isOpaque: boolean,
+  ): void => {
+    const currentScope = scopeStack[scopeStack.length - 1];
+
+    if (ts.isIdentifier(binding)) {
+      if (currentScope && !currentScope.has(binding.text)) {
+        currentScope.set(binding.text, activeOpaqueRoots.has(binding.text));
+      }
+      if (isOpaque) {
+        activeOpaqueRoots.add(binding.text);
+      } else {
+        activeOpaqueRoots.delete(binding.text);
+      }
+      return;
+    }
+
+    for (const element of binding.elements) {
+      if (ts.isOmittedExpression(element)) continue;
+      setBindingOpaqueState(element.name, isOpaque);
+    }
+  };
 
   const diagnosticsSeen = new Set<number>();
   const reportOnce = (
@@ -796,14 +787,31 @@ function rewritePatternBody(
       }
     }
 
+    if (ts.isBlock(node) && node !== body) {
+      enterScope();
+      const rewritten = visitEachChildWithJsx(node, visit, context.tsContext);
+      exitScope();
+      return rewritten;
+    }
+
     const visited = visitEachChildWithJsx(node, visit, context.tsContext);
 
-    if (
-      ts.isVariableDeclaration(visited) &&
-      visited.initializer &&
-      isOpaqueSourceExpression(visited.initializer, opaqueRoots, context)
-    ) {
-      addBindingTargets(visited.name, opaqueRoots);
+    if (ts.isVariableDeclaration(visited)) {
+      const initializerIsOpaque = !!visited.initializer &&
+        isOpaqueSourceExpression(
+          visited.initializer,
+          activeOpaqueRoots,
+          opaqueRootSymbols,
+          context,
+        );
+      setBindingOpaqueState(visited.name, initializerIsOpaque);
+      if (initializerIsOpaque) {
+        addBindingTargetSymbols(
+          visited.name,
+          opaqueRootSymbols,
+          context.checker,
+        );
+      }
     }
 
     if (
@@ -812,7 +820,15 @@ function rewritePatternBody(
       isTopmostMemberAccess(visited)
     ) {
       const info = getAccessInfo(visited, context);
-      if (!info.root || !opaqueRoots.has(info.root)) {
+      if (
+        !info.root ||
+        !isOpaqueRootInfo(
+          info,
+          activeOpaqueRoots,
+          opaqueRootSymbols,
+          context,
+        )
+      ) {
         return visited;
       }
 
@@ -911,7 +927,14 @@ function rewritePatternBody(
     if (ts.isCallExpression(visited)) {
       if (visited.questionDotToken) {
         const info = getAccessInfo(visited.expression, context);
-        if (info.root && opaqueRoots.has(info.root)) {
+        if (
+          isOpaqueRootInfo(
+            info,
+            activeOpaqueRoots,
+            opaqueRootSymbols,
+            context,
+          )
+        ) {
           reportOnce(
             visited,
             "optional",
@@ -929,7 +952,14 @@ function rewritePatternBody(
         const firstArg = visited.arguments[0];
         if (firstArg) {
           const info = getAccessInfo(firstArg, context);
-          if (info.root && opaqueRoots.has(info.root)) {
+          if (
+            isOpaqueRootInfo(
+              info,
+              activeOpaqueRoots,
+              opaqueRootSymbols,
+              context,
+            )
+          ) {
             reportOnce(
               firstArg,
               "computation",
@@ -948,7 +978,14 @@ function rewritePatternBody(
         const firstArg = visited.arguments[0];
         if (firstArg) {
           const info = getAccessInfo(firstArg, context);
-          if (info.root && opaqueRoots.has(info.root)) {
+          if (
+            isOpaqueRootInfo(
+              info,
+              activeOpaqueRoots,
+              opaqueRootSymbols,
+              context,
+            )
+          ) {
             reportOnce(
               firstArg,
               "computation",
@@ -961,7 +998,14 @@ function rewritePatternBody(
 
     if (ts.isSpreadElement(visited) || ts.isSpreadAssignment(visited)) {
       const info = getAccessInfo(visited.expression, context);
-      if (info.root && opaqueRoots.has(info.root)) {
+      if (
+        isOpaqueRootInfo(
+          info,
+          activeOpaqueRoots,
+          opaqueRootSymbols,
+          context,
+        )
+      ) {
         reportOnce(
           visited,
           "computation",
@@ -972,7 +1016,14 @@ function rewritePatternBody(
 
     if (ts.isForInStatement(visited)) {
       const info = getAccessInfo(visited.expression, context);
-      if (info.root && opaqueRoots.has(info.root)) {
+      if (
+        isOpaqueRootInfo(
+          info,
+          activeOpaqueRoots,
+          opaqueRootSymbols,
+          context,
+        )
+      ) {
         reportOnce(
           visited.expression,
           "computation",
@@ -984,11 +1035,20 @@ function rewritePatternBody(
     return visited;
   };
 
+  enterScope();
   if (ts.isBlock(body)) {
-    return visitEachChildWithJsx(body, visit, context.tsContext) as ts.Block;
+    const rewrittenBody = visitEachChildWithJsx(
+      body,
+      visit,
+      context.tsContext,
+    ) as ts.Block;
+    exitScope();
+    return rewrittenBody;
   }
 
-  return visit(body) as ts.Expression;
+  const rewrittenExpr = visit(body) as ts.Expression;
+  exitScope();
+  return rewrittenExpr;
 }
 
 function transformPatternCallback(
@@ -998,6 +1058,7 @@ function transformPatternCallback(
   const factory = context.factory;
   const firstParam = callback.parameters[0];
   const opaqueRoots = new Set<string>();
+  const opaqueRootSymbols = new Set<ts.Symbol>();
   const diagnostics: string[] = [];
   const extractedDefaults: DefaultDestructureBinding[] = [];
   let hasUnsupportedDestructuring = false;
@@ -1009,6 +1070,10 @@ function transformPatternCallback(
   if (firstParam) {
     if (ts.isIdentifier(firstParam.name)) {
       opaqueRoots.add(firstParam.name.text);
+      const symbol = context.checker.getSymbolAtLocation(firstParam.name);
+      if (symbol) {
+        opaqueRootSymbols.add(symbol);
+      }
       summaryParamName = firstParam.name.text;
     } else if (
       ts.isObjectBindingPattern(firstParam.name) ||
@@ -1032,6 +1097,15 @@ function transformPatternCallback(
 
       const inputIdentifier = factory.createIdentifier("__ct_pattern_input");
       opaqueRoots.add(inputIdentifier.text);
+      const inputSymbol = context.checker.getSymbolAtLocation(firstParam.name);
+      if (inputSymbol) {
+        opaqueRootSymbols.add(inputSymbol);
+      }
+      addBindingTargetSymbols(
+        firstParam.name,
+        opaqueRootSymbols,
+        context.checker,
+      );
 
       const rewrittenFirstParam = factory.updateParameterDeclaration(
         firstParam,
@@ -1110,15 +1184,7 @@ function transformPatternCallback(
   }
 
   let body: ts.ConciseBody = callback.body;
-  const expandedOpaqueRoots = collectOpaqueRootsFromBody(
-    body,
-    opaqueRoots,
-    context,
-  );
-  for (const root of expandedOpaqueRoots) {
-    opaqueRoots.add(root);
-  }
-  body = rewritePatternBody(body, opaqueRoots, context);
+  body = rewritePatternBody(body, opaqueRoots, opaqueRootSymbols, context);
 
   if (prologue.length > 0) {
     if (ts.isBlock(body)) {

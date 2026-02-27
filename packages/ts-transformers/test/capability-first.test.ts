@@ -58,6 +58,51 @@ const p = pattern(({ list }: { list: string[] }) => <div>{[0, 1].forEach(() => l
 );
 
 Deno.test(
+  "Capability-first: nested block shadowing does not leak opaque alias roots",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern } from "commontools";
+const p = pattern((input: { user: { name: string }; value: { foo: number } }) => {
+  const value = { foo: 1 };
+  {
+    const value = input.user;
+    void value.name;
+  }
+  return <div>{value.foo}</div>;
+});
+`;
+
+    const output = await transformSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+    });
+
+    assertStringIncludes(output, 'const value = input.key("user");');
+    assertStringIncludes(output, "return <div>{value.foo}</div>;");
+    assert(!output.includes('value.key("foo")'));
+  },
+);
+
+Deno.test(
+  "Capability-first: plain callback parameter map is not rewritten in pattern",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern } from "commontools";
+const p = pattern((input: { ok: boolean }) => {
+  const out = ((arr: number[]) => arr.map((x) => x + 1))([1, 2]);
+  return <div>{out.length}</div>;
+});
+`;
+
+    const output = await transformSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+    });
+
+    assertStringIncludes(output, "arr.map((x) => x + 1)");
+    assert(!output.includes(".mapWithPattern("));
+  },
+);
+
+Deno.test(
   "Capability-first: pattern JSX map still rewrites after prior JSX lowering",
   async () => {
     const source = `/// <cts-enable />

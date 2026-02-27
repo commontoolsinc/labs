@@ -381,6 +381,66 @@ function isIdentifierBoundInPatternCallback(
   return false;
 }
 
+function isPatternOwnedParameterDeclaration(
+  declaration: ts.ParameterDeclaration,
+  context: TransformationContext,
+): boolean {
+  const owner = declaration.parent;
+  if (
+    !owner || (!ts.isArrowFunction(owner) && !ts.isFunctionExpression(owner))
+  ) {
+    return false;
+  }
+  if (!isPatternBuilderCallback(owner, context)) {
+    return false;
+  }
+  return owner.parameters[0] === declaration;
+}
+
+function isReactiveCollectionCallbackParameter(
+  declaration: ts.ParameterDeclaration,
+  context: TransformationContext,
+): boolean {
+  const owner = declaration.parent;
+  if (
+    !owner || (!ts.isArrowFunction(owner) && !ts.isFunctionExpression(owner))
+  ) {
+    return false;
+  }
+
+  const call = owner.parent;
+  if (!call || !ts.isCallExpression(call) || !call.arguments.includes(owner)) {
+    return false;
+  }
+
+  if (!ts.isPropertyAccessExpression(call.expression)) {
+    return false;
+  }
+
+  const methodName = call.expression.name.text;
+  if (methodName !== "map" && methodName !== "mapWithPattern") {
+    return false;
+  }
+
+  return isReactiveMapOrigin(call.expression.expression, context);
+}
+
+function getOwningParameterDeclaration(
+  declaration: ts.BindingElement,
+): ts.ParameterDeclaration | undefined {
+  let current: ts.Node | undefined = declaration.parent;
+  while (current) {
+    if (ts.isParameter(current)) {
+      return current;
+    }
+    if (ts.isSourceFile(current)) {
+      return undefined;
+    }
+    current = current.parent;
+  }
+  return undefined;
+}
+
 function isReactiveMapOrigin(
   expression: ts.Expression,
   context: TransformationContext,
@@ -455,19 +515,25 @@ function isReactiveMapOrigin(
 
   for (const declaration of symbol.declarations ?? []) {
     if (ts.isParameter(declaration)) {
-      return true;
+      if (
+        isPatternOwnedParameterDeclaration(declaration, context) ||
+        isReactiveCollectionCallbackParameter(declaration, context)
+      ) {
+        return true;
+      }
+      continue;
     }
 
     if (ts.isBindingElement(declaration)) {
-      let current: ts.Node | undefined = declaration.parent;
-      while (current) {
-        if (ts.isParameter(current)) {
-          return true;
-        }
-        if (ts.isSourceFile(current)) {
-          break;
-        }
-        current = current.parent;
+      const parameter = getOwningParameterDeclaration(declaration);
+      if (
+        parameter &&
+        (
+          isPatternOwnedParameterDeclaration(parameter, context) ||
+          isReactiveCollectionCallbackParameter(parameter, context)
+        )
+      ) {
+        return true;
       }
     }
 
