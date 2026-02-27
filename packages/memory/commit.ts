@@ -10,7 +10,7 @@ import type {
 } from "./interface.ts";
 import type { ContentId } from "./reference.ts";
 import { assert } from "./fact.ts";
-import { fromString } from "merkle-reference";
+import { fromString } from "./reference.ts";
 
 export const COMMIT_LOG_TYPE = "application/commit+json" as const;
 export const create = <Space extends MemorySpace>({
