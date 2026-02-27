@@ -5,6 +5,19 @@ import type {
   ReactiveCapability,
 } from "../core/mod.ts";
 
+type CapabilityAnalyzableFunction =
+  | ts.ArrowFunction
+  | ts.FunctionExpression
+  | ts.FunctionDeclaration
+  | ts.MethodDeclaration;
+
+export interface CapabilityAnalysisOptions {
+  readonly checker?: ts.TypeChecker;
+  readonly interprocedural?: boolean;
+  readonly summaryCache?: WeakMap<ts.Node, FunctionCapabilitySummary>;
+  readonly inProgress?: WeakSet<ts.Node>;
+}
+
 interface MutableCapabilityState {
   readonly reads: Set<string>;
   readonly writes: Set<string>;
@@ -48,6 +61,19 @@ const ASSIGNMENT_OPERATORS = new Set<ts.SyntaxKind>([
   ts.SyntaxKind.QuestionQuestionEqualsToken,
   ts.SyntaxKind.CaretEqualsToken,
 ]);
+
+function isCapabilityAnalyzableFunction(
+  node: ts.Node | undefined,
+): node is CapabilityAnalyzableFunction {
+  return !!node &&
+    (
+      ts.isArrowFunction(node) ||
+      ts.isFunctionExpression(node) ||
+      ts.isFunctionDeclaration(node) ||
+      ts.isMethodDeclaration(node)
+    ) &&
+    !!node.body;
+}
 
 function encodePath(path: readonly string[]): string {
   return path.join(".");
@@ -372,8 +398,30 @@ function toCapability(state: MutableCapabilityState): ReactiveCapability {
 }
 
 export function analyzeFunctionCapabilities(
-  fn: ts.ArrowFunction | ts.FunctionExpression,
+  fn: CapabilityAnalyzableFunction,
+  options?: CapabilityAnalysisOptions,
 ): FunctionCapabilitySummary {
+  const summaryCache = options?.summaryCache ?? new WeakMap();
+  const inProgress = options?.inProgress ?? new WeakSet();
+  const cached = summaryCache.get(fn);
+  if (cached) {
+    return cached;
+  }
+  if (inProgress.has(fn)) {
+    return { params: [] };
+  }
+  inProgress.add(fn);
+
+  const checker = options?.checker;
+  const interprocedural = !!options?.interprocedural && !!checker;
+
+  if (!fn.body) {
+    const empty = { params: [] };
+    summaryCache.set(fn, empty);
+    inProgress.delete(fn);
+    return empty;
+  }
+
   const states = new Map<string, MutableCapabilityState>();
   const aliases = new Map<string, SourceRef>();
   const parameterStateKeys: string[] = [];
@@ -438,7 +486,10 @@ export function analyzeFunctionCapabilities(
   }
 
   if (parameterStateKeys.length === 0) {
-    return { params: [] };
+    const empty = { params: [] };
+    summaryCache.set(fn, empty);
+    inProgress.delete(fn);
+    return empty;
   }
 
   const resolveFromAccess = (
@@ -675,6 +726,25 @@ export function analyzeFunctionCapabilities(
     marker(ref.root, ref.path);
   };
 
+  const resolveInterproceduralSummary = (
+    call: ts.CallExpression,
+  ): FunctionCapabilitySummary | undefined => {
+    if (!interprocedural || !checker) return undefined;
+    const signature = checker.getResolvedSignature(call);
+    if (!signature) return undefined;
+    const declaration = signature.declaration;
+    if (!isCapabilityAnalyzableFunction(declaration)) {
+      return undefined;
+    }
+
+    return analyzeFunctionCapabilities(declaration, {
+      checker,
+      interprocedural: true,
+      summaryCache,
+      inProgress,
+    });
+  };
+
   const visit = (node: ts.Node): void => {
     if (
       ts.isBinaryExpression(node) &&
@@ -789,6 +859,40 @@ export function analyzeFunctionCapabilities(
     }
 
     if (ts.isCallExpression(node)) {
+      const interproceduralHandledArgs = new Set<number>();
+      const calleeSummary = resolveInterproceduralSummary(node);
+      if (calleeSummary) {
+        const count = Math.min(
+          calleeSummary.params.length,
+          node.arguments.length,
+        );
+        for (let index = 0; index < count; index++) {
+          const paramSummary = calleeSummary.params[index];
+          const argument = node.arguments[index];
+          if (!paramSummary || !argument) continue;
+
+          const source = resolveSourceRef(argument);
+          if (!source) continue;
+          interproceduralHandledArgs.add(index);
+
+          if (source.dynamic || paramSummary.wildcard) {
+            markWildcard(source.root);
+            continue;
+          }
+
+          for (const readPath of paramSummary.readPaths) {
+            trackRead(source.root, [...source.path, ...readPath]);
+          }
+          for (const writePath of paramSummary.writePaths) {
+            trackWrite(source.root, [...source.path, ...writePath]);
+          }
+
+          if (paramSummary.passthrough && source.path.length === 0) {
+            markPassthrough(source.root);
+          }
+        }
+      }
+
       // Optional-call forms are non-lowerable; treat as wildcard usage.
       if (node.questionDotToken && ts.isExpression(node.expression)) {
         const source = resolveSourceRef(node.expression);
@@ -819,7 +923,12 @@ export function analyzeFunctionCapabilities(
 
       // Passing a tracked root object into an opaque helper can conceal
       // indirect traversal/mutation; conservatively disable shrinking.
-      for (const argument of node.arguments) {
+      for (let index = 0; index < node.arguments.length; index++) {
+        if (interproceduralHandledArgs.has(index)) {
+          continue;
+        }
+        const argument = node.arguments[index];
+        if (!argument) continue;
         const unwrappedArgument = unwrapExpression(argument);
         if (!ts.isIdentifier(unwrappedArgument)) continue;
         const source = resolveSourceRef(unwrappedArgument);
@@ -915,5 +1024,8 @@ export function analyzeFunctionCapabilities(
     });
   }
 
-  return { params };
+  const result = { params };
+  summaryCache.set(fn, result);
+  inProgress.delete(fn);
+  return result;
 }

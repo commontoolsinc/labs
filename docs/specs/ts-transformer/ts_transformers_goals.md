@@ -158,6 +158,13 @@ When usage evidence permits, emitted boundary types/schemas should mention only
 the object paths actually read or written. Unknown-dynamic or wildcard
 operations should conservatively fall back to broader shape.
 
+Context-specific propagation rule:
+
+1. Pattern context shrinks from direct local usage at that boundary
+   (non-transitive by design).
+2. Compute context may require transitive/interprocedural propagation so helper
+   calls can contribute required capability.
+
 ## G-013 Destructured Parameter Compatibility Under Key-Based Access
 
 Common authored forms like `pattern(({ foo, bar }) => ...)` must remain valid.
@@ -268,6 +275,15 @@ In pattern-style contexts, authored expressions are valid only if they can be
 lowered to opaque/key/capability-respecting operations. Non-lowerable constructs
 must produce clear diagnostics with compute-context alternatives.
 
+## C-011 Context-Specific Capability Propagation
+
+Capability propagation is intentionally asymmetric:
+
+1. Pattern-context boundary signatures are direct/local only and must not widen
+   from helper-callee reads.
+2. Compute-context boundary signatures may widen via interprocedural summaries
+   so forwarded values are typed by effective downstream usage.
+
 ## 7. Success Criteria
 
 We are meeting goals when:
@@ -288,6 +304,9 @@ We are meeting goals when:
    stable receiver-plus-`key(...)` lowered output with equivalent behavior
 10. pattern-context diagnostics in fixtures align with lowerability outcomes,
     without dependency on a separate heuristic-only validator path
+11. propagation fixtures show pattern-context signature isolation (caller does
+    not inherit callee reads) and compute-context transitive widening where
+    enabled
 
 ## 8. Policy For Future Changes
 

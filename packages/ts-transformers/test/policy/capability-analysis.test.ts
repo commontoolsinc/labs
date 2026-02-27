@@ -31,6 +31,76 @@ function parseFirstCallback(
   return callback;
 }
 
+function createProgramWithSource(source: string): {
+  program: ts.Program;
+  sourceFile: ts.SourceFile;
+} {
+  const fileName = "/test.ts";
+  const options: ts.CompilerOptions = {
+    target: ts.ScriptTarget.ESNext,
+    module: ts.ModuleKind.ESNext,
+    strict: true,
+    noLib: true,
+  };
+
+  const host: ts.CompilerHost = {
+    fileExists: (name) => name === fileName,
+    readFile: (name) => (name === fileName ? source : undefined),
+    directoryExists: () => true,
+    getDirectories: () => [],
+    getCanonicalFileName: (name) => name,
+    getCurrentDirectory: () => "/",
+    getNewLine: () => "\n",
+    getDefaultLibFileName: () => "lib.d.ts",
+    useCaseSensitiveFileNames: () => true,
+    writeFile: () => {},
+    getSourceFile: (name, languageVersion) =>
+      name === fileName
+        ? ts.createSourceFile(
+          fileName,
+          source,
+          languageVersion,
+          true,
+          ts.ScriptKind.TS,
+        )
+        : undefined,
+  };
+
+  const program = ts.createProgram([fileName], options, host);
+  const sourceFile = program.getSourceFile(fileName);
+  if (!sourceFile) {
+    throw new Error("Expected source file in program.");
+  }
+  return { program, sourceFile };
+}
+
+function findArrowByVariableName(
+  sourceFile: ts.SourceFile,
+  variableName: string,
+): ts.ArrowFunction {
+  let callback: ts.ArrowFunction | undefined;
+  const visit = (node: ts.Node): void => {
+    if (callback) return;
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.name.text === variableName &&
+      node.initializer &&
+      ts.isArrowFunction(node.initializer)
+    ) {
+      callback = node.initializer;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+
+  if (!callback) {
+    throw new Error(`Expected arrow function variable '${variableName}'.`);
+  }
+  return callback;
+}
+
 function getPaths(
   summary: ReturnType<typeof analyzeFunctionCapabilities>,
   name: string,
@@ -215,5 +285,44 @@ Deno.test(
     assertEquals(input.wildcard, false);
     assertEquals(input.readPaths.length, 0);
     assertEquals(input.writePaths.length, 0);
+  },
+);
+
+Deno.test(
+  "Capability analysis interprocedural propagation tracks callee reads in compute mode",
+  () => {
+    const source = `const helper = (value) => value.foo;
+const fn = (input) => helper(input);`;
+    const { program, sourceFile } = createProgramWithSource(source);
+    const checker = program.getTypeChecker();
+    const fn = findArrowByVariableName(sourceFile, "fn");
+
+    const summary = analyzeFunctionCapabilities(fn, {
+      checker,
+      interprocedural: true,
+    });
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.capability, "readonly");
+    assertEquals(input.wildcard, false);
+    assert(input.readPaths.includes("foo"));
+  },
+);
+
+Deno.test(
+  "Capability analysis without interprocedural propagation keeps conservative wildcard",
+  () => {
+    const source = `const helper = (value) => value.foo;
+const fn = (input) => helper(input);`;
+    const { sourceFile } = createProgramWithSource(source);
+    const fn = findArrowByVariableName(sourceFile, "fn");
+
+    const summary = analyzeFunctionCapabilities(fn);
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.capability, "opaque");
+    assertEquals(input.passthrough, true);
+    assertEquals(input.wildcard, true);
+    assertEquals(input.readPaths.length, 0);
   },
 );

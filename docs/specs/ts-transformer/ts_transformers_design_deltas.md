@@ -1,17 +1,37 @@
 # TS Transformers Design Deltas
 
-**Status:** Proposed (not yet implemented)  
-**Date:** February 24, 2026  
+**Status:** Partially implemented (status snapshot)  
+**Date:** February 27, 2026  
 **Companion:** `docs/specs/ts-transformer/ts_transformers_current_behavior_spec.md`
 
 ## Purpose
 
-Track intentional behavior deltas we want relative to current implementation,
-and the principles that should constrain future transformer changes.
+Track intentional behavior deltas, what has landed, and what remains relative to
+the current implementation.
 
-This document is a proposal backlog, not a statement of current behavior.
+This document is a mixed roadmap/status artifact. It includes both landed
+behavior and open follow-up work.
 
 ## Delta Backlog
+
+## Implementation Snapshot (February 27, 2026)
+
+- Landed:
+  - `useLegacyOpaqueRefSemantics` option with capability-first default
+  - unified context classifier (`pattern` / `compute` / `neutral`)
+  - deterministic JSX logical lowering policy (`&&` / `||`) by context
+  - `.map` rewrite matrix by `{context, receiverKind}`
+  - pattern callback canonicalization and `key(...)` lowering
+  - capability analysis with path/capability shrinking at schema boundaries
+  - additive wrapper support for `ReadonlyCell` / `WriteonlyCell` / `OpaqueCell`
+- Partially landed:
+  - diagnostics migration (legacy codes preserved; some legacy validation remains)
+  - legacy cleanup and helper deprecation
+  - compute-context interprocedural capability summaries (MVP scope)
+- Open:
+  - standalone-function `.map` policy finalization
+  - collection-method generalization beyond `.map` (`.filter`, etc.)
+  - default-initializer lowering to schema defaults
 
 ## D-001 Rename Context Terms (`safe` -> `compute` / `pattern`)
 
@@ -111,6 +131,11 @@ to runtime contract support).
   propagated origins.
 - Treat pattern inputs and outputs of `lift(...)` / `pattern(...)` inside
   patterns as origin sources, then follow aliases/reassignments/destructuring.
+- Apply context-specific propagation rules:
+  - In pattern context, boundary signatures are intentionally based on
+    directly-observed local reads/writes at that boundary.
+  - In compute context, forwarded values should eventually use
+    interprocedural summaries so helper calls contribute to required capability.
 - Summarize actual usage at boundaries:
   - read-only -> `ReadonlyCell<T>`
   - write-only -> `WriteonlyCell<T>`
@@ -171,6 +196,11 @@ to runtime contract support).
 11. Pattern-context diagnostics are emitted when an expression/use-site cannot be
     represented under opaque/key lowering rules, rather than by separate legacy
     heuristic checks.
+12. Pattern-context boundary signatures do not widen from helper-callee reads
+    (`g(input) { return f(input); }` does not inherit read paths observed in
+    `f`).
+13. Compute-context boundary summaries are allowed to widen from helper-callee
+    reads/writes when interprocedural summaries are enabled.
 
 ## Principles
 
@@ -431,6 +461,8 @@ is "valid per validator" but not lowerable, or vice versa.
 
 ## Phase 0: Lock Baseline And Prepare Rollout
 
+**Status:** Landed
+
 1. Add explicit characterization tests for current `.map` nested behavior and
    logical lowering behavior.
 2. Add a transformer option gate for new policy path (for example
@@ -440,6 +472,8 @@ is "valid per validator" but not lowerable, or vice versa.
 
 ## Phase 1: Terminology Migration (Low-Risk)
 
+**Status:** Partially landed
+
 1. Update docs and diagnostics from “safe” to “compute/pattern” terms.
 2. Keep existing function names internally if needed, but update user-facing
    text immediately.
@@ -448,6 +482,8 @@ is "valid per validator" but not lowerable, or vice versa.
 diagnostics.
 
 ## Phase 2: Context Classifier Introduction
+
+**Status:** Landed
 
 1. Implement `getReactiveContextInfo(node, checker)`.
 2. Re-implement old helpers as wrappers over the new classifier to preserve
@@ -460,6 +496,8 @@ compatibility shims.
 
 ## Phase 3: Logical Operator Policy Rewrite
 
+**Status:** Landed
+
 1. Implement `shouldLowerLogicalInJsx`.
 2. Refactor `emitBinaryExpression` to use policy matrix (remove expensive-RHS
    gating for policy-controlled paths).
@@ -469,6 +507,8 @@ compatibility shims.
 heuristics.
 
 ## Phase 4: `.map` Policy Simplification
+
+**Status:** Landed (with standalone-function follow-up)
 
 1. Implement `classifyReceiverKind`.
 2. Refactor `shouldTransformMap` in `map-strategy.ts` to policy-driven form:
@@ -483,6 +523,8 @@ heuristics.
 
 ## Phase 5: Collection Method Generalization Scaffold
 
+**Status:** Open
+
 1. Introduce collection-method strategy abstraction with `map` as first method.
 2. Define placeholder policy entries for future operators without enabling
    runtime behavior yet.
@@ -491,6 +533,8 @@ heuristics.
 logic.
 
 ## Phase 6: Cleanup
+
+**Status:** Partially landed
 
 1. Remove superseded heuristic branches.
 2. Delete or deprecate old context helper names once all consumers migrate.
@@ -502,12 +546,16 @@ logic.
 
 ## Phase D0: Guardrails And Instrumentation
 
+**Status:** Landed
+
 1. Add feature gate (`capabilityDataflowV1`) and fixture split for old/new path.
 2. Add characterization tests for tricky nested cases and current boundary types.
 
 **Exit criteria:** dual-path test harness in place with stable baseline.
 
 ## Phase D1: Origin Tagging
+
+**Status:** Landed (intraprocedural)
 
 1. Tag analysis origins from:
    - pattern/lift/derive/handler/action callback parameters
@@ -520,6 +568,8 @@ logic.
 
 ## Phase D2: Local Alias/Reassignment Flow Graph
 
+**Status:** Landed
+
 1. Implement statement-level local flow tracking for:
    - direct assignment/reassignment
    - object/array destructuring
@@ -531,6 +581,8 @@ logic.
 **Exit criteria:** alias lineage is available for capability summarization.
 
 ## Phase D3: Operation Classification
+
+**Status:** Landed
 
 1. Classify operations per origin/path:
    - reads (`get`, comparisons, arithmetic, branch predicates, template use)
@@ -545,6 +597,8 @@ logic.
 
 ## Phase D4: Boundary Capability And Shape Shrinking
 
+**Status:** Landed
+
 1. Produce boundary summaries:
    - `OpaqueCell` / `ReadonlyCell` / `WriteonlyCell` / `Cell`
    - used path tree + wildcard flags
@@ -555,6 +609,8 @@ capability for covered fixtures.
 
 ## Phase D5: Policy Integration For Operator Rewrites
 
+**Status:** Partially landed
+
 1. Replace map/logical receiver classification inputs with capability summaries.
 2. Remove remaining `OpaqueRef`-specific heuristic branches where superseded.
 3. Start routing pattern-context validation diagnostics through lowering
@@ -563,6 +619,8 @@ capability for covered fixtures.
 **Exit criteria:** operator rewrite matrix decisions are capability-backed.
 
 ## Phase D6: Opaque Path Navigation Lowering
+
+**Status:** Landed
 
 1. Lower `foo.bar.baz` and optional-chain path navigation to `foo.key(...)`
    when receiver summary is `OpaqueCell`.
@@ -574,15 +632,33 @@ capability for covered fixtures.
 **Exit criteria:** snapshot parity for supported forms and explicit handling of
 unsupported optional-call cases.
 
-## Phase D7: Interprocedural Summaries (Selective)
+## Phase D7: Interprocedural Summaries (Compute Context Focus)
 
-1. Emit compact summaries for `lift`/`pattern` outputs used within same module.
-2. Reuse summaries at call sites to avoid recomputation and improve precision.
+**Status:** Partially landed
 
-**Exit criteria:** improved shrinking precision in nested helper pipelines
-without major compile-time regression.
+Implemented in current MVP:
+
+1. Compute-context capability analysis reuses callee summaries through resolved
+   function signatures with concrete function bodies.
+2. Transitive read/write paths from helper callees propagate to caller compute
+   boundaries.
+3. Pattern-context signature shrinking remains direct/local by design (no
+   helper-driven widening).
+
+Remaining work:
+
+1. Expand/clarify interprocedural scope boundaries (for example unsupported
+   declaration forms and cross-module behavior expectations).
+2. Add dedicated fixture matrix for interprocedural edge cases and recursion
+   boundaries.
+
+**Exit criteria:** compute-context boundaries gain transitive precision across
+supported helper calls, while pattern-context boundaries preserve
+direct-read-only signature semantics, without major compile-time regression.
 
 ## Phase D8: Default-On And Legacy Cleanup
+
+**Status:** Partially landed
 
 1. Flip `capabilityDataflowV1` to default after stabilization window.
 2. Remove legacy branches tied to old `OpaqueRef` heuristics.
@@ -604,8 +680,9 @@ without major compile-time regression.
    dual-path migration window?
 5. For path shrinking, which operations should immediately force wildcard shape
    fallback vs allow partial precision?
-6. Do we require interprocedural summaries before enabling capability shrinking
-   by default, or can local-only analysis ship first?
+6. For compute context, what interprocedural scope is required in MVP
+   (same-module direct calls only vs broader), given pattern-context signatures
+   are intentionally direct/local?
 7. Should static destructuring default initializers be lowered into emitted
    schema defaults (for example, `{ foo = "x" }` -> default on `foo`) rather
    than rejected as non-lowerable?

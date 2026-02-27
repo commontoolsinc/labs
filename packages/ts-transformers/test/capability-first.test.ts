@@ -567,6 +567,53 @@ const fn = lift((input: Writable<{ foo: string; bar: string }>) => input);
 );
 
 Deno.test(
+  "Capability-first: compute callback inherits callee read paths interprocedurally",
+  async () => {
+    const source = `/// <cts-enable />
+import { lift, type Writable } from "commontools";
+
+const helper = (value: Writable<{ foo: string; bar: string }>) =>
+  value.key("foo").get();
+
+const fn = lift((input: Writable<{ foo: string; bar: string }>) => helper(input));
+`;
+
+    const output = await transformSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, "asCell: true");
+    assertStringIncludes(output, '"foo"');
+    assert(!output.includes('"bar"'));
+    assert(!output.includes("asOpaque: true"));
+  },
+);
+
+Deno.test(
+  "Capability-first: pattern callback keeps direct local signature semantics",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern, type Writable } from "commontools";
+
+const helper = (value: Writable<{ foo: string; bar: string }>) =>
+  value.key("foo").get();
+
+const p = pattern((input: Writable<{ foo: string; bar: string }>) => helper(input));
+`;
+
+    const output = await transformSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, "asOpaque: true");
+    assertStringIncludes(output, '"foo"');
+    assertStringIncludes(output, '"bar"');
+  },
+);
+
+Deno.test(
   "Capability-first: lift write-only usage shrinks wrapped input paths",
   async () => {
     const source = `/// <cts-enable />

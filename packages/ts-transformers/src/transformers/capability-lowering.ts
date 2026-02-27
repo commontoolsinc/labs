@@ -403,10 +403,17 @@ function isPatternBuilderCall(
 function registerCapabilitySummary(
   callback: ts.ArrowFunction | ts.FunctionExpression,
   context: TransformationContext,
+  interprocedural: boolean,
 ): void {
   const registry = context.options.capabilitySummaryRegistry;
   if (!registry) return;
-  registry.set(callback, analyzeFunctionCapabilities(callback));
+  registry.set(
+    callback,
+    analyzeFunctionCapabilities(callback, {
+      checker: context.checker,
+      interprocedural,
+    }),
+  );
 }
 
 function reportComputationError(
@@ -894,7 +901,7 @@ function transformPatternCallback(
   // Keep authored callback parameter bindings intact when we already know
   // lowering is non-lowerable. This avoids generating unbound identifiers.
   if (hasUnsupportedDestructuring) {
-    registerCapabilitySummary(callback, context);
+    registerCapabilitySummary(callback, context, false);
     return callback;
   }
 
@@ -930,7 +937,7 @@ function transformPatternCallback(
       callback.equalsGreaterThanToken,
       body,
     );
-    registerCapabilitySummary(transformed, context);
+    registerCapabilitySummary(transformed, context, false);
     return transformed;
   }
 
@@ -944,7 +951,7 @@ function transformPatternCallback(
     callback.type,
     body as ts.Block,
   );
-  registerCapabilitySummary(transformed, context);
+  registerCapabilitySummary(transformed, context, false);
   return transformed;
 }
 
@@ -957,7 +964,7 @@ function maybeRegisterBuilderCapabilitySummary(
 
   const registerFrom = (arg: ts.Expression | undefined): void => {
     if (!arg || !isFunctionLikeExpression(arg)) return;
-    registerCapabilitySummary(arg, context);
+    registerCapabilitySummary(arg, context, true);
   };
 
   if (callKind.kind === "derive") {
