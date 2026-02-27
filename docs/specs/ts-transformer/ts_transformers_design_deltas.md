@@ -24,6 +24,7 @@ behavior and open follow-up work.
   - pattern callback canonicalization and `key(...)` lowering
   - capability analysis with path/capability shrinking at schema boundaries
   - additive wrapper support for `ReadonlyCell` / `WriteonlyCell` / `OpaqueCell`
+  - static destructuring default initializer lowering to schema defaults
 - Partially landed:
   - diagnostics migration (legacy codes preserved; some legacy validation remains)
   - legacy cleanup and helper deprecation
@@ -31,7 +32,7 @@ behavior and open follow-up work.
 - Open:
   - standalone-function `.map` policy finalization
   - collection-method generalization beyond `.map` (`.filter`, etc.)
-  - default-initializer lowering to schema defaults
+  - pattern-boundary shrink policy alignment (preserve schema/default continuity)
 
 ## D-001 Rename Context Terms (`safe` -> `compute` / `pattern`)
 
@@ -133,16 +134,21 @@ to runtime contract support).
   patterns as origin sources, then follow aliases/reassignments/destructuring.
 - Apply context-specific propagation rules:
   - In pattern context, boundary signatures are intentionally based on
-    directly-observed local reads/writes at that boundary.
+    directly-observed local usage for legality analysis, but emitted boundary
+    schemas keep broad shape/default continuity.
   - In compute context, forwarded values should eventually use
     interprocedural summaries so helper calls contribute to required capability.
-- Summarize actual usage at boundaries:
+- Summarize actual usage at compute-oriented boundaries:
   - read-only -> `ReadonlyCell<T>`
   - write-only -> `WriteonlyCell<T>`
   - read+write -> `Cell<T>` / `Writable<T>`
   - pass-through only -> `OpaqueCell<T>`
-- Shrink structural types to paths actually observed as read/written, with
-  conservative fallback to broader shape on unknown-dynamic operations.
+- Shrink structural types in compute context to paths actually observed as
+  read/written, with conservative fallback to broader shape on
+  unknown-dynamic operations.
+- Preserve broad pattern boundary shapes (including schema defaults) so links to
+  downstream `compute`/`handler`/`derive` code do not lose fields that are not
+  directly read in the outer pattern callback.
 - In pattern-style contexts, treat "lowerable to opaque/key semantics" as the
   primary legality criterion. Uses that cannot be lowered should produce
   diagnostics.
@@ -173,8 +179,9 @@ to runtime contract support).
 
 1. Rewrite decisions for collection and conditional operators can be explained
    from `{context, receiver capability summary}`, not `OpaqueRef` heuristics.
-2. Boundary schemas/types for pattern/lift/derive/handler inputs and outputs can
-   be shrunk to used paths when no wildcard operations are present.
+2. Boundary schemas/types for compute-oriented boundaries (`derive`, `lift`,
+   `handler`, compute-like callbacks) can be shrunk to used paths when no
+   wildcard operations are present.
 3. Wildcard/dynamic operations (`...obj`, `Object.keys`, `for..in`, unknown
    dynamic keys, serialization-like full traversal) conservatively disable path
    shrinking for affected roots.
@@ -196,10 +203,12 @@ to runtime contract support).
 11. Pattern-context diagnostics are emitted when an expression/use-site cannot be
     represented under opaque/key lowering rules, rather than by separate legacy
     heuristic checks.
-12. Pattern-context boundary signatures do not widen from helper-callee reads
+12. Pattern-context legality summaries do not widen from helper-callee reads
     (`g(input) { return f(input); }` does not inherit read paths observed in
     `f`).
-13. Compute-context boundary summaries are allowed to widen from helper-callee
+13. Pattern-context emitted schemas retain broad shape/defaults rather than
+    shrinking to local reads.
+14. Compute-context boundary summaries are allowed to widen from helper-callee
     reads/writes when interprocedural summaries are enabled.
 
 ## Principles
@@ -262,12 +271,14 @@ When disallowing expressions in pattern context, diagnostics should explain:
 ## P-009 Least Capability At Boundaries
 
 When a boundary type can be represented with less authority without losing
-needed behavior, prefer the least-capability representation.
+needed behavior, prefer the least-capability representation in compute-oriented
+contexts. Pattern boundaries prioritize opaque contract continuity.
 
 ## P-010 Path-Sensitive Precision, Conservative Fallback
 
-Use precise path-level shrinking when evidence is strong. When analysis is
-ambiguous, fall back to broader types/shapes rather than risking unsoundness.
+Use precise path-level shrinking when evidence is strong in compute context.
+When analysis is ambiguous, fall back to broader types/shapes rather than
+risking unsoundness.
 
 ## P-011 Pattern Legality Is Lowerability
 
@@ -275,6 +286,12 @@ In pattern context, if authored code can be lowered to explicit opaque/key
 operations, it is legal. If it cannot be lowered soundly, it should be rejected
 with diagnostics that explain the blocking construct and compute-context escape
 hatch.
+
+## P-012 Preserve Schema Continuity Across Pattern Boundaries
+
+Pattern boundaries should not prune schema/default shape based solely on local
+pattern reads. Downstream compute/handler links must continue to see expected
+fields/defaults unless an explicit author opt-in narrowing model is introduced.
 
 ## Candidate Implementation Touchpoints
 
@@ -642,8 +659,8 @@ Implemented in current MVP:
    function signatures with concrete function bodies.
 2. Transitive read/write paths from helper callees propagate to caller compute
    boundaries.
-3. Pattern-context signature shrinking remains direct/local by design (no
-   helper-driven widening).
+3. Pattern-context legality summaries remain direct/local (no helper-driven
+   widening).
 
 Remaining work:
 
@@ -651,10 +668,13 @@ Remaining work:
    declaration forms and cross-module behavior expectations).
 2. Add dedicated fixture matrix for interprocedural edge cases and recursion
    boundaries.
+3. Align emitted pattern boundary schema policy with continuity goals (avoid
+   local-read-based pruning of fields/defaults).
 
 **Exit criteria:** compute-context boundaries gain transitive precision across
-supported helper calls, while pattern-context boundaries preserve
-direct-read-only signature semantics, without major compile-time regression.
+supported helper calls, while pattern-context legality remains local-only and
+pattern boundary schemas preserve broad continuity, without major compile-time
+regression.
 
 ## Phase D8: Default-On And Legacy Cleanup
 
@@ -683,6 +703,5 @@ direct-read-only signature semantics, without major compile-time regression.
 6. For compute context, what interprocedural scope is required in MVP
    (same-module direct calls only vs broader), given pattern-context signatures
    are intentionally direct/local?
-7. Should static destructuring default initializers be lowered into emitted
-   schema defaults (for example, `{ foo = "x" }` -> default on `foo`) rather
-   than rejected as non-lowerable?
+7. Should pattern-boundary narrowing be entirely disabled by default, with a
+   future explicit opt-in if authors want aggressive boundary minimization?

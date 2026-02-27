@@ -141,29 +141,35 @@ Important callback rule for `.map`:
 
 ## G-011 Least-Capability Boundary Types
 
-Boundary types should reflect the minimum authority required by observed usage,
-not the maximum authority implied by broad source annotations or proxy-heavy
-type defaults.
+Boundary types should reflect the minimum authority required by observed usage
+where capability authority is semantically meaningful, while preserving opaque
+contract continuity where that matters more than local minimization.
 
-Target direction:
+Context-specific target direction:
 
-1. read-only usage -> `ReadonlyCell<T>`
-2. write-only usage -> `WriteonlyCell<T>`
-3. read+write usage -> `Cell<T>` / `Writable<T>`
-4. pass-through-only usage -> `OpaqueCell<T>`
+1. Pattern boundaries: default to opaque boundary contracts (`OpaqueCell<T>`)
+   so schema/default continuity is preserved across downstream links.
+2. Compute boundaries: use least-capability wrappers from observed usage:
+   read-only -> `ReadonlyCell<T>`, write-only -> `WriteonlyCell<T>`,
+   read+write -> `Cell<T>` / `Writable<T>`, pass-through-only -> `OpaqueCell<T>`.
 
 ## G-012 Path-Sensitive Type Shrinking
 
-When usage evidence permits, emitted boundary types/schemas should mention only
-the object paths actually read or written. Unknown-dynamic or wildcard
-operations should conservatively fall back to broader shape.
+Path-sensitive shrinking should be context-scoped, not global.
+
+1. Pattern boundaries should preserve broad declared/inferred schema shape
+   (including defaults) to maintain downstream compatibility.
+2. Compute boundaries should shrink to observed read/write paths when evidence
+   is strong.
+3. Unknown-dynamic or wildcard operations should conservatively fall back to
+   broader shape.
 
 Context-specific propagation rule:
 
-1. Pattern context shrinks from direct local usage at that boundary
-   (non-transitive by design).
+1. Pattern context keeps non-transitive analysis for legality diagnostics, but
+   does not use that local summary to prune boundary shape.
 2. Compute context may require transitive/interprocedural propagation so helper
-   calls can contribute required capability.
+   calls can contribute required capability and shrink decisions.
 
 ## G-013 Destructured Parameter Compatibility Under Key-Based Access
 
@@ -279,9 +285,11 @@ must produce clear diagnostics with compute-context alternatives.
 
 Capability propagation is intentionally asymmetric:
 
-1. Pattern-context boundary signatures are direct/local only and must not widen
-   from helper-callee reads.
-2. Compute-context boundary signatures may widen via interprocedural summaries
+1. Pattern-context legality analysis is direct/local and must not widen from
+   helper-callee reads.
+2. Pattern-context emitted boundary schemas preserve broad shape/defaults
+   instead of shrinking to local reads.
+3. Compute-context boundary signatures may widen via interprocedural summaries
    so forwarded values are typed by effective downstream usage.
 
 ## 7. Success Criteria
@@ -296,17 +304,18 @@ We are meeting goals when:
 5. transformed output supports practical debugging and code review
 6. nested context tests demonstrate the collection-operator policy matrix for
    `.map` and any newly added analogous operators
-7. boundary capability fixtures show deterministic shrink to
-   `OpaqueCell`/`ReadonlyCell`/`WriteonlyCell`/`Cell` based on observed usage
-8. path-shrinking fixtures show precise contraction on static paths and
-   conservative fallback on wildcard operations
+7. boundary capability fixtures show deterministic wrapper selection by context:
+   pattern boundaries stay opaque; compute boundaries use least-capability
+   wrappers
+8. path-shrinking fixtures show precise contraction on static paths in compute
+   boundaries, with conservative fallback on wildcard operations
 9. destructured-parameter fixtures (`{ foo, bar }`, alias, nested) produce
    stable receiver-plus-`key(...)` lowered output with equivalent behavior
 10. pattern-context diagnostics in fixtures align with lowerability outcomes,
     without dependency on a separate heuristic-only validator path
-11. propagation fixtures show pattern-context signature isolation (caller does
-    not inherit callee reads) and compute-context transitive widening where
-    enabled
+11. propagation fixtures show pattern-context local-only legality isolation
+    plus schema/default continuity, and compute-context transitive widening
+    where enabled
 
 ## 8. Policy For Future Changes
 
@@ -329,5 +338,5 @@ Near-term direction implied by the current delta backlog:
 3. prioritize deterministic rules over local heuristics where possible
 4. migrate from `OpaqueRef`-driven heuristics toward capability dataflow from
    regular parameter flow
-5. make least-capability and path-shrunk boundary emission a first-class design
-   target
+5. make context-scoped boundary emission explicit: broad opaque pattern
+   boundaries plus least-capability/path-shrunk compute boundaries

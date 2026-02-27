@@ -27,6 +27,7 @@ Generated from direct transform diffing of fixture inputs with:
 
 ## Follow-up Tasks
 - Standalone function policy: allow `.map()` rewrite on reactive/cell-like receivers in module-scope standalone functions (while still disallowing `computed`/`derive`/`action`/etc.), or explicitly keep rejecting it with a dedicated conservative diagnostic. Add fixture coverage for both allowed and rejected paths.
+- Pattern boundary schema continuity: avoid local-read-based shrinking for emitted pattern boundary schemas so defaults/fields remain available to downstream compute/handler links.
 
 ## Map Rewrite Deltas
 - packages/ts-transformers/test/fixtures/closures/map-capture-cell-param-no-name.input.tsx (mapWithPattern +1, map -1)

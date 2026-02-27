@@ -432,6 +432,9 @@ pipeline. Current built-in behavior:
    functions only.
 4. One closure fixture is explicitly skipped:
    `map-generic-type-parameter.*.skip`.
+5. Capability-based boundary shrinking can prune pattern input schema fields
+   that are not locally read in the outer pattern callback, which can reduce
+   downstream default/field continuity for nested compute/handler consumers.
 
 ## 14. Test Coverage Snapshot
 
