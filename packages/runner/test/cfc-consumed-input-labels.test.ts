@@ -89,4 +89,33 @@ describe("collectConsumedInputLabels", () => {
     const labeled = collectConsumedInputLabels(reads, labelsByEntity);
     expect(labeled[0].effectiveLabel).toBeUndefined();
   });
+
+  it("applies wildcard labels for indexed reads", () => {
+    const read: CanonicalBoundaryRead = {
+      space: "did:key:test",
+      id: "of:doc",
+      type: "application/json",
+      path: "/items/0",
+      meta: {},
+      internalVerifierRead: false,
+    };
+
+    const labelsByEntity = new Map<string, Record<string, Labels>>([
+      [
+        consumedReadEntityKey(read),
+        {
+          "/items/*": {
+            classification: ["secret"],
+            integrity: ["source-a"],
+          },
+        },
+      ],
+    ]);
+
+    const labeled = collectConsumedInputLabels([read], labelsByEntity);
+    expect(labeled[0].effectiveLabel).toEqual({
+      classification: ["secret"],
+      integrity: ["source-a"],
+    });
+  });
 });

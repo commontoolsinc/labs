@@ -4,6 +4,7 @@ import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
+import { markCfcRelevantForEffectiveLabels } from "../src/cfc/relevance.ts";
 
 const signer = await Identity.fromPassphrase(
   "cfc relevance from effective label read",
@@ -57,6 +58,40 @@ describe("CFC relevance from effective-label read", () => {
     tx = runtime.edit();
     const value = labeledCell.withTx(tx).asSchema(plainNumberSchema).get();
     expect(value).toBe(5);
+    expect(tx.cfcRelevant).toBe(true);
+    expect(tx.cfcReasons).toContain("ifc-read-effective-label");
+    tx.abort("test-complete");
+  });
+
+  it("marks tx relevant when wildcard label path constrains indexed read", async () => {
+    let tx = runtime.edit();
+    const labeledCell = runtime.getCell<{ items: number[] }>(
+      space,
+      "cfc-relevance-effective-label-wildcard-read",
+      undefined,
+      tx,
+    );
+    labeledCell.set({ items: [5] });
+    tx.writeOrThrow({
+      space,
+      id: labeledCell.getAsNormalizedFullLink().id,
+      type: "application/json",
+      path: ["cfc", "labels"],
+    }, {
+      "/items/*": {
+        classification: ["secret"],
+      },
+    });
+    const seeded = await tx.commit();
+    expect(seeded.error).toBeUndefined();
+
+    tx = runtime.edit();
+    markCfcRelevantForEffectiveLabels(tx, {
+      space,
+      id: labeledCell.getAsNormalizedFullLink().id,
+      type: "application/json",
+      path: ["items", "0"],
+    });
     expect(tx.cfcRelevant).toBe(true);
     expect(tx.cfcReasons).toContain("ifc-read-effective-label");
     tx.abort("test-complete");

@@ -7,6 +7,7 @@ import type {
 } from "../storage/interface.ts";
 import { canonicalizeStoragePath } from "./canonical-activity.ts";
 import { internalVerifierReadAnnotations } from "./internal-markers.ts";
+import { canonicalLabelPathMatchesReadPath } from "./path-matching.ts";
 
 function hasIfcInObjectSchema(
   schema: Record<string, unknown>,
@@ -169,31 +170,12 @@ function normalizePersistedLabels(value: unknown): Record<string, Labels> {
   return labelsByPath;
 }
 
-function jsonPointerPrefixes(path: string): string[] {
-  if (path === "/") {
-    return ["/"];
-  }
-
-  const segments = path.slice(1).split("/");
-  const prefixes = ["/"];
-  let current = "";
-  for (const segment of segments) {
-    if (!segment) {
-      continue;
-    }
-    current += `/${segment}`;
-    prefixes.push(current);
-  }
-  return prefixes;
-}
-
 function hasEffectiveLabelConstraint(
   labelsByPath: Record<string, Labels>,
   canonicalPath: string,
 ): boolean {
-  for (const prefix of jsonPointerPrefixes(canonicalPath)) {
-    const label = labelsByPath[prefix];
-    if (!label) {
+  for (const [labelPath, label] of Object.entries(labelsByPath)) {
+    if (!canonicalLabelPathMatchesReadPath(labelPath, canonicalPath)) {
       continue;
     }
     if ((label.classification?.length ?? 0) > 0) {
