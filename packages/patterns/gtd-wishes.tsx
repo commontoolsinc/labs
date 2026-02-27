@@ -3,6 +3,7 @@ import {
   action,
   computed,
   type Default,
+  ifElse,
   NAME,
   pattern,
   UI,
@@ -76,246 +77,251 @@ const GTDWishes = pattern<WishesInput, WishesOutput>(({ directives }) => {
     commandDraft.set("");
   });
 
+  // Data-only computed cells — no VNodes, no onClick
+  const sortedDirs = computed(() =>
+    [...(directives.get() || [])].filter((d: Directive) => d && d.id)
+  );
+  const pendingDirs = computed(() =>
+    sortedDirs.filter((d: Directive) => d.status === "pending")
+  );
+
   return {
     [NAME]: "GTD Wishes",
     userActions,
-    [UI]: computed(() => {
-      const dirs: Directive[] = [...(directives.get() || [])].filter(
-        (d: Directive) => d && d.id,
-      );
-      const pending = dirs.filter((d: Directive) => d.status === "pending");
-
-      return (
+    [UI]: (
+      <div
+        style={{
+          fontFamily: font,
+          maxWidth: "600px",
+          margin: "0 auto",
+          padding: "20px 16px",
+          background: color.background,
+          minHeight: "100vh",
+        }}
+      >
+        {/* Header */}
         <div
           style={{
-            fontFamily: font,
-            maxWidth: "600px",
-            margin: "0 auto",
-            padding: "20px 16px",
-            background: color.background,
-            minHeight: "100vh",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: "20px",
           }}
         >
-          {/* Header */}
+          <div
+            style={{
+              fontSize: "28px",
+              fontWeight: "700",
+              color: color.label,
+              letterSpacing: "-0.5px",
+            }}
+          >
+            GTD Wishes
+          </div>
+          {ifElse(
+            computed(() => pendingDirs.length > 0),
+            <div
+              style={{
+                fontSize: "13px",
+                fontWeight: "600",
+                color: color.orange,
+                padding: "4px 12px",
+                borderRadius: "100px",
+                background: "rgba(255, 149, 0, 0.12)",
+              }}
+            >
+              {computed(() => pendingDirs.length + " pending")}
+            </div>,
+            null,
+          )}
+        </div>
+
+        {/* Command Input */}
+        <div
+          style={{
+            background: color.secondaryBg,
+            borderRadius: "12px",
+            padding: "12px",
+            marginBottom: "24px",
+          }}
+        >
+          <ct-textarea
+            $value={commandDraft}
+            placeholder="What's your wish?"
+            rows={2}
+            style={{
+              width: "100%",
+              borderRadius: "10px",
+              fontSize: "14px",
+            }}
+          />
           <div
             style={{
               display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              marginBottom: "20px",
+              justifyContent: "flex-end",
+              marginTop: "8px",
             }}
           >
             <div
+              onClick={sendCommand}
               style={{
-                fontSize: "28px",
-                fontWeight: "700",
-                color: color.label,
-                letterSpacing: "-0.5px",
+                padding: "8px 16px",
+                borderRadius: "100px",
+                fontSize: "13px",
+                fontWeight: "600",
+                background: color.indigo,
+                color: "#fff",
+                cursor: "pointer",
               }}
             >
-              GTD Wishes
+              Send
             </div>
-            {pending.length > 0 ? (
-              <div
-                style={{
-                  fontSize: "13px",
-                  fontWeight: "600",
-                  color: color.orange,
-                  padding: "4px 12px",
-                  borderRadius: "100px",
-                  background: "rgba(255, 149, 0, 0.12)",
-                }}
-              >
-                {pending.length} pending
-              </div>
-            ) : null}
           </div>
+        </div>
 
-          {/* Command Input */}
+        {/* Directive Feed */}
+        <div
+          style={{
+            fontSize: "11px",
+            fontWeight: "600",
+            color: color.secondaryLabel,
+            textTransform: "uppercase" as const,
+            letterSpacing: "0.5px",
+            marginBottom: "8px",
+          }}
+        >
+          Directives ({computed(() => sortedDirs.length)})
+        </div>
+
+        {ifElse(
+          computed(() => sortedDirs.length === 0),
           <div
             style={{
-              background: color.secondaryBg,
-              borderRadius: "12px",
-              padding: "12px",
-              marginBottom: "24px",
+              fontSize: "14px",
+              color: color.tertiaryLabel,
+              padding: "24px 0",
+              textAlign: "center" as const,
             }}
           >
-            <ct-textarea
-              $value={commandDraft}
-              placeholder="What's your wish?"
-              rows={2}
-              style={{
-                width: "100%",
-                borderRadius: "10px",
-                fontSize: "14px",
-              }}
-            />
+            No directives yet
+          </div>,
+          null,
+        )}
+
+        {sortedDirs.map((d: Directive) => {
+          const statusColor =
+            d.status === "pending"
+              ? color.orange
+              : d.status === "assigned"
+                ? color.blue
+                : color.green;
+          const statusBg =
+            d.status === "pending"
+              ? "rgba(255, 149, 0, 0.12)"
+              : d.status === "assigned"
+                ? "rgba(0, 122, 255, 0.12)"
+                : "rgba(52, 199, 89, 0.12)";
+
+          return (
             <div
               style={{
-                display: "flex",
-                justifyContent: "flex-end",
-                marginTop: "8px",
+                padding: "10px 0",
+                borderBottom: "0.5px solid " + color.separator,
               }}
             >
-              <div
-                onClick={sendCommand}
-                style={{
-                  padding: "8px 16px",
-                  borderRadius: "100px",
-                  fontSize: "13px",
-                  fontWeight: "600",
-                  background: color.indigo,
-                  color: "#fff",
-                  cursor: "pointer",
-                }}
-              >
-                Send
-              </div>
-            </div>
-          </div>
-
-          {/* Directive Feed */}
-          <div
-            style={{
-              fontSize: "11px",
-              fontWeight: "600",
-              color: color.secondaryLabel,
-              textTransform: "uppercase" as const,
-              letterSpacing: "0.5px",
-              marginBottom: "8px",
-            }}
-          >
-            Directives ({dirs.length})
-          </div>
-
-          {dirs.length === 0 ? (
-            <div
-              style={{
-                fontSize: "14px",
-                color: color.tertiaryLabel,
-                padding: "24px 0",
-                textAlign: "center" as const,
-              }}
-            >
-              No directives yet
-            </div>
-          ) : null}
-
-          {dirs.map((d: Directive) => {
-            const statusColor =
-              d.status === "pending"
-                ? color.orange
-                : d.status === "assigned"
-                  ? color.blue
-                  : color.green;
-            const statusBg =
-              d.status === "pending"
-                ? "rgba(255, 149, 0, 0.12)"
-                : d.status === "assigned"
-                  ? "rgba(0, 122, 255, 0.12)"
-                  : "rgba(52, 199, 89, 0.12)";
-
-            return (
+              {/* Top row: ID, text, status, agent */}
               <div
                 style={{
-                  padding: "10px 0",
-                  borderBottom: "0.5px solid " + color.separator,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
                 }}
               >
-                {/* Top row: ID, text, status, agent */}
-                <div
+                <span
                   style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "8px",
+                    fontSize: "11px",
+                    fontWeight: "600",
+                    color: color.tertiaryLabel,
+                    minWidth: "42px",
+                    flexShrink: "0",
                   }}
                 >
-                  <span
-                    style={{
-                      fontSize: "11px",
-                      fontWeight: "600",
-                      color: color.tertiaryLabel,
-                      minWidth: "42px",
-                      flexShrink: "0",
-                    }}
-                  >
-                    {d.id}
-                  </span>
-                  <span
-                    style={{
-                      fontSize: "13px",
-                      color: color.label,
-                      flex: "1",
-                      overflow: "hidden" as const,
-                      textOverflow: "ellipsis" as const,
-                      whiteSpace: "nowrap" as const,
-                    }}
-                  >
-                    {d.text}
-                  </span>
+                  {d.id}
+                </span>
+                <span
+                  style={{
+                    fontSize: "13px",
+                    color: color.label,
+                    flex: "1",
+                    overflow: "hidden" as const,
+                    textOverflow: "ellipsis" as const,
+                    whiteSpace: "nowrap" as const,
+                  }}
+                >
+                  {d.text}
+                </span>
+                <span
+                  style={{
+                    fontSize: "10px",
+                    fontWeight: "600",
+                    color: statusColor,
+                    padding: "2px 8px",
+                    borderRadius: "100px",
+                    background: statusBg,
+                    flexShrink: "0",
+                  }}
+                >
+                  {d.status}
+                </span>
+                {d.assignedTo ? (
                   <span
                     style={{
                       fontSize: "10px",
-                      fontWeight: "600",
-                      color: statusColor,
-                      padding: "2px 8px",
+                      color: color.secondaryLabel,
+                      padding: "1px 6px",
                       borderRadius: "100px",
-                      background: statusBg,
+                      background: color.fillPrimary,
                       flexShrink: "0",
                     }}
                   >
-                    {d.status}
+                    {d.assignedTo}
                   </span>
-                  {d.assignedTo ? (
-                    <span
-                      style={{
-                        fontSize: "10px",
-                        color: color.secondaryLabel,
-                        padding: "1px 6px",
-                        borderRadius: "100px",
-                        background: color.fillPrimary,
-                        flexShrink: "0",
-                      }}
-                    >
-                      {d.assignedTo}
-                    </span>
-                  ) : null}
-                  {d.noteUrl ? (
-                    <a
-                      href={d.noteUrl}
-                      target="_blank"
-                      style={{
-                        textDecoration: "none",
-                        fontSize: "16px",
-                        flexShrink: "0",
-                        cursor: "pointer",
-                      }}
-                    >
-                      {"📎"}
-                    </a>
-                  ) : null}
-                </div>
-
-                {/* Response (for done directives) */}
-                {d.response ? (
-                  <div
+                ) : null}
+                {d.noteUrl ? (
+                  <a
+                    href={d.noteUrl}
+                    target="_blank"
                     style={{
-                      fontSize: "12px",
-                      color: color.secondaryLabel,
-                      marginTop: "4px",
-                      marginLeft: "50px",
-                      lineHeight: "1.4",
+                      textDecoration: "none",
+                      fontSize: "16px",
+                      flexShrink: "0",
+                      cursor: "pointer",
                     }}
                   >
-                    {d.response}
-                  </div>
+                    {"📎"}
+                  </a>
                 ) : null}
               </div>
-            );
-          })}
-        </div>
-      );
-    }),
+
+              {/* Response (for done directives) */}
+              {d.response ? (
+                <div
+                  style={{
+                    fontSize: "12px",
+                    color: color.secondaryLabel,
+                    marginTop: "4px",
+                    marginLeft: "50px",
+                    lineHeight: "1.4",
+                  }}
+                >
+                  {d.response}
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    ),
   };
 });
 

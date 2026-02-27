@@ -3,6 +3,7 @@ import {
   action,
   computed,
   type Default,
+  ifElse,
   NAME,
   pattern,
   UI,
@@ -358,6 +359,180 @@ const GTDProjects = pattern<ProjectsInput, ProjectsOutput>(
       addItemOpen.set(false);
     });
 
+    // --- Data-only computed cells (no VNodes, no onClick) ---
+
+    // Validated breadcrumb array
+    const breadcrumbCrumbs = computed(() => {
+      const crumbStrs = projectBreadcrumbs.get() || [];
+      const projectItems = [...(projects.get() || [])] as Project[];
+      const knownIds = new Set<string>();
+      for (const p of projectItems) {
+        knownIds.add(p.id);
+        if (p.parentId) knownIds.add(p.parentId);
+      }
+      const crumbs = crumbStrs.map((s: string) => {
+        const bar = s.indexOf("|");
+        return {
+          id: bar >= 0 ? s.substring(0, bar) : s,
+          name: bar >= 0 ? s.substring(bar + 1) : s,
+        };
+      });
+      if (crumbs.length > 0 && crumbs.some((c: { id: string; name: string }) => !knownIds.has(c.id))) {
+        return [];
+      }
+      return crumbs;
+    });
+
+    // Project name → noteUrl lookup
+    const projectNotesMap = computed(() => {
+      const currentSpace = spaceName.get() || "GTDfeb27";
+      const notes: Record<string, string> = {};
+      const allDirs = [...(directives.get() || [])].filter(
+        (d: Directive) => d && d.id && d.noteUrl,
+      );
+      for (const d of allDirs) {
+        const m = d.text.match(/^Re:\s*(.+?)\s*\u2014/);
+        if (m && d.noteUrl) {
+          let url = d.noteUrl;
+          if (url.match(/^\/[^\/]+\/baedrei/)) url = "/" + currentSpace + url.substring(url.indexOf("/", 1));
+          notes[m[1]] = url;
+        }
+      }
+      return notes;
+    });
+
+    // Visible items at current breadcrumb depth
+    const visibleItemsData = computed(() => {
+      const projectItems = [...(projects.get() || [])] as Project[];
+      const peopleItems = [...(people.get() || [])] as Person[];
+      const actionItems = [...(actions.get() || [])] as NextAction[];
+      const crumbs = breadcrumbCrumbs;
+
+      if (projectItems.length === 0) return [];
+
+      const hideCompleted = !showCompleted.get();
+      const isCompleted = (s: string) => s === "Done" || s === "Archived";
+
+      // Build children-of maps
+      const childrenOf: Record<string, Project[]> = {};
+      const visibleChildrenOf: Record<string, Project[]> = {};
+      for (const p of projectItems) {
+        if (p.parentId) {
+          if (!childrenOf[p.parentId]) childrenOf[p.parentId] = [];
+          childrenOf[p.parentId].push(p);
+          if (!hideCompleted || !isCompleted(p.status)) {
+            if (!visibleChildrenOf[p.parentId]) visibleChildrenOf[p.parentId] = [];
+            visibleChildrenOf[p.parentId].push(p);
+          }
+        }
+      }
+
+      // Project IDs with linked actions
+      const projectsWithActions = new Set<string>();
+      for (const a of actionItems) {
+        if (a.projectId) projectsWithActions.add(a.projectId);
+      }
+
+      // Project names with directive responses
+      const allDirectives = [...(directives.get() || [])] as Directive[];
+      const projectsWithResponses = new Set<string>();
+      for (const d of allDirectives) {
+        if (!d || d.status !== "done" || !d.response) continue;
+        const dm = d.text.match(/^Re:\s*(.+?)\s*\u2014/);
+        if (dm) projectsWithResponses.add(dm[1]);
+      }
+
+      // Build visible items
+      const items: {
+        type: string; id: string; name: string;
+        project: Project | null; action: NextAction | null;
+        directive: Directive | null;
+        idx: number; hasChildren: boolean; childCount: number;
+      }[] = [];
+
+      if (crumbs.length === 0) {
+        // Root level: person groups + top-level projects
+        for (const parentId of Object.keys(visibleChildrenOf)) {
+          if (parentId.startsWith("PPL:")) {
+            const person = peopleItems.find((pp: Person) => pp.id === parentId);
+            const name = person ? person.name : parentId.split(":")[1];
+            items.push({
+              type: "person", id: parentId, name,
+              project: null, action: null, directive: null,
+              idx: -1, hasChildren: true,
+              childCount: (visibleChildrenOf[parentId] || []).length,
+            });
+          }
+        }
+        for (const p of projectItems) {
+          if (!p.parentId) {
+            if (hideCompleted && isCompleted(p.status)) continue;
+            const idx = projectItems.indexOf(p);
+            const hasKids =
+              (visibleChildrenOf[p.id] || []).length > 0
+              || projectsWithActions.has(p.id)
+              || projectsWithResponses.has(p.name);
+            items.push({
+              type: "project", id: p.id, name: p.name,
+              project: p, action: null, directive: null,
+              idx, hasChildren: hasKids, childCount: 0,
+            });
+          }
+        }
+      } else {
+        // Drilled into a node
+        const currentId = crumbs[crumbs.length - 1].id;
+        const currentProject = projectItems.find((p: Project) => p.id === currentId);
+        const children = childrenOf[currentId] || [];
+        for (const child of children) {
+          if (hideCompleted && isCompleted(child.status)) continue;
+          const idx = projectItems.indexOf(child);
+          const hasKids =
+            (visibleChildrenOf[child.id] || []).length > 0
+            || projectsWithActions.has(child.id)
+            || projectsWithResponses.has(child.name);
+          items.push({
+            type: "project", id: child.id, name: child.name,
+            project: child, action: null, directive: null,
+            idx, hasChildren: hasKids, childCount: 0,
+          });
+        }
+        // Related next actions
+        const projectActions = actionItems.filter((a: NextAction) => a.projectId === currentId);
+        for (let ai = 0; ai < projectActions.length; ai++) {
+          const pa = projectActions[ai];
+          const origIdx = actionItems.indexOf(pa);
+          items.push({
+            type: "action", id: "action-" + origIdx, name: pa.text,
+            project: null, action: pa, directive: null,
+            idx: origIdx, hasChildren: false, childCount: 0,
+          });
+        }
+        // Completed directive responses
+        const currentSpace = spaceName.get() || "GTDfeb27";
+        if (currentProject) {
+          for (const d of allDirectives) {
+            if (!d || d.status !== "done" || !d.response) continue;
+            const dm = d.text.match(/^Re:\s*(.+?)\s*\u2014/);
+            if (dm && dm[1] === currentProject.name) {
+              let noteLink = d.noteUrl || "";
+              if (noteLink && noteLink.match(/^\/[^\/]+\/baedrei/)) {
+                noteLink = "/" + currentSpace + noteLink.substring(noteLink.indexOf("/", 1));
+              }
+              items.push({
+                type: "response", id: d.id, name: d.text,
+                project: null, action: null,
+                directive: { ...d, noteUrl: noteLink },
+                idx: -1, hasChildren: false, childCount: 0,
+              });
+            }
+          }
+        }
+      }
+
+      return items;
+    });
+
     // --- Render ---
 
     return {
@@ -388,609 +563,395 @@ const GTDProjects = pattern<ProjectsInput, ProjectsOutput>(
           </div>
 
           <div style={panelCardStyle}>
-            {/* Breadcrumb bar */}
-            {computed(() => {
-              const crumbStrs = projectBreadcrumbs.get() || [];
-              // Validate breadcrumbs against current data
-              const projectItems = [...(projects.get() || [])] as Project[];
-              const knownIds = new Set<string>();
-              for (const p of projectItems) {
-                knownIds.add(p.id);
-                if (p.parentId) knownIds.add(p.parentId);
-              }
-              let crumbs = crumbStrs.map((s: string) => {
-                const bar = s.indexOf("|");
-                return {
-                  id: bar >= 0 ? s.substring(0, bar) : s,
-                  name: bar >= 0 ? s.substring(bar + 1) : s,
-                };
-              });
-              // If any crumb references an ID not in current data, treat as root
-              if (crumbs.length > 0 && crumbs.some(
-                (c: { id: string; name: string }) => !knownIds.has(c.id),
-              )) {
-                crumbs = [];
-              }
-              if (crumbs.length === 0) {
-                return (
-                  <div
+            {/* Breadcrumb bar — ifElse for onClick safety */}
+            {ifElse(
+              computed(() => (breadcrumbCrumbs).length === 0),
+              <div
+                style={{
+                  ...groupHeaderStyle,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                }}
+              >
+                <span>Projects</span>
+                <span
+                  style={computed(() => ({
+                    fontSize: "11px",
+                    fontWeight: "500",
+                    color: showCompleted.get() ? color.blue : color.tertiaryLabel,
+                    cursor: "pointer",
+                  }))}
+                  onClick={toggleShowCompleted}
+                >
+                  {computed(() => showCompleted.get() ? "Hide Done" : "Show Done")}
+                </span>
+              </div>,
+              <div>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0",
+                    flexWrap: "wrap" as const,
+                    padding: "4px 0 8px",
+                  }}
+                >
+                  <span
                     style={{
-                      ...groupHeaderStyle,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
+                      fontSize: "13px",
+                      fontWeight: "500",
+                      color: color.blue,
+                      cursor: "pointer",
                     }}
+                    onClick={() => navigateBreadcrumb.send({ depth: -1 })}
                   >
-                    <span>Projects</span>
-                    <span
-                      style={{
-                        fontSize: "11px",
-                        fontWeight: "500",
-                        color: showCompleted.get()
-                          ? color.blue
-                          : color.tertiaryLabel,
-                        cursor: "pointer",
-                      }}
-                      onClick={toggleShowCompleted}
-                    >
-                      {showCompleted.get() ? "Hide Done" : "Show Done"}
-                    </span>
-                  </div>
-                );
-              }
-              const currentCrumb = crumbs[crumbs.length - 1];
-              const dirOpen = breadcrumbDirectiveOpen.get();
-              return (
-                <div>
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "0",
-                      flexWrap: "wrap" as const,
-                      padding: "4px 0 8px",
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontSize: "13px",
-                        fontWeight: "500",
-                        color: color.blue,
-                        cursor: "pointer",
-                      }}
-                      onClick={() =>
-                        navigateBreadcrumb.send({ depth: -1 })
-                      }
-                    >
-                      Projects
-                    </span>
-                    {crumbs.map(
-                      (
-                        c: { id: string; name: string },
-                        i: number,
-                      ) => (
+                    Projects
+                  </span>
+                  {breadcrumbCrumbs.map(
+                    (c: { id: string; name: string }, i: number) => (
+                      <span
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                        }}
+                      >
                         <span
                           style={{
-                            display: "inline-flex",
-                            alignItems: "center",
+                            fontSize: "12px",
+                            color: color.tertiaryLabel,
+                            margin: "0 6px",
                           }}
                         >
+                          /
+                        </span>
+                        {/* Ternary auto-converts to ifElse — onClick safe */}
+                        {i < (breadcrumbCrumbs).length - 1 ? (
                           <span
                             style={{
-                              fontSize: "12px",
-                              color: color.tertiaryLabel,
-                              margin: "0 6px",
+                              fontSize: "13px",
+                              fontWeight: "500",
+                              color: color.blue,
+                              cursor: "pointer",
+                            }}
+                            onClick={() => navigateBreadcrumb.send({ depth: i })}
+                          >
+                            {c.name}
+                          </span>
+                        ) : (
+                          <span
+                            style={{
+                              fontSize: "13px",
+                              fontWeight: "600",
+                              color: color.label,
                             }}
                           >
-                            /
+                            {c.name}
                           </span>
-                          {i < crumbs.length - 1 ? (
-                            <span
-                              style={{
-                                fontSize: "13px",
-                                fontWeight: "500",
-                                color: color.blue,
-                                cursor: "pointer",
-                              }}
-                              onClick={() =>
-                                navigateBreadcrumb.send({
-                                  depth: i,
-                                })
-                              }
-                            >
-                              {c.name}
-                            </span>
-                          ) : (
-                            <span
-                              style={{
-                                fontSize: "13px",
-                                fontWeight: "600",
-                                color: color.label,
-                              }}
-                            >
-                              {c.name}
-                            </span>
-                          )}
-                        </span>
-                      ),
-                    )}
-                    <div
-                      style={{ marginLeft: "auto", ...actionBtnDirective, fontSize: "11px", padding: "3px 10px" }}
-                      onClick={() => openBreadcrumbDirective.send({ prefix: "Re: " + currentCrumb.name + " — " })}
-                    >
-                      → Directive
-                    </div>
+                        )}
+                      </span>
+                    ),
+                  )}
+                  <div
+                    style={{ marginLeft: "auto", ...actionBtnDirective, fontSize: "11px", padding: "3px 10px" }}
+                    onClick={() => {
+                      const crumbs = breadcrumbCrumbs;
+                      const current = crumbs[crumbs.length - 1];
+                      if (current) openBreadcrumbDirective.send({ prefix: "Re: " + current.name + " \u2014 " });
+                    }}
+                  >
+                    → Directive
                   </div>
-                  {dirOpen ? (
-                    <div style={{ ...directiveInputRowStyle, marginBottom: "8px" }}>
-                      <ct-textarea
-                        $value={breadcrumbDirectiveDraft}
-                        placeholder={"Directive about " + currentCrumb.name + "..."}
-                        rows={1}
-                        style={{ flex: "1", borderRadius: "10px", fontSize: "14px" }}
-                      />
-                      <div style={directiveSendBtnStyle} onClick={sendBreadcrumbDirective}>
-                        Send
-                      </div>
-                    </div>
-                  ) : null}
                 </div>
-              );
-            })}
+                {ifElse(
+                  breadcrumbDirectiveOpen,
+                  <div style={{ ...directiveInputRowStyle, marginBottom: "8px" }}>
+                    <ct-textarea
+                      $value={breadcrumbDirectiveDraft}
+                      placeholder={computed(() => {
+                        const crumbs = breadcrumbCrumbs;
+                        const current = crumbs[crumbs.length - 1];
+                        return current ? "Directive about " + current.name + "..." : "Directive...";
+                      })}
+                      rows={1}
+                      style={{ flex: "1", borderRadius: "10px", fontSize: "14px" }}
+                    />
+                    <div style={directiveSendBtnStyle} onClick={sendBreadcrumbDirective}>
+                      Send
+                    </div>
+                  </div>,
+                  null,
+                )}
+              </div>,
+            )}
+            {/* Empty state — read-only computed, no onClick */}
             {computed(() => {
-              const projectItems = [...(projects.get() || [])] as Project[];
-              const peopleItems = [...(people.get() || [])] as Person[];
-              const actionItems = [...(actions.get() || [])] as NextAction[];
-              const crumbStrs2 = projectBreadcrumbs.get() || [];
-              let crumbs = crumbStrs2.map((s: string) => {
-                const bar = s.indexOf("|");
-                return {
-                  id: bar >= 0 ? s.substring(0, bar) : s,
-                  name: bar >= 0 ? s.substring(bar + 1) : s,
-                };
-              });
-
-              // Build project name -> noteUrl lookup from directives
-              // Rewrite relative piece URLs to use the current space
-              const currentSpace = spaceName.get() || "GTDfeb27";
-              const projectNotes: Record<string, string> = {};
-              const allDirs: Directive[] = [
-                ...(directives.get() || []),
-              ].filter(
-                (d: Directive) => d && d.id && d.noteUrl,
-              );
-              for (const d of allDirs) {
-                const m = d.text.match(/^Re:\s*(.+?)\s*—/);
-                if (m && d.noteUrl) {
-                  let url = d.noteUrl;
-                  if (url.match(/^\/[^\/]+\/baedrei/)) url = "/" + currentSpace + url.substring(url.indexOf("/", 1));
-                  projectNotes[m[1]] = url;
-                }
-              }
-
-              if (projectItems.length === 0) {
+              const items = visibleItemsData;
+              const crumbs = breadcrumbCrumbs;
+              if (items.length === 0 && crumbs.length > 0) {
                 return (
-                  <div
-                    style={{
-                      fontSize: "13px",
-                      color: color.tertiaryLabel,
-                      padding: "12px 0",
-                    }}
-                  >
-                    No projects
-                  </div>
-                );
-              }
-
-              const hideCompleted = !showCompleted.get();
-              const isCompleted = (s: string) =>
-                s === "Done" || s === "Archived";
-
-              // Build children-of map
-              const childrenOf: Record<string, Project[]> = {};
-              const visibleChildrenOf: Record<string, Project[]> = {};
-              const knownIds = new Set<string>();
-              for (const p of projectItems) {
-                knownIds.add(p.id);
-                if (p.parentId) {
-                  knownIds.add(p.parentId);
-                  if (!childrenOf[p.parentId])
-                    childrenOf[p.parentId] = [];
-                  childrenOf[p.parentId].push(p);
-                  if (!hideCompleted || !isCompleted(p.status)) {
-                    if (!visibleChildrenOf[p.parentId])
-                      visibleChildrenOf[p.parentId] = [];
-                    visibleChildrenOf[p.parentId].push(p);
-                  }
-                }
-              }
-
-              // Validate breadcrumbs
-              if (crumbs.length > 0) {
-                const invalid = crumbs.some(
-                  (c: { id: string; name: string }) => !knownIds.has(c.id),
-                );
-                if (invalid) {
-                  crumbs = [];
-                }
-              }
-
-              // Build set of project IDs that have linked actions (for drill-in eligibility)
-              const projectsWithActions = new Set<string>();
-              for (const a of actionItems) {
-                if (a.projectId) projectsWithActions.add(a.projectId);
-              }
-
-              // Build set of project names that have directive responses
-              const allDirectives = [...(directives.get() || [])] as Directive[];
-              const projectsWithResponses = new Set<string>();
-              for (const d of allDirectives) {
-                if (!d || d.status !== "done" || !d.response) continue;
-                const dm = d.text.match(/^Re:\s*(.+?)\s*\u2014/);
-                if (dm) projectsWithResponses.add(dm[1]);
-              }
-
-              // Determine visible items at current breadcrumb depth
-              let visibleItems: {
-                type: string;
-                id: string;
-                name: string;
-                project: Project | null;
-                action: NextAction | null;
-                idx: number;
-                hasChildren: boolean;
-              }[] = [];
-
-              if (crumbs.length === 0) {
-                // Root level: person groups + top-level projects
-                for (const parentId of Object.keys(visibleChildrenOf)) {
-                  if (parentId.startsWith("PPL:")) {
-                    const person = peopleItems.find(
-                      (pp: Person) => pp.id === parentId,
-                    );
-                    const name = person
-                      ? person.name
-                      : parentId.split(":")[1];
-                    visibleItems.push({
-                      type: "person",
-                      id: parentId,
-                      name,
-                      project: null,
-                      action: null,
-                      idx: -1,
-                      hasChildren: true,
-                    });
-                  }
-                }
-                for (const p of projectItems) {
-                  if (!p.parentId) {
-                    if (hideCompleted && isCompleted(p.status))
-                      continue;
-                    const idx = projectItems.indexOf(p);
-                    const hasKids =
-                      (visibleChildrenOf[p.id] || []).length > 0
-                      || projectsWithActions.has(p.id)
-                      || projectsWithResponses.has(p.name);
-                    visibleItems.push({
-                      type: "project",
-                      id: p.id,
-                      name: p.name,
-                      project: p,
-                      action: null,
-                      idx,
-                      hasChildren: hasKids,
-                    });
-                  }
-                }
-              } else {
-                // Drilled into a node — show its children (sub-projects + related actions + responses)
-                const currentId = crumbs[crumbs.length - 1].id;
-                const currentProject = projectItems.find(
-                  (p: Project) => p.id === currentId,
-                );
-                const children = childrenOf[currentId] || [];
-                for (const child of children) {
-                  if (hideCompleted && isCompleted(child.status))
-                    continue;
-                  const idx = projectItems.indexOf(child);
-                  const hasKids =
-                    (visibleChildrenOf[child.id] || []).length > 0
-                    || projectsWithActions.has(child.id)
-                    || projectsWithResponses.has(child.name);
-                  visibleItems.push({
-                    type: "project",
-                    id: child.id,
-                    name: child.name,
-                    project: child,
-                    action: null,
-                    idx,
-                    hasChildren: hasKids,
-                  });
-                }
-                // Related next actions for this project
-                const projectActions = actionItems.filter((a: NextAction) => a.projectId === currentId);
-                for (let ai = 0; ai < projectActions.length; ai++) {
-                  const pa = projectActions[ai];
-                  const origIdx = actionItems.indexOf(pa);
-                  visibleItems.push({ type: "action", id: "action-" + origIdx, name: pa.text, project: null, action: pa, idx: origIdx, hasChildren: false });
-                }
-                // Completed directive responses as sub-items
-                if (currentProject) {
-                  for (const d of allDirectives) {
-                    if (!d || d.status !== "done" || !d.response) continue;
-                    const dm = d.text.match(/^Re:\s*(.+?)\s*\u2014/);
-                    if (dm && dm[1] === currentProject.name) {
-                      visibleItems.push({
-                        type: "response",
-                        id: d.id,
-                        name: d.text,
-                        project: null,
-                        action: null,
-                        idx: -1,
-                        hasChildren: false,
-                      });
-                    }
-                  }
-                }
-              }
-
-              if (visibleItems.length === 0 && crumbs.length > 0) {
-                return (
-                  <div
-                    style={{
-                      fontSize: "13px",
-                      color: color.tertiaryLabel,
-                      padding: "12px 0",
-                    }}
-                  >
+                  <div style={{ fontSize: "13px", color: color.tertiaryLabel, padding: "12px 0" }}>
                     No child items
                   </div>
                 );
               }
-
-              return visibleItems.map(
-                (item: {
-                  type: string;
-                  id: string;
-                  name: string;
-                  project: Project | null;
-                  action: NextAction | null;
-                  idx: number;
-                  hasChildren: boolean;
-                }) => {
-                  // Action row (next action with checkbox)
-                  if (item.type === "action") {
-                    const a = item.action!;
-                    return (
-                      <div
+              if (items.length === 0) {
+                return (
+                  <div style={{ fontSize: "13px", color: color.tertiaryLabel, padding: "12px 0" }}>
+                    No projects
+                  </div>
+                );
+              }
+              return null;
+            })}
+            {/* Item rows — .map() on computed array, onClick safe at top level */}
+            {visibleItemsData.map(
+              (item: {
+                type: string; id: string; name: string;
+                project: Project | null; action: NextAction | null;
+                directive: Directive | null;
+                idx: number; hasChildren: boolean; childCount: number;
+              }) => {
+                // Action row
+                if (item.type === "action") {
+                  const a = item.action!;
+                  return (
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                        padding: "5px 0 5px 12px",
+                        borderBottom: `0.5px solid ${color.separator}`,
+                      }}
+                    >
+                      <ct-checkbox
+                        checked={false}
                         style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "8px",
-                          padding: "5px 0 5px 12px",
-                          borderBottom: `0.5px solid ${color.separator}`,
-                        }}
-                      >
-                        <ct-checkbox
-                          checked={false}
-                          style={{
-                            width: "15px",
-                            height: "15px",
-                            flexShrink: "0",
-                            cursor: "pointer",
-                          }}
-                          onClick={() => markItemDone.send({ key: "actions:" + item.idx })}
-                        />
-                        {a.context ? (
-                          <span style={{ fontSize: "10px", color: color.blue, background: "rgba(0,122,255,0.08)", padding: "1px 6px", borderRadius: "100px", flexShrink: "0", fontWeight: "500" }}>
-                            {a.context}
-                          </span>
-                        ) : null}
-                        <span style={{ fontSize: "13px", color: color.secondaryLabel, flex: "1" }}>{a.text}</span>
-                      </div>
-                    );
-                  }
-
-                  // Directive response row
-                  if (item.type === "response") {
-                    const dir = allDirectives.find((dd: Directive) => dd.id === item.id);
-                    if (!dir) return <div />;
-                    const qMatch = dir.text.match(/^Re:\s*.+?\s*\u2014\s*(.+)$/);
-                    const question = qMatch ? qMatch[1] : dir.text;
-                    const dateStr = dir.createdAt
-                      ? new Date(dir.createdAt).toLocaleDateString("en-US", {
-                          month: "short", day: "numeric",
-                        })
-                      : "";
-                    let noteLink = dir.noteUrl || "";
-                    if (noteLink && noteLink.match(/^\/[^\/]+\/baedrei/)) noteLink = "/" + currentSpace + noteLink.substring(noteLink.indexOf("/", 1));
-                    return (
-                      <div style={{ ...itemRowStyle, padding: "10px 0" }}>
-                        <div style={{ display: "flex", alignItems: "flex-start", gap: "10px" }}>
-                          <span style={{
-                            padding: "2px 6px", borderRadius: "4px",
-                            fontSize: "10px", fontWeight: "600",
-                            background: "rgba(88, 86, 214, 0.12)",
-                            color: color.indigo, flexShrink: "0", marginTop: "2px",
-                          }}>{dir.id}</span>
-                          <div style={{ flex: "1" }}>
-                            <div style={{ fontSize: "13px", fontWeight: "500", color: color.label }}>
-                              {question}
-                            </div>
-                            <div style={{
-                              fontSize: "12px", color: color.secondaryLabel,
-                              marginTop: "4px", lineHeight: "1.5",
-                              whiteSpace: "pre-wrap" as const,
-                            }}>
-                              {dir.response}
-                            </div>
-                            <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "6px" }}>
-                              {dateStr ? (
-                                <span style={{ fontSize: "11px", color: color.tertiaryLabel }}>{dateStr}</span>
-                              ) : null}
-                              {noteLink ? (
-                                <a href={noteLink} target="_blank" style={{
-                                  fontSize: "11px", color: color.blue,
-                                  textDecoration: "none",
-                                }}>{"📎 View note"}</a>
-                              ) : null}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  }
-
-                  // Person row — click drills in
-                  if (item.type === "person") {
-                    return (
-                      <div
-                        style={{
-                          ...itemRowStyle,
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "10px",
+                          width: "15px",
+                          height: "15px",
+                          flexShrink: "0",
                           cursor: "pointer",
                         }}
-                        onClick={() =>
-                          drillIntoProject.send({
-                            id: item.id,
-                            name: item.name,
-                          })
-                        }
-                      >
-                        <span
-                          style={{
-                            fontSize: "13px",
-                            fontWeight: "600",
-                            color: color.purple,
-                            flex: "1",
-                          }}
-                        >
-                          {item.name}
+                        onClick={() => markItemDone.send({ key: "actions:" + item.idx })}
+                      />
+                      {a.context ? (
+                        <span style={{ fontSize: "10px", color: color.blue, background: "rgba(0,122,255,0.08)", padding: "1px 6px", borderRadius: "100px", flexShrink: "0", fontWeight: "500" }}>
+                          {a.context}
                         </span>
-                        <span
-                          style={{
-                            fontSize: "11px",
-                            color: color.tertiaryLabel,
-                          }}
-                        >
-                          {(visibleChildrenOf[item.id] || []).length + " items"}
-                        </span>
-                        <span style={{ fontSize: "14px", color: color.tertiaryLabel, flexShrink: "0" }}>{">"}</span>
-                      </div>
-                    );
-                  }
-
-                  // Project row
-                  const p = item.project!;
-                  const idx = item.idx;
-                  return (
-                    <div>
-                      <div
-                        style={computed(() =>
-                          selectedItem.get() === "projects:" + idx
-                            ? {
-                                ...itemRowStyle,
-                                display: "flex",
-                                alignItems: "center",
-                                gap: "0px",
-                                cursor: "pointer",
-                                background: "rgba(0, 122, 255, 0.06)",
-                                borderRadius: "8px",
-                                padding: "8px",
-                              }
-                            : {
-                                ...itemRowStyle,
-                                display: "flex",
-                                alignItems: "center",
-                                gap: "0px",
-                                cursor: "pointer",
-                              },
-                        )}
-                      >
-                        {/* Item content — click to drill in if has children, else select */}
-                        <div
-                          style={{ display: "flex", alignItems: "center", gap: "10px", flex: "1", cursor: "pointer" }}
-                          onClick={() => item.hasChildren ? drillIntoProject.send({ id: item.id, name: p.name }) : selectItem.send({ key: "projects:" + idx })}
-                        >
-                          <span style={{ fontSize: "12px", color: color.tertiaryLabel, fontWeight: "500", minWidth: "32px", flexShrink: "0" }}>
-                            {p.id}
-                          </span>
-                          <span style={{ flex: "1" }}>{p.name}</span>
-                          <span
-                            style={{
-                              padding: "2px 10px",
-                              borderRadius: "100px",
-                              fontSize: "11px",
-                              fontWeight: "500",
-                              background:
-                                p.status === "Active"
-                                  ? "rgba(52, 199, 89, 0.12)"
-                                  : p.status === "Done"
-                                    ? "rgba(142, 142, 147, 0.12)"
-                                    : "rgba(255, 149, 0, 0.12)",
-                              color:
-                                p.status === "Active"
-                                  ? "#34c759"
-                                  : p.status === "Done"
-                                    ? "#8e8e93"
-                                    : "#ff9500",
-                              flexShrink: "0",
-                            }}
-                          >
-                            {p.status}
-                          </span>
-                        </div>
-                        {projectNotes[p.name] ? (
-                          <a href={projectNotes[p.name]} target="_blank" style={{ textDecoration: "none", fontSize: "16px", flexShrink: "0", cursor: "pointer", marginLeft: "4px" }}>
-                            {"📎"}
-                          </a>
-                        ) : null}
-                        {/* Drill-in chevron */}
-                        {item.hasChildren ? (
-                          <span style={{ fontSize: "14px", color: color.tertiaryLabel, paddingLeft: "8px", flexShrink: "0", cursor: "pointer" }} onClick={() => drillIntoProject.send({ id: item.id, name: p.name })}>{">"}</span>
-                        ) : null}
-                      </div>
-                      {computed(() => {
-                        const pk = "projects:" + idx;
-                        if (selectedItem.get() !== pk) return null;
-                        return (
-                          <div style={{ display: "flex", gap: "8px", padding: "6px 0 8px", flexWrap: "wrap" as const }}>
-                            <div style={actionBtnDone} onClick={() => markItemDone.send({ key: pk })}>✓ Done</div>
-                            <div style={actionBtnDelete} onClick={() => deleteItem.send({ key: pk })}>✕ Delete</div>
-                            <div style={actionBtnDirective} onClick={openItemDirective}>→ Directive</div>
-                            {!item.hasChildren ? (
-                              <div style={actionBtnAdd} onClick={() => drillAndAddSubproject.send({ id: item.id, name: p.name })}>+ Subproject</div>
-                            ) : null}
-                          </div>
-                        );
-                      })}
+                      ) : null}
+                      <span style={{ fontSize: "13px", color: color.secondaryLabel, flex: "1" }}>{a.text}</span>
                     </div>
                   );
-                },
-              );
-            })}
-            {/* Add project / subproject */}
-            {computed(() => {
-              const isOpen = addItemOpen.get();
-              const crumbs = projectBreadcrumbs.get() || [];
-              const label = crumbs.length > 0 ? "New Subproject" : "New Project";
-              const placeholder = crumbs.length > 0 ? "New subproject..." : "New project...";
-              if (!isOpen) return (
-                <div style={{ marginTop: "10px", display: "inline-flex", alignItems: "center", gap: "5px", cursor: "pointer", color: color.blue, fontSize: "13px", fontWeight: "500", padding: "4px 0" }} onClick={openAddItem}>
-                  <span style={{ fontSize: "17px", fontWeight: "300", lineHeight: "1" }}>+</span>
-                  <span>{label}</span>
-                </div>
-              );
-              return (
-                <div style={{ display: "flex", gap: "8px", marginTop: "10px", alignItems: "center" }}>
-                  <ct-textarea $value={addItemDraft} placeholder={placeholder} rows={1} style={{ flex: "1", borderRadius: "10px", fontSize: "14px" }} />
-                  <div style={{ padding: "7px 16px", borderRadius: "100px", fontSize: "13px", fontWeight: "600", background: color.blue, color: "#fff", cursor: "pointer", flexShrink: "0" }} onClick={sendAddItem}>Add</div>
-                  <div style={{ padding: "7px 10px", borderRadius: "100px", fontSize: "13px", color: color.secondaryLabel, cursor: "pointer", flexShrink: "0" }} onClick={() => { addItemOpen.set(false); addItemDraft.set(""); }}>Cancel</div>
-                </div>
-              );
-            })}
+                }
+
+                // Directive response row
+                if (item.type === "response") {
+                  const dir = item.directive;
+                  if (!dir) return <div />;
+                  const qMatch = dir.text.match(/^Re:\s*.+?\s*\u2014\s*(.+)$/);
+                  const question = qMatch ? qMatch[1] : dir.text;
+                  const dateStr = dir.createdAt
+                    ? new Date(dir.createdAt).toLocaleDateString("en-US", {
+                        month: "short", day: "numeric",
+                      })
+                    : "";
+                  const noteLink = dir.noteUrl || "";
+                  return (
+                    <div style={{ ...itemRowStyle, padding: "10px 0" }}>
+                      <div style={{ display: "flex", alignItems: "flex-start", gap: "10px" }}>
+                        <span style={{
+                          padding: "2px 6px", borderRadius: "4px",
+                          fontSize: "10px", fontWeight: "600",
+                          background: "rgba(88, 86, 214, 0.12)",
+                          color: color.indigo, flexShrink: "0", marginTop: "2px",
+                        }}>{dir.id}</span>
+                        <div style={{ flex: "1" }}>
+                          <div style={{ fontSize: "13px", fontWeight: "500", color: color.label }}>
+                            {question}
+                          </div>
+                          <div style={{
+                            fontSize: "12px", color: color.secondaryLabel,
+                            marginTop: "4px", lineHeight: "1.5",
+                            whiteSpace: "pre-wrap" as const,
+                          }}>
+                            {dir.response}
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "6px" }}>
+                            {dateStr ? (
+                              <span style={{ fontSize: "11px", color: color.tertiaryLabel }}>{dateStr}</span>
+                            ) : null}
+                            {noteLink ? (
+                              <a href={noteLink} target="_blank" style={{
+                                fontSize: "11px", color: color.blue,
+                                textDecoration: "none",
+                              }}>{"📎 View note"}</a>
+                            ) : null}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+
+                // Person row — onClick safe in .map() callback
+                if (item.type === "person") {
+                  return (
+                    <div
+                      style={{
+                        ...itemRowStyle,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "10px",
+                        cursor: "pointer",
+                      }}
+                      onClick={() =>
+                        drillIntoProject.send({
+                          id: item.id,
+                          name: item.name,
+                        })
+                      }
+                    >
+                      <span
+                        style={{
+                          fontSize: "13px",
+                          fontWeight: "600",
+                          color: color.purple,
+                          flex: "1",
+                        }}
+                      >
+                        {item.name}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: "11px",
+                          color: color.tertiaryLabel,
+                        }}
+                      >
+                        {item.childCount + " items"}
+                      </span>
+                      <span style={{ fontSize: "14px", color: color.tertiaryLabel, flexShrink: "0" }}>{">"}</span>
+                    </div>
+                  );
+                }
+
+                // Project row
+                const p = item.project!;
+                const idx = item.idx;
+                return (
+                  <div>
+                    <div
+                      style={computed(() =>
+                        selectedItem.get() === "projects:" + idx
+                          ? {
+                              ...itemRowStyle,
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "0px",
+                              cursor: "pointer",
+                              background: "rgba(0, 122, 255, 0.06)",
+                              borderRadius: "8px",
+                              padding: "8px",
+                            }
+                          : {
+                              ...itemRowStyle,
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "0px",
+                              cursor: "pointer",
+                            },
+                      )}
+                    >
+                      {/* Item content — click to drill in if has children, else select */}
+                      <div
+                        style={{ display: "flex", alignItems: "center", gap: "10px", flex: "1", cursor: "pointer" }}
+                        onClick={() => item.hasChildren ? drillIntoProject.send({ id: item.id, name: p.name }) : selectItem.send({ key: "projects:" + idx })}
+                      >
+                        <span style={{ fontSize: "12px", color: color.tertiaryLabel, fontWeight: "500", minWidth: "32px", flexShrink: "0" }}>
+                          {p.id}
+                        </span>
+                        <span style={{ flex: "1" }}>{p.name}</span>
+                        <span
+                          style={{
+                            padding: "2px 10px",
+                            borderRadius: "100px",
+                            fontSize: "11px",
+                            fontWeight: "500",
+                            background:
+                              p.status === "Active"
+                                ? "rgba(52, 199, 89, 0.12)"
+                                : p.status === "Done"
+                                  ? "rgba(142, 142, 147, 0.12)"
+                                  : "rgba(255, 149, 0, 0.12)",
+                            color:
+                              p.status === "Active"
+                                ? "#34c759"
+                                : p.status === "Done"
+                                  ? "#8e8e93"
+                                  : "#ff9500",
+                            flexShrink: "0",
+                          }}
+                        >
+                          {p.status}
+                        </span>
+                      </div>
+                      {/* Note link — read-only computed, no onClick */}
+                      {computed(() => {
+                        const notes = projectNotesMap;
+                        const link = notes[p.name];
+                        if (!link) return null;
+                        return (
+                          <a href={link} target="_blank" style={{ textDecoration: "none", fontSize: "16px", flexShrink: "0", cursor: "pointer", marginLeft: "4px" }}>
+                            {"📎"}
+                          </a>
+                        );
+                      })}
+                      {/* Drill-in chevron */}
+                      {item.hasChildren ? (
+                        <span style={{ fontSize: "14px", color: color.tertiaryLabel, paddingLeft: "8px", flexShrink: "0", cursor: "pointer" }} onClick={() => drillIntoProject.send({ id: item.id, name: p.name })}>{">"}</span>
+                      ) : null}
+                    </div>
+                    {/* Selection toolbar — ifElse for onClick safety */}
+                    {ifElse(
+                      computed(() => selectedItem.get() === "projects:" + idx),
+                      <div style={{ display: "flex", gap: "8px", padding: "6px 0 8px", flexWrap: "wrap" as const }}>
+                        <div style={actionBtnDone} onClick={() => markItemDone.send({ key: "projects:" + idx })}>{"✓ Done"}</div>
+                        <div style={actionBtnDelete} onClick={() => deleteItem.send({ key: "projects:" + idx })}>{"✕ Delete"}</div>
+                        <div style={actionBtnDirective} onClick={openItemDirective}>{"→ Directive"}</div>
+                        {!item.hasChildren ? (
+                          <div style={actionBtnAdd} onClick={() => drillAndAddSubproject.send({ id: item.id, name: p.name })}>+ Subproject</div>
+                        ) : null}
+                      </div>,
+                      null,
+                    )}
+                  </div>
+                );
+              },
+            )}
+            {/* Add project / subproject — ifElse for onClick + $value safety */}
+            {ifElse(
+              addItemOpen,
+              <div style={{ display: "flex", gap: "8px", marginTop: "10px", alignItems: "center" }}>
+                <ct-textarea
+                  $value={addItemDraft}
+                  placeholder={computed(() => {
+                    const crumbs = breadcrumbCrumbs;
+                    return crumbs.length > 0 ? "New subproject..." : "New project...";
+                  })}
+                  rows={1}
+                  style={{ flex: "1", borderRadius: "10px", fontSize: "14px" }}
+                />
+                <div style={{ padding: "7px 16px", borderRadius: "100px", fontSize: "13px", fontWeight: "600", background: color.blue, color: "#fff", cursor: "pointer", flexShrink: "0" }} onClick={sendAddItem}>Add</div>
+                <div style={{ padding: "7px 10px", borderRadius: "100px", fontSize: "13px", color: color.secondaryLabel, cursor: "pointer", flexShrink: "0" }} onClick={() => { addItemOpen.set(false); addItemDraft.set(""); }}>Cancel</div>
+              </div>,
+              <div style={{ marginTop: "10px", display: "inline-flex", alignItems: "center", gap: "5px", cursor: "pointer", color: color.blue, fontSize: "13px", fontWeight: "500", padding: "4px 0" }} onClick={openAddItem}>
+                <span style={{ fontSize: "17px", fontWeight: "300", lineHeight: "1" }}>+</span>
+                <span>{computed(() => {
+                  const crumbs = breadcrumbCrumbs;
+                  return crumbs.length > 0 ? "New Subproject" : "New Project";
+                })}</span>
+              </div>,
+            )}
           </div>
         </div>
       ),
