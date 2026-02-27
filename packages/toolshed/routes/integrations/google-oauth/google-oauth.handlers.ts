@@ -19,10 +19,12 @@ import {
   createOAuthClient,
   createRefreshErrorResponse,
   createRefreshSuccessResponse,
+  createSignedState,
   fetchUserInfo,
   getBaseUrl,
   persistTokens,
   tokenToAuthData,
+  verifySignedState,
 } from "./google-oauth.utils.ts";
 import { setBGCharm } from "@commontools/background-charm";
 import { runtime } from "@/index.ts";
@@ -59,13 +61,14 @@ export const login: AppRouteHandler<LoginRoute> = async (c) => {
       scope: scopeString,
     });
 
-    // Create state payload that includes the code verifier and scopes
-    const statePayload = btoa(JSON.stringify({
+    // Create HMAC-signed state payload; the code verifier is stored
+    // server-side and referenced by a random nonce in the state.
+    const statePayload = await createSignedState({
       authCellId: payload.authCellId,
       integrationPieceId: payload.integrationPieceId,
       codeVerifier: codeVerifier,
       scopes: payload.scopes,
-    }));
+    });
 
     // Add state parameter and other required params to the URL
     const authUrl = new URL(uri.toString());
@@ -124,39 +127,38 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
       return createCallbackResponse(callbackResult);
     }
 
-    // Decode and parse the state parameter
+    // Verify the HMAC-signed state parameter and retrieve the server-side
+    // code verifier. This rejects forged, tampered, expired, or replayed
+    // state values.
     let decodedState: {
       authCellId: string;
       integrationPieceId: string;
-      codeVerifier: string;
+      codeVerifierNonce: string;
       scopes?: string[];
+      timestamp: number;
     };
+    let codeVerifier: string;
 
     try {
-      decodedState = JSON.parse(atob(state));
+      const verified = await verifySignedState(state);
+      decodedState = verified.payload;
+      codeVerifier = verified.codeVerifier;
       logger.info({
         decodedState: {
           authCellId: decodedState.authCellId,
           integrationPieceId: decodedState.integrationPieceId,
-          codeVerifier: decodedState.codeVerifier ? "present" : "missing",
+          codeVerifier: "present (server-side)",
           scopes: decodedState.scopes,
         },
-      }, "Decoded state parameter");
+      }, "Verified and decoded state parameter");
     } catch (error) {
-      logger.error({ state, error }, "Failed to decode state parameter");
+      const errorMsg = error instanceof Error
+        ? error.message
+        : "Invalid state parameter";
+      logger.error({ state, error }, "State parameter verification failed");
       const callbackResult: CallbackResult = {
         success: false,
-        error: "Invalid state parameter format",
-      };
-      return createCallbackResponse(callbackResult);
-    }
-
-    const codeVerifier = decodedState.codeVerifier;
-    if (!codeVerifier) {
-      logger.error("No code verifier found in state parameter");
-      const callbackResult: CallbackResult = {
-        success: false,
-        error: "Invalid state parameter: missing code verifier",
+        error: errorMsg,
       };
       return createCallbackResponse(callbackResult);
     }
