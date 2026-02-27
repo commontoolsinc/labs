@@ -13,10 +13,10 @@ performance issue caused by the pattern's 26 `.map()` calls in its JSX template.
 
 ```bash
 # Full test (3 failures at action_6, action_21)
-deno task ct test packages/patterns/parking-coordinator --verbose
+deno task ct test packages/patterns/parking-coordinator/v1 --verbose
 
 # Minimal reproduction (1 failure: add spot 7, then edit spot 1)
-deno task ct test packages/patterns/parking-coordinator/minimal-repro.test.tsx --verbose
+deno task ct test packages/patterns/parking-coordinator/v1/minimal-repro.test.tsx --verbose
 ```
 
 ## What we ruled out
