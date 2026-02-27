@@ -162,6 +162,7 @@ async function runSyncLoop(
 
   async function doSync() {
     let editWatermark = 0; // Track which edits have been applied to fs
+    const editIdMap: Map<Edit, string> = new Map(); // Survives CAS retries
     let committed = false;
 
     while (!committed) {
@@ -178,7 +179,6 @@ async function runSyncLoop(
 
       try {
         const edits = editsCell.get();
-        const editIdMap: Map<Edit, string> = new Map();
 
         // 1. Apply NEW edits to the filesystem (only past the watermark)
         //    On first iteration watermark is 0, so all edits are applied.
