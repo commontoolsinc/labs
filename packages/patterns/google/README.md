@@ -84,20 +84,21 @@ You need your own Google OAuth credentials:
 
 Tokens expire after ~1 hour. Refresh happens automatically in two layers:
 
-**Layer 1: Automatic (background-charm-service)**
-When google-auth is registered with background-charm-service, the `bgUpdater`
-handler is polled every ~60 seconds. If the token has < 10 minutes remaining,
-it refreshes proactively — no user action needed.
+**Layer 1: Automatic (background-charm-service)** When google-auth is registered
+with background-charm-service, the `bgUpdater` handler is polled every ~60
+seconds. If the token has < 10 minutes remaining, it refreshes proactively — no
+user action needed.
 
 To enable: register your google-auth piece with background-charm-service.
 
-**Layer 2: One-click (UI fallback)**
-If background refresh isn't running (e.g., local dev), consuming patterns show
-a "Refresh Session" button when the token expires. Clicking it calls the
-google-auth piece's `refreshToken` stream to refresh the token inline.
+**Layer 2: One-click (UI fallback)** If background refresh isn't running (e.g.,
+local dev), consuming patterns show a "Refresh Session" button when the token
+expires. Clicking it calls the google-auth piece's `refreshToken` stream to
+refresh the token inline.
 
-**Layer 3: Manual (last resort)**
-If refresh fails (e.g., refresh token revoked):
+**Layer 3: Manual (last resort)** If refresh fails (e.g., refresh token
+revoked):
+
 1. Find your google-auth piece (in favorites or homespace)
 2. Click "Sign in with Google" to re-authenticate
 3. Other patterns automatically get the new token
