@@ -1,4 +1,4 @@
-import type { ContentId } from "./reference.ts";
+import type { ContentId, DefinedReferent } from "./reference.ts";
 import type { JSONSchema, JSONValue } from "@commontools/api";
 import type { StorableInstance } from "./storable-protocol.ts";
 import type {
@@ -128,7 +128,7 @@ export interface Principal<ID extends DID = DID> {
  * Principal capable of issuing an {@link Authorization}.
  */
 export interface Authority extends Principal {
-  authorize<T extends JSONValue>(
+  authorize<T extends DefinedReferent>(
     access: Iterable<ContentId<T> | T>,
   ): AwaitResult<Authorization<T>, AuthorizationError>;
 }
@@ -166,7 +166,7 @@ export type UCAN<Command extends Invocation> = {
 /**
  * Proof of authorization for a given access.
  */
-export interface Proof<Access extends JSONValue> {
+export interface Proof<Access extends DefinedReferent = DefinedReferent> {
   [link: AsString<ContentId<Access>>]: Unit;
 }
 
@@ -174,7 +174,7 @@ export interface Proof<Access extends JSONValue> {
  * Represents a verifiable authorization issued by specific {@link Authority}.
  * It is slightly more abstract notion than signed payload.
  */
-export type Authorization<T extends JSONValue = JSONValue> = {
+export type Authorization<T extends DefinedReferent = DefinedReferent> = {
   signature: Signature<Proof<T>>;
   access: Proof<T>;
 };
@@ -475,7 +475,7 @@ export type Task<Return, Command = never> = Iterable<Command, Return>;
 
 export type Job<
   Command extends NonNullable<unknown> = NonNullable<unknown>,
-  Return extends NonNullable<unknown> | null = NonNullable<unknown> | null,
+  Return extends DefinedReferent = DefinedReferent,
   Effect = unknown,
 > = {
   invoke: Command;
@@ -501,7 +501,7 @@ export type SessionTask<Space extends MemorySpace> =
 
 export type Receipt<
   Command extends NonNullable<unknown>,
-  Result extends NonNullable<unknown> | null,
+  Result extends DefinedReferent,
   Effect,
 > =
   | {
@@ -524,7 +524,7 @@ export type Effect<Of extends NonNullable<unknown>, Command> = {
 
 export type Return<
   Of extends NonNullable<unknown>,
-  Result extends NonNullable<unknown> | null,
+  Result extends DefinedReferent,
 > = {
   of: ContentId<Of>;
   is: Result;
