@@ -105,9 +105,11 @@ import { pushFrameFromCause, popFrame } from "@commontools/runner/builder";
 const runtime = new Runtime(/* storage config */);
 
 // Sync the cells you'll operate on
-await stateCell.sync();
-await editsCell.sync();
-await runtime.storageManager.synced();
+await Promise.all([
+  stateCell.sync(),
+  editsCell.sync(),
+  runtime.storageManager.synced(),
+]);
 ```
 
 ### The Sync Loop
@@ -142,7 +144,9 @@ async function runSyncLoop(
     if (!pending) return;
     pending = false;
 
+    let editWatermark = 0; // Track which edits have been applied to fs
     let committed = false;
+
     while (!committed) {
       // Wait for any in-flight syncs to settle
       await runtime.storageManager.synced();
@@ -159,29 +163,40 @@ async function runSyncLoop(
         const edits = editsCell.get();
         const editIdMap: Map<Edit, string> = new Map();
 
-        // 1. Apply pending edits to the filesystem
-        if (edits.length > 0) {
-          for (const edit of edits) {
-            try {
-              applyEditToFilesystem(edit, watchPath);
-              // Track any newly assigned canonical IDs
-              if (edit.type === "create") {
-                editIdMap.set(edit, getCanonicalId(edit, watchPath));
-              }
-            } catch (err) {
-              // Move failed edit to failedEdits (see Error Handling)
-              handleEditFailure(edit, err, tx);
+        // 1. Apply NEW edits to the filesystem (only past the watermark)
+        //    On first iteration watermark is 0, so all edits are applied.
+        //    On retry (tx failed because new edits arrived), only the
+        //    new edits beyond the watermark are applied — earlier ones
+        //    are already on disk.
+        for (let i = editWatermark; i < edits.length; i++) {
+          const edit = edits[i];
+          try {
+            applyEditToFilesystem(edit, watchPath);
+            if (edit.type === "create") {
+              editIdMap.set(edit, getCanonicalId(edit, watchPath));
             }
+          } catch (err) {
+            if (isSystemError(err)) {
+              // System error: keep edit in queue, crash loud.
+              // Operator fixes the condition, restarts daemon.
+              throw new Error(
+                `System error applying edit: ${err.message}. ` +
+                `Edit remains in queue. Fix the issue and restart.`,
+              );
+            }
+            // Conflict error: move to failedEdits for user reformulation
+            failedEditsCell.push({ edit, error: err.message });
           }
         }
+        editWatermark = edits.length;
 
-        // 2. Read full filesystem state and write to cells
+        // 2. Read full filesystem state, build cell structure
+        //    IMPORTANT: Use Cell.of(canonicalId) for each item that has
+        //    an external ID. This ensures stable links in the fabric.
         const fsState = readFilesystemState(watchPath);
-        stateCell.set(buildStateFromFs(fsState));
-        // Use Cell.of() for items with canonical IDs:
-        // for (const item of fsState.items) {
-        //   Cell.of(item.canonicalId).set(item);
-        // }
+        stateCell.set(
+          buildStateFromFs(fsState), // Must use Cell.of() internally — see below
+        );
 
         // 3. Write redirect links for newly created items
         for (const [edit, canonicalId] of editIdMap) {
@@ -193,10 +208,8 @@ async function runSyncLoop(
         }
 
         // 4. Clear edit queue, record applied edits
+        appliedEditsCell.push(...edits);
         editsCell.set([]);
-        for (const edit of edits) {
-          appliedEditsCell.push(edit);
-        }
       } finally {
         popFrame();
       }
@@ -206,7 +219,8 @@ async function runSyncLoop(
       if (!error) {
         committed = true;
       }
-      // If error, loop again: a new edit was appended, so catch up
+      // If error, loop again: a new edit was appended, so catch up.
+      // The watermark ensures we don't re-apply edits to the filesystem.
     }
   }
 
@@ -214,6 +228,32 @@ async function runSyncLoop(
   await sync();
 }
 ```
+
+### Building State with Stable Identity
+
+The `buildStateFromFs` function (or equivalent) **must** use `Cell.of()` for
+every sub-item that has an external canonical ID. For example:
+
+```typescript
+function buildStateFromFs(fsState: FsState): State {
+  return {
+    items: fsState.items.map((item) => {
+      // Cell.of() ensures this item has a stable cell derived from
+      // its canonical ID. Links to this item survive across syncs.
+      Cell.of(item.canonicalId).set({
+        name: item.name,
+        path: item.path,
+        // ...
+      });
+    }),
+  };
+}
+```
+
+This is not a post-processing step — it must happen as part of constructing the
+state structure. If you write the structure first and then try to set up
+`Cell.of()` mappings afterward, the items in the array will have ephemeral cell
+IDs that break on every sync.
 
 ### Don't Diff — Let the Runtime Do It
 
@@ -265,22 +305,32 @@ process.on("SIGTERM", () => { releaseLock(); process.exit(); });
 
 ### Error Handling: Failed Edits
 
-Not all edit failures are equal. Categorize them:
+Not all edit failures are equal. Two categories require different strategies:
 
-- **System errors** (permissions, disk full, network timeout): Transient
-  failures that should be retried. Move to a `retryableEdits` queue and attempt
-  again on the next sync cycle.
+- **System errors** (permissions, disk full, network timeout): The environment is
+  broken — retrying won't help until an operator intervenes. **Keep the failed
+  edit in the queue** (don't clear it) and **crash the daemon with a clear error
+  message.** The operator fixes the condition (frees disk, fixes permissions),
+  restarts the daemon, and the edit applies naturally on the next sync cycle.
 - **Conflict errors** (file was deleted externally, path collision): The edit
-  can't succeed as-is. Move to a `failedEdits` queue and surface to the user for
-  reformulation.
+  can't succeed as-is and won't succeed on retry either. Move to a `failedEdits`
+  queue and surface to the user for reformulation. The daemon continues running.
 
 ```typescript
-function handleEditFailure(edit: Edit, err: Error, tx) {
+// In the edit application loop:
+try {
+  applyEditToFilesystem(edit, watchPath);
+} catch (err) {
   if (isSystemError(err)) {
-    retryableEditsCell.push({ edit, error: err.message, retriesLeft: 3 });
-  } else {
-    failedEditsCell.push({ edit, error: err.message });
+    // Don't clear the queue — this edit and all after it are preserved.
+    // Crash loud so the operator knows what to fix.
+    throw new Error(
+      `System error applying edit: ${err.message}. ` +
+      `Edit remains in queue. Fix the issue and restart.`,
+    );
   }
+  // Conflict: move to failed queue, continue with remaining edits
+  failedEditsCell.push({ edit, error: err.message });
 }
 ```
 
@@ -420,6 +470,7 @@ need it.
 | Stable identity         | `Cell.of(externalId)` for canonical-ID-bearing items   |
 | In-flight link safety   | Write redirect links from temp cells to canonical ones |
 | Process safety          | Lockfile with PID, stale lock recovery                 |
-| Edit failures           | Separate queues for retryable vs. conflict errors      |
+| System edit failures    | Keep in queue, crash daemon, operator restarts          |
+| Conflict edit failures  | Move to failedEdits queue, surface to user              |
 | UI pending state        | Render from edit queue; auto-clears on sync            |
 | API sync                | TBD — same principles, different plumbing              |
