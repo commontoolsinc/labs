@@ -32,7 +32,7 @@ const EnvSchema = z.object({
   // ===========================================================================
   // OpenTelemetry Configuration
   // ===========================================================================
-  OTEL_ENABLED: z.coerce.boolean().default(true),
+  OTEL_ENABLED: z.coerce.boolean().default(false),
   OTEL_SERVICE_NAME: z.string().default("toolshed"),
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().default("http://localhost:4318"),
   OTEL_TRACES_SAMPLER: z.string().default("always_on"),
