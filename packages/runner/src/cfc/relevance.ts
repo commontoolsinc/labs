@@ -8,6 +8,7 @@ import type {
 import { canonicalizeStoragePath } from "./canonical-activity.ts";
 import { internalVerifierReadAnnotations } from "./internal-markers.ts";
 import { canonicalLabelPathMatchesReadPath } from "./path-matching.ts";
+import { cfcLabelsAddress, normalizePersistedLabels } from "./shared.ts";
 
 function hasIfcInObjectSchema(
   schema: Record<string, unknown>,
@@ -133,43 +134,6 @@ export function markCfcRelevantForSchema(
   }
 }
 
-function normalizePersistedLabels(value: unknown): Record<string, Labels> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return {};
-  }
-
-  const labelsByPath: Record<string, Labels> = {};
-  for (const [path, rawLabel] of Object.entries(value)) {
-    if (!path.startsWith("/")) {
-      continue;
-    }
-    if (!rawLabel || typeof rawLabel !== "object" || Array.isArray(rawLabel)) {
-      continue;
-    }
-    const rawClassification = (rawLabel as { classification?: unknown })
-      .classification;
-    const classification = Array.isArray(rawClassification)
-      ? rawClassification.filter((entry): entry is string =>
-        typeof entry === "string" && entry.length > 0
-      )
-      : [];
-    const rawIntegrity = (rawLabel as { integrity?: unknown }).integrity;
-    const integrity = Array.isArray(rawIntegrity)
-      ? rawIntegrity.filter((entry): entry is string =>
-        typeof entry === "string" && entry.length > 0
-      )
-      : [];
-    if (classification.length === 0 && integrity.length === 0) {
-      continue;
-    }
-    labelsByPath[path] = {
-      ...(classification.length > 0 ? { classification } : {}),
-      ...(integrity.length > 0 ? { integrity } : {}),
-    };
-  }
-  return labelsByPath;
-}
-
 function hasEffectiveLabelConstraint(
   labelsByPath: Record<string, Labels>,
   canonicalPath: string,
@@ -188,17 +152,6 @@ function hasEffectiveLabelConstraint(
   return false;
 }
 
-function labelsAddress(
-  readAddress: Pick<IMemorySpaceAddress, "space" | "id" | "type">,
-): IMemorySpaceAddress {
-  return {
-    space: readAddress.space,
-    id: readAddress.id,
-    type: readAddress.type,
-    path: ["cfc", "labels"],
-  };
-}
-
 export function markCfcRelevantForEffectiveLabels(
   tx: IExtendedStorageTransaction | undefined,
   readAddress: IMemorySpaceAddress,
@@ -208,7 +161,7 @@ export function markCfcRelevantForEffectiveLabels(
     return;
   }
 
-  const labelsValue = tx.readOrThrow(labelsAddress(readAddress), {
+  const labelsValue = tx.readOrThrow(cfcLabelsAddress(readAddress), {
     cfc: internalVerifierReadAnnotations,
   });
   const labelsByPath = normalizePersistedLabels(labelsValue);

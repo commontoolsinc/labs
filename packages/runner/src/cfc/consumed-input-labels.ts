@@ -2,6 +2,7 @@ import { ContextualFlowControl } from "../cfc.ts";
 import type { Labels } from "../storage/interface.ts";
 import type { CanonicalBoundaryRead } from "./canonical-activity.ts";
 import { canonicalLabelPathMatchesReadPath } from "./path-matching.ts";
+import { cfcEntityKey } from "./shared.ts";
 
 export interface ConsumedReadWithEffectiveLabel {
   readonly read: CanonicalBoundaryRead;
@@ -9,7 +10,7 @@ export interface ConsumedReadWithEffectiveLabel {
 }
 
 export function consumedReadEntityKey(read: CanonicalBoundaryRead): string {
-  return `${read.space}\u0000${read.id}\u0000${read.type}`;
+  return cfcEntityKey(read);
 }
 
 function effectiveLabelForPath(

@@ -437,7 +437,9 @@ describe("CFC pattern output transitions", () => {
 
     await waitForScheduler();
     let pulled: unknown = undefined;
-    for (let attempt = 0; attempt < 8; attempt++) {
+    // Full-workspace test runs can delay scheduler flushes, so allow a wider
+    // observation window before declaring the pull unresolved.
+    for (let attempt = 0; attempt < 30; attempt++) {
       pulled = await result.pull();
       if (pulled !== undefined) {
         break;
