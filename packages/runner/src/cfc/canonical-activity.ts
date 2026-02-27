@@ -44,11 +44,10 @@ export function toCanonicalJsonPointer(path: readonly string[]): string {
 export function stripStorageWrapperFromPath(
   path: readonly string[],
 ): readonly string[] {
-  let start = 0;
-  while (start < path.length && path[start] === "value") {
-    start++;
+  if (path.length > 0 && path[0] === "value") {
+    return path.slice(1);
   }
-  return path.slice(start);
+  return path;
 }
 
 export function canonicalizeStoragePath(path: readonly string[]): string {
