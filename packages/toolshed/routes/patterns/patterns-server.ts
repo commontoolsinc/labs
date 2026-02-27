@@ -33,6 +33,13 @@ export class PatternsServer {
   async get(filename: string): Promise<Uint8Array> {
     const url = new URL(filename, this.baseUrl);
 
+    // Security: verify the resolved URL stays within the patterns directory.
+    // This prevents path traversal via encoded sequences (e.g. %2e%2e) that
+    // bypass string-level checks but are decoded during URL resolution.
+    if (!url.href.startsWith(this.baseUrl.href)) {
+      throw new Error("Path traversal detected");
+    }
+
     try {
       return await Deno.readFile(url);
     } catch (error) {
