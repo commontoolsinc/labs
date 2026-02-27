@@ -1165,3 +1165,60 @@ type Input = {
 // Displays LLM-generated activity summary and scrollable commit list
 // with author, date, and clickable links to GitHub
 ```
+
+## `bookmarks.tsx`
+
+A pattern for collecting and browsing URLs/bookmarks. Users can add URLs to a
+collection, view them in a searchable grid with rich link previews (via
+ct-link-preview), and remove bookmarks. Designed to feed into the summary
+system.
+
+**Keywords:** bookmarks, links, collection, urls, grid, preview, search,
+ct-link-preview, ct-grid
+
+### Input Schema
+
+```ts
+interface Bookmark {
+  url: string;
+  title: Default<string, "">;
+  description: Default<string, "">;
+}
+
+interface BookmarksInput {
+  bookmarks?: Writable<Default<Bookmark[], []>>;
+}
+```
+
+### Output Schema
+
+```ts
+interface BookmarksOutput {
+  bookmarks: Bookmark[];
+  count: number;
+}
+```
+
+## `link-preview.tsx`
+
+A simple pattern that renders a rich link preview for a single URL. Uses
+ct-input for URL entry and ct-link-preview to display the preview card with
+metadata and screenshot.
+
+**Keywords:** link, preview, url, ct-link-preview, ct-input
+
+### Input Schema
+
+```ts
+interface LinkPreviewInput {
+  url: Default<string, "https://github.com">;
+}
+```
+
+### Output Schema
+
+```ts
+interface LinkPreviewInput {
+  url: string;
+}
+```
