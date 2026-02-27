@@ -1752,3 +1752,378 @@ describe("anyOf optimization integration", () => {
     expect(traverser.anyOfFastRejects).toBeGreaterThanOrEqual(2);
   });
 });
+
+describe("anyOf fast-reject reactivity invariants (traverseCells)", () => {
+  // These tests verify that the fast-reject optimization does NOT break
+  // reactivity. When traverseCells=true (the default), the schemaTracker
+  // must record every document whose value can affect the result, so that
+  // subscriptions fire when any contributing document changes.
+  //
+  // Key invariants:
+  //   1. The root document is ALWAYS tracked.
+  //   2. Linked documents reachable through surviving branches are tracked.
+  //   3. If the root document later changes (e.g. discriminator flips), the
+  //      subscription fires and a fresh traversal discovers the new branch's
+  //      links. Therefore, links exclusive to fast-rejected branches do NOT
+  //      need to be tracked preemptively — the root doc subscription covers
+  //      that scenario.
+
+  const SPACE = "did:null:null";
+  const TYPE = "application/json" as const;
+
+  /** Build a tracker key matching the internal getTrackerKey() format. */
+  function trackerKey(id: string): string {
+    return `${SPACE}/${id}/${TYPE}`;
+  }
+
+  /** Shortcut: store a document in the map-based store. */
+  function putDoc(
+    store: Map<string, Revision<State>>,
+    id: string,
+    value: unknown,
+  ) {
+    const entity = id as Entity;
+    store.set(`${entity}/${TYPE}`, {
+      the: TYPE,
+      of: entity,
+      is: { value },
+      cause: refer({ the: TYPE, of: entity }),
+      since: 1,
+    } as Revision<State>);
+  }
+
+  /** Create a link value (sigil v1 format). */
+  function makeLink(targetId: string, path: string[] = []) {
+    return {
+      "/": {
+        [LINK_V1_TAG]: { id: targetId, path },
+      },
+    };
+  }
+
+  /** Access the protected schemaTracker from the traverser. */
+  function getSchemaTracker(
+    traverser: SchemaObjectTraverser<StorableDatum>,
+  ): MapSet<string, SchemaPathSelector> {
+    return (traverser as any).schemaTracker;
+  }
+
+  it("tracks the root document even when all anyOf branches are fast-rejected", () => {
+    const store = new Map<string, Revision<State>>();
+    const docUri = "of:doc-no-match" as URI;
+
+    // Value is a number, but all branches expect string or boolean
+    putDoc(store, docUri, 42);
+
+    const schema = {
+      anyOf: [
+        { type: "string" },
+        { type: "boolean" },
+      ],
+    } as JSONSchema;
+
+    const traverser = getTraverser(store, { path: ["value"], schema });
+    traverser.traverse({
+      address: { space: SPACE, id: docUri, type: TYPE, path: ["value"] },
+      value: 42,
+    });
+
+    const tracker = getSchemaTracker(traverser);
+    // Root doc must ALWAYS be tracked — if its value changes, we re-traverse
+    expect(tracker.has(trackerKey(docUri))).toBe(true);
+  });
+
+  it("tracks linked docs reached through the matching branch of a discriminated union", () => {
+    const store = new Map<string, Revision<State>>();
+    const rootUri = "of:doc-disc-root" as URI;
+    const circleDataUri = "of:circle-data" as URI;
+
+    putDoc(store, circleDataUri, "radius-info");
+
+    const rootValue = {
+      kind: "circle",
+      data: makeLink(circleDataUri),
+    };
+    putDoc(store, rootUri, rootValue);
+
+    // Discriminated union: "circle" branch includes data link, "square" does not
+    const schema = {
+      anyOf: [
+        {
+          type: "object",
+          properties: {
+            kind: { const: "circle" },
+            data: { type: "string" },
+          },
+          required: ["kind"],
+        },
+        {
+          type: "object",
+          properties: {
+            kind: { const: "square" },
+            side: { type: "number" },
+          },
+          required: ["kind"],
+        },
+      ],
+    } as JSONSchema;
+
+    const traverser = getTraverser(store, { path: ["value"], schema });
+    const result = traverser.traverse({
+      address: { space: SPACE, id: rootUri, type: TYPE, path: ["value"] },
+      value: rootValue,
+    });
+
+    // Correct result
+    expect((result as any).kind).toBe("circle");
+    expect((result as any).data).toBe("radius-info");
+
+    // "square" branch should be fast-rejected
+    expect(traverser.anyOfFastRejects).toBeGreaterThanOrEqual(1);
+
+    // Reactivity: both root and linked doc must be tracked
+    const tracker = getSchemaTracker(traverser);
+    expect(tracker.has(trackerKey(rootUri))).toBe(true);
+    expect(tracker.has(trackerKey(circleDataUri))).toBe(true);
+  });
+
+  it("tracks linked docs in shared properties even when some branches are fast-rejected", () => {
+    const store = new Map<string, Revision<State>>();
+    const rootUri = "of:doc-shared-link" as URI;
+    const sharedUri = "of:shared-target" as URI;
+
+    putDoc(store, sharedUri, "shared-value");
+
+    // Both branches reference the same property "ref" which has a link.
+    // "string" branch is fast-rejected (value is an object), but the
+    // surviving "object" branch still traverses "ref".
+    const rootValue = {
+      name: "test",
+      ref: makeLink(sharedUri),
+    };
+    putDoc(store, rootUri, rootValue);
+
+    const schema = {
+      anyOf: [
+        { type: "string" },
+        {
+          type: "object",
+          properties: {
+            name: { type: "string" },
+            ref: { type: "string" },
+          },
+        },
+      ],
+    } as JSONSchema;
+
+    const traverser = getTraverser(store, { path: ["value"], schema });
+    const result = traverser.traverse({
+      address: { space: SPACE, id: rootUri, type: TYPE, path: ["value"] },
+      value: rootValue,
+    });
+
+    expect((result as any).ref).toBe("shared-value");
+    expect(traverser.anyOfFastRejects).toBeGreaterThanOrEqual(1);
+
+    const tracker = getSchemaTracker(traverser);
+    expect(tracker.has(trackerKey(rootUri))).toBe(true);
+    expect(tracker.has(trackerKey(sharedUri))).toBe(true);
+  });
+
+  it("tracks all linked docs when multiple links survive fast-reject", () => {
+    const store = new Map<string, Revision<State>>();
+    const rootUri = "of:doc-multi-link" as URI;
+    const linkAUri = "of:link-a" as URI;
+    const linkBUri = "of:link-b" as URI;
+
+    putDoc(store, linkAUri, "value-a");
+    putDoc(store, linkBUri, "value-b");
+
+    const rootValue = {
+      kind: "circle",
+      linkA: makeLink(linkAUri),
+      linkB: makeLink(linkBUri),
+    };
+    putDoc(store, rootUri, rootValue);
+
+    const schema = {
+      anyOf: [
+        {
+          type: "object",
+          properties: {
+            kind: { const: "circle" },
+            linkA: { type: "string" },
+            linkB: { type: "string" },
+          },
+          required: ["kind"],
+        },
+        {
+          type: "object",
+          properties: {
+            kind: { const: "square" },
+          },
+          required: ["kind"],
+        },
+        { type: "string" },
+      ],
+    } as JSONSchema;
+
+    const traverser = getTraverser(store, { path: ["value"], schema });
+    const result = traverser.traverse({
+      address: { space: SPACE, id: rootUri, type: TYPE, path: ["value"] },
+      value: rootValue,
+    });
+
+    expect((result as any).linkA).toBe("value-a");
+    expect((result as any).linkB).toBe("value-b");
+
+    // "square" and "string" branches should be fast-rejected
+    expect(traverser.anyOfFastRejects).toBeGreaterThanOrEqual(2);
+
+    // ALL three docs (root + 2 links) must be tracked for reactivity
+    const tracker = getSchemaTracker(traverser);
+    expect(tracker.has(trackerKey(rootUri))).toBe(true);
+    expect(tracker.has(trackerKey(linkAUri))).toBe(true);
+    expect(tracker.has(trackerKey(linkBUri))).toBe(true);
+  });
+
+  it("root doc subscription ensures rejected-branch links become discoverable on change", () => {
+    // Scenario: branch A (circle) matches now and has linkA tracked.
+    // Branch B (square) is fast-rejected; its exclusive linkB is NOT tracked.
+    // This is safe because: if the root doc changes to kind:"square", the
+    // root-doc subscription fires and a fresh traversal will now match
+    // branch B and discover linkB.
+    //
+    // We verify this by doing TWO traversals with different root values.
+    const store = new Map<string, Revision<State>>();
+    const rootUri = "of:doc-flip" as URI;
+    const circleLinkUri = "of:circle-link" as URI;
+    const squareLinkUri = "of:square-link" as URI;
+
+    putDoc(store, circleLinkUri, "circle-data");
+    putDoc(store, squareLinkUri, "square-data");
+
+    // First traversal: kind=circle → circleLink tracked, squareLink not needed
+    const circleValue = {
+      kind: "circle",
+      circleLink: makeLink(circleLinkUri),
+      squareLink: makeLink(squareLinkUri),
+    };
+    putDoc(store, rootUri, circleValue);
+
+    const schema = {
+      anyOf: [
+        {
+          type: "object",
+          properties: {
+            kind: { const: "circle" },
+            circleLink: { type: "string" },
+          },
+          required: ["kind"],
+        },
+        {
+          type: "object",
+          properties: {
+            kind: { const: "square" },
+            squareLink: { type: "string" },
+          },
+          required: ["kind"],
+        },
+      ],
+    } as JSONSchema;
+
+    const traverser1 = getTraverser(store, { path: ["value"], schema });
+    const result1 = traverser1.traverse({
+      address: { space: SPACE, id: rootUri, type: TYPE, path: ["value"] },
+      value: circleValue,
+    });
+
+    expect((result1 as any).kind).toBe("circle");
+    expect((result1 as any).circleLink).toBe("circle-data");
+    const tracker1 = getSchemaTracker(traverser1);
+    expect(tracker1.has(trackerKey(rootUri))).toBe(true);
+    expect(tracker1.has(trackerKey(circleLinkUri))).toBe(true);
+
+    // Second traversal: root doc changes to kind=square
+    // (simulates a reactive re-run after the root subscription fires)
+    const squareValue = {
+      kind: "square",
+      circleLink: makeLink(circleLinkUri),
+      squareLink: makeLink(squareLinkUri),
+    };
+    putDoc(store, rootUri, squareValue);
+
+    const traverser2 = getTraverser(store, { path: ["value"], schema });
+    const result2 = traverser2.traverse({
+      address: { space: SPACE, id: rootUri, type: TYPE, path: ["value"] },
+      value: squareValue,
+    });
+
+    expect((result2 as any).kind).toBe("square");
+    expect((result2 as any).squareLink).toBe("square-data");
+    const tracker2 = getSchemaTracker(traverser2);
+    expect(tracker2.has(trackerKey(rootUri))).toBe(true);
+    expect(tracker2.has(trackerKey(squareLinkUri))).toBe(true);
+  });
+
+  it("tracks nested linked docs through surviving anyOf branches", () => {
+    // Chain: root → midDoc → leafDoc, all through an anyOf-guarded schema
+    const store = new Map<string, Revision<State>>();
+    const rootUri = "of:doc-nested-root" as URI;
+    const midUri = "of:doc-mid" as URI;
+    const leafUri = "of:doc-leaf" as URI;
+
+    putDoc(store, leafUri, "leaf-value");
+    putDoc(store, midUri, { inner: makeLink(leafUri) });
+
+    const rootValue = {
+      kind: "deep",
+      ref: makeLink(midUri),
+    };
+    putDoc(store, rootUri, rootValue);
+
+    const schema = {
+      anyOf: [
+        {
+          type: "object",
+          properties: {
+            kind: { const: "deep" },
+            ref: {
+              type: "object",
+              properties: {
+                inner: { type: "string" },
+              },
+            },
+          },
+          required: ["kind"],
+        },
+        {
+          type: "object",
+          properties: {
+            kind: { const: "shallow" },
+          },
+          required: ["kind"],
+        },
+        { type: "null" },
+      ],
+    } as JSONSchema;
+
+    const traverser = getTraverser(store, { path: ["value"], schema });
+    const result = traverser.traverse({
+      address: { space: SPACE, id: rootUri, type: TYPE, path: ["value"] },
+      value: rootValue,
+    });
+
+    expect((result as any).kind).toBe("deep");
+    expect((result as any).ref).toEqual({ inner: "leaf-value" });
+
+    // "shallow" and "null" branches fast-rejected
+    expect(traverser.anyOfFastRejects).toBeGreaterThanOrEqual(2);
+
+    // All three docs in the chain must be tracked
+    const tracker = getSchemaTracker(traverser);
+    expect(tracker.has(trackerKey(rootUri))).toBe(true);
+    expect(tracker.has(trackerKey(midUri))).toBe(true);
+    expect(tracker.has(trackerKey(leafUri))).toBe(true);
+  });
+});
