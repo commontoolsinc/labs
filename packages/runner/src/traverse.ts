@@ -139,7 +139,7 @@ function stableStringify(value: unknown): string {
  *
  * When `useStableStringify` is true, values are deduped using a canonical hash
  * (stableStringify with WeakMap identity cache) for O(1) add/hasValue.
- * The hash path uses sorted object keys, so structurally-equal values always 
+ * The hash path uses sorted object keys, so structurally-equal values always
  * produce the same hash.
  *
  * When `useStableStringify` is false, values are stored in a plain Set using
