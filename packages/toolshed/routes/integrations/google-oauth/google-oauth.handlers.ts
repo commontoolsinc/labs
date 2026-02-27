@@ -25,7 +25,6 @@ import {
   tokenToAuthData,
 } from "./google-oauth.utils.ts";
 import { setBGCharm } from "@commontools/background-charm";
-import { parseLink } from "@commontools/runner";
 import { runtime } from "@/index.ts";
 import { Tokens } from "@cmd-johnson/oauth2-client";
 
@@ -201,7 +200,9 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
     // Add this charm to the Gmail integration charms cell
     try {
       // Get the charm ID and space from the decodedState (which is the auth cell ID)
-      const authCellLink = parseLink(JSON.parse(decodedState.authCellId))!;
+      // The authCellId is already a normalized link object {space, id, type, path, schema}
+      // not a PrimitiveCellLink sigil, so we read .space directly instead of using parseLink()
+      const authCellLink = JSON.parse(decodedState.authCellId);
       const space = authCellLink.space;
       const integrationPieceId = decodedState?.integrationPieceId;
 
@@ -225,8 +226,11 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
       }
     } catch (error) {
       // Don't fail the main operation if this fails, just log it
+      const errorInfo = error instanceof Error
+        ? { message: error.message, stack: error.stack, name: error.name }
+        : { raw: String(error), type: typeof error };
       logger.error(
-        { error },
+        { error: errorInfo },
         "Failed to add charm to Gmail integrations, continuing anyway",
       );
     }
