@@ -1,9 +1,14 @@
 import { createRouter } from "@/lib/create-app.ts";
 import * as handlers from "./voice.handlers.ts";
+import * as ttsHandlers from "./tts.handlers.ts";
 import * as routes from "./voice.routes.ts";
+import * as ttsRoutes from "./tts.routes.ts";
 import { cors } from "@hono/hono/cors";
+
 const router = createRouter()
-  .openapi(routes.transcribeVoice, handlers.transcribeVoice);
+  .openapi(routes.transcribeVoice, handlers.transcribeVoice)
+  .openapi(ttsRoutes.synthesizeVoice, ttsHandlers.synthesizeVoice)
+  .openapi(ttsRoutes.getAudio, ttsHandlers.getAudio);
 
 router.use(
   "/api/ai/voice/*",
