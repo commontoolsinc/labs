@@ -325,6 +325,11 @@ Be matter-of-fact. Prefer action to explanation.`;
                   />
                 </div>
 
+                {/* Pinned items / attachments - always visible */}
+                <div style="padding: 4px 8px; flex-shrink: 0;">
+                  {omnibot.ui.attachmentsAndTools}
+                </div>
+
                 {/* Expandable chat history */}
                 <div
                   style={computed(() => {
@@ -340,9 +345,6 @@ Be matter-of-fact. Prefer action to explanation.`;
                     };`;
                   })}
                 >
-                  <div style="padding: 4px 8px; flex-shrink: 0;">
-                    {omnibot.ui.attachmentsAndTools}
-                  </div>
                   <div style="flex: 1; overflow-y: auto; min-height: 0;">
                     <ct-cell-context $cell={omnibot}>
                       {omnibot.ui.chatLog}
