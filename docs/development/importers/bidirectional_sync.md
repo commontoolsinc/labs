@@ -130,6 +130,8 @@ async function runSyncLoop(
   let syncInProgress = false;
   let syncAgain = false;
 
+  const debouncedSync = debounce(sync, 100);
+
   function scheduleSync() {
     syncAgain = true;
     debouncedSync();
@@ -140,8 +142,6 @@ async function runSyncLoop(
 
   // Watch edit queue for new entries
   editsCell.sink(scheduleSync);
-
-  const debouncedSync = debounce(sync, 100);
 
   async function sync() {
     if (syncInProgress) {
