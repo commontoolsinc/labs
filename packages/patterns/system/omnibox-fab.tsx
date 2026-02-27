@@ -294,7 +294,7 @@ Be matter-of-fact. Prefer action to explanation.`;
       [UI]: (
         <ct-drop-zone
           accept="cell-link"
-          style="position: fixed; bottom: 0; left: 50%; transform: translateX(-50%); width: 240px; height: 32px; z-index: 997;"
+          style="position: fixed; bottom: 0; left: 50%; transform: translateX(-50%); z-index: 997;"
           onct-drop={handleDropToPin({
             pinToChat: omnibot.pinToChat,
             fabExpanded,
@@ -325,6 +325,11 @@ Be matter-of-fact. Prefer action to explanation.`;
                   />
                 </div>
 
+                {/* Pinned items / attachments - always visible */}
+                <div style="padding: 4px 8px; flex-shrink: 0;">
+                  {omnibot.ui.attachmentsAndTools}
+                </div>
+
                 {/* Expandable chat history */}
                 <div
                   style={computed(() => {
@@ -340,9 +345,6 @@ Be matter-of-fact. Prefer action to explanation.`;
                     };`;
                   })}
                 >
-                  <div style="padding: 4px 8px; flex-shrink: 0;">
-                    {omnibot.ui.attachmentsAndTools}
-                  </div>
                   <div style="flex: 1; overflow-y: auto; min-height: 0;">
                     <ct-cell-context $cell={omnibot}>
                       {omnibot.ui.chatLog}
