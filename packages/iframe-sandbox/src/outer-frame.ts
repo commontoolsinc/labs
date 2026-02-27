@@ -29,7 +29,7 @@ iframe {
 <\/head>
 <body>
 <iframe
-  allow="clipboard-write"
+  allow="clipboard-write; autoplay"
   sandbox="allow-popups allow-popups-to-escape-sandbox allow-scripts allow-modals"><\/iframe>
 <script>
 const iframe = document.querySelector("iframe");

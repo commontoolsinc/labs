@@ -113,7 +113,7 @@ export default pattern<Input, Output>(({ messages, system, voice }) => {
     url: computed(() => ttsPayload ? "/api/ai/voice/synthesize" : null),
     mode: "json",
     options: computed(() => {
-      if (!ttsPayload) return undefined;
+      if (!ttsPayload) return null;
       return {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -156,7 +156,8 @@ export default pattern<Input, Output>(({ messages, system, voice }) => {
         </ct-vscroll>
 
         {/* Hidden audio — plays TTS when src updates */}
-        <audio autoPlay src={audioSrc} />
+        {/* @ts-ignore autoplay must be lowercase for DOM property */}
+        <audio autoplay src={audioSrc} />
 
         {/* Voice input — hold mic to record */}
         <div

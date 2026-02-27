@@ -502,7 +502,7 @@ export class CommonIframeSandboxElement extends LitElement {
     return html`
       <iframe
         ${ref(this.iframeRef)}
-        allow="clipboard-write"
+        allow="clipboard-write; autoplay"
         sandbox="allow-scripts allow-pointer-lock allow-popups allow-popups-to-escape-sandbox"
         .srcdoc="${OuterFrame}"
         height="100%"
