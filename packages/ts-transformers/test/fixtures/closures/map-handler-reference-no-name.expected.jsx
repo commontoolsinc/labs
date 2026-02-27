@@ -32,7 +32,7 @@ export default pattern((state: State) => {
     return {
         [UI]: (<div>
         {/* Map callback references handler - should NOT capture it */}
-        {state.items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        {state.key("items").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                 const item = __ct_pattern_input.key("element");
                 const state = __ct_pattern_input.key("params", "state");
                 return (<ct-button onClick={handleClick({ count: state.key("count") })}>

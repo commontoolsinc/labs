@@ -177,7 +177,7 @@ const p = pattern(({ foo, ...rest }) => <div>{foo}</div>);
 );
 
 Deno.test(
-  "Capability-first diagnostics: array destructuring is non-lowerable",
+  "Capability-first diagnostics: array destructuring is lowerable",
   async () => {
     const source = `/// <cts-enable />
 import { pattern } from "commontools";
@@ -187,15 +187,15 @@ const p = pattern(([first]) => <div>{first}</div>);
     const { diagnostics } = await validateSource(source, {
       useLegacyOpaqueRefSemantics: false,
     });
+    const output = await transformSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+    });
     const computationDiagnostics = diagnostics.filter((diagnostic) =>
       diagnostic.type === "pattern-context:computation"
     );
 
-    assertEquals(computationDiagnostics.length, 1);
-    assertStringIncludes(
-      computationDiagnostics[0]!.message,
-      "Array destructuring",
-    );
+    assertEquals(computationDiagnostics.length, 0);
+    assertStringIncludes(output, 'const first = __ct_pattern_input.key("0");');
   },
 );
 
@@ -223,30 +223,31 @@ const p = pattern(({ foo = "fallback" }) => <div>{foo}</div>);
 );
 
 Deno.test(
-  "Capability-first diagnostics: computed binding key destructuring is non-lowerable",
+  "Capability-first diagnostics: computed binding key destructuring is lowerable",
   async () => {
     const source = `/// <cts-enable />
 import { pattern } from "commontools";
-const p = pattern(({ ["foo"]: foo }) => <div>{foo}</div>);
+const key = "foo" as const;
+const p = pattern(({ [key]: foo }) => <div>{foo}</div>);
 `;
 
     const { diagnostics } = await validateSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+    });
+    const output = await transformSource(source, {
       useLegacyOpaqueRefSemantics: false,
     });
     const computationDiagnostics = diagnostics.filter((diagnostic) =>
       diagnostic.type === "pattern-context:computation"
     );
 
-    assertEquals(computationDiagnostics.length, 1);
-    assertStringIncludes(
-      computationDiagnostics[0]!.message,
-      "Computed destructuring keys",
-    );
+    assertEquals(computationDiagnostics.length, 0);
+    assertStringIncludes(output, "const foo = __ct_pattern_input.key(key);");
   },
 );
 
 Deno.test(
-  "Capability-first: mapWithPattern array destructuring reports diagnostic and keeps bindings",
+  "Capability-first: mapWithPattern array destructuring lowers to key bindings",
   async () => {
     const source = `/// <cts-enable />
 import { pattern, UI } from "commontools";
@@ -278,19 +279,16 @@ const p = pattern<State>((state) => {
       diagnostic.type === "pattern-context:computation"
     );
 
-    assert(computationDiagnostics.length >= 1);
+    assertEquals(computationDiagnostics.length, 0);
     assertStringIncludes(
-      computationDiagnostics[0]!.message,
-      "Array destructuring is not lowerable",
+      output,
+      'const left = __ct_pattern_input.key("element", "0");',
     );
     assertStringIncludes(
       output,
-      "{ element: [left, right], params: {} }",
+      'const right = __ct_pattern_input.key("element", "1");',
     );
     assertStringIncludes(output, ".mapWithPattern(");
-    assert(
-      !output.includes("__ct_pattern_input => <span>{left}:{right}</span>"),
-    );
   },
 );
 
@@ -692,6 +690,81 @@ const p = pattern((input, key: string) => input[key]);
     );
 
     assert(computationDiagnostics.length >= 1);
+  },
+);
+
+Deno.test(
+  "Capability-first diagnostics: known symbol key access is lowerable",
+  async () => {
+    const source = `/// <cts-enable />
+import { NAME, UI, pattern } from "commontools";
+const p = pattern(({ items }) => items.map((item) => ({ n: item[NAME], u: item[UI] })));
+`;
+
+    const { diagnostics } = await validateSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+    });
+    const output = await transformSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+    });
+
+    const computationDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-context:computation"
+    );
+
+    assertEquals(computationDiagnostics.length, 0);
+    assertStringIncludes(output, "item.key(__ctHelpers.NAME)");
+    assertStringIncludes(output, "item.key(__ctHelpers.UI)");
+  },
+);
+
+Deno.test(
+  "Capability-first diagnostics: SELF destructuring key is lowerable",
+  async () => {
+    const source = `/// <cts-enable />
+import { SELF, pattern } from "commontools";
+const p = pattern(({ [SELF]: self, value }) => self);
+`;
+
+    const { diagnostics } = await validateSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+    });
+    const output = await transformSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+    });
+
+    const computationDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-context:computation"
+    );
+
+    assertEquals(computationDiagnostics.length, 0);
+    assertStringIncludes(
+      output,
+      "const self = __ct_pattern_input[__ctHelpers.SELF];",
+    );
+    assertStringIncludes(
+      output,
+      'const value = __ct_pattern_input.key("value");',
+    );
+  },
+);
+
+Deno.test(
+  "Capability-first: map callback receiver path lowers before mapWithPattern terminal",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern } from "commontools";
+const p = pattern(({ items }) =>
+  items.map((item) => item.subItems.map((subItem) => subItem.value))
+);
+`;
+
+    const output = await transformSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+    });
+
+    assertStringIncludes(output, 'item.key("subItems").mapWithPattern(');
+    assertStringIncludes(output, 'return subItem.key("value");');
   },
 );
 

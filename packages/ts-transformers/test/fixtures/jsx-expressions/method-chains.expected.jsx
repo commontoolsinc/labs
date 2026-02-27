@@ -402,7 +402,7 @@ export default pattern((state) => {
         <h3>Complex Method Combinations</h3>
         {/* Map with chained operations inside */}
         <ul>
-          {state.names.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+          {state.key("names").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                 const name = __ct_pattern_input.key("element");
                 return (<li>{__ctHelpers.derive({
                     type: "object",
@@ -657,7 +657,7 @@ export default pattern((state) => {
 
         {/* Map with conditional logic */}
         <ul>
-          {state.users.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+          {state.key("users").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                 const u = __ct_pattern_input.key("element");
                 return (<li>{__ctHelpers.ifElse({
                     type: "boolean",

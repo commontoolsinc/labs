@@ -125,7 +125,7 @@ export default pattern((__ct_pattern_input) => {
             return (<div>
               <strong>{item.key("label")}</strong>
               <ul>
-                {item.tags.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                {item.key("tags").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                     const tag = __ct_pattern_input.key("element");
                     const i = __ct_pattern_input.key("index");
                     const item = __ct_pattern_input.key("params", "item");

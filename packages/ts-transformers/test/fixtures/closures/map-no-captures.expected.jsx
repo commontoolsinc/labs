@@ -11,7 +11,7 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* No captures - just uses the callback parameter */}
-        {state.items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        {state.key("items").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                 const item = __ct_pattern_input.key("element");
                 return (<div>Item #{item.key("id")}: ${item.key("price")}</div>);
             }, {

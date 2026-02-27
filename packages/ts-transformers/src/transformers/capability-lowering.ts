@@ -5,12 +5,19 @@ import {
   isFunctionLikeExpression,
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
-import { TransformationContext, Transformer } from "../core/mod.ts";
+import {
+  resolvesToCommonToolsSymbol,
+  TransformationContext,
+  Transformer,
+} from "../core/mod.ts";
 import { analyzeFunctionCapabilities } from "../policy/mod.ts";
+
+type PathSegment = string | ts.Expression;
 
 interface DestructureBinding {
   readonly localName: string;
-  readonly path: readonly string[];
+  readonly path: readonly PathSegment[];
+  readonly directKeyExpression?: ts.Expression;
 }
 
 const KNOWN_PATH_TERMINAL_METHODS = new Set([
@@ -47,20 +54,116 @@ function unwrapExpression(expr: ts.Expression): ts.Expression {
       current = current.expression;
       continue;
     }
+    if (ts.isPartiallyEmittedExpression(current)) {
+      current = current.expression;
+      continue;
+    }
     return current;
   }
 }
 
-function getAccessInfo(expr: ts.Expression): {
+function cloneKeyExpression(
+  expr: ts.Expression,
+  factory: ts.NodeFactory,
+): ts.Expression {
+  if (ts.isIdentifier(expr)) {
+    return factory.createIdentifier(expr.text);
+  }
+  if (ts.isStringLiteral(expr)) {
+    return factory.createStringLiteral(expr.text);
+  }
+  if (ts.isNumericLiteral(expr)) {
+    return factory.createNumericLiteral(expr.text);
+  }
+  if (ts.isNoSubstitutionTemplateLiteral(expr)) {
+    return factory.createStringLiteral(expr.text);
+  }
+  return expr;
+}
+
+function isCommonToolsKeyIdentifier(
+  expr: ts.Expression,
+  context: TransformationContext,
+  targetName: "NAME" | "UI" | "SELF",
+): expr is ts.Identifier {
+  if (!ts.isIdentifier(expr)) return false;
+  const symbol = context.checker.getSymbolAtLocation(expr);
+  if (resolvesToCommonToolsSymbol(symbol, context.checker, targetName)) {
+    return true;
+  }
+  // Keep direct-name fallback for transformed helper contexts where symbol
+  // resolution can be transient.
+  return expr.text === targetName;
+}
+
+function getKnownComputedKeyExpression(
+  expr: ts.Expression,
+  context: TransformationContext,
+): ts.Expression | undefined {
+  if (isCommonToolsKeyIdentifier(expr, context, "NAME")) {
+    return context.ctHelpers.getHelperExpr("NAME");
+  }
+  if (isCommonToolsKeyIdentifier(expr, context, "UI")) {
+    return context.ctHelpers.getHelperExpr("UI");
+  }
+  if (isCommonToolsKeyIdentifier(expr, context, "SELF")) {
+    return context.ctHelpers.getHelperExpr("SELF");
+  }
+  return undefined;
+}
+
+function isSelfPathSegment(
+  segment: PathSegment,
+  context: TransformationContext,
+): boolean {
+  return typeof segment !== "string" &&
+    (
+      isCommonToolsKeyIdentifier(segment, context, "SELF") ||
+      (ts.isPropertyAccessExpression(segment) &&
+        ts.isIdentifier(segment.expression) &&
+        segment.expression.text === "__ctHelpers" &&
+        segment.name.text === "SELF")
+    );
+}
+
+function getAccessInfo(
+  expr: ts.Expression,
+  context: TransformationContext,
+): {
   root?: string;
-  path: string[];
+  path: PathSegment[];
   dynamic: boolean;
 } {
-  const path: string[] = [];
+  const path: PathSegment[] = [];
   let current: ts.Expression = expr;
   let dynamic = false;
 
   while (true) {
+    if (ts.isParenthesizedExpression(current)) {
+      current = current.expression;
+      continue;
+    }
+    if (ts.isAsExpression(current)) {
+      current = current.expression;
+      continue;
+    }
+    if (ts.isTypeAssertionExpression(current)) {
+      current = current.expression;
+      continue;
+    }
+    if (ts.isSatisfiesExpression(current)) {
+      current = current.expression;
+      continue;
+    }
+    if (ts.isNonNullExpression(current)) {
+      current = current.expression;
+      continue;
+    }
+    if (ts.isPartiallyEmittedExpression(current)) {
+      current = current.expression;
+      continue;
+    }
+
     if (ts.isPropertyAccessExpression(current)) {
       path.unshift(current.name.text);
       current = current.expression;
@@ -76,6 +179,13 @@ function getAccessInfo(expr: ts.Expression): {
           ts.isNoSubstitutionTemplateLiteral(arg))
       ) {
         path.unshift(arg.text);
+      } else if (arg) {
+        const knownKeyExpression = getKnownComputedKeyExpression(arg, context);
+        if (knownKeyExpression) {
+          path.unshift(knownKeyExpression);
+        } else {
+          dynamic = true;
+        }
       } else {
         dynamic = true;
       }
@@ -105,9 +215,10 @@ function isTopmostMemberAccess(node: ts.Node): boolean {
 
 function collectDestructureBindings(
   name: ts.BindingName,
-  path: readonly string[],
+  path: readonly PathSegment[],
   bindings: DestructureBinding[],
   unsupported: string[],
+  context: TransformationContext,
 ): void {
   if (ts.isIdentifier(name)) {
     bindings.push({
@@ -118,9 +229,43 @@ function collectDestructureBindings(
   }
 
   if (ts.isArrayBindingPattern(name)) {
-    unsupported.push(
-      "Array destructuring is not lowerable in pattern context; use explicit input.key(...) bindings.",
-    );
+    for (let index = 0; index < name.elements.length; index++) {
+      const element = name.elements[index];
+      if (!element || ts.isOmittedExpression(element)) {
+        continue;
+      }
+
+      if (element.dotDotDotToken) {
+        unsupported.push(
+          "Rest destructuring is not lowerable in pattern context; avoid ...rest in pattern parameters.",
+        );
+        continue;
+      }
+
+      if (element.initializer) {
+        unsupported.push(
+          "Default destructuring initializers are not lowerable in pattern context; move defaulting into computed().",
+        );
+        continue;
+      }
+
+      const nextPath = [...path, String(index)];
+      if (ts.isIdentifier(element.name)) {
+        bindings.push({
+          localName: element.name.text,
+          path: nextPath,
+        });
+        continue;
+      }
+
+      collectDestructureBindings(
+        element.name,
+        nextPath,
+        bindings,
+        unsupported,
+        context,
+      );
+    }
     return;
   }
 
@@ -139,7 +284,8 @@ function collectDestructureBindings(
       continue;
     }
 
-    let key: string | undefined;
+    let key: PathSegment | undefined;
+    let directKeyExpression: ts.Expression | undefined;
     if (!element.propertyName) {
       if (ts.isIdentifier(element.name)) {
         key = element.name.text;
@@ -156,10 +302,13 @@ function collectDestructureBindings(
     } else if (ts.isNumericLiteral(element.propertyName)) {
       key = element.propertyName.text;
     } else if (ts.isComputedPropertyName(element.propertyName)) {
-      unsupported.push(
-        "Computed destructuring keys are not lowerable in pattern context; use explicit input.key(dynamicKey).",
-      );
-      continue;
+      const computedKey = element.propertyName.expression;
+      if (isCommonToolsKeyIdentifier(computedKey, context, "SELF")) {
+        directKeyExpression = context.ctHelpers.getHelperExpr("SELF");
+      } else {
+        key = getKnownComputedKeyExpression(computedKey, context) ??
+          computedKey;
+      }
     } else {
       unsupported.push(
         "Unsupported destructuring key in pattern context; use explicit input.key(...).",
@@ -167,29 +316,36 @@ function collectDestructureBindings(
       continue;
     }
 
-    const nextPath = [...path, key];
+    const nextPath = key === undefined ? path : [...path, key];
     if (ts.isIdentifier(element.name)) {
       bindings.push({
         localName: element.name.text,
         path: nextPath,
+        directKeyExpression,
       });
       continue;
     }
 
-    if (ts.isArrayBindingPattern(element.name)) {
+    if (directKeyExpression) {
       unsupported.push(
-        "Array destructuring is not lowerable in pattern context; use explicit input.key(...) bindings.",
+        "Nested SELF destructuring is not lowerable in pattern context.",
       );
       continue;
     }
 
-    collectDestructureBindings(element.name, nextPath, bindings, unsupported);
+    collectDestructureBindings(
+      element.name,
+      nextPath,
+      bindings,
+      unsupported,
+      context,
+    );
   }
 }
 
 function createKeyCall(
   rootIdentifier: ts.Identifier,
-  path: readonly string[],
+  path: readonly PathSegment[],
   factory: ts.NodeFactory,
 ): ts.Expression {
   const keyCall = factory.createCallExpression(
@@ -198,7 +354,11 @@ function createKeyCall(
       factory.createIdentifier("key"),
     ),
     undefined,
-    path.map((segment) => factory.createStringLiteral(segment)),
+    path.map((segment) =>
+      typeof segment === "string"
+        ? factory.createStringLiteral(segment)
+        : cloneKeyExpression(segment, factory)
+    ),
   );
   return keyCall;
 }
@@ -226,7 +386,18 @@ function isPatternBuilderCall(
   checker: ts.TypeChecker,
 ): boolean {
   const kind = detectCallKind(call, checker);
-  return kind?.kind === "builder" && kind.builderName === "pattern";
+  if (kind?.kind === "builder" && kind.builderName === "pattern") {
+    return true;
+  }
+
+  const expression = unwrapExpression(call.expression);
+  if (ts.isIdentifier(expression)) {
+    return expression.text === "pattern";
+  }
+  if (ts.isPropertyAccessExpression(expression)) {
+    return expression.name.text === "pattern";
+  }
+  return false;
 }
 
 function registerCapabilitySummary(
@@ -271,7 +442,7 @@ function isOpaqueSourceExpression(
   context: TransformationContext,
 ): boolean {
   const current = unwrapExpression(expression);
-  const info = getAccessInfo(current);
+  const info = getAccessInfo(current, context);
   if (info.root && opaqueRoots.has(info.root)) {
     return true;
   }
@@ -403,7 +574,7 @@ function reportOptionalError(
 
 function rewritePatternBody(
   body: ts.ConciseBody,
-  opaqueRoots: ReadonlySet<string>,
+  opaqueRoots: Set<string>,
   context: TransformationContext,
 ): ts.ConciseBody {
   if (opaqueRoots.size === 0) {
@@ -436,11 +607,19 @@ function rewritePatternBody(
     const visited = visitEachChildWithJsx(node, visit, context.tsContext);
 
     if (
+      ts.isVariableDeclaration(visited) &&
+      visited.initializer &&
+      isOpaqueSourceExpression(visited.initializer, opaqueRoots, context)
+    ) {
+      addBindingTargets(visited.name, opaqueRoots);
+    }
+
+    if (
       (ts.isPropertyAccessExpression(visited) ||
         ts.isElementAccessExpression(visited)) &&
       isTopmostMemberAccess(visited)
     ) {
-      const info = getAccessInfo(visited);
+      const info = getAccessInfo(visited, context);
       if (!info.root || !opaqueRoots.has(info.root)) {
         return visited;
       }
@@ -454,45 +633,75 @@ function rewritePatternBody(
         return visited;
       }
 
-      if (
-        ts.isPropertyAccessExpression(visited) &&
-        KNOWN_PATH_TERMINAL_METHODS.has(visited.name.text)
-      ) {
-        const parent = visited.parent;
-        if (
-          !parent ||
-          (ts.isCallExpression(parent) && parent.expression === visited)
-        ) {
+      const parent = visited.parent;
+      if (ts.isPropertyAccessExpression(visited)) {
+        const isCallParent = !!parent && ts.isCallExpression(parent) &&
+          parent.expression === visited;
+
+        if (KNOWN_PATH_TERMINAL_METHODS.has(visited.name.text)) {
+          if (!isCallParent) {
+            return visited;
+          }
+
+          if (
+            (parent as ts.CallExpression).questionDotToken ||
+            visited.questionDotToken
+          ) {
+            reportOnce(
+              visited,
+              "optional",
+              "Optional-call forms are not lowerable in pattern context. Move this access into computed().",
+            );
+            return visited;
+          }
+
+          if (info.path.length <= 1) {
+            return visited;
+          }
+
+          const receiverPath = info.path.slice(0, -1);
+          const rewrittenReceiver = createKeyCall(
+            context.factory.createIdentifier(info.root),
+            receiverPath,
+            context.factory,
+          );
+          const rewrittenMethod = context.factory
+            .createPropertyAccessExpression(
+              rewrittenReceiver,
+              visited.name.text,
+            );
+          registerReplacementType(rewrittenMethod, visited, context);
+          return rewrittenMethod;
+        }
+
+        if (isCallParent) {
+          if (
+            (parent as ts.CallExpression).questionDotToken ||
+            visited.questionDotToken
+          ) {
+            reportOnce(
+              visited,
+              "optional",
+              "Optional-call forms are not lowerable in pattern context. Move this access into computed().",
+            );
+            return visited;
+          }
+
+          reportOnce(
+            visited,
+            "computation",
+            "Method calls on opaque pattern values are not lowerable. Move this call into computed().",
+          );
           return visited;
         }
       }
 
-      const parent = visited.parent;
+      const firstPathSegment = info.path[0];
       if (
-        !!parent &&
-        ts.isCallExpression(parent) &&
-        parent.expression === visited &&
-        ts.isPropertyAccessExpression(visited)
+        info.path.length === 1 &&
+        firstPathSegment &&
+        isSelfPathSegment(firstPathSegment, context)
       ) {
-        if (parent.questionDotToken || visited.questionDotToken) {
-          reportOnce(
-            visited,
-            "optional",
-            "Optional-call forms are not lowerable in pattern context. Move this access into computed().",
-          );
-          return visited;
-        }
-
-        if (KNOWN_PATH_TERMINAL_METHODS.has(visited.name.text)) {
-          // Keep terminal method calls and let receiver rewriting handle parent links.
-          return visited;
-        }
-
-        reportOnce(
-          visited,
-          "computation",
-          "Method calls on opaque pattern values are not lowerable. Move this call into computed().",
-        );
         return visited;
       }
 
@@ -509,7 +718,7 @@ function rewritePatternBody(
 
     if (ts.isCallExpression(visited)) {
       if (visited.questionDotToken) {
-        const info = getAccessInfo(visited.expression);
+        const info = getAccessInfo(visited.expression, context);
         if (info.root && opaqueRoots.has(info.root)) {
           reportOnce(
             visited,
@@ -527,7 +736,7 @@ function rewritePatternBody(
       ) {
         const firstArg = visited.arguments[0];
         if (firstArg) {
-          const info = getAccessInfo(firstArg);
+          const info = getAccessInfo(firstArg, context);
           if (info.root && opaqueRoots.has(info.root)) {
             reportOnce(
               firstArg,
@@ -546,7 +755,7 @@ function rewritePatternBody(
       ) {
         const firstArg = visited.arguments[0];
         if (firstArg) {
-          const info = getAccessInfo(firstArg);
+          const info = getAccessInfo(firstArg, context);
           if (info.root && opaqueRoots.has(info.root)) {
             reportOnce(
               firstArg,
@@ -559,7 +768,7 @@ function rewritePatternBody(
     }
 
     if (ts.isSpreadElement(visited) || ts.isSpreadAssignment(visited)) {
-      const info = getAccessInfo(visited.expression);
+      const info = getAccessInfo(visited.expression, context);
       if (info.root && opaqueRoots.has(info.root)) {
         reportOnce(
           visited,
@@ -570,7 +779,7 @@ function rewritePatternBody(
     }
 
     if (ts.isForInStatement(visited)) {
-      const info = getAccessInfo(visited.expression);
+      const info = getAccessInfo(visited.expression, context);
       if (info.root && opaqueRoots.has(info.root)) {
         reportOnce(
           visited.expression,
@@ -606,9 +815,18 @@ function transformPatternCallback(
   if (firstParam) {
     if (ts.isIdentifier(firstParam.name)) {
       opaqueRoots.add(firstParam.name.text);
-    } else if (ts.isObjectBindingPattern(firstParam.name)) {
+    } else if (
+      ts.isObjectBindingPattern(firstParam.name) ||
+      ts.isArrayBindingPattern(firstParam.name)
+    ) {
       const bindings: DestructureBinding[] = [];
-      collectDestructureBindings(firstParam.name, [], bindings, diagnostics);
+      collectDestructureBindings(
+        firstParam.name,
+        [],
+        bindings,
+        diagnostics,
+        context,
+      );
       if (diagnostics.length > 0) {
         for (const message of diagnostics) {
           reportComputationError(context, firstParam, message);
@@ -643,7 +861,15 @@ function transformPatternCallback(
                 factory.createIdentifier(binding.localName),
                 undefined,
                 undefined,
-                binding.path.length === 0
+                binding.directKeyExpression
+                  ? factory.createElementAccessExpression(
+                    factory.createIdentifier(inputIdentifier.text),
+                    cloneKeyExpression(
+                      binding.directKeyExpression,
+                      factory,
+                    ),
+                  )
+                  : binding.path.length === 0
                   ? factory.createIdentifier(inputIdentifier.text)
                   : createKeyCall(inputIdentifier, binding.path, factory),
               ),
@@ -655,13 +881,6 @@ function transformPatternCallback(
       for (const binding of bindings) {
         opaqueRoots.add(binding.localName);
       }
-    } else if (ts.isArrayBindingPattern(firstParam.name)) {
-      reportComputationError(
-        context,
-        firstParam,
-        "Array destructuring in pattern parameters is not lowerable. Use an object parameter and explicit input.key(...) bindings.",
-      );
-      hasUnsupportedDestructuring = true;
     } else {
       reportComputationError(
         context,

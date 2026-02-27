@@ -1,5 +1,8 @@
 import ts from "typescript";
-import type { TransformationContext } from "../../core/mod.ts";
+import {
+  resolvesToCommonToolsSymbol,
+  type TransformationContext,
+} from "../../core/mod.ts";
 import type { ClosureTransformationStrategy } from "./strategy.ts";
 import {
   classifyReactiveContext,
@@ -181,6 +184,130 @@ function unwrapExpression(expr: ts.Expression): ts.Expression {
     }
     return current;
   }
+}
+
+function cloneMapKeyExpression(
+  expression: ts.Expression,
+  factory: ts.NodeFactory,
+): ts.Expression {
+  if (ts.isIdentifier(expression)) {
+    return factory.createIdentifier(expression.text);
+  }
+  if (ts.isStringLiteral(expression)) {
+    return factory.createStringLiteral(expression.text);
+  }
+  if (ts.isNumericLiteral(expression)) {
+    return factory.createNumericLiteral(expression.text);
+  }
+  if (ts.isNoSubstitutionTemplateLiteral(expression)) {
+    return factory.createStringLiteral(expression.text);
+  }
+  return expression;
+}
+
+function getKnownMapComputedKeyExpression(
+  expression: ts.Expression,
+  context: TransformationContext,
+): ts.Expression | undefined {
+  if (
+    resolvesToCommonToolsSymbol(
+      context.checker.getSymbolAtLocation(expression),
+      context.checker,
+      "NAME",
+    ) || (ts.isIdentifier(expression) && expression.text === "NAME")
+  ) {
+    return context.ctHelpers.getHelperExpr("NAME");
+  }
+
+  if (
+    resolvesToCommonToolsSymbol(
+      context.checker.getSymbolAtLocation(expression),
+      context.checker,
+      "UI",
+    ) || (ts.isIdentifier(expression) && expression.text === "UI")
+  ) {
+    return context.ctHelpers.getHelperExpr("UI");
+  }
+
+  if (
+    resolvesToCommonToolsSymbol(
+      context.checker.getSymbolAtLocation(expression),
+      context.checker,
+      "SELF",
+    ) || (ts.isIdentifier(expression) && expression.text === "SELF")
+  ) {
+    return context.ctHelpers.getHelperExpr("SELF");
+  }
+
+  return undefined;
+}
+
+function isKnownComputedKey(
+  expression: ts.Expression,
+  context: TransformationContext,
+): expression is ts.Identifier {
+  if (!ts.isIdentifier(expression)) return false;
+  const symbol = context.checker.getSymbolAtLocation(expression);
+  return resolvesToCommonToolsSymbol(symbol, context.checker, "NAME") ||
+    resolvesToCommonToolsSymbol(symbol, context.checker, "UI") ||
+    resolvesToCommonToolsSymbol(symbol, context.checker, "SELF") ||
+    expression.text === "NAME" ||
+    expression.text === "UI" ||
+    expression.text === "SELF";
+}
+
+function lowerMapReceiverMemberAccess(
+  expression: ts.Expression,
+  context: TransformationContext,
+): ts.Expression {
+  const segments: ts.Expression[] = [];
+  let current = unwrapExpression(expression);
+
+  while (true) {
+    if (ts.isPropertyAccessExpression(current)) {
+      segments.unshift(context.factory.createStringLiteral(current.name.text));
+      current = unwrapExpression(current.expression);
+      continue;
+    }
+
+    if (ts.isElementAccessExpression(current)) {
+      const arg = current.argumentExpression;
+      if (
+        arg &&
+        (ts.isStringLiteral(arg) ||
+          ts.isNumericLiteral(arg) ||
+          ts.isNoSubstitutionTemplateLiteral(arg))
+      ) {
+        segments.unshift(context.factory.createStringLiteral(arg.text));
+        current = unwrapExpression(current.expression);
+        continue;
+      }
+      if (arg && isKnownComputedKey(arg, context)) {
+        segments.unshift(
+          getKnownMapComputedKeyExpression(arg, context) ??
+            cloneMapKeyExpression(arg, context.factory),
+        );
+        current = unwrapExpression(current.expression);
+        continue;
+      }
+      return expression;
+    }
+
+    break;
+  }
+
+  if (!ts.isIdentifier(current) || segments.length === 0) {
+    return expression;
+  }
+
+  return context.factory.createCallExpression(
+    context.factory.createPropertyAccessExpression(
+      context.factory.createIdentifier(current.text),
+      context.factory.createIdentifier("key"),
+    ),
+    undefined,
+    segments,
+  );
 }
 
 function isFallbackOperator(kind: ts.SyntaxKind): boolean {
@@ -582,9 +709,13 @@ function createPatternCallWithParams(
     visitor,
     ts.isExpression,
   ) ?? mapCall.expression.expression;
+  const loweredArrayExpr = lowerMapReceiverMemberAccess(
+    visitedArrayExpr,
+    context,
+  );
 
   const mapWithPatternAccess = factory.createPropertyAccessExpression(
-    visitedArrayExpr,
+    loweredArrayExpr,
     factory.createIdentifier("mapWithPattern"),
   );
 

@@ -17,13 +17,13 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Outer map captures state.prefix, inner map closes over item from outer callback */}
-        {state.items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        {state.key("items").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                 const item = __ct_pattern_input.key("element");
                 const state = __ct_pattern_input.key("params", "state");
                 return (<div>
             {state.key("prefix")}: {item.key("name")}
             <ul>
-              {item.tags.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+              {item.key("tags").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                         const tag = __ct_pattern_input.key("element");
                         const item = __ct_pattern_input.key("params", "item");
                         return (<li>{item.key("name")} - {tag.key("name")}</li>);

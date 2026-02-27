@@ -11,7 +11,7 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Map with common shorthand index parameter names */}
-        {state.items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        {state.key("items").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                 const item = __ct_pattern_input.key("element");
                 const i = __ct_pattern_input.key("index");
                 return (<div key={i}>
@@ -66,7 +66,7 @@ export default pattern((state) => {
             } as const satisfies __ctHelpers.JSONSchema), {})}
 
         {/* Map with idx as index parameter */}
-        {state.items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        {state.key("items").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                 const item = __ct_pattern_input.key("element");
                 const idx = __ct_pattern_input.key("index");
                 return (<div key={idx}>

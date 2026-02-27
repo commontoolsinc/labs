@@ -13,7 +13,7 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Template literal with captures */}
-        {state.items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        {state.key("items").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                 const item = __ct_pattern_input.key("element");
                 const state = __ct_pattern_input.key("params", "state");
                 return (<div>{__ctHelpers.derive({

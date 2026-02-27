@@ -7,7 +7,7 @@ interface State {
 export default pattern((state) => {
     return {
         [UI]: (<div>
-        {state.sortedTags.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        {state.key("sortedTags").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                 const tag = __ct_pattern_input.key("element");
                 const state = __ct_pattern_input.key("params", "state");
                 return (<span>

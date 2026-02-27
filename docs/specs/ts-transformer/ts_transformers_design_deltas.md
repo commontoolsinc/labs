@@ -606,3 +606,6 @@ without major compile-time regression.
    fallback vs allow partial precision?
 6. Do we require interprocedural summaries before enabling capability shrinking
    by default, or can local-only analysis ship first?
+7. Should static destructuring default initializers be lowered into emitted
+   schema defaults (for example, `{ foo = "x" }` -> default on `foo`) rather
+   than rejected as non-lowerable?

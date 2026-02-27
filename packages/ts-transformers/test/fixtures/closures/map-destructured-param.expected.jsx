@@ -12,7 +12,7 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Map with destructured parameter and capture */}
-        {state.points.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        {state.key("points").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                 const x = __ct_pattern_input.key("element", "x");
                 const y = __ct_pattern_input.key("element", "y");
                 const state = __ct_pattern_input.key("params", "state");

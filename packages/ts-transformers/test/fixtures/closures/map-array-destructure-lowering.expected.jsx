@@ -1,30 +1,37 @@
 import * as __ctHelpers from "commontools";
 import { pattern, UI } from "commontools";
+type Row = [
+    left: string,
+    right: string
+];
 interface State {
-    entries: Array<{
-        0: number;
-    }>;
+    rows: Row[];
 }
 export default pattern((state) => {
     return {
         [UI]: (<div>
-        {state.key("entries").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
-                const first = __ct_pattern_input.key("element", "0");
-                return (<span>{first}</span>);
+        {state.key("rows").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const left = __ct_pattern_input.key("element", "0");
+                const right = __ct_pattern_input.key("element", "1");
+                return (<span>
+            {left}:{right}
+          </span>);
             }, {
                 type: "object",
                 properties: {
                     element: {
-                        type: "object",
-                        properties: {
-                            "0": {
-                                type: "number"
-                            }
-                        },
-                        required: ["0"]
+                        $ref: "#/$defs/Row"
                     }
                 },
-                required: ["element"]
+                required: ["element"],
+                $defs: {
+                    Row: {
+                        type: "array",
+                        items: {
+                            type: "string"
+                        }
+                    }
+                }
             } as const satisfies __ctHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
@@ -52,20 +59,22 @@ export default pattern((state) => {
 }, {
     type: "object",
     properties: {
-        entries: {
+        rows: {
             type: "array",
             items: {
-                type: "object",
-                properties: {
-                    "0": {
-                        type: "number"
-                    }
-                },
-                required: ["0"]
+                $ref: "#/$defs/Row"
             }
         }
     },
-    required: ["entries"]
+    required: ["rows"],
+    $defs: {
+        Row: {
+            type: "array",
+            items: {
+                type: "string"
+            }
+        }
+    }
 } as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {

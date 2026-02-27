@@ -15,7 +15,7 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         <span>{state.key("maybe", "value")}</span>
-        {state.items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        {state.key("items").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                 const item = __ct_pattern_input.key("element");
                 return (<span>{__ctHelpers.derive({
                     type: "object",

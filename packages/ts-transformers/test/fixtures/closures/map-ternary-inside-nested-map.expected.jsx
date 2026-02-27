@@ -189,7 +189,7 @@ export default pattern((__ct_pattern_input) => {
                     }
                 } }, ({ item }) => item.tags.length > 0)), item.key("label"), "No tags")}</strong>
               <ul>
-                {item.tags.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                {item.key("tags").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                     const tag = __ct_pattern_input.key("element");
                     const showInactive = __ct_pattern_input.key("params", "showInactive");
                     return (<li>

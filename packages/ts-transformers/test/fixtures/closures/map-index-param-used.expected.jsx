@@ -12,7 +12,7 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Uses both index parameter and captures state.offset */}
-        {state.items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        {state.key("items").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                 const item = __ct_pattern_input.key("element");
                 const index = __ct_pattern_input.key("index");
                 const state = __ct_pattern_input.key("params", "state");

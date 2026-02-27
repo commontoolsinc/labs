@@ -21,7 +21,7 @@ export default pattern((state) => {
                 - subs is a derive callback parameter (unwrapped at runtime)
                 - .filter() returns a plain JS array
                 - Plain arrays don't have .mapWithPattern() */}
-        {state.items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        {state.key("items").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                 const item = __ct_pattern_input.key("element");
                 return (<div>
             <h2>{item.key("title")}</h2>

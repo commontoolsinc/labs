@@ -12,7 +12,7 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Performs computation on element property - should wrap in computed() */}
-        {state.items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        {state.key("items").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                 const item = __ct_pattern_input.key("element");
                 const index = __ct_pattern_input.key("index");
                 return (<div>

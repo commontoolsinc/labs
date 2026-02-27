@@ -9,7 +9,7 @@ interface State {
 export default pattern((state) => {
     return {
         [UI]: (<div>
-        {state.items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        {state.key("items").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                 const cost = __ct_pattern_input.key("element", "price");
                 const state = __ct_pattern_input.key("params", "state");
                 return (<span>{__ctHelpers.derive({
