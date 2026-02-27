@@ -9,6 +9,13 @@ import { sha256 } from "./hash-impl.ts";
 // ---------------------------------------------------------------------------
 
 /**
+ * Type constraint for content identifier referents — i.e., any value
+ * including `null` but _not_ `undefined`.
+ * Used by `ContentId<T>` and related generic types.
+ */
+export type DefinedReferent = NonNullable<unknown> | null;
+
+/**
  * Content identifier -- a hash-based reference to a value.
  *
  * Drop-in replacement for the `Reference<T>` type previously re-exported from
@@ -16,11 +23,11 @@ import { sha256 } from "./hash-impl.ts";
  * assignable everywhere `Reference` was (e.g., `JSONValue` constraints).
  */
 export type ContentId<
-  T extends NonNullable<unknown> | null = NonNullable<unknown> | null,
+  T extends DefinedReferent = DefinedReferent,
 > = MerkleReference<T>;
 
 /** Type guard: returns true if the value is a content identifier. */
-export const isContentId: <T extends NonNullable<unknown> | null>(
+export const isContentId: <T extends DefinedReferent>(
   value: unknown | ContentId<T>,
 ) => value is ContentId<T> = Reference.is;
 

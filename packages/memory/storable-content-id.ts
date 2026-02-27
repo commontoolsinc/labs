@@ -21,8 +21,36 @@ export class StorableContentId extends SpecialPrimitiveValue {
     Object.freeze(this);
   }
 
+  /**
+   * CID-link-style accessor, returns the raw hash bytes. Present to satisfy
+   * the `EntityId` structural type (`{ "/": string | Uint8Array }`).
+   * TODO(danfuzz): Remove after canonical hashing flag graduates.
+   */
+  get "/"(): Uint8Array {
+    return this.hash;
+  }
+
+  /** Defensive copy of the raw hash bytes. */
+  get bytes(): Uint8Array {
+    return new Uint8Array(this.hash);
+  }
+
+  /** Copy the hash bytes into `target` starting at offset 0. Returns `target`. */
+  copyHashInto(target: Uint8Array): Uint8Array {
+    target.set(this.hash);
+    return target;
+  }
+
   /** Returns `<algorithmTag>:<base64hash>` (unpadded base64). */
   override toString(): string {
     return `${this.algorithmTag}:${toUnpaddedBase64(this.hash)}`;
+  }
+
+  /**
+   * JSON representation: `{ '/': '<algorithmTag>:<base64hash>' }`.
+   * Preserves the `{"/": string}` shape used by `Reference.View.toJSON()`.
+   */
+  toJSON(): { "/": string } {
+    return { "/": this.toString() };
   }
 }
