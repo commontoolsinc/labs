@@ -32,11 +32,17 @@ export class CTDropZone extends BaseElement {
     css`
       :host {
         display: block;
+        position: relative;
       }
 
-      :host([drag-over]) {
-        outline: 2px dashed var(--ct-color-primary, #0066cc);
-        outline-offset: -2px;
+      :host([drag-over])::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border: 2px dashed var(--ct-color-primary, #0066cc);
+        border-radius: inherit;
+        z-index: 1000;
+        pointer-events: none;
       }
     `,
   ];

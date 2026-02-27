@@ -45,6 +45,11 @@ export class CTFab extends BaseElement {
         height: 32px;
       }
 
+      :host([expanded]) {
+        width: min(560px, calc(100vw - 48px));
+        height: 80px;
+      }
+
       *,
       *::before,
       *::after {
