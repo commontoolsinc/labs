@@ -982,6 +982,32 @@ type DiagramOutput = {
 };
 ```
 
+## `suggestable/svg-diagram.tsx`
+
+Generates an SVG diagram illustrating relationships, flows, or structures.
+Rendered via `<ct-svg>` web component for scalable vector output.
+
+**Keywords:** diagram, SVG, generateText, suggestion-fuel, ct-svg
+
+### Input Schema
+
+```ts
+type SvgDiagramInput = {
+  topic?: Default<string, "">;
+  context?: Default<Record<string, any>, Record<string, never>>;
+};
+```
+
+### Output Schema
+
+```ts
+type SvgDiagramOutput = {
+  topic: string;
+  diagram: string;
+  pending: boolean;
+};
+```
+
 ## `suggestable/budget-planner.tsx`
 
 Generates a budget breakdown with editable amounts for each category. The LLM

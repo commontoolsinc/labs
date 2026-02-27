@@ -73,6 +73,7 @@ export * from "./components/ct-separator/index.ts";
 export * from "./components/ct-skeleton/index.ts";
 export * from "./components/ct-slider/index.ts";
 export * from "./components/ct-switch/index.ts";
+export * from "./components/ct-svg/index.ts";
 export * from "./components/ct-tab/index.ts";
 export * from "./components/ct-tab-list/index.ts";
 export * from "./components/ct-tab-panel/index.ts";
