@@ -123,27 +123,44 @@ async function runSyncLoop(
   appliedEditsCell: Cell<Edit[]>,
   watchPath: string,
 ) {
-  // Run once on startup, then react to changes
-  let pending = true;
+  // Concurrency guard: only one sync runs at a time.
+  // If a notification arrives mid-sync, we set syncAgain = true so
+  // another full cycle runs immediately after the current one finishes.
+  // Worst case: we re-read the filesystem, produce no diffs, no-op.
+  let syncInProgress = false;
+  let syncAgain = false;
+
+  function scheduleSync() {
+    syncAgain = true;
+    debouncedSync();
+  }
 
   // Watch filesystem for changes
-  const watcher = fs.watch(watchPath, { recursive: true }, () => {
-    pending = true;
-    scheduleSync();
-  });
+  const watcher = fs.watch(watchPath, { recursive: true }, scheduleSync);
 
   // Watch edit queue for new entries
-  editsCell.sink(() => {
-    pending = true;
-    scheduleSync();
-  });
+  editsCell.sink(scheduleSync);
 
-  const scheduleSync = debounce(sync, 100);
+  const debouncedSync = debounce(sync, 100);
 
   async function sync() {
-    if (!pending) return;
-    pending = false;
+    if (syncInProgress) {
+      syncAgain = true;
+      return;
+    }
 
+    syncInProgress = true;
+    try {
+      do {
+        syncAgain = false;
+        await doSync();
+      } while (syncAgain);
+    } finally {
+      syncInProgress = false;
+    }
+  }
+
+  async function doSync() {
     let editWatermark = 0; // Track which edits have been applied to fs
     let committed = false;
 
@@ -225,7 +242,7 @@ async function runSyncLoop(
   }
 
   // Initial sync
-  await sync();
+  scheduleSync();
 }
 ```
 
