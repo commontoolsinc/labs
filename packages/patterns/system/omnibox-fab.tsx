@@ -294,7 +294,7 @@ Be matter-of-fact. Prefer action to explanation.`;
       [UI]: (
         <ct-drop-zone
           accept="cell-link"
-          style="position: fixed; bottom: 0; left: 50%; transform: translateX(-50%); width: 240px; height: 32px; z-index: 997;"
+          style="position: fixed; bottom: 0; left: 50%; transform: translateX(-50%); z-index: 997;"
           onct-drop={handleDropToPin({
             pinToChat: omnibot.pinToChat,
             fabExpanded,
