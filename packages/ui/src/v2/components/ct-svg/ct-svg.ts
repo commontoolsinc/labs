@@ -3,6 +3,7 @@ import { property } from "lit/decorators.js";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import { BaseElement } from "../../core/base-element.ts";
 import { type CellHandle, isCellHandle } from "@commontools/runtime-client";
+import { sanitizeSvg } from "./sanitize-svg.ts";
 
 /**
  * CTSvg - Renders SVG content from a string
@@ -97,16 +98,9 @@ export class CTSvg extends BaseElement {
   override render() {
     const contentValue = this._getContentValue();
 
-    // TODO(CT-1088): XSS VULNERABILITY - This component uses unsafeHTML without sanitization!
-    //
-    // We need to sanitize the SVG content to prevent XSS attacks. SVG can contain
-    // <script> tags and event handlers that could execute malicious code.
-    //
-    // For now, only use this component with trusted SVG content!
-
     return html`
       <div class="svg-content" part="content">
-        ${unsafeHTML(contentValue)}
+        ${unsafeHTML(sanitizeSvg(contentValue))}
       </div>
     `;
   }
