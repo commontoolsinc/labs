@@ -4,6 +4,8 @@ import type {
   FunctionCapabilitySummary,
   ReactiveCapability,
 } from "../core/mod.ts";
+import { decodePath, encodePath } from "../utils/path-serialization.ts";
+import { unwrapExpression } from "../utils/expression.ts";
 
 type CapabilityAnalyzableFunction =
   | ts.ArrowFunction
@@ -75,15 +77,6 @@ function isCapabilityAnalyzableFunction(
     !!node.body;
 }
 
-function encodePath(path: readonly string[]): string {
-  return path.join(".");
-}
-
-function decodePath(path: string): readonly string[] {
-  if (!path) return [];
-  return path.split(".");
-}
-
 function isLiteralElement(
   expr: ts.Expression | undefined,
 ): expr is
@@ -121,33 +114,6 @@ function extractLiteralPathArguments(
     return { path, dynamic: true };
   }
   return { path, dynamic: false };
-}
-
-function unwrapExpression(expr: ts.Expression): ts.Expression {
-  let current = expr;
-  while (true) {
-    if (ts.isParenthesizedExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-    if (ts.isAsExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-    if (ts.isTypeAssertionExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-    if (ts.isSatisfiesExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-    if (ts.isNonNullExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-    return current;
-  }
 }
 
 function extractAccessPath(expr: ts.Expression): AccessPathInfo | undefined {

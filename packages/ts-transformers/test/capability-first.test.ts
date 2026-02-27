@@ -303,6 +303,30 @@ const p = pattern<Input>(({ foo = "fallback", count = 0 }) => <div>{foo}:{count}
 );
 
 Deno.test(
+  "Capability-first: interface defaults keep non-default sibling fields in pattern input schema",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern } from "commontools";
+interface Input {
+  foo: string;
+  count: number;
+  enabled: boolean;
+}
+const p = pattern<Input>(({ foo = "fallback", count = 0 }) => <div>{foo}:{count}</div>);
+`;
+
+    const output = await transformSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, '"default": "fallback"');
+    assertStringIncludes(output, '"default": 0');
+    assertStringIncludes(output, '"enabled"');
+  },
+);
+
+Deno.test(
   "Capability-first diagnostics: non-static default initializer destructuring is non-lowerable",
   async () => {
     const source = `/// <cts-enable />
@@ -348,6 +372,31 @@ const p = pattern(({ [key]: foo }) => <div>{foo}</div>);
 
     assertEquals(computationDiagnostics.length, 0);
     assertStringIncludes(output, "const foo = __ct_pattern_input.key(key);");
+  },
+);
+
+Deno.test(
+  "Capability-first: computed literal member defaults are preserved in schema",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern } from "commontools";
+const p = pattern<{ ["foo"]: string; bar: string }>(({ ["foo"]: foo = "fallback" }) => <div>{foo}</div>);
+`;
+
+    const { diagnostics } = await validateSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
+    });
+    const output = await transformSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
+    });
+    const computationDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-context:computation"
+    );
+
+    assertEquals(computationDiagnostics.length, 0);
+    assertStringIncludes(output, '"default": "fallback"');
   },
 );
 
@@ -500,7 +549,7 @@ const fn = lift((input: Writable<{ foo: string; bar: string }>) => input.get().f
 );
 
 Deno.test(
-  "Capability-first: pattern input shrinks to observed key paths",
+  "Capability-first: pattern input preserves full shape for downstream continuity",
   async () => {
     const source = `/// <cts-enable />
 import { pattern, type Writable } from "commontools";
@@ -512,9 +561,9 @@ const p = pattern((input: Writable<{ foo: string; bar: string }>) => input.key("
       types: COMMONTOOLS_TYPES,
     });
 
-    assertStringIncludes(output, "asCell: true");
+    assertStringIncludes(output, "asOpaque: true");
     assertStringIncludes(output, '"foo"');
-    assert(!output.includes('"bar"'));
+    assertStringIncludes(output, '"bar"');
   },
 );
 
@@ -541,7 +590,7 @@ const fn = lift((input: Writable<{ foo: string | undefined; bar: string }>) =>
 );
 
 Deno.test(
-  "Capability-first: pattern explicit type arguments still shrink input paths",
+  "Capability-first: pattern explicit type arguments preserve full input shape",
   async () => {
     const source = `/// <cts-enable />
 import { pattern, type Writable } from "commontools";
@@ -555,9 +604,9 @@ const p = pattern<Writable<{ foo: string; bar: string }>, { foo: string }>((inpu
       types: COMMONTOOLS_TYPES,
     });
 
-    assertStringIncludes(output, "asCell: true");
+    assertStringIncludes(output, "asOpaque: true");
     assertStringIncludes(output, '"foo"');
-    assert(!output.includes('"bar"'));
+    assertStringIncludes(output, '"bar"');
   },
 );
 
@@ -777,9 +826,10 @@ const p = pattern((input: Writable<{ foo: string; bar: string }>) => {
       types: COMMONTOOLS_TYPES,
     });
 
+    assertStringIncludes(output, "asOpaque: true");
     assertStringIncludes(output, "asCell: true");
     assertStringIncludes(output, '"foo"');
-    assert(!output.includes('"bar"'));
+    assertStringIncludes(output, 'required: ["foo"]');
   },
 );
 
@@ -1184,6 +1234,90 @@ export default pattern<{ items?: Item[] }>(({ items }) => {
     [UI]: (
       <div>
         {(items ?? []).map((item) => <span data-id={item.id}>{item.id}</span>)}
+      </div>
+    ),
+  };
+});
+`;
+
+    const { diagnostics } = await validateSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
+    });
+    const output = await transformSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
+    });
+
+    const fallbackDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-context:map-on-fallback"
+    );
+
+    assertEquals(fallbackDiagnostics.length, 0);
+    assertStringIncludes(output, ".mapWithPattern(");
+    assertStringIncludes(output, 'data-id={item.key("id")}');
+  },
+);
+
+Deno.test(
+  "Capability-first: rewrites cast-wrapped reactive fallback map",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern, UI } from "commontools";
+
+interface Item {
+  id: string;
+}
+
+export default pattern<{ items?: Item[] }>(({ items }) => {
+  return {
+    [UI]: (
+      <div>
+        {((items as Item[] | undefined) ?? []).map((item) => (
+          <span data-id={item.id}>{item.id}</span>
+        ))}
+      </div>
+    ),
+  };
+});
+`;
+
+    const { diagnostics } = await validateSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
+    });
+    const output = await transformSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
+    });
+
+    const fallbackDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-context:map-on-fallback"
+    );
+
+    assertEquals(fallbackDiagnostics.length, 0);
+    assertStringIncludes(output, ".mapWithPattern(");
+    assertStringIncludes(output, 'data-id={item.key("id")}');
+  },
+);
+
+Deno.test(
+  "Capability-first: rewrites satisfies-wrapped reactive fallback map",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern, UI } from "commontools";
+
+interface Item {
+  id: string;
+}
+
+export default pattern<{ items?: Item[] }>(({ items }) => {
+  return {
+    [UI]: (
+      <div>
+        {((items satisfies Item[] | undefined) ?? []).map((item) => (
+          <span data-id={item.id}>{item.id}</span>
+        ))}
       </div>
     ),
   };

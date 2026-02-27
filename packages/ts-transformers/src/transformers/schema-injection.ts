@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { getPropertyNameText } from "@commontools/schema-generator/property-name";
 
 import {
   detectCallKind,
@@ -15,6 +16,7 @@ import {
   widenLiteralType,
 } from "../ast/mod.ts";
 import { createPropertyName } from "../utils/identifiers.ts";
+import { uniquePaths } from "../utils/path-serialization.ts";
 import {
   type CapabilityParamDefault,
   type CapabilityParamSummary,
@@ -70,20 +72,6 @@ import { analyzeFunctionCapabilities } from "../policy/mod.ts";
  * - SchemaInjectionTransformer finds that type in TypeRegistry
  * - SchemaGeneratorTransformer uses it to create accurate schema for `foo`
  */
-
-function uniquePaths(
-  paths: readonly (readonly string[])[],
-): readonly (readonly string[])[] {
-  const seen = new Set<string>();
-  const out: (readonly string[])[] = [];
-  for (const path of paths) {
-    const key = path.join(".");
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(path);
-  }
-  return out;
-}
 
 function groupPathsByHead(
   paths: readonly (readonly string[])[],
@@ -267,14 +255,6 @@ function buildShrunkTypeNodeFromType(
   }
 
   return factory.createTypeLiteralNode(properties);
-}
-
-function getPropertyNameText(name: ts.PropertyName): string | undefined {
-  if (ts.isIdentifier(name)) return name.text;
-  if (ts.isStringLiteral(name)) return name.text;
-  if (ts.isNumericLiteral(name)) return name.text;
-  if (ts.isNoSubstitutionTemplateLiteral(name)) return name.text;
-  return undefined;
 }
 
 function buildShrunkTypeNodeFromTypeNode(
@@ -609,6 +589,112 @@ function unwrapCellLikeType(
   return getTypeReferenceArgument(type) ?? type;
 }
 
+type CapabilitySummaryApplicationMode = "full" | "defaults_only";
+
+function getSymbolTypeAtSource(
+  symbol: ts.Symbol,
+  checker: ts.TypeChecker,
+  sourceFile: ts.SourceFile,
+): ts.Type {
+  const declaration = symbol.valueDeclaration ?? symbol.declarations?.[0] ??
+    sourceFile;
+  return checker.getTypeOfSymbolAtLocation(symbol, declaration);
+}
+
+function isArrayLikeType(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+): boolean {
+  const typeChecker = checker as ts.TypeChecker & {
+    isArrayType?: (type: ts.Type) => boolean;
+    isTupleType?: (type: ts.Type) => boolean;
+  };
+  return !!(typeChecker.isArrayType?.(type) ||
+    typeChecker.isTupleType?.(type) ||
+    checker.getIndexTypeOfType(type, ts.IndexKind.Number));
+}
+
+function collectAllPropertyLeafPaths(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+  sourceFile: ts.SourceFile,
+  prefix: readonly string[],
+  seen: Set<ts.Type>,
+): readonly (readonly string[])[] {
+  if (seen.has(type) || isArrayLikeType(type, checker)) {
+    return [prefix];
+  }
+  seen.add(type);
+
+  const properties = checker.getPropertiesOfType(type);
+  if (properties.length === 0) {
+    return [prefix];
+  }
+
+  const paths: string[][] = [];
+  for (const property of properties) {
+    const childType = getSymbolTypeAtSource(property, checker, sourceFile);
+    const childPrefix = [...prefix, property.getName()];
+    const childPaths = collectAllPropertyLeafPaths(
+      childType,
+      checker,
+      sourceFile,
+      childPrefix,
+      seen,
+    );
+    for (const path of childPaths) {
+      paths.push([...path]);
+    }
+  }
+  return paths;
+}
+
+function buildDefaultsOnlyFallbackPaths(
+  baseType: ts.Type | undefined,
+  defaults: readonly CapabilityParamDefault[] | undefined,
+  checker: ts.TypeChecker,
+  sourceFile: ts.SourceFile,
+): readonly (readonly string[])[] {
+  if (!baseType || !defaults || defaults.length === 0) {
+    return [];
+  }
+
+  const nestedHeads = new Set<string>();
+  for (const entry of defaults) {
+    if (entry.path.length > 1) {
+      const [head] = entry.path;
+      if (head) nestedHeads.add(head);
+    }
+  }
+
+  const fallbackPaths: string[][] = [];
+  for (const property of checker.getPropertiesOfType(baseType)) {
+    const head = property.getName();
+    if (!nestedHeads.has(head)) {
+      fallbackPaths.push([head]);
+      continue;
+    }
+
+    const childType = getSymbolTypeAtSource(property, checker, sourceFile);
+    const leafPaths = collectAllPropertyLeafPaths(
+      childType,
+      checker,
+      sourceFile,
+      [head],
+      new Set<ts.Type>(),
+    );
+    for (const path of leafPaths) {
+      fallbackPaths.push([...path]);
+    }
+  }
+
+  for (const entry of defaults) {
+    fallbackPaths.push([...entry.path]);
+  }
+
+  return uniquePaths(fallbackPaths);
+}
+
 function findCapabilitySummaryForParameter(
   fn: ts.ArrowFunction | ts.FunctionExpression,
   index: number,
@@ -634,6 +720,7 @@ function applyCapabilitySummaryToArgument(
   sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
   capabilityRegistry?: CapabilitySummaryRegistry,
+  mode: CapabilitySummaryApplicationMode = "full",
 ): ts.TypeNode | undefined {
   if (!argumentNode) return argumentNode;
 
@@ -657,6 +744,29 @@ function applyCapabilitySummaryToArgument(
     ...paramSummary.readPaths,
     ...paramSummary.writePaths,
   ]);
+
+  if (mode === "defaults_only") {
+    const fallbackPaths = buildDefaultsOnlyFallbackPaths(
+      baseType,
+      paramSummary.defaults,
+      checker,
+      sourceFile,
+    );
+    const next = applyCapabilityDefaultsToTypeNode(
+      baseTypeNode,
+      paramSummary.defaults,
+      baseType,
+      fallbackPaths,
+      false,
+      checker,
+      sourceFile,
+      factory,
+    );
+    if (!shouldWrap) {
+      return next;
+    }
+    return wrapTypeNodeWithCapability(next, "opaque", factory);
+  }
 
   let next = baseTypeNode;
   if (!paramSummary.wildcard && paths.length > 0) {
@@ -835,6 +945,7 @@ function collectFunctionSchemaTypeNodes(
   fallbackArgType?: ts.Type,
   typeRegistry?: TypeRegistry,
   capabilityRegistry?: CapabilitySummaryRegistry,
+  argumentCapabilityMode: CapabilitySummaryApplicationMode = "full",
 ): {
   argument?: ts.TypeNode;
   argumentType?: ts.Type; // Store the Type for registry
@@ -894,6 +1005,7 @@ function collectFunctionSchemaTypeNodes(
     sourceFile,
     factory,
     capabilityRegistry,
+    argumentCapabilityMode,
   );
   if (
     argumentNode && originalArgumentNode &&
@@ -1264,6 +1376,18 @@ function reportAnyResultSchema(
   });
 }
 
+function isMapWithPatternCallbackPatternCall(node: ts.CallExpression): boolean {
+  const parent = node.parent;
+  if (!parent || !ts.isCallExpression(parent)) {
+    return false;
+  }
+  if (parent.arguments[0] !== node) {
+    return false;
+  }
+  return ts.isPropertyAccessExpression(parent.expression) &&
+    parent.expression.name.text === "mapWithPattern";
+}
+
 function handlePatternSchemaInjection(
   node: ts.CallExpression,
   context: TransformationContext,
@@ -1273,6 +1397,8 @@ function handlePatternSchemaInjection(
   const { factory, checker, sourceFile, tsContext: transformation } = context;
   const typeArgs = node.typeArguments;
   const capabilityRegistry = context.options.capabilitySummaryRegistry;
+  const argumentCapabilityMode: CapabilitySummaryApplicationMode =
+    isMapWithPatternCallbackPatternCall(node) ? "full" : "defaults_only";
   const argsArray = Array.from(node.arguments);
 
   // Find the function argument
@@ -1342,6 +1468,7 @@ function handlePatternSchemaInjection(
       undefined,
       typeRegistry,
       capabilityRegistry,
+      argumentCapabilityMode,
     );
     if (!inferred.result) {
       reportAnyResultSchema(context, node);
@@ -1374,6 +1501,7 @@ function handlePatternSchemaInjection(
         undefined,
         typeRegistry,
         capabilityRegistry,
+        argumentCapabilityMode,
       );
       if (!inferred.result) {
         reportAnyResultSchema(context, node);
@@ -1405,6 +1533,7 @@ function handlePatternSchemaInjection(
         undefined,
         typeRegistry,
         capabilityRegistry,
+        argumentCapabilityMode,
       );
 
       inputTypeNode = inferred.argument ??
@@ -1437,6 +1566,7 @@ function handlePatternSchemaInjection(
     sourceFile,
     factory,
     capabilityRegistry,
+    argumentCapabilityMode,
   ) ?? inputTypeNode;
   if (inputTypeNode !== originalInputTypeNode) {
     // Capability lowering produced a synthetic wrapped/shrunk node.

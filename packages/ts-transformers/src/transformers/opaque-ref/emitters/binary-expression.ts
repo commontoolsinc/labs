@@ -13,6 +13,8 @@ import {
 } from "../../../ast/mod.ts";
 import { isOpaqueRefType, isSimpleOpaqueRefAccess } from "../opaque-ref.ts";
 import { shouldLowerLogicalInJsx } from "../../../policy/mod.ts";
+import { unwrapExpression } from "../../../utils/expression.ts";
+import { isFallbackOperator } from "../../../utils/reactive-keys.ts";
 
 /**
  * Check if an expression is JSX (element, fragment, or self-closing).
@@ -42,23 +44,6 @@ function isMapReceiverBinary(expression: ts.BinaryExpression): boolean {
   return ts.isPropertyAccessExpression(parent) &&
     parent.expression === current &&
     parent.name.text === "map";
-}
-
-function unwrapExpression(expression: ts.Expression): ts.Expression {
-  let current = expression;
-  while (
-    ts.isParenthesizedExpression(current) ||
-    ts.isPartiallyEmittedExpression(current) ||
-    ts.isNonNullExpression(current)
-  ) {
-    current = current.expression;
-  }
-  return current;
-}
-
-function isFallbackOperator(kind: ts.SyntaxKind): boolean {
-  return kind === ts.SyntaxKind.QuestionQuestionToken ||
-    kind === ts.SyntaxKind.BarBarToken;
 }
 
 function canDeferFallbackMapReceiverDerive(

@@ -156,6 +156,28 @@ Deno.test("Capability analysis tracks object destructure aliases", () => {
   assert(input.readPaths.includes("user.name"));
 });
 
+Deno.test(
+  "Capability analysis keeps dotted literal keys distinct from nested member paths",
+  () => {
+    const fn = parseFirstCallback(
+      `const fn = (input) => {
+      const direct = input["a.b"];
+      const nested = input.a.b;
+      return direct ?? nested;
+    };`,
+    );
+    const summary = analyzeFunctionCapabilities(fn);
+    const input = summary.params.find((entry) => entry.name === "input");
+    if (!input) {
+      throw new Error("Missing parameter summary for 'input'.");
+    }
+
+    const readPathKeys = input.readPaths.map((path) => JSON.stringify(path));
+    assert(readPathKeys.includes('["a.b"]'));
+    assert(readPathKeys.includes('["a","b"]'));
+  },
+);
+
 Deno.test("Capability analysis tracks reassignment aliases", () => {
   const fn = parseFirstCallback(
     `const fn = (input) => {

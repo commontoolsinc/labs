@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { getPropertyNameText } from "@commontools/schema-generator/property-name";
 import {
   detectCallKind,
   getTypeAtLocationWithFallback,
@@ -7,11 +8,16 @@ import {
 } from "../ast/mod.ts";
 import {
   type CapabilityParamDefault,
-  resolvesToCommonToolsSymbol,
   TransformationContext,
   Transformer,
 } from "../core/mod.ts";
 import { analyzeFunctionCapabilities } from "../policy/mod.ts";
+import { unwrapExpression } from "../utils/expression.ts";
+import {
+  cloneKeyExpression,
+  getKnownComputedKeyExpression,
+  isCommonToolsKeyIdentifier,
+} from "../utils/reactive-keys.ts";
 
 type PathSegment = string | ts.Expression;
 
@@ -36,87 +42,6 @@ const KNOWN_PATH_TERMINAL_METHODS = new Set([
 ]);
 
 const WILDCARD_OBJECT_METHODS = new Set(["keys", "values", "entries"]);
-
-function unwrapExpression(expr: ts.Expression): ts.Expression {
-  let current = expr;
-  while (true) {
-    if (ts.isParenthesizedExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-    if (ts.isAsExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-    if (ts.isTypeAssertionExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-    if (ts.isSatisfiesExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-    if (ts.isNonNullExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-    if (ts.isPartiallyEmittedExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-    return current;
-  }
-}
-
-function cloneKeyExpression(
-  expr: ts.Expression,
-  factory: ts.NodeFactory,
-): ts.Expression {
-  if (ts.isIdentifier(expr)) {
-    return factory.createIdentifier(expr.text);
-  }
-  if (ts.isStringLiteral(expr)) {
-    return factory.createStringLiteral(expr.text);
-  }
-  if (ts.isNumericLiteral(expr)) {
-    return factory.createNumericLiteral(expr.text);
-  }
-  if (ts.isNoSubstitutionTemplateLiteral(expr)) {
-    return factory.createStringLiteral(expr.text);
-  }
-  return expr;
-}
-
-function isCommonToolsKeyIdentifier(
-  expr: ts.Expression,
-  context: TransformationContext,
-  targetName: "NAME" | "UI" | "SELF",
-): expr is ts.Identifier {
-  if (!ts.isIdentifier(expr)) return false;
-  const symbol = context.checker.getSymbolAtLocation(expr);
-  if (resolvesToCommonToolsSymbol(symbol, context.checker, targetName)) {
-    return true;
-  }
-  // Keep direct-name fallback for transformed helper contexts where symbol
-  // resolution can be transient.
-  return expr.text === targetName;
-}
-
-function getKnownComputedKeyExpression(
-  expr: ts.Expression,
-  context: TransformationContext,
-): ts.Expression | undefined {
-  if (isCommonToolsKeyIdentifier(expr, context, "NAME")) {
-    return context.ctHelpers.getHelperExpr("NAME");
-  }
-  if (isCommonToolsKeyIdentifier(expr, context, "UI")) {
-    return context.ctHelpers.getHelperExpr("UI");
-  }
-  if (isCommonToolsKeyIdentifier(expr, context, "SELF")) {
-    return context.ctHelpers.getHelperExpr("SELF");
-  }
-  return undefined;
-}
 
 function isSelfPathSegment(
   segment: PathSegment,
@@ -445,12 +370,17 @@ function collectDestructureBindings(
     } else if (ts.isNumericLiteral(element.propertyName)) {
       key = element.propertyName.text;
     } else if (ts.isComputedPropertyName(element.propertyName)) {
-      const computedKey = element.propertyName.expression;
-      if (isCommonToolsKeyIdentifier(computedKey, context, "SELF")) {
-        directKeyExpression = context.ctHelpers.getHelperExpr("SELF");
+      const staticKey = getPropertyNameText(element.propertyName);
+      if (staticKey !== undefined) {
+        key = staticKey;
       } else {
-        key = getKnownComputedKeyExpression(computedKey, context) ??
-          computedKey;
+        const computedKey = element.propertyName.expression;
+        if (isCommonToolsKeyIdentifier(computedKey, context, "SELF")) {
+          directKeyExpression = context.ctHelpers.getHelperExpr("SELF");
+        } else {
+          key = getKnownComputedKeyExpression(computedKey, context) ??
+            computedKey;
+        }
       }
     } else {
       unsupported.push(

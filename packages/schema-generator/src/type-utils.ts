@@ -2,6 +2,7 @@ import ts from "typescript";
 
 import type { SchemaDefinition } from "./interface.ts";
 import { NativeTypeFormatter } from "./formatters/native-type-formatter.ts";
+import { getPropertyNameText } from "./typescript/property-name.ts";
 
 /**
  * Names that should be treated as Cell-like wrapper types.
@@ -19,28 +20,7 @@ function getEntityNameText(name: ts.EntityName): string {
   return ts.isIdentifier(name) ? name.text : name.right.text;
 }
 
-/**
- * Extract static text for a property name when available.
- * Supports identifier keys plus string/numeric literal keys.
- */
-export function getPropertyNameText(name: ts.PropertyName): string | undefined {
-  if (ts.isIdentifier(name) || ts.isStringLiteral(name)) {
-    return name.text;
-  }
-
-  if (ts.isNumericLiteral(name)) {
-    return name.text;
-  }
-
-  if (ts.isComputedPropertyName(name)) {
-    const expr = name.expression;
-    if (ts.isStringLiteral(expr) || ts.isNumericLiteral(expr)) {
-      return expr.text;
-    }
-  }
-
-  return undefined;
-}
+export { getPropertyNameText };
 
 /**
  * Safe wrapper for TypeScript checker APIs that may throw in reduced environments

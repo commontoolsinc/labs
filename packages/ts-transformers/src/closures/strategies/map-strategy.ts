@@ -1,6 +1,5 @@
 import ts from "typescript";
 import {
-  resolvesToCommonToolsSymbol,
   type TransformationContext,
 } from "../../core/mod.ts";
 import type { ClosureTransformationStrategy } from "./strategy.ts";
@@ -29,6 +28,13 @@ import type { ComputedAliasInfo } from "./map-utils.ts";
 import { CaptureCollector } from "../capture-collector.ts";
 import { PatternBuilder } from "../utils/pattern-builder.ts";
 import { SchemaFactory } from "../utils/schema-factory.ts";
+import { unwrapExpression } from "../../utils/expression.ts";
+import {
+  cloneKeyExpression,
+  getKnownComputedKeyExpression,
+  isCommonToolsKeyIdentifier,
+  isFallbackOperator,
+} from "../../utils/reactive-keys.ts";
 
 export class MapStrategy implements ClosureTransformationStrategy {
   canTransform(
@@ -155,105 +161,13 @@ function shouldTransformMap(
   );
 }
 
-function unwrapExpression(expr: ts.Expression): ts.Expression {
-  let current = expr;
-  while (true) {
-    if (ts.isParenthesizedExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-    if (ts.isAsExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-    if (ts.isTypeAssertionExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-    if (ts.isSatisfiesExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-    if (ts.isNonNullExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-    if (ts.isPartiallyEmittedExpression(current)) {
-      current = current.expression;
-      continue;
-    }
-    return current;
-  }
-}
-
-function cloneMapKeyExpression(
-  expression: ts.Expression,
-  factory: ts.NodeFactory,
-): ts.Expression {
-  if (ts.isIdentifier(expression)) {
-    return factory.createIdentifier(expression.text);
-  }
-  if (ts.isStringLiteral(expression)) {
-    return factory.createStringLiteral(expression.text);
-  }
-  if (ts.isNumericLiteral(expression)) {
-    return factory.createNumericLiteral(expression.text);
-  }
-  if (ts.isNoSubstitutionTemplateLiteral(expression)) {
-    return factory.createStringLiteral(expression.text);
-  }
-  return expression;
-}
-
-function getKnownMapComputedKeyExpression(
-  expression: ts.Expression,
-  context: TransformationContext,
-): ts.Expression | undefined {
-  if (
-    resolvesToCommonToolsSymbol(
-      context.checker.getSymbolAtLocation(expression),
-      context.checker,
-      "NAME",
-    ) || (ts.isIdentifier(expression) && expression.text === "NAME")
-  ) {
-    return context.ctHelpers.getHelperExpr("NAME");
-  }
-
-  if (
-    resolvesToCommonToolsSymbol(
-      context.checker.getSymbolAtLocation(expression),
-      context.checker,
-      "UI",
-    ) || (ts.isIdentifier(expression) && expression.text === "UI")
-  ) {
-    return context.ctHelpers.getHelperExpr("UI");
-  }
-
-  if (
-    resolvesToCommonToolsSymbol(
-      context.checker.getSymbolAtLocation(expression),
-      context.checker,
-      "SELF",
-    ) || (ts.isIdentifier(expression) && expression.text === "SELF")
-  ) {
-    return context.ctHelpers.getHelperExpr("SELF");
-  }
-
-  return undefined;
-}
-
 function isKnownComputedKey(
   expression: ts.Expression,
   context: TransformationContext,
 ): expression is ts.Identifier {
-  if (!ts.isIdentifier(expression)) return false;
-  const symbol = context.checker.getSymbolAtLocation(expression);
-  return resolvesToCommonToolsSymbol(symbol, context.checker, "NAME") ||
-    resolvesToCommonToolsSymbol(symbol, context.checker, "UI") ||
-    resolvesToCommonToolsSymbol(symbol, context.checker, "SELF") ||
-    expression.text === "NAME" ||
-    expression.text === "UI" ||
-    expression.text === "SELF";
+  return isCommonToolsKeyIdentifier(expression, context, "NAME") ||
+    isCommonToolsKeyIdentifier(expression, context, "UI") ||
+    isCommonToolsKeyIdentifier(expression, context, "SELF");
 }
 
 function lowerMapReceiverMemberAccess(
@@ -284,8 +198,8 @@ function lowerMapReceiverMemberAccess(
       }
       if (arg && isKnownComputedKey(arg, context)) {
         segments.unshift(
-          getKnownMapComputedKeyExpression(arg, context) ??
-            cloneMapKeyExpression(arg, context.factory),
+          getKnownComputedKeyExpression(arg, context) ??
+            cloneKeyExpression(arg, context.factory),
         );
         current = unwrapExpression(current.expression);
         continue;
@@ -308,11 +222,6 @@ function lowerMapReceiverMemberAccess(
     undefined,
     segments,
   );
-}
-
-function isFallbackOperator(kind: ts.SyntaxKind): boolean {
-  return kind === ts.SyntaxKind.QuestionQuestionToken ||
-    kind === ts.SyntaxKind.BarBarToken;
 }
 
 function bindingContainsName(
