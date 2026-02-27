@@ -203,11 +203,12 @@ function debugLog(enabled: boolean, ...args: unknown[]) {
 
 /**
  * Handler for one-click token refresh from the expired UI.
- * Calls the google-auth piece's refreshToken stream and updates local state.
+ * Calls the google-auth piece's refreshToken stream. Completion is detected
+ * reactively by watching the auth cell (see refreshWatcher computed below),
+ * not via a callback or blind timeout.
  */
-// Timeout (in ms) to reset refreshing state, since stream.send() is
-// fire-and-forget and we won't get a completion callback.
-const REFRESH_TIMEOUT_MS = 10_000;
+// If the token hasn't changed within this window, assume the refresh failed.
+const REFRESH_FAILURE_TIMEOUT_MS = 15_000;
 
 const attemptRefresh = handler<
   unknown,
@@ -216,23 +217,29 @@ const attemptRefresh = handler<
     refreshStream: any;
     refreshing: Writable<boolean>;
     refreshFailed: Writable<boolean>;
+    refreshStartedAt: Writable<number>;
   }
->((_event, { refreshStream, refreshing, refreshFailed }) => {
+>((_event, { refreshStream, refreshing, refreshFailed, refreshStartedAt }) => {
   if (!refreshStream?.send) {
     refreshFailed.set(true);
     return;
   }
   refreshing.set(true);
   refreshFailed.set(false);
+  refreshStartedAt.set(Date.now());
 
   // Fire-and-forget: the handler on the other side (refreshTokenHandler in
   // google-auth) is async and the stream infrastructure handles execution.
   refreshStream.send({});
 
-  // Reset refreshing state after a timeout since we have no completion signal.
+  // Fallback timeout: if the reactive watcher (refreshWatcher) doesn't detect
+  // a token change within the window, mark the refresh as failed.
   setTimeout(() => {
-    refreshing.set(false);
-  }, REFRESH_TIMEOUT_MS);
+    if (refreshing.get()) {
+      refreshing.set(false);
+      refreshFailed.set(true);
+    }
+  }, REFRESH_FAILURE_TIMEOUT_MS);
 });
 
 // =============================================================================
@@ -344,6 +351,21 @@ export const GoogleAuthManager = pattern<
     const refreshStream = wishResult.result.refreshToken;
     const refreshing = Writable.of(false);
     const refreshFailed = Writable.of(false);
+    const refreshStartedAt = Writable.of(0);
+
+    // Reactive watcher: detect when a refresh succeeds by watching auth changes.
+    // When refreshing is true and the token becomes valid (non-expired), the
+    // refresh succeeded — reset the spinner immediately instead of waiting for
+    // a blind timeout.
+    computed(() => {
+      if (!refreshing.get()) return;
+      const expiresAt = auth?.expiresAt ?? 0;
+      if (expiresAt > Date.now()) {
+        // Token is now valid — refresh succeeded
+        refreshing.set(false);
+        refreshFailed.set(false);
+      }
+    });
 
     const isRefreshing = computed(() => refreshing.get() === true);
     const hasRefreshFailed = computed(() => refreshFailed.get() === true);
@@ -697,6 +719,7 @@ export const GoogleAuthManager = pattern<
                 refreshStream,
                 refreshing,
                 refreshFailed,
+                refreshStartedAt,
               })}
               disabled={isRefreshing}
               style={{
