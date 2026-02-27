@@ -20,13 +20,10 @@ const adder = handler(false as const satisfies __ctHelpers.JSONSchema, {
 export default pattern((__ct_pattern_input) => {
     const values = __ct_pattern_input.key("values");
     derive({
-        type: "object",
-        properties: {
-            length: {
-                type: "number"
-            }
-        },
-        required: ["length"]
+        type: "array",
+        items: {
+            type: "string"
+        }
     } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, values, (values) => {
         console.log("values#", values?.length);
     });

@@ -123,6 +123,44 @@ function typeNodeIncludesUndefined(node: ts.TypeNode): boolean {
   return false;
 }
 
+function containsAnyOrUnknownTypeNode(node: ts.TypeNode): boolean {
+  let found = false;
+  const visit = (current: ts.Node) => {
+    if (found) return;
+    if (
+      current.kind === ts.SyntaxKind.AnyKeyword ||
+      current.kind === ts.SyntaxKind.UnknownKeyword
+    ) {
+      found = true;
+      return;
+    }
+    current.forEachChild(visit);
+  };
+  visit(node);
+  return found;
+}
+
+function shouldDropFallbackTypeForSchema(
+  node: ts.TypeNode | undefined,
+  type: ts.Type | undefined,
+  checker: ts.TypeChecker,
+  sourceFile: ts.SourceFile,
+): boolean {
+  if (!node || !type) return false;
+  if (containsAnyOrUnknownTypeNode(node)) return false;
+
+  const typeToNodeFlags = ts.NodeBuilderFlags.NoTruncation |
+    ts.NodeBuilderFlags.UseStructuralFallback;
+  let rebuilt: ts.TypeNode | undefined;
+  try {
+    rebuilt = checker.typeToTypeNode(type, sourceFile, typeToNodeFlags);
+  } catch {
+    rebuilt = undefined;
+  }
+  if (!rebuilt) return false;
+  return containsAnyOrUnknownTypeNode(rebuilt);
+}
+
 function buildShrunkTypeNodeFromType(
   type: ts.Type,
   paths: readonly (readonly string[])[],
@@ -446,15 +484,28 @@ function applyCapabilitySummaryToArgument(
     let shrunk: ts.TypeNode | undefined;
     if (preferTypeDriven) {
       // Synthetic inferred nodes can lose property precision in node-only mode.
-      shrunk = buildShrunkTypeNodeFromType(
+      const typeDriven = buildShrunkTypeNodeFromType(
         baseType!,
         paths,
         checker,
         sourceFile,
         factory,
       );
-      if (!shrunk) {
-        shrunk = buildShrunkTypeNodeFromTypeNode(baseTypeNode, paths, factory);
+      const nodeDriven = buildShrunkTypeNodeFromTypeNode(
+        baseTypeNode,
+        paths,
+        factory,
+      );
+      shrunk = typeDriven ?? nodeDriven;
+      if (
+        typeDriven &&
+        nodeDriven &&
+        containsAnyOrUnknownTypeNode(typeDriven) &&
+        !containsAnyOrUnknownTypeNode(nodeDriven)
+      ) {
+        // Prefer node-driven shrinking when type-driven rebuilding widens nested
+        // members to `any`/`unknown` (e.g. array items or optional fields).
+        shrunk = nodeDriven;
       }
     } else {
       // Source-authored nodes preserve exact unions/aliases; keep them first.
@@ -527,15 +578,28 @@ function applyCapabilitySummaryToParameter(
     let shrunk: ts.TypeNode | undefined;
     if (preferTypeDriven) {
       // Synthetic inferred nodes can lose property precision in node-only mode.
-      shrunk = buildShrunkTypeNodeFromType(
+      const typeDriven = buildShrunkTypeNodeFromType(
         baseType!,
         paths,
         checker,
         sourceFile,
         factory,
       );
-      if (!shrunk) {
-        shrunk = buildShrunkTypeNodeFromTypeNode(baseTypeNode, paths, factory);
+      const nodeDriven = buildShrunkTypeNodeFromTypeNode(
+        baseTypeNode,
+        paths,
+        factory,
+      );
+      shrunk = typeDriven ?? nodeDriven;
+      if (
+        typeDriven &&
+        nodeDriven &&
+        containsAnyOrUnknownTypeNode(typeDriven) &&
+        !containsAnyOrUnknownTypeNode(nodeDriven)
+      ) {
+        // Prefer node-driven shrinking when type-driven rebuilding widens nested
+        // members to `any`/`unknown` (e.g. array items or optional fields).
+        shrunk = nodeDriven;
       }
     } else {
       // Source-authored nodes preserve exact unions/aliases; keep them first.
@@ -661,6 +725,17 @@ function collectFunctionSchemaTypeNodes(
     }
   }
 
+  if (
+    shouldDropFallbackTypeForSchema(
+      argumentNode,
+      argumentType,
+      checker,
+      sourceFile,
+    )
+  ) {
+    argumentType = undefined;
+  }
+
   // 2. Get return type TypeNode
   let resultNode: ts.TypeNode | undefined;
   let resultType: ts.Type | undefined;
@@ -682,6 +757,17 @@ function collectFunctionSchemaTypeNodes(
       resultNode = typeToSchemaTypeNode(returnType, checker, sourceFile);
     }
     // If inference failed, leave resultNode undefined - we'll use unknown below
+  }
+
+  if (
+    shouldDropFallbackTypeForSchema(
+      resultNode,
+      resultType,
+      checker,
+      sourceFile,
+    )
+  ) {
+    resultType = undefined;
   }
 
   // 3. If we couldn't infer a type, we can't transform at all
@@ -1555,6 +1641,69 @@ export class SchemaInjectionTransformer extends Transformer {
             argumentTypeNode,
             argumentTypeValue,
             resultType,
+            resultTypeValue,
+          );
+        }
+
+        if (node.typeArguments && node.typeArguments.length === 1) {
+          const [argumentType] = node.typeArguments;
+          if (!argumentType) {
+            return ts.visitEachChild(node, visit, transformation);
+          }
+
+          const liftCallback = node.arguments[0];
+          if (
+            !liftCallback ||
+            (!ts.isArrowFunction(liftCallback) &&
+              !ts.isFunctionExpression(liftCallback))
+          ) {
+            return ts.visitEachChild(node, visit, transformation);
+          }
+
+          let argumentTypeValue = typeRegistry?.get(argumentType);
+          let argumentTypeNode: ts.TypeNode = argumentType;
+          const transformedArgumentType = applyCapabilitySummaryToArgument(
+            liftCallback,
+            argumentType,
+            argumentTypeValue,
+            checker,
+            sourceFile,
+            factory,
+            capabilityRegistry,
+          );
+          if (transformedArgumentType) {
+            argumentTypeNode = transformedArgumentType;
+            if (argumentTypeNode !== argumentType) {
+              argumentTypeValue = undefined;
+            }
+          }
+
+          const fallbackArgType = getTypeFromTypeNodeWithFallback(
+            argumentType,
+            checker,
+            typeRegistry,
+          );
+          const inferred = collectFunctionSchemaTypeNodes(
+            liftCallback,
+            checker,
+            sourceFile,
+            factory,
+            fallbackArgType,
+            typeRegistry,
+            capabilityRegistry,
+          );
+          const resultTypeNode = inferred.result ??
+            factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+          const resultTypeValue = getTypeFromRegistryOrFallback(
+            resultTypeNode,
+            inferred.resultType,
+            typeRegistry,
+          );
+
+          return updateWithSchemas(
+            argumentTypeNode,
+            argumentTypeValue,
+            resultTypeNode,
             resultTypeValue,
           );
         }

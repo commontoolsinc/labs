@@ -712,6 +712,46 @@ export class SchemaGenerator implements ISchemaGenerator {
       return { type: "array", items };
     }
 
+    // Handle unions in synthetic nodes. This avoids widening optional
+    // properties like `name?: string` to `true` when checker resolution falls
+    // back to `any`.
+    if (ts.isUnionTypeNode(typeNode)) {
+      const nonUndefinedMembers = typeNode.types.filter((member) =>
+        member.kind !== ts.SyntaxKind.UndefinedKeyword
+      );
+      if (nonUndefinedMembers.length === 0) {
+        return { type: "undefined" };
+      }
+      if (nonUndefinedMembers.length === 1) {
+        return this.analyzeTypeNodeStructure(
+          nonUndefinedMembers[0]!,
+          checker,
+          context,
+        );
+      }
+      const memberSchemas = nonUndefinedMembers.map((member) =>
+        this.analyzeTypeNodeStructure(member, checker, context)
+      );
+      if (memberSchemas.some((schema) => schema === true)) {
+        return true as SchemaDefinition;
+      }
+      return { anyOf: memberSchemas as Exclude<SchemaDefinition, boolean>[] };
+    }
+
+    // Synthetic TypeReferenceNodes may fail to bind in checker APIs directly.
+    // Resolve by name from source scope as a fallback (e.g., CharmEntry in
+    // Cell<CharmEntry[]>).
+    if (ts.isTypeReferenceNode(typeNode)) {
+      const resolved = this.resolveTypeReferenceFromScope(
+        typeNode,
+        checker,
+        context,
+      );
+      if (resolved) {
+        return this.formatChildType(resolved, context, typeNode);
+      }
+    }
+
     // Handle keyword types (string, number, boolean, etc.)
     switch (typeNode.kind) {
       case ts.SyntaxKind.StringKeyword:
@@ -744,6 +784,40 @@ export class SchemaGenerator implements ISchemaGenerator {
 
     // Fallback: accept any value
     return true as SchemaDefinition;
+  }
+
+  private resolveTypeReferenceFromScope(
+    typeNode: ts.TypeReferenceNode,
+    checker: ts.TypeChecker,
+    context: GenerationContext,
+  ): ts.Type | undefined {
+    if (!ts.isIdentifier(typeNode.typeName)) {
+      return undefined;
+    }
+    const typeName = typeNode.typeName.text;
+    const symbolAtNode = checker.getSymbolAtLocation(typeNode.typeName);
+    if (symbolAtNode) {
+      const declared = checker.getDeclaredTypeOfSymbol(symbolAtNode);
+      if (declared && !(declared.flags & ts.TypeFlags.Any)) {
+        return declared;
+      }
+    }
+
+    const scopeNode = context.typeNode?.getSourceFile?.() ??
+      typeNode.getSourceFile?.();
+    if (!scopeNode) return undefined;
+
+    const candidates = checker.getSymbolsInScope(
+      scopeNode,
+      ts.SymbolFlags.Type,
+    );
+    const symbol = candidates.find((candidate) => candidate.name === typeName);
+    if (!symbol) return undefined;
+    const declared = checker.getDeclaredTypeOfSymbol(symbol);
+    if (!declared || (declared.flags & ts.TypeFlags.Any)) {
+      return undefined;
+    }
+    return declared;
   }
 
   /**

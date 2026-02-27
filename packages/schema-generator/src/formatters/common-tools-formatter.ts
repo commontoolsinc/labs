@@ -345,15 +345,17 @@ export class CommonToolsFormatter implements TypeFormatter {
     const innerTypeIsGeneric =
       (innerType.flags & ts.TypeFlags.TypeParameter) !== 0;
 
-    // Don't pass synthetic TypeNodes - they lose type information (especially for arrays)
-    // Synthetic nodes have pos === -1 and end === -1
-    // But DO pass real TypeNodes from source code for proper type detection (e.g., Default)
+    // Synthetic nodes have pos === -1 and end === -1.
     const isSyntheticNode = innerTypeNode && innerTypeNode.pos === -1 &&
       innerTypeNode.end === -1;
 
-    // Only pass typeNode if it's real (not synthetic) AND not a generic type parameter
-    const shouldPassTypeNode = innerTypeNode && !isSyntheticNode &&
-      !innerTypeIsGeneric;
+    const syntheticNodeNeedsHelp = !!innerTypeNode && !!isSyntheticNode &&
+      this.innerTypeNeedsNodeAssistance(innerType, context.typeChecker);
+
+    // Prefer real source nodes, but allow synthetic nodes when the resolved type
+    // is widened/unusable and the node still carries useful structure.
+    const shouldPassTypeNode = innerTypeNode && !innerTypeIsGeneric &&
+      (!isSyntheticNode || syntheticNodeNeedsHelp);
 
     // Check for schema hints on the current typeNode and propagate to child context
     // This allows array-property-only access patterns (e.g., .length) to generate items: { not: true, asCell/asOpaque: true }
@@ -411,6 +413,20 @@ export class CommonToolsFormatter implements TypeFormatter {
       (ts.TypeFlags.Any | ts.TypeFlags.Unknown |
         ts.TypeFlags.TypeParameter)) !==
       0;
+  }
+
+  private innerTypeNeedsNodeAssistance(
+    type: ts.Type,
+    checker: ts.TypeChecker,
+  ): boolean {
+    if (this.isUnusableInnerType(type)) {
+      return true;
+    }
+    const numericIndex = checker.getIndexTypeOfType(type, ts.IndexKind.Number);
+    if (!numericIndex) {
+      return false;
+    }
+    return this.isUnusableInnerType(numericIndex);
   }
 
   /**

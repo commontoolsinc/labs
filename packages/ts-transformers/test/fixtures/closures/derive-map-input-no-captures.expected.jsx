@@ -23,13 +23,10 @@ export default pattern((__ct_pattern_input) => {
     // derive has NO captures, so it won't be transformed by ClosureTransformer
     // The callback param has NO explicit type annotation
     const count = derive({
-        type: "object",
-        properties: {
-            length: {
-                type: "number"
-            }
-        },
-        required: ["length"]
+        type: "array",
+        items: {
+            type: "string"
+        }
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema, items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
