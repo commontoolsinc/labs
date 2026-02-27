@@ -4,6 +4,7 @@ import type {
   IMemorySpaceAddress,
   IStorageTransaction,
 } from "../storage/interface.ts";
+import { cfcEntityKey } from "./shared.ts";
 
 type SchemaContextEntry = {
   schema: JSONSchema;
@@ -14,10 +15,6 @@ const schemaContextByTx = new WeakMap<
   IStorageTransaction,
   Map<string, SchemaContextEntry>
 >();
-
-function schemaContextKey(address: IMemorySpaceAddress): string {
-  return `${address.space}\u0000${address.id}\u0000${address.type}`;
-}
 
 function getOrCreateTxSchemaContext(
   tx: IExtendedStorageTransaction,
@@ -40,7 +37,7 @@ export function recordCfcWriteSchemaContext(
   }
 
   const context = getOrCreateTxSchemaContext(tx);
-  const key = schemaContextKey(address);
+  const key = cfcEntityKey(address);
   const existing = context.get(key);
   const pathLength = address.path.length;
 
@@ -55,6 +52,6 @@ export function getCfcWriteSchemaContext(
   address: IMemorySpaceAddress,
 ): JSONSchema | undefined {
   const context = schemaContextByTx.get(tx.tx);
-  const key = schemaContextKey(address);
+  const key = cfcEntityKey(address);
   return context?.get(key)?.schema;
 }

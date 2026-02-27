@@ -4,6 +4,7 @@ import type {
   Metadata,
 } from "../storage/interface.ts";
 import { hasInternalVerifierReadMarker } from "./internal-markers.ts";
+import { activityWriteChangedFlag } from "./shared.ts";
 
 export interface CanonicalBoundaryRead {
   readonly space: string;
@@ -29,7 +30,7 @@ export interface CanonicalBoundaryActivity {
   readonly finalAttemptedWrites: readonly CanonicalAttemptedWrite[];
 }
 
-function escapeJsonPointerToken(token: string): string {
+export function escapeJsonPointerToken(token: string): string {
   return token.replaceAll("~", "~0").replaceAll("/", "~1");
 }
 
@@ -53,16 +54,6 @@ export function stripStorageWrapperFromPath(
 export function canonicalizeStoragePath(path: readonly string[]): string {
   const stripped = stripStorageWrapperFromPath(path);
   return toCanonicalJsonPointer(stripped);
-}
-
-function activityWriteChangedFlag(activityWrite: unknown): boolean {
-  if (
-    activityWrite && typeof activityWrite === "object" &&
-    "changed" in activityWrite
-  ) {
-    return Boolean((activityWrite as { changed?: unknown }).changed);
-  }
-  return true;
 }
 
 function finalAttemptedWriteKey(write: CanonicalAttemptedWrite): string {

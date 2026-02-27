@@ -1,4 +1,5 @@
 import type { JSONSchema } from "../builder/types.ts";
+import { toHex } from "./shared.ts";
 
 const CFC_SCHEMA_HASH_VERSION = "cfc-schema-v1";
 
@@ -9,10 +10,6 @@ type CanonicalValue =
   | string
   | CanonicalValue[]
   | { [key: string]: CanonicalValue };
-
-function toHex(bytes: Uint8Array): string {
-  return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-}
 
 function canonicalizeSchemaValue(value: unknown): CanonicalValue {
   if (value === null) return null;

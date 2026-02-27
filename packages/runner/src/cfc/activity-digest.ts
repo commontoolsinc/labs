@@ -10,6 +10,7 @@ import {
   markReadAsPotentialWriteMarker,
 } from "../storage/read-metadata.ts";
 import { canonicalizeStoragePath } from "./canonical-activity.ts";
+import { activityWriteChangedFlag, toHex } from "./shared.ts";
 
 interface NormalizedReadMetadata {
   readonly ignoreReadForScheduling: boolean;
@@ -42,20 +43,6 @@ type NormalizedWriteActivity = {
 };
 
 type NormalizedActivity = NormalizedReadActivity | NormalizedWriteActivity;
-
-function toHex(bytes: Uint8Array): string {
-  return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-function activityWriteChangedFlag(activityWrite: unknown): boolean {
-  if (
-    activityWrite && typeof activityWrite === "object" &&
-    "changed" in activityWrite
-  ) {
-    return Boolean((activityWrite as { changed?: unknown }).changed);
-  }
-  return true;
-}
 
 function normalizeReadMetadata(
   meta: Metadata | undefined,

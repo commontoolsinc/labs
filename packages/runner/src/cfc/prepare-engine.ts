@@ -16,6 +16,7 @@ import {
   type CanonicalBoundaryRead,
   canonicalizeBoundaryActivity,
   canonicalizeStoragePath,
+  escapeJsonPointerToken,
 } from "./canonical-activity.ts";
 import { partitionConsumedBoundaryReads } from "./consumed-reads.ts";
 import {
@@ -35,6 +36,11 @@ import {
 import { getCfcWriteSchemaContext } from "./schema-context.ts";
 import { computeCfcSchemaHash } from "./schema-hash.ts";
 import { cfcSchemaBlobAddress } from "./schema-blob.ts";
+import {
+  cfcEntityKey,
+  cfcLabelsAddress,
+  normalizePersistedLabels,
+} from "./shared.ts";
 
 type EntityAddress = Pick<IMemorySpaceAddress, "space" | "id" | "type">;
 
@@ -44,10 +50,6 @@ export interface PrepareBoundaryCommitOptions {
     expectedSchemaHash: string,
     actualSchemaHash: string,
   ) => boolean;
-}
-
-function entityKey(entity: EntityAddress): string {
-  return `${entity.space}\u0000${entity.id}\u0000${entity.type}`;
 }
 
 function CfcPrepareSchemaUnavailableError(
@@ -289,7 +291,7 @@ function collectWrittenEntities(
       id: write.id as IMemorySpaceAddress["id"],
       type: write.type as IMemorySpaceAddress["type"],
     };
-    entities.set(entityKey(entity), entity);
+    entities.set(cfcEntityKey(entity), entity);
   }
   return [...entities.values()];
 }
@@ -314,61 +316,6 @@ function schemaBlobAddress(
   schemaHash: string,
 ): IMemorySpaceAddress {
   return cfcSchemaBlobAddress(entity.space, schemaHash);
-}
-
-function readLabelsAddress(entity: EntityAddress): IMemorySpaceAddress {
-  return {
-    space: entity.space,
-    id: entity.id,
-    type: entity.type,
-    path: ["cfc", "labels"],
-  };
-}
-
-function labelsAddress(entity: EntityAddress): IMemorySpaceAddress {
-  return {
-    space: entity.space,
-    id: entity.id,
-    type: entity.type,
-    path: ["cfc", "labels"],
-  };
-}
-
-function normalizeLabelsByPath(value: unknown): Record<string, Labels> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return {};
-  }
-
-  const labelsByPath: Record<string, Labels> = {};
-  for (const [path, rawLabel] of Object.entries(value)) {
-    if (!path.startsWith("/")) {
-      continue;
-    }
-    if (!rawLabel || typeof rawLabel !== "object" || Array.isArray(rawLabel)) {
-      continue;
-    }
-    const rawClassification = (rawLabel as { classification?: unknown })
-      .classification;
-    const classification = Array.isArray(rawClassification)
-      ? rawClassification.filter((entry): entry is string =>
-        typeof entry === "string" && entry.length > 0
-      )
-      : [];
-    const rawIntegrity = (rawLabel as { integrity?: unknown }).integrity;
-    const integrity = Array.isArray(rawIntegrity)
-      ? rawIntegrity.filter((entry): entry is string =>
-        typeof entry === "string" && entry.length > 0
-      )
-      : [];
-    if (classification.length === 0 && integrity.length === 0) {
-      continue;
-    }
-    labelsByPath[path] = {
-      ...(classification.length > 0 ? { classification } : {}),
-      ...(integrity.length > 0 ? { integrity } : {}),
-    };
-  }
-  return labelsByPath;
 }
 
 function computePreparedLabels(schema: JSONSchema): Record<string, Labels> {
@@ -689,7 +636,7 @@ function verifyInputRequirementsForAttempt(
       continue;
     }
     const rawLabels = tx.readOrThrow(
-      readLabelsAddress({
+      cfcLabelsAddress({
         space: read.space as IMemorySpaceAddress["space"],
         id: read.id as IMemorySpaceAddress["id"],
         type: read.type as IMemorySpaceAddress["type"],
@@ -698,7 +645,7 @@ function verifyInputRequirementsForAttempt(
         cfc: internalVerifierReadAnnotations,
       },
     );
-    labelsByEntity.set(key, normalizeLabelsByPath(rawLabels));
+    labelsByEntity.set(key, normalizePersistedLabels(rawLabels));
   }
 
   const consumedReadLabels = collectConsumedInputLabels(
@@ -1314,12 +1261,8 @@ function lengthPreservedSourcePath(
     collection.permutationOf;
 }
 
-function escapeCanonicalSegment(segment: string): string {
-  return segment.replaceAll("~", "~0").replaceAll("/", "~1");
-}
-
 function appendCanonicalSegment(path: string, segment: string): string {
-  const escaped = escapeCanonicalSegment(segment);
+  const escaped = escapeJsonPointerToken(segment);
   return path === "/" ? `/${escaped}` : `${path}/${escaped}`;
 }
 
@@ -1931,7 +1874,7 @@ function verifyOutputTransitionsForAttempt(
       id: write.id as EntityAddress["id"],
       type: write.type as EntityAddress["type"],
     };
-    const rootSchema = rootSchemaByEntity?.get(entityKey(entity)) ??
+    const rootSchema = rootSchemaByEntity?.get(cfcEntityKey(entity)) ??
       getCfcWriteSchemaContext(tx, { ...entity, path: [] });
     if (!rootSchema) {
       continue;
@@ -2209,7 +2152,7 @@ export async function prepareBoundaryCommit(
   const preparedRootSchemasByEntity = new Map<string, JSONSchema>();
   for (const prepared of preparedWriteSchemas) {
     preparedRootSchemasByEntity.set(
-      entityKey(prepared.entity),
+      cfcEntityKey(prepared.entity),
       prepared.schema,
     );
   }
@@ -2249,7 +2192,7 @@ export async function prepareBoundaryCommit(
           prepared.actualSchemaHash,
         );
       }
-      tx.writeOrThrow(labelsAddress(prepared.entity), prepared.labels);
+      tx.writeOrThrow(cfcLabelsAddress(prepared.entity), prepared.labels);
     }
   }
 
