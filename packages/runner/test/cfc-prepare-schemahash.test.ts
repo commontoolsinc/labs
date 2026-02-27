@@ -73,6 +73,8 @@ const siblingIfcObjectSchema = {
   },
 } as const satisfies JSONSchema;
 
+const permissiveBooleanSchema = true as const satisfies JSONSchema;
+
 const composedAndRefIfcObjectSchema = {
   type: "object",
   properties: {
@@ -288,6 +290,28 @@ describe("CFC prepare schema hash", () => {
         classification: ["confidential"],
       },
     });
+  });
+
+  it("handles boolean write schemas when attempt is IFC-relevant", async () => {
+    const tx = runtime.edit();
+    const ifcCell = runtime.getCell<{ count: number }>(
+      space,
+      "cfc-prepare-schemahash-boolean-ifc",
+      ifcObjectSchema,
+      tx,
+    );
+    const permissiveCell = runtime.getCell<unknown>(
+      space,
+      "cfc-prepare-schemahash-boolean-true",
+      permissiveBooleanSchema,
+      tx,
+    );
+    ifcCell.set({ count: 1 });
+    permissiveCell.set({ any: "value" });
+
+    await prepareCfcCommitIfNeeded(tx);
+    const { error } = await tx.commit();
+    expect(error).toBeUndefined();
   });
 
   it("commits when existing cfc.schemaHash matches", async () => {
