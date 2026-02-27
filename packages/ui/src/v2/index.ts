@@ -56,6 +56,7 @@ export * from "./components/ct-image-input/index.ts";
 export * from "./components/ct-input/index.ts";
 export * from "./components/ct-input-otp/index.ts";
 export * from "./components/ct-label/index.ts";
+export * from "./components/ct-link-preview/index.ts";
 export * from "./components/ct-plaid-link/index.ts";
 export * from "./components/ct-progress/index.ts";
 export * from "./components/ct-radio/index.ts";

@@ -2860,6 +2860,7 @@ interface CTCellLinkElement extends CTHTMLElement {}
 interface CTSpaceLinkElement extends CTHTMLElement {}
 interface CTLoaderElement extends CTHTMLElement {}
 interface CTInputElement extends CTHTMLElement {}
+interface CTLinkPreviewElement extends CTHTMLElement {}
 interface CTTextAreaElement extends CTHTMLElement {}
 interface CTFileInputElement extends CTHTMLElement {}
 interface CTImageInputElement extends CTHTMLElement {}
@@ -3510,6 +3511,10 @@ interface CTInputAttributes<T> extends CTHTMLAttributes<T> {
   "onct-keydown"?: any;
   "onct-submit"?: any;
   "onct-invalid"?: any;
+}
+
+interface CTLinkPreviewAttributes<T> extends CTHTMLAttributes<T> {
+  "url"?: CellLike<string> | string;
 }
 
 interface CTTextAreaAttributes<T> extends CTHTMLAttributes<T> {
@@ -4559,6 +4564,10 @@ declare global {
       "ct-input": CTDOM.DetailedHTMLProps<
         CTInputAttributes<CTInputElement>,
         CTInputElement
+      >;
+      "ct-link-preview": CTDOM.DetailedHTMLProps<
+        CTLinkPreviewAttributes<CTLinkPreviewElement>,
+        CTLinkPreviewElement
       >;
       "ct-textarea": CTDOM.DetailedHTMLProps<
         CTTextAreaAttributes<CTTextAreaElement>,
