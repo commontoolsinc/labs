@@ -1103,14 +1103,18 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                   })}
                   target="_blank"
                   style={{
-                    fontSize: "18px",
+                    padding: "5px 14px",
+                    borderRadius: "100px",
+                    fontSize: "13px",
+                    fontWeight: "600",
+                    background: "rgba(0, 122, 255, 0.12)",
+                    color: "#007AFF",
                     cursor: "pointer",
                     textDecoration: "none",
-                    opacity: 0.7,
-                    lineHeight: "1",
+                    transition: "all 0.2s ease",
                   }}
                 >
-                  {"📅"}
+                  Cal
                 </a>
                 <span
                   style={computed(() => {
@@ -1166,7 +1170,7 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                   })}
                   onClick={syncNow}
                 >
-                  {"\uD83D\uDD04"}
+                  {"ᯤ"}
                 </div>
               </div>
             </div>
