@@ -2901,6 +2901,7 @@ interface CTDragSourceElement extends CTHTMLElement {}
 interface CTDropZoneElement extends CTHTMLElement {}
 interface CTChatMessageElement extends CTHTMLElement {}
 interface CTMarkdownElement extends CTHTMLElement {}
+interface CTSvgElement extends CTHTMLElement {}
 interface CTVScrollElement extends CTHTMLElement {}
 interface CTSendMessageElement extends CTHTMLElement {}
 interface CTTextElement extends CTHTMLElement {}
@@ -3290,6 +3291,11 @@ interface CTMarkdownAttributes<T> extends CTHTMLAttributes<T> {
   "variant"?: "default" | "inverse";
   "streaming"?: boolean;
   "compact"?: boolean;
+}
+
+interface CTSvgAttributes<T> extends CTHTMLAttributes<T> {
+  "content"?: string;
+  "$content"?: CellLike<string>;
 }
 
 interface CTAlertAttributes<T> extends CTHTMLAttributes<T> {
@@ -4843,6 +4849,10 @@ declare global {
       "ct-switch": CTDOM.DetailedHTMLProps<
         CTSwitchAttributes<CTSwitchElement>,
         CTSwitchElement
+      >;
+      "ct-svg": CTDOM.DetailedHTMLProps<
+        CTSvgAttributes<CTSvgElement>,
+        CTSvgElement
       >;
       "ct-toggle": CTDOM.DetailedHTMLProps<
         CTToggleAttributes<CTToggleElement>,
