@@ -304,7 +304,7 @@ export class CycleTracker<K> {
  *
  * This will not work correctly if the key is modified after being added.
  */
-export class CompoundCycleTracker<EqualKey, DeepEqualKey, Value = unknown> {
+export class CompoundCycleTracker<EqualKey, ExtraKey, Value = unknown> {
   // partialKey (identity) → Map<hash(extraKey), Value?>
   private partial: Map<EqualKey, Map<string, Value | undefined>>;
   constructor() {
@@ -318,7 +318,7 @@ export class CompoundCycleTracker<EqualKey, DeepEqualKey, Value = unknown> {
    */
   include(
     partialKey: EqualKey,
-    extraKey: DeepEqualKey,
+    extraKey: ExtraKey,
     value?: Value,
     _context?: unknown,
   ): Disposable | null {
@@ -346,7 +346,7 @@ export class CompoundCycleTracker<EqualKey, DeepEqualKey, Value = unknown> {
   }
 
   // After a failed include (that returns null), we can use getExisting to find the registered value
-  getExisting(partialKey: EqualKey, extraKey: DeepEqualKey): Value | undefined {
+  getExisting(partialKey: EqualKey, extraKey: ExtraKey): Value | undefined {
     const existing = this.partial.get(partialKey);
     if (existing === undefined) {
       return undefined;
