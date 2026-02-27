@@ -342,6 +342,8 @@ interface Output {
    * ```
    */
   refreshToken: Stream<Record<string, never>>;
+  /** Background updater for proactive token refresh via background-charm-service */
+  bgUpdater: Stream<unknown>;
 }
 
 // Handler for toggling scope selection
@@ -485,6 +487,52 @@ const refreshTokenHandler = handler<
     auth.get()?.token?.slice(0, 20),
   );
 });
+
+// Threshold: refresh when less than 10 minutes remain
+const REFRESH_THRESHOLD_MS = 10 * 60 * 1000;
+
+/**
+ * Background updater handler for proactive token refresh.
+ *
+ * When google-auth is registered with background-charm-service, this handler
+ * is called every ~60 seconds. It checks if the token is about to expire
+ * (< 10 min remaining) and refreshes it proactively, preventing expiry.
+ */
+const bgRefreshHandler = handler<unknown, { auth: Writable<Auth> }>(
+  async (_event, { auth }) => {
+    const currentAuth = auth.get();
+    if (!currentAuth?.token || !currentAuth?.refreshToken) return;
+
+    const expiresAt = currentAuth.expiresAt ?? 0;
+    if (expiresAt <= 0) return;
+
+    const timeRemaining = expiresAt - Date.now();
+    if (timeRemaining > REFRESH_THRESHOLD_MS) return; // Still fresh, skip
+
+    // Token is expiring soon or already expired — refresh it
+    console.log("[google-auth bgUpdater] Token expiring soon, refreshing...");
+
+    const res = await fetch(
+      new URL("/api/integrations/google-oauth/refresh", env.apiUrl),
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refreshToken: currentAuth.refreshToken }),
+      },
+    );
+
+    if (!res.ok) {
+      console.error("[google-auth bgUpdater] Refresh failed:", res.status);
+      return; // Don't throw — bgUpdater should be resilient
+    }
+
+    const json = await res.json();
+    if (!json.tokenInfo) return;
+
+    auth.update({ ...json.tokenInfo, user: currentAuth.user });
+    console.log("[google-auth bgUpdater] Token refreshed successfully");
+  },
+);
 
 export default pattern<Input, Output>(
   ({ auth, selectedScopes }) => {
@@ -931,6 +979,8 @@ export default pattern<Input, Output>(
       previewUI,
       // Export the refresh handler for cross-piece calling
       refreshToken: refreshTokenHandler({ auth }),
+      // Background updater for proactive token refresh via background-charm-service
+      bgUpdater: bgRefreshHandler({ auth }),
     };
   },
 );

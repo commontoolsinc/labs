@@ -22,14 +22,15 @@
  * return { [UI]: <div>{fullUI}</div> };
  * ```
  *
- * IMPORTANT: Token refresh is currently broken in the framework!
- * This utility detects expired tokens but relies on manual re-authentication.
+ * Token refresh: Tokens auto-refresh via background-charm-service (when registered).
+ * For fallback, a "Refresh Session" button is shown in the expired UI.
  */
 
 import {
   action,
   computed,
   Default,
+  handler,
   ifElse,
   navigateTo,
   pattern,
@@ -144,6 +145,7 @@ interface GoogleAuthPiece {
   scopes?: string[];
   selectedScopes?: Record<ScopeKey, boolean>;
   userChip?: unknown;
+  refreshToken?: unknown;
 }
 
 // Status colors
@@ -160,7 +162,7 @@ const STATUS_MESSAGES: Record<AuthState, string> = {
   loading: "Loading auth...",
   "needs-login": "Please sign in to your Google Auth",
   "missing-scopes": "Additional permissions needed",
-  "token-expired": "Session expired - please re-authenticate",
+  "token-expired": "Session expired - click Refresh Session",
   ready: "Connected",
 };
 
@@ -194,6 +196,46 @@ function formatTimeRemaining(ms: number | null): string {
 function debugLog(enabled: boolean, ...args: unknown[]) {
   if (enabled) console.log("[GoogleAuth]", ...args);
 }
+
+// =============================================================================
+// MODULE-SCOPE HANDLERS
+// =============================================================================
+
+/**
+ * Handler for one-click token refresh from the expired UI.
+ * Calls the google-auth piece's refreshToken stream and updates local state.
+ */
+const attemptRefresh = handler<
+  unknown,
+  {
+    // deno-lint-ignore no-explicit-any
+    refreshStream: any;
+    refreshing: Writable<boolean>;
+    refreshFailed: Writable<boolean>;
+  }
+>(async (_event, { refreshStream, refreshing, refreshFailed }) => {
+  if (!refreshStream?.send) {
+    refreshFailed.set(true);
+    return;
+  }
+  refreshing.set(true);
+  refreshFailed.set(false);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      // deno-lint-ignore no-explicit-any
+      (refreshStream.send as any)({}, (tx: any) => {
+        const status = tx?.status?.();
+        if (status?.status === "done") resolve();
+        else if (status?.status === "error") reject(new Error(status.error));
+        else resolve();
+      });
+    });
+  } catch {
+    refreshFailed.set(true);
+  } finally {
+    refreshing.set(false);
+  }
+});
 
 // =============================================================================
 // MAIN PATTERN
@@ -299,6 +341,14 @@ export const GoogleAuthManager = pattern<
       return value;
     });
     const currentEmail = computed(() => auth?.user?.email ?? "");
+
+    // Refresh state for one-click token refresh
+    const refreshStream = wishResult.result.refreshToken;
+    const refreshing = Writable.of(false);
+    const refreshFailed = Writable.of(false);
+
+    const isRefreshing = computed(() => refreshing.get() === true);
+    const hasRefreshFailed = computed(() => refreshFailed.get() === true);
 
     const statusDotColor = computed(
       () => STATUS_COLORS[currentState as AuthState] ?? STATUS_COLORS.loading,
@@ -633,7 +683,44 @@ export const GoogleAuthManager = pattern<
             Session Expired
           </h4>
           <div style={{ margin: "0", fontSize: "13px", color: "#4b5563" }}>
-            Your Google session has expired. Please sign in again to continue.
+            Your Google session has expired.
+          </div>
+          <div
+            style={{
+              marginTop: "12px",
+              display: "flex",
+              gap: "8px",
+              alignItems: "center",
+            }}
+          >
+            <button
+              type="button"
+              onClick={attemptRefresh({
+                refreshStream,
+                refreshing,
+                refreshFailed,
+              })}
+              disabled={isRefreshing}
+              style={{
+                padding: "8px 16px",
+                backgroundColor: "#3b82f6",
+                color: "white",
+                border: "none",
+                borderRadius: "6px",
+                cursor: "pointer",
+                fontWeight: "500",
+                fontSize: "14px",
+              }}
+            >
+              {ifElse(isRefreshing, "Refreshing...", "Refresh Session")}
+            </button>
+            {ifElse(
+              hasRefreshFailed,
+              <span style={{ fontSize: "13px", color: "#dc2626" }}>
+                Refresh failed — try signing in again below.
+              </span>,
+              null,
+            )}
           </div>
         </div>
         {pickerUI}
@@ -744,6 +831,36 @@ export const GoogleAuthManager = pattern<
       </div>
     );
 
+    // --- Refreshing UI (shown while token refresh is in progress) ---
+    const refreshingUI = (
+      <div
+        style={{
+          padding: "12px 16px",
+          backgroundColor: "#fef3c7",
+          borderRadius: "8px",
+          border: "1px solid #f59e0b",
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
+          fontSize: "14px",
+          color: "#b45309",
+        }}
+      >
+        <span
+          style={{
+            display: "inline-block",
+            width: "14px",
+            height: "14px",
+            border: "2px solid #f59e0b",
+            borderTop: "2px solid transparent",
+            borderRadius: "50%",
+            animation: "spin 1s linear infinite",
+          }}
+        />
+        Refreshing session...
+      </div>
+    );
+
     // --- Compose fullUI via chained ifElse (no null branches) ---
     // Built inside-out to avoid TS2589 (type instantiation too deep)
     const loginOrLoad = ifElse(isNeedsLogin, needsLoginUI, loadingUI);
@@ -753,7 +870,8 @@ export const GoogleAuthManager = pattern<
       tokenExpiredUI,
       scopesOrPrev,
     );
-    const fullUI = ifElse(isReadyState, readyUI, expiredOrPrev);
+    const refreshOrPrev = ifElse(isRefreshing, refreshingUI, expiredOrPrev);
+    const fullUI = ifElse(isReadyState, readyUI, refreshOrPrev);
 
     // ========================================================================
     // RETURN

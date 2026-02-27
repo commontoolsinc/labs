@@ -9,6 +9,7 @@ cache
 artifact
 _deno.lock
 .claude-prompt.tmp
+.bg-charm-service.pid
 .pr-desc.tmp
 dist/
 .claude/settings.local.json

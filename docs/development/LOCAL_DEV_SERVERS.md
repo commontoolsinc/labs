@@ -13,6 +13,7 @@
 ./scripts/restart-local-dev.sh --force       # Force kill first
 ./scripts/restart-local-dev.sh --clear-cache # Clear disposable caches (preserves spaces)
 ./scripts/restart-local-dev.sh --dangerously-clear-all-spaces # Clear databases/spaces
+./scripts/restart-local-dev.sh --bg-updater  # Also start background-charm-service
 ./scripts/check-local-dev.sh          # Health check both servers
 ```
 
@@ -174,24 +175,34 @@ When editing `ct-*` components in `packages/ui/`, restart the local dev server t
 > codebase. "Charm" is the legacy name for "piece"; they refer to the same
 > concept.
 
-The background-charm-service polls registered pieces and triggers their `bgUpdater` handlers server-side. This is **optional** - only needed if you're testing background/scheduled piece execution.
+The background-charm-service polls registered pieces and triggers their `bgUpdater` handlers server-side. This is **optional** - only needed if you're testing background/scheduled piece execution (e.g., auto-refreshing Google OAuth tokens).
 
-### Quick Setup
+### Quick Setup (Recommended)
+
+Use the `--bg-updater` flag with the local dev scripts:
 
 ```bash
-# 1. Build binaries (if not already done)
-deno task build-binaries
+./scripts/start-local-dev.sh --bg-updater
+# or
+./scripts/restart-local-dev.sh --bg-updater
+```
 
-# 2. Ensure toolshed is running (uses "implicit trust" identity in dev mode)
+This automatically handles admin charm setup and starts the background service. The service log is at `packages/background-charm-service/local-dev-bg.log`. The stop script will also clean up the background service process.
+
+### Manual Setup
+
+If you prefer manual control:
+
+```bash
+# 1. Ensure toolshed is running (uses "implicit trust" identity in dev mode)
 ./scripts/restart-local-dev.sh
 
-# 3. Set up admin charm (grants bg-service access to system space)
+# 2. Set up admin charm (grants bg-service access to system space)
 cd packages/background-charm-service
 OPERATOR_PASS="implicit trust" API_URL="http://localhost:8000" deno task add-admin-charm
 
-# 4. Start the background service
-cd /path/to/labs
-OPERATOR_PASS="implicit trust" API_URL="http://localhost:8000" ./dist/bg-charm-service
+# 3. Start the background service from source
+OPERATOR_PASS="implicit trust" API_URL="http://localhost:8000" deno task start
 ```
 
 ### Registering a Piece for Background Updates

@@ -14,6 +14,7 @@ TOOLSHED_PORT=${TOOLSHED_PORT:-}
 # Parse command line arguments
 FORCE=false
 WATCH=false
+BG_UPDATER=false
 while [[ $# -gt 0 ]]; do
     case $1 in
         --force)
@@ -22,6 +23,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --watch)
             WATCH=true
+            shift
+            ;;
+        --bg-updater)
+            BG_UPDATER=true
             shift
             ;;
         --port-offset)
@@ -130,3 +135,25 @@ if [[ "$PORT_OFFSET" -ne 0 ]]; then
 fi
 echo "Shell log file: packages/shell/local-dev-shell.log"
 echo "Toolshed log file: packages/toolshed/local-dev-toolshed.log"
+
+# Optionally start background-charm-service for bgUpdater polling
+if [[ "$BG_UPDATER" == "true" ]]; then
+    echo ""
+    echo "Starting background-charm-service..."
+
+    # Run add-admin-charm (idempotent, needed for service access to system space)
+    cd "$SCRIPT_DIR/../packages/background-charm-service"
+    OPERATOR_PASS="implicit trust" API_URL="http://localhost:$TOOLSHED_PORT" \
+        deno task add-admin-charm > /dev/null 2>&1 || true
+
+    # Start the background service
+    OPERATOR_PASS="implicit trust" API_URL="http://localhost:$TOOLSHED_PORT" \
+        deno task start > "$SCRIPT_DIR/../packages/background-charm-service/local-dev-bg.log" 2>&1 &
+    BG_PID=$!
+
+    # Save PID for stop script
+    echo "$BG_PID" > "$SCRIPT_DIR/../.bg-charm-service.pid"
+
+    echo "  Background service: PID $BG_PID (polling bgUpdater every 60s)"
+    echo "  Log file: packages/background-charm-service/local-dev-bg.log"
+fi
