@@ -322,6 +322,18 @@ async function syncDocumentPath(
   }
 }
 
+function resetReplicaCacheIfSupported(
+  ctx: TestContext,
+  space: MemorySpace,
+): void {
+  const provider = ctx.storageManager.open(space) as {
+    replica?: { reset?: () => void };
+  };
+  if (typeof provider.replica?.reset === "function") {
+    provider.replica.reset();
+  }
+}
+
 async function runTwoPatternScenario(args: {
   runId: string;
   producerIntegrity: string;
@@ -405,6 +417,7 @@ async function runTwoPatternScenario(args: {
   await disposeContext(phase1);
 
   const phase2 = createContext(identity);
+  resetReplicaCacheIfSupported(phase2, space);
   const producerResultView = phase2.runtime.getCell<any>(
     space,
     producerResultCellId,
