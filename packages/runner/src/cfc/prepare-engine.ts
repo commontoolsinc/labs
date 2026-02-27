@@ -28,6 +28,10 @@ import {
   readMaxConfidentialityFromMeta,
   readRequiredIntegrityFromMeta,
 } from "./internal-markers.ts";
+import {
+  ignoreReadForSchedulingMarker,
+  markReadAsPotentialWriteMarker,
+} from "../storage/read-metadata.ts";
 import { getCfcWriteSchemaContext } from "./schema-context.ts";
 import { computeCfcSchemaHash } from "./schema-hash.ts";
 import { cfcSchemaBlobAddress } from "./schema-blob.ts";
@@ -1088,12 +1092,30 @@ type ConsumedSourceLookup = {
   readonly value: unknown;
 };
 
+function sameEntityAddress(
+  left: EntityAddress,
+  right: EntityAddress,
+): boolean {
+  return left.space === right.space &&
+    left.id === right.id &&
+    left.type === right.type;
+}
+
 function resolveConsumedSourceValue(
   tx: IExtendedStorageTransaction,
   consumedReadLabels: readonly ConsumedReadWithEffectiveLabel[],
   sourcePath: string,
+  preferredEntity?: EntityAddress,
 ): ConsumedSourceLookup {
   const seen = new Set<string>();
+  let firstValue: unknown = undefined;
+  let firstExternalValue: unknown = undefined;
+  let preferredValue: unknown = undefined;
+  let preferredExternalValue: unknown = undefined;
+  let hasFirstValue = false;
+  let hasFirstExternalValue = false;
+  let hasPreferredValue = false;
+  let hasPreferredExternalValue = false;
   for (const consumed of consumedReadLabels) {
     if (consumed.read.path !== sourcePath) {
       continue;
@@ -1108,16 +1130,50 @@ function resolveConsumedSourceValue(
       continue;
     }
     seen.add(key);
-    return {
-      found: true,
-      value: readValueAtCanonicalPath(tx, {
-        space: consumed.read.space as EntityAddress["space"],
-        id: consumed.read.id as EntityAddress["id"],
-        type: consumed.read.type as EntityAddress["type"],
-      }, consumed.read.path),
+    const entity: EntityAddress = {
+      space: consumed.read.space as EntityAddress["space"],
+      id: consumed.read.id as EntityAddress["id"],
+      type: consumed.read.type as EntityAddress["type"],
     };
+    const value = readValueAtCanonicalPath(tx, entity, consumed.read.path);
+    if (!hasFirstValue) {
+      firstValue = value;
+      hasFirstValue = true;
+    }
+    const isPotentialWriteRead =
+      consumed.read.meta?.[markReadAsPotentialWriteMarker] === true;
+    const isIgnoredForScheduling =
+      consumed.read.meta?.[ignoreReadForSchedulingMarker] === true;
+    const isExternalConsumedRead = !isPotentialWriteRead &&
+      !isIgnoredForScheduling;
+    if (isExternalConsumedRead && !hasFirstExternalValue) {
+      firstExternalValue = value;
+      hasFirstExternalValue = true;
+    }
+    if (preferredEntity && sameEntityAddress(entity, preferredEntity)) {
+      if (!hasPreferredValue) {
+        preferredValue = value;
+        hasPreferredValue = true;
+      }
+      if (isExternalConsumedRead && !hasPreferredExternalValue) {
+        preferredExternalValue = value;
+        hasPreferredExternalValue = true;
+      }
+    }
   }
-  return { found: false, value: undefined };
+  if (hasPreferredExternalValue) {
+    return { found: true, value: preferredExternalValue };
+  }
+  if (hasFirstExternalValue) {
+    return { found: true, value: firstExternalValue };
+  }
+  if (hasPreferredValue) {
+    return { found: true, value: preferredValue };
+  }
+  if (!hasFirstValue) {
+    return { found: false, value: undefined };
+  }
+  return { found: true, value: firstValue };
 }
 
 function observedReadValueForPath(
@@ -1234,9 +1290,15 @@ function isPermutationMultiset(
 function readConsumedArraySource(
   tx: IExtendedStorageTransaction,
   consumedReadLabels: readonly ConsumedReadWithEffectiveLabel[],
+  preferredEntity: EntityAddress,
   sourcePath: string,
 ): readonly unknown[] | undefined {
-  const source = resolveConsumedSourceValue(tx, consumedReadLabels, sourcePath);
+  const source = resolveConsumedSourceValue(
+    tx,
+    consumedReadLabels,
+    sourcePath,
+    preferredEntity,
+  );
   if (!source.found || !Array.isArray(source.value)) {
     return undefined;
   }
@@ -1963,6 +2025,7 @@ function verifyOutputTransitionsForAttempt(
         tx,
         consumedReadLabels,
         exactCopyOf,
+        entity,
       );
       const outputValue = readValueAtCanonicalPath(tx, entity, write.path);
       if (!source.found || !deepEqual(source.value, outputValue)) {
@@ -1976,6 +2039,7 @@ function verifyOutputTransitionsForAttempt(
         tx,
         consumedReadLabels,
         projection.from,
+        entity,
       );
       const outputValue = readValueAtCanonicalPath(tx, entity, write.path);
       const expectedValue = valueAtCanonicalPath(source.value, projection.path);
@@ -1998,6 +2062,7 @@ function verifyOutputTransitionsForAttempt(
         const sourceArray = readConsumedArraySource(
           tx,
           consumedReadLabels,
+          entity,
           collection.subsetOf,
         );
         if (
@@ -2017,6 +2082,7 @@ function verifyOutputTransitionsForAttempt(
         const sourceArray = readConsumedArraySource(
           tx,
           consumedReadLabels,
+          entity,
           collection.permutationOf,
         );
         if (
@@ -2036,6 +2102,7 @@ function verifyOutputTransitionsForAttempt(
         const sourceArray = readConsumedArraySource(
           tx,
           consumedReadLabels,
+          entity,
           collection.filteredFrom,
         );
         if (
@@ -2054,7 +2121,7 @@ function verifyOutputTransitionsForAttempt(
       if (collection.lengthPreserved) {
         const sourcePath = lengthPreservedSourcePath(collection);
         const sourceArray = sourcePath
-          ? readConsumedArraySource(tx, consumedReadLabels, sourcePath)
+          ? readConsumedArraySource(tx, consumedReadLabels, entity, sourcePath)
           : undefined;
         if (
           !sourceArray || !outputArray ||
@@ -2094,6 +2161,7 @@ function verifyOutputTransitionsForAttempt(
         tx,
         consumedReadLabels,
         recompose.from,
+        entity,
       );
       if (!source.found) {
         throw CfcOutputRecomposeProjectionsViolationError(

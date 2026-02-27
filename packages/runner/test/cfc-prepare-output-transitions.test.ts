@@ -6,6 +6,7 @@ import { Runtime } from "../src/runtime.ts";
 import { prepareCfcCommitIfNeeded } from "../src/cfc/prepare-shim.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { URI } from "../src/storage/interface.ts";
+import { recordCfcWriteSchemaContext } from "../src/cfc/schema-context.ts";
 
 const signer = await Identity.fromPassphrase(
   "cfc prepare output transition test",
@@ -308,6 +309,50 @@ describe("CFC prepare output transitions", () => {
     expect(
       (thrown as { requirement?: string } | undefined)?.requirement,
     ).toBe("exactCopyOf");
+  });
+
+  it("prefers same-entity source when multiple consumed reads share source path", async () => {
+    const targetId = runtime.getCell(
+      space,
+      "cfc-output-exact-copy-prioritize-target-low-level",
+    ).getAsNormalizedFullLink().id;
+    const unrelatedId = runtime.getCell(
+      space,
+      "cfc-output-exact-copy-prioritize-unrelated-low-level",
+    ).getAsNormalizedFullLink().id;
+    await seedInputClassification(targetId, 7, "secret");
+    await seedInputClassification(unrelatedId, 99, "secret");
+
+    const tx = runtime.edit();
+    tx.readValueOrThrow({
+      space,
+      id: unrelatedId,
+      type: "application/json",
+      path: [],
+    });
+    tx.readValueOrThrow({
+      space,
+      id: targetId,
+      type: "application/json",
+      path: [],
+    });
+    tx.writeOrThrow({
+      space,
+      id: targetId,
+      type: "application/json",
+      path: ["value"],
+    }, 7);
+    recordCfcWriteSchemaContext(tx, {
+      space,
+      id: targetId,
+      type: "application/json",
+      path: [],
+    }, exactCopyNumberSchema);
+    tx.markCfcRelevant("ifc-write-schema");
+
+    await prepareCfcCommitIfNeeded(tx);
+    const { error } = await tx.commit();
+    expect(error).toBeUndefined();
   });
 
   it("allows prepare when projection assertion is satisfied", async () => {
