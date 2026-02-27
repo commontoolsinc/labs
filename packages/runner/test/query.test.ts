@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { refer } from "merkle-reference/json";
-import { deepEqual, JSONObject, type JSONSchema } from "../src/index.ts";
+import { JSONObject, type JSONSchema } from "../src/index.ts";
 import type { StorableDatum } from "@commontools/memory/interface";
 import {
   CompoundCycleTracker,
@@ -412,7 +412,7 @@ describe("Query", () => {
       },
     } as const satisfies JSONSchema;
 
-    const schemaTracker = new MapSet<string, SchemaPathSelector>(deepEqual);
+    const schemaTracker = new MapSet<string, SchemaPathSelector>(true);
     const traverser = new SchemaObjectTraverser(
       emulatedStorageTx,
       { path: ["value"], schema },

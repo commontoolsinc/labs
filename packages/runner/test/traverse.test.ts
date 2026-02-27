@@ -22,7 +22,7 @@ import { ExtendedStorageTransaction } from "../src/storage/extended-storage-tran
 import type { JSONSchema } from "../src/builder/types.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { Immutable } from "@commontools/utils/types";
-import { ContextualFlowControl, deepEqual } from "@commontools/runner";
+import { ContextualFlowControl } from "@commontools/runner";
 import {
   IMemorySpaceAddress,
   IMemorySpaceAttestation,
@@ -752,7 +752,7 @@ describe("getAtPath array index validation", () => {
       JSONSchema | undefined
     >();
     const cfc = new ContextualFlowControl();
-    const schemaTracker = new MapSet<string, SchemaPathSelector>(deepEqual);
+    const schemaTracker = new MapSet<string, SchemaPathSelector>(true);
 
     const doc: IMemorySpaceAttestation = {
       address: { space: "did:null:null", id: docUri, type, path: ["value"] },
