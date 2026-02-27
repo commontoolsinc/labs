@@ -478,22 +478,15 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
       return q ? q.question : "";
     });
 
-    // Stat card computed styles — parameterized factories
-    function cardStyle(panel: string) {
-      return computed(() => ({
-        background: expandedPanel.get() === panel ? "rgba(0, 122, 255, 0.08)" : color.fillPrimary,
-        borderRadius: "12px", padding: "12px 14px", cursor: "pointer",
-        transition: "background 0.2s ease",
-        border: expandedPanel.get() === panel ? "1px solid rgba(0, 122, 255, 0.2)" : "1px solid transparent",
-      }));
-    }
-    function chevronStyle(panel: string) {
-      return computed(() => ({
-        fontSize: "10px", color: color.tertiaryLabel, transition: "transform 0.2s ease",
-        transform: expandedPanel.get() === panel ? "rotate(90deg)" : "rotate(0deg)",
-        marginLeft: "auto", flexShrink: "0",
-      }));
-    }
+    // Stat card computed styles — one computed per panel (no factory functions in pattern scope)
+    const cardStyleInbox = computed(() => ({ background: expandedPanel.get() === "inbox" ? "rgba(0, 122, 255, 0.08)" : color.fillPrimary, borderRadius: "12px", padding: "12px 14px", cursor: "pointer", transition: "background 0.2s ease", border: expandedPanel.get() === "inbox" ? "1px solid rgba(0, 122, 255, 0.2)" : "1px solid transparent" }));
+    const cardStyleProjects = computed(() => ({ background: expandedPanel.get() === "projects" ? "rgba(0, 122, 255, 0.08)" : color.fillPrimary, borderRadius: "12px", padding: "12px 14px", cursor: "pointer", transition: "background 0.2s ease", border: expandedPanel.get() === "projects" ? "1px solid rgba(0, 122, 255, 0.2)" : "1px solid transparent" }));
+    const cardStylePeople = computed(() => ({ background: expandedPanel.get() === "people" ? "rgba(0, 122, 255, 0.08)" : color.fillPrimary, borderRadius: "12px", padding: "12px 14px", cursor: "pointer", transition: "background 0.2s ease", border: expandedPanel.get() === "people" ? "1px solid rgba(0, 122, 255, 0.2)" : "1px solid transparent" }));
+    const cardStyleThings = computed(() => ({ background: expandedPanel.get() === "things" ? "rgba(0, 122, 255, 0.08)" : color.fillPrimary, borderRadius: "12px", padding: "12px 14px", cursor: "pointer", transition: "background 0.2s ease", border: expandedPanel.get() === "things" ? "1px solid rgba(0, 122, 255, 0.2)" : "1px solid transparent" }));
+    const chevronStyleInbox = computed(() => ({ fontSize: "10px", color: color.tertiaryLabel, transition: "transform 0.2s ease", transform: expandedPanel.get() === "inbox" ? "rotate(90deg)" : "rotate(0deg)", marginLeft: "auto", flexShrink: "0" }));
+    const chevronStyleProjects = computed(() => ({ fontSize: "10px", color: color.tertiaryLabel, transition: "transform 0.2s ease", transform: expandedPanel.get() === "projects" ? "rotate(90deg)" : "rotate(0deg)", marginLeft: "auto", flexShrink: "0" }));
+    const chevronStylePeople = computed(() => ({ fontSize: "10px", color: color.tertiaryLabel, transition: "transform 0.2s ease", transform: expandedPanel.get() === "people" ? "rotate(90deg)" : "rotate(0deg)", marginLeft: "auto", flexShrink: "0" }));
+    const chevronStyleThings = computed(() => ({ fontSize: "10px", color: color.tertiaryLabel, transition: "transform 0.2s ease", transform: expandedPanel.get() === "things" ? "rotate(90deg)" : "rotate(0deg)", marginLeft: "auto", flexShrink: "0" }));
 
     const togglePanel = action(({ panel }: { panel: string }) => {
       expandedPanel.set(panel);
@@ -1193,7 +1186,7 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
             >
               {/* Inbox card */}
               <div
-                style={cardStyle("inbox")}
+                style={cardStyleInbox}
                 onClick={() => togglePanel.send({ panel: "inbox" })}
               >
                 <div style={{ display: "flex", alignItems: "center" }}>
@@ -1207,7 +1200,7 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                   >
                     {computed(() => displayInbox.length)}
                   </div>
-                  <span style={chevronStyle("inbox")}>▶</span>
+                  <span style={chevronStyleInbox}>▶</span>
                 </div>
                 <div
                   style={{
@@ -1224,7 +1217,7 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
               </div>
               {/* Projects card */}
               <div
-                style={cardStyle("projects")}
+                style={cardStyleProjects}
                 onClick={() => togglePanel.send({ panel: "projects" })}
               >
                 <div style={{ display: "flex", alignItems: "center" }}>
@@ -1241,7 +1234,7 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                       return displayProjects.filter((p: Project) => p.status !== "Done" && p.status !== "Archived").length;
                     })}
                   </div>
-                  <span style={chevronStyle("projects")}>▶</span>
+                  <span style={chevronStyleProjects}>▶</span>
 
                 </div>
                 <div
@@ -1259,7 +1252,7 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
               </div>
               {/* People card */}
               <div
-                style={cardStyle("people")}
+                style={cardStylePeople}
                 onClick={() => togglePanel.send({ panel: "people" })}
               >
                 <div style={{ display: "flex", alignItems: "center" }}>
@@ -1273,7 +1266,7 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                   >
                     {computed(() => displayPeople.length)}
                   </div>
-                  <span style={chevronStyle("people")}>▶</span>
+                  <span style={chevronStylePeople}>▶</span>
                 </div>
                 <div
                   style={{
@@ -1290,7 +1283,7 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
               </div>
               {/* Things card */}
               <div
-                style={cardStyle("things")}
+                style={cardStyleThings}
                 onClick={() => togglePanel.send({ panel: "things" })}
               >
                 <div style={{ display: "flex", alignItems: "center" }}>
@@ -1307,7 +1300,7 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                       return things.filter((t: ThingItem) => t.type === "folder").length;
                     })}
                   </div>
-                  <span style={chevronStyle("things")}>▶</span>
+                  <span style={chevronStyleThings}>▶</span>
                 </div>
                 <div
                   style={{
