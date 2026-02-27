@@ -850,8 +850,10 @@ export type ACL = {
 export type URI = `${string}:${string}`;
 // Mime type or Media Type -- often called 'the'
 export type MIME = `${string}/${string}`;
-// This is the base32 digest preceded by "b" as per multibase spec.
-export type CauseString = `b${string}`;
+// TODO(danfuzz): Clean up after canonical hashing flag graduates. The `fid1:`
+// branch was added for StorableContentId; once the experiment is permanent,
+// the `b`-prefixed format can be removed.
+export type CauseString = `b${string}` | `fid1:${string}`;
 
 export type Transaction<Space extends MemorySpace = MemorySpace> = Invocation<
   "/memory/transact",
