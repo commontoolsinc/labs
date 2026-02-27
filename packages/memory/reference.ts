@@ -9,10 +9,9 @@ import { sha256 } from "./hash-impl.ts";
 // ---------------------------------------------------------------------------
 
 /**
- * Shorthand for the referent constraint shared by `ContentId`, `isContentId`,
- * and related generic signatures. Equivalent to `NonNullable<unknown> | null`
- * (i.e., any value including `null`). Extracted as a named alias so the
- * constraint can be written -- and changed -- in one place.
+ * Type constraint for content identifier referents — i.e., any value
+ * including `null` but _not_ `undefined`.
+ * Used by `ContentId<T>` and related generic types.
  */
 export type DefinedReferent = NonNullable<unknown> | null;
 
