@@ -130,18 +130,30 @@ function buildShrunkTypeNodeFromType(
   sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
 ): ts.TypeNode | undefined {
+  const typeToNodeFlags = ts.NodeBuilderFlags.NoTruncation |
+    ts.NodeBuilderFlags.UseStructuralFallback;
   const normalized = uniquePaths(paths);
   if (normalized.length === 0) {
     return undefined;
   }
 
+  // Keep array-like roots as arrays. Narrowing `T[]` to `{ length: number }`
+  // breaks runtime schema matching for downstream derives/lifts.
+  const typeChecker = checker as ts.TypeChecker & {
+    isArrayType?: (type: ts.Type) => boolean;
+    isTupleType?: (type: ts.Type) => boolean;
+  };
+  const isArrayLike = typeChecker.isArrayType?.(type) ||
+    typeChecker.isTupleType?.(type) ||
+    !!checker.getIndexTypeOfType(type, ts.IndexKind.Number);
+  if (isArrayLike) {
+    return checker.typeToTypeNode(type, sourceFile, typeToNodeFlags) ??
+      factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+  }
+
   if (normalized.some((path) => path.length === 0)) {
-    return checker.typeToTypeNode(
-      type,
-      sourceFile,
-      ts.NodeBuilderFlags.NoTruncation |
-        ts.NodeBuilderFlags.UseStructuralFallback,
-    ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+    return checker.typeToTypeNode(type, sourceFile, typeToNodeFlags) ??
+      factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
   }
 
   const grouped = groupPathsByHead(normalized);
@@ -195,12 +207,9 @@ function buildShrunkTypeNodeFromType(
       continue;
     }
 
-    const propTypeNode = shrunkChild ?? checker.typeToTypeNode(
-      propType,
-      sourceFile,
-      ts.NodeBuilderFlags.NoTruncation |
-        ts.NodeBuilderFlags.UseStructuralFallback,
-    ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+    const propTypeNode = shrunkChild ??
+      checker.typeToTypeNode(propType, sourceFile, typeToNodeFlags) ??
+      factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
 
     properties.push(
       factory.createPropertySignature(
