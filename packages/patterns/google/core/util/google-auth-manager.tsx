@@ -553,6 +553,7 @@ export const GoogleAuthManager = pattern<
             Please sign in with your Google account to continue.
           </div>
         </div>
+        {pickerUI}
         <div style={actionRowStyle}>
           <button
             type="button"
@@ -594,6 +595,7 @@ export const GoogleAuthManager = pattern<
             {missingScopesList}
           </div>
         </div>
+        {pickerUI}
         <div style={actionRowStyle}>
           <button
             type="button"
@@ -634,6 +636,7 @@ export const GoogleAuthManager = pattern<
             Your Google session has expired. Please sign in again to continue.
           </div>
         </div>
+        {pickerUI}
         <div style={actionRowStyle}>
           <button
             type="button"
