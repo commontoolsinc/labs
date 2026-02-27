@@ -9,6 +9,15 @@ import {
 import { EditorState, Range } from "@codemirror/state";
 import { syntaxTree } from "@codemirror/language";
 
+/** Minimal cursor interface returned by `SyntaxNode.cursor()`. */
+type SyntaxCursor = {
+  firstChild(): boolean;
+  nextSibling(): boolean;
+  name: string;
+  from: number;
+  to: number;
+};
+
 /**
  * Heading node names used by the lezer markdown parser.
  * ATXHeading1..6 correspond to # through ######.
@@ -179,17 +188,7 @@ export function buildProseDecorations(
 
   // Helper: hide pipe delimiters and style cells in a table row
   const addTableCellDecos = (
-    rowCursor: {
-      node: {
-        cursor(): {
-          firstChild(): boolean;
-          nextSibling(): boolean;
-          name: string;
-          from: number;
-          to: number;
-        };
-      };
-    },
+    rowCursor: { node: { cursor(): SyntaxCursor } },
     hidden: Decoration,
   ) => {
     const rCursor = rowCursor.node.cursor();
@@ -642,7 +641,6 @@ export function buildProseDecorations(
     },
   });
 
-  decorations.sort((a, b) => a.from - b.from || a.to - b.to);
   return decorations;
 }
 
@@ -664,9 +662,12 @@ export function createProseMarkdownPlugin() {
       constructor(view: EditorView) {
         this.decorations = Decoration.set(
           buildProseDecorations(view.state, view.hasFocus),
+          true,
         );
       }
 
+      // TODO(@robdodson): For large documents, optimize to only decorate
+      // visible ranges using update.view.visibleRanges.
       update(update: ViewUpdate) {
         if (
           update.docChanged || update.viewportChanged ||
@@ -674,6 +675,7 @@ export function createProseMarkdownPlugin() {
         ) {
           this.decorations = Decoration.set(
             buildProseDecorations(update.view.state, update.view.hasFocus),
+            true,
           );
         }
       }

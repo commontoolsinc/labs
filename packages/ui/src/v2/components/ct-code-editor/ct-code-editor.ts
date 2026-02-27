@@ -1128,7 +1128,7 @@ export class CTCodeEditor extends BaseElement {
   }
 
   private _getModeExtension(): Extension {
-    if (this.mode !== "prose") return [] as unknown as Extension;
+    if (this.mode !== "prose") return [];
 
     return [
       EditorView.theme({

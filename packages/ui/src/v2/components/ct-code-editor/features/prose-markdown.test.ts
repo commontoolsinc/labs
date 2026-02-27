@@ -24,12 +24,14 @@ function createState(doc: string, cursor = 0): EditorState {
 
 type DecoRange = ReturnType<typeof buildProseDecorations>[number];
 
+/** True when `decos` contains a replace decoration spanning `[from, to)`. */
 function hasReplace(decos: DecoRange[], from: number, to: number): boolean {
   return decos.some(
     (d) => d.from === from && d.to === to && isReplace(d.value),
   );
 }
 
+/** True when `decos` contains a mark decoration spanning `[from, to)` with the given CSS class. */
 function hasMark(
   decos: DecoRange[],
   from: number,
@@ -44,27 +46,28 @@ function hasMark(
   );
 }
 
+/** True when `decos` contains a widget decoration spanning `[from, to)`. */
 function hasWidget(decos: DecoRange[], from: number, to: number): boolean {
   return decos.some(
     (d) => d.from === from && d.to === to && d.value.spec?.widget,
   );
 }
 
+/** True when `decos` contains a line decoration at `from` whose class includes `cls`. */
 function hasLineClass(decos: DecoRange[], from: number, cls: string): boolean {
   return decos.some(
     (d) => d.from === from && d.value.spec?.class?.includes(cls),
   );
 }
 
+/** Identifies a replace (or widget) decoration. Replace decorations have no `class` in their spec. */
 function isReplace(deco: Decoration): boolean {
-  return deco.spec?.inclusive !== undefined || (deco as any).startSide > 0 ||
-    deco.spec?.widget !== undefined ||
-    (typeof (deco as any).point === "boolean" && (deco as any).point === true);
+  return !("class" in (deco.spec ?? {}));
 }
 
+/** Identifies a mark decoration. Mark decorations always carry a `class` string in their spec. */
 function isMark(deco: Decoration): boolean {
-  return typeof deco.spec?.class === "string" &&
-    (deco as any).point !== true;
+  return typeof deco.spec?.class === "string";
 }
 
 // ---------------------------------------------------------------------------
