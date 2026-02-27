@@ -363,7 +363,12 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
       // 🎉 directive-complete items: keep visible with strikethrough until next sync; others filter immediately
       const filtered = raw
         .filter((i: InboxItem) => !dels.has(i.text) || i.text.startsWith("🎉"))
-        .map((i: InboxItem) => ({ ...i, text: edits[i.text] || i.text, done: (i.done && !undones.has(i.text)) || dels.has(i.text) }));
+        .map((i: InboxItem) => {
+          const newText = edits[i.text] || i.text;
+          const newDone = (i.done && !undones.has(i.text)) || dels.has(i.text);
+          if (newText === i.text && newDone === i.done) return i;
+          return { ...i, text: newText, done: newDone };
+        });
       // Deduplicate: skip adds already present in raw (sync may have persisted them)
       const existing = new Set(raw.map((i: InboxItem) => i.text));
       const newAdds = adds.filter((a: UserAction) => !existing.has(a.text || "") && !dels.has(a.text || ""));
