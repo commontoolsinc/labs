@@ -1,0 +1,109 @@
+{
+  "rubric_version": "1.0",
+  "pattern": "parking-coordinator",
+  "run_id": "2026-02-26-parking-coordinator-hbv8",
+  "dimensions": {
+    "correctness": {
+      "score": 85,
+      "pass_count": 4,
+      "fail_count": 2,
+      "na_count": 0,
+      "failures": [
+        {
+          "check_id": "COR-5",
+          "description": "Runtime TypeErrors in computed value bodies: 'TypeError: Cannot read properties of undefined (reading 'number')' and similar appear in server logs during every piece step. These originate from computed sections that access spot/person properties before the data is populated. The pattern continues functioning but the errors indicate missing null guards in view computeds.",
+          "line_number": null,
+          "suggested_fix": "Add null/undefined guards in computed view sections: use optional chaining (spot?.number) or filter out undefined entries before mapping over them. E.g., in todayView and weekView, guard alloc lookups: const alloc = getAllocForSpotDate(allocs, spot.number, date); before accessing alloc.personEmail."
+        },
+        {
+          "check_id": "COR-5",
+          "description": "todayDate is a static string captured once at pattern initialization (line 121: const todayDate = getTodayDate()). All date comparison guards ('if (date < todayDate)'), history queries, and the today-view header header use this static value. If the app runs past midnight the date becomes stale without a page reload.",
+          "line_number": 121,
+          "suggested_fix": "Wrap as a computed: const todayDate = computed(() => getTodayDate()); and access via todayDate.get() inside all action bodies and computed view expressions that use it."
+        },
+        {
+          "check_id": "COR-6",
+          "description": "ParkingCoordinatorOutput interface declares 'adminMode: boolean' and 'viewMode: string' (schemas.tsx lines 61-63), but the pattern returns adminMode (a Writable<boolean>) and viewMode (a Writable<string>). The type declaration is imprecise; framework reactive unwrapping makes this work in practice, but the mismatch creates a type-safety gap.",
+          "line_number": 61,
+          "suggested_fix": "Either change the output type declarations to 'adminMode: Writable<boolean>' and 'viewMode: Writable<string>', or wrap the returned values in computed(() => adminMode.get()) etc. to return true primitives."
+        }
+      ],
+      "justification": "Compiles cleanly (ct check passes), all 57 tests pass, and all 19 manual acceptance criteria pass. Three minor correctness issues: runtime TypeErrors in computed bodies on missing null checks (pattern keeps running but errors accumulate in logs), a stale todayDate that will be wrong after midnight, and a type mismatch in the output interface. No critical failures — COR-1 and COR-2 are both PASS."
+    },
+    "idiomaticity": {
+      "score": 100,
+      "pass_count": 13,
+      "fail_count": 0,
+      "na_count": 1,
+      "failures": [],
+      "justification": "Excellent adherence to all Common Fabric idioms. action() used correctly for all business logic (closing over pattern-scope Writables). handler() and lift() not used anywhere (N/A for IDI-8 LLM directive and IDI-13/14 async — no LLM used). All form inputs use $value bidirectional binding. Style syntax violations from the first critic pass were fully resolved: all HTML span elements use object syntax, all ct-* elements use string syntax. [NAME] and [UI] present. Stream<T> used for all outputs. No Map/Set in cell data."
+    },
+    "reactivity": {
+      "score": 95,
+      "pass_count": 7,
+      "fail_count": 1,
+      "na_count": 2,
+      "failures": [
+        {
+          "check_id": "REA-7",
+          "description": "currentView computed (lines 1194-1199) returns weekView, requestsView, and todayView directly — these are computed<VNode> cells, not resolved VNodes. The result is a computed<computed<VNode>>. At line 1246, {currentView} places this double-wrapped cell into JSX. The framework appears to double-unwrap in practice (all three views work correctly per manual test), but this pattern is not guaranteed by the spec and creates a nested-computed dependency.",
+          "line_number": 1194,
+          "suggested_fix": "Resolve the inner computed inside currentView: if (mode === 'week') return weekView.get(); if (mode === 'requests') return requestsView.get(); return todayView.get();"
+        }
+      ],
+      "justification": "Strong reactivity patterns throughout. All Writables initialized with static values, no .get() on non-Writable values, no Writable.of(reactive) usage, no inline filter/sort/reduce in top-level JSX. The one issue is currentView returning computed objects rather than resolved VNodes, which works in practice via framework double-unwrapping but is technically a nested-computed pattern. REA-5 is N/A (static string [NAME]). REA-8 is N/A (no lift() used). Inline arrow functions in view .map() callbacks are REA-9b but the lists are behind view-mode toggles and not frequently-updating, so no deduction per rubric guidance."
+    },
+    "ui_quality": {
+      "score": 100,
+      "pass_count": 7,
+      "fail_count": 0,
+      "na_count": 0,
+      "failures": [],
+      "justification": "Excellent UI implementation. All form inputs use ct-* components (ct-input, ct-select, ct-button). Bidirectional $value binding used correctly throughout. ct-screen with slot='header' and ct-vscroll used for layout. ct-vstack and ct-hstack used consistently for structure. No <option> elements in ct-select (items attribute used with {label, value} objects). Empty states handled in requestsView and adminPanel. Interactive elements have clear visual affordance with variant= attributes. Manual test confirms all views render correctly including the admin panel management controls."
+    },
+    "test_coverage": {
+      "score": 95,
+      "pass_count": 4,
+      "fail_count": 1,
+      "na_count": 0,
+      "failures": [
+        {
+          "check_id": "TST-5",
+          "description": "Several edge case categories are not directly tested: (1) past date rejection cannot be tested without a mock date — this critical guard is not covered; (2) spot preference ordering and preference-based allocation are not tested in isolation (only covered indirectly via the default-spot test); (3) week view date accuracy is not asserted.",
+          "line_number": null,
+          "suggested_fix": "For past date: inject a date string directly into requestSpot.send({ date: '2020-01-01', ... }) and assert no new request is created. For preferences: add a test that sets preferences [spotA, spotB], allocates spotA to someone else, then verifies the requester gets spotB."
+        }
+      ],
+      "justification": "57 tests pass with comprehensive coverage of all major flows: add/remove entities, request lifecycle (allocate/deny/cancel/retry), priority reordering, default spot allocation, manual allocation, cascading deletes, validation guards, admin/view mode toggling. Pattern-as-test approach used correctly. Minor gap: past date rejection and preference-based allocation are not directly tested in isolation, and week view data is not asserted."
+    },
+    "code_quality": {
+      "score": 95,
+      "pass_count": 6,
+      "fail_count": 1,
+      "na_count": 0,
+      "failures": [
+        {
+          "check_id": "CQA-7",
+          "description": "Business logic for spot preference array manipulation lives in JSX event handler lambdas (lines 978-1011) rather than inside action bodies. The lambdas perform array index swapping and filtering before calling setSpotPreferences.send(). Business logic should be encapsulated in actions; JSX handlers should only dispatch.",
+          "line_number": 978,
+          "suggested_fix": "Create addSpotPreference and removeSpotPreferenceAt actions, or extend setSpotPreferences to accept discriminated payloads (addSpot: number | removeAtIndex: number | swapIndices: [number, number]). Move the array manipulation logic into those action bodies."
+        }
+      ],
+      "justification": "Strong domain model with clear entity boundaries and descriptive names. Pattern correctly split into main.tsx + schemas.tsx for an Advanced-tier pattern with 4 entity types. Helper functions at module scope. Normalized state using email/spotNumber as cross-references with no duplicated data. The one issue is that preference reordering logic (array swapping) lives in JSX event handler lambdas rather than inside action bodies, violating the principle that business logic belongs in actions."
+    },
+    "spec_fidelity": {
+      "score": 100,
+      "pass_count": 4,
+      "fail_count": 0,
+      "na_count": 0,
+      "failures": [],
+      "justification": "All 19 formal acceptance criteria pass per manual testing. All 4 entity types implemented as specified. All user interactions from both team member and admin roles are available. The auto-allocation priority chain (default spot → preferences → any available) is correctly implemented. The preference reordering UI was added in the fix pass and is confirmed working. The spec edge case about a warning before spot removal is not in the formal acceptance criteria and its absence does not constitute a spec fidelity failure. Pattern feels complete for its intended use case."
+    }
+  },
+  "overall": {
+    "score": 89,
+    "classification": "excellent",
+    "recommendation": "promote",
+    "summary": "A well-built Advanced-tier pattern that successfully implements all 19 acceptance criteria across a complex domain with 4 entities, 2 user roles, and a non-trivial auto-allocation algorithm. The pattern required 3 build iterations to resolve critical issues from the first critic pass (computed side-effects, style syntax violations, missing admin UI), resulting in a -6 process efficiency modifier from a raw weighted score of 94.50. Remaining concerns are minor: a stale todayDate after midnight, runtime TypeErrors in computed bodies from missing null guards, and business logic leaking into JSX event handlers for preference reordering."
+  }
+}
