@@ -745,6 +745,10 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
       } else if (panel === "actions") {
         const item = displayActions[idx];
         if (item) prefix = "Re: " + item.text + " — ";
+      } else if (panel === "things") {
+        // key is "things:path/to/folder" — use path as prefix
+        const path = selKey.substring("things:".length);
+        prefix = "Re: Things/" + path + " — ";
       }
 
       const now = new Date().toISOString();
@@ -2300,25 +2304,49 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                   const files = currentItems.filter((t: ThingItem) => t.type === "file");
 
                   // Breadcrumb bar
+                  const dirOpen = crumbs.length > 0 ? breadcrumbDirectiveOpen.get() : false;
                   const breadcrumbBar = (
-                    <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" as const, marginBottom: "8px" }}>
-                      <span
-                        style={{ fontSize: "15px", fontWeight: "600", cursor: crumbs.length > 0 ? "pointer" : "default", color: crumbs.length > 0 ? color.blue : color.label }}
-                        onClick={() => { if (crumbs.length > 0) thingsBreadcrumbs.set([]); }}
-                      >
-                        Things
-                      </span>
-                      {crumbs.map((c: string, i: number) => (
-                        <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                          <span style={{ fontSize: "11px", color: color.tertiaryLabel }}>/</span>
-                          <span
-                            style={{ fontSize: "15px", fontWeight: i === crumbs.length - 1 ? "600" : "500", cursor: i < crumbs.length - 1 ? "pointer" : "default", color: i < crumbs.length - 1 ? color.blue : color.label }}
-                            onClick={() => { if (i < crumbs.length - 1) thingsBreadcrumbs.set(crumbs.slice(0, i + 1)); }}
-                          >
-                            {c}
-                          </span>
+                    <div>
+                      <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" as const, marginBottom: "8px" }}>
+                        <span
+                          style={{ fontSize: "15px", fontWeight: "600", cursor: crumbs.length > 0 ? "pointer" : "default", color: crumbs.length > 0 ? color.blue : color.label }}
+                          onClick={() => { if (crumbs.length > 0) thingsBreadcrumbs.set([]); }}
+                        >
+                          Things
                         </span>
-                      ))}
+                        {crumbs.map((c: string, i: number) => (
+                          <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                            <span style={{ fontSize: "11px", color: color.tertiaryLabel }}>/</span>
+                            <span
+                              style={{ fontSize: "15px", fontWeight: i === crumbs.length - 1 ? "600" : "500", cursor: i < crumbs.length - 1 ? "pointer" : "default", color: i < crumbs.length - 1 ? color.blue : color.label }}
+                              onClick={() => { if (i < crumbs.length - 1) thingsBreadcrumbs.set(crumbs.slice(0, i + 1)); }}
+                            >
+                              {c}
+                            </span>
+                          </span>
+                        ))}
+                        {crumbs.length > 0 ? (
+                          <div
+                            style={{ marginLeft: "auto", ...actionBtnDirective, fontSize: "11px", padding: "3px 10px" }}
+                            onClick={() => openBreadcrumbDirective.send({ prefix: "Re: Things/" + crumbs.join("/") + " — ", ctx: "things" })}
+                          >
+                            → Directive
+                          </div>
+                        ) : null}
+                      </div>
+                      {dirOpen ? (
+                        <div style={{ ...directiveInputRowStyle, marginBottom: "8px" }}>
+                          <ct-textarea
+                            $value={breadcrumbDirectiveDraft}
+                            placeholder={"Directive about " + crumbs[crumbs.length - 1] + "..."}
+                            rows={1}
+                            style="flex: 1; border-radius: 10px; font-size: 14px;"
+                          />
+                          <div style={directiveSendBtnStyle} onClick={sendBreadcrumbDirective}>
+                            Send
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
                   );
 
@@ -2336,20 +2364,42 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                   return (
                     <div>
                       {breadcrumbBar}
-                      {folders.map((t: ThingItem) => (
-                        <div
-                          style={{ ...itemRowStyle, cursor: "pointer", display: "flex", alignItems: "center", gap: "8px" }}
-                          onClick={() => thingsBreadcrumbs.set([...crumbs, t.name])}
-                        >
-                          <span style={{ fontSize: "16px", flexShrink: "0", opacity: 0.6 }}>{">"}</span>
-                          <span style={{ fontWeight: "500", flex: "1" }}>{t.name}</span>
-                          {(t.itemCount || 0) > 0 ? (
-                            <span style={{ fontSize: "11px", color: color.tertiaryLabel, flexShrink: "0" }}>
-                              {t.itemCount} {(t.itemCount || 0) === 1 ? "item" : "items"}
-                            </span>
-                          ) : null}
-                        </div>
-                      ))}
+                      {folders.map((t: ThingItem) => {
+                        const thingKey = "things:" + [...crumbs, t.name].join("/");
+                        return (
+                          <div>
+                            <div
+                              style={computed(() =>
+                                selectedItem.get() === thingKey
+                                  ? { ...itemRowStyle, cursor: "pointer", display: "flex", alignItems: "center", gap: "8px", background: "rgba(0, 122, 255, 0.06)", borderRadius: "8px", padding: "8px" }
+                                  : { ...itemRowStyle, cursor: "pointer", display: "flex", alignItems: "center", gap: "8px" }
+                              )}
+                            >
+                              <span style={{ fontSize: "16px", flexShrink: "0", opacity: 0.6 }} onClick={() => thingsBreadcrumbs.set([...crumbs, t.name])}>{">"}</span>
+                              <span style={{ fontWeight: "500", flex: "1", cursor: "pointer" }} onClick={() => thingsBreadcrumbs.set([...crumbs, t.name])}>{t.name}</span>
+                              {(t.itemCount || 0) > 0 ? (
+                                <span style={{ fontSize: "11px", color: color.tertiaryLabel, flexShrink: "0" }}>
+                                  {t.itemCount} {(t.itemCount || 0) === 1 ? "item" : "items"}
+                                </span>
+                              ) : null}
+                              <span
+                                style={{ fontSize: "14px", color: color.tertiaryLabel, cursor: "pointer", padding: "0 4px", flexShrink: "0" }}
+                                onClick={() => selectItem.send({ key: thingKey })}
+                              >
+                                {"···"}
+                              </span>
+                            </div>
+                            {computed(() => {
+                              if (selectedItem.get() !== thingKey) return null;
+                              return (
+                                <div style={{ display: "flex", gap: "8px", padding: "6px 0 8px" }}>
+                                  <div style={actionBtnDirective} onClick={openItemDirective}>→ Directive</div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        );
+                      })}
                       {files.map((t: ThingItem) => (
                         <div style={{ ...itemRowStyle, display: "flex", alignItems: "center", gap: "8px" }}>
                           <span style={{ fontSize: "13px", flexShrink: "0", opacity: 0.4 }}>-</span>
