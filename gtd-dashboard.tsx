@@ -276,6 +276,9 @@ const actionBtnDirective = {
   cursor: "pointer",
 };
 
+const cssId = (prefix: string, key: string) =>
+  prefix + key.replace(/[^a-zA-Z0-9]/g, "_");
+
 // ===== Pattern =====
 
 const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
@@ -524,7 +527,9 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
       addItemOpen.set(false);
       addItemDraft.set("");
       addItemType.set("");
-      if (panel !== "things") thingsBreadcrumbs.set([]);
+      if (panel === "projects") projectBreadcrumbs.set([]);
+      if (panel === "people") peopleBreadcrumbs.set([]);
+      if (panel === "things") thingsBreadcrumbs.set([]);
     });
 
     const addInboxItem = action(() => {
@@ -964,6 +969,18 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
             color: color.label,
           }}
         >
+          {/* ── Dynamic selection highlight via CSS ── */}
+          {computed(() => {
+            const sel = selectedItem.get();
+            if (!sel) return null;
+            const iid = cssId("si_", sel);
+            const tid = cssId("tb_", sel);
+            return (
+              <style>
+                {`#${iid} { background: rgba(0, 122, 255, 0.06) !important; border-radius: 8px !important; padding: 8px !important; } #${tid} { display: flex !important; }`}
+              </style>
+            );
+          })}
           {/* ── Header ── */}
           <div
             style={{
@@ -1379,19 +1396,10 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                     return (
                     <div>
                       <div
-                        style={computed(() =>
-                          isComplete
-                            ? { ...itemRowStyle, cursor: "pointer", opacity: item.done ? 0.55 : 1 }
-                            : selectedItem.get() === "inbox:" + idx
-                              ? {
-                                  ...itemRowStyle,
-                                  cursor: "pointer",
-                                  background: "rgba(0, 122, 255, 0.06)",
-                                  borderRadius: "8px",
-                                  padding: "8px",
-                                }
-                              : { ...itemRowStyle, cursor: "pointer" },
-                        )}
+                        id={isComplete ? undefined : cssId("si_", "inbox:" + idx)}
+                        style={isComplete
+                          ? { ...itemRowStyle, cursor: "pointer", opacity: item.done ? 0.55 : 1 }
+                          : { ...itemRowStyle, cursor: "pointer" }}
                         onClick={() =>
                           isComplete
                             ? (item.done ? unmarkItemDone.send({ key: "inbox:" + idx }) : markItemDone.send({ key: "inbox:" + idx }))
@@ -1431,18 +1439,13 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                           </a>
                         ) : null}
                       </div>
-                      {computed(() => {
-                        if (isComplete) return null;
-                        const ik = "inbox:" + idx;
-                        if (selectedItem.get() !== ik) return null;
-                        return (
-                          <div style={{ display: "flex", gap: "8px", padding: "6px 0 8px" }}>
-                            <div style={actionBtnDone} onClick={() => markItemDone.send({ key: ik })}>✓ Done</div>
-                            <div style={actionBtnDelete} onClick={() => deleteItem.send({ key: ik })}>✕ Delete</div>
-                            <div style={actionBtnDirective} onClick={openItemDirective}>→ Directive</div>
-                          </div>
-                        );
-                      })}
+                      {!isComplete && (
+                        <div id={cssId("tb_", "inbox:" + idx)} style={{ display: "none", gap: "8px", padding: "6px 0 8px" }}>
+                          <div style={actionBtnDone} onClick={() => markItemDone.send({ key: "inbox:" + idx })}>✓ Done</div>
+                          <div style={actionBtnDelete} onClick={() => deleteItem.send({ key: "inbox:" + idx })}>✕ Delete</div>
+                          <div style={actionBtnDirective} onClick={openItemDirective}>→ Directive</div>
+                        </div>
+                      )}
                     </div>
                   );
                   });
@@ -1795,26 +1798,8 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                     return (
                       <div>
                         <div
-                          style={computed(() =>
-                            selectedItem.get() === "projects:" + idx
-                              ? {
-                                  ...itemRowStyle,
-                                  display: "flex",
-                                  alignItems: "center",
-                                  gap: "0px",
-                                  cursor: "pointer",
-                                  background: "rgba(0, 122, 255, 0.06)",
-                                  borderRadius: "8px",
-                                  padding: "8px",
-                                }
-                              : {
-                                  ...itemRowStyle,
-                                  display: "flex",
-                                  alignItems: "center",
-                                  gap: "0px",
-                                  cursor: "pointer",
-                                },
-                          )}
+                          id={cssId("si_", "projects:" + idx)}
+                          style={{ ...itemRowStyle, display: "flex", alignItems: "center", gap: "0px", cursor: "pointer" }}
                         >
                           {/* Item content — click to drill in if has children, else select to show buttons */}
                           <div
@@ -1859,17 +1844,11 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                             <span style={{ fontSize: "14px", color: color.tertiaryLabel, paddingLeft: "8px", flexShrink: "0", cursor: "pointer" }} onClick={() => drillIntoProject.send({ id: item.id, name: p.name })}>{">"}</span>
                           ) : null}
                         </div>
-                        {computed(() => {
-                          const pk = "projects:" + idx;
-                          if (selectedItem.get() !== pk) return null;
-                          return (
-                            <div style={{ display: "flex", gap: "8px", padding: "6px 0 8px", flexWrap: "wrap" as const }}>
-                              <div style={actionBtnDone} onClick={() => markItemDone.send({ key: pk })}>✓ Done</div>
-                              <div style={actionBtnDelete} onClick={() => deleteItem.send({ key: pk })}>✕ Delete</div>
-                              <div style={actionBtnDirective} onClick={openItemDirective}>→ Directive</div>
-                            </div>
-                          );
-                        })}
+                        <div id={cssId("tb_", "projects:" + idx)} style={{ display: "none", gap: "8px", padding: "6px 0 8px", flexWrap: "wrap" as const }}>
+                          <div style={actionBtnDone} onClick={() => markItemDone.send({ key: "projects:" + idx })}>✓ Done</div>
+                          <div style={actionBtnDelete} onClick={() => deleteItem.send({ key: "projects:" + idx })}>✕ Delete</div>
+                          <div style={actionBtnDirective} onClick={openItemDirective}>→ Directive</div>
+                        </div>
                       </div>
                     );
                   });
@@ -1999,26 +1978,8 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                       return (
                         <div>
                           <div
-                            style={computed(() =>
-                              selectedItem.get() === "people:" + idx
-                                ? {
-                                    ...itemRowStyle,
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: "0px",
-                                    cursor: "pointer",
-                                    background: "rgba(0, 122, 255, 0.06)",
-                                    borderRadius: "8px",
-                                    padding: "8px",
-                                  }
-                                : {
-                                    ...itemRowStyle,
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: "0px",
-                                    cursor: "pointer",
-                                  },
-                            )}
+                            id={cssId("si_", "people:" + idx)}
+                            style={{ ...itemRowStyle, display: "flex", alignItems: "center", gap: "0px", cursor: "pointer" }}
                           >
                             {/* Item content — click to drill in (if has linked items) or select */}
                             <div
@@ -2049,16 +2010,10 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                               </span>
                             ) : null}
                           </div>
-                          {computed(() => {
-                            const ppk = "people:" + idx;
-                            if (selectedItem.get() !== ppk) return null;
-                            return (
-                              <div style={{ display: "flex", gap: "8px", padding: "6px 0 8px" }}>
-                                <div style={actionBtnDelete} onClick={() => deleteItem.send({ key: ppk })}>✕ Delete</div>
-                                <div style={actionBtnDirective} onClick={openItemDirective}>→ Directive</div>
-                              </div>
-                            );
-                          })}
+                          <div id={cssId("tb_", "people:" + idx)} style={{ display: "none", gap: "8px", padding: "6px 0 8px" }}>
+                            <div style={actionBtnDelete} onClick={() => deleteItem.send({ key: "people:" + idx })}>✕ Delete</div>
+                            <div style={actionBtnDirective} onClick={openItemDirective}>→ Directive</div>
+                          </div>
                         </div>
                       );
                     });
@@ -2123,11 +2078,8 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                             return (
                               <div>
                                 <div
-                                  style={computed(() =>
-                                    selectedItem.get() === pk
-                                      ? { ...itemRowStyle, display: "flex", alignItems: "center", gap: "0px", cursor: "pointer", background: "rgba(0, 122, 255, 0.06)", borderRadius: "8px", padding: "8px" }
-                                      : { ...itemRowStyle, display: "flex", alignItems: "center", gap: "0px", cursor: "pointer" }
-                                  )}
+                                  id={cssId("si_", pk)}
+                                  style={{ ...itemRowStyle, display: "flex", alignItems: "center", gap: "0px", cursor: "pointer" }}
                                 >
                                   <div
                                     style={{ display: "flex", alignItems: "center", gap: "10px", flex: "1", cursor: "pointer" }}
@@ -2148,16 +2100,11 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                                     <span style={{ fontSize: "14px", color: color.tertiaryLabel, paddingLeft: "8px", flexShrink: "0", cursor: "pointer" }} onClick={() => drillIntoPerson.send({ id: pr.id, name: pr.name })}>{">"}</span>
                                   ) : null}
                                 </div>
-                                {computed(() => {
-                                  if (selectedItem.get() !== pk) return null;
-                                  return (
-                                    <div style={{ display: "flex", gap: "8px", padding: "6px 0 8px", flexWrap: "wrap" as const }}>
-                                      <div style={actionBtnDone} onClick={() => markItemDone.send({ key: pk })}>✓ Done</div>
-                                      <div style={actionBtnDelete} onClick={() => deleteItem.send({ key: pk })}>✕ Delete</div>
-                                      <div style={actionBtnDirective} onClick={openItemDirective}>→ Directive</div>
-                                    </div>
-                                  );
-                                })}
+                                <div id={cssId("tb_", pk)} style={{ display: "none", gap: "8px", padding: "6px 0 8px", flexWrap: "wrap" as const }}>
+                                  <div style={actionBtnDone} onClick={() => markItemDone.send({ key: pk })}>✓ Done</div>
+                                  <div style={actionBtnDelete} onClick={() => deleteItem.send({ key: pk })}>✕ Delete</div>
+                                  <div style={actionBtnDirective} onClick={openItemDirective}>→ Directive</div>
+                                </div>
                               </div>
                             );
                           })}
@@ -2376,11 +2323,8 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                         return (
                           <div>
                             <div
-                              style={computed(() =>
-                                selectedItem.get() === thingKey
-                                  ? { ...itemRowStyle, cursor: "pointer", display: "flex", alignItems: "center", gap: "8px", background: "rgba(0, 122, 255, 0.06)", borderRadius: "8px", padding: "8px" }
-                                  : { ...itemRowStyle, cursor: "pointer", display: "flex", alignItems: "center", gap: "8px" }
-                              )}
+                              id={cssId("si_", thingKey)}
+                              style={{ ...itemRowStyle, cursor: "pointer", display: "flex", alignItems: "center", gap: "8px" }}
                             >
                               <span style={{ fontSize: "16px", flexShrink: "0", opacity: 0.6 }} onClick={() => thingsBreadcrumbs.set([...crumbs, t.name])}>{">"}</span>
                               <span style={{ fontWeight: "500", flex: "1", cursor: "pointer" }} onClick={() => thingsBreadcrumbs.set([...crumbs, t.name])}>{t.name}</span>
@@ -2396,14 +2340,9 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                                 {"···"}
                               </span>
                             </div>
-                            {computed(() => {
-                              if (selectedItem.get() !== thingKey) return null;
-                              return (
-                                <div style={{ display: "flex", gap: "8px", padding: "6px 0 8px" }}>
-                                  <div style={actionBtnDirective} onClick={openItemDirective}>→ Directive</div>
-                                </div>
-                              );
-                            })}
+                            <div id={cssId("tb_", thingKey)} style={{ display: "none", gap: "8px", padding: "6px 0 8px" }}>
+                              <div style={actionBtnDirective} onClick={openItemDirective}>→ Directive</div>
+                            </div>
                           </div>
                         );
                       })}
