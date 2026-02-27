@@ -100,7 +100,7 @@ directory and keeps cells in sync with the filesystem.
 
 ```typescript
 import { Runtime } from "@commontools/runner";
-import { pushFrameFromCause, popFrame } from "@commontools/runner/builder";
+import { popFrame, pushFrameFromCause } from "@commontools/runner/builder";
 
 const runtime = new Runtime(/* storage config */);
 
@@ -198,7 +198,7 @@ async function runSyncLoop(
               // Operator fixes the condition, restarts daemon.
               throw new Error(
                 `System error applying edit: ${err.message}. ` +
-                `Edit remains in queue. Fix the issue and restart.`,
+                  `Edit remains in queue. Fix the issue and restart.`,
               );
             }
             // Conflict error: move to failedEdits for user reformulation
@@ -278,8 +278,8 @@ When writing the full state to cells, write the entire structure at once with a
 single `.set()`. Don't manually diff old vs. new state. The cell infrastructure
 diffs internally and only persists the minimal changes.
 
-Only consider manual diffing once the dataset is too large to load into memory at
-once. You're far from that threshold.
+Only consider manual diffing once the dataset is too large to load into memory
+at once. You're far from that threshold.
 
 ### Process Safety: Lockfiles
 
@@ -316,19 +316,26 @@ function releaseLock() {
 
 // Clean up on exit
 process.on("exit", releaseLock);
-process.on("SIGINT", () => { releaseLock(); process.exit(); });
-process.on("SIGTERM", () => { releaseLock(); process.exit(); });
+process.on("SIGINT", () => {
+  releaseLock();
+  process.exit();
+});
+process.on("SIGTERM", () => {
+  releaseLock();
+  process.exit();
+});
 ```
 
 ### Error Handling: Failed Edits
 
 Not all edit failures are equal. Two categories require different strategies:
 
-- **System errors** (permissions, disk full, network timeout): The environment is
-  broken — retrying won't help until an operator intervenes. **Keep the failed
-  edit in the queue** (don't clear it) and **crash the daemon with a clear error
-  message.** The operator fixes the condition (frees disk, fixes permissions),
-  restarts the daemon, and the edit applies naturally on the next sync cycle.
+- **System errors** (permissions, disk full, network timeout): The environment
+  is broken — retrying won't help until an operator intervenes. **Keep the
+  failed edit in the queue** (don't clear it) and **crash the daemon with a
+  clear error message.** The operator fixes the condition (frees disk, fixes
+  permissions), restarts the daemon, and the edit applies naturally on the next
+  sync cycle.
 - **Conflict errors** (file was deleted externally, path collision): The edit
   can't succeed as-is and won't succeed on retry either. Move to a `failedEdits`
   queue and surface to the user for reformulation. The daemon continues running.
@@ -343,7 +350,7 @@ try {
     // Crash loud so the operator knows what to fix.
     throw new Error(
       `System error applying edit: ${err.message}. ` +
-      `Edit remains in queue. Fix the issue and restart.`,
+        `Edit remains in queue. Fix the issue and restart.`,
     );
   }
   // Conflict: move to failed queue, continue with remaining edits
@@ -364,15 +371,15 @@ Render directly from the synced state cell. No local state management, no
 optimistic-update tracking in the UI layer.
 
 ```tsx
-const myPattern = pattern<{ state: State; edits: Edit[] }>(({ state, edits }) => {
-  return (
-    <div>
-      {state.items.map((item) => (
-        <div key={item.id}>{item.name}</div>
-      ))}
-    </div>
-  );
-});
+const myPattern = pattern<{ state: State; edits: Edit[] }>(
+  ({ state, edits }) => {
+    return (
+      <div>
+        {state.items.map((item) => <div key={item.id}>{item.name}</div>)}
+      </div>
+    );
+  },
+);
 ```
 
 ### Editing
@@ -410,7 +417,11 @@ sync overwrites the state. No cleanup logic needed — reactivity handles it.
 "syncing..." badges.
 
 ```tsx
-{edits.length > 0 && <span class="sync-badge">Syncing {edits.length} changes...</span>}
+{
+  edits.length > 0 && (
+    <span class="sync-badge">Syncing {edits.length} changes...</span>
+  );
+}
 ```
 
 ---
@@ -478,16 +489,16 @@ need it.
 
 ## Summary
 
-| Concern                 | Solution                                               |
-| ----------------------- | ------------------------------------------------------ |
-| Atomicity               | CAS transactions — all mutations commit or retry       |
-| Optimistic updates      | Apply edits to local state in same tx as enqueue       |
-| External canonical      | Overwrite local state from external source each sync   |
-| Anti-backsliding        | Single tx: apply edits + update state + clear queue    |
-| Stable identity         | `Cell.of(externalId)` for canonical-ID-bearing items   |
-| In-flight link safety   | Write redirect links from temp cells to canonical ones |
-| Process safety          | Lockfile with PID, stale lock recovery                 |
-| System edit failures    | Keep in queue, crash daemon, operator restarts          |
-| Conflict edit failures  | Move to failedEdits queue, surface to user              |
-| UI pending state        | Render from edit queue; auto-clears on sync            |
-| API sync                | TBD — same principles, different plumbing              |
+| Concern                | Solution                                               |
+| ---------------------- | ------------------------------------------------------ |
+| Atomicity              | CAS transactions — all mutations commit or retry       |
+| Optimistic updates     | Apply edits to local state in same tx as enqueue       |
+| External canonical     | Overwrite local state from external source each sync   |
+| Anti-backsliding       | Single tx: apply edits + update state + clear queue    |
+| Stable identity        | `Cell.of(externalId)` for canonical-ID-bearing items   |
+| In-flight link safety  | Write redirect links from temp cells to canonical ones |
+| Process safety         | Lockfile with PID, stale lock recovery                 |
+| System edit failures   | Keep in queue, crash daemon, operator restarts         |
+| Conflict edit failures | Move to failedEdits queue, surface to user             |
+| UI pending state       | Render from edit queue; auto-clears on sync            |
+| API sync               | TBD — same principles, different plumbing              |
