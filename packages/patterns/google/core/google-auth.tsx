@@ -343,54 +343,68 @@ interface Output {
    */
   refreshToken: Stream<Record<string, never>>;
   /** Background updater for proactive token refresh via background-charm-service */
-  bgUpdater: Stream<unknown>;
+  bgUpdater: Stream<Record<string, never>>;
 }
 
 /**
  * Shared token refresh logic. Calls the server refresh endpoint and updates
  * the auth cell with new token data. Throws on failure.
+ *
+ * Guarded against concurrent invocations — if a refresh is already in progress,
+ * subsequent calls return immediately (no-op).
  */
+let refreshInProgress = false;
+
 async function refreshAuthToken(
   authCell: Writable<Auth>,
 ): Promise<void> {
-  const currentAuth = authCell.get();
-  const refreshToken = currentAuth?.refreshToken;
+  if (refreshInProgress) return;
+  refreshInProgress = true;
 
-  if (!refreshToken) {
-    throw new Error("No refresh token available");
+  try {
+    const currentAuth = authCell.get();
+    const refreshToken = currentAuth?.refreshToken;
+
+    if (!refreshToken) {
+      throw new Error("No refresh token available");
+    }
+
+    const res = await fetch(
+      new URL("/api/integrations/google-oauth/refresh", env.apiUrl),
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refreshToken }),
+      },
+    );
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      const error = new Error(
+        `Token refresh failed: ${res.status} ${errorText}`,
+      ) as Error & { status: number };
+      error.status = res.status;
+      throw error;
+    }
+
+    const json = await res.json();
+    if (!json.tokenInfo) {
+      throw new Error("Invalid refresh response: no tokenInfo");
+    }
+
+    authCell.update({
+      ...json.tokenInfo,
+      user: currentAuth.user,
+    });
+  } finally {
+    refreshInProgress = false;
   }
-
-  const res = await fetch(
-    new URL("/api/integrations/google-oauth/refresh", env.apiUrl),
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refreshToken }),
-    },
-  );
-
-  if (!res.ok) {
-    const errorText = await res.text();
-    const error = new Error(
-      `Token refresh failed: ${res.status} ${errorText}`,
-    ) as Error & { status: number };
-    error.status = res.status;
-    throw error;
-  }
-
-  const json = await res.json();
-  if (!json.tokenInfo) {
-    throw new Error("Invalid refresh response: no tokenInfo");
-  }
-
-  authCell.update({
-    ...json.tokenInfo,
-    user: currentAuth.user,
-  });
 }
 
-// Handler for refreshing OAuth tokens from UI button
-// Must be at module scope, not inside pattern
+// Handler for refreshing OAuth tokens from UI button.
+// Must be at module scope (sandbox rule) and uses handler() (not action()) because
+// the auth cell is typed as OpaqueCell in pattern context — handler bindings allow
+// explicit Writable<Auth> typing which matches the runtime type.
 const handleRefresh = handler<
   unknown,
   {
@@ -455,6 +469,13 @@ const refreshTokenHandler = handler<
   );
 });
 
+// TODO(CT-1163): Replace with wish("#now:30000") when reactive time wish is available.
+// Date.now() is non-idiomatic (will be blocked in future sandbox versions).
+// This setInterval workaround makes time-dependent computeds reactive.
+function startReactiveClock(cell: Writable<number>): void {
+  setInterval(() => cell.set(Date.now()), 30_000);
+}
+
 // Threshold: refresh when less than 10 minutes remain
 const REFRESH_THRESHOLD_MS = 10 * 60 * 1000;
 
@@ -465,7 +486,10 @@ const REFRESH_THRESHOLD_MS = 10 * 60 * 1000;
  * is called every ~60 seconds. It checks if the token is about to expire
  * (< 10 min remaining) and refreshes it proactively, preventing expiry.
  */
-const bgRefreshHandler = handler<unknown, { auth: Writable<Auth> }>(
+const bgRefreshHandler = handler<
+  Record<string, never>,
+  { auth: Writable<Auth> }
+>(
   async (_event, { auth }) => {
     const currentAuth = auth.get();
     if (!currentAuth?.token || !currentAuth?.refreshToken) return;
@@ -543,17 +567,20 @@ export default pattern<Input, Output>(
       return false;
     });
 
+    const now = Writable.of(Date.now());
+    startReactiveClock(now);
+
     // Check if token is expired (need refresh)
     const isTokenExpired = computed(() => {
       if (!auth?.token || !auth?.expiresAt) return false;
-      return auth.expiresAt < Date.now();
+      return auth.expiresAt < now.get();
     });
 
     // Format time remaining until token expiry
     const tokenExpiryDisplay = computed(() => {
       if (!auth?.expiresAt || auth.expiresAt === 0) return null;
-      const now = Date.now();
-      const remaining = auth.expiresAt - now;
+      const currentTime = now.get();
+      const remaining = auth.expiresAt - currentTime;
       if (remaining <= 0) return "Expired";
 
       const minutes = Math.floor(remaining / (60 * 1000));

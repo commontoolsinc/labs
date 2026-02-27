@@ -197,6 +197,13 @@ function debugLog(enabled: boolean, ...args: unknown[]) {
   if (enabled) console.log("[GoogleAuth]", ...args);
 }
 
+// TODO(CT-1163): Replace with wish("#now:30000") when reactive time wish is available.
+// Date.now() is non-idiomatic (will be blocked in future sandbox versions).
+// This setInterval workaround makes time-dependent computeds reactive.
+function startReactiveClock(cell: Writable<number>): void {
+  setInterval(() => cell.set(Date.now()), 30_000);
+}
+
 // =============================================================================
 // MODULE-SCOPE HANDLERS
 // =============================================================================
@@ -230,10 +237,16 @@ const attemptRefresh = handler<
 
   // Fire-and-forget: the handler on the other side (refreshTokenHandler in
   // google-auth) is async and the stream infrastructure handles execution.
+  // NOTE: Cross-space stream sends currently fail with WriteIsolationError
+  // because the scheduler doesn't set the owning space context on the handler
+  // transaction. See CT-1289. The bgUpdater (server-side) works around this.
   refreshStream.send({});
 
   // Fallback timeout: if the reactive watcher (refreshWatcher) doesn't detect
   // a token change within the window, mark the refresh as failed.
+  // NOTE: Writing to Writable cells from setTimeout is acceptable here because
+  // CTS has no effect() primitive. The write is idempotent (only fires if still
+  // refreshing) and the reactive graph picks up the change on next flush.
   setTimeout(() => {
     if (refreshing.get()) {
       refreshing.set(false);
@@ -254,16 +267,13 @@ export const GoogleAuthManager = pattern<
     // ========================================================================
     // WISH SETUP - Writable tag with accountType sync
     // ========================================================================
-    const wishTag = Writable.of("#googleAuth");
-    // Sync accountType -> wishTag (idempotent side-effect)
-    computed(() => {
+    const wishTag = computed(() => {
       const type = accountType;
-      const newTag = type === "personal"
+      return type === "personal"
         ? "#googleAuthPersonal"
         : type === "work"
         ? "#googleAuthWork"
         : "#googleAuth";
-      if (wishTag.get() !== newTag) wishTag.set(newTag);
     });
 
     const wishResult = wish<GoogleAuthPiece>({
@@ -283,10 +293,13 @@ export const GoogleAuthManager = pattern<
     const hasToken = computed(() => !!auth?.token);
     const hasEmail = computed(() => !!auth?.user?.email);
 
+    const now = Writable.of(Date.now());
+    startReactiveClock(now);
+
     // Token expiry
     const isTokenExpired = computed(() => {
       const expiresAt = auth?.expiresAt ?? 0;
-      const value = expiresAt > 0 && expiresAt < Date.now();
+      const value = expiresAt > 0 && expiresAt < now.get();
       debugLog(debugMode as boolean, "isTokenExpired:", value);
       return value;
     });
@@ -294,7 +307,7 @@ export const GoogleAuthManager = pattern<
     const tokenTimeRemaining = computed((): number | null => {
       const expiresAt = auth?.expiresAt ?? 0;
       if (!expiresAt) return null;
-      return expiresAt - Date.now();
+      return expiresAt - now.get();
     });
 
     const tokenExpiryWarning = computed((): TokenExpiryWarning => {
@@ -360,7 +373,7 @@ export const GoogleAuthManager = pattern<
     computed(() => {
       if (!refreshing.get()) return;
       const expiresAt = auth?.expiresAt ?? 0;
-      if (expiresAt > Date.now()) {
+      if (expiresAt > now.get()) {
         // Token is now valid — refresh succeeded
         refreshing.set(false);
         refreshFailed.set(false);
