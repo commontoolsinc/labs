@@ -3,7 +3,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { createBuilder } from "../src/builder/factory.ts";
-import type { JSONSchema } from "../src/builder/types.ts";
+import type { JSONSchema, Schema } from "../src/builder/types.ts";
 import {
   getCfcDebugCounters,
   resetCfcDebugCounters,
@@ -12,9 +12,12 @@ import { prepareCfcCommitIfNeeded } from "../src/cfc/prepare-shim.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { Labels, URI } from "../src/storage/interface.ts";
 
-const signer = await Identity.fromPassphrase("cfc pattern output transition test");
+const signer = await Identity.fromPassphrase(
+  "cfc pattern output transition test",
+);
 const space = signer.did();
 
+// Source schemas carry IFC annotations so reads are CFC-relevant.
 const sourceNumberSchema = {
   type: "number",
   ifc: { classification: ["secret"] },
@@ -45,6 +48,56 @@ const sourceCoordsSchema = {
   ifc: { classification: ["secret"] },
 } as const satisfies JSONSchema;
 
+const numberSchema = {
+  type: "number",
+} as const satisfies JSONSchema;
+
+const numberArraySchema = {
+  type: "array",
+  items: numberSchema,
+} as const satisfies JSONSchema;
+
+const countObjectSchema = {
+  type: "object",
+  properties: {
+    count: numberSchema,
+  },
+  required: ["count"],
+} as const satisfies JSONSchema;
+
+const latLongSchema = {
+  type: "object",
+  properties: {
+    lat: numberSchema,
+    long: numberSchema,
+  },
+  required: ["lat", "long"],
+} as const satisfies JSONSchema;
+
+const tickEventSchema = {
+  type: "object",
+  properties: {
+    step: numberSchema,
+  },
+  required: ["step"],
+} as const satisfies JSONSchema;
+
+const tickHandlerStateSchema = {
+  type: "object",
+  properties: {
+    runtimeState: {
+      type: "object",
+      properties: {
+        eventCount: numberSchema,
+      },
+      required: ["eventCount"],
+      asCell: true,
+    },
+  },
+  required: ["runtimeState"],
+} as const satisfies JSONSchema;
+
+// Result schemas define the CFC transition relation expected for each case.
 const monotoneResultSchema = {
   type: "object",
   properties: {
@@ -248,6 +301,7 @@ const coordsArgSchema = {
 } as const satisfies JSONSchema;
 
 type Lift = ReturnType<typeof createBuilder>["commontools"]["lift"];
+type TickEvent = Schema<typeof tickEventSchema>;
 
 type Case = {
   caseId: string;
@@ -256,7 +310,10 @@ type Case = {
   expectedResult: unknown;
   argumentSchema: JSONSchema;
   resultSchema: JSONSchema;
-  transform: (source: any, lift: Lift) => unknown;
+  transform: (
+    source: any,
+    lift: Lift,
+  ) => unknown;
 };
 
 describe("CFC pattern output transitions", () => {
@@ -264,6 +321,7 @@ describe("CFC pattern output transitions", () => {
   let runtime: Runtime;
   let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
   let lift: Lift;
+  let handler: ReturnType<typeof createBuilder>["commontools"]["handler"];
 
   beforeEach(() => {
     resetCfcDebugCounters();
@@ -274,7 +332,7 @@ describe("CFC pattern output transitions", () => {
     });
     runtime.scheduler.disablePullMode();
     const { commontools } = createBuilder();
-    ({ pattern, lift } = commontools);
+    ({ pattern, lift, handler } = commontools);
   });
 
   afterEach(async () => {
@@ -283,6 +341,7 @@ describe("CFC pattern output transitions", () => {
   });
 
   async function seedSourceLabels(id: URI, labels: Labels): Promise<void> {
+    // Runtime labels on /cfc/labels are the concrete provenance source used by CFC checks.
     const tx = runtime.edit();
     tx.writeOrThrow({
       space,
@@ -303,12 +362,38 @@ describe("CFC pattern output transitions", () => {
   }
 
   async function runCase(testCase: Case): Promise<void> {
-    const builtPattern = pattern<{ source: any }>(
-      ({ source }) => testCase.transform(source, lift),
+    const tickHandler = handler(
+      tickEventSchema,
+      tickHandlerStateSchema,
+      (event: TickEvent, { runtimeState }) => {
+        const current = runtimeState.get();
+        runtimeState.set({
+          ...current,
+          eventCount: current.eventCount + event.step,
+        });
+      },
+    );
+
+    const builtPattern = pattern(
+      ({ source }) => {
+        // Include lift and handler nodes so this runs through both reactive and event-bearing runtime paths.
+        const transformed = testCase.transform(source, lift) as Record<
+          string,
+          unknown
+        >;
+        const runtimeState = { eventCount: 0 };
+        const stream = tickHandler({ runtimeState });
+        return {
+          ...transformed,
+          stream,
+        };
+      },
       testCase.argumentSchema,
       testCase.resultSchema,
     );
+    expect(builtPattern.nodes.length).toBeGreaterThanOrEqual(2);
 
+    // Bootstrap source/result cells in a setup tx; this is not the transition commit under test.
     let tx = runtime.edit();
     const sourceCell = runtime.getCell<any>(
       space,
@@ -325,14 +410,17 @@ describe("CFC pattern output transitions", () => {
     );
     resultCell.set(testCase.initialResult);
 
+    // Prepare commit-gate digest, but keep boundary enforcement disabled in this transition-focused suite.
     await prepareCfcCommitIfNeeded(tx, { enforceBoundary: false });
     let committed = await tx.commit();
     expect(committed.error).toBeUndefined();
 
+    // Explicitly seed source labels so transition checks have concrete classified input provenance.
     await seedSourceLabels(sourceCell.getAsNormalizedFullLink().id, {
       classification: ["secret"],
     });
 
+    // Valid transition cases should not increment the CFC gate reject counter.
     const gateRejectsBefore = getCfcDebugCounters().cfcGateRejects;
 
     tx = runtime.edit();
@@ -342,6 +430,7 @@ describe("CFC pattern output transitions", () => {
       { source: sourceCell },
       resultCell,
     );
+    // This commit is the one exercising CFC transition handling for the pattern output write.
     await prepareCfcCommitIfNeeded(tx, { enforceBoundary: false });
     committed = await tx.commit();
     expect(committed.error).toBeUndefined();
@@ -356,10 +445,10 @@ describe("CFC pattern output transitions", () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
       await runtime.scheduler.idle();
     }
+    // Each case asserts both functional output shape/value and no unexpected CFC gate rejection.
     expect(pulled).toEqual(testCase.expectedResult);
     expect(getCfcDebugCounters().cfcGateRejects).toBe(gateRejectsBefore);
   }
-
 
   it("supports monotone output classification in pattern execution", async () => {
     await runCase({
@@ -370,11 +459,10 @@ describe("CFC pattern output transitions", () => {
       argumentSchema: numberArgSchema,
       resultSchema: monotoneResultSchema,
       transform: (source, lift) => ({
-        result: lift((value: number) => value + 1)(source),
+        result: lift(numberSchema, numberSchema, (value) => value + 1)(source),
       }),
     });
   });
-
 
   it("supports exactCopyOf in pattern execution", async () => {
     await runCase({
@@ -384,10 +472,11 @@ describe("CFC pattern output transitions", () => {
       expectedResult: { result: 11 },
       argumentSchema: numberArgSchema,
       resultSchema: exactCopyResultSchema,
-      transform: (source) => ({ result: source }),
+      transform: (source, lift) => ({
+        result: lift(numberSchema, numberSchema, (value) => value)(source),
+      }),
     });
   });
-
 
   it("supports projection in pattern execution", async () => {
     await runCase({
@@ -398,11 +487,12 @@ describe("CFC pattern output transitions", () => {
       argumentSchema: objectArgSchema,
       resultSchema: projectionResultSchema,
       transform: (source, lift) => ({
-        result: lift((value: { count: number }) => value.count)(source),
+        result: lift(countObjectSchema, numberSchema, (value) => value.count)(
+          source,
+        ),
       }),
     });
   });
-
 
   it("supports subsetOf in pattern execution", async () => {
     await runCase({
@@ -413,13 +503,16 @@ describe("CFC pattern output transitions", () => {
       argumentSchema: arrayArgSchema,
       resultSchema: subsetResultSchema,
       transform: (source, lift) => ({
-        items: lift((values: number[]) => values.filter((value) => value !== 1))(
+        items: lift(
+          numberArraySchema,
+          numberArraySchema,
+          (values) => values.filter((value) => value !== 1),
+        )(
           source,
         ),
       }),
     });
   });
-
 
   it("supports permutationOf in pattern execution", async () => {
     await runCase({
@@ -430,7 +523,7 @@ describe("CFC pattern output transitions", () => {
       argumentSchema: arrayArgSchema,
       resultSchema: permutationResultSchema,
       transform: (source, lift) => ({
-        items: lift((values: number[]) => [
+        items: lift(numberArraySchema, numberArraySchema, (values) => [
           values[2] ?? 0,
           values[0] ?? 0,
           values[1] ?? 0,
@@ -438,7 +531,6 @@ describe("CFC pattern output transitions", () => {
       }),
     });
   });
-
 
   it("supports filteredFrom in pattern execution", async () => {
     await runCase({
@@ -449,13 +541,14 @@ describe("CFC pattern output transitions", () => {
       argumentSchema: arrayArgSchema,
       resultSchema: filteredFromResultSchema,
       transform: (source, lift) => ({
-        items: lift((values: number[]) => values.filter((value) => value > 1))(
-          source,
-        ),
+        items: lift(
+          numberArraySchema,
+          numberArraySchema,
+          (values) => values.filter((value) => value > 1),
+        )(source),
       }),
     });
   });
-
 
   it("supports lengthPreserved in pattern execution", async () => {
     await runCase({
@@ -466,13 +559,14 @@ describe("CFC pattern output transitions", () => {
       argumentSchema: arrayArgSchema,
       resultSchema: lengthPreservedResultSchema,
       transform: (source, lift) => ({
-        items: lift((values: number[]) => values.map((value) => value + 10))(
-          source,
-        ),
+        items: lift(
+          numberArraySchema,
+          numberArraySchema,
+          (values) => values.map((value) => value + 10),
+        )(source),
       }),
     });
   });
-
 
   it("supports recomposeProjections in pattern execution", async () => {
     await runCase({
@@ -483,7 +577,7 @@ describe("CFC pattern output transitions", () => {
       argumentSchema: coordsArgSchema,
       resultSchema: recomposeResultSchema,
       transform: (source, lift) => ({
-        coords: lift((value: { latitude: number; longitude: number }) => ({
+        coords: lift(sourceCoordsSchema, latLongSchema, (value) => ({
           lat: value.latitude,
           long: value.longitude,
         }))(source),
@@ -500,7 +594,7 @@ describe("CFC pattern output transitions", () => {
       argumentSchema: numberArgSchema,
       resultSchema: monotoneResultSchema,
       transform: (source, lift) => ({
-        result: lift((value: number) => value + 1)(source),
+        result: lift(numberSchema, numberSchema, (value) => value + 1)(source),
       }),
     });
   });
@@ -513,7 +607,11 @@ describe("CFC pattern output transitions", () => {
       expectedResult: { result: { count: 9 } },
       argumentSchema: objectArgSchema,
       resultSchema: exactCopyObjectResultSchema,
-      transform: (source) => ({ result: source }),
+      transform: (source, lift) => ({
+        result: lift(countObjectSchema, countObjectSchema, (value) => value)(
+          source,
+        ),
+      }),
     });
   });
 
@@ -526,7 +624,13 @@ describe("CFC pattern output transitions", () => {
       argumentSchema: coordsArgSchema,
       resultSchema: projectionLatitudeResultSchema,
       transform: (source, lift) => ({
-        result: lift((value: { latitude: number }) => value.latitude)(source),
+        result: lift(
+          sourceCoordsSchema,
+          numberSchema,
+          (value) => value.latitude,
+        )(
+          source,
+        ),
       }),
     });
   });
@@ -540,9 +644,12 @@ describe("CFC pattern output transitions", () => {
       argumentSchema: arrayArgSchema,
       resultSchema: subsetResultSchema,
       transform: (source, lift) => ({
-        items: lift((values: number[]) => values.filter((value, index) =>
-          index === 1 || value === 3
-        ))(source),
+        items: lift(
+          numberArraySchema,
+          numberArraySchema,
+          (values) =>
+            values.filter((value, index) => index === 1 || value === 3),
+        )(source),
       }),
     });
   });
@@ -556,7 +663,7 @@ describe("CFC pattern output transitions", () => {
       argumentSchema: arrayArgSchema,
       resultSchema: permutationResultSchema,
       transform: (source, lift) => ({
-        items: lift((values: number[]) => [
+        items: lift(numberArraySchema, numberArraySchema, (values) => [
           values[0] ?? 0,
           values[2] ?? 0,
           values[1] ?? 0,
@@ -574,7 +681,11 @@ describe("CFC pattern output transitions", () => {
       argumentSchema: arrayArgSchema,
       resultSchema: filteredFromResultSchema,
       transform: (source, lift) => ({
-        items: lift((values: number[]) => values.filter(() => true))(source),
+        items: lift(
+          numberArraySchema,
+          numberArraySchema,
+          (values) => values.filter(() => true),
+        )(source),
       }),
     });
   });
@@ -588,9 +699,11 @@ describe("CFC pattern output transitions", () => {
       argumentSchema: arrayArgSchema,
       resultSchema: lengthPreservedResultSchema,
       transform: (source, lift) => ({
-        items: lift((values: number[]) => values.map((value) => value + 10))(
-          source,
-        ),
+        items: lift(
+          numberArraySchema,
+          numberArraySchema,
+          (values) => values.map((value) => value + 10),
+        )(source),
       }),
     });
   });
@@ -604,12 +717,11 @@ describe("CFC pattern output transitions", () => {
       argumentSchema: coordsArgSchema,
       resultSchema: recomposeResultSchema,
       transform: (source, lift) => ({
-        coords: lift((value: { latitude: number; longitude: number }) => ({
+        coords: lift(sourceCoordsSchema, latLongSchema, (value) => ({
           lat: value.latitude,
           long: value.longitude,
         }))(source),
       }),
     });
   });
-
 });
