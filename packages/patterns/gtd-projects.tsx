@@ -713,7 +713,7 @@ const GTDProjects = pattern<ProjectsInput, ProjectsOutput>(
                 idx: number; hasChildren: boolean; childCount: number;
               }) =>
                 /* Action row */
-                item.type === "action" ? (
+                ifElse(computed(() => item.type === "action"),
                   <div
                     style={{
                       display: "flex",
@@ -735,9 +735,9 @@ const GTDProjects = pattern<ProjectsInput, ProjectsOutput>(
                     ) : null}
                     <span style={{ fontSize: "13px", color: color.secondaryLabel, flex: "1" }}>{item.action?.text}</span>
                   </div>
-                ) :
+                ,
                 /* Directive response row */
-                item.type === "response" ? (
+                ifElse(computed(() => item.type === "response"),
                   <div style={{ ...itemRowStyle, padding: "10px 0" }}>
                     <div style={{ display: "flex", alignItems: "flex-start", gap: "10px" }}>
                       <span style={{
@@ -784,9 +784,9 @@ const GTDProjects = pattern<ProjectsInput, ProjectsOutput>(
                       </div>
                     </div>
                   </div>
-                ) :
+                ,
                 /* Person row */
-                item.type === "person" ? (
+                ifElse(computed(() => item.type === "person"),
                   <div
                     style={{
                       ...itemRowStyle,
@@ -822,9 +822,9 @@ const GTDProjects = pattern<ProjectsInput, ProjectsOutput>(
                     </span>
                     <span style={{ fontSize: "14px", color: color.tertiaryLabel, flexShrink: "0" }}>{">"}</span>
                   </div>
-                ) :
+                ,
                 /* Project row (default) */
-                (
+
                   <div>
                     <div
                       style={computed(() =>
@@ -911,7 +911,7 @@ const GTDProjects = pattern<ProjectsInput, ProjectsOutput>(
                       null,
                     )}
                   </div>
-                ),
+                ))),
             )}
             {/* Add project / subproject — ifElse for onClick + $value safety */}
             {ifElse(
