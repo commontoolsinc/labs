@@ -704,140 +704,131 @@ const GTDProjects = pattern<ProjectsInput, ProjectsOutput>(
               }
               return null;
             })}
-            {/* Item rows — .map() on computed array, onClick safe at top level */}
+            {/* Item rows — .map() on computed array, ternaries auto-convert to ifElse */}
             {visibleItemsData.map(
               (item: {
                 type: string; id: string; name: string;
                 project: Project | null; action: NextAction | null;
                 directive: Directive | null;
                 idx: number; hasChildren: boolean; childCount: number;
-              }) => {
-                // Action row
-                if (item.type === "action") {
-                  const a = item.action!;
-                  return (
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "8px",
-                        padding: "5px 0 5px 12px",
-                        borderBottom: `0.5px solid ${color.separator}`,
-                      }}
-                    >
-                      <ct-checkbox
-                        checked={false}
-                        style="width: 15px; height: 15px; flex-shrink: 0; cursor: pointer;"
-                        onClick={() => markItemDone.send({ key: "actions:" + item.idx })}
-                      />
-                      {a.context ? (
-                        <span style={{ fontSize: "10px", color: color.blue, background: "rgba(0,122,255,0.08)", padding: "1px 6px", borderRadius: "100px", flexShrink: "0", fontWeight: "500" }}>
-                          {a.context}
-                        </span>
-                      ) : null}
-                      <span style={{ fontSize: "13px", color: color.secondaryLabel, flex: "1" }}>{a.text}</span>
-                    </div>
-                  );
-                }
-
-                // Directive response row
-                if (item.type === "response") {
-                  const dir = item.directive;
-                  if (!dir) return <div />;
-                  const qMatch = dir.text.match(/^Re:\s*.+?\s*\u2014\s*(.+)$/);
-                  const question = qMatch ? qMatch[1] : dir.text;
-                  const dateStr = dir.createdAt
-                    ? new Date(dir.createdAt).toLocaleDateString("en-US", {
-                        month: "short", day: "numeric",
-                      })
-                    : "";
-                  const noteLink = dir.noteUrl || "";
-                  return (
-                    <div style={{ ...itemRowStyle, padding: "10px 0" }}>
-                      <div style={{ display: "flex", alignItems: "flex-start", gap: "10px" }}>
-                        <span style={{
-                          padding: "2px 6px", borderRadius: "4px",
-                          fontSize: "10px", fontWeight: "600",
-                          background: "rgba(88, 86, 214, 0.12)",
-                          color: color.indigo, flexShrink: "0", marginTop: "2px",
-                        }}>{dir.id}</span>
-                        <div style={{ flex: "1" }}>
-                          <div style={{ fontSize: "13px", fontWeight: "500", color: color.label }}>
-                            {question}
-                          </div>
-                          <div style={{
-                            fontSize: "12px", color: color.secondaryLabel,
-                            marginTop: "4px", lineHeight: "1.5",
-                            whiteSpace: "pre-wrap" as const,
-                          }}>
-                            {dir.response}
-                          </div>
-                          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "6px" }}>
-                            {dateStr ? (
-                              <span style={{ fontSize: "11px", color: color.tertiaryLabel }}>{dateStr}</span>
-                            ) : null}
-                            {noteLink ? (
-                              <a href={noteLink} target="_blank" style={{
-                                fontSize: "11px", color: color.blue,
-                                textDecoration: "none",
-                              }}>{"📎 View note"}</a>
-                            ) : null}
-                          </div>
+              }) =>
+                /* Action row */
+                item.type === "action" ? (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                      padding: "5px 0 5px 12px",
+                      borderBottom: `0.5px solid ${color.separator}`,
+                    }}
+                  >
+                    <ct-checkbox
+                      checked={false}
+                      style="width: 15px; height: 15px; flex-shrink: 0; cursor: pointer;"
+                      onClick={() => markItemDone.send({ key: "actions:" + item.idx })}
+                    />
+                    {item.action?.context ? (
+                      <span style={{ fontSize: "10px", color: color.blue, background: "rgba(0,122,255,0.08)", padding: "1px 6px", borderRadius: "100px", flexShrink: "0", fontWeight: "500" }}>
+                        {item.action?.context}
+                      </span>
+                    ) : null}
+                    <span style={{ fontSize: "13px", color: color.secondaryLabel, flex: "1" }}>{item.action?.text}</span>
+                  </div>
+                ) :
+                /* Directive response row */
+                item.type === "response" ? (
+                  <div style={{ ...itemRowStyle, padding: "10px 0" }}>
+                    <div style={{ display: "flex", alignItems: "flex-start", gap: "10px" }}>
+                      <span style={{
+                        padding: "2px 6px", borderRadius: "4px",
+                        fontSize: "10px", fontWeight: "600",
+                        background: "rgba(88, 86, 214, 0.12)",
+                        color: color.indigo, flexShrink: "0", marginTop: "2px",
+                      }}>{item.directive?.id}</span>
+                      <div style={{ flex: "1" }}>
+                        <div style={{ fontSize: "13px", fontWeight: "500", color: color.label }}>
+                          {/* Extract question text — read-only computed, no onClick */}
+                          {computed(() => {
+                            const qMatch = item.directive?.text.match(/^Re:\s*.+?\s*\u2014\s*(.+)$/);
+                            return qMatch ? qMatch[1] : item.directive?.text;
+                          })}
                         </div>
+                        <div style={{
+                          fontSize: "12px", color: color.secondaryLabel,
+                          marginTop: "4px", lineHeight: "1.5",
+                          whiteSpace: "pre-wrap" as const,
+                        }}>
+                          {item.directive?.response}
+                        </div>
+                        {/* Date + note link — read-only computed */}
+                        {computed(() => {
+                          const dateStr = item.directive?.createdAt
+                            ? new Date(item.directive?.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+                            : "";
+                          const noteLink = item.directive?.noteUrl || "";
+                          return (
+                            <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "6px" }}>
+                              {dateStr ? (
+                                <span style={{ fontSize: "11px", color: color.tertiaryLabel }}>{dateStr}</span>
+                              ) : null}
+                              {noteLink ? (
+                                <a href={noteLink} target="_blank" style={{
+                                  fontSize: "11px", color: color.blue,
+                                  textDecoration: "none",
+                                }}>{"📎 View note"}</a>
+                              ) : null}
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
-                  );
-                }
-
-                // Person row — onClick safe in .map() callback
-                if (item.type === "person") {
-                  return (
-                    <div
+                  </div>
+                ) :
+                /* Person row */
+                item.type === "person" ? (
+                  <div
+                    style={{
+                      ...itemRowStyle,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "10px",
+                      cursor: "pointer",
+                    }}
+                    onClick={() =>
+                      drillIntoProject.send({
+                        id: item.id,
+                        name: item.name,
+                      })
+                    }
+                  >
+                    <span
                       style={{
-                        ...itemRowStyle,
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "10px",
-                        cursor: "pointer",
+                        fontSize: "13px",
+                        fontWeight: "600",
+                        color: color.purple,
+                        flex: "1",
                       }}
-                      onClick={() =>
-                        drillIntoProject.send({
-                          id: item.id,
-                          name: item.name,
-                        })
-                      }
                     >
-                      <span
-                        style={{
-                          fontSize: "13px",
-                          fontWeight: "600",
-                          color: color.purple,
-                          flex: "1",
-                        }}
-                      >
-                        {item.name}
-                      </span>
-                      <span
-                        style={{
-                          fontSize: "11px",
-                          color: color.tertiaryLabel,
-                        }}
-                      >
-                        {item.childCount + " items"}
-                      </span>
-                      <span style={{ fontSize: "14px", color: color.tertiaryLabel, flexShrink: "0" }}>{">"}</span>
-                    </div>
-                  );
-                }
-
-                // Project row
-                const p = item.project!;
-                const idx = item.idx;
-                return (
+                      {item.name}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: "11px",
+                        color: color.tertiaryLabel,
+                      }}
+                    >
+                      {item.childCount + " items"}
+                    </span>
+                    <span style={{ fontSize: "14px", color: color.tertiaryLabel, flexShrink: "0" }}>{">"}</span>
+                  </div>
+                ) :
+                /* Project row (default) */
+                (
                   <div>
                     <div
                       style={computed(() =>
-                        selectedItem.get() === "projects:" + idx
+                        selectedItem.get() === "projects:" + item.idx
                           ? {
                               ...itemRowStyle,
                               display: "flex",
@@ -860,40 +851,40 @@ const GTDProjects = pattern<ProjectsInput, ProjectsOutput>(
                       {/* Item content — click to drill in if has children, else select */}
                       <div
                         style={{ display: "flex", alignItems: "center", gap: "10px", flex: "1", cursor: "pointer" }}
-                        onClick={() => item.hasChildren ? drillIntoProject.send({ id: item.id, name: p.name }) : selectItem.send({ key: "projects:" + idx })}
+                        onClick={() => item.hasChildren ? drillIntoProject.send({ id: item.id, name: item.project?.name ?? "" }) : selectItem.send({ key: "projects:" + item.idx })}
                       >
                         <span style={{ fontSize: "12px", color: color.tertiaryLabel, fontWeight: "500", minWidth: "32px", flexShrink: "0" }}>
-                          {p.id}
+                          {item.project?.id}
                         </span>
-                        <span style={{ flex: "1" }}>{p.name}</span>
+                        <span style={{ flex: "1" }}>{item.project?.name}</span>
                         <span
-                          style={{
+                          style={computed(() => ({
                             padding: "2px 10px",
                             borderRadius: "100px",
                             fontSize: "11px",
                             fontWeight: "500",
                             background:
-                              p.status === "Active"
+                              item.project?.status === "Active"
                                 ? "rgba(52, 199, 89, 0.12)"
-                                : p.status === "Done"
+                                : item.project?.status === "Done"
                                   ? "rgba(142, 142, 147, 0.12)"
                                   : "rgba(255, 149, 0, 0.12)",
                             color:
-                              p.status === "Active"
+                              item.project?.status === "Active"
                                 ? "#34c759"
-                                : p.status === "Done"
+                                : item.project?.status === "Done"
                                   ? "#8e8e93"
                                   : "#ff9500",
                             flexShrink: "0",
-                          }}
+                          }))}
                         >
-                          {p.status}
+                          {item.project?.status}
                         </span>
                       </div>
                       {/* Note link — read-only computed, no onClick */}
                       {computed(() => {
                         const notes = projectNotesMap;
-                        const link = notes[p.name];
+                        const link = notes[item.project?.name ?? ""];
                         if (!link) return null;
                         return (
                           <a href={link} target="_blank" style={{ textDecoration: "none", fontSize: "16px", flexShrink: "0", cursor: "pointer", marginLeft: "4px" }}>
@@ -903,25 +894,24 @@ const GTDProjects = pattern<ProjectsInput, ProjectsOutput>(
                       })}
                       {/* Drill-in chevron */}
                       {item.hasChildren ? (
-                        <span style={{ fontSize: "14px", color: color.tertiaryLabel, paddingLeft: "8px", flexShrink: "0", cursor: "pointer" }} onClick={() => drillIntoProject.send({ id: item.id, name: p.name })}>{">"}</span>
+                        <span style={{ fontSize: "14px", color: color.tertiaryLabel, paddingLeft: "8px", flexShrink: "0", cursor: "pointer" }} onClick={() => drillIntoProject.send({ id: item.id, name: item.project?.name ?? "" })}>{">"}</span>
                       ) : null}
                     </div>
                     {/* Selection toolbar — ifElse for onClick safety */}
                     {ifElse(
-                      computed(() => selectedItem.get() === "projects:" + idx),
+                      computed(() => selectedItem.get() === "projects:" + item.idx),
                       <div style={{ display: "flex", gap: "8px", padding: "6px 0 8px", flexWrap: "wrap" as const }}>
-                        <div style={actionBtnDone} onClick={() => markItemDone.send({ key: "projects:" + idx })}>{"✓ Done"}</div>
-                        <div style={actionBtnDelete} onClick={() => deleteItem.send({ key: "projects:" + idx })}>{"✕ Delete"}</div>
+                        <div style={actionBtnDone} onClick={() => markItemDone.send({ key: "projects:" + item.idx })}>{"✓ Done"}</div>
+                        <div style={actionBtnDelete} onClick={() => deleteItem.send({ key: "projects:" + item.idx })}>{"✕ Delete"}</div>
                         <div style={actionBtnDirective} onClick={openItemDirective}>{"→ Directive"}</div>
                         {!item.hasChildren ? (
-                          <div style={actionBtnAdd} onClick={() => drillAndAddSubproject.send({ id: item.id, name: p.name })}>+ Subproject</div>
+                          <div style={actionBtnAdd} onClick={() => drillAndAddSubproject.send({ id: item.id, name: item.project?.name ?? "" })}>+ Subproject</div>
                         ) : null}
                       </div>,
                       null,
                     )}
                   </div>
-                );
-              },
+                ),
             )}
             {/* Add project / subproject — ifElse for onClick + $value safety */}
             {ifElse(
