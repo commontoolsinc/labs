@@ -5,6 +5,9 @@ import { BaseElement } from "../../core/base-element.ts";
 /**
  * CTLinkPreview - Renders a rich link preview card for a given URL
  *
+ * Fetches metadata and a screenshot via the /api/link-preview endpoint
+ * (which proxies through Jina to avoid SSRF concerns).
+ *
  * @element ct-link-preview
  * @attr {string} url - The URL to generate a preview for
  *
@@ -158,12 +161,6 @@ export class CTLinkPreview extends BaseElement {
             color: var(--muted-foreground, hsl(0, 0%, 45%));
           }
 
-          .preview-favicon {
-            width: 16px;
-            height: 16px;
-            object-fit: contain;
-          }
-
           .preview-domain {
             overflow: hidden;
             text-overflow: ellipsis;
@@ -189,12 +186,6 @@ export class CTLinkPreview extends BaseElement {
 
       @state()
       private _image = "";
-
-      @state()
-      private _favicon = "";
-
-      @state()
-      private _siteName = "";
 
       private _abortController: AbortController | null = null;
 
@@ -233,8 +224,6 @@ export class CTLinkPreview extends BaseElement {
         this._title = "";
         this._description = "";
         this._image = "";
-        this._favicon = "";
-        this._siteName = "";
 
         // Create new abort controller
         this._abortController = new AbortController();
@@ -251,15 +240,11 @@ export class CTLinkPreview extends BaseElement {
 
           const data = await response.json();
 
-          // Update state with fetched data
           this._title = data.title || "";
           this._description = data.description || "";
           this._image = data.image || "";
-          this._favicon = data.favicon || "";
-          this._siteName = data.siteName || "";
           this._loading = false;
         } catch (error) {
-          // Don't set error if request was aborted
           if (error instanceof Error && error.name !== "AbortError") {
             this._error = true;
           }
@@ -327,23 +312,10 @@ export class CTLinkPreview extends BaseElement {
               <div class="preview-title">${this._title || domain}</div>
               ${this._description
                 ? html`
-                  <div class="preview-description">
-                    ${this._description}
-                  </div>
+                  <div class="preview-description">${this._description}</div>
                 `
                 : nothing}
               <div class="preview-footer">
-                ${this._favicon
-                  ? html`
-                    <img
-                      class="preview-favicon"
-                      src="${this._favicon}"
-                      alt=""
-                      width="16"
-                      height="16"
-                    />
-                  `
-                  : nothing}
                 <span class="preview-domain">${domain}</span>
               </div>
             </div>

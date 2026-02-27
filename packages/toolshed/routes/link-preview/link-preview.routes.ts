@@ -6,17 +6,9 @@ const tags = ["Link Preview"];
 
 // Response schema for link preview metadata
 const LinkPreviewSchema = z.object({
-  title: z.string().optional().describe("Page title from og:title or <title>"),
-  description: z.string().optional().describe(
-    "Page description from og:description or meta description",
-  ),
-  image: z.string().url().optional().describe(
-    "Preview image URL from og:image",
-  ),
-  favicon: z.string().url().optional().describe(
-    "Favicon URL from link rel=icon or /favicon.ico",
-  ),
-  siteName: z.string().optional().describe("Site name from og:site_name"),
+  title: z.string().optional().describe("Page title"),
+  description: z.string().optional().describe("Page description"),
+  image: z.string().optional().describe("Screenshot URL from Jina"),
   url: z.string().url().describe("The requested URL"),
 });
 
