@@ -487,7 +487,10 @@ const bgRefreshHandler = handler<unknown, { auth: Writable<Auth> }>(
         auth.update({ ...currentAuth, token: "", expiresAt: 0 });
       } else {
         // Transient failure (network, 5xx) — log and retry next cycle
-        console.error("[google-auth bgUpdater] Transient refresh failure:", msg);
+        console.error(
+          "[google-auth bgUpdater] Transient refresh failure:",
+          msg,
+        );
       }
     }
   },
