@@ -63,7 +63,7 @@ export let fromString: (source: string) => ContentId;
  * In browsers, uses hash-wasm (WASM, ~3x faster than pure JS).
  * Falls back to @noble/hashes if neither is available.
  */
-export let refer: <T extends NonNullable<unknown> | null>(
+export let refer: <T extends DefinedReferent>(
   source: T,
 ) => ContentId<T>;
 
@@ -136,7 +136,7 @@ function configureDispatch(): void {
       source: string,
     ) => ContentId;
 
-    refer = <T extends NonNullable<unknown> | null>(
+    refer = <T extends DefinedReferent>(
       source: T,
     ): ContentId<T> => {
       // Cache {the, of} patterns (unclaimed facts)
@@ -219,7 +219,7 @@ const treeBuilder = Reference.Tree.createBuilder(
   wrappedNodeBuilder,
 );
 
-const referImpl = <T extends NonNullable<unknown> | null>(
+const referImpl = <T extends DefinedReferent>(
   source: T,
 ): ContentId<T> => {
   return treeBuilder.refer(source) as unknown as ContentId<T>;
