@@ -200,15 +200,75 @@ const p = pattern(([first]) => <div>{first}</div>);
 );
 
 Deno.test(
-  "Capability-first diagnostics: default initializer destructuring is non-lowerable",
+  "Capability-first: static default initializer destructuring lowers to schema default",
   async () => {
     const source = `/// <cts-enable />
 import { pattern } from "commontools";
-const p = pattern(({ foo = "fallback" }) => <div>{foo}</div>);
+const p = pattern<{ foo: string }>(({ foo = "fallback" }) => <div>{foo}</div>);
 `;
 
     const { diagnostics } = await validateSource(source, {
       useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
+    });
+    const output = await transformSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
+    });
+    const computationDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-context:computation"
+    );
+
+    assertEquals(computationDiagnostics.length, 0);
+    assertStringIncludes(
+      output,
+      '"default": "fallback"',
+    );
+  },
+);
+
+Deno.test(
+  "Capability-first: static default initializer extraction works with interface input types",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern } from "commontools";
+interface Input {
+  foo: string;
+  count: number;
+}
+const p = pattern<Input>(({ foo = "fallback", count = 0 }) => <div>{foo}:{count}</div>);
+`;
+
+    const { diagnostics } = await validateSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
+    });
+    const output = await transformSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
+    });
+    const computationDiagnostics = diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-context:computation"
+    );
+
+    assertEquals(computationDiagnostics.length, 0);
+    assertStringIncludes(output, '"default": "fallback"');
+    assertStringIncludes(output, '"default": 0');
+  },
+);
+
+Deno.test(
+  "Capability-first diagnostics: non-static default initializer destructuring is non-lowerable",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern } from "commontools";
+const fallback = "fallback";
+const p = pattern(({ foo = fallback }) => <div>{foo}</div>);
+`;
+
+    const { diagnostics } = await validateSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
     });
     const computationDiagnostics = diagnostics.filter((diagnostic) =>
       diagnostic.type === "pattern-context:computation"
@@ -217,7 +277,7 @@ const p = pattern(({ foo = "fallback" }) => <div>{foo}</div>);
     assertEquals(computationDiagnostics.length, 1);
     assertStringIncludes(
       computationDiagnostics[0]!.message,
-      "Default destructuring initializers",
+      "Non-static destructuring initializers",
     );
   },
 );

@@ -16,6 +16,7 @@ import {
 } from "../ast/mod.ts";
 import { createPropertyName } from "../utils/identifiers.ts";
 import {
+  type CapabilityParamDefault,
   type CapabilityParamSummary,
   type CapabilitySummaryRegistry,
   type ReactiveCapability,
@@ -391,6 +392,185 @@ function wrapTypeNodeWithCapability(
   );
 }
 
+function wrapTypeNodeWithDefault(
+  node: ts.TypeNode,
+  defaultType: ts.TypeNode,
+  factory: ts.NodeFactory,
+): ts.TypeNode {
+  return factory.createTypeReferenceNode(
+    factory.createQualifiedName(
+      factory.createIdentifier("__ctHelpers"),
+      factory.createIdentifier("Default"),
+    ),
+    [node, defaultType],
+  );
+}
+
+function applySingleDefaultToTypeNode(
+  node: ts.TypeNode,
+  path: readonly string[],
+  defaultType: ts.TypeNode,
+  factory: ts.NodeFactory,
+): { node: ts.TypeNode; applied: boolean } {
+  if (path.length === 0) {
+    return {
+      node: wrapTypeNodeWithDefault(node, defaultType, factory),
+      applied: true,
+    };
+  }
+
+  const [head, ...tail] = path;
+  if (!head) {
+    return { node, applied: false };
+  }
+
+  if (ts.isTypeLiteralNode(node)) {
+    let applied = false;
+    const members = node.members.map((member) => {
+      if (!ts.isPropertySignature(member) || !member.type || !member.name) {
+        return member;
+      }
+      const memberName = getPropertyNameText(member.name);
+      if (memberName !== head) {
+        return member;
+      }
+      const updatedChild = applySingleDefaultToTypeNode(
+        member.type,
+        tail,
+        defaultType,
+        factory,
+      );
+      if (!updatedChild.applied) {
+        return member;
+      }
+      applied = true;
+      return factory.updatePropertySignature(
+        member,
+        member.modifiers,
+        member.name,
+        member.questionToken,
+        updatedChild.node,
+      );
+    });
+
+    return applied
+      ? { node: factory.createTypeLiteralNode(members), applied: true }
+      : { node, applied: false };
+  }
+
+  if (ts.isTupleTypeNode(node)) {
+    const index = Number(head);
+    if (
+      !Number.isInteger(index) || index < 0 || index >= node.elements.length
+    ) {
+      return { node, applied: false };
+    }
+    const element = node.elements[index];
+    if (!element) return { node, applied: false };
+    const updatedChild = applySingleDefaultToTypeNode(
+      element,
+      tail,
+      defaultType,
+      factory,
+    );
+    if (!updatedChild.applied) {
+      return { node, applied: false };
+    }
+    const nextElements = [...node.elements];
+    nextElements[index] = updatedChild.node;
+    return {
+      node: factory.updateTupleTypeNode(node, nextElements),
+      applied: true,
+    };
+  }
+
+  if (ts.isUnionTypeNode(node)) {
+    let applied = false;
+    const members = node.types.map((member) => {
+      const updatedChild = applySingleDefaultToTypeNode(
+        member,
+        path,
+        defaultType,
+        factory,
+      );
+      if (updatedChild.applied) {
+        applied = true;
+      }
+      return updatedChild.node;
+    });
+
+    return applied
+      ? { node: factory.createUnionTypeNode(members), applied: true }
+      : { node, applied: false };
+  }
+
+  return { node, applied: false };
+}
+
+function applyDefaultsToTypeNode(
+  node: ts.TypeNode,
+  defaults: readonly CapabilityParamDefault[] | undefined,
+  factory: ts.NodeFactory,
+): { node: ts.TypeNode; appliedCount: number } {
+  if (!defaults || defaults.length === 0) {
+    return { node, appliedCount: 0 };
+  }
+
+  const ordered = [...defaults].sort((a, b) => b.path.length - a.path.length);
+  let next = node;
+  let appliedCount = 0;
+  for (const entry of ordered) {
+    const updated = applySingleDefaultToTypeNode(
+      next,
+      entry.path,
+      entry.defaultType,
+      factory,
+    );
+    if (updated.applied) {
+      next = updated.node;
+      appliedCount++;
+    }
+  }
+  return { node: next, appliedCount };
+}
+
+function applyCapabilityDefaultsToTypeNode(
+  node: ts.TypeNode,
+  defaults: readonly CapabilityParamDefault[] | undefined,
+  baseType: ts.Type | undefined,
+  paths: readonly (readonly string[])[],
+  wildcard: boolean,
+  checker: ts.TypeChecker,
+  sourceFile: ts.SourceFile,
+  factory: ts.NodeFactory,
+): ts.TypeNode {
+  const initial = applyDefaultsToTypeNode(node, defaults, factory);
+  if (initial.appliedCount > 0 || !defaults || defaults.length === 0) {
+    return initial.node;
+  }
+  if (!baseType) {
+    return initial.node;
+  }
+
+  let fallbackNode: ts.TypeNode | undefined;
+  if (!wildcard && paths.length > 0) {
+    fallbackNode = buildShrunkTypeNodeFromType(
+      baseType,
+      paths,
+      checker,
+      sourceFile,
+      factory,
+    );
+  }
+  fallbackNode ??= typeToSchemaTypeNode(baseType, checker, sourceFile);
+  if (!fallbackNode) {
+    return initial.node;
+  }
+
+  const fallback = applyDefaultsToTypeNode(fallbackNode, defaults, factory);
+  return fallback.appliedCount > 0 ? fallback.node : initial.node;
+}
+
 function isCellLikeTypeNode(node: ts.TypeNode): boolean {
   if (!ts.isTypeReferenceNode(node)) return false;
   const name = ts.isIdentifier(node.typeName)
@@ -525,6 +705,17 @@ function applyCapabilitySummaryToArgument(
     }
   }
 
+  next = applyCapabilityDefaultsToTypeNode(
+    next,
+    paramSummary.defaults,
+    baseType,
+    paths,
+    paramSummary.wildcard,
+    checker,
+    sourceFile,
+    factory,
+  );
+
   if (!shouldWrap) {
     return next;
   }
@@ -618,6 +809,17 @@ function applyCapabilitySummaryToParameter(
       next = shrunk;
     }
   }
+
+  next = applyCapabilityDefaultsToTypeNode(
+    next,
+    paramSummary.defaults,
+    baseType,
+    paths,
+    paramSummary.wildcard,
+    checker,
+    sourceFile,
+    factory,
+  );
 
   if (!shouldWrap) {
     return next;
@@ -1107,6 +1309,16 @@ function handlePatternSchemaInjection(
       inputType = typeRegistry.get(inputTypeNode);
       resultType = typeRegistry.get(resultTypeNode);
     }
+    inputType ??= getTypeFromTypeNodeWithFallback(
+      inputTypeNode,
+      checker,
+      typeRegistry,
+    );
+    resultType ??= getTypeFromTypeNodeWithFallback(
+      resultTypeNode,
+      checker,
+      typeRegistry,
+    );
   } else if (typeArgs && typeArgs.length === 1) {
     // Case 2: One type argument → input from type arg, result inferred
     inputTypeNode = typeArgs[0]!;
@@ -1115,6 +1327,11 @@ function handlePatternSchemaInjection(
     if (typeRegistry) {
       inputType = typeRegistry.get(inputTypeNode);
     }
+    inputType ??= getTypeFromTypeNodeWithFallback(
+      inputTypeNode,
+      checker,
+      typeRegistry,
+    );
 
     // Infer result type from function
     const inferred = collectFunctionSchemaTypeNodes(

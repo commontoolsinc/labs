@@ -1,5 +1,6 @@
 export { TransformationContext } from "./context.ts";
 export type {
+  CapabilityParamDefault,
   CapabilityParamSummary,
   CapabilitySummaryRegistry,
   DiagnosticInput,

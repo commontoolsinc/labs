@@ -6,6 +6,7 @@ import {
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
 import {
+  type CapabilityParamDefault,
   resolvesToCommonToolsSymbol,
   TransformationContext,
   Transformer,
@@ -18,6 +19,11 @@ interface DestructureBinding {
   readonly localName: string;
   readonly path: readonly PathSegment[];
   readonly directKeyExpression?: ts.Expression;
+}
+
+interface DefaultDestructureBinding {
+  readonly path: readonly string[];
+  readonly defaultType: ts.TypeNode;
 }
 
 const KNOWN_PATH_TERMINAL_METHODS = new Set([
@@ -213,10 +219,134 @@ function isTopmostMemberAccess(node: ts.Node): boolean {
   );
 }
 
+function getStaticDefaultTypeNode(
+  expression: ts.Expression,
+  context: TransformationContext,
+): ts.TypeNode | undefined {
+  const factory = context.factory;
+  const current = unwrapExpression(expression);
+
+  if (
+    ts.isStringLiteral(current) || ts.isNoSubstitutionTemplateLiteral(current)
+  ) {
+    return factory.createLiteralTypeNode(
+      factory.createStringLiteral(current.text),
+    );
+  }
+  if (ts.isNumericLiteral(current)) {
+    return factory.createLiteralTypeNode(
+      factory.createNumericLiteral(current.text),
+    );
+  }
+  if (ts.isBigIntLiteral(current)) {
+    return factory.createLiteralTypeNode(
+      factory.createBigIntLiteral(current.text),
+    );
+  }
+  if (
+    current.kind === ts.SyntaxKind.TrueKeyword ||
+    current.kind === ts.SyntaxKind.FalseKeyword
+  ) {
+    return factory.createLiteralTypeNode(
+      current.kind === ts.SyntaxKind.TrueKeyword
+        ? factory.createTrue()
+        : factory.createFalse(),
+    );
+  }
+  if (current.kind === ts.SyntaxKind.NullKeyword) {
+    return factory.createLiteralTypeNode(factory.createNull());
+  }
+  if (ts.isIdentifier(current) && current.text === "undefined") {
+    return factory.createKeywordTypeNode(ts.SyntaxKind.UndefinedKeyword);
+  }
+
+  if (
+    ts.isPrefixUnaryExpression(current) &&
+    (current.operator === ts.SyntaxKind.MinusToken ||
+      current.operator === ts.SyntaxKind.PlusToken)
+  ) {
+    const operand = unwrapExpression(current.operand);
+    if (ts.isNumericLiteral(operand) || ts.isBigIntLiteral(operand)) {
+      return factory.createLiteralTypeNode(
+        factory.createPrefixUnaryExpression(
+          current.operator,
+          ts.isNumericLiteral(operand)
+            ? factory.createNumericLiteral(operand.text)
+            : factory.createBigIntLiteral(operand.text),
+        ),
+      );
+    }
+  }
+
+  if (ts.isArrayLiteralExpression(current)) {
+    const elements: ts.TypeNode[] = [];
+    for (const element of current.elements) {
+      if (ts.isOmittedExpression(element) || ts.isSpreadElement(element)) {
+        return undefined;
+      }
+      const elementType = getStaticDefaultTypeNode(element, context);
+      if (!elementType) return undefined;
+      elements.push(elementType);
+    }
+    return factory.createTupleTypeNode(elements);
+  }
+
+  if (ts.isObjectLiteralExpression(current)) {
+    const members: ts.TypeElement[] = [];
+    for (const property of current.properties) {
+      if (!ts.isPropertyAssignment(property)) {
+        return undefined;
+      }
+
+      let name: ts.PropertyName;
+      if (ts.isIdentifier(property.name)) {
+        name = factory.createIdentifier(property.name.text);
+      } else if (ts.isStringLiteral(property.name)) {
+        name = factory.createStringLiteral(property.name.text);
+      } else if (ts.isNumericLiteral(property.name)) {
+        name = factory.createNumericLiteral(property.name.text);
+      } else if (ts.isNoSubstitutionTemplateLiteral(property.name)) {
+        name = factory.createStringLiteral(property.name.text);
+      } else {
+        return undefined;
+      }
+
+      const valueType = getStaticDefaultTypeNode(property.initializer, context);
+      if (!valueType) return undefined;
+
+      members.push(
+        factory.createPropertySignature(
+          undefined,
+          name,
+          undefined,
+          valueType,
+        ),
+      );
+    }
+    return factory.createTypeLiteralNode(members);
+  }
+
+  return undefined;
+}
+
+function toStringPath(
+  path: readonly PathSegment[],
+): readonly string[] | undefined {
+  const out: string[] = [];
+  for (const segment of path) {
+    if (typeof segment !== "string") {
+      return undefined;
+    }
+    out.push(segment);
+  }
+  return out;
+}
+
 function collectDestructureBindings(
   name: ts.BindingName,
   path: readonly PathSegment[],
   bindings: DestructureBinding[],
+  defaults: DefaultDestructureBinding[],
   unsupported: string[],
   context: TransformationContext,
 ): void {
@@ -243,10 +373,28 @@ function collectDestructureBindings(
       }
 
       if (element.initializer) {
-        unsupported.push(
-          "Default destructuring initializers are not lowerable in pattern context; move defaulting into computed().",
+        const defaultType = getStaticDefaultTypeNode(
+          element.initializer,
+          context,
         );
-        continue;
+        if (!defaultType) {
+          unsupported.push(
+            "Non-static destructuring initializers are not lowerable in pattern context; use a static literal default or move defaulting into computed().",
+          );
+          continue;
+        }
+
+        const defaultPath = toStringPath([...path, String(index)]);
+        if (!defaultPath) {
+          unsupported.push(
+            "Defaults on dynamic destructuring keys are not lowerable in pattern context; move defaulting into computed().",
+          );
+          continue;
+        }
+        defaults.push({
+          path: defaultPath,
+          defaultType,
+        });
       }
 
       const nextPath = [...path, String(index)];
@@ -262,6 +410,7 @@ function collectDestructureBindings(
         element.name,
         nextPath,
         bindings,
+        defaults,
         unsupported,
         context,
       );
@@ -273,13 +422,6 @@ function collectDestructureBindings(
     if (element.dotDotDotToken) {
       unsupported.push(
         "Rest destructuring is not lowerable in pattern context; avoid ...rest in pattern parameters.",
-      );
-      continue;
-    }
-
-    if (element.initializer) {
-      unsupported.push(
-        "Default destructuring initializers are not lowerable in pattern context; move defaulting into computed().",
       );
       continue;
     }
@@ -317,6 +459,31 @@ function collectDestructureBindings(
     }
 
     const nextPath = key === undefined ? path : [...path, key];
+    if (element.initializer) {
+      const defaultType = getStaticDefaultTypeNode(
+        element.initializer,
+        context,
+      );
+      if (!defaultType) {
+        unsupported.push(
+          "Non-static destructuring initializers are not lowerable in pattern context; use a static literal default or move defaulting into computed().",
+        );
+        continue;
+      }
+
+      const defaultPath = toStringPath(nextPath);
+      if (!defaultPath) {
+        unsupported.push(
+          "Defaults on dynamic destructuring keys are not lowerable in pattern context; move defaulting into computed().",
+        );
+        continue;
+      }
+      defaults.push({
+        path: defaultPath,
+        defaultType,
+      });
+    }
+
     if (ts.isIdentifier(element.name)) {
       bindings.push({
         localName: element.name.text,
@@ -337,6 +504,7 @@ function collectDestructureBindings(
       element.name,
       nextPath,
       bindings,
+      defaults,
       unsupported,
       context,
     );
@@ -404,16 +572,33 @@ function registerCapabilitySummary(
   callback: ts.ArrowFunction | ts.FunctionExpression,
   context: TransformationContext,
   interprocedural: boolean,
+  defaultsByParamName?: ReadonlyMap<string, readonly CapabilityParamDefault[]>,
 ): void {
   const registry = context.options.capabilitySummaryRegistry;
   if (!registry) return;
-  registry.set(
-    callback,
-    analyzeFunctionCapabilities(callback, {
-      checker: context.checker,
-      interprocedural,
+
+  const summary = analyzeFunctionCapabilities(callback, {
+    checker: context.checker,
+    interprocedural,
+  });
+
+  if (!defaultsByParamName || defaultsByParamName.size === 0) {
+    registry.set(callback, summary);
+    return;
+  }
+
+  registry.set(callback, {
+    params: summary.params.map((param) => {
+      const defaults = defaultsByParamName.get(param.name);
+      if (!defaults || defaults.length === 0) {
+        return param;
+      }
+      return {
+        ...param,
+        defaults,
+      };
     }),
-  );
+  });
 }
 
 function reportComputationError(
@@ -814,7 +999,9 @@ function transformPatternCallback(
   const firstParam = callback.parameters[0];
   const opaqueRoots = new Set<string>();
   const diagnostics: string[] = [];
+  const extractedDefaults: DefaultDestructureBinding[] = [];
   let hasUnsupportedDestructuring = false;
+  let summaryParamName: string | undefined;
 
   let updatedParameters = callback.parameters;
   let prologue: ts.Statement[] = [];
@@ -822,6 +1009,7 @@ function transformPatternCallback(
   if (firstParam) {
     if (ts.isIdentifier(firstParam.name)) {
       opaqueRoots.add(firstParam.name.text);
+      summaryParamName = firstParam.name.text;
     } else if (
       ts.isObjectBindingPattern(firstParam.name) ||
       ts.isArrayBindingPattern(firstParam.name)
@@ -831,6 +1019,7 @@ function transformPatternCallback(
         firstParam.name,
         [],
         bindings,
+        extractedDefaults,
         diagnostics,
         context,
       );
@@ -853,6 +1042,7 @@ function transformPatternCallback(
         firstParam.type,
         firstParam.initializer,
       );
+      summaryParamName = inputIdentifier.text;
 
       updatedParameters = factory.createNodeArray([
         rewrittenFirstParam,
@@ -905,6 +1095,20 @@ function transformPatternCallback(
     return callback;
   }
 
+  const defaultsByParamName = new Map<
+    string,
+    readonly CapabilityParamDefault[]
+  >();
+  if (summaryParamName && extractedDefaults.length > 0) {
+    defaultsByParamName.set(
+      summaryParamName,
+      extractedDefaults.map((entry) => ({
+        path: entry.path,
+        defaultType: entry.defaultType,
+      })),
+    );
+  }
+
   let body: ts.ConciseBody = callback.body;
   const expandedOpaqueRoots = collectOpaqueRootsFromBody(
     body,
@@ -937,7 +1141,12 @@ function transformPatternCallback(
       callback.equalsGreaterThanToken,
       body,
     );
-    registerCapabilitySummary(transformed, context, false);
+    registerCapabilitySummary(
+      transformed,
+      context,
+      false,
+      defaultsByParamName,
+    );
     return transformed;
   }
 
@@ -951,7 +1160,12 @@ function transformPatternCallback(
     callback.type,
     body as ts.Block,
   );
-  registerCapabilitySummary(transformed, context, false);
+  registerCapabilitySummary(
+    transformed,
+    context,
+    false,
+    defaultsByParamName,
+  );
   return transformed;
 }
 

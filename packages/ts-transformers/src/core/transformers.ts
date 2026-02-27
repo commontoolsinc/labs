@@ -19,6 +19,11 @@ export type ReactiveCapability =
   | "writeonly"
   | "writable";
 
+export interface CapabilityParamDefault {
+  readonly path: readonly string[];
+  readonly defaultType: ts.TypeNode;
+}
+
 export interface CapabilityParamSummary {
   readonly name: string;
   readonly capability: ReactiveCapability;
@@ -26,6 +31,7 @@ export interface CapabilityParamSummary {
   readonly writePaths: readonly (readonly string[])[];
   readonly passthrough: boolean;
   readonly wildcard: boolean;
+  readonly defaults?: readonly CapabilityParamDefault[];
 }
 
 export interface FunctionCapabilitySummary {
