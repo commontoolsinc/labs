@@ -35,6 +35,11 @@ interface Question {
   replies: Reply[];
 }
 
+interface SyncHealth {
+  consecutiveFailures: number;
+  minutesSinceSuccess: number;
+}
+
 interface StatusData {
   inboxCount: number;
   projectCount: number;
@@ -43,6 +48,7 @@ interface StatusData {
   lastSync: string;
   spaceName?: string;
   calendarPieceId?: string;
+  syncHealth?: SyncHealth;
 }
 
 interface InboxItem {
@@ -411,7 +417,22 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
       const newAdds = adds
         .filter((a: UserAction) => !existing.has((a.text || "").toLowerCase()) && !dels.has((a.text || "").toLowerCase()))
         .map((a: UserAction) => ({ id: "", name: (a.text || "").split(" ").map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(" "), status: "Active", childIds: [], parentId: "" } as Project));
-      return [...filtered, ...newAdds];
+      // Optimistic subproject adds: parse pending "Add subproject to X: Y" directives
+      const subAdds: Project[] = [];
+      const addedSubNames = new Set<string>();
+      for (const a of acts) {
+        if (a.type !== "directive") continue;
+        const m = (a.text || "").match(/^Add subproject to (.+): (.+)$/);
+        if (!m) continue;
+        const parentName = m[1].trim();
+        const subName = m[2].trim();
+        const parent = raw.find((p: Project) => p.name.toLowerCase() === parentName.toLowerCase());
+        if (!parent) continue;
+        if (existing.has(subName.toLowerCase()) || addedSubNames.has(subName.toLowerCase())) continue;
+        addedSubNames.add(subName.toLowerCase());
+        subAdds.push({ id: "", name: subName, status: "Active", childIds: [], parentId: parent.id } as Project);
+      }
+      return [...filtered, ...newAdds, ...subAdds];
     });
 
     const displayQuestions = computed(() => {
@@ -1123,16 +1144,30 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                   Calendar
                 </a>
                 <span
-                  style={{
-                    fontSize: "12px",
-                    color: color.tertiaryLabel,
-                    fontWeight: "400",
-                  }}
+                  style={computed(() => {
+                    const s = status.get();
+                    const health = s.syncHealth;
+                    const failures = health?.consecutiveFailures || 0;
+                    const minsStale = health?.minutesSinceSuccess || 0;
+                    let col = color.tertiaryLabel;
+                    if (minsStale > 15 || failures >= 3) col = "#FF3B30";
+                    else if (minsStale > 5) col = "#FF9500";
+                    return { fontSize: "12px", color: col, fontWeight: minsStale > 15 ? "600" : "400" };
+                  })}
                 >
                   {computed(() => {
                     const s = status.get();
                     const raw = s.lastSync;
                     if (!raw) return "";
+                    const health = s.syncHealth;
+                    const failures = health?.consecutiveFailures || 0;
+                    const minsStale = health?.minutesSinceSuccess || 0;
+                    if (minsStale > 15 || failures >= 3) {
+                      return `\u26A0 Last synced ${minsStale}m ago`;
+                    }
+                    if (minsStale > 5) {
+                      return `Synced ${minsStale}m ago`;
+                    }
                     const d = new Date(raw);
                     const days = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
                     const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
@@ -1165,11 +1200,7 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                     $value={dispatchDraft}
                     placeholder="What needs attention?"
                     rows={1}
-                    style={{
-                      flex: "1",
-                      borderRadius: "10px",
-                      fontSize: "14px",
-                    }}
+                    style="flex: 1; border-radius: 10px; font-size: 14px;"
                   />
                   <div
                     style={directiveSendBtnStyle}
@@ -1565,11 +1596,7 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                     $value={inboxDraft}
                     placeholder="Add to inbox..."
                     rows={1}
-                    style={{
-                      flex: "1",
-                      borderRadius: "10px",
-                      fontSize: "14px",
-                    }}
+                    style="flex: 1; border-radius: 10px; font-size: 14px;"
                   />
                   <div
                     style={{
@@ -1667,7 +1694,7 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                             $value={breadcrumbDirectiveDraft}
                             placeholder={"Directive about " + currentCrumb.name + "..."}
                             rows={1}
-                            style={{ flex: "1", borderRadius: "10px", fontSize: "14px" }}
+                            style="flex: 1; border-radius: 10px; font-size: 14px;"
                           />
                           <div style={directiveSendBtnStyle} onClick={sendBreadcrumbDirective}>
                             Send
@@ -1816,12 +1843,7 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                         >
                           <ct-checkbox
                             checked={false}
-                            style={{
-                              width: "15px",
-                              height: "15px",
-                              flexShrink: "0",
-                              cursor: "pointer",
-                            }}
+                            style="width: 15px; height: 15px; flex-shrink: 0; cursor: pointer;"
                             onClick={() => markItemDone.send({ key: "actions:" + item.idx })}
                           />
                           {a.context ? (
@@ -2003,7 +2025,7 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                   );
                   return (
                     <div style={{ display: "flex", gap: "8px", marginTop: "10px", alignItems: "center" }}>
-                      <ct-textarea $value={addItemDraft} placeholder={placeholder} rows={1} style={{ flex: "1", borderRadius: "10px", fontSize: "14px" }} />
+                      <ct-textarea $value={addItemDraft} placeholder={placeholder} rows={1} style="flex: 1; border-radius: 10px; font-size: 14px;" />
                       <div style={{ padding: "7px 16px", borderRadius: "100px", fontSize: "13px", fontWeight: "600", background: color.blue, color: "#fff", cursor: "pointer", flexShrink: "0" }} onClick={sendAddItem}>Add</div>
                       <div style={{ padding: "7px 10px", borderRadius: "100px", fontSize: "13px", color: color.secondaryLabel, cursor: "pointer", flexShrink: "0" }} onClick={() => { addItemOpen.set(false); addItemDraft.set(""); }}>Cancel</div>
                     </div>
@@ -2064,7 +2086,7 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                             $value={breadcrumbDirectiveDraft}
                             placeholder={"Directive about " + currentCrumb.name + "..."}
                             rows={1}
-                            style={{ flex: "1", borderRadius: "10px", fontSize: "14px" }}
+                            style="flex: 1; border-radius: 10px; font-size: 14px;"
                           />
                           <div style={directiveSendBtnStyle} onClick={sendBreadcrumbDirective}>
                             Send
@@ -2243,7 +2265,7 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                               <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "5px 0 5px 12px", borderBottom: `0.5px solid ${color.separator}` }}>
                                 <ct-checkbox
                                   checked={false}
-                                  style={{ width: "15px", height: "15px", flexShrink: "0", cursor: "pointer" }}
+                                  style="width: 15px; height: 15px; flex-shrink: 0; cursor: pointer;"
                                   onClick={() => markItemDone.send({ key: "actions:" + origIdx })}
                                 />
                                 {a.context ? (
@@ -2305,7 +2327,7 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                   const placeholder = inPersonView ? (itype === "action" ? "New action..." : (inProjectView ? "New subproject..." : "New project for this person...")) : "New person...";
                   return (
                     <div style={{ display: "flex", gap: "8px", marginTop: "10px", alignItems: "center" }}>
-                      <ct-textarea $value={addItemDraft} placeholder={placeholder} rows={1} style={{ flex: "1", borderRadius: "10px", fontSize: "14px" }} />
+                      <ct-textarea $value={addItemDraft} placeholder={placeholder} rows={1} style="flex: 1; border-radius: 10px; font-size: 14px;" />
                       <div style={{ padding: "7px 16px", borderRadius: "100px", fontSize: "13px", fontWeight: "600", background: color.blue, color: "#fff", cursor: "pointer", flexShrink: "0" }} onClick={sendAddItem}>Add</div>
                       <div style={{ padding: "7px 10px", borderRadius: "100px", fontSize: "13px", color: color.secondaryLabel, cursor: "pointer", flexShrink: "0" }} onClick={() => { addItemOpen.set(false); addItemDraft.set(""); addItemType.set(""); }}>Cancel</div>
                     </div>
@@ -2561,7 +2583,7 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                   );
                   return (
                     <div style={{ display: "flex", gap: "8px", marginTop: "10px", alignItems: "center" }}>
-                      <ct-textarea $value={addItemDraft} placeholder={placeholder} rows={1} style={{ flex: "1", borderRadius: "10px", fontSize: "14px" }} />
+                      <ct-textarea $value={addItemDraft} placeholder={placeholder} rows={1} style="flex: 1; border-radius: 10px; font-size: 14px;" />
                       <div style={{ padding: "7px 16px", borderRadius: "100px", fontSize: "13px", fontWeight: "600", background: color.blue, color: "#fff", cursor: "pointer", flexShrink: "0" }} onClick={sendAddItem}>Add</div>
                       <div style={{ padding: "7px 10px", borderRadius: "100px", fontSize: "13px", color: color.secondaryLabel, cursor: "pointer", flexShrink: "0" }} onClick={() => { addItemOpen.set(false); addItemDraft.set(""); }}>Cancel</div>
                     </div>
@@ -2580,7 +2602,7 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
             return (
               <div style={{ padding: "0 16px", marginBottom: "8px" }}>
                 <div style={directiveInputRowStyle}>
-                  <ct-textarea $value={itemDirectiveDraft} placeholder="Directive about this item..." rows={1} style={{ flex: "1", borderRadius: "10px", fontSize: "14px" }} />
+                  <ct-textarea $value={itemDirectiveDraft} placeholder="Directive about this item..." rows={1} style="flex: 1; border-radius: 10px; font-size: 14px;" />
                   <div style={directiveSendBtnStyle} onClick={sendItemDirective}>Send</div>
                 </div>
               </div>
@@ -2949,10 +2971,7 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
                 $value={draftAnswer}
                 placeholder="Type your answer..."
                 rows={3}
-                style={{
-                  borderRadius: "10px",
-                  marginBottom: "10px",
-                }}
+                style="border-radius: 10px; margin-bottom: 10px;"
               />
               <div
                 style={{

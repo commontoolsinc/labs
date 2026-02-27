@@ -674,7 +674,7 @@ const GTDProjects = pattern<ProjectsInput, ProjectsOutput>(
                         return current ? "Directive about " + current.name + "..." : "Directive...";
                       })}
                       rows={1}
-                      style={{ flex: "1", borderRadius: "10px", fontSize: "14px" }}
+                      style="flex: 1; border-radius: 10px; font-size: 14px;"
                     />
                     <div style={directiveSendBtnStyle} onClick={sendBreadcrumbDirective}>
                       Send
@@ -727,12 +727,7 @@ const GTDProjects = pattern<ProjectsInput, ProjectsOutput>(
                     >
                       <ct-checkbox
                         checked={false}
-                        style={{
-                          width: "15px",
-                          height: "15px",
-                          flexShrink: "0",
-                          cursor: "pointer",
-                        }}
+                        style="width: 15px; height: 15px; flex-shrink: 0; cursor: pointer;"
                         onClick={() => markItemDone.send({ key: "actions:" + item.idx })}
                       />
                       {a.context ? (
@@ -939,7 +934,7 @@ const GTDProjects = pattern<ProjectsInput, ProjectsOutput>(
                     return crumbs.length > 0 ? "New subproject..." : "New project...";
                   })}
                   rows={1}
-                  style={{ flex: "1", borderRadius: "10px", fontSize: "14px" }}
+                  style="flex: 1; border-radius: 10px; font-size: 14px;"
                 />
                 <div style={{ padding: "7px 16px", borderRadius: "100px", fontSize: "13px", fontWeight: "600", background: color.blue, color: "#fff", cursor: "pointer", flexShrink: "0" }} onClick={sendAddItem}>Add</div>
                 <div style={{ padding: "7px 10px", borderRadius: "100px", fontSize: "13px", color: color.secondaryLabel, cursor: "pointer", flexShrink: "0" }} onClick={() => { addItemOpen.set(false); addItemDraft.set(""); }}>Cancel</div>

@@ -149,11 +149,7 @@ const GTDWishes = pattern<WishesInput, WishesOutput>(({ directives }) => {
             $value={commandDraft}
             placeholder="What's your wish?"
             rows={2}
-            style={{
-              width: "100%",
-              borderRadius: "10px",
-              fontSize: "14px",
-            }}
+            style="width: 100%; border-radius: 10px; font-size: 14px;"
           />
           <div
             style={{
