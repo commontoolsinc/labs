@@ -391,9 +391,25 @@ async function refreshAuthToken(
 
 // Handler for refreshing OAuth tokens from UI button
 // Must be at module scope, not inside pattern
-const handleRefresh = handler<unknown, { auth: Writable<Auth> }>(
-  async (_event, { auth }) => {
-    await refreshAuthToken(auth);
+const handleRefresh = handler<
+  unknown,
+  {
+    auth: Writable<Auth>;
+    refreshing: Writable<boolean>;
+    refreshFailed: Writable<boolean>;
+  }
+>(
+  async (_event, { auth, refreshing, refreshFailed }) => {
+    refreshing.set(true);
+    refreshFailed.set(false);
+    try {
+      await refreshAuthToken(auth);
+      refreshing.set(false);
+      refreshFailed.set(false);
+    } catch {
+      refreshing.set(false);
+      refreshFailed.set(true);
+    }
   },
 );
 
@@ -554,6 +570,10 @@ export default pattern<Input, Output>(
     // Avoids creating computed() inside .map() loop
     // See: community-docs/superstitions/2025-12-16-expensive-computation-inside-map-jsx.md
     const checkboxesDisabled = computed(() => !!auth?.user?.email);
+
+    // UI feedback state for token refresh
+    const refreshing = Writable.of(false);
+    const refreshFailed = Writable.of(false);
 
     // Pre-compute the scopes string for display
     const scopesDisplay = computed(() => scopes.join(", "));
@@ -819,20 +839,33 @@ export default pattern<Input, Output>(
                 </p>
                 <button
                   type="button"
-                  onClick={handleRefresh({ auth })}
+                  onClick={handleRefresh({ auth, refreshing, refreshFailed })}
+                  disabled={refreshing}
                   style={{
                     padding: "10px 20px",
-                    backgroundColor: "#3b82f6",
+                    backgroundColor: refreshing ? "#93c5fd" : "#3b82f6",
                     color: "white",
                     border: "none",
                     borderRadius: "6px",
-                    cursor: "pointer",
+                    cursor: refreshing ? "not-allowed" : "pointer",
                     fontWeight: "500",
                     fontSize: "14px",
                   }}
                 >
-                  Refresh Token
+                  {refreshing ? "Refreshing..." : "Refresh Token"}
                 </button>
+                {refreshFailed && (
+                  <p
+                    style={{
+                      margin: "8px 0 0 0",
+                      fontSize: "13px",
+                      color: "#dc2626",
+                      fontWeight: "500",
+                    }}
+                  >
+                    Refresh failed — try signing in again below.
+                  </p>
+                )}
               </div>
             )}
 
@@ -899,19 +932,20 @@ export default pattern<Input, Output>(
                   </div>
                   <button
                     type="button"
-                    onClick={handleRefresh({ auth })}
+                    onClick={handleRefresh({ auth, refreshing, refreshFailed })}
+                    disabled={refreshing}
                     style={{
                       padding: "8px 16px",
-                      backgroundColor: "#0ea5e9",
+                      backgroundColor: refreshing ? "#7dd3fc" : "#0ea5e9",
                       color: "white",
                       border: "none",
                       borderRadius: "6px",
-                      cursor: "pointer",
+                      cursor: refreshing ? "not-allowed" : "pointer",
                       fontWeight: "500",
                       fontSize: "13px",
                     }}
                   >
-                    Refresh Now
+                    {refreshing ? "Refreshing..." : "Refresh Now"}
                   </button>
                 </div>
               </div>
