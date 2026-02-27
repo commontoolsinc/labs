@@ -533,8 +533,8 @@ async function resolvePreparedWriteSchemas(
   options: PrepareBoundaryCommitOptions,
 ): Promise<PreparedWriteSchema[]> {
   const prepared: PreparedWriteSchema[] = [];
-  const schemaHashCache = new WeakMap<object, string>();
-  const labelsCache = new WeakMap<object, Record<string, Labels>>();
+  const schemaHashCache = new Map<JSONSchema, string>();
+  const labelsCache = new Map<JSONSchema, Record<string, Labels>>();
 
   for (const entity of writtenEntities) {
     const schema = getCfcWriteSchemaContext(tx, {
@@ -545,16 +545,16 @@ async function resolvePreparedWriteSchemas(
       continue;
     }
 
-    let actualSchemaHash = schemaHashCache.get(schema as object);
+    let actualSchemaHash = schemaHashCache.get(schema);
     if (!actualSchemaHash) {
       actualSchemaHash = await resolvePreparedSchemaHash(schema);
-      schemaHashCache.set(schema as object, actualSchemaHash);
+      schemaHashCache.set(schema, actualSchemaHash);
     }
 
-    let labels = labelsCache.get(schema as object);
+    let labels = labelsCache.get(schema);
     if (!labels) {
       labels = computePreparedLabels(schema);
-      labelsCache.set(schema as object, labels);
+      labelsCache.set(schema, labels);
     }
 
     const existingSchemaHash = tx.readOrThrow(schemaHashAddress(entity), {

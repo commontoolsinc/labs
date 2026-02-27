@@ -357,17 +357,23 @@ function annotateWithBackToCellSymbols(
 function readIfcInputAnnotations(
   schema: JSONSchema | undefined,
 ): ICfcReadAnnotations | undefined {
-  if (!isObject(schema) || !isObject(schema.ifc)) {
+  const resolvedSchema = resolveSchema(schema);
+  const schemaWithIfc = isObject(resolvedSchema) && isObject(resolvedSchema.ifc)
+    ? resolvedSchema
+    : isObject(schema) && isObject(schema.ifc)
+    ? schema
+    : undefined;
+  if (!schemaWithIfc) {
     return undefined;
   }
-  const rawMaxConfidentiality = (schema.ifc as Record<string, unknown>)
+  const rawMaxConfidentiality = (schemaWithIfc.ifc as Record<string, unknown>)
     .maxConfidentiality;
   const maxConfidentiality = Array.isArray(rawMaxConfidentiality)
     ? rawMaxConfidentiality.filter(
       (entry): entry is string => typeof entry === "string" && entry.length > 0,
     )
     : [];
-  const rawRequiredIntegrity = (schema.ifc as Record<string, unknown>)
+  const rawRequiredIntegrity = (schemaWithIfc.ifc as Record<string, unknown>)
     .requiredIntegrity;
   const requiredIntegrity = Array.isArray(rawRequiredIntegrity)
     ? rawRequiredIntegrity.filter(

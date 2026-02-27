@@ -19,10 +19,29 @@ const maxConfidentialSchema = {
   },
 } as const satisfies JSONSchema;
 
+const maxConfidentialViaRefSchema = {
+  $ref: "#/$defs/BoundedNumber",
+  $defs: {
+    BoundedNumber: {
+      type: "number",
+      ifc: {
+        maxConfidentiality: ["confidential"],
+      },
+    },
+  },
+} as const satisfies JSONSchema;
+
 const requiredIntegritySchema = {
   type: "number",
   ifc: {
     requiredIntegrity: ["trusted-source"],
+  },
+} as const satisfies JSONSchema;
+
+const secretOutputSchema = {
+  type: "number",
+  ifc: {
+    classification: ["secret"],
   },
 } as const satisfies JSONSchema;
 
@@ -152,6 +171,42 @@ describe("CFC prepare input requirements", () => {
       sourceCell.withTx(tx).asSchema(maxConfidentialSchema).get() ?? 0,
     );
     targetCell.withTx(tx).set(value + 1);
+
+    let thrown: unknown;
+    try {
+      await prepareCfcCommitIfNeeded(tx);
+    } catch (error) {
+      thrown = error;
+    }
+    tx.abort(thrown);
+
+    expect((thrown as { name?: string } | undefined)?.name).toBe(
+      "CfcInputRequirementViolationError",
+    );
+    expect(
+      (thrown as { requirement?: string } | undefined)?.requirement,
+    ).toBe("maxConfidentiality");
+  });
+
+  it("enforces maxConfidentiality when IFC annotations are provided through $ref", async () => {
+    const sourceId = runtime.getCell(space, "cfc-input-maxconf-ref-reject-source")
+      .getAsNormalizedFullLink().id;
+    await seedInputWithClassification(sourceId, 1, "secret");
+
+    const tx = runtime.edit();
+    const sourceCell = runtime.getCell<number>(
+      space,
+      "cfc-input-maxconf-ref-reject-source",
+    );
+    const targetCell = runtime.getCell<number>(
+      space,
+      "cfc-input-maxconf-ref-reject-target",
+    );
+
+    const value = Number(
+      sourceCell.withTx(tx).asSchema(maxConfidentialViaRefSchema).get() ?? 0,
+    );
+    targetCell.withTx(tx).asSchema(secretOutputSchema).set(value + 1);
 
     let thrown: unknown;
     try {
