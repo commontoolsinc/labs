@@ -493,7 +493,9 @@ const GTDDashboard = pattern<DashboardInput, DashboardOutput>(
       addItemOpen.set(false);
       addItemDraft.set("");
       addItemType.set("");
-      if (panel !== "things") thingsBreadcrumbs.set([]);
+      if (panel === "projects") projectBreadcrumbs.set([]);
+      if (panel === "people") peopleBreadcrumbs.set([]);
+      if (panel === "things") thingsBreadcrumbs.set([]);
     });
 
     const addInboxItem = action(() => {
