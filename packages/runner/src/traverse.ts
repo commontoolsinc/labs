@@ -137,20 +137,20 @@ function stableStringify(value: unknown): string {
  * A data structure that maps keys to sets of values, allowing multiple values
  * to be associated with a single key without duplication.
  *
- * When an `equalFn` is provided, values are deduped using a canonical hash
- * (stableStringify with WeakMap identity cache) for O(1) add/hasValue instead
- * of O(n) linear scans with deepEqual. The hash path uses sorted object keys
- * so structurally-equal values always produce the same hash.
+ * When `useStableStringify` is true, values are deduped using a canonical hash
+ * (stableStringify with WeakMap identity cache) for O(1) add/hasValue.
+ * The hash path uses sorted object keys, so structurally-equal values always
+ * produce the same hash.
  *
- * When no `equalFn` is provided, values are stored in a plain Set using
+ * When `useStableStringify` is false, values are stored in a plain Set using
  * reference equality.
  *
  * @template K The type of keys in the map
  * @template V The type of values stored in the sets
  */
 export class MapSet<K, V> {
-  // When equalFn is provided, use hash-based dedup: key → (hash → value)
-  // When not, use plain Set: key → Set<value>
+  // When useStableStringify is true, use hash-based dedup: key → (hash → value)
+  // When false, use plain Set: key → Set<value>
   private hashMap?: Map<K, Map<string, V>>;
   private setMap?: Map<K, Set<V>>;
 
@@ -158,8 +158,8 @@ export class MapSet<K, V> {
   deepEqualCalls = 0;
   deepEqualMs = 0;
 
-  constructor(equalFn?: (a: V, b: V) => boolean) {
-    if (equalFn !== undefined) {
+  constructor(useStableStringify = false) {
+    if (useStableStringify) {
       this.hashMap = new Map();
     } else {
       this.setMap = new Map();
@@ -304,7 +304,7 @@ export class CycleTracker<K> {
  *
  * This will not work correctly if the key is modified after being added.
  */
-export class CompoundCycleTracker<EqualKey, DeepEqualKey, Value = unknown> {
+export class CompoundCycleTracker<EqualKey, ExtraKey, Value = unknown> {
   // partialKey (identity) → Map<hash(extraKey), Value?>
   private partial: Map<EqualKey, Map<string, Value | undefined>>;
   constructor() {
@@ -318,7 +318,7 @@ export class CompoundCycleTracker<EqualKey, DeepEqualKey, Value = unknown> {
    */
   include(
     partialKey: EqualKey,
-    extraKey: DeepEqualKey,
+    extraKey: ExtraKey,
     value?: Value,
     _context?: unknown,
   ): Disposable | null {
@@ -346,7 +346,7 @@ export class CompoundCycleTracker<EqualKey, DeepEqualKey, Value = unknown> {
   }
 
   // After a failed include (that returns null), we can use getExisting to find the registered value
-  getExisting(partialKey: EqualKey, extraKey: DeepEqualKey): Value | undefined {
+  getExisting(partialKey: EqualKey, extraKey: ExtraKey): Value | undefined {
     const existing = this.partial.get(partialKey);
     if (existing === undefined) {
       return undefined;
@@ -585,7 +585,7 @@ export abstract class BaseObjectTraverser {
     protected schemaTracker: MapSet<string, SchemaPathSelector> = new MapSet<
       string,
       SchemaPathSelector
-    >(deepEqual),
+    >(true),
     protected cfc: ContextualFlowControl = new ContextualFlowControl(),
     public objectCreator: IObjectCreator<StorableDatum> =
       new StandardObjectCreator(),
@@ -1663,7 +1663,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     schemaTracker: MapSet<string, SchemaPathSelector> = new MapSet<
       string,
       SchemaPathSelector
-    >(deepEqual),
+    >(true),
     cfc: ContextualFlowControl = new ContextualFlowControl(),
     objectCreator?: IObjectCreator<V>,
     traverseCells?: boolean,

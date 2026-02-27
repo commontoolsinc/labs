@@ -1,6 +1,5 @@
 import {
   ContextualFlowControl,
-  deepEqual,
   type JSONObject,
   type JSONSchema,
 } from "@commontools/runner";
@@ -218,7 +217,7 @@ export const selectSchema = <Space extends MemorySpace>(
   const cfc = new ContextualFlowControl();
   // Use existing tracker if provided, otherwise create new one
   const schemaTracker = existingSchemaTracker ??
-    new MapSet<string, SchemaPathSelector>(deepEqual);
+    new MapSet<string, SchemaPathSelector>(true);
   // Shared memo cache across all loadFactsForDoc calls in this query.
   // Since the traversal only discovers linked docs (populating schemaTracker),
   // memoizing across docs is safe — same doc+path+schema always produces
