@@ -205,6 +205,10 @@ function debugLog(enabled: boolean, ...args: unknown[]) {
  * Handler for one-click token refresh from the expired UI.
  * Calls the google-auth piece's refreshToken stream and updates local state.
  */
+// Timeout (in ms) to reset refreshing state, since stream.send() is
+// fire-and-forget and we won't get a completion callback.
+const REFRESH_TIMEOUT_MS = 10_000;
+
 const attemptRefresh = handler<
   unknown,
   {
@@ -213,28 +217,22 @@ const attemptRefresh = handler<
     refreshing: Writable<boolean>;
     refreshFailed: Writable<boolean>;
   }
->(async (_event, { refreshStream, refreshing, refreshFailed }) => {
+>((_event, { refreshStream, refreshing, refreshFailed }) => {
   if (!refreshStream?.send) {
     refreshFailed.set(true);
     return;
   }
   refreshing.set(true);
   refreshFailed.set(false);
-  try {
-    await new Promise<void>((resolve, reject) => {
-      // deno-lint-ignore no-explicit-any
-      (refreshStream.send as any)({}, (tx: any) => {
-        const status = tx?.status?.();
-        if (status?.status === "done") resolve();
-        else if (status?.status === "error") reject(new Error(status.error));
-        else resolve();
-      });
-    });
-  } catch {
-    refreshFailed.set(true);
-  } finally {
+
+  // Fire-and-forget: the handler on the other side (refreshTokenHandler in
+  // google-auth) is async and the stream infrastructure handles execution.
+  refreshStream.send({});
+
+  // Reset refreshing state after a timeout since we have no completion signal.
+  setTimeout(() => {
     refreshing.set(false);
-  }
+  }, REFRESH_TIMEOUT_MS);
 });
 
 // =============================================================================

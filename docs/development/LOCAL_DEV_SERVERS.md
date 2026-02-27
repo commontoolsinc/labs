@@ -197,13 +197,21 @@ If you prefer manual control:
 # 1. Ensure toolshed is running (uses "implicit trust" identity in dev mode)
 ./scripts/restart-local-dev.sh
 
-# 2. Set up admin charm (grants bg-service access to system space)
+# 2. Start the background service from source
 cd packages/background-charm-service
-OPERATOR_PASS="implicit trust" API_URL="http://localhost:8000" deno task add-admin-charm
-
-# 3. Start the background service from source
 OPERATOR_PASS="implicit trust" API_URL="http://localhost:8000" deno task start
 ```
+
+> **Optional:** The `add-admin-charm` task deploys an admin dashboard piece
+> into the system space. It is **not** required for normal background-service
+> operation -- the system space cell is bootstrapped automatically by
+> `setBGCharm()` during the OAuth callback when a piece is first registered.
+> Run it only if you want the admin dashboard:
+>
+> ```bash
+> cd packages/background-charm-service
+> OPERATOR_PASS="implicit trust" API_URL="http://localhost:8000" deno task add-admin-charm
+> ```
 
 ### Registering a Piece for Background Updates
 
@@ -230,7 +238,7 @@ Or use the `<ct-updater>` component in your piece's UI.
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | `CompilerError: no exported member 'pattern'` | Binary version mismatch | Run `deno task build-binaries` |
-| `AuthorizationError` on system space | Admin charm not set up | Run `add-admin-charm` step |
+| `AuthorizationError` on system space | System space not yet bootstrapped | Register a piece (e.g., via OAuth) to auto-create it, or run optional `add-admin-charm` |
 | Piece not polling | Not registered | Register via `/api/integrations/bg` |
 
 See `packages/background-charm-service/CLAUDE.md` for more details.

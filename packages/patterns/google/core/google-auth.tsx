@@ -346,20 +346,6 @@ interface Output {
   bgUpdater: Stream<unknown>;
 }
 
-// Handler for toggling scope selection
-const toggleScope = handler<
-  { target: { checked: boolean } },
-  { selectedScopes: Writable<SelectedScopes>; scopeKey: string }
->(
-  ({ target }, { selectedScopes, scopeKey }) => {
-    const current = selectedScopes.get();
-    selectedScopes.set({
-      ...current,
-      [scopeKey]: target.checked,
-    });
-  },
-);
-
 /**
  * Shared token refresh logic. Calls the server refresh endpoint and updates
  * the auth cell with new token data. Throws on failure.
@@ -385,7 +371,11 @@ async function refreshAuthToken(
 
   if (!res.ok) {
     const errorText = await res.text();
-    throw new Error(`Token refresh failed: ${res.status} ${errorText}`);
+    const error = new Error(
+      `Token refresh failed: ${res.status} ${errorText}`,
+    ) as Error & { status: number };
+    error.status = res.status;
+    throw error;
   }
 
   const json = await res.json();
@@ -476,15 +466,25 @@ const bgRefreshHandler = handler<unknown, { auth: Writable<Auth> }>(
       await refreshAuthToken(auth);
       console.log("[google-auth bgUpdater] Token refreshed successfully");
     } catch (e) {
+      const status = (e as { status?: number }).status;
       const msg = e instanceof Error ? e.message : String(e);
-      // Permanent failures (revoked token, invalid grant) — clear the token
-      // so the UI shows "expired" state instead of silently retrying forever
-      if (msg.includes("400") || msg.includes("401")) {
+      // Permanent failures (revoked token, invalid grant) — clear auth entirely
+      // so the UI shows "not authenticated" instead of silently retrying forever.
+      // 400 = invalid_grant, 401 = invalid credentials, 403 = token revoked
+      if (status === 400 || status === 401 || status === 403) {
         console.error(
-          "[google-auth bgUpdater] Permanent refresh failure, clearing token:",
+          "[google-auth bgUpdater] Permanent refresh failure, clearing auth:",
           msg,
         );
-        auth.update({ ...currentAuth, token: "", expiresAt: 0 });
+        auth.set({
+          token: "",
+          tokenType: "",
+          scope: [],
+          expiresIn: 0,
+          expiresAt: 0,
+          refreshToken: "",
+          user: { email: "", name: "", picture: "" },
+        });
       } else {
         // Transient failure (network, 5xx) — log and retry next cycle
         console.error(
@@ -730,13 +730,12 @@ export default pattern<Input, Output>(
                     color: loggedIn ? "#9ca3af" : "inherit",
                   }}
                 >
-                  <input
-                    type="checkbox"
-                    checked={selectedScopes[key as keyof SelectedScopes]}
-                    onChange={toggleScope({ selectedScopes, scopeKey: key })}
+                  <ct-checkbox
+                    $checked={selectedScopes[key as keyof SelectedScopes]}
                     disabled={checkboxesDisabled}
-                  />
-                  <span>{description}</span>
+                  >
+                    {description}
+                  </ct-checkbox>
                 </label>
               ))}
             </div>
