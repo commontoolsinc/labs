@@ -1302,6 +1302,11 @@ Deno.test("Standalone Function Validation", async (t) => {
         true,
         "Error should mention .map()",
       );
+      assertEquals(
+        errors[0]!.message.includes(".get().map(...)"),
+        true,
+        "Error should suggest explicit .get().map(...) workaround",
+      );
     },
   );
 

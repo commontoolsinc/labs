@@ -538,7 +538,8 @@ export class PatternContextValidationTransformer extends Transformer {
                   message:
                     `.map() on reactive types is not allowed inside standalone functions. ` +
                     `Standalone functions cannot capture reactive closures. ` +
-                    `Move the .map() call to the pattern body, or use patternTool() to enable automatic closure capture.`,
+                    `Move the .map() call to the pattern body, or use patternTool() to enable automatic closure capture. ` +
+                    `If this is an explicit Cell/Writable value and eager mapping is acceptable, use <cell>.get().map(...).`,
                   node,
                 });
                 return;
