@@ -887,6 +887,10 @@ const swap = <Space extends MemorySpace>(
     // it as a conflict as current state is the asserted one.
     // Use stored fact hash directly instead of recomputing with refer().
     if (revision?.fact !== fact) {
+      if (of.startsWith("blob:") && imported === 0) {
+        // TODO(@ubik2): Verify stored blob content matches the blob URI hash.
+        return;
+      }
       // Disable including history tracking for performance.
       // Re-enable this if you need to debug cause chains.
       const revisions: Revision<Fact>[] = [];

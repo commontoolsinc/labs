@@ -52,6 +52,7 @@ import { resolve } from "./storage/transaction/attestation.ts";
 import { isWriteRedirectLink } from "./link-types.ts";
 import { LastNode } from "./link-resolution.ts";
 import type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
+import { cfcSchemaBlobAddress } from "./cfc/schema-blob.ts";
 
 const logger = getLogger("traverse", { enabled: true, level: "warn" });
 
@@ -1205,6 +1206,7 @@ export function loadSource(
   cycleCheck: Set<string> = new Set<string>(),
   schemaTracker: MapSet<string, SchemaPathSelector>,
 ) {
+  loadSchemaBlobForEntry(tx, valueEntry, schemaTracker);
   loadLinkedPattern(tx, valueEntry, schemaTracker);
   if (!isObject(valueEntry.value)) {
     return;
@@ -1249,6 +1251,32 @@ export function loadSource(
   // We've lost the space from our address in the tx.read, so recreate
   const fullEntry = { address: address, value: entry.value };
   loadSource(tx, fullEntry, cycleCheck, schemaTracker);
+}
+
+function loadSchemaBlobForEntry(
+  tx: IExtendedStorageTransaction,
+  valueEntry: IMemorySpaceAttestation,
+  schemaTracker: MapSet<string, SchemaPathSelector>,
+) {
+  if (!isObject(valueEntry.value)) {
+    return;
+  }
+  const doc = valueEntry.value as Immutable<JSONObject>;
+  const cfc = doc["cfc"];
+  if (!isObject(cfc) || Array.isArray(cfc)) {
+    return;
+  }
+  const schemaHash = (cfc as Record<string, unknown>)["schemaHash"];
+  if (!isString(schemaHash) || schemaHash.length === 0) {
+    return;
+  }
+
+  const address = cfcSchemaBlobAddress(valueEntry.address.space, schemaHash);
+  const { ok: entry, error } = tx.read(address);
+  if (error || entry === null || entry.value === undefined) {
+    return;
+  }
+  schemaTracker.add(getTrackerKey(address), { path: [], schema: false });
 }
 
 // With unified traversal code, we don't need to worry about the server
