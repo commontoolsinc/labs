@@ -10,6 +10,8 @@ source "$SCRIPT_DIR/common/port-utils.sh"
 PORT_OFFSET=${PORT_OFFSET:-0}
 SHELL_PORT=${SHELL_PORT:-}
 TOOLSHED_PORT=${TOOLSHED_PORT:-}
+INSPECT=false
+INSPECT_PORT=${INSPECT_PORT:-}
 
 # Parse command line arguments
 FORCE=false
@@ -27,6 +29,20 @@ while [[ $# -gt 0 ]]; do
             ;;
         --bg-updater)
             BG_UPDATER=true
+            shift
+            ;;
+        --inspect)
+            INSPECT=true
+            shift
+            ;;
+        --inspect-port)
+            INSPECT=true
+            INSPECT_PORT="$2"
+            shift 2
+            ;;
+        --inspect-port=*)
+            INSPECT=true
+            INSPECT_PORT="${1#*=}"
             shift
             ;;
         --port-offset)
@@ -62,6 +78,7 @@ done
 # Apply offset to default ports if not explicitly set
 SHELL_PORT=${SHELL_PORT:-$((5173 + PORT_OFFSET))}
 TOOLSHED_PORT=${TOOLSHED_PORT:-$((8000 + PORT_OFFSET))}
+INSPECT_PORT=${INSPECT_PORT:-$((9229 + PORT_OFFSET))}
 
 # Export for child processes
 export SHELL_PORT
@@ -110,8 +127,12 @@ WATCH_FLAG=""
 if [[ "$WATCH" == "true" ]]; then
     WATCH_FLAG="--watch"
 fi
+INSPECT_FLAG=""
+if [[ "$INSPECT" == "true" ]]; then
+    INSPECT_FLAG="--inspect=127.0.0.1:$INSPECT_PORT"
+fi
 SHELL_URL="http://localhost:$SHELL_PORT" \
-    deno run --unstable-otel -A $WATCH_FLAG --env-file=.env index.ts --port="$TOOLSHED_PORT" > local-dev-toolshed.log 2>&1 &
+    deno run --unstable-otel -A $INSPECT_FLAG $WATCH_FLAG --env-file=.env index.ts --port="$TOOLSHED_PORT" > local-dev-toolshed.log 2>&1 &
 TOOLSHED_PID=$!
 
 # # Function to cleanup background processes
@@ -131,6 +152,9 @@ if [[ "$BG_UPDATER" != "true" ]]; then
     echo "Development servers started successfully!"
     echo "  Shell:    http://localhost:$SHELL_PORT"
     echo "  Toolshed: http://localhost:$TOOLSHED_PORT"
+    if [[ "$INSPECT" == "true" ]]; then
+        echo "  Inspect:  127.0.0.1:$INSPECT_PORT"
+    fi
     if [[ "$PORT_OFFSET" -ne 0 ]]; then
         echo "  Offset:   $PORT_OFFSET"
     fi
@@ -189,6 +213,9 @@ if [[ "$BG_UPDATER" == "true" ]]; then
     echo "Development servers started successfully!"
     echo "  Shell:    http://localhost:$SHELL_PORT"
     echo "  Toolshed: http://localhost:$TOOLSHED_PORT"
+    if [[ "$INSPECT" == "true" ]]; then
+        echo "  Inspect:  127.0.0.1:$INSPECT_PORT"
+    fi
     if [[ "$PORT_OFFSET" -ne 0 ]]; then
         echo "  Offset:   $PORT_OFFSET"
     fi

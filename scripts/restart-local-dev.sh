@@ -7,6 +7,8 @@ cd "$SCRIPT_DIR/.."
 PORT_OFFSET=${PORT_OFFSET:-0}
 SHELL_PORT=${SHELL_PORT:-}
 TOOLSHED_PORT=${TOOLSHED_PORT:-}
+INSPECT=false
+INSPECT_PORT=${INSPECT_PORT:-}
 
 # Parse command line arguments
 CLEAR_CACHE=false
@@ -36,6 +38,20 @@ while [[ $# -gt 0 ]]; do
             BG_UPDATER=true
             shift
             ;;
+        --inspect)
+            INSPECT=true
+            shift
+            ;;
+        --inspect-port)
+            INSPECT=true
+            INSPECT_PORT="$2"
+            shift 2
+            ;;
+        --inspect-port=*)
+            INSPECT=true
+            INSPECT_PORT="${1#*=}"
+            shift
+            ;;
         --port-offset)
             PORT_OFFSET="$2"
             shift 2
@@ -62,7 +78,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: $0 [--clear-cache] [--dangerously-clear-all-spaces] [--force] [--watch] [--bg-updater] [--port-offset N] [--shell-port PORT] [--toolshed-port PORT]"
+            echo "Usage: $0 [--clear-cache] [--dangerously-clear-all-spaces] [--force] [--watch] [--bg-updater] [--inspect] [--inspect-port PORT] [--port-offset N] [--shell-port PORT] [--toolshed-port PORT]"
             exit 1
             ;;
     esac
@@ -111,5 +127,11 @@ if [[ "$WATCH" == "true" ]]; then
 fi
 if [[ "$BG_UPDATER" == "true" ]]; then
     START_ARGS="$START_ARGS --bg-updater"
+fi
+if [[ "$INSPECT" == "true" ]]; then
+    START_ARGS="$START_ARGS --inspect"
+    if [[ -n "$INSPECT_PORT" ]]; then
+        START_ARGS="$START_ARGS --inspect-port $INSPECT_PORT"
+    fi
 fi
 ./scripts/start-local-dev.sh $START_ARGS
