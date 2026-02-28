@@ -96,8 +96,49 @@ const VOICE_SYSTEM_PROMPT =
   "You are having a spoken conversation. Keep responses concise " +
   "and natural — 1-3 sentences unless asked for detail. No markdown, " +
   "no bullet points, no formatting. Speak like a person, not a document. " +
-  "You have access to the user's notes via the searchNotes tool. When " +
-  "asked about their notes, use this tool to find relevant information.";
+  "You have access to the user's notes via two tools: searchNotes to find " +
+  "notes by keyword (returns names and summaries), and readNote to get the " +
+  "full text of a specific note by name. When asked about their notes, " +
+  "search first, then read the relevant note to answer in detail.";
+
+// --- Read-note sub-pattern ---
+
+/** Given a note name, wish for all pieces via #default and return the full content. */
+const readNotePattern = pattern<
+  { name: string },
+  { name: string; content: string } | { error: string }
+>(({ name }) => {
+  // Use #default wish (like email-task-engine) — the allPieces array
+  // projects content when typed as { content?: string }.
+  const { allPieces } = wish<{
+    allPieces: Array<{ [NAME]?: string; content?: string }>;
+  }>({
+    query: "#default",
+  }).result;
+
+  return computed(() => {
+    if (!name) return { error: "No name provided" };
+    const lower = name.toLowerCase().trim();
+    const pieces = allPieces ?? [];
+    const match = pieces.find((p: any) => {
+      const piece = p?.get ? p.get() : p;
+      const pieceName = (piece?.[NAME] ?? "").toString().toLowerCase();
+      return pieceName === lower ||
+        pieceName.includes(lower) ||
+        lower.includes(pieceName);
+    });
+    if (!match) return { error: `No note found matching "${name}"` };
+    const value = (match as any)?.get ? (match as any).get() : match;
+    const raw = value?.content;
+    const content = typeof raw === "object" && raw && "get" in raw
+      ? (raw as any).get()
+      : raw;
+    return {
+      name: (value?.[NAME] ?? "").toString(),
+      content: typeof content === "string" ? content : "",
+    };
+  });
+});
 
 // --- Debug panel styles ---
 
@@ -144,6 +185,7 @@ export default pattern<Input, Output>(({ messages, system, voice }) => {
 
   const tools = {
     searchNotes: patternTool(summarySearchPattern, { entries: summaryEntries }),
+    readNote: patternTool(readNotePattern),
   };
 
   const { addMessage, cancelGeneration, pending } = llmDialog({
