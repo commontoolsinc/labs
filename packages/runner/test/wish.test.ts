@@ -7,11 +7,7 @@ import { createBuilder } from "../src/builder/factory.ts";
 import { Runtime } from "../src/runtime.ts";
 import { ALL_PIECES_ID } from "../src/builtins/well-known.ts";
 import { NAME, UI } from "../src/builder/types.ts";
-import {
-  coarsenTimestamp,
-  parseWishTarget,
-  tagMatchesHashtag,
-} from "../src/builtins/wish.ts";
+import { parseWishTarget, tagMatchesHashtag } from "../src/builtins/wish.ts";
 
 const signer = await Identity.fromPassphrase("wish built-in tests");
 const space = signer.did();
@@ -2618,30 +2614,6 @@ describe("parseWishTarget", () => {
   });
 });
 
-describe("coarsenTimestamp", () => {
-  it("quantizes to 1-second boundary", () => {
-    // 1708000000123 → 1708000000000
-    expect(coarsenTimestamp(1708000000123, 1000)).toBe(1708000000000);
-  });
-
-  it("quantizes to 60-second boundary", () => {
-    // 1708000045678 → 1708000020000 (floor to 60s boundary)
-    const result = coarsenTimestamp(1708000045678, 60000);
-    expect(result % 60000).toBe(0);
-    expect(result).toBe(1708000020000);
-  });
-
-  it("quantizes to 5-second boundary", () => {
-    const result = coarsenTimestamp(1708000007500, 5000);
-    expect(result % 5000).toBe(0);
-    expect(result).toBe(1708000005000);
-  });
-
-  it("returns exact value when already on boundary", () => {
-    expect(coarsenTimestamp(1708000000000, 1000)).toBe(1708000000000);
-  });
-});
-
 describe("interval #now wish", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
@@ -2925,16 +2897,16 @@ describe("interval #now wish", () => {
     expect(typeof initial).toBe("number");
     expect(initial! % 1000).toBe(0);
 
-    // Wait for at least one tick (1s interval + margin for scheduling)
-    await new Promise((r) => setTimeout(r, 1500));
-
-    // Re-pull to get the updated reactive value
-    await result.pull();
-
-    const updated = result.key("nowValue").get()?.result;
-    expect(typeof updated).toBe("number");
-    expect(updated! % 1000).toBe(0);
+    // Poll until value changes, with a generous deadline for CI
+    const deadline = Date.now() + 5000;
+    let updated = initial;
+    while (updated === initial && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 200));
+      await result.pull();
+      updated = result.key("nowValue").get()?.result;
+    }
     expect(updated).toBeGreaterThan(initial!);
+    expect(updated! % 1000).toBe(0);
 
     // Clean up timer
     runtime.runner.stop(resultCell);

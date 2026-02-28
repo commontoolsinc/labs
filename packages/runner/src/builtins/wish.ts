@@ -45,7 +45,7 @@ const ONE_SHOT_RESOLUTION_MS = 1000;
  * SES sandboxing blocks direct Date.now() access, patterns cannot use this
  * reactive time source for timing side-channel attacks.
  */
-export function coarsenTimestamp(nowMs: number, resolutionMs: number): number {
+function coarsenTimestamp(nowMs: number, resolutionMs: number): number {
   return Math.floor(nowMs / resolutionMs) * resolutionMs;
 }
 
@@ -575,6 +575,8 @@ export function wish(
   let nowTimerId: ReturnType<typeof setTimeout> | undefined;
   let nowCell: Cell<any> | undefined;
   let nowCancelRegistered = false;
+  let nowGeneration = 0;
+  let nowIntervalMs = 0;
 
   // Per-instance suggestion pattern result cell
   let suggestionPatternInput:
@@ -678,9 +680,16 @@ export function wish(
           // Handle interval #now — timer lifecycle managed here where
           // addCancel and sendResult are available.
           if (baseResolutions === INTERVAL_NOW_SENTINEL) {
+            nowGeneration++;
             const intervalStr = parsed.path[0];
             const requested = Number(intervalStr);
             const intervalMs = Math.max(requested, MIN_INTERVAL_MS);
+
+            // If the interval changed, force cell recreation.
+            if (nowCell && nowIntervalMs !== intervalMs) {
+              nowCell = undefined; // force recreation with new interval
+            }
+            nowIntervalMs = intervalMs;
 
             // Create a mutable cell for the ticking timestamp.
             if (!nowCell) {
@@ -700,19 +709,30 @@ export function wish(
             // Start aligned timer — ticks on wall-clock boundaries so patterns
             // cannot choose a phase offset to correlate with other operations.
             clearTimeout(nowTimerId);
+            // TODO(perf): Each wish instance creates its own timer. If many patterns use
+            // #now/N with the same interval, consider a shared-timer-per-interval registry
+            // to avoid thundering-herd editWithRetry bursts.
             const scheduleNextTick = (ms: number) => {
               const now = Date.now();
               const nextBoundary = (Math.floor(now / ms) + 1) * ms;
               const delay = nextBoundary - now;
-              nowTimerId = setTimeout(() => {
-                runtime.editWithRetry((editTx) => {
+              nowTimerId = setTimeout(async () => {
+                const gen = nowGeneration;
+                const { error } = await runtime.editWithRetry((editTx) => {
+                  if (gen !== nowGeneration) return; // stale tick, skip
                   nowCell!.withTx(editTx).send(
                     coarsenTimestamp(Date.now(), ms),
                   );
-                }).catch((err) => {
-                  console.error("[wish] #now interval tick failed:", err);
                 });
-                scheduleNextTick(ms);
+                if (error) {
+                  console.error(
+                    "[wish] #now interval tick failed after retries:",
+                    error,
+                  );
+                }
+                if (gen === nowGeneration) {
+                  scheduleNextTick(ms);
+                }
               }, delay);
             };
             scheduleNextTick(intervalMs);
