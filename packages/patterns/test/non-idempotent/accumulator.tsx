@@ -11,7 +11,7 @@ export default pattern<{
   const log = Writable.of<string[]>([]);
   computed(() => {
     const current = log.get();
-    log.set([...current, `${value} at run #${current.length + 1}`]);
+    log.set([...current, `${value.get()} at run #${current.length + 1}`]);
   });
 
   return {
