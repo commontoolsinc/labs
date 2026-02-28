@@ -495,7 +495,10 @@ function handleIntervalNow(
   };
   scheduleNextTick(intervalMs);
   if (!state.cancelRegistered) {
-    addCancel(() => clearTimeout(state.timerId));
+    addCancel(() => {
+      clearTimeout(state.timerId);
+      state.generation++; // invalidate in-flight editWithRetry callbacks
+    });
     state.cancelRegistered = true;
   }
 
