@@ -1928,13 +1928,7 @@ function verifyOutputTransitionsForAttempt(
     const rootSchema = rootSchemaByEntity?.get(cfcEntityKey(entity)) ??
       getCfcWriteSchemaContext(tx, { ...entity, path: [] });
     if (!rootSchema) {
-      // TODO(security): Silently skipping entities without schema context
-      // bypasses all output transition checks (confidentiality monotonicity,
-      // label persistence, etc.). Multiple write paths skip
-      // recordCfcWriteSchemaContext: [ID] entity splitting in
-      // normalizeAndDiff, setRaw(), and setSourceCell(). Consider failing
-      // closed or propagating schema context from these call sites.
-      continue;
+      throw CfcPrepareSchemaUnavailableError(entity);
     }
     const schemaAtWritePath = cfc.getSchemaAtPath(
       rootSchema,
