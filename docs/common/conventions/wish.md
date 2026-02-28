@@ -132,7 +132,7 @@ This ensures the wish is established once. Conditional logic belongs in how you
 
 | Target          | Description                                          |
 |-----------------|------------------------------------------------------|
-| `#now`          | Current timestamp (one-shot, milliseconds)           |
+| `#now`          | Current timestamp (one-shot, 1s resolution)          |
 | `#now/N`        | Reactive timestamp that ticks every N ms (min 1000)  |
 | `#favorites`    | User's favorites list (from home space)              |
 | `#default`      | Default pattern of the current space                 |
@@ -143,10 +143,10 @@ This ensures the wish is established once. Conditional logic belongs in how you
 | `/path/to/prop` | Nested property of the space cell                    |
 
 ```tsx
-// One-shot timestamp (captured once)
-const createdAt = wish({ query: "#now" });
+// One-shot: captures current time once, never updates
+const createdAt = wish<number>({ query: "#now" });
 
-// Reactive timestamp (updates every 60s)
+// Reactive: updates every 60s, re-triggers downstream computed()
 const now = wish<number>({ query: "#now/60000" });
 const timeAgo = computed(() => {
   const ms = now.result - message.sentAt;
