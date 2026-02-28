@@ -1942,6 +1942,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         // Layer 1: Fast-reject branches that clearly can't match the value
         const survivingBranches: JSONSchema[] = [];
         for (const optionSchema of sortedAnyOf) {
+          this.anyOfBranches++;
           if (ContextualFlowControl.isFalseSchema(optionSchema)) {
             continue;
           }
