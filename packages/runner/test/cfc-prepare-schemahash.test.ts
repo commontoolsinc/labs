@@ -465,20 +465,37 @@ describe("CFC prepare schema hash", () => {
   });
 
   it(
-    "rejects prepare when relevant write lacks schema context from read-driven relevance",
+    "rejects prepare when relevant write has persisted labels but no schema context",
     async () => {
       const id = runtime.getCell(
         space,
         "cfc-prepare-schemahash-missing-context-read-relevance",
       ).getAsNormalizedFullLink().id;
 
+      // Seed persisted CFC labels so the entity is recognized as IFC-relevant.
+      const seedTx = runtime.edit();
+      seedTx.writeOrThrow({
+        space,
+        id,
+        type: "application/json",
+        path: ["value"],
+      }, { x: 0 });
+      seedTx.writeOrThrow({
+        space,
+        id,
+        type: "application/json",
+        path: ["cfc", "labels"],
+      }, { "/": { classification: ["secret"] } });
+      const seeded = await seedTx.commit();
+      expect(seeded.error).toBeUndefined();
+
       const tx = runtime.edit();
       const writeResult = tx.write({
         space,
         id,
         type: "application/json",
-        path: [],
-      }, { value: { x: 1 } });
+        path: ["value"],
+      }, { x: 1 });
       expect(writeResult.error).toBeUndefined();
       tx.markCfcRelevant("ifc-read-effective-label");
 
@@ -493,6 +510,30 @@ describe("CFC prepare schema hash", () => {
       expect((thrown as { name?: string } | undefined)?.name).toBe(
         "CfcPrepareSchemaUnavailableError",
       );
+    },
+  );
+
+  it(
+    "skips output transition check for writes without schema context or persisted labels",
+    async () => {
+      const id = runtime.getCell(
+        space,
+        "cfc-prepare-schemahash-no-labels-no-schema",
+      ).getAsNormalizedFullLink().id;
+
+      const tx = runtime.edit();
+      const writeResult = tx.write({
+        space,
+        id,
+        type: "application/json",
+        path: [],
+      }, { value: { x: 1 } });
+      expect(writeResult.error).toBeUndefined();
+      tx.markCfcRelevant("ifc-read-effective-label");
+
+      await prepareCfcCommitIfNeeded(tx);
+      const { error } = await tx.commit();
+      expect(error).toBeUndefined();
     },
   );
 

@@ -1939,7 +1939,17 @@ function verifyOutputTransitionsForAttempt(
     const rootSchema = rootSchemaByEntity?.get(cfcEntityKey(entity)) ??
       getCfcWriteSchemaContext(tx, { ...entity, path: [] });
     if (!rootSchema) {
-      throw CfcPrepareSchemaUnavailableError(entity);
+      // Entity has no schema context — check if it has persisted CFC labels.
+      // If it does, something recorded labels but schema context was lost,
+      // so fail closed. If not, the entity is genuinely unclassified and has
+      // no output transitions to verify.
+      const persistedLabels = tx.readOrThrow(cfcLabelsAddress(entity), {
+        cfc: internalVerifierReadAnnotations,
+      });
+      if (persistedLabels !== undefined) {
+        throw CfcPrepareSchemaUnavailableError(entity);
+      }
+      continue;
     }
     const schemaAtWritePath = cfc.getSchemaAtPath(
       rootSchema,
