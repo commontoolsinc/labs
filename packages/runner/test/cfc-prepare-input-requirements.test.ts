@@ -189,8 +189,9 @@ describe("CFC prepare input requirements", () => {
   });
 
   it("enforces maxConfidentiality when IFC annotations are provided through $ref", async () => {
-    const sourceId = runtime.getCell(space, "cfc-input-maxconf-ref-reject-source")
-      .getAsNormalizedFullLink().id;
+    const sourceId =
+      runtime.getCell(space, "cfc-input-maxconf-ref-reject-source")
+        .getAsNormalizedFullLink().id;
     await seedInputWithClassification(sourceId, 1, "secret");
 
     const tx = runtime.edit();
