@@ -464,6 +464,38 @@ describe("CFC prepare schema hash", () => {
     );
   });
 
+  it(
+    "rejects prepare when relevant write lacks schema context from read-driven relevance",
+    async () => {
+      const id = runtime.getCell(
+        space,
+        "cfc-prepare-schemahash-missing-context-read-relevance",
+      ).getAsNormalizedFullLink().id;
+
+      const tx = runtime.edit();
+      const writeResult = tx.write({
+        space,
+        id,
+        type: "application/json",
+        path: [],
+      }, { value: { x: 1 } });
+      expect(writeResult.error).toBeUndefined();
+      tx.markCfcRelevant("ifc-read-effective-label");
+
+      let thrown: unknown;
+      try {
+        await prepareCfcCommitIfNeeded(tx);
+      } catch (error) {
+        thrown = error;
+      }
+      tx.abort(thrown);
+
+      expect((thrown as { name?: string } | undefined)?.name).toBe(
+        "CfcPrepareSchemaUnavailableError",
+      );
+    },
+  );
+
   it("allows schema hash migration when explicit hook authorizes it", async () => {
     const id = runtime.getCell(space, "cfc-prepare-schemahash-migration-hook")
       .getAsNormalizedFullLink().id;
