@@ -82,6 +82,7 @@ import {
 } from "./link-utils.ts";
 import type {
   ChangeGroup,
+  CommitError,
   IExtendedStorageTransaction,
   IReadOptions,
 } from "./storage/interface.ts";
@@ -120,7 +121,10 @@ declare module "@commontools/api" {
   interface IWritable<T, C extends AnyBrandedCell<any>> {
     set(
       value: AnyCellWrapping<T> | T,
-      onCommit?: (tx: IExtendedStorageTransaction) => void,
+      onCommit?: (
+        tx: IExtendedStorageTransaction,
+        commitResult: { error?: CommitError },
+      ) => void,
     ): C;
   }
 
@@ -132,11 +136,17 @@ declare module "@commontools/api" {
     send(
       ...args: T extends void ? [] | [AnyCellWrapping<T> | T] | [
           AnyCellWrapping<T> | T,
-          (tx: IExtendedStorageTransaction) => void,
+          (
+            tx: IExtendedStorageTransaction,
+            commitResult: { error?: CommitError },
+          ) => void,
         ]
         : [AnyCellWrapping<T> | T] | [
           AnyCellWrapping<T> | T,
-          (tx: IExtendedStorageTransaction) => void,
+          (
+            tx: IExtendedStorageTransaction,
+            commitResult: { error?: CommitError },
+          ) => void,
         ]
     ): void;
   }
@@ -660,7 +670,10 @@ export class CellImpl<T extends StorableValue>
 
   set(
     newValue: AnyCellWrapping<T> | T,
-    onCommit?: (tx: IExtendedStorageTransaction) => void,
+    onCommit?: (
+      tx: IExtendedStorageTransaction,
+      commitResult: { error?: CommitError },
+    ) => void,
   ): Cell<T> {
     const resolvedToValueLink = resolveLink(
       this.runtime,
@@ -740,11 +753,17 @@ export class CellImpl<T extends StorableValue>
   send(
     ...args: T extends void ? [] | [AnyCellWrapping<T>] | [
         AnyCellWrapping<T>,
-        (tx: IExtendedStorageTransaction) => void,
+        (
+          tx: IExtendedStorageTransaction,
+          commitResult: { error?: CommitError },
+        ) => void,
       ]
       : [AnyCellWrapping<T>] | [
         AnyCellWrapping<T>,
-        (tx: IExtendedStorageTransaction) => void,
+        (
+          tx: IExtendedStorageTransaction,
+          commitResult: { error?: CommitError },
+        ) => void,
       ]
   ): void {
     const [event, onCommit] = args;

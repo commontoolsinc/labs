@@ -13,6 +13,7 @@ import type {
 } from "../storage/interface.ts";
 import { computeCfcActivityDigest } from "./activity-digest.ts";
 import {
+  type CanonicalBoundaryActivity,
   type CanonicalBoundaryRead,
   canonicalizeBoundaryActivity,
   canonicalizeStoragePath,
@@ -281,9 +282,8 @@ function CfcPolicyNonConvergenceError(
 }
 
 function collectWrittenEntities(
-  tx: IExtendedStorageTransaction,
+  canonical: CanonicalBoundaryActivity,
 ): EntityAddress[] {
-  const canonical = canonicalizeBoundaryActivity(tx.journal.activity());
   const entities = new Map<string, EntityAddress>();
   for (const write of canonical.attemptedWrites) {
     const entity: EntityAddress = {
@@ -294,12 +294,6 @@ function collectWrittenEntities(
     entities.set(cfcEntityKey(entity), entity);
   }
   return [...entities.values()];
-}
-
-async function resolvePreparedSchemaHash(
-  schema: JSONSchema,
-): Promise<string> {
-  return await computeCfcSchemaHash(schema);
 }
 
 function schemaHashAddress(entity: EntityAddress): IMemorySpaceAddress {
@@ -547,7 +541,7 @@ async function resolvePreparedWriteSchemas(
 
     let actualSchemaHash = schemaHashCache.get(schema);
     if (!actualSchemaHash) {
-      actualSchemaHash = await resolvePreparedSchemaHash(schema);
+      actualSchemaHash = await computeCfcSchemaHash(schema);
       schemaHashCache.set(schema, actualSchemaHash);
     }
 
@@ -675,10 +669,9 @@ function findRequiredIntegrityCoherenceViolation(
 
 function verifyInputRequirementsForAttempt(
   tx: IExtendedStorageTransaction,
+  canonical: CanonicalBoundaryActivity,
 ): readonly ConsumedReadWithEffectiveLabel[] {
-  const { consumedReads } = partitionConsumedBoundaryReads(
-    tx.journal.activity(),
-  );
+  const { consumedReads } = partitionConsumedBoundaryReads(canonical);
   const labelsByEntity = new Map<string, Record<string, Labels>>();
 
   for (const read of consumedReads) {
@@ -801,11 +794,7 @@ function effectiveWriteClassification(
     : undefined;
 
   if (rootClassification && writeClassification) {
-    try {
-      return cfc.lub(new Set([rootClassification, writeClassification]));
-    } catch {
-      return writeClassification;
-    }
+    return cfc.lub(new Set([rootClassification, writeClassification]));
   }
 
   return writeClassification ?? rootClassification ?? "unclassified";
@@ -815,7 +804,12 @@ function fromCanonicalPath(path: string): string[] {
   if (path === "/" || path.length === 0) {
     return [];
   }
-  const rawParts = path.startsWith("/") ? path.slice(1).split("/") : [];
+  if (!path.startsWith("/")) {
+    throw new Error(
+      `Malformed canonical path: expected "/" prefix, got "${path}"`,
+    );
+  }
+  const rawParts = path.slice(1).split("/");
   return rawParts.filter(Boolean).map((part) =>
     part.replaceAll("~1", "/").replaceAll("~0", "~")
   );
@@ -1817,20 +1811,30 @@ function evaluatePolicyOnce(
   tx: IExtendedStorageTransaction,
   entity: EntityAddress,
   writePath: string,
-): { readonly changed: boolean; readonly label: PolicyLabelState } {
+  remainingFuel: number,
+): {
+  readonly changed: boolean;
+  readonly label: PolicyLabelState;
+  readonly remainingFuel: number;
+} {
   let current = label;
   let changed = false;
+  let fuel = remainingFuel;
   for (const rule of config.rules) {
     while (true) {
+      if (fuel <= 0 && changed) {
+        return { changed: true, label: current, remainingFuel: 0 };
+      }
       const applied = applyPolicyRuleOnce(current, rule, tx, entity, writePath);
       if (!applied.changed) {
         break;
       }
       changed = true;
       current = applied.label;
+      fuel--;
     }
   }
-  return { changed, label: current };
+  return { changed, label: current, remainingFuel: fuel };
 }
 
 function evaluatePolicyFixpoint(
@@ -1844,14 +1848,21 @@ function evaluatePolicyFixpoint(
   let remainingFuel = config.fuel;
 
   while (true) {
-    const next = evaluatePolicyOnce(current, config, tx, entity, writePath);
+    const next = evaluatePolicyOnce(
+      current,
+      config,
+      tx,
+      entity,
+      writePath,
+      remainingFuel,
+    );
     if (!next.changed) {
       return { nonConverged: false, label: current, fuel: config.fuel };
     }
-    if (remainingFuel === 0) {
+    remainingFuel = next.remainingFuel;
+    if (remainingFuel <= 0) {
       return { nonConverged: true, fuel: config.fuel };
     }
-    remainingFuel--;
     current = next.label;
   }
 }
@@ -1907,9 +1918,9 @@ function evaluatePolicyDowngradeDecision(
 function verifyOutputTransitionsForAttempt(
   tx: IExtendedStorageTransaction,
   consumedReadLabels: readonly ConsumedReadWithEffectiveLabel[],
+  canonical: CanonicalBoundaryActivity,
   rootSchemaByEntity?: ReadonlyMap<string, JSONSchema>,
 ): void {
-  const canonical = canonicalizeBoundaryActivity(tx.journal.activity());
   if (canonical.attemptedWrites.length === 0) {
     return;
   }
@@ -2134,7 +2145,8 @@ function verifyOutputTransitionsForAttempt(
     const recompose = readRecomposeProjections(schemaAtWritePath);
     if (recompose) {
       // The declaration is consumed for verification-side structure checks.
-      void recompose.baseIntegrityType;
+      // TODO(#cfc): enforce recompose.baseIntegrityType for integrity-level
+      // verification of recomposed projections.
 
       const outputObjectValue = readValueAtCanonicalPath(
         tx,
@@ -2187,7 +2199,8 @@ export async function prepareBoundaryCommit(
   tx: IExtendedStorageTransaction,
   options: PrepareBoundaryCommitOptions = {},
 ): Promise<void> {
-  const writtenEntities = collectWrittenEntities(tx);
+  const canonical = canonicalizeBoundaryActivity(tx.journal.activity());
+  const writtenEntities = collectWrittenEntities(canonical);
   const hasIfcWriteReason = tx.cfcReasons.includes("ifc-write-schema");
   const preparedWriteSchemas = hasIfcWriteReason
     ? await resolvePreparedWriteSchemas(tx, writtenEntities, options)
@@ -2208,10 +2221,11 @@ export async function prepareBoundaryCommit(
     );
   }
 
-  const consumedReadLabels = verifyInputRequirementsForAttempt(tx);
+  const consumedReadLabels = verifyInputRequirementsForAttempt(tx, canonical);
   verifyOutputTransitionsForAttempt(
     tx,
     consumedReadLabels,
+    canonical,
     preparedRootSchemasByEntity,
   );
 
@@ -2247,6 +2261,6 @@ export async function prepareBoundaryCommit(
     }
   }
 
-  const digest = await computeCfcActivityDigest(tx.journal.activity());
+  const digest = computeCfcActivityDigest(tx.journal.activity());
   tx.markCfcPrepared(digest);
 }

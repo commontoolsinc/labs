@@ -100,7 +100,7 @@ function normalizeActivity(
 
 export function computeCfcActivityDigest(
   activity: Iterable<Activity>,
-): Promise<string> {
+): string {
   const storable = toDeepStorableValue(normalizeActivity(activity));
-  return Promise.resolve(toHex(canonicalHash(storable).hash));
+  return toHex(canonicalHash(storable).hash);
 }

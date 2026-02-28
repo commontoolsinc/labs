@@ -80,6 +80,87 @@ describe("CFC policy fixpoint fuel exhaustion", () => {
     }
   }
 
+  it("fails closed when inner rule loop exhausts fuel", async () => {
+    // Schema with fuel: 3 and four chaining rules.  Each rule adds an
+    // alternative that unlocks the next rule, so all four fire within a
+    // single evaluatePolicyOnce call.  Three applications consume the
+    // fuel, and the fourth sees fuel <= 0 — triggering non-convergence.
+    const innerFuelSchema = {
+      type: "number",
+      ifc: {
+        classification: ["confidential"],
+        exchange: {
+          fuel: 3,
+          rules: [
+            {
+              confidentialityPre: ["secret"],
+              integrityPre: ["proof-token"],
+              addAlternatives: ["level-1"],
+              releaseCondition: true,
+            },
+            {
+              confidentialityPre: ["level-1"],
+              integrityPre: ["proof-token"],
+              addAlternatives: ["level-2"],
+              releaseCondition: true,
+            },
+            {
+              confidentialityPre: ["level-2"],
+              integrityPre: ["proof-token"],
+              addAlternatives: ["level-3"],
+              releaseCondition: true,
+            },
+            {
+              confidentialityPre: ["level-3"],
+              integrityPre: ["proof-token"],
+              addAlternatives: ["level-4"],
+              releaseCondition: true,
+            },
+          ],
+        },
+      },
+    } as const satisfies JSONSchema;
+
+    let tx = runtime.edit();
+    const source = runtime.getCell<number>(
+      space,
+      "cfc-inner-fuel-source",
+      undefined,
+      tx,
+    );
+    const target = runtime.getCell<number>(
+      space,
+      "cfc-inner-fuel-target",
+      undefined,
+      tx,
+    );
+    source.set(10);
+    target.set(0);
+    await tx.commit();
+
+    await seedSourceLabels(
+      source.getAsNormalizedFullLink().id,
+      10,
+      ["proof-token"],
+    );
+
+    tx = runtime.edit();
+    const value = Number(source.withTx(tx).asSchema(sourceSchema).get() ?? 0);
+    target.withTx(tx).asSchema(innerFuelSchema).set(value + 1);
+
+    let thrown: unknown;
+    try {
+      await prepareCfcCommitIfNeeded(tx);
+    } catch (error) {
+      thrown = error;
+    }
+    tx.abort(thrown);
+
+    expect((thrown as { name?: string } | undefined)?.name).toBe(
+      "CfcPolicyNonConvergenceError",
+    );
+  });
+
   it("fails closed when policy fixpoint fuel is exhausted", async () => {
     let tx = runtime.edit();
     const source = runtime.getCell<number>(

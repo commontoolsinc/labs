@@ -58,6 +58,64 @@ function projectSchemaToEntityRoot(
   };
 }
 
+function mergeIfcAnnotations(
+  left: Record<string, unknown>,
+  right: Record<string, unknown>,
+): Record<string, unknown> {
+  const leftIfc = isSchemaObject(left.ifc) ? left.ifc : undefined;
+  const rightIfc = isSchemaObject(right.ifc) ? right.ifc : undefined;
+  if (!leftIfc && !rightIfc) {
+    return {};
+  }
+  if (!leftIfc) {
+    return { ifc: rightIfc };
+  }
+  if (!rightIfc) {
+    return { ifc: leftIfc };
+  }
+
+  const leftClassification = Array.isArray(leftIfc.classification)
+    ? leftIfc.classification.filter((v: unknown): v is string =>
+      typeof v === "string"
+    )
+    : [];
+  const rightClassification = Array.isArray(rightIfc.classification)
+    ? rightIfc.classification.filter((v: unknown): v is string =>
+      typeof v === "string"
+    )
+    : [];
+  const leftIntegrity = Array.isArray(leftIfc.integrity)
+    ? leftIfc.integrity.filter((v: unknown): v is string =>
+      typeof v === "string"
+    )
+    : [];
+  const rightIntegrity = Array.isArray(rightIfc.integrity)
+    ? rightIfc.integrity.filter((v: unknown): v is string =>
+      typeof v === "string"
+    )
+    : [];
+
+  const mergedClassification = [
+    ...new Set([...leftClassification, ...rightClassification]),
+  ].sort();
+  const mergedIntegrity = [
+    ...new Set([...leftIntegrity, ...rightIntegrity]),
+  ].sort();
+
+  const mergedIfc: Record<string, unknown> = {
+    ...leftIfc,
+    ...rightIfc,
+  };
+  if (mergedClassification.length > 0) {
+    mergedIfc.classification = mergedClassification;
+  }
+  if (mergedIntegrity.length > 0) {
+    mergedIfc.integrity = mergedIntegrity;
+  }
+
+  return { ifc: mergedIfc };
+}
+
 function mergeProjectedSchemas(
   left: JSONSchema,
   right: JSONSchema,
@@ -113,6 +171,7 @@ function mergeProjectedSchemas(
     return {
       ...left,
       ...right,
+      ...mergeIfcAnnotations(left, right),
       ...(Object.keys(mergedProperties).length > 0
         ? { properties: mergedProperties }
         : {}),
@@ -125,6 +184,7 @@ function mergeProjectedSchemas(
     return {
       ...left,
       ...right,
+      ...mergeIfcAnnotations(left, right),
       ...(left.items !== undefined && right.items !== undefined
         ? {
           items: mergeProjectedSchemas(
@@ -141,6 +201,7 @@ function mergeProjectedSchemas(
   return {
     ...left,
     ...right,
+    ...mergeIfcAnnotations(left, right),
     ...(mergedDefs ? { $defs: mergedDefs } : {}),
     ...(mergedDefinitions ? { definitions: mergedDefinitions } : {}),
   };

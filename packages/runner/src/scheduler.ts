@@ -152,7 +152,10 @@ export class Scheduler {
     handler: EventHandler;
     event: any;
     retriesLeft: number;
-    onCommit?: (tx: IExtendedStorageTransaction) => void;
+    onCommit?: (
+      tx: IExtendedStorageTransaction,
+      commitResult: { error?: CommitError },
+    ) => void;
   }[] = [];
   private eventHandlers: [NormalizedFullLink, EventHandler][] = [];
 
@@ -843,7 +846,10 @@ export class Scheduler {
     eventLink: NormalizedFullLink,
     event: any,
     retries: number = DEFAULT_RETRIES_FOR_EVENTS,
-    onCommit?: (tx: IExtendedStorageTransaction) => void,
+    onCommit?: (
+      tx: IExtendedStorageTransaction,
+      commitResult: { error?: CommitError },
+    ) => void,
     doNotLoadPieceIfNotRunning: boolean = false,
   ): void {
     let handlerFound = false;
@@ -2171,7 +2177,7 @@ export class Scheduler {
                 // - Commit succeeds (!commitError), OR
                 // - Commit fails but we're out of retries (retriesLeft === 0)
                 try {
-                  onCommit(tx);
+                  onCommit(tx, { error: commitError });
                 } catch (callbackError) {
                   logger.error(
                     "schedule-error",

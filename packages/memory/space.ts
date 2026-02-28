@@ -887,6 +887,8 @@ const swap = <Space extends MemorySpace>(
     // it as a conflict as current state is the asserted one.
     // Use stored fact hash directly instead of recomputing with refer().
     if (revision?.fact !== fact) {
+      // "blob:" prefix defined canonically as CFC_SCHEMA_BLOB_PREFIX in
+      // packages/runner/src/cfc/schema-blob.ts — keep in sync.
       if (of.startsWith("blob:") && imported === 0) {
         // TODO(@ubik2): Verify stored blob content matches the blob URI hash.
         return;
