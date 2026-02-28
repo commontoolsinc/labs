@@ -293,10 +293,16 @@ export default pattern<Input, Output>(({ messages, system, voice }) => {
         <ct-resizable-panel-group direction="horizontal" style="flex: 1;">
           {/* Left: Chat */}
           <ct-resizable-panel default-size="70" min-size="50">
-            <ct-vstack style="height: 100%;">
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                height: "100%",
+                overflow: "hidden",
+              }}
+            >
               <ct-vscroll
-                style="padding: 1rem;"
-                flex
+                style="flex: 1; min-height: 0; padding: 1rem;"
                 showScrollbar
                 fadeEdges
                 snapToBottom
@@ -319,7 +325,7 @@ export default pattern<Input, Output>(({ messages, system, voice }) => {
                   onct-transcription-complete={sendVoiceMessage(sendCtx)}
                 />
               </div>
-            </ct-vstack>
+            </div>
           </ct-resizable-panel>
 
           <ct-resizable-handle />
