@@ -128,6 +128,79 @@ export default pattern<Input>(({ enableSearch }) => {
 This ensures the wish is established once. Conditional logic belongs in how you
 *use* the result, not in whether you *create* the wish.
 
+## Built-in Targets
+
+Some wish targets resolve to built-in runtime data rather than searching for
+pieces.
+
+### `#now` — Current Timestamp (one-shot)
+
+Returns the current time as a millisecond timestamp, captured once when the
+pattern runs. Useful for "created at" or "last opened" timestamps.
+
+```tsx
+const createdAt = wish({ query: "#now" });
+// createdAt.result is a number like 1708000000000
+```
+
+The timestamp is coarsened to 1-second resolution (always ends in `000`). This
+is defense-in-depth: once SES sandboxing is enforced, `Date.now()` will be
+blocked in patterns, and coarsening prevents timing side-channel attacks via this
+API.
+
+### `#now/N` — Reactive Interval Timestamp
+
+Returns a reactive timestamp that updates every N milliseconds. The interval
+goes in the path slot: `#now/60000` ticks every minute.
+
+```tsx
+const now = wish<number>({ query: "#now/5000" }); // ticks every 5s
+
+const timeAgo = computed(() => {
+  const ms = now.result - message.sentAt;
+  return `${Math.floor(ms / 60000)} minutes ago`;
+});
+```
+
+**Behavior:**
+
+- The returned cell updates reactively — downstream `computed()` values
+  automatically re-evaluate on each tick
+- Timestamps are coarsened to the interval boundary (e.g. `#now/5000` values are
+  always divisible by 5000)
+- Minimum interval is **1000ms** — values below are clamped to 1 second
+- Timers are aligned to wall-clock boundaries (a 60s timer ticks at :00, :01,
+  :02 of each minute)
+- Cleanup is automatic when the pattern stops
+
+**Common intervals:**
+
+| Query            | Interval | Use case                    |
+|------------------|----------|-----------------------------|
+| `#now/1000`      | 1 second | Live clocks, countdowns     |
+| `#now/5000`      | 5 seconds| "Just now" / "5s ago" labels|
+| `#now/60000`     | 1 minute | "3 minutes ago" timestamps  |
+| `#now/3600000`   | 1 hour   | "2 hours ago" displays      |
+
+**Error cases:**
+
+- `#now/abc` — error: interval must be a finite positive number
+- `#now/0`, `#now/-1` — error: interval must be positive
+- `#now/Infinity` — error: interval must be finite
+- `#now/5000/extra` — error: too many path segments
+
+### Other Built-in Targets
+
+| Target          | Description                              |
+|-----------------|------------------------------------------|
+| `/`             | Current space cell                       |
+| `/path/to/prop` | Nested property of the space cell        |
+| `#default`      | Default pattern of the current space     |
+| `#favorites`    | User's favorites list (from home space)  |
+| `#recent`       | Recently-used pieces in the current space|
+| `#allPieces`    | All pieces in the current space          |
+| `#mentionable`  | Mentionable pieces in the current space  |
+
 ## Intended Usage
 
 Keep a handle to important information in a piece, e.g. google auth, user
