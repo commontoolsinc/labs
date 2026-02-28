@@ -573,4 +573,19 @@ describe("CFC prepare schema hash", () => {
     );
     expect(persistedSchemaHash).toBe(expectedSchemaHash);
   });
+
+  it("throws on cyclic schema value", async () => {
+    const cyclic: Record<string, unknown> = { type: "object" };
+    cyclic.self = cyclic;
+
+    let thrown: unknown;
+    try {
+      await computeCfcSchemaHash(cyclic as JSONSchema);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toContain("Cyclic reference");
+  });
 });

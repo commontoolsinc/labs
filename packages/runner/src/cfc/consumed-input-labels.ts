@@ -4,6 +4,18 @@ import type { CanonicalBoundaryRead } from "./canonical-activity.ts";
 import { canonicalLabelPathMatchesReadPath } from "./path-matching.ts";
 import { cfcEntityKey } from "./shared.ts";
 
+class CfcLabelLubError extends Error {
+  constructor(classifications: Set<string>, cause?: unknown) {
+    super(
+      `CFC label LUB failed for classifications: ${
+        [...classifications].sort().join(", ")
+      }`,
+    );
+    this.name = "CfcLabelLubError";
+    this.cause = cause;
+  }
+}
+
 export interface ConsumedReadWithEffectiveLabel {
   readonly read: CanonicalBoundaryRead;
   readonly effectiveLabel: Labels | undefined;
@@ -44,10 +56,17 @@ function effectiveLabelForPath(
     return undefined;
   }
 
+  let lubResult: string | undefined;
+  if (classifications.size > 0) {
+    try {
+      lubResult = cfc.lub(classifications);
+    } catch (cause) {
+      throw new CfcLabelLubError(classifications, cause);
+    }
+  }
+
   return {
-    ...(classifications.size > 0
-      ? { classification: [cfc.lub(classifications)] }
-      : {}),
+    ...(lubResult !== undefined ? { classification: [lubResult] } : {}),
     ...(integrity.size > 0 ? { integrity: [...integrity].sort() } : {}),
   };
 }

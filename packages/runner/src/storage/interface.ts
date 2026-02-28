@@ -549,7 +549,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   addCommitCallback(
     callback: (
       tx: IExtendedStorageTransaction,
-      result: Result<Unit, CommitError>,
+      commitResult: { error?: CommitError },
     ) => void,
   ): void;
 

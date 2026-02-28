@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { Activity } from "../src/storage/interface.ts";
+import { canonicalizeBoundaryActivity } from "../src/cfc/canonical-activity.ts";
 import { partitionConsumedBoundaryReads } from "../src/cfc/consumed-reads.ts";
 import { internalVerifierReadAnnotations } from "../src/cfc/internal-markers.ts";
 
@@ -28,7 +29,9 @@ describe("partitionConsumedBoundaryReads", () => {
       },
     ];
 
-    const partitioned = partitionConsumedBoundaryReads(activity);
+    const partitioned = partitionConsumedBoundaryReads(
+      canonicalizeBoundaryActivity(activity),
+    );
     expect(partitioned.consumedReads).toHaveLength(1);
     expect(partitioned.consumedReads[0].path).toBe("/public");
     expect(partitioned.internalVerifierReads).toHaveLength(1);
@@ -57,7 +60,9 @@ describe("partitionConsumedBoundaryReads", () => {
       },
     ];
 
-    const partitioned = partitionConsumedBoundaryReads(activity);
+    const partitioned = partitionConsumedBoundaryReads(
+      canonicalizeBoundaryActivity(activity),
+    );
     expect(partitioned.consumedReads.map((read) => read.path)).toEqual([
       "/a",
       "/b",

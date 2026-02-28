@@ -76,7 +76,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   private commitCallbacks = new Set<
     (
       tx: IExtendedStorageTransaction,
-      result: Result<Unit, CommitError>,
+      commitResult: { error?: CommitError },
     ) => void
   >();
   private cfcState: CfcTxState = {
@@ -262,9 +262,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     promise.then((result) => {
       // Call all callbacks, wrapping each in try/catch to prevent one
       // failing callback from breaking others
+      const commitResult = result.error ? { error: result.error } : {};
       for (const callback of this.commitCallbacks) {
         try {
-          callback(this, result);
+          callback(this, commitResult);
         } catch (error) {
           logger.error("storage-error", "Error in commit callback:", error);
         }
@@ -368,7 +369,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       return { error };
     }
 
-    const actualDigest = await computeCfcActivityDigest(
+    const actualDigest = computeCfcActivityDigest(
       this.journal.activity(),
     );
     if (actualDigest !== this.cfcState.preparedActivityDigest) {
@@ -414,7 +415,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   addCommitCallback(
     callback: (
       tx: IExtendedStorageTransaction,
-      result: Result<Unit, CommitError>,
+      commitResult: { error?: CommitError },
     ) => void,
   ): void {
     this.commitCallbacks.add(callback);
@@ -571,7 +572,7 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
   addCommitCallback(
     callback: (
       tx: IExtendedStorageTransaction,
-      result: Result<Unit, CommitError>,
+      commitResult: { error?: CommitError },
     ) => void,
   ): void {
     return this.wrapped.addCommitCallback(callback);

@@ -1,7 +1,6 @@
-import type { Activity } from "../storage/interface.ts";
-import {
-  type CanonicalBoundaryRead,
-  canonicalizeBoundaryActivity,
+import type {
+  CanonicalBoundaryActivity,
+  CanonicalBoundaryRead,
 } from "./canonical-activity.ts";
 
 export interface PartitionedBoundaryReads {
@@ -10,9 +9,8 @@ export interface PartitionedBoundaryReads {
 }
 
 export function partitionConsumedBoundaryReads(
-  activity: Iterable<Activity>,
+  canonical: CanonicalBoundaryActivity,
 ): PartitionedBoundaryReads {
-  const canonical = canonicalizeBoundaryActivity(activity);
   const consumedReads: CanonicalBoundaryRead[] = [];
   const internalVerifierReads: CanonicalBoundaryRead[] = [];
 

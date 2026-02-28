@@ -11,7 +11,10 @@ type CanonicalValue =
   | CanonicalValue[]
   | { [key: string]: CanonicalValue };
 
-function canonicalizeSchemaValue(value: unknown): CanonicalValue {
+function canonicalizeSchemaValue(
+  value: unknown,
+  visited: Set<object> = new Set(),
+): CanonicalValue {
   if (value === null) return null;
 
   if (
@@ -23,10 +26,18 @@ function canonicalizeSchemaValue(value: unknown): CanonicalValue {
   }
 
   if (Array.isArray(value)) {
-    return value.map((item) => canonicalizeSchemaValue(item));
+    if (visited.has(value)) {
+      throw new Error("Cyclic reference detected in schema value");
+    }
+    visited.add(value);
+    return value.map((item) => canonicalizeSchemaValue(item, visited));
   }
 
   if (typeof value === "object") {
+    if (visited.has(value)) {
+      throw new Error("Cyclic reference detected in schema value");
+    }
+    visited.add(value);
     const record = value as Record<string, unknown>;
     const canonical: Record<string, CanonicalValue> = {};
     for (const key of Object.keys(record).sort()) {
@@ -34,7 +45,7 @@ function canonicalizeSchemaValue(value: unknown): CanonicalValue {
       if (nextValue === undefined) {
         continue;
       }
-      canonical[key] = canonicalizeSchemaValue(nextValue);
+      canonical[key] = canonicalizeSchemaValue(nextValue, visited);
     }
     return canonical;
   }

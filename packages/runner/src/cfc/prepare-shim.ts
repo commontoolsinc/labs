@@ -24,7 +24,7 @@ export async function prepareCfcCommitIfNeeded(
     return;
   }
   if (options.enforceBoundary === false) {
-    const digest = await computeCfcActivityDigest(tx.journal.activity());
+    const digest = computeCfcActivityDigest(tx.journal.activity());
     tx.markCfcPrepared(digest);
     return;
   }
