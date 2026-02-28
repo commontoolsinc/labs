@@ -358,8 +358,8 @@ let refreshInProgress = false;
 
 async function refreshAuthToken(
   authCell: Writable<Auth>,
-): Promise<void> {
-  if (refreshInProgress) return;
+): Promise<boolean> {
+  if (refreshInProgress) return false;
   refreshInProgress = true;
 
   try {
@@ -397,6 +397,7 @@ async function refreshAuthToken(
       ...json.tokenInfo,
       user: currentAuth.user,
     });
+    return true;
   } finally {
     refreshInProgress = false;
   }
@@ -418,8 +419,13 @@ const handleRefresh = handler<
     refreshing.set(true);
     refreshFailed.set(false);
     try {
-      await refreshAuthToken(auth);
+      const didRefresh = await refreshAuthToken(auth);
       refreshing.set(false);
+      if (!didRefresh) {
+        // Another refresh was already in-flight; don't claim success or failure.
+        // The UI will update reactively when the other refresh completes.
+        return;
+      }
       refreshFailed.set(false);
     } catch {
       refreshing.set(false);
