@@ -1,9 +1,25 @@
 import { html, PropertyValues } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 import { styles } from "./styles.ts";
-import { basicSetup } from "codemirror";
-import { EditorView, keymap, placeholder } from "@codemirror/view";
-import { indentWithTab } from "@codemirror/commands";
+import {
+  crosshairCursor,
+  drawSelection,
+  dropCursor,
+  EditorView,
+  highlightActiveLine,
+  highlightActiveLineGutter,
+  highlightSpecialChars,
+  keymap,
+  lineNumbers,
+  placeholder,
+  rectangularSelection,
+} from "@codemirror/view";
+import {
+  defaultKeymap,
+  history,
+  historyKeymap,
+  indentWithTab,
+} from "@codemirror/commands";
 import {
   Annotation,
   Compartment,
@@ -11,9 +27,19 @@ import {
   Extension,
   Prec,
 } from "@codemirror/state";
-import { indentUnit, LanguageSupport } from "@codemirror/language";
+import {
+  bracketMatching,
+  defaultHighlightStyle,
+  foldGutter,
+  foldKeymap,
+  indentOnInput,
+  indentUnit,
+  LanguageSupport,
+  syntaxHighlighting,
+} from "@codemirror/language";
 import { javascript as createJavaScript } from "@codemirror/lang-javascript";
 import { markdown as createMarkdown } from "@codemirror/lang-markdown";
+import { GFM } from "@lezer/markdown";
 import { css as createCss } from "@codemirror/lang-css";
 import { html as createHtml } from "@codemirror/lang-html";
 import { json as createJson } from "@codemirror/lang-json";
@@ -21,12 +47,17 @@ import { oneDark } from "@codemirror/theme-one-dark";
 
 import {
   autocompletion,
+  closeBrackets,
+  closeBracketsKeymap,
   Completion,
   CompletionContext,
+  completionKeymap,
   CompletionResult,
   completionStatus,
   startCompletion,
 } from "@codemirror/autocomplete";
+import { highlightSelectionMatches, searchKeymap } from "@codemirror/search";
+import { lintKeymap } from "@codemirror/lint";
 import {
   type CellHandle,
   isCellHandle,
@@ -46,6 +77,7 @@ import {
   backlinkField,
   createBacklinkDecorationPlugin,
 } from "./features/backlinks.ts";
+import { createProseMarkdownPlugin } from "./features/prose-markdown.ts";
 
 /**
  * Supported MIME types for syntax highlighting
@@ -68,6 +100,7 @@ export type MimeType = (typeof MimeType)[keyof typeof MimeType];
 const langRegistry = new Map<MimeType, LanguageSupport>();
 const markdownLang = createMarkdown({
   defaultCodeLanguage: createJavaScript({ jsx: true }),
+  extensions: GFM,
 });
 const defaultLang = markdownLang;
 
@@ -140,6 +173,7 @@ export class CTCodeEditor extends BaseElement {
     tabSize: { type: Number },
     tabIndent: { type: Boolean },
     theme: { type: String, reflect: true },
+    mode: { type: String, reflect: true },
   };
 
   declare value: CellHandle<string> | string;
@@ -161,6 +195,7 @@ export class CTCodeEditor extends BaseElement {
   declare tabSize: number;
   declare tabIndent: boolean;
   declare theme: "light" | "dark";
+  declare mode: "code" | "prose";
 
   private _editorView: EditorView | undefined;
   private _lang = new Compartment();
@@ -172,6 +207,9 @@ export class CTCodeEditor extends BaseElement {
   private _maxLineWidthComp = new Compartment();
   private _indentUnitComp = new Compartment();
   private _themeComp = new Compartment();
+  private _setupComp = new Compartment();
+  private _modeComp = new Compartment();
+  private _proseMarkdownComp = new Compartment();
   private _cleanupFns: Array<() => void> = [];
   private _mentionableUnsub: (() => void) | null = null;
   private _mentionedUnsub: (() => void) | null = null;
@@ -222,6 +260,7 @@ export class CTCodeEditor extends BaseElement {
     this.tabSize = 2;
     this.tabIndent = true;
     this.theme = "light";
+    this.mode = "code";
     this.mentionable = null;
   }
 
@@ -985,6 +1024,19 @@ export class CTCodeEditor extends BaseElement {
         ),
       });
     }
+
+    // Update mode (setup extensions + prose styling + markdown rendering)
+    if (changedProperties.has("mode") && this._editorView) {
+      this._editorView.dispatch({
+        effects: [
+          this._setupComp.reconfigure(this._getSetupExtensions()),
+          this._modeComp.reconfigure(this._getModeExtension()),
+          this._proseMarkdownComp.reconfigure(
+            this.mode === "prose" ? createProseMarkdownPlugin() : [],
+          ),
+        ],
+      });
+    }
   }
 
   protected override firstUpdated(_changedProperties: PropertyValues): void {
@@ -1030,6 +1082,70 @@ export class CTCodeEditor extends BaseElement {
     }
   }
 
+  private _getSetupExtensions(): Extension {
+    // Shared extensions needed in both modes
+    const shared: Extension[] = [
+      highlightSpecialChars(),
+      history(),
+      drawSelection(),
+      dropCursor(),
+      EditorState.allowMultipleSelections.of(true),
+      indentOnInput(),
+      keymap.of([
+        ...defaultKeymap,
+        ...historyKeymap,
+        ...searchKeymap,
+        ...completionKeymap,
+      ]),
+    ];
+
+    if (this.mode === "prose") {
+      // Prose mode: minimal setup — no line numbers, no bracket matching,
+      // no fold gutters, no selection highlights, no rectangular select,
+      // no defaultHighlightStyle (our decoration plugin handles all rendering)
+      return shared;
+    }
+
+    // Code mode: full setup matching what basicSetup provided
+    return [
+      ...shared,
+      lineNumbers(),
+      highlightActiveLineGutter(),
+      foldGutter(),
+      syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+      bracketMatching(),
+      closeBrackets(),
+      rectangularSelection(),
+      crosshairCursor(),
+      highlightActiveLine(),
+      highlightSelectionMatches(),
+      keymap.of([
+        ...closeBracketsKeymap,
+        ...foldKeymap,
+        ...lintKeymap,
+      ]),
+    ];
+  }
+
+  private _getModeExtension(): Extension {
+    if (this.mode !== "prose") return [];
+
+    return [
+      EditorView.theme({
+        ".cm-content": {
+          fontFamily: "inherit",
+          lineHeight: "1.6",
+          padding: "8px 0",
+          maxWidth: "700px",
+          margin: "0 auto",
+        },
+        ".cm-line": {
+          padding: "1px 0",
+        },
+      }),
+    ];
+  }
+
   private _initializeEditor(): void {
     const editorElement = this.shadowRoot?.querySelector(
       ".code-editor",
@@ -1038,7 +1154,7 @@ export class CTCodeEditor extends BaseElement {
 
     // Create editor extensions
     const extensions: Extension[] = [
-      basicSetup,
+      this._setupComp.of(this._getSetupExtensions()),
       // Backlink protection: StateField + atomic ranges + edit filter
       backlinkField,
       atomicBacklinkRanges,
@@ -1073,6 +1189,11 @@ export class CTCodeEditor extends BaseElement {
       ),
       // Theme (dark -> oneDark)
       this._themeComp.of(this.theme === "dark" ? oneDark : []),
+      // Prose/code mode extensions
+      this._modeComp.of(this._getModeExtension()),
+      this._proseMarkdownComp.of(
+        this.mode === "prose" ? createProseMarkdownPlugin() : [],
+      ),
       EditorView.updateListener.of((update) => {
         // Only process user-initiated changes, not Cell-originated updates.
         // Check if any transaction has the Cell sync annotation - if so, skip.
