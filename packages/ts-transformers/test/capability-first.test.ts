@@ -1137,6 +1137,70 @@ const fn = lift(() => items.map((item) => item));
 );
 
 Deno.test(
+  "Capability-first: mapWithPattern callback schema omits params when unused",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern, UI } from "commontools";
+
+interface Item {
+  id: string;
+}
+
+interface State {
+  items: Item[];
+}
+
+export default pattern<State>((state) => {
+  return {
+    [UI]: <div>{state.items.map((item) => <span>{item.id}</span>)}</div>,
+  };
+});
+`;
+
+    const output = await transformSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, ".mapWithPattern(");
+    assertStringIncludes(output, 'required: ["element"]');
+    assert(!output.includes('required: ["element", "params"]'));
+  },
+);
+
+Deno.test(
+  "Capability-first: mapWithPattern callback schema includes params when captures are used",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern, UI } from "commontools";
+
+interface Item {
+  price: number;
+}
+
+interface State {
+  items: Item[];
+  discount: number;
+}
+
+export default pattern<State>((state) => {
+  return {
+    [UI]: <div>{state.items.map((item) => <span>{item.price * state.discount}</span>)}</div>,
+  };
+});
+`;
+
+    const output = await transformSource(source, {
+      useLegacyOpaqueRefSemantics: false,
+      types: COMMONTOOLS_TYPES,
+    });
+
+    assertStringIncludes(output, ".mapWithPattern(");
+    assertStringIncludes(output, 'required: ["element", "params"]');
+  },
+);
+
+Deno.test(
   "Capability-first: pattern context does not rewrite plain array map",
   async () => {
     const source = `/// <cts-enable />

@@ -168,13 +168,9 @@ export default pattern((__ct_pattern_input) => {
                 properties: {
                     element: {
                         $ref: "#/$defs/Message"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {}
                     }
                 },
-                required: ["element", "params"],
+                required: ["element"],
                 $defs: {
                     Message: {
                         type: "object",

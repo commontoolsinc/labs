@@ -17,13 +17,9 @@ const _p = pattern((__ct_pattern_input) => {
         properties: {
             element: {
                 $ref: "#/$defs/Entry"
-            },
-            params: {
-                type: "object",
-                properties: {}
             }
         },
-        required: ["element", "params"],
+        required: ["element"],
         $defs: {
             Entry: {
                 type: "object",

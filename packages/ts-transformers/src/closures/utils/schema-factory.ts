@@ -95,15 +95,19 @@ export class SchemaFactory {
       this.context,
     );
 
-    // 6. Add params property
-    callbackParamProperties.push(
-      this.factory.createPropertySignature(
-        undefined,
-        this.factory.createIdentifier("params"),
-        undefined,
-        this.factory.createTypeLiteralNode(paramsProperties),
-      ),
-    );
+    // 6. Add params property only when captures are present.
+    // Emitting an empty required `params` object for no-capture callbacks
+    // widens mapWithPattern input schemas and regresses fixture parity.
+    if (paramsProperties.length > 0) {
+      callbackParamProperties.push(
+        this.factory.createPropertySignature(
+          undefined,
+          this.factory.createIdentifier("params"),
+          undefined,
+          this.factory.createTypeLiteralNode(paramsProperties),
+        ),
+      );
+    }
 
     return this.factory.createTypeLiteralNode(callbackParamProperties);
   }

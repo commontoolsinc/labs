@@ -1397,8 +1397,6 @@ function handlePatternSchemaInjection(
   const { factory, checker, sourceFile, tsContext: transformation } = context;
   const typeArgs = node.typeArguments;
   const capabilityRegistry = context.options.capabilitySummaryRegistry;
-  const argumentCapabilityMode: CapabilitySummaryApplicationMode =
-    isMapWithPatternCallbackPatternCall(node) ? "full" : "defaults_only";
   const argsArray = Array.from(node.arguments);
 
   // Find the function argument
@@ -1406,6 +1404,12 @@ function handlePatternSchemaInjection(
   if (!builderFunction) {
     return undefined; // No function found - skip transformation
   }
+
+  const argumentCapabilityMode: CapabilitySummaryApplicationMode =
+    context.isMapCallback(builderFunction) ||
+      isMapWithPatternCallbackPatternCall(node)
+      ? "full"
+      : "defaults_only";
 
   // Helper to build final call with function-first argument order
   const buildCallExpression = (

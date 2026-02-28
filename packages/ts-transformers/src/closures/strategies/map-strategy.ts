@@ -1,7 +1,5 @@
 import ts from "typescript";
-import {
-  type TransformationContext,
-} from "../../core/mod.ts";
+import { type TransformationContext } from "../../core/mod.ts";
 import type { ClosureTransformationStrategy } from "./strategy.ts";
 import {
   classifyReactiveContext,
