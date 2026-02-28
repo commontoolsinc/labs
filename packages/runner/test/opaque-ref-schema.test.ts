@@ -326,7 +326,7 @@ describe("OpaqueRef Schema Support", () => {
   });
 
   describe("Schema $ref and $defs Resolution", () => {
-    it("should preserve rootSchema with $defs when navigating with key()", () => {
+    it("should preserve schema with $defs when navigating with key()", () => {
       // Schema with $defs that needs to be preserved for nested $ref resolution
       const schema = {
         $defs: {
@@ -366,7 +366,7 @@ describe("OpaqueRef Schema Support", () => {
       const userRef = ref.key("user");
       const userExport = userRef.export();
 
-      // The rootSchema should be preserved (contains $defs)
+      // The schema should be preserved (contains $defs)
       expect(userExport.schema).toBeDefined();
       expect((userExport.schema as any).$defs).toBeDefined();
       expect((userExport.schema as any).$defs.Address).toBeDefined();
@@ -375,7 +375,7 @@ describe("OpaqueRef Schema Support", () => {
       const homeRef = userRef.key("home");
       const homeExport = homeRef.export();
 
-      // The rootSchema should still be preserved at this level
+      // The schema should still be preserved at this level
       expect(homeExport.schema).toBeDefined();
       expect((homeExport.schema as any).$defs).toBeDefined();
       expect((homeExport.schema as any).$defs.Address).toBeDefined();

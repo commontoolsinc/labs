@@ -142,7 +142,7 @@ describe("$ref with default support", () => {
 
   describe("anyOf/oneOf with default", () => {
     it("should preserve default in anyOf options with refs", () => {
-      const rootSchema: JSONSchema = {
+      const schema: JSONSchema = {
         $defs: {
           String: { type: "string" },
           Number: { type: "number" },
@@ -154,12 +154,12 @@ describe("$ref with default support", () => {
       } as const satisfies JSONSchema;
 
       const s1 = {
-        ...(rootSchema.anyOf![0] as JSONSchemaObj),
-        $defs: rootSchema.$defs,
+        ...(schema.anyOf![0] as JSONSchemaObj),
+        $defs: schema.$defs,
       };
       const s2 = {
-        ...(rootSchema.anyOf![1] as JSONSchemaObj),
-        $defs: rootSchema.$defs,
+        ...(schema.anyOf![1] as JSONSchemaObj),
+        $defs: schema.$defs,
       };
       // This would be used in validateAndTransform's anyOf handling
       const option1 = resolveSchema(s1, false);
@@ -169,17 +169,17 @@ describe("$ref with default support", () => {
       expect(option1).toEqual({
         type: "string",
         default: "string-default",
-        $defs: rootSchema.$defs,
+        $defs: schema.$defs,
       });
       expect(option2).toEqual({
         type: "number",
         default: 42,
-        $defs: rootSchema.$defs,
+        $defs: schema.$defs,
       });
     });
 
     it("should apply ref site default to anyOf union as a whole", () => {
-      const rootSchema: JSONSchema = {
+      const schema: JSONSchema = {
         $defs: {
           StringOrNumber: {
             anyOf: [
@@ -192,10 +192,10 @@ describe("$ref with default support", () => {
         default: "override",
       };
 
-      const resolved = resolveSchema(rootSchema, false);
+      const resolved = resolveSchema(schema, false);
 
       expect(resolved).toEqual({
-        $defs: rootSchema.$defs,
+        $defs: schema.$defs,
         anyOf: [
           { type: "string", default: "str" },
           { type: "number", default: 42 },
@@ -205,7 +205,7 @@ describe("$ref with default support", () => {
     });
 
     it("should preserve asCell and default together in anyOf options", () => {
-      const rootSchema: JSONSchema = {
+      const schema: JSONSchema = {
         $defs: {
           StringCell: { type: "string" },
         },
@@ -216,13 +216,13 @@ describe("$ref with default support", () => {
       };
 
       const option1 = resolveSchema({
-        ...(rootSchema.anyOf![0] as JSONSchemaObj),
-        $defs: rootSchema.$defs,
+        ...(schema.anyOf![0] as JSONSchemaObj),
+        $defs: schema.$defs,
       }, false);
 
       // Resolve schema doesn't remove $defs
       expect(option1).toEqual({
-        $defs: rootSchema.$defs,
+        $defs: schema.$defs,
         type: "string",
         default: "cell-default",
         asCell: true,
@@ -232,7 +232,7 @@ describe("$ref with default support", () => {
 
   describe("edge cases", () => {
     it("should handle default with value of different types (number)", () => {
-      const rootSchema: JSONSchema = {
+      const schema: JSONSchema = {
         $defs: {
           Number: { type: "number" },
         },
@@ -240,16 +240,16 @@ describe("$ref with default support", () => {
         default: 42,
       };
 
-      const resolved = resolveSchema(rootSchema, false);
+      const resolved = resolveSchema(schema, false);
       expect(resolved).toEqual({
-        $defs: rootSchema.$defs,
+        $defs: schema.$defs,
         type: "number",
         default: 42,
       });
     });
 
     it("should handle default with value of null", () => {
-      const rootSchema: JSONSchema = {
+      const schema: JSONSchema = {
         $defs: {
           Nullable: { type: ["string", "null"] },
         },
@@ -257,16 +257,16 @@ describe("$ref with default support", () => {
         default: null,
       };
 
-      const resolved = resolveSchema(rootSchema, false);
+      const resolved = resolveSchema(schema, false);
       expect(resolved).toEqual({
-        $defs: rootSchema.$defs,
+        $defs: schema.$defs,
         type: ["string", "null"],
         default: null,
       });
     });
 
     it("should handle default with array value", () => {
-      const rootSchema: JSONSchema = {
+      const schema: JSONSchema = {
         $defs: {
           StringArray: { type: "array", items: { type: "string" } },
         },
@@ -274,9 +274,9 @@ describe("$ref with default support", () => {
         default: ["item1", "item2"],
       };
 
-      const resolved = resolveSchema(rootSchema, false);
+      const resolved = resolveSchema(schema, false);
       expect(resolved).toEqual({
-        $defs: rootSchema.$defs,
+        $defs: schema.$defs,
         type: "array",
         items: { type: "string" },
         default: ["item1", "item2"],
@@ -284,7 +284,7 @@ describe("$ref with default support", () => {
     });
 
     it("should handle default with object value", () => {
-      const rootSchema: JSONSchema = {
+      const schema: JSONSchema = {
         $defs: {
           Person: {
             type: "object",
@@ -298,9 +298,9 @@ describe("$ref with default support", () => {
         default: { name: "John", age: 30 },
       };
 
-      const resolved = resolveSchema(rootSchema, false);
+      const resolved = resolveSchema(schema, false);
       expect(resolved).toEqual({
-        $defs: rootSchema.$defs,
+        $defs: schema.$defs,
         type: "object",
         properties: {
           name: { type: "string" },
@@ -311,7 +311,7 @@ describe("$ref with default support", () => {
     });
 
     it("should not filter default when filterAsCell is true (unlike asCell)", () => {
-      const rootSchema: JSONSchema = {
+      const schema: JSONSchema = {
         $defs: {
           CellString: {
             type: "string",
@@ -324,7 +324,7 @@ describe("$ref with default support", () => {
         asCell: true,
       };
 
-      const resolved = resolveSchema(rootSchema, true);
+      const resolved = resolveSchema(schema, true);
 
       // asCell should be filtered out, but default should remain
       expect(resolved).not.toHaveProperty("asCell");
@@ -332,7 +332,7 @@ describe("$ref with default support", () => {
     });
 
     it("should handle ref with both asCell, asStream, and default", () => {
-      const rootSchema: JSONSchema = {
+      const schema: JSONSchema = {
         $defs: {
           StreamCell: { type: "string" },
         },
@@ -342,10 +342,10 @@ describe("$ref with default support", () => {
         asStream: true,
       };
 
-      const resolved = resolveSchema(rootSchema, false);
+      const resolved = resolveSchema(schema, false);
 
       expect(resolved).toEqual({
-        $defs: rootSchema.$defs,
+        $defs: schema.$defs,
         type: "string",
         default: "ref-default",
         asCell: true,

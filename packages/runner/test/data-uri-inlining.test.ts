@@ -222,7 +222,6 @@ describe("data URI inlining", () => {
             id: dataURI,
             path: [],
             schema: { type: "number" },
-            rootSchema: { type: "number" },
           },
         },
       };
@@ -244,7 +243,6 @@ describe("data URI inlining", () => {
             id: dataURI,
             path: ["nested"],
             schema: { type: "object" },
-            rootSchema: { type: "object" },
           },
         },
       };
@@ -448,22 +446,6 @@ describe("data URI inlining", () => {
             id: linkedCell.entityId["/"],
             path: [],
             schema: {
-              type: "object",
-              properties: {
-                level1: {
-                  type: "object",
-                  properties: {
-                    level2: {
-                      type: "object",
-                      properties: {
-                        level3: { type: "string" },
-                      },
-                    },
-                  },
-                },
-              },
-            },
-            rootSchema: {
               type: "object",
               properties: {
                 level1: {
