@@ -42,9 +42,7 @@ export default pattern<{
         <div>
           <strong>Input items:</strong>
           <ul>
-            {items.map((item) => (
-              <li>{item.title}</li>
-            ))}
+            {items.map((item) => <li>{item.title}</li>)}
           </ul>
         </div>
         <div>
@@ -57,14 +55,12 @@ export default pattern<{
             ))}
           </ul>
         </div>
-        <div
-          style="margin-top: 16px; padding: 12px; background: #fff3cd; border-radius: 4px;"
-        >
-          <strong>Anti-pattern:</strong> Date.now() inside computed() — each run
-          produces different values.
+        <div style="margin-top: 16px; padding: 12px; background: #fff3cd; border-radius: 4px;">
+          <strong>Anti-pattern:</strong>{" "}
+          Date.now() inside computed() — each run produces different values.
           <br />
-          <strong>Fix:</strong> Use timestamps only in handlers, not in
-          computed().
+          <strong>Fix:</strong>{" "}
+          Use timestamps only in handlers, not in computed().
         </div>
       </div>
     ),

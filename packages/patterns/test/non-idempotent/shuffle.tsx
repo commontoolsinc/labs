@@ -6,7 +6,9 @@
 import { computed, Default, pattern, UI, Writable } from "commontools";
 
 export default pattern<{
-  items: Writable<Default<string[], ["alpha", "bravo", "charlie", "delta", "echo"]>>;
+  items: Writable<
+    Default<string[], ["alpha", "bravo", "charlie", "delta", "echo"]>
+  >;
 }>(({ items }) => {
   // Anti-pattern: Math.random() inside computed() produces different output each run
   const shuffled = Writable.of<string[]>([]);
@@ -27,27 +29,22 @@ export default pattern<{
         <div>
           <strong>Input items:</strong>
           <ul>
-            {items.map((item) => (
-              <li>{item}</li>
-            ))}
+            {items.map((item) => <li>{item}</li>)}
           </ul>
         </div>
         <div>
           <strong>Shuffled (keeps changing):</strong>
           <ul>
-            {shuffled.map((item) => (
-              <li>{item}</li>
-            ))}
+            {shuffled.map((item) => <li>{item}</li>)}
           </ul>
         </div>
-        <div
-          style="margin-top: 16px; padding: 12px; background: #fff3cd; border-radius: 4px;"
-        >
-          <strong>Anti-pattern:</strong> Math.random() in computed() — each run
-          produces a different permutation.
+        <div style="margin-top: 16px; padding: 12px; background: #fff3cd; border-radius: 4px;">
+          <strong>Anti-pattern:</strong>{" "}
+          Math.random() in computed() — each run produces a different
+          permutation.
           <br />
-          <strong>Fix:</strong> Sort deterministically or move randomization to a
-          handler.
+          <strong>Fix:</strong>{" "}
+          Sort deterministically or move randomization to a handler.
         </div>
       </div>
     ),

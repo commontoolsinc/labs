@@ -26,24 +26,19 @@ export default pattern<{
         <div>
           <strong>Log (growing rapidly):</strong>
           <ul>
-            {log.map((entry) => (
-              <li>{entry}</li>
-            ))}
+            {log.map((entry) => <li>{entry}</li>)}
           </ul>
         </div>
         <div>
-          <strong>Entry count:</strong>{" "}
-          {computed(() => `${log.get().length}`)}
+          <strong>Entry count:</strong> {computed(() => `${log.get().length}`)}
         </div>
-        <div
-          style="margin-top: 16px; padding: 12px; background: #fff3cd; border-radius: 4px;"
-        >
-          <strong>Anti-pattern:</strong> Reading and appending to the same
-          Writable in computed() — each run reads a longer array and writes an
-          even longer one.
+        <div style="margin-top: 16px; padding: 12px; background: #fff3cd; border-radius: 4px;">
+          <strong>Anti-pattern:</strong>{" "}
+          Reading and appending to the same Writable in computed() — each run
+          reads a longer array and writes an even longer one.
           <br />
-          <strong>Fix:</strong> Derive the full value from inputs instead of
-          appending incrementally.
+          <strong>Fix:</strong>{" "}
+          Derive the full value from inputs instead of appending incrementally.
         </div>
       </div>
     ),

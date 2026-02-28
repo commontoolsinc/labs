@@ -51,19 +51,15 @@ export default pattern<{
         <div>
           <strong>Unique tags (keeps reordering):</strong>
           <ul>
-            {uniqueTags.map((tag) => (
-              <li>{tag}</li>
-            ))}
+            {uniqueTags.map((tag) => <li>{tag}</li>)}
           </ul>
         </div>
-        <div
-          style="margin-top: 16px; padding: 12px; background: #fff3cd; border-radius: 4px;"
-        >
-          <strong>Anti-pattern:</strong> Randomizing insertion order into a Set
-          before converting to array.
+        <div style="margin-top: 16px; padding: 12px; background: #fff3cd; border-radius: 4px;">
+          <strong>Anti-pattern:</strong>{" "}
+          Randomizing insertion order into a Set before converting to array.
           <br />
-          <strong>Fix:</strong> Sort the array after Set conversion:
-          [...set].sort().
+          <strong>Fix:</strong>{" "}
+          Sort the array after Set conversion: [...set].sort().
         </div>
       </div>
     ),
