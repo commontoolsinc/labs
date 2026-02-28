@@ -17,7 +17,7 @@ export const createLinkToken = createRoute({
               authCellId: z.string().describe("The authentication cell ID"),
               integrationPieceId: z
                 .string()
-                .describe("The charm ID of the integration charm"),
+                .describe("The piece ID of the integration piece"),
               products: z
                 .array(z.string())
                 .optional()
@@ -36,7 +36,7 @@ export const createLinkToken = createRoute({
             .openapi({
               example: {
                 authCellId: "auth-cell-123",
-                integrationPieceId: "integration-charm-123",
+                integrationPieceId: "integration-piece-123",
                 products: ["accounts", "transactions"],
                 countryCodes: ["US"],
               },
@@ -84,7 +84,7 @@ export const exchangeToken = createRoute({
               authCellId: z.string().describe("The authentication cell ID"),
               integrationPieceId: z
                 .string()
-                .describe("The charm ID of the integration charm"),
+                .describe("The piece ID of the integration piece"),
               metadata: z
                 .object({
                   institution: z.object({
@@ -108,7 +108,7 @@ export const exchangeToken = createRoute({
               example: {
                 publicToken: "public-sandbox-xxx",
                 authCellId: "auth-cell-123",
-                integrationPieceId: "integration-charm-123",
+                integrationPieceId: "integration-piece-123",
                 metadata: {
                   institution: {
                     institutionId: "ins_109508",

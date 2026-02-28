@@ -1128,10 +1128,7 @@ export default pattern<
 
   // Check if overrideAuth is provided (for manual linking when wish() is unavailable)
   const hasOverrideAuth = computed(() => !!overrideAuth?.token);
-  const overrideAuthEmail = derive(
-    { overrideAuth },
-    ({ overrideAuth: la }) => la?.user?.email || "",
-  );
+  const overrideAuthEmail = computed(() => overrideAuth?.user?.email || "");
 
   const auth = ifElse(
     hasOverrideAuth,
