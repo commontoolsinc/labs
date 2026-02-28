@@ -519,6 +519,7 @@ function registerCapabilitySummary(
   }
 
   registry.set(callback, {
+    ...summary,
     params: summary.params.map((param) => {
       const defaults = defaultsByParamName.get(param.name);
       if (!defaults || defaults.length === 0) {

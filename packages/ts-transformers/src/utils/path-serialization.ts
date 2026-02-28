@@ -21,7 +21,7 @@ export function decodePath(path: string): readonly string[] {
     if (isStringArray(parsed)) {
       return parsed;
     }
-  } catch {
+  } catch (_e: unknown) {
     // Support legacy dotted encoding during transition.
   }
   return path.split(".");
