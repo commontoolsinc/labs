@@ -499,6 +499,61 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
     },
   );
 
+  await t.step(
+    "Cell<Props> unchanged primitive props are not re-emitted",
+    async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+      });
+
+      const propsCell = new MockPropsCell({
+        className: "foo",
+        title: "bar",
+      });
+      const rootCell = new MockCell({
+        type: "vnode",
+        name: "div",
+        props: propsCell,
+        children: [],
+      });
+
+      reconciler.mount(rootCell as any);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      collector.clear();
+
+      // Re-emit identical values
+      propsCell.set({ className: "foo", title: "bar" });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const setPropOps = collector.getOpsOfType("set-prop");
+      assertEquals(
+        setPropOps.length,
+        0,
+        "Should emit NO set-prop ops when primitive values are unchanged",
+      );
+
+      collector.clear();
+
+      // Change only one value
+      propsCell.set({ className: "foo", title: "baz" });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const updatedOps = collector.getOpsOfType("set-prop");
+      assertEquals(
+        updatedOps.length,
+        1,
+        "Should emit exactly one set-prop for the changed value",
+      );
+      assertEquals(
+        (updatedOps[0] as any).key,
+        "title",
+        "Changed prop should be title",
+      );
+      assertEquals((updatedOps[0] as any).value, "baz");
+    },
+  );
+
   await t.step("Cell<Props> mixed prop types", async () => {
     const collector = createOpsCollector();
     const reconciler = new WorkerReconciler({

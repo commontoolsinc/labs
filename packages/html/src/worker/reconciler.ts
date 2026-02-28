@@ -961,8 +961,8 @@ export class WorkerReconciler {
           const existing = state.propSubscriptions.get(key);
           if (existing) existing.cancel();
 
-          // deno-lint-ignore no-explicit-any
-          const propKeyCell = propsCell.key(key).asSchema(true as any);
+          // Schema `true` = accept everything → enables deep traversal of this prop
+          const propKeyCell = propsCell.key(key).asSchema(true);
           const propSinkCancel = propKeyCell.sink((deepValue: unknown) => {
             const propValue = this.transformPropValue(key, deepValue);
             this.queueOps([{
@@ -987,6 +987,10 @@ export class WorkerReconciler {
             perPropSinks.delete(key);
           }
 
+          // Skip if value hasn't changed
+          const existingState = state.propSubscriptions.get(key);
+          if (existingState && existingState.currentValue === value) continue;
+
           const propValue = this.transformPropValue(key, value);
           this.queueOps([{
             op: "set-prop",
@@ -997,6 +1001,7 @@ export class WorkerReconciler {
           state.propSubscriptions.set(key, {
             cell: undefined,
             cancel: () => {},
+            currentValue: value,
           });
         }
       }
