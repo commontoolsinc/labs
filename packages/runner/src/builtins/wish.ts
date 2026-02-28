@@ -41,6 +41,24 @@ class WishError extends Error {
   }
 }
 
+// -- Interval #now constants and helpers --
+// Minimum interval for #now/N. Caps sampling rate at 1Hz, which also serves as
+// defense-in-depth against timing side-channel attacks once SES sandboxing is
+// enforced (patterns will lose direct access to Date.now/performance.now).
+const MIN_INTERVAL_MS = 1000;
+const ONE_SHOT_RESOLUTION_MS = 1000;
+
+/**
+ * Quantize timestamp to resolution boundary.
+ *
+ * Defense-in-depth: removes sub-second (or sub-interval) precision so that once
+ * SES sandboxing blocks direct Date.now() access, patterns cannot use this
+ * reactive time source for timing side-channel attacks.
+ */
+export function coarsenTimestamp(nowMs: number, resolutionMs: number): number {
+  return Math.floor(nowMs / resolutionMs) * resolutionMs;
+}
+
 export type ParsedWishTarget = {
   key: "/" | WishTag;
   path: string[];
@@ -482,26 +500,54 @@ function resolveHomeSpaceTarget(
   }
 }
 
+// Sentinel value returned by resolveSpaceTarget when #now has an interval.
+// Timer lifecycle must be managed in the main action body (where addCancel
+// and sendResult are available), so we signal rather than resolve inline.
+const INTERVAL_NOW_SENTINEL: unique symbol = Symbol("INTERVAL_NOW");
+type IntervalNowSentinel = typeof INTERVAL_NOW_SENTINEL;
+
 /**
  * Resolve well-known targets that map to current space paths.
  */
 function resolveSpaceTarget(
   parsed: ParsedWishTarget,
   ctx: WishContext,
-): BaseResolution[] | null {
-  // #now is special — not scope-dependent
+): BaseResolution[] | IntervalNowSentinel | null {
+  // #now is special — not scope-dependent.
+  //
+  // API design rationale: We use the path slot for the interval parameter
+  // (e.g. #now/60000) rather than a WishParams field or colon syntax because:
+  // - A WishParams `interval` field would pollute the general-purpose type
+  //   with a field only relevant to #now.
+  // - Colon syntax (e.g. #now:60000) would require parser changes for one
+  //   use case.
+  // - Path slot has precedent: #favorites already uses parsed.path[0] as a
+  //   parameter (search term). Zero parser/type changes needed.
   if (parsed.key === "#now") {
-    if (parsed.path.length > 0) {
+    if (parsed.path.length > 1) {
       throw new WishError(
         `Wish now target "${formatTarget(parsed)}" is not recognized.`,
       );
     }
-    // Cache the #now cell per wish instance so that sync re-runs don't
-    // create a new immutable cell each time (Date.now() changes each call).
+    const intervalStr = parsed.path[0];
+    if (intervalStr !== undefined) {
+      const interval = Number(intervalStr);
+      if (!Number.isFinite(interval) || interval <= 0) {
+        throw new WishError(
+          `Wish now interval "${intervalStr}" must be a finite positive number.`,
+        );
+      }
+      // Signal interval wish — handled in main action body where addCancel
+      // and sendResult are available for timer lifecycle management.
+      return INTERVAL_NOW_SENTINEL;
+    }
+
+    // Cache the one-shot #now cell per wish instance so sync re-runs don't
+    // create a new immutable cell each time.
     if (!ctx.nowCell) {
       ctx.nowCell = ctx.runtime.getImmutableCell(
         ctx.parentCell.space,
-        Date.now(),
+        coarsenTimestamp(Date.now(), ONE_SHOT_RESOLUTION_MS),
         undefined,
         ctx.tx,
       );
@@ -567,6 +613,7 @@ function resolveBase(
   parsed: ParsedWishTarget,
   ctx: WishContext,
 ): BaseResolution[] {
+): BaseResolution[] | IntervalNowSentinel {
   // Try space targets first (most common)
   const spaceResult = resolveSpaceTarget(parsed, ctx);
   if (spaceResult) return spaceResult;
@@ -644,6 +691,9 @@ export function wish(
   // Per-instance cached #now cell — prevents non-idempotent re-runs from
   // Date.now() producing a different value each time the sync action fires.
   let nowCell: Cell<unknown> | undefined;
+  // Per-instance interval #now state
+  let nowTimerId: ReturnType<typeof setTimeout> | undefined;
+  let nowCancelRegistered = false;
 
   // Per-instance suggestion pattern result cell
   let suggestionPatternInput:
@@ -811,6 +861,65 @@ export function wish(
           const baseResolutions = resolveBase(parsed, ctx);
           // Persist #now cell across re-runs to avoid non-idempotent loops
           if (ctx.nowCell) nowCell = ctx.nowCell;
+
+          // Handle interval #now — timer lifecycle managed here where
+          // addCancel and sendResult are available.
+          if (baseResolutions === INTERVAL_NOW_SENTINEL) {
+            const intervalStr = parsed.path[0];
+            const requested = Number(intervalStr);
+            const intervalMs = Math.max(requested, MIN_INTERVAL_MS);
+
+            // Create a mutable cell for the ticking timestamp.
+            if (!nowCell) {
+              nowCell = runtime.getCell(
+                parentCell.space,
+                { wish: { now: cause, interval: intervalMs } },
+                undefined,
+                tx,
+              );
+            }
+
+            // Set initial coarsened value.
+            nowCell.withTx(tx).send(
+              coarsenTimestamp(Date.now(), intervalMs),
+            );
+
+            // Start aligned timer — ticks on wall-clock boundaries so patterns
+            // cannot choose a phase offset to correlate with other operations.
+            clearTimeout(nowTimerId);
+            const scheduleNextTick = (ms: number) => {
+              const now = Date.now();
+              const nextBoundary = (Math.floor(now / ms) + 1) * ms;
+              const delay = nextBoundary - now;
+              nowTimerId = setTimeout(() => {
+                runtime.editWithRetry((editTx) => {
+                  nowCell!.withTx(editTx).send(
+                    coarsenTimestamp(Date.now(), ms),
+                  );
+                }).catch((err) => {
+                  console.error("[wish] #now interval tick failed:", err);
+                });
+                scheduleNextTick(ms);
+              }, delay);
+            };
+            scheduleNextTick(intervalMs);
+            if (!nowCancelRegistered) {
+              addCancel(() => clearTimeout(nowTimerId));
+              nowCancelRegistered = true;
+            }
+
+            const candidatesCell = runtime.getImmutableCell(
+              parentCell.space,
+              [nowCell],
+              undefined,
+              tx,
+            );
+            sendResult(tx, {
+              result: nowCell,
+              candidates: candidatesCell,
+            });
+            return;
+          }
 
           if (baseResolutions.length === 0) {
             // No matches yet — data may still be loading. Send a pending
