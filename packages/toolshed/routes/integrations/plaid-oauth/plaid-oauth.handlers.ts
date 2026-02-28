@@ -191,24 +191,24 @@ export const exchangeToken: AppRouteHandler<ExchangeTokenRoute> = async (c) => {
     // Save to auth cell
     await upsertPlaidItem(payload.authCellId, plaidItem);
 
-    // Add this charm to the Plaid integration charms cell
+    // Register this piece for background updates
     try {
       const authCellLink = typeof payload.authCellId === "string"
         ? JSON.parse(payload.authCellId) as SigilLink
         : payload.authCellId as SigilLink;
       const parsedLink = parseLink(authCellLink) as NormalizedLink;
       const space = parsedLink.space;
-      const integrationCharmId = payload.integrationCharmId;
+      const integrationPieceId = payload.integrationPieceId;
 
-      if (space && integrationCharmId) {
+      if (space && integrationPieceId) {
         logger.info(
-          { space, integrationCharmId },
-          "Adding Plaid integration charm",
+          { space, integrationPieceId },
+          "Registering Plaid integration piece for background updates",
         );
 
         await setBGCharm({
           space,
-          pieceId: integrationCharmId,
+          pieceId: integrationPieceId,
           integration: "plaid",
           runtime,
         });
@@ -216,7 +216,7 @@ export const exchangeToken: AppRouteHandler<ExchangeTokenRoute> = async (c) => {
     } catch (error) {
       logger.warn(
         { error },
-        "Failed to add charm to Plaid integrations, continuing anyway",
+        "Failed to register piece for background updates, continuing anyway",
       );
     }
 

@@ -652,14 +652,8 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
     });
 
     // Check if overrideAuth is provided (for manual linking when wish() is unavailable)
-    const hasLinkedAuth = derive(
-      { overrideAuth },
-      ({ overrideAuth: la }) => !!(la?.token),
-    );
-    const overrideAuthEmail = derive(
-      { overrideAuth },
-      ({ overrideAuth: la }) => la?.user?.email || "",
-    );
+    const hasLinkedAuth = computed(() => !!(overrideAuth?.token));
+    const overrideAuthEmail = computed(() => overrideAuth?.user?.email || "");
 
     // Use overrideAuth if provided, otherwise use wished auth
     // This allows manual linking via CLI when wish() is unavailable (e.g., favorites disabled)

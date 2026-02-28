@@ -22,14 +22,15 @@
  * return { [UI]: <div>{fullUI}</div> };
  * ```
  *
- * IMPORTANT: Token refresh is currently broken in the framework!
- * This utility detects expired tokens but relies on manual re-authentication.
+ * Token refresh: Tokens auto-refresh via background-charm-service (when registered).
+ * For fallback, a "Refresh Session" button is shown in the expired UI.
  */
 
 import {
   action,
   computed,
   Default,
+  handler,
   ifElse,
   navigateTo,
   pattern,
@@ -144,6 +145,7 @@ interface GoogleAuthPiece {
   scopes?: string[];
   selectedScopes?: Record<ScopeKey, boolean>;
   userChip?: unknown;
+  refreshToken?: unknown;
 }
 
 // Status colors
@@ -160,7 +162,7 @@ const STATUS_MESSAGES: Record<AuthState, string> = {
   loading: "Loading auth...",
   "needs-login": "Please sign in to your Google Auth",
   "missing-scopes": "Additional permissions needed",
-  "token-expired": "Session expired - please re-authenticate",
+  "token-expired": "Session expired - click Refresh Session",
   ready: "Connected",
 };
 
@@ -195,6 +197,65 @@ function debugLog(enabled: boolean, ...args: unknown[]) {
   if (enabled) console.log("[GoogleAuth]", ...args);
 }
 
+// TODO(CT-1163): Replace with wish("#now:30000") when reactive time wish is available.
+// Date.now() is non-idiomatic (will be blocked in future sandbox versions).
+// This setInterval workaround makes time-dependent computeds reactive.
+// Interval is intentionally never cleared — pattern lifecycle matches page lifecycle.
+function startReactiveClock(cell: Writable<number>): void {
+  setInterval(() => cell.set(Date.now()), 30_000);
+}
+
+// =============================================================================
+// MODULE-SCOPE HANDLERS
+// =============================================================================
+
+/**
+ * Handler for one-click token refresh from the expired UI.
+ * Calls the google-auth piece's refreshToken stream. Completion is detected
+ * reactively by watching the auth cell (see refreshWatcher computed below),
+ * not via a callback or blind timeout.
+ */
+// If the token hasn't changed within this window, assume the refresh failed.
+const REFRESH_FAILURE_TIMEOUT_MS = 15_000;
+
+const attemptRefresh = handler<
+  unknown,
+  {
+    // deno-lint-ignore no-explicit-any
+    refreshStream: any;
+    refreshing: Writable<boolean>;
+    refreshFailed: Writable<boolean>;
+    refreshStartedAt: Writable<number>;
+  }
+>((_event, { refreshStream, refreshing, refreshFailed, refreshStartedAt }) => {
+  if (!refreshStream?.send) {
+    refreshFailed.set(true);
+    return;
+  }
+  refreshing.set(true);
+  refreshFailed.set(false);
+  refreshStartedAt.set(Date.now());
+
+  // Fire-and-forget: the handler on the other side (refreshTokenHandler in
+  // google-auth) is async and the stream infrastructure handles execution.
+  // NOTE: Cross-space stream sends currently fail with WriteIsolationError
+  // because the scheduler doesn't set the owning space context on the handler
+  // transaction. See CT-1289. The bgUpdater (server-side) works around this.
+  refreshStream.send({});
+
+  // Fallback timeout: if the reactive watcher (refreshWatcher) doesn't detect
+  // a token change within the window, mark the refresh as failed.
+  // NOTE: Writing to Writable cells from setTimeout is acceptable here because
+  // CTS has no effect() primitive. The write is idempotent (only fires if still
+  // refreshing) and the reactive graph picks up the change on next flush.
+  setTimeout(() => {
+    if (refreshing.get()) {
+      refreshing.set(false);
+      refreshFailed.set(true);
+    }
+  }, REFRESH_FAILURE_TIMEOUT_MS);
+});
+
 // =============================================================================
 // MAIN PATTERN
 // =============================================================================
@@ -207,16 +268,13 @@ export const GoogleAuthManager = pattern<
     // ========================================================================
     // WISH SETUP - Writable tag with accountType sync
     // ========================================================================
-    const wishTag = Writable.of("#googleAuth");
-    // Sync accountType -> wishTag (idempotent side-effect)
-    computed(() => {
+    const wishTag = computed(() => {
       const type = accountType;
-      const newTag = type === "personal"
+      return type === "personal"
         ? "#googleAuthPersonal"
         : type === "work"
         ? "#googleAuthWork"
         : "#googleAuth";
-      if (wishTag.get() !== newTag) wishTag.set(newTag);
     });
 
     const wishResult = wish<GoogleAuthPiece>({
@@ -236,10 +294,13 @@ export const GoogleAuthManager = pattern<
     const hasToken = computed(() => !!auth?.token);
     const hasEmail = computed(() => !!auth?.user?.email);
 
+    const now = Writable.of(Date.now());
+    startReactiveClock(now);
+
     // Token expiry
     const isTokenExpired = computed(() => {
       const expiresAt = auth?.expiresAt ?? 0;
-      const value = expiresAt > 0 && expiresAt < Date.now();
+      const value = expiresAt > 0 && expiresAt < now.get();
       debugLog(debugMode as boolean, "isTokenExpired:", value);
       return value;
     });
@@ -247,7 +308,7 @@ export const GoogleAuthManager = pattern<
     const tokenTimeRemaining = computed((): number | null => {
       const expiresAt = auth?.expiresAt ?? 0;
       if (!expiresAt) return null;
-      return expiresAt - Date.now();
+      return expiresAt - now.get();
     });
 
     const tokenExpiryWarning = computed((): TokenExpiryWarning => {
@@ -299,6 +360,29 @@ export const GoogleAuthManager = pattern<
       return value;
     });
     const currentEmail = computed(() => auth?.user?.email ?? "");
+
+    // Refresh state for one-click token refresh
+    const refreshStream = wishResult.result.refreshToken;
+    const refreshing = Writable.of(false);
+    const refreshFailed = Writable.of(false);
+    const refreshStartedAt = Writable.of(0);
+
+    // Reactive watcher: detect when a refresh succeeds by watching auth changes.
+    // When refreshing is true and the token becomes valid (non-expired), the
+    // refresh succeeded — reset the spinner immediately instead of waiting for
+    // a blind timeout.
+    computed(() => {
+      if (!refreshing.get()) return;
+      const expiresAt = auth?.expiresAt ?? 0;
+      if (expiresAt > now.get()) {
+        // Token is now valid — refresh succeeded
+        refreshing.set(false);
+        refreshFailed.set(false);
+      }
+    });
+
+    const isRefreshing = computed(() => refreshing.get() === true);
+    const hasRefreshFailed = computed(() => refreshFailed.get() === true);
 
     const statusDotColor = computed(
       () => STATUS_COLORS[currentState as AuthState] ?? STATUS_COLORS.loading,
@@ -553,6 +637,7 @@ export const GoogleAuthManager = pattern<
             Please sign in with your Google account to continue.
           </div>
         </div>
+        {pickerUI}
         <div style={actionRowStyle}>
           <button
             type="button"
@@ -594,6 +679,7 @@ export const GoogleAuthManager = pattern<
             {missingScopesList}
           </div>
         </div>
+        {pickerUI}
         <div style={actionRowStyle}>
           <button
             type="button"
@@ -631,9 +717,48 @@ export const GoogleAuthManager = pattern<
             Session Expired
           </h4>
           <div style={{ margin: "0", fontSize: "13px", color: "#4b5563" }}>
-            Your Google session has expired. Please sign in again to continue.
+            Your Google session has expired.
+          </div>
+          <div
+            style={{
+              marginTop: "12px",
+              display: "flex",
+              gap: "8px",
+              alignItems: "center",
+            }}
+          >
+            <button
+              type="button"
+              onClick={attemptRefresh({
+                refreshStream,
+                refreshing,
+                refreshFailed,
+                refreshStartedAt,
+              })}
+              disabled={isRefreshing}
+              style={{
+                padding: "8px 16px",
+                backgroundColor: "#3b82f6",
+                color: "white",
+                border: "none",
+                borderRadius: "6px",
+                cursor: "pointer",
+                fontWeight: "500",
+                fontSize: "14px",
+              }}
+            >
+              {ifElse(isRefreshing, "Refreshing...", "Refresh Session")}
+            </button>
+            {ifElse(
+              hasRefreshFailed,
+              <span style={{ fontSize: "13px", color: "#dc2626" }}>
+                Refresh failed — try signing in again below.
+              </span>,
+              null,
+            )}
           </div>
         </div>
+        {pickerUI}
         <div style={actionRowStyle}>
           <button
             type="button"
@@ -741,6 +866,39 @@ export const GoogleAuthManager = pattern<
       </div>
     );
 
+    // --- Refreshing UI (shown while token refresh is in progress) ---
+    const refreshingUI = (
+      <div
+        style={{
+          padding: "12px 16px",
+          backgroundColor: "#fef3c7",
+          borderRadius: "8px",
+          border: "1px solid #f59e0b",
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
+          fontSize: "14px",
+          color: "#b45309",
+        }}
+      >
+        <style>
+          {"@keyframes ct-auth-spin { to { transform: rotate(360deg); } }"}
+        </style>
+        <span
+          style={{
+            display: "inline-block",
+            width: "14px",
+            height: "14px",
+            border: "2px solid #f59e0b",
+            borderTop: "2px solid transparent",
+            borderRadius: "50%",
+            animation: "ct-auth-spin 1s linear infinite",
+          }}
+        />
+        Refreshing session...
+      </div>
+    );
+
     // --- Compose fullUI via chained ifElse (no null branches) ---
     // Built inside-out to avoid TS2589 (type instantiation too deep)
     const loginOrLoad = ifElse(isNeedsLogin, needsLoginUI, loadingUI);
@@ -750,7 +908,8 @@ export const GoogleAuthManager = pattern<
       tokenExpiredUI,
       scopesOrPrev,
     );
-    const fullUI = ifElse(isReadyState, readyUI, expiredOrPrev);
+    const refreshOrPrev = ifElse(isRefreshing, refreshingUI, expiredOrPrev);
+    const fullUI = ifElse(isReadyState, readyUI, refreshOrPrev);
 
     // ========================================================================
     // RETURN

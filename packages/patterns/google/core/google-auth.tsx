@@ -342,31 +342,31 @@ interface Output {
    * ```
    */
   refreshToken: Stream<Record<string, never>>;
+  /** Background updater for proactive token refresh via background-charm-service */
+  bgUpdater: Stream<Record<string, never>>;
 }
 
-// Handler for toggling scope selection
-const toggleScope = handler<
-  { target: { checked: boolean } },
-  { selectedScopes: Writable<SelectedScopes>; scopeKey: string }
->(
-  ({ target }, { selectedScopes, scopeKey }) => {
-    const current = selectedScopes.get();
-    selectedScopes.set({
-      ...current,
-      [scopeKey]: target.checked,
-    });
-  },
-);
+/**
+ * Shared token refresh logic. Calls the server refresh endpoint and updates
+ * the auth cell with new token data. Throws on failure.
+ *
+ * Guarded against concurrent invocations — if a refresh is already in progress,
+ * subsequent calls return silently (no-op, no error). Callers that need to know
+ * whether a refresh actually happened should watch the auth cell reactively.
+ */
+let refreshInProgress = false;
 
-// Handler for refreshing OAuth tokens from UI button
-// Must be at module scope, not inside pattern
-const handleRefresh = handler<unknown, { auth: Writable<Auth> }>(
-  async (_event, { auth: authCell }) => {
+async function refreshAuthToken(
+  authCell: Writable<Auth>,
+): Promise<boolean> {
+  if (refreshInProgress) return false;
+  refreshInProgress = true;
+
+  try {
     const currentAuth = authCell.get();
     const refreshToken = currentAuth?.refreshToken;
 
     if (!refreshToken) {
-      console.error("[google-auth] No refresh token available");
       throw new Error("No refresh token available");
     }
 
@@ -381,21 +381,56 @@ const handleRefresh = handler<unknown, { auth: Writable<Auth> }>(
 
     if (!res.ok) {
       const errorText = await res.text();
-      console.error("[google-auth] Refresh failed:", res.status, errorText);
-      throw new Error(`Token refresh failed: ${res.status}`);
+      const error = new Error(
+        `Token refresh failed: ${res.status} ${errorText}`,
+      ) as Error & { status: number };
+      error.status = res.status;
+      throw error;
     }
 
     const json = await res.json();
     if (!json.tokenInfo) {
-      console.error("[google-auth] No tokenInfo in response:", json);
-      throw new Error("Invalid refresh response");
+      throw new Error("Invalid refresh response: no tokenInfo");
     }
 
-    // Update auth with new token, keeping user info
     authCell.update({
       ...json.tokenInfo,
       user: currentAuth.user,
     });
+    return true;
+  } finally {
+    refreshInProgress = false;
+  }
+}
+
+// Handler for refreshing OAuth tokens from UI button.
+// Must be at module scope (sandbox rule) and uses handler() (not action()) because
+// the auth cell is typed as OpaqueCell in pattern context — handler bindings allow
+// explicit Writable<Auth> typing which matches the runtime type.
+const handleRefresh = handler<
+  unknown,
+  {
+    auth: Writable<Auth>;
+    refreshing: Writable<boolean>;
+    refreshFailed: Writable<boolean>;
+  }
+>(
+  async (_event, { auth, refreshing, refreshFailed }) => {
+    refreshing.set(true);
+    refreshFailed.set(false);
+    try {
+      const didRefresh = await refreshAuthToken(auth);
+      refreshing.set(false);
+      if (!didRefresh) {
+        // Another refresh was already in-flight; don't claim success or failure.
+        // The UI will update reactively when the other refresh completes.
+        return;
+      }
+      refreshFailed.set(false);
+    } catch {
+      refreshing.set(false);
+      refreshFailed.set(true);
+    }
   },
 );
 
@@ -426,65 +461,88 @@ const refreshTokenHandler = handler<
   { auth: Writable<Auth> }
 >(async (_event, { auth }) => {
   authDebugLog("refreshTokenHandler called");
-  const currentAuth = auth.get();
-  const refreshToken = currentAuth?.refreshToken;
-
   authDebugLog(
     "Current token (first 20 chars):",
-    currentAuth?.token?.slice(0, 20),
+    auth.get()?.token?.slice(0, 20),
   );
-  authDebugLog("Has refreshToken:", !!refreshToken);
+  authDebugLog("Has refreshToken:", !!auth.get()?.refreshToken);
 
-  if (!refreshToken) {
-    console.error("[google-auth] No refresh token available");
-    throw new Error("No refresh token available");
-  }
-
-  authDebugLog("Refreshing OAuth token...");
-
-  const res = await fetch(
-    new URL("/api/integrations/google-oauth/refresh", env.apiUrl),
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refreshToken }),
-    },
-  );
-
-  if (!res.ok) {
-    const errorText = await res.text();
-    console.error("[google-auth] Refresh failed:", res.status, errorText);
-    throw new Error(`Token refresh failed: ${res.status}`);
-  }
-
-  const json = await res.json();
-  authDebugLog("Server response received");
-  authDebugLog(
-    "New token (first 20 chars):",
-    json.tokenInfo?.token?.slice(0, 20),
-  );
-  authDebugLog("New expiresAt:", json.tokenInfo?.expiresAt);
-
-  if (!json.tokenInfo) {
-    console.error("[google-auth] No tokenInfo in response:", json);
-    throw new Error("Invalid refresh response");
-  }
+  await refreshAuthToken(auth);
 
   authDebugLog("Token refreshed successfully");
-
-  // Update the auth cell with new token data
-  // Keep existing user info since refresh doesn't return it
-  authDebugLog("Calling auth.update()...");
-  auth.update({
-    ...json.tokenInfo,
-    user: currentAuth.user,
-  });
-  authDebugLog("auth.update() completed");
   authDebugLog(
-    "Verifying - token now (first 20 chars):",
+    "New token (first 20 chars):",
     auth.get()?.token?.slice(0, 20),
   );
 });
+
+// TODO(CT-1163): Replace with wish("#now:30000") when reactive time wish is available.
+// Date.now() is non-idiomatic (will be blocked in future sandbox versions).
+// This setInterval workaround makes time-dependent computeds reactive.
+// Interval is intentionally never cleared — pattern lifecycle matches page lifecycle.
+function startReactiveClock(cell: Writable<number>): void {
+  setInterval(() => cell.set(Date.now()), 30_000);
+}
+
+// Threshold: refresh when less than 10 minutes remain
+const REFRESH_THRESHOLD_MS = 10 * 60 * 1000;
+
+/**
+ * Background updater handler for proactive token refresh.
+ *
+ * When google-auth is registered with background-charm-service, this handler
+ * is called every ~60 seconds. It checks if the token is about to expire
+ * (< 10 min remaining) and refreshes it proactively, preventing expiry.
+ */
+const bgRefreshHandler = handler<
+  Record<string, never>,
+  { auth: Writable<Auth> }
+>(
+  async (_event, { auth }) => {
+    const currentAuth = auth.get();
+    if (!currentAuth?.token || !currentAuth?.refreshToken) return;
+
+    const expiresAt = currentAuth.expiresAt ?? 0;
+    if (expiresAt <= 0) return;
+
+    const timeRemaining = expiresAt - Date.now();
+    if (timeRemaining > REFRESH_THRESHOLD_MS) return; // Still fresh, skip
+
+    console.log("[google-auth bgUpdater] Token expiring soon, refreshing...");
+
+    try {
+      await refreshAuthToken(auth);
+      console.log("[google-auth bgUpdater] Token refreshed successfully");
+    } catch (e) {
+      const status = (e as { status?: number }).status;
+      const msg = e instanceof Error ? e.message : String(e);
+      // Permanent failures (revoked token, invalid grant) — clear auth entirely
+      // so the UI shows "not authenticated" instead of silently retrying forever.
+      // 400 = invalid_grant, 401 = invalid credentials, 403 = token revoked
+      if (status === 400 || status === 401 || status === 403) {
+        console.error(
+          "[google-auth bgUpdater] Permanent refresh failure, clearing auth:",
+          msg,
+        );
+        auth.set({
+          token: "",
+          tokenType: "",
+          scope: [],
+          expiresIn: 0,
+          expiresAt: 0,
+          refreshToken: "",
+          user: { email: "", name: "", picture: "" },
+        });
+      } else {
+        // Transient failure (network, 5xx) — log and retry next cycle
+        console.error(
+          "[google-auth bgUpdater] Transient refresh failure:",
+          msg,
+        );
+      }
+    }
+  },
+);
 
 export default pattern<Input, Output>(
   ({ auth, selectedScopes }) => {
@@ -517,17 +575,20 @@ export default pattern<Input, Output>(
       return false;
     });
 
+    const now = Writable.of(Date.now());
+    startReactiveClock(now);
+
     // Check if token is expired (need refresh)
     const isTokenExpired = computed(() => {
       if (!auth?.token || !auth?.expiresAt) return false;
-      return auth.expiresAt < Date.now();
+      return auth.expiresAt < now.get();
     });
 
     // Format time remaining until token expiry
     const tokenExpiryDisplay = computed(() => {
       if (!auth?.expiresAt || auth.expiresAt === 0) return null;
-      const now = Date.now();
-      const remaining = auth.expiresAt - now;
+      const currentTime = now.get();
+      const remaining = auth.expiresAt - currentTime;
       if (remaining <= 0) return "Expired";
 
       const minutes = Math.floor(remaining / (60 * 1000));
@@ -544,6 +605,10 @@ export default pattern<Input, Output>(
     // Avoids creating computed() inside .map() loop
     // See: community-docs/superstitions/2025-12-16-expensive-computation-inside-map-jsx.md
     const checkboxesDisabled = computed(() => !!auth?.user?.email);
+
+    // UI feedback state for token refresh
+    const refreshing = Writable.of(false);
+    const refreshFailed = Writable.of(false);
 
     // Pre-compute the scopes string for display
     const scopesDisplay = computed(() => scopes.join(", "));
@@ -720,13 +785,12 @@ export default pattern<Input, Output>(
                     color: loggedIn ? "#9ca3af" : "inherit",
                   }}
                 >
-                  <input
-                    type="checkbox"
-                    checked={selectedScopes[key as keyof SelectedScopes]}
-                    onChange={toggleScope({ selectedScopes, scopeKey: key })}
+                  <ct-checkbox
+                    $checked={selectedScopes[key as keyof SelectedScopes]}
                     disabled={checkboxesDisabled}
-                  />
-                  <span>{description}</span>
+                  >
+                    {description}
+                  </ct-checkbox>
                 </label>
               ))}
             </div>
@@ -810,20 +874,33 @@ export default pattern<Input, Output>(
                 </p>
                 <button
                   type="button"
-                  onClick={handleRefresh({ auth })}
+                  onClick={handleRefresh({ auth, refreshing, refreshFailed })}
+                  disabled={refreshing}
                   style={{
                     padding: "10px 20px",
-                    backgroundColor: "#3b82f6",
+                    backgroundColor: refreshing ? "#93c5fd" : "#3b82f6",
                     color: "white",
                     border: "none",
                     borderRadius: "6px",
-                    cursor: "pointer",
+                    cursor: refreshing ? "not-allowed" : "pointer",
                     fontWeight: "500",
                     fontSize: "14px",
                   }}
                 >
-                  Refresh Token
+                  {refreshing ? "Refreshing..." : "Refresh Token"}
                 </button>
+                {refreshFailed && (
+                  <p
+                    style={{
+                      margin: "8px 0 0 0",
+                      fontSize: "13px",
+                      color: "#dc2626",
+                      fontWeight: "500",
+                    }}
+                  >
+                    Refresh failed — try signing in again below.
+                  </p>
+                )}
               </div>
             )}
 
@@ -890,19 +967,20 @@ export default pattern<Input, Output>(
                   </div>
                   <button
                     type="button"
-                    onClick={handleRefresh({ auth })}
+                    onClick={handleRefresh({ auth, refreshing, refreshFailed })}
+                    disabled={refreshing}
                     style={{
                       padding: "8px 16px",
-                      backgroundColor: "#0ea5e9",
+                      backgroundColor: refreshing ? "#7dd3fc" : "#0ea5e9",
                       color: "white",
                       border: "none",
                       borderRadius: "6px",
-                      cursor: "pointer",
+                      cursor: refreshing ? "not-allowed" : "pointer",
                       fontWeight: "500",
                       fontSize: "13px",
                     }}
                   >
-                    Refresh Now
+                    {refreshing ? "Refreshing..." : "Refresh Now"}
                   </button>
                 </div>
               </div>
@@ -931,6 +1009,8 @@ export default pattern<Input, Output>(
       previewUI,
       // Export the refresh handler for cross-piece calling
       refreshToken: refreshTokenHandler({ auth }),
+      // Background updater for proactive token refresh via background-charm-service
+      bgUpdater: bgRefreshHandler({ auth }),
     };
   },
 );
