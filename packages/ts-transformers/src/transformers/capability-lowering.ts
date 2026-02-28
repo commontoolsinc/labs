@@ -16,7 +16,7 @@ import { unwrapExpression } from "../utils/expression.ts";
 import {
   cloneKeyExpression,
   getKnownComputedKeyExpression,
-  isCommonToolsKeyIdentifier,
+  isCommonToolsKeyExpression,
 } from "../utils/reactive-keys.ts";
 
 type PathSegment = string | ts.Expression;
@@ -49,11 +49,7 @@ function isSelfPathSegment(
 ): boolean {
   return typeof segment !== "string" &&
     (
-      isCommonToolsKeyIdentifier(segment, context, "SELF") ||
-      (ts.isPropertyAccessExpression(segment) &&
-        ts.isIdentifier(segment.expression) &&
-        segment.expression.text === "__ctHelpers" &&
-        segment.name.text === "SELF")
+      isCommonToolsKeyExpression(segment, context, "SELF")
     );
 }
 
@@ -375,7 +371,7 @@ function collectDestructureBindings(
         key = staticKey;
       } else {
         const computedKey = element.propertyName.expression;
-        if (isCommonToolsKeyIdentifier(computedKey, context, "SELF")) {
+        if (isCommonToolsKeyExpression(computedKey, context, "SELF")) {
           directKeyExpression = context.ctHelpers.getHelperExpr("SELF");
         } else {
           key = getKnownComputedKeyExpression(computedKey, context) ??

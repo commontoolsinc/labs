@@ -1,6 +1,7 @@
 import ts from "typescript";
 
 import {
+  CT_HELPERS_IDENTIFIER,
   resolvesToCommonToolsSymbol,
   type TransformationContext,
 } from "../core/mod.ts";
@@ -33,27 +34,53 @@ export function isCommonToolsKeyIdentifier(
 ): expr is ts.Identifier {
   if (!ts.isIdentifier(expr)) return false;
   const symbol = context.checker.getSymbolAtLocation(expr);
-  if (symbol) {
-    // Symbol resolved — trust the symbol-based check and don't fall through
-    // to name matching, which could match user-defined identifiers.
-    return resolvesToCommonToolsSymbol(symbol, context.checker, targetName);
+  if (resolvesToCommonToolsSymbol(symbol, context.checker, targetName)) {
+    return true;
   }
-  // No symbol found (synthetic/transformed node) — fall back to name matching.
+  // Fall back to name matching for synthetic/transformed contexts where symbol
+  // resolution may not find the CommonTools origin (e.g. virtual test setups).
   return expr.text === targetName;
+}
+
+/**
+ * Check if an expression is a `__ctHelpers.X` property access for a known key.
+ * Prior transformers (e.g. ClosureTransformer) rewrite bare `NAME`/`UI`/`SELF`
+ * identifiers into this form.
+ */
+export function isCtHelpersKeyAccess(
+  expr: ts.Expression,
+  targetName: CommonToolsKeyName,
+): boolean {
+  return ts.isPropertyAccessExpression(expr) &&
+    ts.isIdentifier(expr.expression) &&
+    expr.expression.text === CT_HELPERS_IDENTIFIER &&
+    expr.name.text === targetName;
+}
+
+/**
+ * Check if an expression refers to a CommonTools key (NAME/UI/SELF) in either
+ * bare identifier or `__ctHelpers.X` property-access form.
+ */
+export function isCommonToolsKeyExpression(
+  expr: ts.Expression,
+  context: TransformationContext,
+  targetName: CommonToolsKeyName,
+): boolean {
+  return isCommonToolsKeyIdentifier(expr, context, targetName) ||
+    isCtHelpersKeyAccess(expr, targetName);
 }
 
 export function getKnownComputedKeyExpression(
   expr: ts.Expression,
   context: TransformationContext,
 ): ts.Expression | undefined {
-  if (isCommonToolsKeyIdentifier(expr, context, "NAME")) {
-    return context.ctHelpers.getHelperExpr("NAME");
-  }
-  if (isCommonToolsKeyIdentifier(expr, context, "UI")) {
-    return context.ctHelpers.getHelperExpr("UI");
-  }
-  if (isCommonToolsKeyIdentifier(expr, context, "SELF")) {
-    return context.ctHelpers.getHelperExpr("SELF");
+  for (const name of ["NAME", "UI", "SELF"] as const) {
+    if (
+      isCommonToolsKeyIdentifier(expr, context, name) ||
+      isCtHelpersKeyAccess(expr, name)
+    ) {
+      return context.ctHelpers.getHelperExpr(name);
+    }
   }
   return undefined;
 }
