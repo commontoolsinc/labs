@@ -392,11 +392,125 @@ function resolveHomeSpaceTarget(
   }
 }
 
-// Sentinel value returned by resolveSpaceTarget when #now has an interval.
-// Timer lifecycle must be managed in the main action body (where addCancel
-// and sendResult are available), so we signal rather than resolve inline.
-const INTERVAL_NOW_SENTINEL: unique symbol = Symbol("INTERVAL_NOW");
-type IntervalNowSentinel = typeof INTERVAL_NOW_SENTINEL;
+/** State for interval #now timer, scoped per wish() instance. */
+type IntervalNowState = {
+  timerId: ReturnType<typeof setTimeout> | undefined;
+  cell: Cell<any> | undefined;
+  cancelRegistered: boolean;
+  generation: number;
+  intervalMs: number;
+};
+
+/**
+ * Handle interval #now — a timer subscription, not a cell resolution.
+ *
+ * Called before the resolution pipeline. Returns true if the target was an
+ * interval #now (and has been fully handled), false otherwise.
+ *
+ * API design rationale: We use the path slot for the interval parameter
+ * (e.g. #now/60000) rather than a WishParams field or colon syntax because:
+ * - A WishParams `interval` field would pollute the general-purpose type
+ *   with a field only relevant to #now.
+ * - Colon syntax (e.g. #now:60000) would require parser changes for one
+ *   use case.
+ * - Path slot has precedent: #favorites already uses parsed.path[0] as a
+ *   parameter (search term). Zero parser/type changes needed.
+ */
+function handleIntervalNow(
+  parsed: ParsedWishTarget,
+  state: IntervalNowState,
+  ctx: WishContext,
+  sendResult: (tx: IExtendedStorageTransaction, result: unknown) => void,
+  addCancel: (cancel: () => void) => void,
+  cause: Cell<any>[],
+): boolean {
+  if (parsed.key !== "#now" || parsed.path.length === 0) return false;
+
+  if (parsed.path.length > 1) {
+    throw new WishError(
+      `Wish now target "${formatTarget(parsed)}" is not recognized.`,
+    );
+  }
+
+  const intervalStr = parsed.path[0];
+  const requested = Number(intervalStr);
+  if (!Number.isFinite(requested) || requested <= 0) {
+    throw new WishError(
+      `Wish now interval "${intervalStr}" must be a finite positive number.`,
+    );
+  }
+  const intervalMs = Math.max(requested, MIN_INTERVAL_MS);
+
+  state.generation++;
+
+  // If the interval changed, force cell recreation.
+  if (state.cell && state.intervalMs !== intervalMs) {
+    state.cell = undefined;
+  }
+  state.intervalMs = intervalMs;
+
+  // Create a mutable cell for the ticking timestamp.
+  if (!state.cell) {
+    state.cell = ctx.runtime.getCell(
+      ctx.parentCell.space,
+      { wish: { now: cause, interval: intervalMs } },
+      undefined,
+      ctx.tx,
+    );
+  }
+
+  // Set initial coarsened value.
+  state.cell.withTx(ctx.tx).send(
+    coarsenTimestamp(Date.now(), intervalMs),
+  );
+
+  // Start aligned timer — ticks on wall-clock boundaries so patterns
+  // cannot choose a phase offset to correlate with other operations.
+  clearTimeout(state.timerId);
+  // TODO(perf): Each wish instance creates its own timer. If many patterns use
+  // #now/N with the same interval, consider a shared-timer-per-interval registry
+  // to avoid thundering-herd editWithRetry bursts.
+  const scheduleNextTick = (ms: number) => {
+    const now = Date.now();
+    const nextBoundary = (Math.floor(now / ms) + 1) * ms;
+    const delay = nextBoundary - now;
+    state.timerId = setTimeout(async () => {
+      const gen = state.generation;
+      const { error } = await ctx.runtime.editWithRetry((editTx) => {
+        if (gen !== state.generation) return; // stale tick, skip
+        state.cell!.withTx(editTx).send(
+          coarsenTimestamp(Date.now(), ms),
+        );
+      });
+      if (error) {
+        console.error(
+          "[wish] #now interval tick failed after retries:",
+          error,
+        );
+      }
+      if (gen === state.generation) {
+        scheduleNextTick(ms);
+      }
+    }, delay);
+  };
+  scheduleNextTick(intervalMs);
+  if (!state.cancelRegistered) {
+    addCancel(() => clearTimeout(state.timerId));
+    state.cancelRegistered = true;
+  }
+
+  const candidatesCell = ctx.runtime.getImmutableCell(
+    ctx.parentCell.space,
+    [state.cell],
+    undefined,
+    ctx.tx,
+  );
+  sendResult(ctx.tx, {
+    result: state.cell,
+    candidates: candidatesCell,
+  });
+  return true;
+}
 
 /**
  * Resolve well-known targets that map to current space paths.
@@ -404,36 +518,11 @@ type IntervalNowSentinel = typeof INTERVAL_NOW_SENTINEL;
 function resolveSpaceTarget(
   parsed: ParsedWishTarget,
   ctx: WishContext,
-): BaseResolution[] | IntervalNowSentinel | null {
+): BaseResolution[] | null {
   // #now is special — not scope-dependent.
-  //
-  // API design rationale: We use the path slot for the interval parameter
-  // (e.g. #now/60000) rather than a WishParams field or colon syntax because:
-  // - A WishParams `interval` field would pollute the general-purpose type
-  //   with a field only relevant to #now.
-  // - Colon syntax (e.g. #now:60000) would require parser changes for one
-  //   use case.
-  // - Path slot has precedent: #favorites already uses parsed.path[0] as a
-  //   parameter (search term). Zero parser/type changes needed.
   if (parsed.key === "#now") {
-    if (parsed.path.length > 1) {
-      throw new WishError(
-        `Wish now target "${formatTarget(parsed)}" is not recognized.`,
-      );
-    }
-
-    const intervalStr = parsed.path[0];
-    if (intervalStr !== undefined) {
-      const interval = Number(intervalStr);
-      if (!Number.isFinite(interval) || interval <= 0) {
-        throw new WishError(
-          `Wish now interval "${intervalStr}" must be a finite positive number.`,
-        );
-      }
-      // Signal interval wish — handled in main action body where addCancel
-      // and sendResult are available for timer lifecycle management.
-      return INTERVAL_NOW_SENTINEL;
-    }
+    // Interval #now is handled by handleIntervalNow() before resolveBase.
+    if (parsed.path.length > 0) return null;
 
     // One-shot #now — coarsened to 1s resolution for security consistency.
     const nowCell = ctx.runtime.getImmutableCell(
@@ -501,7 +590,7 @@ function resolveSpaceTarget(
 async function resolveBase(
   parsed: ParsedWishTarget,
   ctx: WishContext,
-): Promise<BaseResolution[] | IntervalNowSentinel> {
+): Promise<BaseResolution[]> {
   // Try space targets first (most common)
   const spaceResult = resolveSpaceTarget(parsed, ctx);
   if (spaceResult) return spaceResult;
@@ -572,11 +661,13 @@ export function wish(
   runtime: Runtime,
 ): Action {
   // Per-instance interval #now state
-  let nowTimerId: ReturnType<typeof setTimeout> | undefined;
-  let nowCell: Cell<any> | undefined;
-  let nowCancelRegistered = false;
-  let nowGeneration = 0;
-  let nowIntervalMs = 0;
+  const nowState: IntervalNowState = {
+    timerId: undefined,
+    cell: undefined,
+    cancelRegistered: false,
+    generation: 0,
+    intervalMs: 0,
+  };
 
   // Per-instance suggestion pattern result cell
   let suggestionPatternInput:
@@ -675,84 +766,23 @@ export function wish(
           const parsed = parseWishTarget(query);
           parsed.path = [...parsed.path, ...(path ?? [])];
           const ctx: WishContext = { runtime, tx, parentCell, scope };
-          const baseResolutions = await resolveBase(parsed, ctx);
 
-          // Handle interval #now — timer lifecycle managed here where
-          // addCancel and sendResult are available.
-          if (baseResolutions === INTERVAL_NOW_SENTINEL) {
-            nowGeneration++;
-            const intervalStr = parsed.path[0];
-            const requested = Number(intervalStr);
-            const intervalMs = Math.max(requested, MIN_INTERVAL_MS);
-
-            // If the interval changed, force cell recreation.
-            if (nowCell && nowIntervalMs !== intervalMs) {
-              nowCell = undefined; // force recreation with new interval
-            }
-            nowIntervalMs = intervalMs;
-
-            // Create a mutable cell for the ticking timestamp.
-            if (!nowCell) {
-              nowCell = runtime.getCell(
-                parentCell.space,
-                { wish: { now: cause, interval: intervalMs } },
-                undefined,
-                tx,
-              );
-            }
-
-            // Set initial coarsened value.
-            nowCell.withTx(tx).send(
-              coarsenTimestamp(Date.now(), intervalMs),
-            );
-
-            // Start aligned timer — ticks on wall-clock boundaries so patterns
-            // cannot choose a phase offset to correlate with other operations.
-            clearTimeout(nowTimerId);
-            // TODO(perf): Each wish instance creates its own timer. If many patterns use
-            // #now/N with the same interval, consider a shared-timer-per-interval registry
-            // to avoid thundering-herd editWithRetry bursts.
-            const scheduleNextTick = (ms: number) => {
-              const now = Date.now();
-              const nextBoundary = (Math.floor(now / ms) + 1) * ms;
-              const delay = nextBoundary - now;
-              nowTimerId = setTimeout(async () => {
-                const gen = nowGeneration;
-                const { error } = await runtime.editWithRetry((editTx) => {
-                  if (gen !== nowGeneration) return; // stale tick, skip
-                  nowCell!.withTx(editTx).send(
-                    coarsenTimestamp(Date.now(), ms),
-                  );
-                });
-                if (error) {
-                  console.error(
-                    "[wish] #now interval tick failed after retries:",
-                    error,
-                  );
-                }
-                if (gen === nowGeneration) {
-                  scheduleNextTick(ms);
-                }
-              }, delay);
-            };
-            scheduleNextTick(intervalMs);
-            if (!nowCancelRegistered) {
-              addCancel(() => clearTimeout(nowTimerId));
-              nowCancelRegistered = true;
-            }
-
-            const candidatesCell = runtime.getImmutableCell(
-              parentCell.space,
-              [nowCell],
-              undefined,
-              tx,
-            );
-            sendResult(tx, {
-              result: nowCell,
-              candidates: candidatesCell,
-            });
+          // Interval #now is not a resolution — it's a timer subscription.
+          // Handle it before entering the resolution pipeline.
+          if (
+            handleIntervalNow(
+              parsed,
+              nowState,
+              ctx,
+              sendResult,
+              addCancel,
+              cause,
+            )
+          ) {
             return;
           }
+
+          const baseResolutions = await resolveBase(parsed, ctx);
 
           const resultCells = baseResolutions.map((baseResolution) => {
             const combinedPath = baseResolution.pathPrefix
