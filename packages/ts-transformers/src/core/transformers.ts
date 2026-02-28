@@ -36,6 +36,8 @@ export interface CapabilityParamSummary {
 
 export interface FunctionCapabilitySummary {
   readonly params: readonly CapabilityParamSummary[];
+  /** True when analysis was short-circuited due to recursion. */
+  readonly recursive?: boolean;
 }
 
 /**

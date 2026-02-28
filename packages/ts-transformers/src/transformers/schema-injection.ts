@@ -143,7 +143,8 @@ function shouldDropFallbackTypeForSchema(
   let rebuilt: ts.TypeNode | undefined;
   try {
     rebuilt = checker.typeToTypeNode(type, sourceFile, typeToNodeFlags);
-  } catch {
+  } catch (_e: unknown) {
+    // typeToTypeNode can throw on deeply recursive or circular types.
     rebuilt = undefined;
   }
   if (!rebuilt) return false;
@@ -712,61 +713,25 @@ function findCapabilitySummaryForParameter(
   return summary.params.find((param) => param.name === paramName);
 }
 
-function applyCapabilitySummaryToArgument(
-  fn: ts.ArrowFunction | ts.FunctionExpression,
-  argumentNode: ts.TypeNode | undefined,
-  argumentType: ts.Type | undefined,
+/**
+ * Shared implementation for applying capability summary shrinking and wrapping
+ * to a type node. Both `applyCapabilitySummaryToArgument` and
+ * `applyCapabilitySummaryToParameter` delegate here after resolving their
+ * respective param summary and base types.
+ */
+function applyShrinkAndWrap(
+  paramSummary: CapabilityParamSummary,
+  baseTypeNode: ts.TypeNode,
+  baseType: ts.Type | undefined,
+  shouldWrap: boolean,
   checker: ts.TypeChecker,
   sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
-  capabilityRegistry?: CapabilitySummaryRegistry,
-  mode: CapabilitySummaryApplicationMode = "full",
-): ts.TypeNode | undefined {
-  if (!argumentNode) return argumentNode;
-
-  const paramSummary = findCapabilitySummaryForParameter(
-    fn,
-    0,
-    capabilityRegistry,
-  );
-  if (!paramSummary) {
-    return argumentNode;
-  }
-
-  const innerTypeNode = extractCellLikeInnerTypeNode(argumentNode);
-  const shouldWrap = !!innerTypeNode;
-  const baseTypeNode = innerTypeNode ?? argumentNode;
-  const baseType = shouldWrap && argumentType
-    ? (unwrapCellLikeType(argumentType, checker) ?? argumentType)
-    : argumentType;
-
+): ts.TypeNode {
   const paths = uniquePaths([
     ...paramSummary.readPaths,
     ...paramSummary.writePaths,
   ]);
-
-  if (mode === "defaults_only") {
-    const fallbackPaths = buildDefaultsOnlyFallbackPaths(
-      baseType,
-      paramSummary.defaults,
-      checker,
-      sourceFile,
-    );
-    const next = applyCapabilityDefaultsToTypeNode(
-      baseTypeNode,
-      paramSummary.defaults,
-      baseType,
-      fallbackPaths,
-      false,
-      checker,
-      sourceFile,
-      factory,
-    );
-    if (!shouldWrap) {
-      return next;
-    }
-    return wrapTypeNodeWithCapability(next, "opaque", factory);
-  }
 
   let next = baseTypeNode;
   if (!paramSummary.wildcard && paths.length > 0) {
@@ -832,6 +797,68 @@ function applyCapabilitySummaryToArgument(
   return wrapTypeNodeWithCapability(next, paramSummary.capability, factory);
 }
 
+function applyCapabilitySummaryToArgument(
+  fn: ts.ArrowFunction | ts.FunctionExpression,
+  argumentNode: ts.TypeNode | undefined,
+  argumentType: ts.Type | undefined,
+  checker: ts.TypeChecker,
+  sourceFile: ts.SourceFile,
+  factory: ts.NodeFactory,
+  capabilityRegistry?: CapabilitySummaryRegistry,
+  mode: CapabilitySummaryApplicationMode = "full",
+): ts.TypeNode | undefined {
+  if (!argumentNode) return argumentNode;
+
+  const paramSummary = findCapabilitySummaryForParameter(
+    fn,
+    0,
+    capabilityRegistry,
+  );
+  if (!paramSummary) {
+    return argumentNode;
+  }
+
+  const innerTypeNode = extractCellLikeInnerTypeNode(argumentNode);
+  const shouldWrap = !!innerTypeNode;
+  const baseTypeNode = innerTypeNode ?? argumentNode;
+  const baseType = shouldWrap && argumentType
+    ? (unwrapCellLikeType(argumentType, checker) ?? argumentType)
+    : argumentType;
+
+  if (mode === "defaults_only") {
+    const fallbackPaths = buildDefaultsOnlyFallbackPaths(
+      baseType,
+      paramSummary.defaults,
+      checker,
+      sourceFile,
+    );
+    const next = applyCapabilityDefaultsToTypeNode(
+      baseTypeNode,
+      paramSummary.defaults,
+      baseType,
+      fallbackPaths,
+      false,
+      checker,
+      sourceFile,
+      factory,
+    );
+    if (!shouldWrap) {
+      return next;
+    }
+    return wrapTypeNodeWithCapability(next, "opaque", factory);
+  }
+
+  return applyShrinkAndWrap(
+    paramSummary,
+    baseTypeNode,
+    baseType,
+    shouldWrap,
+    checker,
+    sourceFile,
+    factory,
+  );
+}
+
 function applyCapabilitySummaryToParameter(
   fn: ts.ArrowFunction | ts.FunctionExpression,
   parameterIndex: number,
@@ -863,78 +890,21 @@ function applyCapabilitySummaryToParameter(
   if (!baseType) {
     try {
       baseType = checker.getTypeFromTypeNode(baseTypeNode);
-    } catch {
+    } catch (_e: unknown) {
+      // Synthetic nodes may not be resolvable by the checker.
       baseType = undefined;
     }
   }
 
-  const paths = uniquePaths([
-    ...paramSummary.readPaths,
-    ...paramSummary.writePaths,
-  ]);
-
-  let next = baseTypeNode;
-  if (!paramSummary.wildcard && paths.length > 0) {
-    const preferTypeDriven = !!baseType && isSyntheticTypeNode(baseTypeNode);
-    let shrunk: ts.TypeNode | undefined;
-    if (preferTypeDriven) {
-      // Synthetic inferred nodes can lose property precision in node-only mode.
-      const typeDriven = buildShrunkTypeNodeFromType(
-        baseType!,
-        paths,
-        checker,
-        sourceFile,
-        factory,
-      );
-      const nodeDriven = buildShrunkTypeNodeFromTypeNode(
-        baseTypeNode,
-        paths,
-        factory,
-      );
-      shrunk = typeDriven ?? nodeDriven;
-      if (
-        typeDriven &&
-        nodeDriven &&
-        containsAnyOrUnknownTypeNode(typeDriven) &&
-        !containsAnyOrUnknownTypeNode(nodeDriven)
-      ) {
-        // Prefer node-driven shrinking when type-driven rebuilding widens nested
-        // members to `any`/`unknown` (e.g. array items or optional fields).
-        shrunk = nodeDriven;
-      }
-    } else {
-      // Source-authored nodes preserve exact unions/aliases; keep them first.
-      shrunk = buildShrunkTypeNodeFromTypeNode(baseTypeNode, paths, factory);
-      if (!shrunk && baseType) {
-        shrunk = buildShrunkTypeNodeFromType(
-          baseType,
-          paths,
-          checker,
-          sourceFile,
-          factory,
-        );
-      }
-    }
-    if (shrunk) {
-      next = shrunk;
-    }
-  }
-
-  next = applyCapabilityDefaultsToTypeNode(
-    next,
-    paramSummary.defaults,
+  return applyShrinkAndWrap(
+    paramSummary,
+    baseTypeNode,
     baseType,
-    paths,
-    paramSummary.wildcard,
+    shouldWrap,
     checker,
     sourceFile,
     factory,
   );
-
-  if (!shouldWrap) {
-    return next;
-  }
-  return wrapTypeNodeWithCapability(next, paramSummary.capability, factory);
 }
 
 function collectFunctionSchemaTypeNodes(
@@ -1020,7 +990,8 @@ function collectFunctionSchemaTypeNodes(
         checker,
         typeRegistry,
       );
-    } catch {
+    } catch (_e: unknown) {
+      // Synthetic wrapped/shrunk nodes may not be resolvable by the checker.
       recovered = undefined;
     }
 

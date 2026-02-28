@@ -33,11 +33,12 @@ export function isCommonToolsKeyIdentifier(
 ): expr is ts.Identifier {
   if (!ts.isIdentifier(expr)) return false;
   const symbol = context.checker.getSymbolAtLocation(expr);
-  if (resolvesToCommonToolsSymbol(symbol, context.checker, targetName)) {
-    return true;
+  if (symbol) {
+    // Symbol resolved — trust the symbol-based check and don't fall through
+    // to name matching, which could match user-defined identifiers.
+    return resolvesToCommonToolsSymbol(symbol, context.checker, targetName);
   }
-  // Keep direct-name fallback for transformed helper contexts where symbol
-  // resolution can be transient.
+  // No symbol found (synthetic/transformed node) — fall back to name matching.
   return expr.text === targetName;
 }
 

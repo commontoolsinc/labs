@@ -71,6 +71,22 @@ export class TransformationContext {
   ): { start: number; length: number } {
     let current: ts.Node | undefined = node;
     while (current) {
+      // Try the original node first — synthetic nodes created by transformers
+      // often have originals with real source positions.
+      const original: ts.Node = ts.getOriginalNode(current);
+      if (original && original !== current) {
+        const origPos = original.pos;
+        const origEnd = original.end;
+        if (origPos >= 0 && origEnd >= origPos) {
+          try {
+            const start = original.getStart(this.sourceFile);
+            return { start, length: Math.max(0, origEnd - start) };
+          } catch (_e: unknown) {
+            // Original may still lack parent links; fall through.
+          }
+        }
+      }
+
       const pos = current.pos;
       const end = current.end;
       if (pos >= 0 && end >= pos) {
@@ -80,7 +96,7 @@ export class TransformationContext {
             start,
             length: Math.max(0, end - start),
           };
-        } catch {
+        } catch (_e: unknown) {
           // Some synthetic nodes still throw here; continue walking to a real parent.
         }
       }

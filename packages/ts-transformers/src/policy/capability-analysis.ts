@@ -92,9 +92,6 @@ function isLiteralElement(
 function getLiteralElementText(
   expr: ts.StringLiteral | ts.NumericLiteral | ts.NoSubstitutionTemplateLiteral,
 ): string {
-  if (ts.isNumericLiteral(expr)) {
-    return expr.text;
-  }
   return expr.text;
 }
 
@@ -374,7 +371,10 @@ export function analyzeFunctionCapabilities(
     return cached;
   }
   if (inProgress.has(fn)) {
-    return { params: [] };
+    // Recursion detected — return an empty summary so callers skip shrinking
+    // for this function. The `recursive` flag lets callers emit a diagnostic
+    // if they choose to.
+    return { params: [], recursive: true };
   }
   inProgress.add(fn);
 

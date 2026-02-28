@@ -493,7 +493,12 @@ function combineExtractedElementTypes(
   const getUnionType = (checker as ts.TypeChecker & {
     getUnionType?: (types: readonly ts.Type[]) => ts.Type;
   }).getUnionType;
-  return getUnionType?.(unique) ?? unique[0];
+  if (getUnionType) {
+    return getUnionType(unique);
+  }
+  // Cannot construct union without internal API; signal failure so callers
+  // can fall back to alternative type extraction strategies.
+  return undefined;
 }
 
 /**
