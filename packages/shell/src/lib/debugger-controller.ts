@@ -5,6 +5,7 @@ import type {
   CellRef,
   LoggerFlagsData,
   RuntimeTelemetryMarkerResult,
+  SchedulerDiagnosisResult,
   SchedulerGraphEdge,
   SchedulerGraphSnapshot,
 } from "@commontools/runtime-client";
@@ -67,6 +68,11 @@ export class DebuggerController implements ReactiveController {
   private historicalEdges = new Set<string>(); // "from->to" format
   private graphUpdateVersion = 0;
   private isProcessingTelemetry = false; // Guard against re-entrant updates
+
+  // Diagnosis state for non-idempotent detection
+  private diagnosisResult: SchedulerDiagnosisResult | null = null;
+  private isDiagnosing = false;
+  private diagnosisVersion = 0;
 
   // Logger flags from worker (e.g. "action invalid input" flags)
   private activeFlags: LoggerFlagsData = {};
@@ -508,6 +514,56 @@ export class DebuggerController implements ReactiveController {
     id: string,
   ): Record<string, unknown> | null {
     return this.activeFlags?.["runner"]?.[flagName]?.[id] ?? null;
+  }
+
+  // ============================================================
+  // Diagnosis for non-idempotent detection
+  // ============================================================
+
+  /**
+   * Run diagnosis and store the result.
+   */
+  async runDiagnosis(durationMs = 5000): Promise<void> {
+    if (!this.runtime || this.isDiagnosing) return;
+
+    const rt = this.runtime.runtime();
+    if (!rt) return;
+
+    this.isDiagnosing = true;
+    this.host.requestUpdate();
+
+    try {
+      const result = await rt.detectNonIdempotent(durationMs);
+      this.diagnosisResult = result;
+      this.diagnosisVersion++;
+    } catch (e) {
+      console.error("[DebuggerController] Diagnosis failed:", e);
+      this.diagnosisResult = null;
+    } finally {
+      this.isDiagnosing = false;
+      this.host.requestUpdate();
+    }
+  }
+
+  /**
+   * Get the current diagnosis result.
+   */
+  getDiagnosisResult(): SchedulerDiagnosisResult | null {
+    return this.diagnosisResult;
+  }
+
+  /**
+   * Check if diagnosis is currently running.
+   */
+  getIsDiagnosing(): boolean {
+    return this.isDiagnosing;
+  }
+
+  /**
+   * Get the diagnosis version for change detection.
+   */
+  getDiagnosisVersion(): number {
+    return this.diagnosisVersion;
   }
 
   /**

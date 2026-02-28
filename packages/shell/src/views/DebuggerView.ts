@@ -838,7 +838,12 @@ export class XDebuggerView extends LitElement {
   debuggerController?: DebuggerController;
 
   @state()
-  private _activeTab: "events" | "watch" | "scheduler" | "loggers" = "events";
+  private _activeTab:
+    | "events"
+    | "watch"
+    | "scheduler"
+    | "loggers"
+    | "diagnosis" = "events";
 
   @state()
   private activeSubtopics = new Set<string>();
@@ -892,6 +897,9 @@ export class XDebuggerView extends LitElement {
     content: string;
     visible: boolean;
   } | null = null;
+
+  @state()
+  private diagnosisDurationMs = 5000;
 
   private resizeController = new ResizableDrawerController(this, {
     initialHeight: 300,
@@ -2531,6 +2539,172 @@ export class XDebuggerView extends LitElement {
         >
           Loggers
         </button>
+        <button
+          type="button"
+          class="tab-button ${this._activeTab === "diagnosis" ? "active" : ""}"
+          @click="${() => this._activeTab = "diagnosis"}"
+        >
+          Diagnosis
+        </button>
+      </div>
+    `;
+  }
+
+  private renderDiagnosis(): TemplateResult {
+    const isDiagnosing = this.debuggerController?.getIsDiagnosing() ?? false;
+    const result = this.debuggerController?.getDiagnosisResult() ?? null;
+
+    return html`
+      <div style="padding: 0.5rem;">
+        <!-- Controls -->
+        <div
+          style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem;"
+        >
+          <button
+            type="button"
+            class="action-button"
+            style="${isDiagnosing
+              ? "background-color: #dc2626; color: white;"
+              : "background-color: #3b82f6; color: white;"}"
+            @click="${() => {
+              if (!isDiagnosing) {
+                this.debuggerController?.runDiagnosis(this.diagnosisDurationMs);
+              }
+            }}"
+            ?disabled="${isDiagnosing}"
+          >
+            ${isDiagnosing ? "Diagnosing..." : "Run Diagnosis"}
+          </button>
+          <select
+            style="background-color: #1e293b; color: #cbd5e1; border: 1px solid #334155; border-radius: 0.375rem; padding: 0.25rem 0.5rem; font-size: 0.6875rem;"
+            @change="${(e: Event) => {
+              this.diagnosisDurationMs = parseInt(
+                (e.target as HTMLSelectElement).value,
+              );
+            }}"
+          >
+            <option value="3000" ?selected="${this.diagnosisDurationMs ===
+              3000}">3s</option>
+            <option value="5000" ?selected="${this.diagnosisDurationMs ===
+              5000}">5s</option>
+            <option value="10000" ?selected="${this.diagnosisDurationMs ===
+              10000}">10s</option>
+          </select>
+          ${isDiagnosing
+            ? html`
+              <span style="color: #eab308; font-size: 0.75rem;">Capturing data...</span>
+            `
+            : ""}
+        </div>
+
+        ${result
+          ? html`
+            <!-- Summary -->
+            <div style="margin-bottom: 1rem; font-size: 0.75rem; color: #94a3b8;">
+              Duration: ${(result.duration / 1000).toFixed(
+                1,
+              )}s | Non-idempotent: ${result.nonIdempotent
+                .length} | Cycles: ${result.cycles.length}
+            </div>
+
+            <!-- Non-Idempotent Actions -->
+            ${result.nonIdempotent.length > 0
+              ? html`
+                <div style="margin-bottom: 1rem;">
+                  <div
+                    style="font-weight: 600; color: #ef4444; margin-bottom: 0.5rem; font-size: 0.8125rem;"
+                  >
+                    Non-Idempotent Actions
+                  </div>
+                  ${result.nonIdempotent.map(
+                    (report) =>
+                      html`
+                        <div
+                          style="background-color: #1e293b; border: 1px solid #7f1d1d; border-radius: 0.375rem; padding: 0.5rem; margin-bottom: 0.375rem;"
+                        >
+                          <div
+                            style="font-family: monospace; color: #fca5a5; font-size: 0.75rem; margin-bottom: 0.25rem;"
+                          >
+                            ${report.actionId}
+                          </div>
+                          ${report.actionInfo?.patternName
+                            ? html`
+                              <div style="color: #94a3b8; font-size: 0.6875rem; margin-bottom: 0.25rem;">
+                                Pattern: ${report.actionInfo.patternName}
+                              </div>
+                            `
+                            : ""}
+                          <div style="color: #fbbf24; font-size: 0.6875rem;">
+                            Differing writes: ${report.differingWriteKeys.join(
+                              ", ",
+                            )}
+                          </div>
+                          <details style="margin-top: 0.375rem;">
+                            <summary style="cursor: pointer; color: #64748b; font-size: 0.625rem;">
+                              Show run details
+                            </summary>
+                            <pre
+                              style="margin: 0.25rem 0 0; font-size: 0.625rem; color: #cbd5e1; overflow: auto; max-height: 8rem;"
+                            >${JSON.stringify(report.runs, null, 2)}</pre>
+                          </details>
+                        </div>
+                      `,
+                  )}
+                </div>
+              `
+              : html`
+                <div style="color: #10b981; margin-bottom: 1rem; font-size: 0.75rem;">
+                  No non-idempotent actions detected.
+                </div>
+              `}
+
+            <!-- Cycles -->
+            ${result.cycles.length > 0
+              ? html`
+                <div>
+                  <div
+                    style="font-weight: 600; color: #eab308; margin-bottom: 0.5rem; font-size: 0.8125rem;"
+                  >
+                    Causal Cycles
+                  </div>
+                  ${result.cycles.map(
+                    (cycle) =>
+                      html`
+                        <div
+                          style="background-color: #1e293b; border: 1px solid #854d0e; border-radius: 0.375rem; padding: 0.5rem; margin-bottom: 0.375rem;"
+                        >
+                          <div style="font-family: monospace; font-size: 0.6875rem; color: #fde68a;">
+                            ${cycle.cycle
+                              .map((step) =>
+                                `${step.actionId} --[${step.writesCell}]-->`
+                              )
+                              .join(" ")} ${cycle.cycle[0]?.actionId ?? ""}
+                          </div>
+                        </div>
+                      `,
+                  )}
+                </div>
+              `
+              : html`
+                <div style="color: #10b981; font-size: 0.75rem;">
+                  No causal cycles detected.
+                </div>
+              `}
+          `
+          : html`
+            <div class="empty-state">
+              Run a diagnosis to detect non-idempotent computations and causal cycles.
+              <br><br>
+              The diagnosis captures read/write values for each action and tracks causal
+              chains between actions. Actions that produce different outputs for the same
+              inputs are flagged as non-idempotent.
+              <br><br>
+              You can also run from the console:
+              <code style="display: block; margin-top: 0.5rem; color: #3b82f6;">
+                await commontools.detectNonIdempotent(5000)
+              </code>
+            </div>
+          `}
       </div>
     `;
   }
@@ -2714,6 +2888,14 @@ export class XDebuggerView extends LitElement {
                   ? "resizing"
                   : ""}">
                   ${this.renderLoggers()}
+                </div>
+              `
+              : this._activeTab === "diagnosis"
+              ? html`
+                <div class="content-area ${this.resizeController.isResizing
+                  ? "resizing"
+                  : ""}">
+                  ${this.renderDiagnosis()}
                 </div>
               `
               : this._activeTab === "events"

@@ -22,9 +22,12 @@ export {
 } from "./builder/types.ts";
 export { type Cancel, useCancelGroup } from "./cancel.ts";
 export type {
+  CycleReport,
+  NonIdempotentReport,
   RuntimeTelemetry,
   RuntimeTelemetryEvent,
   RuntimeTelemetryMarkerResult,
+  SchedulerDiagnosisResult,
   SchedulerGraphEdge,
   SchedulerGraphNode,
   SchedulerGraphSnapshot,

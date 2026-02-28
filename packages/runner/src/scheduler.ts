@@ -43,7 +43,10 @@ import {
 import { ensurePieceRunning } from "./ensure-piece-running.ts";
 import type {
   ActionStats,
+  CycleReport,
+  NonIdempotentReport,
   SchedulerActionInfo,
+  SchedulerDiagnosisResult,
   SchedulerGraphEdge,
   SchedulerGraphNode,
   SchedulerGraphSnapshot,
@@ -178,6 +181,40 @@ export class Scheduler {
   // Cycle-aware debounce: track runs per action within current execute() call
   private runsThisExecute = new Map<Action, number>();
   private executeStartTime = 0;
+
+  // Non-settling heuristic (Phase 1): detects when the system is churning
+  private settlingTracker = {
+    windowStart: 0, // start of current tracking window
+    busyTime: 0, // cumulative ms spent in execute() within window
+    lastExecuteStart: 0, // timestamp when current execute() started
+    isExecuting: false,
+    nonSettlingDetected: false,
+  };
+  private autoTriggerDiagnosis = false;
+
+  // Idempotency diagnosis (Phase 2): captures read/write values per action run
+  private diagnosisEnabled = false;
+  private diagnosisTimeout: ReturnType<typeof setTimeout> | null = null;
+  private diagnosisStartTime = 0;
+  private diagnosisBusyTime = 0;
+  private diagnosisResolve:
+    | ((result: SchedulerDiagnosisResult) => void)
+    | null = null;
+  private diagnosisHistory = new Map<string, {
+    readValues: Map<string, unknown>;
+    writeValues: Map<string, unknown>;
+    timestamp: number;
+  }[]>();
+  private diagnosisNonIdempotent: NonIdempotentReport[] = [];
+
+  // Cycle detection (Phase 3): tracks causal edges between actions
+  private causalEdges: {
+    writer: string;
+    cell: string;
+    triggered: string;
+    timestamp: number;
+  }[] = [];
+  private changeGroupToActionId = new Map<ChangeGroup, string>();
 
   // Debounce infrastructure for throttling slow actions
   private debounceTimers = new WeakMap<
@@ -758,6 +795,17 @@ export class Scheduler {
             `Elapsed: ${elapsed.toFixed(2)}ms`,
           ]);
 
+          // Diagnosis capture: record read/write values for idempotency checking
+          if (this.diagnosisEnabled) {
+            this.captureDiagnosisRecord(actionId, action, tx, log);
+
+            // Map the action's changeGroup to its ID for causal tracking
+            const cg = this.actionChangeGroups.get(action);
+            if (cg) {
+              this.changeGroupToActionId.set(cg, actionId);
+            }
+          }
+
           this.resubscribe(action, log);
           resolve(result);
         }
@@ -952,6 +1000,24 @@ export class Scheduler {
               ]);
 
               for (const action of triggeredActions) {
+                // Causal edge tracking for diagnosis
+                if (
+                  this.diagnosisEnabled && hasSourceChangeGroup &&
+                  sourceChangeGroup !== undefined
+                ) {
+                  const writerActionId = this.changeGroupToActionId.get(
+                    sourceChangeGroup,
+                  );
+                  if (writerActionId) {
+                    this.causalEdges.push({
+                      writer: writerActionId,
+                      cell: spaceAndURI,
+                      triggered: this.getActionId(action),
+                      timestamp: performance.now(),
+                    });
+                  }
+                }
+
                 const actionChangeGroup = this.actionChangeGroups.get(action);
                 if (
                   hasSourceChangeGroup &&
@@ -1914,6 +1980,340 @@ export class Scheduler {
   resetFilterStats(): void {
     this.filterStats = { filtered: 0, executed: 0 };
   }
+
+  // ============================================================
+  // Non-settling detection API
+  // ============================================================
+
+  /**
+   * Returns whether the scheduler has detected a non-settling condition.
+   * This means execute() is consuming a high fraction of wall-clock time,
+   * indicating the system is churning.
+   */
+  isNonSettling(): boolean {
+    return this.settlingTracker.nonSettlingDetected;
+  }
+
+  /**
+   * Enables or disables automatic triggering of diagnosis when non-settling
+   * is detected. Off by default.
+   */
+  setAutoTriggerDiagnosis(enabled: boolean): void {
+    this.autoTriggerDiagnosis = enabled;
+  }
+
+  // ============================================================
+  // Idempotency diagnosis API (Phase 2 + 3)
+  // ============================================================
+
+  /**
+   * Starts diagnosis mode: captures read/write values and causal edges.
+   * Automatically stops after durationMs.
+   */
+  private startDiagnosis(durationMs = 5000): void {
+    if (this.diagnosisEnabled) return;
+
+    this.diagnosisEnabled = true;
+    this.diagnosisStartTime = performance.now();
+    this.diagnosisBusyTime = 0;
+    this.diagnosisHistory.clear();
+    this.diagnosisNonIdempotent = [];
+    this.causalEdges = [];
+    this.changeGroupToActionId = new Map();
+
+    this.diagnosisTimeout = setTimeout(() => {
+      this.stopDiagnosis();
+    }, durationMs);
+  }
+
+  /**
+   * Stops diagnosis mode and finalizes results.
+   */
+  private stopDiagnosis(): void {
+    if (!this.diagnosisEnabled) return;
+
+    this.diagnosisEnabled = false;
+    if (this.diagnosisTimeout) {
+      clearTimeout(this.diagnosisTimeout);
+      this.diagnosisTimeout = null;
+    }
+
+    const duration = performance.now() - this.diagnosisStartTime;
+
+    // Detect cycles from causal edges
+    const cycles = this.detectCycles();
+
+    const result: SchedulerDiagnosisResult = {
+      nonIdempotent: this.diagnosisNonIdempotent,
+      cycles,
+      duration,
+      busyTime: this.diagnosisBusyTime,
+    };
+
+    // Clean up
+    this.diagnosisHistory.clear();
+    this.causalEdges = [];
+    this.changeGroupToActionId = new Map();
+
+    // Resolve the promise if someone is waiting
+    if (this.diagnosisResolve) {
+      this.diagnosisResolve(result);
+      this.diagnosisResolve = null;
+    }
+  }
+
+  /**
+   * Runs a diagnosis for the specified duration and returns the result.
+   * This is the main entry point for external callers (IPC, console).
+   */
+  runDiagnosis(durationMs = 5000): Promise<SchedulerDiagnosisResult> {
+    // If already running, stop and start fresh
+    if (this.diagnosisEnabled) {
+      this.stopDiagnosis();
+    }
+
+    return new Promise<SchedulerDiagnosisResult>((resolve) => {
+      this.diagnosisResolve = resolve;
+      this.startDiagnosis(durationMs);
+    });
+  }
+
+  /**
+   * Captures a diagnosis record for a single action run.
+   * Called from run() when diagnosisEnabled is true.
+   */
+  private captureDiagnosisRecord(
+    actionId: string,
+    action: Action,
+    tx: IExtendedStorageTransaction,
+    log: ReactivityLog,
+  ): void {
+    // Build address key helper
+    const makeKey = (addr: IMemorySpaceAddress): string =>
+      `${addr.space}/${addr.id}/${addr.path.join("/")}`;
+
+    // Capture read values from committed storage (what the next run would see)
+    const readValues = new Map<string, unknown>();
+    for (const read of log.reads) {
+      const key = makeKey(read);
+      try {
+        const readerTx = this.runtime.edit();
+        const result = readerTx.tx.read(
+          {
+            space: read.space,
+            id: read.id,
+            type: read.type ?? "application/json",
+            path: ["value", ...read.path],
+          },
+          { meta: ignoreReadForScheduling },
+        );
+        readValues.set(key, result.ok?.value);
+        readerTx.abort();
+      } catch {
+        readValues.set(key, "[read-error]");
+      }
+    }
+
+    // Capture write values from the action's transaction journal
+    const writeValues = new Map<string, unknown>();
+    for (const write of log.writes) {
+      const key = makeKey(write);
+      try {
+        for (const att of tx.journal.novelty(write.space)) {
+          if (att.address.id === write.id) {
+            writeValues.set(key, att.value);
+            break;
+          }
+        }
+        if (!writeValues.has(key)) {
+          writeValues.set(key, undefined);
+        }
+      } catch {
+        writeValues.set(key, "[write-error]");
+      }
+    }
+
+    const record = {
+      readValues,
+      writeValues,
+      timestamp: performance.now(),
+    };
+
+    // Store in ring buffer (max 10 per action)
+    let history = this.diagnosisHistory.get(actionId);
+    if (!history) {
+      history = [];
+      this.diagnosisHistory.set(actionId, history);
+    }
+    history.push(record);
+    if (history.length > 10) {
+      history.shift();
+    }
+
+    // Compare with previous records: same reads, different writes => non-idempotent
+    this.checkIdempotency(actionId, action, history);
+  }
+
+  /**
+   * Checks if any two records in the history have the same reads but different writes.
+   */
+  private checkIdempotency(
+    actionId: string,
+    action: Action,
+    history: {
+      readValues: Map<string, unknown>;
+      writeValues: Map<string, unknown>;
+      timestamp: number;
+    }[],
+  ): void {
+    if (history.length < 2) return;
+
+    const latest = history[history.length - 1];
+
+    for (let i = 0; i < history.length - 1; i++) {
+      const prev = history[i];
+
+      // Check if reads are the same
+      if (!this.mapsEqual(latest.readValues, prev.readValues)) continue;
+
+      // Reads are the same - check if writes differ
+      const differingKeys: string[] = [];
+      const allWriteKeys = new Set([
+        ...latest.writeValues.keys(),
+        ...prev.writeValues.keys(),
+      ]);
+
+      for (const key of allWriteKeys) {
+        const latestVal = latest.writeValues.get(key);
+        const prevVal = prev.writeValues.get(key);
+        if (!this.deepEqual(latestVal, prevVal)) {
+          differingKeys.push(key);
+        }
+      }
+
+      if (differingKeys.length > 0) {
+        // Non-idempotent detected! Only report once per action.
+        const existing = this.diagnosisNonIdempotent.find(
+          (r) => r.actionId === actionId,
+        );
+        if (!existing) {
+          this.diagnosisNonIdempotent.push({
+            actionId,
+            actionInfo: this.getActionTelemetryInfo(action),
+            runs: [
+              {
+                timestamp: prev.timestamp,
+                reads: Object.fromEntries(prev.readValues),
+                writes: Object.fromEntries(prev.writeValues),
+              },
+              {
+                timestamp: latest.timestamp,
+                reads: Object.fromEntries(latest.readValues),
+                writes: Object.fromEntries(latest.writeValues),
+              },
+            ],
+            differingWriteKeys: differingKeys,
+          });
+        }
+      }
+    }
+  }
+
+  /**
+   * Detects cycles in the causal edge graph using DFS.
+   */
+  private detectCycles(): CycleReport[] {
+    // Build adjacency list: writer -> [{ triggered, cell }]
+    const adj = new Map<string, { triggered: string; cell: string }[]>();
+    for (const edge of this.causalEdges) {
+      let neighbors = adj.get(edge.writer);
+      if (!neighbors) {
+        neighbors = [];
+        adj.set(edge.writer, neighbors);
+      }
+      neighbors.push({ triggered: edge.triggered, cell: edge.cell });
+    }
+
+    const cycles: CycleReport[] = [];
+    const visited = new Set<string>();
+    const inStack = new Set<string>();
+    const stack: { actionId: string; writesCell: string }[] = [];
+
+    const dfs = (node: string) => {
+      if (inStack.has(node)) {
+        // Found a cycle - extract it from the stack
+        const cycleStart = stack.findIndex((s) => s.actionId === node);
+        if (cycleStart !== -1) {
+          const cycle = stack.slice(cycleStart);
+          cycles.push({
+            cycle: [...cycle],
+            timestamp: performance.now(),
+          });
+        }
+        return;
+      }
+      if (visited.has(node)) return;
+
+      visited.add(node);
+      inStack.add(node);
+
+      const neighbors = adj.get(node) ?? [];
+      for (const { triggered, cell } of neighbors) {
+        stack.push({ actionId: node, writesCell: cell });
+        dfs(triggered);
+        stack.pop();
+      }
+
+      inStack.delete(node);
+    };
+
+    for (const node of adj.keys()) {
+      if (!visited.has(node)) {
+        dfs(node);
+      }
+    }
+
+    return cycles;
+  }
+
+  /**
+   * Deep equality check for two values (used by diagnosis).
+   */
+  private deepEqual(a: unknown, b: unknown): boolean {
+    if (a === b) return true;
+    if (a === null || b === null) return false;
+    if (typeof a !== typeof b) return false;
+    if (typeof a !== "object") return false;
+
+    if (Array.isArray(a)) {
+      if (!Array.isArray(b)) return false;
+      if (a.length !== b.length) return false;
+      return a.every((val, i) => this.deepEqual(val, (b as unknown[])[i]));
+    }
+
+    const aObj = a as Record<string, unknown>;
+    const bObj = b as Record<string, unknown>;
+    const aKeys = Object.keys(aObj);
+    const bKeys = Object.keys(bObj);
+    if (aKeys.length !== bKeys.length) return false;
+    return aKeys.every((key) => this.deepEqual(aObj[key], bObj[key]));
+  }
+
+  /**
+   * Checks if two Maps have the same keys and deeply equal values.
+   */
+  private mapsEqual(
+    a: Map<string, unknown>,
+    b: Map<string, unknown>,
+  ): boolean {
+    if (a.size !== b.size) return false;
+    for (const [key, val] of a) {
+      if (!b.has(key)) return false;
+      if (!this.deepEqual(val, b.get(key))) return false;
+    }
+    return true;
+  }
+
   private handleError(error: Error, action: any) {
     const { pieceId, spellId, patternId, space } = getPieceMetadataFromFrame(
       (error as Error & { frame?: Frame }).frame,
@@ -1963,6 +2363,15 @@ export class Scheduler {
     // Track timing for cycle-aware debounce
     this.executeStartTime = performance.now();
     this.runsThisExecute.clear();
+
+    // Non-settling heuristic: record execute() start
+    const tracker = this.settlingTracker;
+    const now = performance.now();
+    tracker.lastExecuteStart = now;
+    tracker.isExecuting = true;
+    if (tracker.windowStart === 0) {
+      tracker.windowStart = now;
+    }
 
     logger.timeStart("scheduler", "execute", "depCollect");
     // Process pending dependency collection for newly subscribed actions.
@@ -2457,6 +2866,38 @@ export class Scheduler {
       }
     }
 
+    // Non-settling heuristic: accumulate busy time at end of execute()
+    {
+      const endNow = performance.now();
+      tracker.busyTime += endNow - tracker.lastExecuteStart;
+      tracker.isExecuting = false;
+
+      const windowDuration = endNow - tracker.windowStart;
+      if (windowDuration > 5000) {
+        const busyRatio = tracker.busyTime / windowDuration;
+        if (busyRatio > 0.3 && tracker.busyTime > 1000) {
+          if (!tracker.nonSettlingDetected) {
+            tracker.nonSettlingDetected = true;
+            this.runtime.telemetry.submit({
+              type: "scheduler.non-settling",
+              busyTime: tracker.busyTime,
+              windowDuration,
+              busyRatio,
+            });
+            // Auto-trigger diagnosis if enabled
+            if (this.autoTriggerDiagnosis && !this.diagnosisEnabled) {
+              this.startDiagnosis();
+            }
+          }
+        }
+      }
+      // Slide the window if it exceeds 10s without idle
+      if (windowDuration > 10000) {
+        tracker.windowStart = endNow;
+        tracker.busyTime = tracker.busyTime / 2; // Rolling average
+      }
+    }
+
     // In pull mode, we consider ourselves done when there are no effects to execute.
     // Check both pending AND dirty effects - dirty effects may exist from:
     // - Cycle detection (effect re-dirtied, skipped to prevent infinite loop)
@@ -2475,6 +2916,15 @@ export class Scheduler {
       this.idlePromises.length = 0;
       this.loopCounter = new WeakMap();
       this.scheduled = false;
+
+      // Reset settling tracker on idle
+      this.settlingTracker = {
+        windowStart: 0,
+        busyTime: 0,
+        lastExecuteStart: 0,
+        isExecuting: false,
+        nonSettlingDetected: false,
+      };
 
       this.scheduledFirstTime.clear();
     } else {
@@ -2502,6 +2952,12 @@ export class Scheduler {
       clearTimeout(this.pendingQueueTaskTimer);
       this.pendingQueueTaskTimer = null;
     }
+    // Clean up diagnosis state
+    if (this.diagnosisTimeout) {
+      clearTimeout(this.diagnosisTimeout);
+      this.diagnosisTimeout = null;
+    }
+    this.diagnosisEnabled = false;
   }
 }
 
