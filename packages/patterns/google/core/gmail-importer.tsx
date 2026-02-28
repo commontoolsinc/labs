@@ -18,7 +18,10 @@ import {
 } from "commontools";
 import TurndownService from "turndown";
 import { GmailClient } from "./util/gmail-client.ts";
-import { GoogleAuthManagerMinimal } from "./util/google-auth-manager-minimal.tsx";
+import {
+  createGoogleAuth,
+  type ScopeKey,
+} from "./util/google-auth-manager.tsx";
 
 type CFC<T, C extends string> = T;
 type Secret<T> = CFC<T, "secret">;
@@ -1113,21 +1116,31 @@ export default pattern<
   const historyId = Writable.of("").for("historyId");
   const fetching = Writable.of(false).for("fetching");
 
-  // Use auth manager with required scopes
-  const authManager = GoogleAuthManagerMinimal({
-    requiredScopes: ["gmail"],
+  // Use full auth manager with required scopes
+  const {
+    auth: wishedAuth,
+    fullUI: authUI,
+    isReady: wishedIsReady,
+    currentEmail: wishedCurrentEmail,
+  } = createGoogleAuth({
+    requiredScopes: ["gmail"] as ScopeKey[],
   });
 
-  const wishedAuth = authManager.auth;
-  const authUI = authManager[UI];
+  // Check if overrideAuth is provided (for manual linking when wish() is unavailable)
+  const hasOverrideAuth = computed(() => !!overrideAuth?.token);
+  const overrideAuthEmail = computed(() => overrideAuth?.user?.email || "");
 
   const auth = ifElse(
-    overrideAuth !== undefined && overrideAuth.token !== undefined,
+    hasOverrideAuth,
     overrideAuth,
     wishedAuth,
   );
-  const isReady = computed(() => !!auth.token);
-  const currentEmail = computed(() => auth.user?.email ?? "");
+  const isReady = ifElse(hasOverrideAuth, hasOverrideAuth, wishedIsReady);
+  const currentEmail = ifElse(
+    hasOverrideAuth,
+    overrideAuthEmail,
+    wishedCurrentEmail,
+  );
 
   const summary = computed(() => {
     const emailList = emails.get();

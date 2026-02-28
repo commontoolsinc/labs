@@ -25,7 +25,6 @@ import {
   tokenToAuthData,
 } from "./google-oauth.utils.ts";
 import { setBGCharm } from "@commontools/background-charm";
-import { parseLink } from "@commontools/runner";
 import { runtime } from "@/index.ts";
 import { Tokens } from "@cmd-johnson/oauth2-client";
 
@@ -63,7 +62,7 @@ export const login: AppRouteHandler<LoginRoute> = async (c) => {
     // Create state payload that includes the code verifier and scopes
     const statePayload = btoa(JSON.stringify({
       authCellId: payload.authCellId,
-      integrationCharmId: payload.integrationCharmId,
+      integrationPieceId: payload.integrationPieceId,
       codeVerifier: codeVerifier,
       scopes: payload.scopes,
     }));
@@ -128,7 +127,7 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
     // Decode and parse the state parameter
     let decodedState: {
       authCellId: string;
-      integrationCharmId: string;
+      integrationPieceId: string;
       codeVerifier: string;
       scopes?: string[];
     };
@@ -138,7 +137,7 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
       logger.info({
         decodedState: {
           authCellId: decodedState.authCellId,
-          integrationCharmId: decodedState.integrationCharmId,
+          integrationPieceId: decodedState.integrationPieceId,
           codeVerifier: decodedState.codeVerifier ? "present" : "missing",
           scopes: decodedState.scopes,
         },
@@ -198,36 +197,41 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
       decodedState.authCellId,
     );
 
-    // Add this charm to the Gmail integration charms cell
+    // Register this piece for background updates (e.g., proactive token refresh)
     try {
-      // Get the charm ID and space from the decodedState (which is the auth cell ID)
-      const authCellLink = parseLink(JSON.parse(decodedState.authCellId))!;
+      // Get the piece ID and space from the decodedState (which is the auth cell ID)
+      // The authCellId is already a normalized link object {space, id, type, path, schema}
+      // not a PrimitiveCellLink sigil, so we read .space directly instead of using parseLink()
+      const authCellLink = JSON.parse(decodedState.authCellId);
       const space = authCellLink.space;
-      const integrationCharmId = decodedState?.integrationCharmId;
+      const integrationPieceId = decodedState?.integrationPieceId;
 
-      if (space && integrationCharmId) {
+      if (space && integrationPieceId) {
         logger.info(
-          { space, integrationCharmId },
-          "Adding Google integration charm to Gmail integrations",
+          { space, integrationPieceId },
+          "Registering Google integration piece for background updates",
         );
 
         await setBGCharm({
           space,
-          pieceId: integrationCharmId,
+          pieceId: integrationPieceId,
           integration: "google",
           runtime,
         });
       } else {
         logger.warn(
           { decodedState },
-          "Could not extract space and charm ID from auth cell",
+          "Could not extract space and piece ID from auth cell",
         );
       }
     } catch (error) {
       // Don't fail the main operation if this fails, just log it
+      const errorInfo = error instanceof Error
+        ? { message: error.message, stack: error.stack, name: error.name }
+        : { raw: String(error), type: typeof error };
       logger.error(
-        { error },
-        "Failed to add charm to Gmail integrations, continuing anyway",
+        { error: errorInfo },
+        "Failed to register piece for background updates, continuing anyway",
       );
     }
 

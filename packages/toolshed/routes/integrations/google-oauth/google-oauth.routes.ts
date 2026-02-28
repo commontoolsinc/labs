@@ -15,15 +15,15 @@ export const login = createRoute({
           schema: z
             .object({
               authCellId: z.string().describe("The authentication cell ID"),
-              integrationCharmId: z
+              integrationPieceId: z
                 .string()
-                .describe("The charm ID of the integration charm"),
+                .describe("The piece ID of the integration piece"),
             })
             .openapi({
               example: {
                 authCellId:
                   '{"/" : {"link-v0.1" : {"id" : "of:bafe...", "space" : "did:key:bafe...", "path" : ["path", "to", "value"]}}}',
-                integrationCharmId: "integration-charm-123",
+                integrationPieceId: "integration-piece-123",
               },
             }),
         },

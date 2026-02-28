@@ -13,6 +13,7 @@ CLEAR_CACHE=false
 CLEAR_ALL_SPACES=false
 FORCE=false
 WATCH=false
+BG_UPDATER=false
 while [[ $# -gt 0 ]]; do
     case $1 in
         --clear-cache)
@@ -29,6 +30,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --watch)
             WATCH=true
+            shift
+            ;;
+        --bg-updater)
+            BG_UPDATER=true
             shift
             ;;
         --port-offset)
@@ -57,7 +62,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: $0 [--clear-cache] [--dangerously-clear-all-spaces] [--force] [--watch] [--port-offset N] [--shell-port PORT] [--toolshed-port PORT]"
+            echo "Usage: $0 [--clear-cache] [--dangerously-clear-all-spaces] [--force] [--watch] [--bg-updater] [--port-offset N] [--shell-port PORT] [--toolshed-port PORT]"
             exit 1
             ;;
     esac
@@ -103,5 +108,8 @@ if [[ "$FORCE" == "true" ]]; then
 fi
 if [[ "$WATCH" == "true" ]]; then
     START_ARGS="$START_ARGS --watch"
+fi
+if [[ "$BG_UPDATER" == "true" ]]; then
+    START_ARGS="$START_ARGS --bg-updater"
 fi
 ./scripts/start-local-dev.sh $START_ARGS

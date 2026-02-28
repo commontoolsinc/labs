@@ -67,11 +67,9 @@ export async function setBGCharm({
   bgSpace?: MemorySpace;
   bgCause?: string;
 }): Promise<boolean> {
-  const charmsCell = await getBGCharms({
-    bgSpace,
-    bgCause,
-    runtime,
-  });
+  console.log("[setBGCharm] called with", { space, pieceId, integration });
+
+  const charmsCell = await getBGCharms({ bgSpace, bgCause, runtime });
 
   console.log(
     "charmsCell",
@@ -86,7 +84,7 @@ export async function setBGCharm({
   );
 
   if (existingCharmIndex === -1) {
-    console.log("Adding charm to BGUpdater charms cell");
+    console.log("[setBGCharm] Adding charm to BGUpdater charms cell");
     runtime.editWithRetry((tx) => {
       charmsCell.withTx(tx).push({
         [ID]: `${space}/${pieceId}`,
@@ -101,12 +99,10 @@ export async function setBGCharm({
       } as unknown as Cell<BGCharmEntry>);
     });
 
-    // Ensure changes are synced
     await runtime.storageManager.synced();
-
     return true;
   } else {
-    console.log("Charm already exists in BGUpdater charms cell, re-enabling");
+    console.log("[setBGCharm] Charm already exists, re-enabling");
     const existingCharm = charms[existingCharmIndex];
     runtime.editWithRetry((tx) => {
       existingCharm.withTx(tx).update({
@@ -116,7 +112,6 @@ export async function setBGCharm({
       });
     });
     await runtime.storageManager.synced();
-
     return false;
   }
 }

@@ -14,6 +14,7 @@ TOOLSHED_PORT=${TOOLSHED_PORT:-}
 # Parse command line arguments
 FORCE=false
 WATCH=false
+BG_UPDATER=false
 while [[ $# -gt 0 ]]; do
     case $1 in
         --force)
@@ -22,6 +23,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --watch)
             WATCH=true
+            shift
+            ;;
+        --bg-updater)
+            BG_UPDATER=true
             shift
             ;;
         --port-offset)
@@ -121,12 +126,72 @@ TOOLSHED_PID=$!
 # Wait a moment for toolshed to start
 sleep 3
 
-# Print the toolshed URL on success
-echo "Development servers started successfully!"
-echo "  Shell:    http://localhost:$SHELL_PORT"
-echo "  Toolshed: http://localhost:$TOOLSHED_PORT"
-if [[ "$PORT_OFFSET" -ne 0 ]]; then
-    echo "  Offset:   $PORT_OFFSET"
+# Print the toolshed URL on success (when not using --bg-updater, which prints after health check)
+if [[ "$BG_UPDATER" != "true" ]]; then
+    echo "Development servers started successfully!"
+    echo "  Shell:    http://localhost:$SHELL_PORT"
+    echo "  Toolshed: http://localhost:$TOOLSHED_PORT"
+    if [[ "$PORT_OFFSET" -ne 0 ]]; then
+        echo "  Offset:   $PORT_OFFSET"
+    fi
+    echo "Shell log file: packages/shell/local-dev-shell.log"
+    echo "Toolshed log file: packages/toolshed/local-dev-toolshed.log"
 fi
-echo "Shell log file: packages/shell/local-dev-shell.log"
-echo "Toolshed log file: packages/toolshed/local-dev-toolshed.log"
+
+# Optionally start background-charm-service for bgUpdater polling
+if [[ "$BG_UPDATER" == "true" ]]; then
+    echo ""
+    echo "Starting background-charm-service..."
+
+    # Kill any previously running bg service to avoid orphaned processes
+    BG_PID_FILE="$SCRIPT_DIR/../.bg-charm-service.pid"
+    if [[ -f "$BG_PID_FILE" ]]; then
+        OLD_BG_PID=$(cat "$BG_PID_FILE")
+        if kill -0 "$OLD_BG_PID" 2>/dev/null; then
+            echo "  Stopping previous bg service (PID $OLD_BG_PID)..."
+            kill "$OLD_BG_PID" 2>/dev/null
+            sleep 1
+            if kill -0 "$OLD_BG_PID" 2>/dev/null; then
+                echo "  Force killing previous bg service..."
+                kill -9 "$OLD_BG_PID" 2>/dev/null
+            fi
+        fi
+        rm -f "$BG_PID_FILE"
+    fi
+
+    # Wait for toolshed to be healthy before starting bg service
+    echo "  Waiting for toolshed to be ready..."
+    for i in $(seq 1 30); do
+        if curl -s -o /dev/null -w "%{http_code}" --max-time 2 "http://localhost:$TOOLSHED_PORT/_health" 2>/dev/null | grep -q "200"; then
+            echo "  Toolshed is ready!"
+            break
+        fi
+        if [[ $i -eq 30 ]]; then
+            echo "  Warning: Toolshed not ready after 30s, starting bg service anyway"
+        fi
+        sleep 1
+    done
+
+    # Start the background service directly (not via deno task, for reliable PID tracking)
+    cd "$SCRIPT_DIR/../packages/background-charm-service"
+    OPERATOR_PASS="implicit trust" API_URL="http://localhost:$TOOLSHED_PORT" \
+        deno run -A --unstable-worker-options src/main.ts \
+        > "$SCRIPT_DIR/../packages/background-charm-service/local-dev-bg.log" 2>&1 &
+    BG_PID=$!
+    cd "$SCRIPT_DIR/.."
+
+    # Save PID for stop script
+    echo "$BG_PID" > "$BG_PID_FILE"
+
+    echo "  Background service: PID $BG_PID (polling bgUpdater every 60s)"
+    echo "  Log file: packages/background-charm-service/local-dev-bg.log"
+    echo ""
+    echo "Development servers started successfully!"
+    echo "  Shell:    http://localhost:$SHELL_PORT"
+    echo "  Toolshed: http://localhost:$TOOLSHED_PORT"
+    if [[ "$PORT_OFFSET" -ne 0 ]]; then
+        echo "  Offset:   $PORT_OFFSET"
+    fi
+    echo "Shell log file: packages/shell/local-dev-shell.log"
+    echo "Toolshed log file: packages/toolshed/local-dev-toolshed.log"
+fi
