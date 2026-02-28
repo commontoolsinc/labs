@@ -8,10 +8,16 @@ import {
   llmDialog,
   NAME,
   pattern,
+  patternTool,
   Stream,
   UI,
+  wish,
   Writable,
 } from "commontools";
+import {
+  searchPattern as summarySearchPattern,
+  type SummaryIndexEntry,
+} from "./system/summary-index.tsx";
 
 // --- Helpers ---
 
@@ -89,7 +95,9 @@ type Output = {
 const VOICE_SYSTEM_PROMPT =
   "You are having a spoken conversation. Keep responses concise " +
   "and natural — 1-3 sentences unless asked for detail. No markdown, " +
-  "no bullet points, no formatting. Speak like a person, not a document.";
+  "no bullet points, no formatting. Speak like a person, not a document. " +
+  "You have access to the user's notes via the searchNotes tool. When " +
+  "asked about their notes, use this tool to find relevant information.";
 
 // --- Debug panel styles ---
 
@@ -130,10 +138,19 @@ export default pattern<Input, Output>(({ messages, system, voice }) => {
   const sttDurationMs = Writable.of<number | null>(null);
   const messageSentAt = Writable.of<number | null>(null);
 
+  const { entries: summaryEntries } = wish<{ entries: SummaryIndexEntry[] }>({
+    query: "#summaryIndex",
+  }).result;
+
+  const tools = {
+    searchNotes: patternTool(summarySearchPattern, { entries: summaryEntries }),
+  };
+
   const { addMessage, cancelGeneration, pending } = llmDialog({
     system: computed(() => system ?? VOICE_SYSTEM_PROMPT),
     messages,
     model,
+    tools,
   });
 
   // --- TTS Playback ---
@@ -148,6 +165,11 @@ export default pattern<Input, Output>(({ messages, system, voice }) => {
     if (msgs.length === 0) return null;
     const last = msgs[msgs.length - 1];
     if (last.role !== "assistant") return null;
+    // Skip assistant messages that contain tool calls — don't speak those
+    if (
+      Array.isArray(last.content) &&
+      last.content.some((p: any) => p.type === "tool-call")
+    ) return null;
 
     let text: string | null = null;
     if (typeof last.content === "string") {
