@@ -55,6 +55,12 @@ const EnvSchema = z.object({
   CTTS_AI_LLM_XAI_API_KEY: z.string().default(""),
   CTTS_AI_GATEWAY_URL: z.string().default(""),
 
+  // ===========================================================================
+  // Cartesia TTS
+  //   * /routes/ai/voice/tts
+  // ===========================================================================
+  CARTESIA_API_KEY: z.string().default(""),
+
   // LLM Observability Tool
   CTTS_AI_LLM_PHOENIX_PROJECT: z.string().default(""),
   CTTS_AI_LLM_PHOENIX_URL: z.string().default(""),

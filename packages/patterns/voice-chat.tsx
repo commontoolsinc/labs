@@ -77,7 +77,7 @@ const clearChat = handler(
 type Input = {
   messages?: Writable<Default<Array<BuiltInLLMMessage>, []>>;
   system?: string;
-  voice?: Default<string, "nova">;
+  voice?: Default<string, "f786b574-daa5-4673-aa0c-cbe3e8534c02">;
 };
 
 type Output = {
@@ -172,7 +172,7 @@ export default pattern<Input, Output>(({ messages, system, voice }) => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           text: ttsPayload.text,
-          voice: voice ?? "nova",
+          voice: voice ?? "f786b574-daa5-4673-aa0c-cbe3e8534c02",
         }),
       };
     }),
@@ -282,6 +282,16 @@ export default pattern<Input, Output>(({ messages, system, voice }) => {
                 }}
               >
                 {model}
+              </div>
+              <div
+                style={{
+                  fontSize: "0.75rem",
+                  color: "var(--ct-color-gray-400)",
+                  fontFamily: "monospace",
+                  marginBottom: "1rem",
+                }}
+              >
+                TTS: cartesia/sonic-turbo
               </div>
 
               <div style={rowStyle}>

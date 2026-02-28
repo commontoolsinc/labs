@@ -6,10 +6,8 @@ const tags = ["AI Voice TTS"];
 
 export const SynthesizeRequestSchema = z.object({
   text: z.string().min(1).max(4096),
-  voice: z.enum(["alloy", "echo", "fable", "onyx", "nova", "shimmer"])
-    .default("nova"),
-  model: z.enum(["tts-1", "tts-1-hd"]).default("tts-1"),
-  speed: z.number().min(0.25).max(4.0).default(1.0),
+  voice: z.string().default("f786b574-daa5-4673-aa0c-cbe3e8534c02"), // Katie - Friendly Fixer
+  model: z.string().default("sonic-turbo"),
 });
 
 export const SynthesizeResponseSchema = z.object({

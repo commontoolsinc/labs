@@ -10,9 +10,8 @@ async function generateCacheKey(
   text: string,
   voice: string,
   model: string,
-  speed: number,
 ): Promise<string> {
-  const input = JSON.stringify({ text, voice, model, speed });
+  const input = JSON.stringify({ text, voice, model });
   const hashBuffer = await crypto.subtle.digest(
     "SHA-256",
     new TextEncoder().encode(input),
@@ -25,10 +24,10 @@ export const synthesizeVoice: AppRouteHandler<SynthesizeVoiceRoute> = async (
   c,
 ) => {
   const logger = c.get("logger");
-  const { text, voice, model, speed } = c.req.valid("json");
+  const { text, voice, model } = c.req.valid("json");
 
   try {
-    const cacheKey = await generateCacheKey(text, voice, model, speed);
+    const cacheKey = await generateCacheKey(text, voice, model);
     const cachePath = `${CACHE_DIR}/${cacheKey}.mp3`;
     const audioUrl = `/api/ai/voice/audio/${cacheKey}`;
 
@@ -45,33 +44,37 @@ export const synthesizeVoice: AppRouteHandler<SynthesizeVoiceRoute> = async (
 
     logger.info(
       { text: text.slice(0, 100), voice, model },
-      "TTS cache MISS — calling OpenAI",
+      "TTS cache MISS — calling Cartesia",
     );
 
     const ttsStart = Date.now();
 
-    // Call OpenAI TTS — streams audio back
     const response = await fetch(
-      "https://api.openai.com/v1/audio/speech",
+      "https://api.cartesia.ai/tts/bytes",
       {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${env.CTTS_AI_LLM_OPENAI_API_KEY}`,
+          "Cartesia-Version": "2025-04-16",
+          "X-API-Key": env.CARTESIA_API_KEY,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model,
-          input: text,
-          voice,
-          speed,
-          response_format: "mp3",
+          model_id: model,
+          transcript: text,
+          voice: { mode: "id", id: voice },
+          output_format: {
+            container: "mp3",
+            sample_rate: 44100,
+            bit_rate: 128000,
+          },
+          language: "en",
         }),
       },
     );
 
     if (!response.ok) {
       const err = await response.text();
-      logger.error({ status: response.status, err }, "OpenAI TTS failed");
+      logger.error({ status: response.status, err }, "Cartesia TTS failed");
       return c.json({ error: "TTS synthesis failed" }, 500);
     }
 
