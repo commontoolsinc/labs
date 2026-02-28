@@ -58,6 +58,166 @@ export const styles = css`
     border-radius: var(--ct-theme-border-radius, 0.375rem);
   }
 
+  /* Prose mode - remove border and focus ring on outer wrapper */
+  :host([mode="prose"]) .cm-editor {
+    border: none;
+    font-family: var(
+      --ct-theme-font-family,
+      var(
+        --ct-font-family-sans,
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        Roboto,
+        sans-serif
+      )
+    );
+    font-size: 1rem;
+  }
+
+  :host([mode="prose"]) .cm-editor.cm-focused {
+    box-shadow: none;
+  }
+
+  /* Prose markdown styles - scoped to prose mode */
+  :host([mode="prose"]) .cm-prose-h1 {
+    font-size: 1.75em;
+    font-weight: 700;
+    line-height: 1.3;
+  }
+
+  :host([mode="prose"]) .cm-prose-h2 {
+    font-size: 1.4em;
+    font-weight: 600;
+    line-height: 1.3;
+  }
+
+  :host([mode="prose"]) .cm-prose-h3 {
+    font-size: 1.15em;
+    font-weight: 600;
+    line-height: 1.4;
+  }
+
+  :host([mode="prose"]) .cm-prose-h4 {
+    font-size: 1em;
+    font-weight: 600;
+    line-height: 1.4;
+  }
+
+  :host([mode="prose"]) .cm-prose-h5 {
+    font-size: 0.925em;
+    font-weight: 600;
+    line-height: 1.4;
+  }
+
+  :host([mode="prose"]) .cm-prose-h6 {
+    font-size: 0.85em;
+    font-weight: 600;
+    line-height: 1.4;
+  }
+
+  :host([mode="prose"]) .cm-prose-bold {
+    font-weight: 700;
+  }
+
+  :host([mode="prose"]) .cm-prose-italic {
+    font-style: italic;
+  }
+
+  :host([mode="prose"]) .cm-prose-bullet {
+    color: var(--ct-color-neutral-400, hsl(0, 0%, 60%));
+    padding-right: 0.4em;
+  }
+
+  :host([mode="prose"]) .cm-prose-checkbox {
+    margin: 0 0.4em 0 0;
+    cursor: pointer;
+    vertical-align: middle;
+  }
+
+  :host([mode="prose"]) .cm-prose-task-checked {
+    text-decoration: line-through;
+    color: var(--ct-color-neutral-400, hsl(0, 0%, 60%));
+  }
+
+  :host([mode="prose"]) .cm-prose-footnote {
+    color: var(--ct-color-primary-600, hsl(212, 72%, 48%));
+    font-size: 0.75em;
+    padding-left: 1px;
+  }
+
+  :host([mode="prose"]) .cm-prose-link {
+    color: var(--ct-color-primary-600, hsl(212, 72%, 48%));
+    text-decoration: underline;
+    text-decoration-color: var(
+      --ct-color-primary-300,
+      hsla(212, 72%, 48%, 0.4)
+    );
+    text-underline-offset: 2px;
+  }
+
+  :host([mode="prose"]) .cm-prose-inline-code {
+    font-family: var(--ct-theme-mono-font-family, monospace);
+    font-size: 0.9em;
+    background-color: var(--ct-color-neutral-100, hsl(0, 0%, 95%));
+    border-radius: 3px;
+    padding: 0.1em 0.3em;
+  }
+
+  :host([mode="prose"]) .cm-prose-codeblock {
+    background-color: var(--ct-color-neutral-100, hsl(0, 0%, 95%));
+    font-family: var(--ct-theme-mono-font-family, monospace);
+    font-size: 0.9em;
+  }
+
+  :host([mode="prose"]) .cm-prose-blockquote {
+    border-left: 3px solid var(--ct-color-neutral-200, hsl(0, 0%, 88%));
+    padding-left: 1em !important;
+    color: var(--ct-color-neutral-500, hsl(0, 0%, 45%));
+  }
+
+  :host([mode="prose"]) .cm-prose-hr {
+    border: none;
+    border-top: 1px solid var(--ct-color-neutral-200, hsl(0, 0%, 88%));
+    margin: 0;
+  }
+
+  :host([mode="prose"]) .cm-prose-list-number {
+    color: var(--ct-color-neutral-400, hsl(0, 0%, 60%));
+    padding-right: 0.4em;
+  }
+
+  :host([mode="prose"]) .cm-prose-strikethrough {
+    text-decoration: line-through;
+  }
+
+  /* Table styling — line-based approach */
+  :host([mode="prose"]) .cm-prose-table-row {
+    display: grid !important;
+    grid-template-columns: repeat(var(--table-cols, 3), 1fr);
+    border-left: 1px solid var(--ct-color-neutral-200, hsl(0, 0%, 88%));
+    border-right: 1px solid var(--ct-color-neutral-200, hsl(0, 0%, 88%));
+    border-bottom: 1px solid var(--ct-color-neutral-200, hsl(0, 0%, 88%));
+  }
+
+  :host([mode="prose"]) .cm-prose-table-header {
+    border-top: 1px solid var(--ct-color-neutral-200, hsl(0, 0%, 88%));
+    background-color: var(--ct-color-neutral-50, hsl(0, 0%, 97%));
+    font-weight: 600;
+  }
+
+  :host([mode="prose"]) .cm-prose-table-cell {
+    padding: 0.35em 0.75em;
+  }
+
+  :host([mode="prose"]) .cm-prose-table-separator {
+    height: 0 !important;
+    overflow: hidden;
+    font-size: 0;
+    line-height: 0;
+    padding: 0 !important;
+  }
+
   /* Backlink styling - focus-aware display */
   .cm-content .cm-line {
     position: relative;

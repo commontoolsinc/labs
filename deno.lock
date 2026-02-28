@@ -75,6 +75,8 @@
     "npm:@codemirror/lang-json@^6.0.1": "6.0.2",
     "npm:@codemirror/lang-markdown@^6.3.0": "6.5.0",
     "npm:@codemirror/language@^6.10.8": "6.11.3",
+    "npm:@codemirror/lint@^6.8.0": "6.9.2",
+    "npm:@codemirror/search@^6.5.0": "6.5.11",
     "npm:@codemirror/state@^6.5.1": "6.5.2",
     "npm:@codemirror/theme-one-dark@^6.1.2": "6.1.3",
     "npm:@codemirror/view@^6.26.0": "6.38.6",
@@ -83,6 +85,8 @@
     "npm:@hono/zod-openapi@~0.18.3": "0.18.4_hono@4.10.5_zod@3.25.76",
     "npm:@hono/zod-validator@~0.4.2": "0.4.3_hono@4.10.5_zod@3.25.76",
     "npm:@jitl/quickjs-singlefile-mjs-debug-sync@*": "0.31.0",
+    "npm:@lezer/markdown@^1.3.0": "1.6.0",
+    "npm:@lezer/markdown@^1.6.0": "1.6.0",
     "npm:@lit/context@^1.1.2": "1.1.6",
     "npm:@lit/context@^1.1.5": "1.1.6",
     "npm:@lit/task@^1.0.2": "1.0.3",
@@ -105,7 +109,6 @@
     "npm:@types/node@*": "24.2.0",
     "npm:ai@^5.0.27": "5.0.93_zod@3.25.76",
     "npm:ajv@^8.17.1": "8.17.1",
-    "npm:codemirror@^6.0.1": "6.0.2",
     "npm:d3-array@^3.2.4": "3.2.4",
     "npm:d3-scale@^4.0.2": "4.0.2",
     "npm:d3-shape@^3.2.0": "3.2.0",
@@ -1167,18 +1170,6 @@
         "function-bind"
       ]
     },
-    "codemirror@6.0.2": {
-      "integrity": "sha512-VhydHotNW5w1UGK0Qj96BwSk/Zqbp9WbnyK2W/eVMv4QyF41INRGpjUhFJY7/uDNuudSc33a/PKr4iDqRduvHw==",
-      "dependencies": [
-        "@codemirror/autocomplete",
-        "@codemirror/commands",
-        "@codemirror/language",
-        "@codemirror/lint",
-        "@codemirror/search",
-        "@codemirror/state",
-        "@codemirror/view"
-      ]
-    },
     "colorette@2.0.20": {
       "integrity": "sha512-IfEDxwoWIjkeXL1eXcDiow4UbKjhLdq6/EuSVR9GMN7KVH3r9gQ83e73hsz1Nd1T3ijd5xv1wcWRYO+D6kCI2w=="
     },
@@ -2047,15 +2038,17 @@
           "npm:@codemirror/lang-json@^6.0.1",
           "npm:@codemirror/lang-markdown@^6.3.0",
           "npm:@codemirror/language@^6.10.8",
+          "npm:@codemirror/lint@^6.8.0",
+          "npm:@codemirror/search@^6.5.0",
           "npm:@codemirror/state@^6.5.1",
           "npm:@codemirror/theme-one-dark@^6.1.2",
           "npm:@codemirror/view@^6.26.0",
+          "npm:@lezer/markdown@^1.3.0",
           "npm:@lit/context@^1.1.2",
           "npm:@types/d3-array@^3.2.1",
           "npm:@types/d3-scale@^4.0.8",
           "npm:@types/d3-shape@^3.1.6",
           "npm:@types/leaflet@^1.9.21",
-          "npm:codemirror@^6.0.1",
           "npm:d3-array@^3.2.4",
           "npm:d3-scale@^4.0.2",
           "npm:d3-shape@^3.2.0",
