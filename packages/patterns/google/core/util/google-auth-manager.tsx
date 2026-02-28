@@ -200,6 +200,7 @@ function debugLog(enabled: boolean, ...args: unknown[]) {
 // TODO(CT-1163): Replace with wish("#now:30000") when reactive time wish is available.
 // Date.now() is non-idiomatic (will be blocked in future sandbox versions).
 // This setInterval workaround makes time-dependent computeds reactive.
+// Interval is intentionally never cleared — pattern lifecycle matches page lifecycle.
 function startReactiveClock(cell: Writable<number>): void {
   setInterval(() => cell.set(Date.now()), 30_000);
 }

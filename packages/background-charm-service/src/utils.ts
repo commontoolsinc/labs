@@ -68,21 +68,8 @@ export async function setBGCharm({
   bgCause?: string;
 }): Promise<boolean> {
   console.log("[setBGCharm] called with", { space, pieceId, integration });
-  let charmsCell;
-  try {
-    charmsCell = await getBGCharms({
-      bgSpace,
-      bgCause,
-      runtime,
-    });
-  } catch (e) {
-    console.error(
-      "[setBGCharm] getBGCharms failed:",
-      e instanceof Error ? e.message : String(e),
-      e,
-    );
-    throw e;
-  }
+
+  const charmsCell = await getBGCharms({ bgSpace, bgCause, runtime });
 
   console.log(
     "charmsCell",
@@ -98,67 +85,33 @@ export async function setBGCharm({
 
   if (existingCharmIndex === -1) {
     console.log("[setBGCharm] Adding charm to BGUpdater charms cell");
-    try {
-      runtime.editWithRetry((tx) => {
-        charmsCell.withTx(tx).push({
-          [ID]: `${space}/${pieceId}`,
-          space,
-          pieceId,
-          integration,
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-          disabledAt: undefined,
-          lastRun: 0,
-          status: "Initializing",
-        } as unknown as Cell<BGCharmEntry>);
-      });
-    } catch (e) {
-      console.error(
-        "[setBGCharm] editWithRetry failed:",
-        e instanceof Error ? e.message : String(e),
-        e,
-      );
-      throw e;
-    }
+    runtime.editWithRetry((tx) => {
+      charmsCell.withTx(tx).push({
+        [ID]: `${space}/${pieceId}`,
+        space,
+        pieceId,
+        integration,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        disabledAt: undefined,
+        lastRun: 0,
+        status: "Initializing",
+      } as unknown as Cell<BGCharmEntry>);
+    });
 
-    // Ensure changes are synced
-    try {
-      console.log("[setBGCharm] Waiting for sync...");
-      await runtime.storageManager.synced();
-      console.log("[setBGCharm] Synced successfully");
-    } catch (e) {
-      console.error(
-        "[setBGCharm] synced() failed:",
-        e instanceof Error ? e.message : String(e),
-        e,
-      );
-      throw e;
-    }
-
+    await runtime.storageManager.synced();
     return true;
   } else {
     console.log("[setBGCharm] Charm already exists, re-enabling");
     const existingCharm = charms[existingCharmIndex];
-    try {
-      runtime.editWithRetry((tx) => {
-        existingCharm.withTx(tx).update({
-          disabledAt: 0,
-          updatedAt: Date.now(),
-          status: "Re-initializing",
-        });
+    runtime.editWithRetry((tx) => {
+      existingCharm.withTx(tx).update({
+        disabledAt: 0,
+        updatedAt: Date.now(),
+        status: "Re-initializing",
       });
-      console.log("[setBGCharm] Waiting for sync (re-enable)...");
-      await runtime.storageManager.synced();
-      console.log("[setBGCharm] Re-enable synced successfully");
-    } catch (e) {
-      console.error(
-        "[setBGCharm] re-enable failed:",
-        e instanceof Error ? e.message : String(e),
-        e,
-      );
-      throw e;
-    }
-
+    });
+    await runtime.storageManager.synced();
     return false;
   }
 }

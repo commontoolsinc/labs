@@ -351,7 +351,8 @@ interface Output {
  * the auth cell with new token data. Throws on failure.
  *
  * Guarded against concurrent invocations — if a refresh is already in progress,
- * subsequent calls return immediately (no-op).
+ * subsequent calls return silently (no-op, no error). Callers that need to know
+ * whether a refresh actually happened should watch the auth cell reactively.
  */
 let refreshInProgress = false;
 
@@ -472,6 +473,7 @@ const refreshTokenHandler = handler<
 // TODO(CT-1163): Replace with wish("#now:30000") when reactive time wish is available.
 // Date.now() is non-idiomatic (will be blocked in future sandbox versions).
 // This setInterval workaround makes time-dependent computeds reactive.
+// Interval is intentionally never cleared — pattern lifecycle matches page lifecycle.
 function startReactiveClock(cell: Writable<number>): void {
   setInterval(() => cell.set(Date.now()), 30_000);
 }
