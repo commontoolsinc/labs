@@ -74,6 +74,7 @@ class BulletWidget extends WidgetType {
   }
 }
 
+// Singleton — safe to reuse because eq() always returns true (no instance state).
 const bulletWidget = new BulletWidget();
 
 /**
@@ -131,6 +132,7 @@ class HorizontalRuleWidget extends WidgetType {
   }
 }
 
+// Singleton — safe to reuse because eq() always returns true (no instance state).
 const hrWidget = new HorizontalRuleWidget();
 
 /**

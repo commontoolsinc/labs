@@ -79,75 +79,74 @@ export const styles = css`
     box-shadow: none;
   }
 
-  /* Prose markdown heading styles */
-  .cm-prose-h1 {
+  /* Prose markdown styles - scoped to prose mode */
+  :host([mode="prose"]) .cm-prose-h1 {
     font-size: 1.75em;
     font-weight: 700;
     line-height: 1.3;
   }
 
-  .cm-prose-h2 {
+  :host([mode="prose"]) .cm-prose-h2 {
     font-size: 1.4em;
     font-weight: 600;
     line-height: 1.3;
   }
 
-  .cm-prose-h3 {
+  :host([mode="prose"]) .cm-prose-h3 {
     font-size: 1.15em;
     font-weight: 600;
     line-height: 1.4;
   }
 
-  .cm-prose-h4 {
+  :host([mode="prose"]) .cm-prose-h4 {
     font-size: 1em;
     font-weight: 600;
     line-height: 1.4;
   }
 
-  .cm-prose-h5 {
+  :host([mode="prose"]) .cm-prose-h5 {
     font-size: 0.925em;
     font-weight: 600;
     line-height: 1.4;
   }
 
-  .cm-prose-h6 {
+  :host([mode="prose"]) .cm-prose-h6 {
     font-size: 0.85em;
     font-weight: 600;
     line-height: 1.4;
   }
 
-  /* Prose inline syntax styles */
-  .cm-prose-bold {
+  :host([mode="prose"]) .cm-prose-bold {
     font-weight: 700;
   }
 
-  .cm-prose-italic {
+  :host([mode="prose"]) .cm-prose-italic {
     font-style: italic;
   }
 
-  .cm-prose-bullet {
+  :host([mode="prose"]) .cm-prose-bullet {
     color: var(--ct-color-neutral-400, hsl(0, 0%, 60%));
     padding-right: 0.4em;
   }
 
-  .cm-prose-checkbox {
+  :host([mode="prose"]) .cm-prose-checkbox {
     margin: 0 0.4em 0 0;
     cursor: pointer;
     vertical-align: middle;
   }
 
-  .cm-prose-task-checked {
+  :host([mode="prose"]) .cm-prose-task-checked {
     text-decoration: line-through;
     color: var(--ct-color-neutral-400, hsl(0, 0%, 60%));
   }
 
-  .cm-prose-footnote {
+  :host([mode="prose"]) .cm-prose-footnote {
     color: var(--ct-color-primary-600, hsl(212, 72%, 48%));
     font-size: 0.75em;
     padding-left: 1px;
   }
 
-  .cm-prose-link {
+  :host([mode="prose"]) .cm-prose-link {
     color: var(--ct-color-primary-600, hsl(212, 72%, 48%));
     text-decoration: underline;
     text-decoration-color: var(
@@ -157,7 +156,7 @@ export const styles = css`
     text-underline-offset: 2px;
   }
 
-  .cm-prose-inline-code {
+  :host([mode="prose"]) .cm-prose-inline-code {
     font-family: var(--ct-theme-mono-font-family, monospace);
     font-size: 0.9em;
     background-color: var(--ct-color-neutral-100, hsl(0, 0%, 95%));
@@ -165,35 +164,35 @@ export const styles = css`
     padding: 0.1em 0.3em;
   }
 
-  .cm-prose-codeblock {
+  :host([mode="prose"]) .cm-prose-codeblock {
     background-color: var(--ct-color-neutral-100, hsl(0, 0%, 95%));
     font-family: var(--ct-theme-mono-font-family, monospace);
     font-size: 0.9em;
   }
 
-  .cm-prose-blockquote {
+  :host([mode="prose"]) .cm-prose-blockquote {
     border-left: 3px solid var(--ct-color-neutral-200, hsl(0, 0%, 88%));
     padding-left: 1em !important;
     color: var(--ct-color-neutral-500, hsl(0, 0%, 45%));
   }
 
-  .cm-prose-hr {
+  :host([mode="prose"]) .cm-prose-hr {
     border: none;
     border-top: 1px solid var(--ct-color-neutral-200, hsl(0, 0%, 88%));
     margin: 0;
   }
 
-  .cm-prose-list-number {
+  :host([mode="prose"]) .cm-prose-list-number {
     color: var(--ct-color-neutral-400, hsl(0, 0%, 60%));
     padding-right: 0.4em;
   }
 
-  .cm-prose-strikethrough {
+  :host([mode="prose"]) .cm-prose-strikethrough {
     text-decoration: line-through;
   }
 
   /* Table styling — line-based approach */
-  .cm-prose-table-row {
+  :host([mode="prose"]) .cm-prose-table-row {
     display: grid !important;
     grid-template-columns: repeat(var(--table-cols, 3), 1fr);
     border-left: 1px solid var(--ct-color-neutral-200, hsl(0, 0%, 88%));
@@ -201,17 +200,17 @@ export const styles = css`
     border-bottom: 1px solid var(--ct-color-neutral-200, hsl(0, 0%, 88%));
   }
 
-  .cm-prose-table-header {
+  :host([mode="prose"]) .cm-prose-table-header {
     border-top: 1px solid var(--ct-color-neutral-200, hsl(0, 0%, 88%));
     background-color: var(--ct-color-neutral-50, hsl(0, 0%, 97%));
     font-weight: 600;
   }
 
-  .cm-prose-table-cell {
+  :host([mode="prose"]) .cm-prose-table-cell {
     padding: 0.35em 0.75em;
   }
 
-  .cm-prose-table-separator {
+  :host([mode="prose"]) .cm-prose-table-separator {
     height: 0 !important;
     overflow: hidden;
     font-size: 0;
