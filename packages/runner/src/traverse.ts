@@ -1952,6 +1952,12 @@ export class SchemaObjectTraverser<V extends StorableDatum>
           survivingBranches.push(optionSchema);
         }
 
+        // Layer 2 (mergeAnyOfBranchSchemas — merge surviving object branches
+        // into a single schema and traverse once) is disabled. It caused
+        // regressions with link resolution during traversal because the merged
+        // schema loses per-branch context that followPointer relies on.
+        // The helper and its tests are retained for future use.
+
         // Branch-by-branch traversal on surviving branches
         const matches: Immutable<StorableValue>[] = [];
         for (const optionSchema of survivingBranches) {
