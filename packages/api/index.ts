@@ -1092,7 +1092,8 @@ export type JSONSchemaTypes =
   | "number"
   | "boolean"
   | "null"
-  | "undefined"; // undefined is a non-standard addition
+  | "undefined" // undefined is a non-standard addition
+  | "unknown"; // unknown is a non-standard addition
 
 // See https://json-schema.org/draft/2020-12/json-schema-core
 // See https://json-schema.org/draft/2020-12/json-schema-validation

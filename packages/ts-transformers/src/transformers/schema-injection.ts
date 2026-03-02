@@ -772,7 +772,7 @@ export class SchemaInjectionTransformer extends Transformer {
             firstArg.properties.length === 0
           ) {
             // Empty object literal - create a specific type for it
-            // This should generate {type: "object", properties: {}, additionalProperties: false}
+            // This should generate {type: "unknown"}
             argNode = factory.createTypeLiteralNode([]);
             // Don't set argType - let schema generator handle the synthetic node
           } else {

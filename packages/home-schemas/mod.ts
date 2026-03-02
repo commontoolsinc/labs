@@ -46,7 +46,6 @@ export {
 export { type Home, homeSchema } from "./home.ts";
 
 export const objectStubSchema = {
-  type: "object",
-  properties: {},
+  type: "unknown",
 } as const satisfies JSONSchema;
 export type ObjectStub = Schema<typeof objectStubSchema>;

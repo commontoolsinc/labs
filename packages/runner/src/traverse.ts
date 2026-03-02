@@ -63,6 +63,14 @@ interface IMemorySpaceAttestation {
   readonly address: IMemorySpaceAddress;
   readonly value?: StorableDatum;
 }
+
+// Only false is falsy
+const enum TypeValidity {
+  False = 0,
+  True = 1,
+  Unknown = 2,
+}
+
 /**
  * A data structure that maps keys to sets of values, allowing multiple values
  * to be associated with a single key without duplication.
@@ -512,7 +520,7 @@ class StandardObjectCreator implements IObjectCreator<StorableDatum> {
     _link: NormalizedFullLink,
     value: StorableDatum | undefined,
   ): StorableDatum {
-    return value === undefined ? null : value;
+    return value;
   }
 }
 
@@ -2114,35 +2122,44 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         ? { ok: this.traversePrimitive(doc, schemaObj) }
         : { error: new Error("Invalid type") };
     } else if (Array.isArray(doc.value)) {
-      if (this.isValidType(schemaObj, "array")) {
-        const newValue: Immutable<StorableValue>[] = [];
-        // Our link is based on the last link in the chain and not the first.
-        const newLink = link ?? getNormalizedLink(
-          doc.address,
-          schemaObj,
-        );
-        using t = this.tracker.include(doc.value, schema, newValue, doc);
-        if (t === null) {
-          // newValue will be converted to a createObject result by the
-          // function that added it to the tracker, so don't do that here
-          return { ok: this.tracker.getExisting(doc.value, schema) };
-        }
-        const entries = this.traverseArrayWithSchema(doc, schemaObj, newLink);
-        if (!Array.isArray(entries)) {
-          return { error: new Error("Invalid array") };
-        }
-        for (const item of entries) {
-          newValue.push(item);
-        }
-        return { ok: this.objectCreator.createObject(newLink, newValue) };
+      const valid = this.isValidType(schemaObj, "array");
+      if (valid === TypeValidity.False) {
+        return { error: new Error("Invalid type") };
       }
-      return { error: new Error("Invalid type") };
+
+      const newValue: Immutable<StorableValue>[] = [];
+      // Our link is based on the last link in the chain and not the first.
+      const newLink = link ?? getNormalizedLink(
+        doc.address,
+        schemaObj,
+      );
+      using t = this.tracker.include(doc.value, schema, newValue, doc);
+      if (t === null) {
+        // newValue will be converted to a createObject result by the
+        // function that added it to the tracker, so don't do that here
+        return { ok: this.tracker.getExisting(doc.value, schema) };
+      }
+      if (valid === TypeValidity.Unknown) {
+        return { ok: this.objectCreator.createObject(newLink, undefined) };
+      }
+      const entries = this.traverseArrayWithSchema(doc, schemaObj, newLink);
+      if (!Array.isArray(entries)) {
+        return { error: new Error("Invalid array") };
+      }
+      for (const item of entries) {
+        newValue.push(item);
+      }
+      return { ok: this.objectCreator.createObject(newLink, newValue) };
     } else if (isObject(doc.value)) {
       if (isPrimitiveCellLink(doc.value)) {
         // When traversing a pointer, use the unresolved schema, so we have
         // the same values in the schema tracker.
         return this.traversePointerWithSchema(doc, schema, link);
-      } else if (this.isValidType(schemaObj, "object")) {
+      } else {
+        const valid = this.isValidType(schemaObj, "object");
+        if (valid === TypeValidity.False) {
+          return { error: new Error("Invalid type") };
+        }
         const newValue: Record<string, Immutable<StorableValue>> = {};
         // Our link is based on the last link in the chain and not the first.
         const newLink = link ?? getNormalizedLink(doc.address, schemaObj);
@@ -2151,6 +2168,9 @@ export class SchemaObjectTraverser<V extends StorableDatum>
           // newValue will be converted to a createObject result by the
           // function that added it to the tracker, so don't do that here
           return { ok: this.tracker.getExisting(doc.value, schemaObj) };
+        }
+        if (valid === TypeValidity.Unknown) {
+          return { ok: this.objectCreator.createObject(newLink, undefined) };
         }
         const entries = this.traverseObjectWithSchema(doc, schemaObj, newLink);
         if (entries === undefined || entries === null) {
@@ -2172,68 +2192,107 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     return { error: new Error("Unexpected type for doc value") };
   }
 
+  /**
+   * Check whether the javascript type of the value matches the schema type
+   *
+   * This is a pruning method, and is not the full test, so don't reject early
+   *
+   * @param schema
+   * @param valueType
+   * @returns TypeValidity.True if the value type matches the schema type,
+   *  TypeValidity.False if it doesn't, and TypeValidity.Unknown if we match
+   *  the "unknown" type.
+   */
   private isValidType(
     schema: JSONSchema,
     valueType: string,
-  ): boolean {
+  ): TypeValidity {
     if (ContextualFlowControl.isTrueSchema(schema)) {
-      return true;
+      return TypeValidity.True;
     } else if (ContextualFlowControl.isFalseSchema(schema)) {
-      return false;
+      return TypeValidity.False;
     }
     const schemaObj = schema as JSONSchemaObj;
     // Check the top level type flag
     if ("type" in schemaObj) {
       if (Array.isArray(schemaObj["type"])) {
-        if (!schemaObj["type"].includes(valueType)) {
-          return false;
+        const types = schemaObj["type"];
+        // type unknown matches anything
+        if (types.includes("unknown")) {
+          return TypeValidity.Unknown;
+        } else if (!types.includes(valueType)) {
+          return TypeValidity.False;
         }
       } else if (isString(schemaObj["type"])) {
-        if (schemaObj["type"] !== valueType) {
-          return false;
+        const type = schemaObj["type"];
+        // type unknown matches anything
+        if (type === "unknown") {
+          return TypeValidity.Unknown;
+        } else if (type !== valueType) {
+          return TypeValidity.False;
         }
       } else {
         // invalid schema type
-        return false;
+        throw new Error("Invalid schema type");
       }
     }
+    // Limited allOf handling
     if (schemaObj.allOf) {
-      // Special limited allOf handling here
+      // unknown & T => T
+      let match: TypeValidity | undefined;
       for (const option of schemaObj.allOf) {
-        if (!this.isValidType(option, valueType)) {
-          return false;
+        const valid = this.isValidType(option, valueType);
+        // ignore undefined result (unknown type), but if any option returns
+        // false, the whole thing is false
+        if (valid === TypeValidity.False) {
+          return TypeValidity.False;
+        } else if (valid === TypeValidity.True) {
+          match = TypeValidity.True;
+        } else if (valid === TypeValidity.Unknown && match === undefined) {
+          match = TypeValidity.Unknown;
         }
       }
+      return match ?? TypeValidity.True;
     }
+    // Limited anyOf handling
     if (schemaObj.anyOf) {
-      let validOptions = false;
-      // Special limited anyOf handling here
+      // unknown | T => unknown
+      let match: TypeValidity | undefined;
       for (const option of schemaObj.anyOf) {
-        if (this.isValidType(option, valueType)) {
-          validOptions = true;
-          break;
+        if (ContextualFlowControl.isTrueSchema(option)) {
+          // unknown | any => any
+          return TypeValidity.True;
+        }
+        const valid = this.isValidType(option, valueType);
+        if (valid === TypeValidity.False) {
+          continue;
+        } else if (match !== TypeValidity.Unknown) {
+          match = valid;
         }
       }
-      if (!validOptions) {
-        return false;
-      }
+      return match ?? TypeValidity.False;
     }
+    // Limited oneOf handling
+    // This is handled the same as anyOf here
     if (schemaObj.oneOf) {
-      let validOptions = 0;
-      // Special limited oneOf handling here
+      let match: TypeValidity | undefined;
       for (const option of schemaObj.oneOf) {
-        if (this.isValidType(option, valueType)) {
-          validOptions++;
-          if (validOptions > 1) {
-            return false;
-          }
+        if (ContextualFlowControl.isTrueSchema(option)) {
+          // unknown | any => any
+          return TypeValidity.True;
+        }
+        const valid = this.isValidType(option, valueType);
+        if (valid === TypeValidity.False) {
+          continue;
+        } else if (match !== TypeValidity.Unknown) {
+          // this may be more than one, but we don't know that the rest of
+          // the validation will pass, so don't reject.
+          match = valid;
         }
       }
-      if (validOptions !== 1) {
-        return false;
-      }
+      return match ?? TypeValidity.False;
     }
-    return true;
+    return TypeValidity.True;
   }
 
   /**
