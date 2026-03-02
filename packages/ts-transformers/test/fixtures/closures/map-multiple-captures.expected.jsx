@@ -17,7 +17,7 @@ export default pattern((state) => {
         {state.key("items").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                 const item = __ct_pattern_input.key("element");
                 const state = __ct_pattern_input.key("params", "state");
-                const multiplier = __ct_pattern_input.key("params", "multiplier");
+                const multiplier = __ct_pattern_input.params.multiplier;
                 return (<span>
             Total: {__ctHelpers.derive({
                     type: "object",
