@@ -76,6 +76,9 @@ for (const canonicalHashing of [false, true]) {
   const doc1 = doc;
   const doc2 = `of:${refer({ goodbye: "world" })}` as const;
   const doc3 = `of:${refer({ goodbye: "cruel world" })}` as const;
+  // Wrapper that sets/resets the flag inside the test execution body,
+  // not just at registration time. Deno.test() defers execution, so
+  // without this the flag would not be active when canonical tests run.
   const test = (
     title: string,
     url: URL,
@@ -91,7 +94,14 @@ for (const canonicalHashing of [false, true]) {
     } else {
       prefixedTitle = `${prefix}${title}`;
     }
-    baseTest(prefixedTitle, url, run);
+    baseTest(prefixedTitle, url, async (replica) => {
+      setCanonicalHashConfig(canonicalHashing);
+      try {
+        await run(replica);
+      } finally {
+        resetCanonicalHashConfig();
+      }
+    });
   };
 
   test(

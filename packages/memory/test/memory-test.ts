@@ -20,7 +20,7 @@ const the = "application/json";
 // Some generated service key.
 const serviceDid = "did:key:z6MkfJPMCrTyDmurrAHPUsEjCgvcjvLtAuzyZ7nSqwZwb8KQ";
 
-const test = (
+const baseTest = (
   title: string,
   url: URL,
   run: (replica: Memory.MemorySession) => Promise<unknown>,
@@ -57,7 +57,25 @@ for (const canonicalHashing of [false, true]) {
   setCanonicalHashConfig(canonicalHashing);
   const doc = `of:${refer({ hello: "world" })}` as const;
 
-  test(`${prefix}query non-existing`, memory, async (session) => {
+  // Wrapper that sets/resets the flag inside the test execution body,
+  // not just at registration time. Deno.test() defers execution, so
+  // without this the flag would not be active when canonical tests run.
+  const test = (
+    title: string,
+    url: URL,
+    run: (replica: Memory.MemorySession) => Promise<unknown>,
+  ) => {
+    baseTest(`${prefix}${title}`, url, async (session) => {
+      setCanonicalHashConfig(canonicalHashing);
+      try {
+        await run(session);
+      } finally {
+        resetCanonicalHashConfig();
+      }
+    });
+  };
+
+  test("query non-existing", memory, async (session) => {
     const unclaimed = await session.query(
       Query.create({
         issuer: alice,
@@ -75,7 +93,7 @@ for (const canonicalHashing of [false, true]) {
     );
   });
 
-  test(`${prefix}create new memory`, memory, async (session) => {
+  test("create new memory", memory, async (session) => {
     const v1 = Fact.assert({
       the: "application/json",
       of: doc,
@@ -127,7 +145,7 @@ for (const canonicalHashing of [false, true]) {
   });
 
   test(
-    `${prefix}create memory fails if already exists`,
+    "create memory fails if already exists",
     memory,
     async (session) => {
       const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
@@ -167,7 +185,7 @@ for (const canonicalHashing of [false, true]) {
 
   // List tests
 
-  test(`${prefix}list empty memory`, memory, async (session) => {
+  test("list empty memory", memory, async (session) => {
     const result = await session.query(
       Query.create({
         issuer: alice,
@@ -185,7 +203,7 @@ for (const canonicalHashing of [false, true]) {
     );
   });
 
-  test(`${prefix}list single fact`, memory, async (session) => {
+  test("list single fact", memory, async (session) => {
     const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
     // First create a fact
     const tr1 = await session.transact(
@@ -215,7 +233,7 @@ for (const canonicalHashing of [false, true]) {
     );
   });
 
-  test(`${prefix}list multiple facts`, memory, async (session) => {
+  test("list multiple facts", memory, async (session) => {
     const doc2 = `of:${refer({ doc: 2 })}` as const;
 
     const facts = [
@@ -253,7 +271,7 @@ for (const canonicalHashing of [false, true]) {
     );
   });
 
-  test(`${prefix}list excludes retracted facts`, memory, async (session) => {
+  test("list excludes retracted facts", memory, async (session) => {
     const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
     // First create and then retract a fact
     const tr1 = await session.transact(
@@ -314,7 +332,7 @@ for (const canonicalHashing of [false, true]) {
     );
   });
 
-  test(`${prefix}list different fact types`, memory, async (session) => {
+  test("list different fact types", memory, async (session) => {
     const json = Fact.assert({ the, of: doc, is: { v: 1 } });
     const text = Fact.assert({ the: "text/plain", of: doc, is: "Hello" });
 
@@ -365,7 +383,7 @@ for (const canonicalHashing of [false, true]) {
   });
 
   test(
-    `${prefix}list facts from different replicas`,
+    "list facts from different replicas",
     memory,
     async (session) => {
       const a = Fact.assert({ the, of: doc, is: { v: 1 } });
@@ -426,7 +444,7 @@ for (const canonicalHashing of [false, true]) {
     },
   );
 
-  test(`${prefix}list from non-existent replica`, memory, async (session) => {
+  test("list from non-existent replica", memory, async (session) => {
     const result = await session.query({
       cmd: "/memory/query",
       iss: alice,
