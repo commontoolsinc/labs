@@ -1269,19 +1269,13 @@ describe("canBranchMatch", () => {
     expect(canBranchMatch({ type: "null" }, null)).toBe(true);
   });
 
-  it("rejects root const mismatch", () => {
-    expect(canBranchMatch({ const: "a" }, "b")).toBe(false);
-  });
-
-  it("accepts root const match", () => {
+  it("conservatively accepts const schemas (values may contain unresolved links)", () => {
+    expect(canBranchMatch({ const: "a" }, "b")).toBe(true);
     expect(canBranchMatch({ const: "a" }, "a")).toBe(true);
   });
 
-  it("rejects root enum mismatch", () => {
-    expect(canBranchMatch({ enum: ["a", "b"] }, "c")).toBe(false);
-  });
-
-  it("accepts root enum match", () => {
+  it("conservatively accepts enum schemas (values may contain unresolved links)", () => {
+    expect(canBranchMatch({ enum: ["a", "b"] }, "c")).toBe(true);
     expect(canBranchMatch({ enum: ["a", "b"] }, "a")).toBe(true);
   });
 
@@ -1303,7 +1297,9 @@ describe("canBranchMatch", () => {
     ).toBe(true);
   });
 
-  it("rejects property-level const mismatch", () => {
+  it("conservatively accepts property-level const (values may be unresolved links)", () => {
+    // Even when the property value doesn't match the const, we can't reject
+    // because the value might be a link that resolves to a matching value.
     expect(
       canBranchMatch(
         {
@@ -1312,10 +1308,7 @@ describe("canBranchMatch", () => {
         },
         { kind: "dog", name: "Rex" },
       ),
-    ).toBe(false);
-  });
-
-  it("accepts property-level const match", () => {
+    ).toBe(true);
     expect(
       canBranchMatch(
         {
@@ -1327,7 +1320,7 @@ describe("canBranchMatch", () => {
     ).toBe(true);
   });
 
-  it("rejects property-level enum mismatch", () => {
+  it("conservatively accepts property-level enum (values may be unresolved links)", () => {
     expect(
       canBranchMatch(
         {
@@ -1336,7 +1329,7 @@ describe("canBranchMatch", () => {
         },
         { status: "deleted" },
       ),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("returns true (conservative) when uncertain — no type specified", () => {
@@ -1362,9 +1355,9 @@ describe("canBranchMatch", () => {
     expect(canBranchMatch(false, "anything")).toBe(false);
   });
 
-  it("skips property checks for missing properties in value", () => {
-    // Property "kind" has a const but value doesn't have that property —
-    // should not reject (the property might be optional)
+  it("accepts when properties have const/enum (no property-level discrimination)", () => {
+    // Property-level const/enum are not checked because values may contain
+    // unresolved links. This test confirms no rejection happens.
     expect(
       canBranchMatch(
         {
@@ -1563,8 +1556,6 @@ describe("anyOf optimization integration", () => {
     });
 
     expect(result).toEqual({ kind: "circle", radius: 5 });
-    // square and triangle branches should have been fast-rejected
-    expect(traverser.anyOfFastRejects).toBeGreaterThanOrEqual(2);
   });
 
   it("property-merges disjoint object branches into a single traversal", () => {
@@ -1833,7 +1824,7 @@ describe("anyOf fast-reject reactivity invariants (traverseCells)", () => {
     expect(tracker.has(trackerKey(docUri))).toBe(true);
   });
 
-  it("tracks linked docs reached through the matching branch of a discriminated union", () => {
+  it("tracks linked docs reached through the matching branch (type-based rejection)", () => {
     const store = new Map<string, Revision<State>>();
     const rootUri = "of:doc-disc-root" as URI;
     const circleDataUri = "of:circle-data" as URI;
@@ -1846,25 +1837,17 @@ describe("anyOf fast-reject reactivity invariants (traverseCells)", () => {
     };
     putDoc(store, rootUri, rootValue);
 
-    // Discriminated union: "circle" branch includes data link, "square" does not
+    // Object branch has a link property; string branch is type-rejected
     const schema = {
       anyOf: [
         {
           type: "object",
           properties: {
-            kind: { const: "circle" },
+            kind: { type: "string" },
             data: { type: "string" },
           },
-          required: ["kind"],
         },
-        {
-          type: "object",
-          properties: {
-            kind: { const: "square" },
-            side: { type: "number" },
-          },
-          required: ["kind"],
-        },
+        { type: "string" },
       ],
     } as JSONSchema;
 
@@ -1874,11 +1857,11 @@ describe("anyOf fast-reject reactivity invariants (traverseCells)", () => {
       value: rootValue,
     });
 
-    // Correct result
+    // Correct result — link resolved through object branch
     expect((result as any).kind).toBe("circle");
     expect((result as any).data).toBe("radius-info");
 
-    // "square" branch should be fast-rejected
+    // "string" branch should be fast-rejected (type mismatch)
     expect(traverser.anyOfFastRejects).toBeGreaterThanOrEqual(1);
 
     // Reactivity: both root and linked doc must be tracked
@@ -1946,24 +1929,18 @@ describe("anyOf fast-reject reactivity invariants (traverseCells)", () => {
     };
     putDoc(store, rootUri, rootValue);
 
+    // Object branch has two links; null and string branches are type-rejected
     const schema = {
       anyOf: [
         {
           type: "object",
           properties: {
-            kind: { const: "circle" },
+            kind: { type: "string" },
             linkA: { type: "string" },
             linkB: { type: "string" },
           },
-          required: ["kind"],
         },
-        {
-          type: "object",
-          properties: {
-            kind: { const: "square" },
-          },
-          required: ["kind"],
-        },
+        { type: "null" },
         { type: "string" },
       ],
     } as JSONSchema;
@@ -1977,7 +1954,7 @@ describe("anyOf fast-reject reactivity invariants (traverseCells)", () => {
     expect((result as any).linkA).toBe("value-a");
     expect((result as any).linkB).toBe("value-b");
 
-    // "square" and "string" branches should be fast-rejected
+    // "null" and "string" branches should be fast-rejected (type mismatch)
     expect(traverser.anyOfFastRejects).toBeGreaterThanOrEqual(2);
 
     // ALL three docs (root + 2 links) must be tracked for reactivity
@@ -1988,13 +1965,15 @@ describe("anyOf fast-reject reactivity invariants (traverseCells)", () => {
   });
 
   it("root doc subscription ensures rejected-branch links become discoverable on change", () => {
-    // Scenario: branch A (circle) matches now and has linkA tracked.
-    // Branch B (square) is fast-rejected; its exclusive linkB is NOT tracked.
-    // This is safe because: if the root doc changes to kind:"square", the
-    // root-doc subscription fires and a fresh traversal will now match
-    // branch B and discover linkB.
+    // Scenario: branch A matches now and has linkA tracked.
+    // Branch B is fast-rejected (missing required property); its exclusive
+    // linkB is NOT tracked. This is safe because: if the root doc changes
+    // to include branch B's required property, the root-doc subscription
+    // fires and a fresh traversal will now match branch B and discover linkB.
     //
     // We verify this by doing TWO traversals with different root values.
+    // Uses required-property discrimination (const/enum checks removed per
+    // review — values may contain unresolved links).
     const store = new Map<string, Revision<State>>();
     const rootUri = "of:doc-flip" as URI;
     const circleLinkUri = "of:circle-link" as URI;
@@ -2003,9 +1982,9 @@ describe("anyOf fast-reject reactivity invariants (traverseCells)", () => {
     putDoc(store, circleLinkUri, "circle-data");
     putDoc(store, squareLinkUri, "square-data");
 
-    // First traversal: kind=circle → circleLink tracked, squareLink not needed
+    // First traversal: has circleOnly → branch A matches, branch B rejected
     const circleValue = {
-      kind: "circle",
+      circleOnly: true,
       circleLink: makeLink(circleLinkUri),
       squareLink: makeLink(squareLinkUri),
     };
@@ -2016,18 +1995,16 @@ describe("anyOf fast-reject reactivity invariants (traverseCells)", () => {
         {
           type: "object",
           properties: {
-            kind: { const: "circle" },
             circleLink: { type: "string" },
           },
-          required: ["kind"],
+          required: ["circleOnly"],
         },
         {
           type: "object",
           properties: {
-            kind: { const: "square" },
             squareLink: { type: "string" },
           },
-          required: ["kind"],
+          required: ["squareOnly"],
         },
       ],
     } as JSONSchema;
@@ -2038,16 +2015,16 @@ describe("anyOf fast-reject reactivity invariants (traverseCells)", () => {
       value: circleValue,
     });
 
-    expect((result1 as any).kind).toBe("circle");
     expect((result1 as any).circleLink).toBe("circle-data");
+    expect(traverser1.anyOfFastRejects).toBeGreaterThanOrEqual(1);
     const tracker1 = getSchemaTracker(traverser1);
     expect(tracker1.has(trackerKey(rootUri))).toBe(true);
     expect(tracker1.has(trackerKey(circleLinkUri))).toBe(true);
 
-    // Second traversal: root doc changes to kind=square
+    // Second traversal: root doc changes to have squareOnly
     // (simulates a reactive re-run after the root subscription fires)
     const squareValue = {
-      kind: "square",
+      squareOnly: true,
       circleLink: makeLink(circleLinkUri),
       squareLink: makeLink(squareLinkUri),
     };
@@ -2059,8 +2036,8 @@ describe("anyOf fast-reject reactivity invariants (traverseCells)", () => {
       value: squareValue,
     });
 
-    expect((result2 as any).kind).toBe("square");
     expect((result2 as any).squareLink).toBe("square-data");
+    expect(traverser2.anyOfFastRejects).toBeGreaterThanOrEqual(1);
     const tracker2 = getSchemaTracker(traverser2);
     expect(tracker2.has(trackerKey(rootUri))).toBe(true);
     expect(tracker2.has(trackerKey(squareLinkUri))).toBe(true);
@@ -2082,12 +2059,13 @@ describe("anyOf fast-reject reactivity invariants (traverseCells)", () => {
     };
     putDoc(store, rootUri, rootValue);
 
+    // Object branch has nested link chain; string and null branches type-rejected
     const schema = {
       anyOf: [
         {
           type: "object",
           properties: {
-            kind: { const: "deep" },
+            kind: { type: "string" },
             ref: {
               type: "object",
               properties: {
@@ -2095,15 +2073,8 @@ describe("anyOf fast-reject reactivity invariants (traverseCells)", () => {
               },
             },
           },
-          required: ["kind"],
         },
-        {
-          type: "object",
-          properties: {
-            kind: { const: "shallow" },
-          },
-          required: ["kind"],
-        },
+        { type: "string" },
         { type: "null" },
       ],
     } as JSONSchema;
@@ -2117,7 +2088,7 @@ describe("anyOf fast-reject reactivity invariants (traverseCells)", () => {
     expect((result as any).kind).toBe("deep");
     expect((result as any).ref).toEqual({ inner: "leaf-value" });
 
-    // "shallow" and "null" branches fast-rejected
+    // "string" and "null" branches fast-rejected (type mismatch)
     expect(traverser.anyOfFastRejects).toBeGreaterThanOrEqual(2);
 
     // All three docs in the chain must be tracked

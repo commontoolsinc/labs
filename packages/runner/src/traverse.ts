@@ -2763,9 +2763,10 @@ function mergeSchemaOption(
  *
  * Checks performed (all on the top-level resolved branch):
  * - Type mismatch: branch.type vs actual JS type of value
- * - Const mismatch: branch.const or branch.properties[k].const
- * - Enum mismatch: branch.enum or branch.properties[k].enum
  * - Missing required properties
+ *
+ * Const/enum checks are intentionally omitted: property values may contain
+ * unresolved links that would match after link resolution during traversal.
  */
 export function canBranchMatch(
   branch: JSONSchema,
@@ -2803,49 +2804,16 @@ export function canBranchMatch(
     }
   }
 
-  // Root const mismatch
-  if ("const" in resolved) {
-    if (!deepEqual(resolved.const, value)) return false;
-  }
-
-  // Root enum mismatch
-  if (Array.isArray(resolved.enum)) {
-    if (!resolved.enum.some((e: unknown) => deepEqual(e, value))) return false;
-  }
-
-  // For plain object values, check property-level discriminators and
-  // required fields.
-  if (
-    isRecord(value) &&
-    (resolved.type === "object" || resolved.type === undefined)
-  ) {
-    // Missing required properties
-    if (Array.isArray(resolved.required)) {
+  // For plain object values, check missing required properties.
+  // Const/enum checks are omitted — property values may contain unresolved
+  // links that would match after link resolution during traversal.
+  if (isRecord(value)) {
+    const typeIncludesObject = resolved.type === undefined ||
+      resolved.type === "object" ||
+      (Array.isArray(resolved.type) && resolved.type.includes("object"));
+    if (typeIncludesObject && Array.isArray(resolved.required)) {
       for (const req of resolved.required) {
         if (!(req as string in value)) return false;
-      }
-    }
-
-    // Property-level const/enum checks
-    if (isObject(resolved.properties)) {
-      for (const [propKey, propSchema] of Object.entries(resolved.properties)) {
-        if (!isObject(propSchema) || !(propKey in value)) continue;
-        if ("const" in propSchema) {
-          if (
-            !deepEqual(
-              propSchema.const,
-              (value as Record<string, unknown>)[propKey],
-            )
-          ) {
-            return false;
-          }
-        }
-        if (Array.isArray(propSchema.enum)) {
-          const propVal = (value as Record<string, unknown>)[propKey];
-          if (!propSchema.enum.some((e: unknown) => deepEqual(e, propVal))) {
-            return false;
-          }
-        }
       }
     }
   }
@@ -2909,7 +2877,11 @@ function _mergeAnyOfBranchSchemasUncached(
     const merged = mergeSchemaOption(outerSchema, branch);
     if (!isObject(merged)) return null;
     // Must be object type or unspecified (compatible with object)
-    if (merged.type !== undefined && merged.type !== "object") return null;
+    // type can be a string or an array of strings
+    if (merged.type !== undefined) {
+      const types = Array.isArray(merged.type) ? merged.type : [merged.type];
+      if (!types.includes("object")) return null;
+    }
     resolvedBranches.push(merged);
   }
 
