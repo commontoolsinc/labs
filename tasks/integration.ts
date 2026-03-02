@@ -153,40 +153,46 @@ async function runPatternTests(
 
   const failed: string[] = [];
 
-  // Process in batches of `concurrency`
-  for (let i = 0; i < testFiles.length; i += concurrency) {
-    const batch = testFiles.slice(i, i + concurrency);
-    const results = await Promise.all(
-      batch.map(async (testFile) => {
+  // Run as a pool: always keep `concurrency` tests in flight
+  let nextIndex = 0;
+  const running = new Set<Promise<void>>();
+
+  function enqueue(): void {
+    while (running.size < concurrency && nextIndex < testFiles.length) {
+      const testFile = testFiles[nextIndex++];
+      const p = (async () => {
         const result = await runCommand(
           [...ctCmd, "test", "--root", patternsDir, testFile],
-          {
-            cwd: rootDir,
-          },
+          { cwd: rootDir },
         );
-        return { testFile, ...result };
-      }),
-    );
 
-    for (const { testFile, success, stdout, stderr } of results) {
-      if (success) {
-        console.log(`✅ ${testFile}`);
-      } else {
-        console.log(`❌ ${testFile}`);
-        failed.push(testFile);
-      }
-      // Print output (stdout has the test details)
-      if (stdout) {
-        for (const line of stdout.trimEnd().split("\n")) {
-          console.log(`   ${line}`);
+        if (result.success) {
+          console.log(`✅ ${testFile}`);
+        } else {
+          console.log(`❌ ${testFile}`);
+          failed.push(testFile);
         }
-      }
-      if (stderr) {
-        for (const line of stderr.trimEnd().split("\n")) {
-          console.error(`   ${line}`);
+        if (result.stdout) {
+          for (const line of result.stdout.trimEnd().split("\n")) {
+            console.log(`   ${line}`);
+          }
         }
-      }
+        if (result.stderr) {
+          for (const line of result.stderr.trimEnd().split("\n")) {
+            console.error(`   ${line}`);
+          }
+        }
+      })().finally(() => {
+        running.delete(p);
+        enqueue();
+      });
+      running.add(p);
     }
+  }
+
+  enqueue();
+  while (running.size > 0) {
+    await Promise.race(running);
   }
 
   if (failed.length === 0) {
