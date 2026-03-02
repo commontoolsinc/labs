@@ -1374,6 +1374,43 @@ describe("canBranchMatch", () => {
     expect(canBranchMatch({ type: ["string", "number"] }, 42)).toBe(true);
     expect(canBranchMatch({ type: ["string", "number"] }, true)).toBe(false);
   });
+
+  it("checks required properties when type is an array including 'object'", () => {
+    // type: ["object", "null"] should still check required properties
+    expect(
+      canBranchMatch(
+        { type: ["object", "null"], required: ["name"] },
+        { name: "Alice" },
+      ),
+    ).toBe(true);
+    expect(
+      canBranchMatch(
+        { type: ["object", "null"], required: ["name"] },
+        { age: 30 },
+      ),
+    ).toBe(false);
+    // type array without "object" should skip required check
+    expect(
+      canBranchMatch(
+        { type: ["string", "number"], required: ["name"] },
+        { age: 30 },
+      ),
+    ).toBe(false); // rejected by type mismatch, not required
+  });
+
+  it("conservatively accepts when value is a cell link object", () => {
+    const linkValue = { "/": { [LINK_V1_TAG]: { id: "of:target", path: [] } } };
+    // Even if the branch type doesn't match the link's shape, links get
+    // resolved during traversal so we must not reject.
+    expect(canBranchMatch({ type: "string" }, linkValue)).toBe(true);
+    expect(canBranchMatch({ type: "number" }, linkValue)).toBe(true);
+    expect(
+      canBranchMatch(
+        { type: "object", required: ["missing"] },
+        linkValue,
+      ),
+    ).toBe(true);
+  });
 });
 
 describe("mergeAnyOfBranchSchemas", () => {
