@@ -71,7 +71,8 @@ describe("ExperimentalOptions", () => {
   });
 
   describe("toStorableValue with richStorableValues flag", () => {
-    it("works normally when flag is OFF (default)", () => {
+    it("works normally when flag is OFF", () => {
+      setExperimentalStorableConfig({ richStorableValues: false });
       expect(toStorableValue("hello")).toBe("hello");
       expect(toStorableValue(42)).toBe(42);
       expect(toStorableValue(null)).toBe(null);
@@ -80,6 +81,7 @@ describe("ExperimentalOptions", () => {
     });
 
     it("converts Error to @Error object when flag is OFF", () => {
+      setExperimentalStorableConfig({ richStorableValues: false });
       const err = new Error("test error");
       const result = toStorableValue(err);
       expect(result).toEqual({
@@ -93,6 +95,7 @@ describe("ExperimentalOptions", () => {
     });
 
     it("converts undefined in arrays to null when flag is OFF", () => {
+      setExperimentalStorableConfig({ richStorableValues: false });
       const result = toStorableValue([1, undefined, 3]);
       expect(result).toEqual([1, null, 3]);
     });
@@ -123,12 +126,14 @@ describe("ExperimentalOptions", () => {
   });
 
   describe("toDeepStorableValue with richStorableValues flag", () => {
-    it("works normally when flag is OFF (default)", () => {
+    it("works normally when flag is OFF", () => {
+      setExperimentalStorableConfig({ richStorableValues: false });
       expect(toDeepStorableValue({ a: { b: 1 } })).toEqual({ a: { b: 1 } });
       expect(toDeepStorableValue([1, 2, 3])).toEqual([1, 2, 3]);
     });
 
     it("converts nested Error to @Error object when flag is OFF", () => {
+      setExperimentalStorableConfig({ richStorableValues: false });
       const err = new Error("nested");
       const result = toDeepStorableValue({ data: err });
       expect(result).toEqual({
@@ -144,6 +149,7 @@ describe("ExperimentalOptions", () => {
     });
 
     it("omits undefined-valued object properties when flag is OFF", () => {
+      setExperimentalStorableConfig({ richStorableValues: false });
       const result = toDeepStorableValue({ a: 1, b: undefined, c: 3 });
       expect(result).toEqual({ a: 1, c: 3 });
     });
@@ -217,10 +223,12 @@ describe("ExperimentalOptions", () => {
 
   describe("isStorableValue with richStorableValues flag", () => {
     it("rejects Error when flag is OFF", () => {
+      setExperimentalStorableConfig({ richStorableValues: false });
       expect(isStorableValue(new Error("test"))).toBe(false);
     });
 
     it("rejects [undefined] when flag is OFF", () => {
+      setExperimentalStorableConfig({ richStorableValues: false });
       expect(isStorableValue([undefined])).toBe(false);
     });
 
@@ -242,6 +250,7 @@ describe("ExperimentalOptions", () => {
     });
 
     it("rejects sparse arrays when flag is OFF", () => {
+      setExperimentalStorableConfig({ richStorableValues: false });
       // deno-lint-ignore no-sparse-arrays
       const sparse = [1, , 3];
       expect(isStorableValue(sparse)).toBe(false);
@@ -309,7 +318,8 @@ describe("ExperimentalOptions", () => {
   });
 
   describe("refer() with canonicalHashing flag", () => {
-    it("works normally when canonicalHashing is false (default)", () => {
+    it("works normally when canonicalHashing is false", () => {
+      setCanonicalHashConfig(false);
       const ref = refer("hello");
       expect(ref).toBeDefined();
       expect(typeof ref.toString()).toBe("string");
