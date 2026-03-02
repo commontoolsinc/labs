@@ -33,19 +33,19 @@ export default pattern<
     const noteA1 = Note({
       title: "Note A1",
       content: "leaf",
-      noteId: generateId(),
+
       isHidden: true,
     });
     const noteAC1 = Note({
       title: "Note AC1",
       content: "leaf",
-      noteId: generateId(),
+
       isHidden: true,
     });
     const noteAG1 = Note({
       title: "Note AG1",
       content: "leaf",
-      noteId: generateId(),
+
       isHidden: true,
     });
     const nbAGrandchild = Notebook({
@@ -64,19 +64,19 @@ export default pattern<
     const noteB1 = Note({
       title: "Note B1",
       content: "leaf",
-      noteId: generateId(),
+
       isHidden: true,
     });
     const noteBC1 = Note({
       title: "Note BC1",
       content: "leaf",
-      noteId: generateId(),
+
       isHidden: true,
     });
     const noteBG1 = Note({
       title: "Note BG1",
       content: "leaf",
-      noteId: generateId(),
+
       isHidden: true,
     });
     const nbBGrandchild = Notebook({

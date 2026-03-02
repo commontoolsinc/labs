@@ -98,7 +98,6 @@ const createNoteHandler = handler<
   const note = Note({
     title,
     content,
-    noteId: generateId(),
   });
   allPieces.push(note as any);
   return note;
@@ -112,7 +111,6 @@ const createNotebookHandler = handler<
     Note({
       title: data.title,
       content: data.content,
-      noteId: generateId(),
     })
   );
   const notebook = Notebook({ title, notes });

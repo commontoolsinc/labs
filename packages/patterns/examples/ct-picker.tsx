@@ -22,7 +22,6 @@ export default pattern<Input, Result>(
     const counterA = Counter({ value: 10 });
     const counterB = Note({
       content: "This is item B (a Note)",
-      noteId: generateId(),
     });
     const counterC = Counter({ value: 30 });
 

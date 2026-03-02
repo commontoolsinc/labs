@@ -705,7 +705,7 @@ function analyzeImportContent(
 
   // Check for duplicate notes
   const existingNotesByTitle = new Map<string, NotePiece>();
-  existingNotes.forEach((note: NotePiece) => {
+  existingNotes.forEach((note) => {
     const title = note?.title;
     if (title) existingNotesByTitle.set(title, note);
   });
@@ -726,7 +726,7 @@ function analyzeImportContent(
 
   // Detect duplicate notebooks
   const existingNotebookTitles = new Set<string>();
-  existingNotebooks.forEach((nb: NotebookPiece) => {
+  existingNotebooks.forEach((nb) => {
     const cleanTitle = getCleanNotebookTitle(nb);
     if (cleanTitle) existingNotebookTitles.add(cleanTitle);
   });
@@ -1081,8 +1081,8 @@ const NotesImportExport = pattern<Input, Output>(
     // Computed items for ct-select dropdowns
     const notebookAddItems = computed(() => [
       ...resolveRawNotebooks(allPieces).map((
-        nb: NotebookPiece,
-        idx: number,
+        nb,
+        idx,
       ) => ({
         label: nb?.[NAME] ?? nb?.title ?? "Untitled",
         value: String(idx),
@@ -1093,8 +1093,8 @@ const NotesImportExport = pattern<Input, Output>(
 
     const notebookMoveItems = computed(() => [
       ...resolveRawNotebooks(allPieces).map((
-        nb: NotebookPiece,
-        idx: number,
+        nb,
+        idx,
       ) => ({
         label: nb?.[NAME] ?? nb?.title ?? "Untitled",
         value: String(idx),
@@ -1177,7 +1177,7 @@ const NotesImportExport = pattern<Input, Output>(
       const notesList = notes;
       const allPiecesList = allPieces?.get();
 
-      notesList.forEach((note: NotePiece) => {
+      notesList.forEach((note) => {
         if (!allPiecesList) return;
         const allPiecesIdx = allPiecesList.findIndex((p: any) =>
           equals(p, note)
@@ -1431,7 +1431,7 @@ const NotesImportExport = pattern<Input, Output>(
         };
 
         // Remove from all notebooks except target
-        notebooksList.forEach((nb: NotebookPiece, localIdx: number) => {
+        notebooksList.forEach((nb, localIdx) => {
           if (localIdx === nbIndex) return; // Skip target notebook
 
           const nbName = nb?.[NAME];

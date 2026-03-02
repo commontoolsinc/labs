@@ -521,7 +521,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
     const summary = computed(() => {
       const notesList = notes.get() ?? [];
       return notesList
-        .map((note: NotePiece) => note?.summary ?? note?.[NAME] ?? "")
+        .map((note) => note?.summary ?? note?.[NAME] ?? "")
         .filter((s: string) => s.length > 0)
         .join(" | ");
     });
