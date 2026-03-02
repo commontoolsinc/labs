@@ -170,7 +170,7 @@ member of `StorableValue` or `StorableDatum`.
 | `number` | Must be finite | `-0` normalized to `0`; `NaN`/`Infinity` rejected |
 | `string` | None | Unicode text |
 | `undefined` | None | First-class storable; see note below |
-| `bigint` | None | Large integers; JSON-encoded as base64 of two's complement big-endian bytes (Section 5.3) |
+| `bigint` | None | Large integers; JSON-encoded as base64url (RFC 4648, Section 5) of two's complement big-endian bytes (Section 5.3) |
 
 > **`undefined` as a first-class storable.** `undefined` is a first-class
 > storable value that round-trips faithfully through serialization. Because most
@@ -229,7 +229,7 @@ implement `[DECONSTRUCT]`, `[RECONSTRUCT]`, or carry a `typeTag` property.
 | `StorableMap` | `Map` | `Map@1` | `[[key, value], ...]` | Entry pairs as an array of two-element arrays. Insertion order is preserved. Keys and values are recursively processed. |
 | `StorableSet` | `Set` | `Set@1` | `[value, ...]` | Elements as an array. Iteration order is preserved. Values are recursively processed. |
 | `StorableRegExp` | `RegExp` | `RegExp@1` | `{ source, flags, flavor }` | `source` is the pattern string (`regex.source`); `flags` is the flag string (`regex.flags`); `flavor` is the regex dialect identifier (e.g. `"es2025"`). Extra enumerable properties cause rejection. |
-| `StorableUint8Array` | `Uint8Array` | `Bytes@1` | `string` (unpadded base64; see Section 5.3) | Deconstructed state is a string. |
+| `StorableUint8Array` | `Uint8Array` | `Bytes@1` | `string` (unpadded base64url, RFC 4648 Section 5; see Section 5.3) | Deconstructed state is a string. |
 
 Each wrapper class above:
 
@@ -253,7 +253,7 @@ See Sections 1.4.6 through 1.4.9.
 |-------------------|---------|----------|--------------|-------|
 | `StorableEpochNsec` | `SpecialPrimitiveValue` | `EpochNsec@1` | `bigint` (signed nanoseconds from POSIX Epoch) | Primary temporal type. JS `Date` has only millisecond precision; conversion from `Date` multiplies by 10^6. When `Temporal` is available, `Temporal.Instant` maps naturally (it uses nanoseconds from epoch internally). |
 | `StorableEpochDays` | `SpecialPrimitiveValue` | `EpochDays@1` | `bigint` (signed days from POSIX Epoch) | Day-precision temporal type. Anticipates `Temporal.PlainDate`. Mostly nascent — class and spec entry are defined, but full integration (Temporal types, calendar concerns) is deferred. |
-| `StorableContentId` | `SpecialPrimitiveValue` | _(none — see Section 1.4.9)_ | `Uint8Array` (hash bytes) + `string` (algorithm tag) | Content identifier / hash. Stringifies as `<algorithmTag>:<base64hash>` (unpadded base64). The first algorithm tag is `fid1` ("fabric ID, v1"). |
+| `StorableContentId` | `SpecialPrimitiveValue` | _(none — see Section 1.4.9)_ | `Uint8Array` (hash bytes) + `string` (algorithm tag) | Content identifier / hash. Stringifies as `<algorithmTag>:<base64urlhash>` (unpadded base64url, RFC 4648 Section 5). The first algorithm tag is `fid1` ("fabric ID, v1"). |
 
 #### Extra Enumerable Properties
 
@@ -562,10 +562,10 @@ export class StorableEpochDays extends SpecialPrimitiveValue {
  * to the SHA-256-based canonical hash produced by `canonicalHash()`
  * (Section 6.4).
  *
- * Stringification: `<algorithmTag>:<base64hash>` where the base64 encoding
- * uses the standard alphabet (`A-Za-z0-9+/`) with no `=` padding. For
- * example, a `fid1` content ID might stringify as
- * `fid1:n4bQgYhMfWWaL+qgxVrQFaO/TxsrC4Is0V1sFbDwCgg`.
+ * Stringification: `<algorithmTag>:<base64urlhash>` where the encoding
+ * uses base64url (RFC 4648, Section 5) with alphabet `A-Za-z0-9-_` and
+ * no `=` padding. For example, a `fid1` content ID might stringify as
+ * `fid1:n4bQgYhMfWWaL-qgxVrQFaO_TxsrC4Is0V1sFbDwCgg`.
  */
 export class StorableContentId extends SpecialPrimitiveValue {
   constructor(
@@ -577,9 +577,9 @@ export class StorableContentId extends SpecialPrimitiveValue {
     super();
   }
 
-  /** Returns `<algorithmTag>:<base64hash>` (unpadded base64). */
+  /** Returns `<algorithmTag>:<base64urlhash>` (unpadded base64url). */
   toString(): string {
-    return `${this.algorithmTag}:${base64EncodeUnpadded(this.hash)}`;
+    return `${this.algorithmTag}:${base64urlEncodeUnpadded(this.hash)}`;
   }
 }
 ```
@@ -604,14 +604,14 @@ export class StorableUint8Array implements StorableInstance {
   constructor(readonly bytes: Uint8Array) {}
 
   [DECONSTRUCT](): StorableValue {
-    return base64Encode(this.bytes);
+    return base64urlEncode(this.bytes);
   }
 
   static [RECONSTRUCT](
     state: StorableValue,
     _context: ReconstructionContext,
   ): StorableUint8Array {
-    return new StorableUint8Array(base64Decode(state as string));
+    return new StorableUint8Array(base64urlDecode(state as string));
   }
 }
 ```
@@ -1227,35 +1227,35 @@ export function serialize(
   // --- `bigint` ---
   // A primitive that rides through `StorableValue` without wrapping (like
   // `undefined`). Needs a dedicated handler since JSON has no native bigint.
-  // The state is the unpadded base64 encoding of the value's minimal two's
-  // complement representation in big-endian byte order — the same byte format
-  // used by the canonical hash (Section 6.4).
+  // The state is the unpadded base64url (RFC 4648, Section 5) encoding of
+  // the value's minimal two's complement representation in big-endian byte
+  // order — the same byte format used by the canonical hash (Section 6.4).
   if (typeof value === 'bigint') {
-    return context.encode('BigInt@1', base64Encode(bigintToTwosComplement(value)));
+    return context.encode('BigInt@1', base64urlEncode(bigintToTwosComplement(value)));
   }
 
   // --- StorableEpochNsec ---
   // Direct StorableDatum member (not a StorableInstance). Encoded as flat
-  // base64 of the underlying bigint's minimal two's complement representation,
-  // same byte format as BigInt@1.
+  // base64url of the underlying bigint's minimal two's complement
+  // representation, same byte format as BigInt@1.
   if (value instanceof StorableEpochNsec) {
-    return context.encode('EpochNsec@1', base64Encode(bigintToTwosComplement(value.value)));
+    return context.encode('EpochNsec@1', base64urlEncode(bigintToTwosComplement(value.value)));
   }
 
   // --- StorableEpochDays ---
   // Direct StorableDatum member (not a StorableInstance). Same encoding as
   // StorableEpochNsec but with a distinct wire tag.
   if (value instanceof StorableEpochDays) {
-    return context.encode('EpochDays@1', base64Encode(bigintToTwosComplement(value.value)));
+    return context.encode('EpochDays@1', base64urlEncode(bigintToTwosComplement(value.value)));
   }
 
   // --- StorableContentId ---
   // Direct StorableDatum member (not a StorableInstance). Encoded as a
-  // two-element array: [algorithmTag, base64hash]. The base64 encoding uses
-  // the standard alphabet with no padding, matching the stringification
-  // format.
+  // two-element array: `[algorithmTag, base64urlhash]`. The base64url
+  // encoding uses the URL-safe alphabet (`A-Za-z0-9-_`) with no padding,
+  // matching the stringification format.
   if (value instanceof StorableContentId) {
-    return context.encode('ContentId@1', [value.algorithmTag, base64EncodeUnpadded(value.hash)]);
+    return context.encode('ContentId@1', [value.algorithmTag, base64urlEncodeUnpadded(value.hash)]);
   }
 
   // --- `undefined` ---
@@ -1362,7 +1362,7 @@ export function deserialize(
     }
 
     // `BigInt@1`: validate and reconstruct a `bigint` primitive.
-    // The state is unpadded base64 of minimal two's complement big-endian
+    // The state is unpadded base64url of minimal two's complement big-endian
     // bytes. Deserialization cannot assume type safety from the wire — the
     // state must be validated before use. See Section 5.3 deserialization
     // validation note.
@@ -1372,11 +1372,11 @@ export function deserialize(
           'BigInt@1 state must be a string');
       }
       try {
-        const bytes = base64Decode(state);
+        const bytes = base64urlDecode(state);
         return twosComplementToBigint(bytes);
       } catch {
         return new ProblematicStorable('BigInt@1', state as StorableValue,
-          'BigInt@1 state is not valid base64 or not a valid integer representation');
+          'BigInt@1 state is not valid base64url or not a valid integer representation');
       }
     }
 
@@ -1534,10 +1534,11 @@ round-trip correctly.
 
 ### 5.3 Standard Type Encodings
 
-> **Base64 encoding convention.** All base64-encoded values in the JSON wire
-> format use the standard alphabet (`A-Za-z0-9+/`) and **must omit** trailing
-> `=` padding characters. Encoders must not emit padding; decoders must
-> **reject** input containing `=` padding characters. This convention applies
+> **Base64url encoding convention.** All base64-encoded values in the JSON wire
+> format use the URL-safe base64url alphabet (`A-Za-z0-9-_`, per RFC 4648
+> Section 5) and **must omit** trailing `=` padding characters. Encoders must
+> not emit padding; decoders must **reject** input containing `=` padding
+> characters or standard-base64 characters (`+`, `/`). This convention applies
 > to `Bytes@1`, `BigInt@1`, `EpochNsec@1`, and `EpochDays@1` state values.
 
 ```typescript
@@ -1580,7 +1581,7 @@ round-trip correctly.
 // Tag: "Set@1"
 // { "/Set@1": [value, ...] }
 
-// Binary data (base64-encoded per the base64 convention above)
+// Binary data (base64url-encoded per the base64url convention above)
 // Tag: "Bytes@1"
 // { "/Bytes@1": string }
 
@@ -1588,7 +1589,7 @@ round-trip correctly.
 // Tag: "EpochNsec@1"
 // { "/EpochNsec@1": string }
 //
-// The state is the base64 encoding of the bigint value's minimal two's
+// The state is the base64url encoding of the bigint value's minimal two's
 // complement representation in big-endian byte order — the same encoding
 // as BigInt@1.
 
@@ -1596,19 +1597,19 @@ round-trip correctly.
 // Tag: "EpochDays@1"
 // { "/EpochDays@1": string }
 //
-// Same encoding convention as EpochNsec@1 (base64 of two's complement
+// Same encoding convention as EpochNsec@1 (base64url of two's complement
 // big-endian bytes).
 
-// BigInts (base64 of two's complement big-endian bytes; see convention above)
+// BigInts (base64url of two's complement big-endian bytes; see convention above)
 // Tag: "BigInt@1"
 // { "/BigInt@1": string }
 //
-// The state is the base64 encoding of the value's minimal two's complement
+// The state is the base64url encoding of the value's minimal two's complement
 // representation in big-endian byte order. The minimum byte length is 1 —
 // even `0n` produces a single `0x00` byte. Examples:
 //   - `0n`  → single byte 0x00 → "AA"
 //   - `1n`  → 0x01             → "AQ"
-//   - `-1n` → 0xFF             → "/w"
+//   - `-1n` → 0xFF             → "_w"
 //   - `128n` → 0x00 0x80       → "AIA"  (leading 0x00 needed: 0x80 alone would decode as -128)
 //   - `-128n` → 0x80           → "gA"
 // This matches the canonical hash byte format (Section 6.4), which already
@@ -1617,9 +1618,9 @@ round-trip correctly.
 
 > **Deserialization validation.** Deserialization cannot assume type safety from
 > the wire. Each type handler must validate the format of its state before
-> processing. For example, a handler whose state is a base64 string (such as
+> processing. For example, a handler whose state is a base64url string (such as
 > `BigInt@1`, `EpochNsec@1`, `EpochDays@1`, or `Bytes@1`) must validate that
-> its state is a `string` containing valid unpadded base64 before decoding. On
+> its state is a `string` containing valid unpadded base64url before decoding. On
 > malformed input — wrong type, invalid format, or missing fields — the handler
 > should produce a `ProblematicStorable` (Section 3.5) rather than throwing or
 > silently producing garbage. This principle applies to all type handlers. Wire
@@ -1826,8 +1827,9 @@ nibble range.
  * which encapsulates the raw hash bytes and the algorithm tag. The
  * algorithm tag for SHA-256 is `fid1` ("fabric ID, v1"). Callers who
  * need a string representation can call `toString()` on the result,
- * which produces `<algorithmTag>:<base64hash>` (unpadded base64 with
- * the standard alphabet `A-Za-z0-9+/`; see Section 5.3).
+ * which produces `<algorithmTag>:<base64urlhash>` (unpadded base64url
+ * with the URL-safe alphabet `A-Za-z0-9-_`, per RFC 4648 Section 5;
+ * see Section 5.3).
  */
 export function canonicalHash(
   value: StorableValue,

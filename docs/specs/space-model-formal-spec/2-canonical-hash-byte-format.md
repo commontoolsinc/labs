@@ -27,7 +27,7 @@ The digest output is **32 raw bytes** (256 bits). The `canonicalHash()` function
 wraps the raw bytes into a `StorableContentId` instance (Section 1.4.9 of the
 formal spec) with algorithm tag `fid1`. Callers who need a string
 representation call `toString()` on the result, which produces
-`fid1:<base64hash>` (unpadded base64).
+`fid1:<base64urlhash>` (unpadded base64url, RFC 4648 Section 5).
 
 > **Future addition.** BLAKE2b is listed as a recommended second algorithm in
 > the formal spec. When added, it will use the same byte-level input format
