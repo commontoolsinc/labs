@@ -162,7 +162,15 @@ async function runPatternTests(
       const testFile = testFiles[nextIndex++];
       const p = (async () => {
         const result = await runCommand(
-          [...ctCmd, "test", "--root", patternsDir, testFile],
+          [
+            ...ctCmd,
+            "test",
+            "--timeout",
+            "20000",
+            "--root",
+            patternsDir,
+            testFile,
+          ],
           { cwd: rootDir },
         );
 
