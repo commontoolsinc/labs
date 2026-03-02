@@ -318,6 +318,10 @@ export class RuntimeProcessor {
         });
       },
 
+      pieceCreatedCallback: (piece) => {
+        pieceManager?.add([piece]);
+      },
+
       errorHandlers: [
         (error) => {
           self.postMessage({
