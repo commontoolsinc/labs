@@ -6318,4 +6318,95 @@ describe("pull mode array reactivity", () => {
     cancelRenderer();
     cancelComputation();
   });
+
+  describe("runIdempotencyCheck", () => {
+    it("detects non-idempotent accumulator", async () => {
+      // An accumulator: each run appends to the array
+      const log = runtime.getCell<string[]>(
+        space,
+        "idempotency-accumulator-log",
+        undefined,
+        tx,
+      );
+      log.set([]);
+      await tx.commit();
+      tx = runtime.edit();
+
+      const accumulator: Action = (tx) => {
+        const current = log.withTx(tx).get() ?? [];
+        log.withTx(tx).send([...current, "entry"]);
+      };
+      runtime.scheduler.subscribe(
+        accumulator,
+        { reads: [], writes: [] },
+        {},
+      );
+      await runtime.scheduler.idle();
+
+      const result = await runtime.scheduler.runIdempotencyCheck();
+      expect(result.nonIdempotent.length).toBeGreaterThan(0);
+    });
+
+    it("passes idempotent computation", async () => {
+      // Idempotent: always writes the same derived value
+      const input = runtime.getCell<number>(
+        space,
+        "idempotency-idempotent-input",
+        undefined,
+        tx,
+      );
+      input.set(5);
+      const output = runtime.getCell<number>(
+        space,
+        "idempotency-idempotent-output",
+        undefined,
+        tx,
+      );
+      output.set(0);
+      await tx.commit();
+      tx = runtime.edit();
+
+      const doubler: Action = (tx) => {
+        output.withTx(tx).send(input.withTx(tx).get() * 2);
+      };
+      runtime.scheduler.subscribe(doubler, { reads: [], writes: [] }, {});
+      await runtime.scheduler.idle();
+
+      const result = await runtime.scheduler.runIdempotencyCheck();
+      // Filter for our specific action
+      const ourResult = result.nonIdempotent.filter((r) =>
+        r.runs.some((run) =>
+          Object.keys(run.writes).some((k) =>
+            k.includes("idempotency-idempotent")
+          )
+        )
+      );
+      expect(ourResult.length).toBe(0);
+    });
+
+    it("detects Math.random non-idempotency", async () => {
+      const output = runtime.getCell<number>(
+        space,
+        "idempotency-random-output",
+        undefined,
+        tx,
+      );
+      output.set(0);
+      await tx.commit();
+      tx = runtime.edit();
+
+      const randomWriter: Action = (tx) => {
+        output.withTx(tx).send(Math.random());
+      };
+      runtime.scheduler.subscribe(
+        randomWriter,
+        { reads: [], writes: [] },
+        {},
+      );
+      await runtime.scheduler.idle();
+
+      const result = await runtime.scheduler.runIdempotencyCheck();
+      expect(result.nonIdempotent.length).toBeGreaterThan(0);
+    });
+  });
 });
