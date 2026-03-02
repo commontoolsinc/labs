@@ -65,15 +65,15 @@ export default pattern<Record<string, never>, TestOutput>(() => {
   const assert_default_auth_null = computed(() => authDefault.auth === null);
 
   // AuthInfo should exist and have expected structure
-  const assert_authInfo_exists = computed(
+  const _assert_authInfo_exists = computed(
     () => authDefault.authInfo != null,
   );
 
-  const assert_authInfo_state_matches = computed(
+  const _assert_authInfo_state_matches = computed(
     () => authDefault.authInfo.state === authDefault.currentState,
   );
 
-  const assert_authInfo_email_empty = computed(
+  const _assert_authInfo_email_empty = computed(
     () => authDefault.authInfo.email === "",
   );
 
