@@ -361,9 +361,14 @@ export default pattern(() => {
   // ==========================================================================
 
   // After importing fresh note: should have 2 notes total
-  const assert_two_notes_after_fresh_import = computed(
-    () => instance.noteCount === 2,
-  );
+  const assert_two_notes_after_fresh_import = computed(() => {
+    if (instance.noteCount !== 2) {
+      throw new Error(
+        `TEST FAILED. noteCount is: ${instance.noteCount}, expected 2`,
+      );
+    }
+    return true;
+  });
 
   // After importing fresh notebook: should have 2 notebooks total
   const assert_two_notebooks_after_fresh_import = computed(
@@ -376,7 +381,14 @@ export default pattern(() => {
   );
 
   // Import should show progress modal when complete
-  const assert_import_complete = computed(() => instance.importComplete);
+  const assert_import_complete = computed(() => {
+    if (!instance.importComplete) {
+      throw new Error(
+        `TEST FAILED. importComplete is: ${instance.importComplete}`,
+      );
+    }
+    return true;
+  });
 
   // ==========================================================================
   // Assertions - Duplicate note detection
@@ -443,6 +455,22 @@ export default pattern(() => {
   const assert_duplicate_modal_closed = computed(
     () => !instance.showDuplicateModal,
   );
+
+  const assert_no_debug_error = computed(() => {
+    const err = (instance as any).debugError;
+    if (err) {
+      console.log(">>>>>>>> DEBUG ERROR:", err);
+    }
+    return !err;
+  });
+
+  const assert_parsed_count_debug = computed(() => {
+    const count = (instance as any).debugParsedCount;
+    if (count <= 0) {
+      throw new Error(`DEBUG_PARSED_COUNT_FAILED: count is ${count}`);
+    }
+    return true;
+  });
 
   // ==========================================================================
   // Assertions - Import as copies flow
@@ -564,6 +592,8 @@ export default pattern(() => {
       { assertion: assert_has_one_note },
       { action: action_set_fresh_note_markdown },
       { action: action_analyze_import },
+      { assertion: assert_parsed_count_debug },
+      { assertion: assert_no_debug_error },
       { assertion: assert_no_duplicate_modal },
       { assertion: assert_import_complete },
       { assertion: assert_two_notes_after_fresh_import },

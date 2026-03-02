@@ -989,8 +989,8 @@ const getExportFilename = (prefix: string) => {
 // Define raw resolvers to avoid Computed array proxy traps in actions
 function resolveRawNotes(allPieces: any): any[] {
   return (allPieces?.get() ?? []).filter((piece: any) => {
-    const name = piece?.[NAME];
-    return typeof name === "string" && name.startsWith("📝");
+    const name = resolveValue(piece?.[NAME]);
+    return name.startsWith("📝");
   });
 }
 
@@ -1075,7 +1075,7 @@ const NotesImportExport = pattern<Input, Output>(
     // Computed items for ct-select dropdowns
     const notebookAddItems = computed(() => [
       ...resolveRawNotebooks(allPieces).map((nb: any, idx: number) => ({
-        label: nb?.[NAME] ?? nb?.title ?? "Untitled",
+        label: (nb as any)?.[NAME] ?? nb?.title ?? "Untitled",
         value: String(idx),
       })),
       { label: "────────────", value: "_divider", disabled: true },
@@ -1084,7 +1084,7 @@ const NotesImportExport = pattern<Input, Output>(
 
     const notebookMoveItems = computed(() => [
       ...resolveRawNotebooks(allPieces).map((nb: any, idx: number) => ({
-        label: nb?.[NAME] ?? nb?.title ?? "Untitled",
+        label: (nb as any)?.[NAME] ?? nb?.title ?? "Untitled",
         value: String(idx),
       })),
       { label: "────────────", value: "_divider", disabled: true },

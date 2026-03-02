@@ -13,8 +13,7 @@
  *
  * Run: deno task ct test packages/patterns/notes/note-md.test.tsx --verbose
  */
-import { action, computed, pattern, Writable } from "commontools";
-const NAME = "$NAME";
+import { action, computed, NAME, pattern, Writable } from "commontools";
 import NoteMd from "./note-md.tsx";
 import Note from "./note.tsx";
 
@@ -247,7 +246,7 @@ export default pattern(() => {
   // ==========================================================================
 
   const assert_name = computed(
-    () => md[NAME] === "📖 Test Note",
+    () => (md as any)[NAME] === "📖 Test Note",
   );
 
   // ==========================================================================
@@ -374,7 +373,7 @@ export default pattern(() => {
   // ==========================================================================
 
   const assert_source_name = computed(
-    () => mdWithSource[NAME] === "📖 Source Note",
+    () => (mdWithSource as any)[NAME] === "📖 Source Note",
   );
 
   const assert_source_content = computed(

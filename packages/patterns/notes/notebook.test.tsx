@@ -22,7 +22,8 @@
  *
  * Run: deno task ct test packages/patterns/notes/notebook.test.tsx --verbose
  */
-import { action, computed, NAME, pattern } from "commontools";
+import { action, computed, pattern } from "commontools";
+import { NAME } from "@commontools/runner";
 import Notebook from "./notebook.tsx";
 import Note from "./note.tsx";
 
@@ -360,7 +361,7 @@ export default pattern(() => {
   // ==========================================================================
 
   const assert_name_format = computed(() => {
-    const name = notebook[NAME];
+    const name = (notebook as any)[NAME];
     return typeof name === "string" &&
       name.includes("📓") &&
       name.includes(notebook.title) &&

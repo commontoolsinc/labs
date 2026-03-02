@@ -5,7 +5,13 @@
  * This file contains types shared across note.tsx, notebook.tsx, and note-md.tsx.
  */
 
-import { type Default, NAME, type Stream, type Writable } from "commontools";
+import {
+  type Default,
+  NAME,
+  type Stream,
+  UI,
+  type Writable,
+} from "commontools";
 
 // ===== Core Entity Types =====
 
@@ -18,6 +24,7 @@ export interface MentionablePiece {
   isHidden?: boolean;
   mentioned: MentionablePiece[];
   backlinks: MentionablePiece[];
+  [UI]?: import("commontools").VNode;
 }
 
 /**
@@ -26,6 +33,7 @@ export interface MentionablePiece {
  */
 export interface MinimalPiece {
   [NAME]?: string;
+  [UI]?: import("commontools").VNode;
 }
 
 /**
@@ -40,6 +48,7 @@ export interface NotePiece {
   isHidden?: boolean;
   backlinks?: MentionablePiece[];
   parentNotebook?: NotebookPiece | null;
+  [UI]?: import("commontools").VNode;
 }
 
 /**
@@ -53,13 +62,14 @@ export interface NotebookPiece {
   isHidden?: boolean;
   backlinks?: MentionablePiece[];
 
-  createNote: Stream<{ title: string; content: string }>;
+  createNote: Stream<{ title: string; content: string; navigate?: boolean }>;
   createNotes: Stream<{ notesData: Array<{ title: string; content: string }> }>;
   setTitle: Stream<{ newTitle: string }>;
   createNotebook: Stream<{
     title: string;
     notesData?: Array<{ title: string; content: string }>;
   }>;
+  [UI]?: import("commontools").VNode;
 }
 
 /**

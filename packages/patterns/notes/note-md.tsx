@@ -4,9 +4,11 @@ import {
   computed,
   equals,
   handler,
+  NAME,
   navigateTo,
   pattern,
   type Stream,
+  UI,
   type VNode,
   wish,
   Writable,
@@ -153,7 +155,7 @@ export default pattern<NoteMdInput, NoteMdOutput>(
             <ct-hstack gap="2" wrap>
               {note?.backlinks?.map((piece) => (
                 <ct-chip
-                  label={piece?.[NAME] ?? "Untitled"}
+                  label={(piece as any)?.[NAME] ?? "Untitled"}
                   interactive
                   onct-click={handleBacklinkClick({ piece })}
                 />

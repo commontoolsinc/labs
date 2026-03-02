@@ -11,8 +11,7 @@
  *
  * Run: deno task ct test packages/patterns/notes/note.test.tsx --verbose
  */
-import { action, computed, pattern } from "commontools";
-const NAME = "$NAME";
+import { action, computed, NAME, pattern } from "commontools";
 import Note from "./note.tsx";
 import Notebook from "./notebook.tsx";
 
@@ -128,7 +127,7 @@ export default pattern(() => {
   // ==========================================================================
 
   const assert_name = computed(
-    () => note[NAME] === "📝 Test Note",
+    () => (note as any)[NAME] === "📝 Test Note",
   );
   const assert_initial_title = computed(() => note.title === "Test Note");
   const assert_initial_content = computed(
