@@ -308,15 +308,12 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   }
 
   /**
-   * Run non-idempotent computation diagnosis for the specified duration.
-   * Returns a report of non-idempotent actions and causal cycles found.
+   * Run non-idempotent computation detection.
+   * Returns a report of non-idempotent actions found.
    */
-  async detectNonIdempotent(
-    durationMs = 5000,
-  ): Promise<SchedulerDiagnosisResult> {
+  async detectNonIdempotent(): Promise<SchedulerDiagnosisResult> {
     const res = await this.#conn.request<RequestType.DetectNonIdempotent>({
       type: RequestType.DetectNonIdempotent,
-      durationMs,
     });
     return res.result;
   }

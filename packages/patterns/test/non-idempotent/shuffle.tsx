@@ -20,12 +20,6 @@ export default pattern<{
     shuffled.set(arr);
   });
 
-  // Self-cycling: feed shuffled output back as input to keep pattern active
-  computed(() => {
-    const s = shuffled.get();
-    if (s.length > 0) items.set([...s]);
-  });
-
   return {
     $NAME: "Non-Idempotent Shuffle",
     [UI]: (

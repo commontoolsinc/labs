@@ -736,11 +736,9 @@ export class RuntimeProcessor {
   }
 
   async detectNonIdempotent(
-    request: DetectNonIdempotentRequest,
+    _request: DetectNonIdempotentRequest,
   ): Promise<DetectNonIdempotentResponse> {
-    const result = await this.runtime.scheduler.runDiagnosis(
-      request.durationMs ?? 5000,
-    );
+    const result = await this.runtime.scheduler.runIdempotencyCheck();
     return { result };
   }
 

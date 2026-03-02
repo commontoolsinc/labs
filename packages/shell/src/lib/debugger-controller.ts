@@ -523,7 +523,7 @@ export class DebuggerController implements ReactiveController {
   /**
    * Run diagnosis and store the result.
    */
-  async runDiagnosis(durationMs = 5000): Promise<void> {
+  async runDiagnosis(): Promise<void> {
     if (!this.runtime || this.isDiagnosing) return;
 
     const rt = this.runtime.runtime();
@@ -533,7 +533,7 @@ export class DebuggerController implements ReactiveController {
     this.host.requestUpdate();
 
     try {
-      const result = await rt.detectNonIdempotent(durationMs);
+      const result = await rt.detectNonIdempotent();
       this.diagnosisResult = result;
       this.diagnosisVersion++;
     } catch (e) {

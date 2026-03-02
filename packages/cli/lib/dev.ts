@@ -39,7 +39,8 @@ export async function process(
     : options.output
     ? basename(options.output)
     : undefined;
-  const engine = new Engine(await createRuntime());
+  const runtime = await createRuntime();
+  const engine = new Engine(runtime);
   const program = await engine.resolve(
     new FileSystemProgramResolver(options.main, options.rootPath),
   );
@@ -56,19 +57,6 @@ export async function process(
     getTransformedProgram,
     verboseErrors: options.verboseErrors,
   });
-
-  // Run idempotency check after pattern evaluation
-  if (options.run) {
-    const result = await engine.runIdempotencyCheck();
-    if (result.nonIdempotent.length > 0) {
-      console.warn("Non-idempotent computations detected:");
-      for (const action of result.nonIdempotent) {
-        console.warn(
-          `  - ${action.actionInfo?.patternName ?? action.actionId}`,
-        );
-      }
-    }
-  }
 
   if (options.output) {
     await Deno.writeTextFile(options.output, output.js);

@@ -14,14 +14,6 @@ export default pattern<{
     log.set([...current, `${value.get()} at run #${current.length + 1}`]);
   });
 
-  // Self-cycling: feed last log entry back as input value to keep pattern active
-  computed(() => {
-    const entries = log.get();
-    if (entries.length > 0) {
-      value.set(entries[entries.length - 1]);
-    }
-  });
-
   return {
     $NAME: "Non-Idempotent Accumulator",
     [UI]: (

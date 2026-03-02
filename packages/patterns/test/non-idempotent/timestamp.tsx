@@ -33,14 +33,6 @@ export default pattern<{
     );
   });
 
-  // Self-cycling: feed processed items back as input to keep pattern active
-  computed(() => {
-    const p = processed.get();
-    if (p.length > 0) {
-      items.set(p.map((item) => ({ title: item.title })));
-    }
-  });
-
   return {
     $NAME: "Non-Idempotent Timestamp",
     [UI]: (

@@ -116,10 +116,8 @@ export class XRootView extends BaseView {
         }
         globalThis.commontools.rt = this.runtime;
         globalThis.commontools.vdom = createVDomDebugHelpers();
-        globalThis.commontools.detectNonIdempotent = async (
-          durationMs?: number,
-        ) => {
-          const result = await rt.runtime().detectNonIdempotent(durationMs);
+        globalThis.commontools.detectNonIdempotent = async () => {
+          const result = await rt.runtime().detectNonIdempotent();
           console.table(
             result.nonIdempotent.map((r: any) => ({
               action: r.actionId,

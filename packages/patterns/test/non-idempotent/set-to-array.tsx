@@ -32,14 +32,6 @@ export default pattern<{
     uniqueTags.set([...set]);
   });
 
-  // Self-cycling: feed unique tags back as items to keep pattern active
-  computed(() => {
-    const tags = uniqueTags.get();
-    if (tags.length > 0) {
-      items.set(tags.map((tag) => ({ title: tag, tag })));
-    }
-  });
-
   return {
     $NAME: "Non-Idempotent Set-to-Array",
     [UI]: (

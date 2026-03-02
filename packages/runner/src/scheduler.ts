@@ -2079,35 +2079,104 @@ export class Scheduler {
   }
 
   /**
-   * Proactively checks all computations for idempotency by force-dirtying them
-   * and comparing write snapshots across two re-execution rounds. Returns the
-   * same DiagnosisResult as runDiagnosis(), but doesn't rely on the pattern
-   * being active — works even after a pattern has settled.
+   * Checks all computations for idempotency using commit-then-rerun.
+   *
+   * Round 1: run the computation and COMMIT so accumulated state becomes
+   * visible. Round 2: run again WITHOUT commit (reads post-commit state).
+   * An idempotent computation produces the same writes in both rounds.
+   * A non-idempotent computation (accumulator, Math.random, Date.now)
+   * produces different writes.
    */
-  runIdempotencyCheck(): Promise<SchedulerDiagnosisResult> {
-    // If already running, stop and start fresh
-    if (this.diagnosisEnabled) {
-      this.stopDiagnosis();
+  async runIdempotencyCheck(): Promise<SchedulerDiagnosisResult> {
+    const makeKey = (addr: IMemorySpaceAddress): string =>
+      `${addr.space}/${addr.id}/${addr.path.join("/")}`;
+
+    type Snapshot = Map<string, unknown>;
+
+    const captureWrites = (
+      tx: IExtendedStorageTransaction,
+      log: ReactivityLog,
+    ): Snapshot => {
+      const writes: Snapshot = new Map();
+      for (const write of log.writes) {
+        const key = makeKey(write);
+        for (const att of tx.journal.novelty(write.space)) {
+          if (att.address.id === write.id) {
+            writes.set(key, att.value);
+            break;
+          }
+        }
+        if (!writes.has(key)) writes.set(key, undefined);
+      }
+      return writes;
+    };
+
+    const nonIdempotent: NonIdempotentReport[] = [];
+
+    for (const action of this.computations) {
+      const actionId = this.getActionId(action);
+
+      // Round 1: run and COMMIT (so accumulated state becomes visible)
+      const tx1 = this.runtime.edit();
+      try {
+        this.runtime.harness.invoke(() => action(tx1));
+      } catch {
+        // Ignore errors (e.g. unresolved cells)
+      }
+      const log1 = txToReactivityLog(tx1);
+      const writes1 = captureWrites(tx1, log1);
+      const { error } = await tx1.commit();
+      if (error) continue; // skip on commit failure
+
+      // Round 2: run WITHOUT commit (reads post-commit state)
+      const tx2 = this.runtime.edit();
+      try {
+        this.runtime.harness.invoke(() => action(tx2));
+      } catch {
+        // Ignore errors (e.g. unresolved cells)
+      }
+      const log2 = txToReactivityLog(tx2);
+      const writes2 = captureWrites(tx2, log2);
+      tx2.abort();
+
+      // Compare: round 2 should have same or fewer writes with same values
+      const allKeys = new Set([...writes1.keys(), ...writes2.keys()]);
+      const differingKeys: string[] = [];
+      for (const key of allKeys) {
+        const v1 = writes1.get(key);
+        const v2 = writes2.get(key);
+        if (!this.deepEqual(v1, v2)) {
+          differingKeys.push(key);
+        }
+      }
+
+      if (differingKeys.length > 0) {
+        nonIdempotent.push({
+          actionId,
+          actionInfo: this.getActionTelemetryInfo(action),
+          runs: [
+            {
+              timestamp: performance.now(),
+              reads: {},
+              writes: Object.fromEntries(writes1),
+            },
+            {
+              timestamp: performance.now(),
+              reads: {},
+              writes: Object.fromEntries(writes2),
+            },
+          ],
+          differingWriteKeys: differingKeys,
+        });
+      }
     }
 
-    return new Promise<SchedulerDiagnosisResult>((resolve) => {
-      this.diagnosisResolve = resolve;
-      // Use a long timeout — we control when it stops via stopDiagnosis()
-      this.startDiagnosis(60_000);
-
-      // Force two re-execution rounds while diagnosis captures snapshots
-      const forceRound = async () => {
-        for (const action of this.computations) {
-          this.dirty.add(action);
-        }
-        this.queueExecution();
-        await this.idle();
-      };
-
-      forceRound()
-        .then(() => forceRound())
-        .then(() => this.stopDiagnosis());
-    });
+    return {
+      nonIdempotent,
+      cycles: [],
+      duration: 0,
+      busyTime: 0,
+    };
   }
 
   /**

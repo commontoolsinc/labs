@@ -627,6 +627,17 @@ export async function runTestPattern(
       }
     }
 
+    // Run idempotency check after all test steps
+    const idempotencyResult = await engine.runIdempotencyCheck();
+    if (idempotencyResult.nonIdempotent.length > 0) {
+      console.warn("  ⚠ Non-idempotent computations detected:");
+      for (const report of idempotencyResult.nonIdempotent) {
+        console.warn(
+          `    - ${report.actionInfo?.patternName ?? report.actionId}`,
+        );
+      }
+    }
+
     const errorMessages = runtimeErrors.map((e) => String(e));
     return {
       path: testPath,
