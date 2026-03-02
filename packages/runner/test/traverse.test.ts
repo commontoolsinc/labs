@@ -554,7 +554,7 @@ describe("SchemaObjectTraverser array traversal", () => {
       };
       const docASelector = {
         path: ["value", "foo"],
-        schemaContext: { schema: true, rootSchema: true },
+        schemaContext: { schema: true },
       };
       const [curDoc, _selector1] = getAtPath(
         tx,
@@ -685,7 +685,7 @@ describe("SchemaObjectTraverser array traversal", () => {
       };
       const docASelector = {
         path: ["value", "current"],
-        schemaContext: { schema: true, rootSchema: true },
+        schemaContext: { schema: true },
       };
       const [curDoc, _selector1] = getAtPath(
         tx,
