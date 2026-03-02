@@ -5,6 +5,9 @@
  * Imports from `@commontools/runner` may be used freely in this directory.
  */
 
+import "core-js/proposals/explicit-resource-management";
+import "core-js/proposals/async-explicit-resource-management";
+
 import {
   IPCRemoteResponse,
   isIPCClientMessage,
