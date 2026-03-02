@@ -201,13 +201,16 @@ const readDoList = pattern<
   return { result: items };
 });
 
-const doListSystemPrompt = `
+const benExtraSystemPrompt = `
 Do-list management:
 - When users mention tasks, action items, or things to do, use addDoItem or addDoItems
 - When users paste a block of text with multiple items, parse into items and use addDoItems to batch-add
 - Use readDoList to check current items before making changes
 - Use updateDoItem to mark done or rename; removeDoItem only for explicit deletion
 - Use indent levels for sub-tasks (0=root, 1=sub-task, 2=sub-sub-task)
+
+Knowledge graph:
+- For finding relationships between pieces: use getNeighbors with an entity reference to get all incoming/outgoing links, or searchAnnotations to search agent-created annotations by text
 `;
 
 export default pattern<PiecesListInput, PiecesListOutput>((_) => {
@@ -271,8 +274,10 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
       readDoList: patternTool(readDoList, {
         items: doList.items,
       }),
+      getNeighbors: knowledgeGraph.getNeighbors,
+      searchAnnotations: knowledgeGraph.searchGraph,
     },
-    extraSystemPrompt: doListSystemPrompt,
+    extraSystemPrompt: benExtraSystemPrompt,
   });
 
   const gridView = PieceGrid({ pieces: visiblePieces });
