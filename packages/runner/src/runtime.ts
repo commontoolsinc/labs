@@ -263,6 +263,14 @@ export class Runtime {
   }
 
   /**
+   * Proactively checks all computations for idempotency by force-dirtying
+   * and re-executing them, then comparing write snapshots.
+   */
+  runIdempotencyCheck() {
+    return this.scheduler.runIdempotencyCheck();
+  }
+
+  /**
    * Clean up resources and cancel all operations.
    *
    * NOTE: This does not wait for in-flight transactions to settle.

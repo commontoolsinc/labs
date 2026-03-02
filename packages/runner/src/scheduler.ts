@@ -2079,6 +2079,38 @@ export class Scheduler {
   }
 
   /**
+   * Proactively checks all computations for idempotency by force-dirtying them
+   * and comparing write snapshots across two re-execution rounds. Returns the
+   * same DiagnosisResult as runDiagnosis(), but doesn't rely on the pattern
+   * being active — works even after a pattern has settled.
+   */
+  runIdempotencyCheck(): Promise<SchedulerDiagnosisResult> {
+    // If already running, stop and start fresh
+    if (this.diagnosisEnabled) {
+      this.stopDiagnosis();
+    }
+
+    return new Promise<SchedulerDiagnosisResult>((resolve) => {
+      this.diagnosisResolve = resolve;
+      // Use a long timeout — we control when it stops via stopDiagnosis()
+      this.startDiagnosis(60_000);
+
+      // Force two re-execution rounds while diagnosis captures snapshots
+      const forceRound = async () => {
+        for (const action of this.computations) {
+          this.dirty.add(action);
+        }
+        this.queueExecution();
+        await this.idle();
+      };
+
+      forceRound()
+        .then(() => forceRound())
+        .then(() => this.stopDiagnosis());
+    });
+  }
+
+  /**
    * Captures a diagnosis record for a single action run.
    * Called from run() when diagnosisEnabled is true.
    */

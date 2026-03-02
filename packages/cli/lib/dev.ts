@@ -57,6 +57,19 @@ export async function process(
     verboseErrors: options.verboseErrors,
   });
 
+  // Run idempotency check after pattern evaluation
+  if (options.run) {
+    const result = await engine.runIdempotencyCheck();
+    if (result.nonIdempotent.length > 0) {
+      console.warn("Non-idempotent computations detected:");
+      for (const action of result.nonIdempotent) {
+        console.warn(
+          `  - ${action.actionInfo?.patternName ?? action.actionId}`,
+        );
+      }
+    }
+  }
+
   if (options.output) {
     await Deno.writeTextFile(options.output, output.js);
   }
