@@ -17,8 +17,8 @@ import { TAGS } from "./type-tags.ts";
 import {
   bigintFromMinimalTwosComplement,
   bigintToMinimalTwosComplement,
-  fromBase64,
-  toUnpaddedBase64,
+  fromBase64url,
+  toUnpaddedBase64url,
 } from "./bigint-encoding.ts";
 
 /**
@@ -175,7 +175,7 @@ export const BigIntHandler: TypeHandler = {
     _recurse: (v: StorableValue) => SerializedForm,
   ): SerializedForm {
     const bytes = bigintToMinimalTwosComplement(value as bigint);
-    const b64 = toUnpaddedBase64(bytes);
+    const b64 = toUnpaddedBase64url(bytes);
     return context.encode(TAGS.BigInt, b64 as SerializedForm);
   },
 
@@ -193,7 +193,7 @@ export const BigIntHandler: TypeHandler = {
       );
     }
     try {
-      const bytes = fromBase64(state);
+      const bytes = fromBase64url(state);
       return bigintFromMinimalTwosComplement(bytes);
     } catch {
       return makeProblematic(
@@ -227,7 +227,7 @@ export const EpochNsecHandler: TypeHandler = {
   ): SerializedForm {
     const nsec = (value as StorableEpochNsec).value;
     const bytes = bigintToMinimalTwosComplement(nsec);
-    const b64 = toUnpaddedBase64(bytes);
+    const b64 = toUnpaddedBase64url(bytes);
     return context.encode(TAGS.EpochNsec, b64 as SerializedForm);
   },
 
@@ -245,7 +245,7 @@ export const EpochNsecHandler: TypeHandler = {
       );
     }
     try {
-      const bytes = fromBase64(state);
+      const bytes = fromBase64url(state);
       const bigint = bigintFromMinimalTwosComplement(bytes);
       return new StorableEpochNsec(bigint) as unknown as StorableValue;
     } catch {
@@ -280,7 +280,7 @@ export const EpochDaysHandler: TypeHandler = {
   ): SerializedForm {
     const days = (value as StorableEpochDays).value;
     const bytes = bigintToMinimalTwosComplement(days);
-    const b64 = toUnpaddedBase64(bytes);
+    const b64 = toUnpaddedBase64url(bytes);
     return context.encode(TAGS.EpochDays, b64 as SerializedForm);
   },
 
@@ -298,7 +298,7 @@ export const EpochDaysHandler: TypeHandler = {
       );
     }
     try {
-      const bytes = fromBase64(state);
+      const bytes = fromBase64url(state);
       const bigint = bigintFromMinimalTwosComplement(bytes);
       return new StorableEpochDays(bigint) as unknown as StorableValue;
     } catch {

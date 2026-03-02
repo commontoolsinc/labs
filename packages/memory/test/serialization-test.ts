@@ -265,11 +265,11 @@ describe("serialization", () => {
       expect(result).toEqual({ "/BigInt@1": "AA" });
     });
 
-    it("serializes -1n to base64 '/w'", () => {
+    it("serializes -1n to base64url '_w'", () => {
       const { context } = makeTestContext();
       const result = serialize(-1n as StorableValue, context);
-      // -1n -> [0xFF] -> base64 "/w"
-      expect(result).toEqual({ "/BigInt@1": "/w" });
+      // -1n -> [0xFF] -> base64url "_w"
+      expect(result).toEqual({ "/BigInt@1": "_w" });
     });
 
     it("serializes 1n to base64 'AQ'", () => {

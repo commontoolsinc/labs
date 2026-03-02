@@ -3,12 +3,12 @@
  * Extends `SpecialPrimitiveValue` -- treated like a primitive in the storable
  * type system (always frozen, passes through conversion unchanged).
  *
- * Stringification produces `<algorithmTag>:<base64hash>` where `<base64hash>`
- * is the unpadded base64 encoding of the hash bytes. For example:
- * `fid1:abc123...`
+ * Stringification produces `<algorithmTag>:<base64urlHash>` where
+ * `<base64urlHash>` is the unpadded base64url encoding (RFC 4648 section 5)
+ * of the hash bytes. For example: `fid1:abc123...`
  */
 import { SpecialPrimitiveValue } from "./special-primitive-value.ts";
-import { toUnpaddedBase64 } from "./bigint-encoding.ts";
+import { toUnpaddedBase64url } from "./bigint-encoding.ts";
 
 export class StorableContentId extends SpecialPrimitiveValue {
   constructor(
@@ -41,13 +41,13 @@ export class StorableContentId extends SpecialPrimitiveValue {
     return target;
   }
 
-  /** Returns `<algorithmTag>:<base64hash>` (unpadded base64). */
+  /** Returns `<algorithmTag>:<base64urlHash>` (unpadded base64url). */
   override toString(): string {
-    return `${this.algorithmTag}:${toUnpaddedBase64(this.hash)}`;
+    return `${this.algorithmTag}:${toUnpaddedBase64url(this.hash)}`;
   }
 
   /**
-   * JSON representation: `{ '/': '<algorithmTag>:<base64hash>' }`.
+   * JSON representation: `{ '/': '<algorithmTag>:<base64urlHash>' }`.
    * Preserves the `{"/": string}` shape used by `Reference.View.toJSON()`.
    */
   toJSON(): { "/": string } {

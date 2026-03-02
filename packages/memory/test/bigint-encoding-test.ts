@@ -3,8 +3,8 @@ import { expect } from "@std/expect";
 import {
   bigintFromMinimalTwosComplement,
   bigintToMinimalTwosComplement,
-  fromBase64,
-  toUnpaddedBase64,
+  fromBase64url,
+  toUnpaddedBase64url,
 } from "../bigint-encoding.ts";
 
 // ============================================================================
@@ -159,25 +159,25 @@ describe("bigint encoding round-trip", () => {
 });
 
 // ============================================================================
-// toUnpaddedBase64
+// toUnpaddedBase64url
 // ============================================================================
 
-describe("toUnpaddedBase64", () => {
+describe("toUnpaddedBase64url", () => {
   it("encodes empty bytes to empty string", () => {
-    expect(toUnpaddedBase64(new Uint8Array([]))).toBe("");
+    expect(toUnpaddedBase64url(new Uint8Array([]))).toBe("");
   });
 
   it("encodes [0x00] to 'AA'", () => {
-    expect(toUnpaddedBase64(new Uint8Array([0x00]))).toBe("AA");
+    expect(toUnpaddedBase64url(new Uint8Array([0x00]))).toBe("AA");
   });
 
-  it("encodes [0xFF] to '/w'", () => {
-    expect(toUnpaddedBase64(new Uint8Array([0xff]))).toBe("/w");
+  it("encodes [0xFF] to '_w'", () => {
+    expect(toUnpaddedBase64url(new Uint8Array([0xff]))).toBe("_w");
   });
 
   it("encodes 3-byte input (no padding case)", () => {
-    // 3 bytes -> 4 base64 chars (exact, no padding)
-    const b64 = toUnpaddedBase64(new Uint8Array([0x01, 0x02, 0x03]));
+    // 3 bytes -> 4 base64url chars (exact, no padding)
+    const b64 = toUnpaddedBase64url(new Uint8Array([0x01, 0x02, 0x03]));
     expect(b64.length).toBe(4);
     expect(b64).not.toContain("=");
   });
@@ -187,43 +187,43 @@ describe("toUnpaddedBase64", () => {
     for (let len = 1; len <= 5; len++) {
       const bytes = new Uint8Array(len);
       bytes.fill(0x42);
-      const b64 = toUnpaddedBase64(bytes);
+      const b64 = toUnpaddedBase64url(bytes);
       expect(b64).not.toContain("=");
     }
   });
 });
 
 // ============================================================================
-// fromBase64
+// fromBase64url
 // ============================================================================
 
-describe("fromBase64", () => {
+describe("fromBase64url", () => {
   it("decodes empty string to empty bytes", () => {
-    expect(fromBase64("")).toEqual(new Uint8Array([]));
+    expect(fromBase64url("")).toEqual(new Uint8Array([]));
   });
 
   it("decodes 'AA' to [0x00]", () => {
-    expect(fromBase64("AA")).toEqual(new Uint8Array([0x00]));
+    expect(fromBase64url("AA")).toEqual(new Uint8Array([0x00]));
   });
 
-  it("decodes '/w' to [0xFF]", () => {
-    expect(fromBase64("/w")).toEqual(new Uint8Array([0xff]));
+  it("decodes '_w' to [0xFF]", () => {
+    expect(fromBase64url("_w")).toEqual(new Uint8Array([0xff]));
   });
 
   it("rejects padded input ('AA==')", () => {
-    expect(() => fromBase64("AA==")).toThrow("invalid character");
+    expect(() => fromBase64url("AA==")).toThrow("invalid character");
   });
 
-  it("rejects padded input ('/w==')", () => {
-    expect(() => fromBase64("/w==")).toThrow("invalid character");
+  it("rejects padded input ('_w==')", () => {
+    expect(() => fromBase64url("_w==")).toThrow("invalid character");
   });
 });
 
 // ============================================================================
-// Base64 round-trip
+// Base64url round-trip
 // ============================================================================
 
-describe("base64 round-trip", () => {
+describe("base64url round-trip", () => {
   it("round-trips various byte arrays", () => {
     const testArrays = [
       new Uint8Array([]),
@@ -236,25 +236,25 @@ describe("base64 round-trip", () => {
     ];
 
     for (const bytes of testArrays) {
-      const b64 = toUnpaddedBase64(bytes);
-      const decoded = fromBase64(b64);
+      const b64 = toUnpaddedBase64url(bytes);
+      const decoded = fromBase64url(b64);
       expect(decoded).toEqual(bytes);
     }
   });
 });
 
 // ============================================================================
-// Full pipeline: bigint -> bytes -> base64 -> bytes -> bigint
+// Full pipeline: bigint -> bytes -> base64url -> bytes -> bigint
 // ============================================================================
 
-describe("bigint -> base64 -> bigint round-trip", () => {
+describe("bigint -> base64url -> bigint round-trip", () => {
   const values = [0n, 1n, -1n, 42n, -999n, 128n, -128n, 2n ** 64n];
 
   for (const value of values) {
-    it(`round-trips ${value}n through base64`, () => {
+    it(`round-trips ${value}n through base64url`, () => {
       const bytes = bigintToMinimalTwosComplement(value);
-      const b64 = toUnpaddedBase64(bytes);
-      const decodedBytes = fromBase64(b64);
+      const b64 = toUnpaddedBase64url(bytes);
+      const decodedBytes = fromBase64url(b64);
       const result = bigintFromMinimalTwosComplement(decodedBytes);
       expect(result).toBe(value);
     });
