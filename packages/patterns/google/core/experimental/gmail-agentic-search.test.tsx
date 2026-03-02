@@ -130,5 +130,7 @@ export default pattern(() => {
     // Expose subjects for debugging
     searcher,
     customSearcher,
+    // Pattern triggers scheduler errors from auth/filter computations in headless runner
+    allowRuntimeErrors: true,
   };
 });
