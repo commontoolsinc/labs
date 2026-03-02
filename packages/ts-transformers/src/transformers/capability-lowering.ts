@@ -549,11 +549,18 @@ function isOpaqueOriginCall(
   const kind = detectCallKind(expression, context.checker);
   if (!kind) return false;
 
-  if (kind.kind === "builder") {
-    return kind.builderName === "lift" || kind.builderName === "pattern";
+  switch (kind.kind) {
+    case "builder":
+    case "cell-factory":
+    case "cell-for":
+    case "derive":
+    case "wish":
+    case "generate-object":
+    case "pattern-tool":
+      return true;
+    default:
+      return false;
   }
-
-  return false;
 }
 
 function isOpaqueSourceExpression(
@@ -1317,41 +1324,13 @@ export class CapabilityLoweringTransformer extends Transformer {
     {
       // Per-scope info tracked during the pre-scan walk.
       interface ScopeInfo {
-        /** Names from the first parameter (these are opaque/reactive). */
+        /** Names that are opaque/reactive in this pattern scope. */
         opaqueNames: Set<string>;
-        /** Local `const` declarations with purely literal initializers. */
-        literalLocals: Set<string>;
+        /** Symbols that are opaque/reactive. */
+        opaqueSymbols: Set<ts.Symbol>;
       }
 
       const scopeStack: ScopeInfo[] = [];
-
-      /** Recursively check if an expression is a compile-time literal. */
-      const isLiteralExpr = (expr: ts.Expression): boolean => {
-        if (
-          ts.isNumericLiteral(expr) || ts.isStringLiteral(expr) ||
-          ts.isNoSubstitutionTemplateLiteral(expr)
-        ) return true;
-        const k = expr.kind;
-        if (
-          k === ts.SyntaxKind.TrueKeyword ||
-          k === ts.SyntaxKind.FalseKeyword ||
-          k === ts.SyntaxKind.NullKeyword
-        ) return true;
-        if (ts.isObjectLiteralExpression(expr)) {
-          return expr.properties.every((p) =>
-            ts.isPropertyAssignment(p) && isLiteralExpr(p.initializer)
-          );
-        }
-        if (ts.isArrayLiteralExpression(expr)) {
-          return expr.elements.every(
-            (e) => !ts.isSpreadElement(e) && isLiteralExpr(e),
-          );
-        }
-        if (ts.isPrefixUnaryExpression(expr)) {
-          return isLiteralExpr(expr.operand);
-        }
-        return false;
-      };
 
       const collectBindingNames = (
         name: ts.BindingName,
@@ -1372,24 +1351,28 @@ export class CapabilityLoweringTransformer extends Transformer {
         }
       };
 
-      /** Collect `const` declarations with literal-only initializers. */
-      const collectLiteralLocals = (
+      /** Walk the pattern body to propagate opaque bindings. */
+      const collectOpaqueBindings = (
         body: ts.ConciseBody,
-        out: Set<string>,
+        scope: ScopeInfo,
       ): void => {
         if (!ts.isBlock(body)) return;
         for (const stmt of body.statements) {
-          if (
-            ts.isVariableStatement(stmt) &&
-            (stmt.declarationList.flags & ts.NodeFlags.Const)
-          ) {
-            for (const decl of stmt.declarationList.declarations) {
-              if (
-                ts.isIdentifier(decl.name) && decl.initializer &&
-                isLiteralExpr(decl.initializer)
-              ) {
-                out.add(decl.name.text);
-              }
+          if (!ts.isVariableStatement(stmt)) continue;
+          for (const decl of stmt.declarationList.declarations) {
+            if (!decl.initializer) continue;
+            if (
+              ts.isIdentifier(decl.name) &&
+              isOpaqueSourceExpression(
+                decl.initializer,
+                scope.opaqueNames,
+                scope.opaqueSymbols,
+                context,
+              )
+            ) {
+              scope.opaqueNames.add(decl.name.text);
+              const sym = context.checker.getSymbolAtLocation(decl.name);
+              if (sym) scope.opaqueSymbols.add(sym);
             }
           }
         }
@@ -1406,13 +1389,19 @@ export class CapabilityLoweringTransformer extends Transformer {
           const cb = node.arguments[0];
           if (cb && isFunctionLikeExpression(cb)) {
             const opaqueNames = new Set<string>();
+            const opaqueSymbols = new Set<ts.Symbol>();
             const firstParam = cb.parameters[0];
             if (firstParam) {
               collectBindingNames(firstParam.name, opaqueNames);
+              addBindingTargetSymbols(
+                firstParam.name,
+                opaqueSymbols,
+                context.checker,
+              );
             }
-            const literalLocals = new Set<string>();
-            collectLiteralLocals(cb.body, literalLocals);
-            scopeStack.push({ opaqueNames, literalLocals });
+            const scope: ScopeInfo = { opaqueNames, opaqueSymbols };
+            collectOpaqueBindings(cb.body, scope);
+            scopeStack.push(scope);
             pushed = true;
           }
         }
@@ -1429,8 +1418,8 @@ export class CapabilityLoweringTransformer extends Transformer {
           mapPatternCallNodes.add(innerPattern);
 
           // Determine non-reactive captures: a capture is non-reactive
-          // only when it refers to a provably non-reactive local (a const
-          // with a literal initializer) in the enclosing pattern scope.
+          // when its original binding is not opaque/reactive in the
+          // enclosing pattern scope.
           const scope = scopeStack.at(-1);
           if (scope && node.arguments[1]) {
             const capturesArg = node.arguments[1];
@@ -1452,7 +1441,7 @@ export class CapabilityLoweringTransformer extends Transformer {
                 }
                 if (
                   originalName && captureName &&
-                  scope.literalLocals.has(originalName)
+                  !scope.opaqueNames.has(originalName)
                 ) {
                   nonReactive.add(captureName);
                 }
