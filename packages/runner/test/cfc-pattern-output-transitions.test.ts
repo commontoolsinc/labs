@@ -10,7 +10,11 @@ import {
 } from "../src/cfc/debug-counters.ts";
 import { prepareCfcCommitIfNeeded } from "../src/cfc/prepare-shim.ts";
 import { Runtime } from "../src/runtime.ts";
-import type { Labels, URI } from "../src/storage/interface.ts";
+import type {
+  IExtendedStorageTransaction,
+  Labels,
+  URI,
+} from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase(
   "cfc pattern output transition test",
@@ -340,25 +344,17 @@ describe("CFC pattern output transitions", () => {
     await storageManager.close();
   });
 
-  async function seedSourceLabels(id: URI, labels: Labels): Promise<void> {
-    // Runtime labels on /cfc/labels are the concrete provenance source used by CFC checks.
-    const tx = runtime.edit();
+  function seedSourceLabels(
+    tx: IExtendedStorageTransaction,
+    id: URI,
+    labels: Labels,
+  ): void {
     tx.writeOrThrow({
       space,
       id,
       type: "application/json",
       path: ["cfc", "labels"],
     }, { "/": labels });
-    const { error } = await tx.commit();
-    expect(error).toBeUndefined();
-  }
-
-  async function waitForScheduler(): Promise<void> {
-    await runtime.scheduler.idle();
-    await new Promise((resolve) => setTimeout(resolve, 25));
-    await runtime.scheduler.idle();
-    await new Promise((resolve) => setTimeout(resolve, 25));
-    await runtime.scheduler.idle();
   }
 
   async function runCase(testCase: Case): Promise<void> {
@@ -410,15 +406,15 @@ describe("CFC pattern output transitions", () => {
     );
     resultCell.set(testCase.initialResult);
 
+    // Seed source labels in the same tx so transition checks have concrete classified input provenance.
+    seedSourceLabels(tx, sourceCell.getAsNormalizedFullLink().id, {
+      classification: ["secret"],
+    });
+
     // Prepare commit-gate digest, but keep boundary enforcement disabled in this transition-focused suite.
     await prepareCfcCommitIfNeeded(tx, { enforceBoundary: false });
     let committed = await tx.commit();
     expect(committed.error).toBeUndefined();
-
-    // Explicitly seed source labels so transition checks have concrete classified input provenance.
-    await seedSourceLabels(sourceCell.getAsNormalizedFullLink().id, {
-      classification: ["secret"],
-    });
 
     // Valid transition cases should not increment the CFC gate reject counter.
     const gateRejectsBefore = getCfcDebugCounters().cfcGateRejects;
@@ -435,19 +431,13 @@ describe("CFC pattern output transitions", () => {
     committed = await tx.commit();
     expect(committed.error).toBeUndefined();
 
-    await waitForScheduler();
-    let pulled: unknown = undefined;
-    // Full-workspace test runs can delay scheduler flushes, so allow a wider
-    // observation window before declaring the pull unresolved.
-    for (let attempt = 0; attempt < 30; attempt++) {
+    // The pattern includes lift and handler nodes that need multiple scheduler
+    // cycles to propagate.  Pull until the result settles.
+    let pulled: unknown;
+    for (let i = 0; i < 10; i++) {
       pulled = await result.pull();
-      if (pulled !== undefined) {
-        break;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      await runtime.scheduler.idle();
+      if (pulled !== undefined) break;
     }
-    // Each case asserts both functional output shape/value and no unexpected CFC gate rejection.
     expect(pulled).toEqual(testCase.expectedResult);
     expect(getCfcDebugCounters().cfcGateRejects).toBe(gateRejectsBefore);
   }
