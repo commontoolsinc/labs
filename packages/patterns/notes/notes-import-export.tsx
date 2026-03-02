@@ -148,7 +148,9 @@ const NOTE_END_MARKER = "<!-- COMMON_NOTE_END -->";
 const NOTEBOOK_START_MARKER = "<!-- COMMON_NOTEBOOK_START";
 const NOTEBOOK_END_MARKER = "<!-- COMMON_NOTEBOOK_END -->";
 
-// Strip entity IDs from mentions for portable export: [[Name (id)]] -> [[Name]]
+// Strip entity IDs from mentions for portable export
+// Legacy format: [[Name (id)]] -> [[Name]]
+// New format: [[Name]] -> [[Name]] (no change needed)
 function stripMentionIds(content: string): string {
   return content.replace(/\[\[([^\]]*?)\s*\([^)]+\)\]\]/g, "[[$1]]");
 }
@@ -601,47 +603,10 @@ function performImport(
   }
 
   // Phase 3: Resolve mentions
-  const titleToId = new Map<string, string>();
-  for (const { title, index } of createdNotes) {
-    try {
-      const noteCell = allPieces.key(index) as any;
-      const resolved = noteCell.resolveAsCell();
-      const entityId = resolved?.entityId;
-      if (entityId?.["/"] && title) {
-        titleToId.set(title.toLowerCase(), entityId["/"]);
-      }
-    } catch (_e) {
-      // Ignore errors
-    }
-  }
-
-  for (const { originalContent, contentCell } of createdNotes) {
-    try {
-      const content = originalContent ?? "";
-      if (!content) continue;
-
-      const updatedContent = content.replace(
-        /\[\[([^\]]+)\]\]/g,
-        (match: string, name: string) => {
-          if (name.includes("(") && name.endsWith(")")) return match;
-
-          const cleanName = name.trim().replace(/^(📝|📓)\s*/, "")
-            .toLowerCase();
-          const id = titleToId.get(cleanName);
-          if (id) {
-            return `[[${name.trim()} (${id})]]`;
-          }
-          return match;
-        },
-      );
-
-      if (updatedContent !== content) {
-        contentCell.set(updatedContent);
-      }
-    } catch (_e) {
-      // Ignore errors
-    }
-  }
+  // CT-1281: Name-based linking - no longer add IDs to [[Name]] patterns
+  // Editor resolves mentions by name lookup in mentionables list
+  // Legacy [[Name (id)]] format in imported content still works
+  // So we skip ID resolution entirely and keep [[Name]] as-is
 
   onComplete?.();
 }

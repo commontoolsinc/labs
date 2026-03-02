@@ -52,14 +52,14 @@ describe("parseBacklinks", () => {
     expect(bl.nameTo).toBe(13); // end of "My Note"
   });
 
-  it("parses a single incomplete backlink [[text]]", () => {
+  it("parses a single name-only backlink [[Name]] (new format)", () => {
     const doc = "Check [[todo item]] later";
     const result = parseBacklinks(doc);
     expect(result).toHaveLength(1);
 
     const bl = result[0];
     expect(bl.name).toBe("todo item");
-    expect(bl.id).toBe(""); // no ID
+    expect(bl.id).toBe(""); // no ID - name-only format
     expect(bl.from).toBe(6);
     expect(bl.to).toBe(19);
     expect(bl.nameFrom).toBe(8);
@@ -119,7 +119,7 @@ describe("parseBacklinks", () => {
     expect(result).toEqual([]);
   });
 
-  it("handles mixed complete and incomplete backlinks", () => {
+  it("handles mixed legacy [[Name (id)]] and new [[Name]] formats", () => {
     const doc = "[[Done (d1)]] and [[Pending]]";
     const result = parseBacklinks(doc);
     expect(result).toHaveLength(2);
@@ -127,6 +127,34 @@ describe("parseBacklinks", () => {
     expect(result[0].name).toBe("Done");
     expect(result[1].id).toBe("");
     expect(result[1].name).toBe("Pending");
+  });
+
+  it("parses name-only backlinks with various characters", () => {
+    const doc = "[[Project TODO]] and [[Meeting Notes 2026]]";
+    const result = parseBacklinks(doc);
+    expect(result).toHaveLength(2);
+    expect(result[0].name).toBe("Project TODO");
+    expect(result[0].id).toBe("");
+    expect(result[1].name).toBe("Meeting Notes 2026");
+    expect(result[1].id).toBe("");
+  });
+
+  it("treats name-only backlinks as complete (not incomplete)", () => {
+    // CT-1281: Name-only [[Name]] is now the standard format
+    // Both formats are valid, but name-only is the new default
+    const nameOnly = parseBacklinks("[[My Note]]");
+    const withId = parseBacklinks("[[My Note (abc123)]]");
+
+    expect(nameOnly).toHaveLength(1);
+    expect(withId).toHaveLength(1);
+
+    // Both have non-empty names, so both are treated as complete backlinks
+    expect(nameOnly[0].name).toBe("My Note");
+    expect(withId[0].name).toBe("My Note");
+
+    // The only difference is whether id is present
+    expect(nameOnly[0].id).toBe("");
+    expect(withId[0].id).toBe("abc123");
   });
 });
 
@@ -268,12 +296,28 @@ describe("backlinkEditFilter", () => {
     expect(getBacklinks(tr.state)).toHaveLength(0);
   });
 
-  it("allows edits on incomplete backlinks (no ID to protect)", () => {
+  it("allows edits on name-only backlinks (no ID to protect)", () => {
     const state = createState("[[pending]]");
     const tr = state.update({
       changes: { from: 3, to: 3, insert: "X" },
     });
     expect(tr.state.doc.toString()).toBe("[[pXending]]");
+  });
+
+  it("allows editing name portion of both legacy and new format backlinks", () => {
+    // Legacy format with ID
+    const stateLegacy = createState("[[World (w1)]]");
+    const trLegacy = stateLegacy.update({
+      changes: { from: 4, to: 4, insert: "X" },
+    });
+    expect(trLegacy.state.doc.toString()).toBe("[[WoXrld (w1)]]");
+
+    // New name-only format
+    const stateNew = createState("[[World]]");
+    const trNew = stateNew.update({
+      changes: { from: 4, to: 4, insert: "X" },
+    });
+    expect(trNew.state.doc.toString()).toBe("[[WoXrld]]");
   });
 
   it("multi-change transaction: blocks ID edit while allowing other changes", () => {
@@ -296,7 +340,7 @@ describe("backlinkEditFilter", () => {
 // ---------------------------------------------------------------------------
 
 describe("Enter keymap conditions", () => {
-  it("cursor position determines Enter behavior", () => {
+  it("cursor position determines Enter behavior for legacy format", () => {
     // Keymap condition: bl.id && pos >= bl.from && pos < bl.to
     const state = createState("text [[Note (n1)]] more");
     const bl = getBacklinks(state)[0];
@@ -310,6 +354,20 @@ describe("Enter keymap conditions", () => {
     expect(0 >= bl.from && 0 < bl.to).toBe(false);
 
     // bl.to is the dispatch target — the character after ]] in the doc
+    expect(state.doc.sliceString(bl.to, bl.to + 1)).toBe(" ");
+  });
+
+  it("name-only backlinks have empty id field", () => {
+    const state = createState("text [[Note]] more");
+    const bl = getBacklinks(state)[0];
+
+    // Name-only backlink has no ID
+    expect(bl.id).toBe("");
+    expect(bl.name).toBe("Note");
+
+    // Position tracking works the same
+    const insidePos = bl.nameFrom + 1;
+    expect(insidePos >= bl.from && insidePos < bl.to).toBe(true);
     expect(state.doc.sliceString(bl.to, bl.to + 1)).toBe(" ");
   });
 });

@@ -56,16 +56,24 @@ export default pattern<NoteMdInput, NoteMdOutput>(
 
     const hasBacklinks = computed(() => (note?.backlinks?.length ?? 0) > 0);
 
-    // Convert [[Name (id)]] wiki-links to markdown links [Name](/of:id)
-    // ct-markdown will then convert these to clickable ct-cell-link components
+    // Convert wiki-links to markdown links
+    // Legacy format: [[Name (id)]] -> [Name](/of:id)
+    // New format: [[Name]] -> **Name** (bold text, can't navigate from markdown view)
+    // ct-markdown will then convert /of:id links to clickable ct-cell-link components
     // Use content prop if provided, otherwise fall back to note.content
     const processedContent = computed(() => {
       const raw = content?.get?.() ?? note?.content ?? "";
-      // Match [[Name (id)]] pattern and convert to [Name](/of:id)
-      return raw.replace(
+      // First pass: Match [[Name (id)]] pattern and convert to [Name](/of:id)
+      let result = raw.replace(
         /\[\[([^\]]*?)\s*\(([^)]+)\)\]\]/g,
         (_match, name, id) => `[${name.trim()}](/of:${id})`,
       );
+      // Second pass: Match [[Name]] (no id) and convert to bold text
+      result = result.replace(
+        /\[\[([^\]]+)\]\]/g,
+        (_match, name) => `**${name.trim()}**`,
+      );
+      return result;
     });
 
     // Type-based discovery for notes via mentionable list
