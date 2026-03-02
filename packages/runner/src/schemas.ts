@@ -30,7 +30,29 @@ export const rendererVDOMSchema = {
         name: { type: "string" },
         props: {
           type: "object",
-          additionalProperties: { asCell: true },
+          properties: {
+            style: { anyOf: [{ type: "object" }, { type: "string" }] },
+          },
+          additionalProperties: {
+            anyOf: [{
+              type: "string",
+            }, {
+              type: "number",
+            }, {
+              type: "boolean",
+            }, {
+              type: "null",
+            }, {
+              type: "undefined",
+            }, {
+              type: "object",
+              properties: {}, // stop query from descending
+            }, {
+              type: "array",
+              items: { type: "null" }, // stop query from descending
+            }],
+          },
+          asCell: true,
         },
         children: {
           type: "array",
@@ -128,10 +150,6 @@ export const vnodeSchema = {
         type: "number",
       }, {
         type: "boolean",
-        "enum": [false],
-      }, {
-        type: "boolean",
-        "enum": [true],
       }, {
         $ref: "#/$defs/VNode",
       }, {
@@ -156,7 +174,9 @@ export const vnodeSchema = {
     },
     Props: {
       type: "object",
-      properties: {},
+      properties: {
+        style: { anyOf: [{ type: "object" }, { type: "string" }] },
+      },
       additionalProperties: {
         anyOf: [{
           type: "string",
@@ -164,16 +184,12 @@ export const vnodeSchema = {
           type: "number",
         }, {
           type: "boolean",
-          "enum": [false],
-        }, {
-          type: "boolean",
-          "enum": [true],
         }, {
           type: "object",
-          additionalProperties: true,
+          properties: {}, // stop query from descending
         }, {
           type: "array",
-          items: true,
+          items: { type: "null" }, // stop query from descending
         }, {
           asCell: true,
         }, {
