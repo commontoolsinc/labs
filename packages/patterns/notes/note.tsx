@@ -264,7 +264,7 @@ const Note = pattern<NoteInput, NoteOutput>(
     // Append a wiki-link to another piece at the end of the note content
     const appendLink = action(
       ({ piece }: { piece: Writable<MentionablePiece> }) => {
-        const name = (piece.get() as any)[NAME] ?? "";
+        const name = piece.get()[NAME] ?? "";
         const resolved = (piece as any).resolveAsCell();
         const entityId = resolved?.entityId?.["/"];
         if (!name || !entityId) return;
@@ -306,7 +306,7 @@ const Note = pattern<NoteInput, NoteOutput>(
     const hasParentNotebook = computed(() => !!parentNotebook.get());
     const parentNotebookLabel = computed(() => {
       const p = parentNotebook.get();
-      return (p as any)?.[NAME] ?? p?.title ?? "Notebook";
+      return p?.[NAME] ?? p?.title ?? "Notebook";
     });
 
     // Menu display states
@@ -485,7 +485,7 @@ const Note = pattern<NoteInput, NoteOutput>(
                     style={{ justifyContent: "flex-start" }}
                   >
                     {"  "}
-                    {(notebook as any)?.[NAME] ?? "Untitled"}
+                    {notebook?.[NAME] ?? "Untitled"}
                     {computed(() => {
                       return containingNotebooks
                           .find((nb) => equals(nb, notebook))
@@ -524,7 +524,7 @@ const Note = pattern<NoteInput, NoteOutput>(
           <ct-hstack slot="footer">
             {backlinks?.map((piece) => (
               <ct-button onClick={handleBacklinkClick({ piece })}>
-                {(piece as any)?.[NAME]}
+                {piece?.[NAME]}
               </ct-button>
             ))}
           </ct-hstack>

@@ -246,7 +246,7 @@ export default pattern(() => {
   // ==========================================================================
 
   const assert_name = computed(
-    () => (md as any)[NAME] === "📖 Test Note",
+    () => md[NAME] === "📖 Test Note",
   );
 
   // ==========================================================================
@@ -373,7 +373,7 @@ export default pattern(() => {
   // ==========================================================================
 
   const assert_source_name = computed(
-    () => (mdWithSource as any)[NAME] === "📖 Source Note",
+    () => mdWithSource[NAME] === "📖 Source Note",
   );
 
   const assert_source_content = computed(

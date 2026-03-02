@@ -521,7 +521,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
     const summary = computed(() => {
       const notesList = notes.get() ?? [];
       return notesList
-        .map((note: any) => note?.summary ?? note?.[NAME] ?? "")
+        .map((note: NotePiece) => note?.summary ?? note?.[NAME] ?? "")
         .filter((s: string) => s.length > 0)
         .join(" | ");
     });
@@ -589,7 +589,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
     const goToAllNotesAction = action(() => {
       const pieces = allPieces.get();
       const existing = pieces.find((piece) => {
-        const name = (piece as any)?.[NAME];
+        const name = piece?.[NAME];
         return typeof name === "string" && name.startsWith("All Notes");
       });
       if (existing) {
@@ -877,7 +877,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
     // ct-select has proper bidirectional DOM sync, unlike native <select>
     const notebookSelectItems = computed(() => [
       ...notebooks.map((nb, idx: number) => ({
-        label: (nb as any)?.[NAME] ?? "Untitled",
+        label: nb?.[NAME] ?? "Untitled",
         value: String(idx),
       })),
       { label: "────────────", value: "_divider", disabled: true },
@@ -890,7 +890,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
     const hasParentNotebook = computed(() => !!parentNotebook.get());
     const parentNotebookLabel = computed(() => {
       const p = parentNotebook.get();
-      return (p as any)?.[NAME] ?? p?.title ?? "Parent";
+      return p?.[NAME] ?? p?.title ?? "Parent";
     });
 
     // Title editing display states
@@ -920,7 +920,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
     const allNotesButtonDisplay = computed(() => {
       const pieces = allPieces.get();
       const exists = pieces.some((piece) => {
-        const name = (piece as any)?.[NAME];
+        const name = piece?.[NAME];
         return typeof name === "string" && name.startsWith("All Notes");
       });
       return exists ? "flex" : "none";
@@ -1193,7 +1193,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                                   >
                                     <ct-cell-context $cell={note}>
                                       <ct-chip
-                                        label={(note as any)?.[NAME] ??
+                                        label={note?.[NAME] ??
                                           note?.title ??
                                           "Untitled"}
                                         interactive
@@ -1468,7 +1468,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                 onClick={handleBacklinkClick({ piece })}
                 style={{ fontSize: "12px" }}
               >
-                {(piece as any)?.[NAME]}
+                {piece?.[NAME]}
               </ct-button>
             ))}
           </ct-hstack>

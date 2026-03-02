@@ -361,7 +361,7 @@ export default pattern(() => {
   // ==========================================================================
 
   const assert_name_format = computed(() => {
-    const name = (notebook as any)[NAME];
+    const name = notebook[NAME];
     return typeof name === "string" &&
       name.includes("📓") &&
       name.includes(notebook.title) &&

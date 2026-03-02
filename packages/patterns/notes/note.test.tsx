@@ -127,7 +127,7 @@ export default pattern(() => {
   // ==========================================================================
 
   const assert_name = computed(
-    () => (note as any)[NAME] === "📝 Test Note",
+    () => note[NAME] === "📝 Test Note",
   );
   const assert_initial_title = computed(() => note.title === "Test Note");
   const assert_initial_content = computed(

@@ -103,24 +103,30 @@ function resolveBooleanValue(value: unknown, parentObj?: unknown): boolean {
 }
 
 // Helper to get piece name (handles both local and wish({ query: "#default" }) pieces)
-function _getPieceName(piece: unknown): string {
-  const symbolName = (piece as any)?.[NAME];
+function _getPieceName(
+  piece: Partial<MinimalPiece> & { title?: string },
+): string {
+  const symbolName = piece?.[NAME];
   if (typeof symbolName === "string") return symbolName;
-  const titleProp = (piece as any)?.title;
+  const titleProp = piece?.title;
   if (typeof titleProp === "string") return titleProp;
   return "";
 }
 
 // Helper to check if a piece is a notebook
-function isNotebookPiece(piece: unknown): boolean {
-  const name = (piece as any)?.[NAME];
+function isNotebookPiece(
+  piece: Partial<MinimalPiece> & { isNotebook?: boolean },
+): boolean {
+  const name = piece?.[NAME];
   if (typeof name === "string" && name.startsWith("📓")) return true;
-  return (piece as any)?.isNotebook === true;
+  return piece?.isNotebook === true;
 }
 
 // Helper to get clean notebook title (strip emoji and count)
-function getCleanNotebookTitle(notebook: unknown): string {
-  const rawName = (notebook as any)?.[NAME] ?? (notebook as any)?.title ?? "";
+function getCleanNotebookTitle(
+  notebook: Partial<MinimalPiece> & { title?: string },
+): string {
+  const rawName = notebook?.[NAME] ?? notebook?.title ?? "";
   return rawName.replace(/^📓\s*/, "").replace(/\s*\(\d+\)$/, "");
 }
 
@@ -188,7 +194,7 @@ function getNotebookContents(
 function generateExport(
   pieces: NotePiece[],
   notebooks: NotebookPiece[],
-  allPiecesRaw?: unknown[],
+  allPiecesRaw?: Partial<MinimalPiece & { isHidden?: boolean }>[],
 ): { markdown: string; count: number; notebookCount: number } {
   // Filter to only note pieces
   const notes = pieces.filter(
@@ -233,9 +239,9 @@ function generateExport(
 
     let isHidden = false;
     if (allPiecesRaw) {
-      const notebookName = (notebook as any)?.[NAME];
+      const notebookName = notebook?.[NAME];
       for (const piece of allPiecesRaw) {
-        if ((piece as any)?.[NAME] === notebookName) {
+        if (piece?.[NAME] === notebookName) {
           isHidden = resolveBooleanValue((piece as any)?.isHidden, piece);
           break;
         }
@@ -1074,8 +1080,11 @@ const NotesImportExport = pattern<Input, Output>(
 
     // Computed items for ct-select dropdowns
     const notebookAddItems = computed(() => [
-      ...resolveRawNotebooks(allPieces).map((nb: any, idx: number) => ({
-        label: (nb as any)?.[NAME] ?? nb?.title ?? "Untitled",
+      ...resolveRawNotebooks(allPieces).map((
+        nb: NotebookPiece,
+        idx: number,
+      ) => ({
+        label: nb?.[NAME] ?? nb?.title ?? "Untitled",
         value: String(idx),
       })),
       { label: "────────────", value: "_divider", disabled: true },
@@ -1083,8 +1092,11 @@ const NotesImportExport = pattern<Input, Output>(
     ]);
 
     const notebookMoveItems = computed(() => [
-      ...resolveRawNotebooks(allPieces).map((nb: any, idx: number) => ({
-        label: (nb as any)?.[NAME] ?? nb?.title ?? "Untitled",
+      ...resolveRawNotebooks(allPieces).map((
+        nb: NotebookPiece,
+        idx: number,
+      ) => ({
+        label: nb?.[NAME] ?? nb?.title ?? "Untitled",
         value: String(idx),
       })),
       { label: "────────────", value: "_divider", disabled: true },
@@ -1165,7 +1177,7 @@ const NotesImportExport = pattern<Input, Output>(
       const notesList = notes;
       const allPiecesList = allPieces?.get();
 
-      notesList.forEach((note: any) => {
+      notesList.forEach((note: NotePiece) => {
         if (!allPiecesList) return;
         const allPiecesIdx = allPiecesList.findIndex((p: any) =>
           equals(p, note)
@@ -1187,12 +1199,12 @@ const NotesImportExport = pattern<Input, Output>(
       const allPiecesList = allPieces?.get();
 
       notebooksList.forEach((nb: any) => {
-        const nbName = (nb as any)?.[NAME];
+        const nbName = nb?.[NAME];
         if (!nbName) return;
         if (!allPiecesList) return;
 
         const allPiecesIdx = allPiecesList.findIndex((p: any) =>
-          (p as any)?.[NAME] === nbName
+          p?.[NAME] === nbName
         );
         if (allPiecesIdx >= 0) {
           allPieces?.key(allPiecesIdx).key("isHidden").set(newHiddenState);
@@ -1244,12 +1256,10 @@ const NotesImportExport = pattern<Input, Output>(
       const allPiecesList = allPieces.get();
 
       notebooksList.forEach((nb: any) => {
-        const nbName = (nb as any)?.[NAME];
+        const nbName = nb?.[NAME];
         if (!nbName) return;
 
-        const nbIdx = allPiecesList.findIndex((p: any) =>
-          (p as any)?.[NAME] === nbName
-        );
+        const nbIdx = allPiecesList.findIndex((p: any) => p?.[NAME] === nbName);
         if (nbIdx < 0) return;
 
         const nbNotesCell = allPieces.key(nbIdx).key("notes");
@@ -1293,7 +1303,9 @@ const NotesImportExport = pattern<Input, Output>(
       for (const idx of selected) {
         const original = notebooks[idx];
         if (original) {
-          const newNotes = ((original as any).notes ?? []).map((note: any) =>
+          const newNotes = ((original as any).notes ?? []).map((
+            note: NotePiece,
+          ) =>
             Note({
               title: note.title ?? "Note",
               content: note.content ?? "",
@@ -1338,11 +1350,11 @@ const NotesImportExport = pattern<Input, Output>(
 
         // Find the notebook in allPieces
         const targetNotebook = notebooksList[nbIndex];
-        const targetNbName = (targetNotebook as any)?.[NAME];
+        const targetNbName = targetNotebook?.[NAME];
         if (!targetNbName) return;
 
         const targetNbIdx = allPiecesList.findIndex((p: any) =>
-          (p as any)?.[NAME] === targetNbName
+          p?.[NAME] === targetNbName
         );
         if (targetNbIdx < 0) return;
 
@@ -1389,11 +1401,11 @@ const NotesImportExport = pattern<Input, Output>(
 
         // Find target notebook in allPieces
         const targetNotebook = notebooksList[nbIndex];
-        const targetNbName = (targetNotebook as any)?.[NAME];
+        const targetNbName = targetNotebook?.[NAME];
         if (!targetNbName) return;
 
         const targetNbIdx = allPiecesList.findIndex((p: any) =>
-          (p as any)?.[NAME] === targetNbName
+          p?.[NAME] === targetNbName
         );
         if (targetNbIdx < 0) return;
 
@@ -1419,14 +1431,14 @@ const NotesImportExport = pattern<Input, Output>(
         };
 
         // Remove from all notebooks except target
-        notebooksList.forEach((nb: any, localIdx: number) => {
+        notebooksList.forEach((nb: NotebookPiece, localIdx: number) => {
           if (localIdx === nbIndex) return; // Skip target notebook
 
-          const nbName = (nb as any)?.[NAME];
+          const nbName = nb?.[NAME];
           if (!nbName) return;
 
           const nbIdx = allPiecesList.findIndex((p: any) =>
-            (p as any)?.[NAME] === nbName
+            p?.[NAME] === nbName
           );
           if (nbIdx < 0) return;
 
@@ -1613,11 +1625,11 @@ const NotesImportExport = pattern<Input, Output>(
       if (actionType === "move") {
         const notebooksList = notebooks;
         notebooksList.forEach((nb: any) => {
-          const nbName = (nb as any)?.[NAME];
+          const nbName = nb?.[NAME];
           if (!nbName) return;
 
           const nbIdx = allPiecesList.findIndex((p: any) =>
-            (p as any)?.[NAME] === nbName
+            p?.[NAME] === nbName
           );
           if (nbIdx < 0) return;
 

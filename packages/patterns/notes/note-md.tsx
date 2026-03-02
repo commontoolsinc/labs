@@ -155,7 +155,7 @@ export default pattern<NoteMdInput, NoteMdOutput>(
             <ct-hstack gap="2" wrap>
               {note?.backlinks?.map((piece) => (
                 <ct-chip
-                  label={(piece as any)?.[NAME] ?? "Untitled"}
+                  label={piece?.[NAME] ?? "Untitled"}
                   interactive
                   onct-click={handleBacklinkClick({ piece })}
                 />
