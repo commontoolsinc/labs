@@ -3,7 +3,7 @@ import { LRUCache } from "@commontools/utils/cache";
 import { canonicalHash } from "./canonical-hash.ts";
 import { sha256 } from "./hash-impl.ts";
 import { StorableContentId } from "./storable-content-id.ts";
-import { fromBase64 } from "./bigint-encoding.ts";
+import { fromBase64url } from "./bigint-encoding.ts";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -81,7 +81,7 @@ let canonicalHashingEnabled = false;
 
 /**
  * Parse a `StorableContentId` from its string representation
- * (`<algorithmTag>:<base64hash>`).
+ * (`<algorithmTag>:<base64urlHash>`).
  */
 function contentIdFromString(source: string): StorableContentId {
   const colonIndex = source.indexOf(":");
@@ -89,8 +89,8 @@ function contentIdFromString(source: string): StorableContentId {
     throw new ReferenceError(`Invalid content ID string: ${source}`);
   }
   const algorithmTag = source.substring(0, colonIndex);
-  const hashBase64 = source.substring(colonIndex + 1);
-  return new StorableContentId(fromBase64(hashBase64), algorithmTag);
+  const hashBase64url = source.substring(colonIndex + 1);
+  return new StorableContentId(fromBase64url(hashBase64url), algorithmTag);
 }
 
 /**

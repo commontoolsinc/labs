@@ -1,5 +1,5 @@
 /**
- * Shared BigInt two's-complement big-endian encoding, and base64 helpers for
+ * Shared BigInt two's-complement big-endian encoding, and base64url helpers for
  * the JSON wire format. Used by both `canonical-hash.ts` (byte-level hashing)
  * and `type-handlers.ts` (JSON serialization).
  *
@@ -160,17 +160,18 @@ export function bigintFromMinimalTwosComplement(bytes: Uint8Array): bigint {
 }
 
 // ---------------------------------------------------------------------------
-// Unpadded base64 encoding/decoding
+// Unpadded base64url encoding/decoding (RFC 4648 section 5)
 // ---------------------------------------------------------------------------
 
-/** Standard base64 alphabet. */
+/** Base64url alphabet (RFC 4648 section 5): `+` -> `-`, `/` -> `_`. */
 const B64_CHARS =
-  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
 /**
- * Encode a `Uint8Array` to an unpadded base64 string (no trailing `=`).
+ * Encode a `Uint8Array` to an unpadded base64url string (no trailing `=`).
+ * Uses the base64url alphabet (RFC 4648 section 5).
  */
-export function toUnpaddedBase64(bytes: Uint8Array): string {
+export function toUnpaddedBase64url(bytes: Uint8Array): string {
   let result = "";
   const len = bytes.length;
   let i = 0;
@@ -209,10 +210,11 @@ for (let i = 0; i < B64_CHARS.length; i++) {
 }
 
 /**
- * Decode an unpadded base64 string to `Uint8Array`. Rejects padded input
- * (trailing `=` characters are invalid per the spec's base64 convention).
+ * Decode an unpadded base64url string to `Uint8Array`. Rejects padded input
+ * (trailing `=` characters are invalid per the spec's base64url convention).
+ * Uses the base64url alphabet (RFC 4648 section 5).
  */
-export function fromBase64(encoded: string): Uint8Array {
+export function fromBase64url(encoded: string): Uint8Array {
   // Compute output byte count from the number of base64 characters.
   const s = encoded;
   const outLen = (s.length * 3) >>> 2;
@@ -226,7 +228,7 @@ export function fromBase64(encoded: string): Uint8Array {
     const code = s.charCodeAt(i);
     const val = B64_DECODE[code];
     if (code >= 128 || val === 0xff) {
-      throw new Error(`fromBase64: invalid character at index ${i}`);
+      throw new Error(`fromBase64url: invalid character at index ${i}`);
     }
     bitBuf = (bitBuf << 6) | val;
     bitCount += 6;
