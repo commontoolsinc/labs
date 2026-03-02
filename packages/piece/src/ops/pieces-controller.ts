@@ -13,6 +13,7 @@ import { compileProgram } from "./utils.ts";
 import { createSession, Identity } from "@commontools/identity";
 import { HttpProgramResolver } from "@commontools/js-compiler";
 import { ACLManager } from "./acl-manager.ts";
+import { homeSchema } from "@commontools/home-schemas";
 
 export interface CreatePieceOptions {
   input?: object;
@@ -140,6 +141,24 @@ export class PiecesController<T = unknown> {
   }
 
   /**
+   * Read the default app URL from the home space's configuration.
+   * Returns empty string if not configured or if home space is not accessible.
+   */
+  private async getDefaultAppUrlFromHome(): Promise<string> {
+    try {
+      const homeSpaceCell = this.#manager.runtime.getHomeSpaceCell();
+      await homeSpaceCell.sync();
+
+      const url = homeSpaceCell.key("defaultPattern")
+        .asSchema(homeSchema).key("defaultAppUrl").get();
+      return typeof url === "string" ? url.trim() : "";
+    } catch (error) {
+      console.warn("Failed to read defaultAppUrl from home space:", error);
+      return "";
+    }
+  }
+
+  /**
    * Recreates the default pattern from scratch.
    * Stops and unlinks the existing default pattern, then creates a new one.
    * This is useful for resetting the space's default pattern state.
@@ -164,17 +183,22 @@ export class PiecesController<T = unknown> {
     const isHomeSpace =
       this.#manager.getSpace() === this.#manager.runtime.userIdentityDID;
 
-    const patternConfig = isHomeSpace
-      ? {
+    let patternConfig: { name: string; urlPath: string; cause: string };
+
+    if (isHomeSpace) {
+      patternConfig = {
         name: "Home",
         urlPath: "/api/patterns/system/home.tsx",
-        cause: `home-pattern-${Date.now()}`, // Unique cause to create new cell
-      }
-      : {
-        name: "DefaultPieceList",
-        urlPath: "/api/patterns/system/default-app.tsx",
-        cause: `space-root-${Date.now()}`, // Unique cause to create new cell
+        cause: `home-pattern-${Date.now()}`,
       };
+    } else {
+      const customUrl = await this.getDefaultAppUrlFromHome();
+      patternConfig = {
+        name: "DefaultPieceList",
+        urlPath: customUrl || "/api/patterns/system/default-app.tsx",
+        cause: `space-root-${Date.now()}`,
+      };
+    }
 
     const patternUrl = new URL(
       patternConfig.urlPath,
@@ -249,17 +273,22 @@ export class PiecesController<T = unknown> {
     const isHomeSpace =
       this.#manager.getSpace() === this.#manager.runtime.userIdentityDID;
 
-    const patternConfig = isHomeSpace
-      ? {
+    let patternConfig: { name: string; urlPath: string; cause: string };
+
+    if (isHomeSpace) {
+      patternConfig = {
         name: "Home",
         urlPath: "/api/patterns/system/home.tsx",
         cause: "home-pattern",
-      }
-      : {
+      };
+    } else {
+      const customUrl = await this.getDefaultAppUrlFromHome();
+      patternConfig = {
         name: "DefaultPieceList",
-        urlPath: "/api/patterns/system/default-app.tsx",
+        urlPath: customUrl || "/api/patterns/system/default-app.tsx",
         cause: "space-root",
       };
+    }
 
     const patternUrl = new URL(
       patternConfig.urlPath,

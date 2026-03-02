@@ -18,7 +18,8 @@ The home space provides a persistent, user-owned storage location for:
 
 - **Favorites** - A singleton list of favorited pieces that works across all
   spaces
-- Future user-level preferences and settings
+- **Spaces** - A managed list of spaces the user has created or bookmarked
+- **Settings** - User-level preferences including `defaultAppUrl`
 
 ## Favorites
 
@@ -59,6 +60,24 @@ await removeFavorite(runtime, piece);
 const isFav = isFavorite(runtime, piece);
 const favoritesCell = getHomeFavorites(runtime);
 ```
+
+## Spaces
+
+The home space maintains a managed list of spaces in
+`defaultPattern.spaces`. Each entry has a `name` (required) and optional `did`.
+Users add spaces via the Spaces tab in the home pattern. Clicking a space link
+navigates to it (creating it if it doesn't exist yet).
+
+## Default App URL
+
+The `defaultPattern.defaultAppUrl` setting controls which pattern is used as the
+default app when creating new spaces. When `PiecesController.ensureDefaultPattern()`
+runs for a non-home space, it reads this value from the home space. If set, the
+custom URL is used; otherwise it falls back to
+`/api/patterns/system/default-app.tsx`.
+
+This enables users to maintain personal forks of the default app pattern (e.g.,
+`default-app-ben.tsx`) with different features or configurations.
 
 ## Implementation Details
 

@@ -41,6 +41,11 @@ type JournalEntry = {
   space?: string;
 };
 
+type SpaceEntry = {
+  name: string;
+  did?: string;
+};
+
 type ProfileExtraction = {
   facts: Array<{ content: string; confidence: number }>;
   preferences: Array<{ key: string; value: string; confidence: number }>;
@@ -193,6 +198,29 @@ const addJournalEntry = handler<
   journal.push(entry);
 });
 
+// Handler to add a space to the managed list
+const addSpaceHandler = handler<
+  { detail: { message: string } },
+  { spaces: Writable<SpaceEntry[]> }
+>(({ detail }, { spaces }) => {
+  const name = detail?.message?.trim();
+  if (!name) return;
+  const current = spaces.get();
+  if (!current.some((s) => s.name === name)) {
+    spaces.push({ name });
+  }
+});
+
+// Handler to remove a space from the managed list
+const removeSpaceHandler = handler<
+  Record<string, never>,
+  { name: string; spaces: Writable<SpaceEntry[]> }
+>((_, { name, spaces }) => {
+  const current = spaces.get();
+  const filtered = current.filter((s) => s.name !== name);
+  spaces.set(filtered);
+});
+
 // Handler to submit an answer to a question (reads question from learned state)
 // Uses ct-message-input event format: { detail: { message: string } }
 const submitAnswerHandler = handler<
@@ -243,28 +271,13 @@ export default pattern((_) => {
   const favorites = Writable.of<Favorite[]>([]).for("favorites");
   const journal = Writable.of<JournalEntry[]>([]).for("journal");
   const learned = Writable.of<LearnedSection>(EMPTY_LEARNED).for("learned");
+  const spaces = Writable.of<SpaceEntry[]>([]).for("spaces");
+  const defaultAppUrl = Writable.of("").for("defaultAppUrl");
 
   // Child components use wish() to access favorites/journal through defaultPattern
   const favoritesComponent = FavoritesManager({});
   const journalComponent = Journal({});
   const activeTab = Writable.of("journal").for("activeTab");
-
-  // Compute unique spaces from favorites
-  const uniqueSpaces = computed(() => {
-    const spaceMap = new Map<
-      string,
-      { spaceDid: string; spaceName?: string }
-    >();
-    for (const fav of favorites.get()) {
-      // Cross-space cell references may be null before sync completes
-      if (!fav) continue;
-      const did = fav.spaceDid;
-      if (did && !spaceMap.has(did)) {
-        spaceMap.set(did, { spaceDid: did, spaceName: fav.spaceName });
-      }
-    }
-    return Array.from(spaceMap.values());
-  });
 
   // === REACTIVE NARRATIVE ENRICHMENT ===
   // LLM Error Handling: generateText/generateObject return { pending, result, error }.
@@ -989,19 +1002,64 @@ IMPORTANT:
             </ct-vstack>
           </ct-tab-panel>
           <ct-tab-panel value="spaces">
-            <ct-vstack gap="2">
-              {uniqueSpaces.map((space) => (
-                <ct-space-link
-                  spaceName={space.spaceName}
-                  spaceDid={space.spaceDid}
+            <ct-vstack gap="4" style={{ padding: "1rem" }}>
+              <h2 style={{ margin: 0, fontSize: "16px" }}>My Spaces</h2>
+
+              <ct-vstack gap="2">
+                {spaces.map((space) => (
+                  <ct-hstack gap="2" align="center">
+                    <div style={{ flex: "1" }}>
+                      <ct-space-link
+                        spaceName={space.name}
+                        spaceDid={space.did}
+                      />
+                    </div>
+                    <ct-button
+                      size="sm"
+                      variant="ghost"
+                      onClick={removeSpaceHandler({ name: space.name, spaces })}
+                    >
+                      ✕
+                    </ct-button>
+                  </ct-hstack>
+                ))}
+                {computed(() => spaces.get().length === 0) && (
+                  <p style={{ color: "#888", fontStyle: "italic", textAlign: "center" }}>
+                    No spaces yet. Add one below.
+                  </p>
+                )}
+              </ct-vstack>
+
+              <hr style={{ border: "none", borderTop: "1px solid #e5e5e7" }} />
+
+              <ct-vstack gap="1">
+                <h3 style={{ margin: 0, fontSize: "14px" }}>Add or Create Space</h3>
+                <ct-message-input
+                  placeholder="Space name..."
+                  appearance="rounded"
+                  onct-send={addSpaceHandler({ spaces })}
                 />
-              ))}
-              {uniqueSpaces.length === 0 && (
-                <p style="color: var(--ct-color-text-secondary); text-align: center; padding: 1rem;">
-                  No spaces yet. Favorite pieces from different spaces to see
-                  them here.
-                </p>
-              )}
+                <span style={{ fontSize: "11px", color: "#888" }}>
+                  Type a name and press enter. Click the link to navigate.
+                </span>
+              </ct-vstack>
+
+              <hr style={{ border: "none", borderTop: "1px solid #e5e5e7", margin: "8px 0" }} />
+
+              <ct-vstack gap="1">
+                <h3 style={{ margin: 0, fontSize: "14px" }}>Settings</h3>
+                <label style={{ fontSize: "13px", color: "#666" }}>
+                  Default App Pattern URL
+                </label>
+                <ct-input
+                  $value={defaultAppUrl}
+                  placeholder="/api/patterns/system/default-app.tsx"
+                  style={{ width: "100%", fontFamily: "monospace", fontSize: "12px" }}
+                />
+                <span style={{ fontSize: "11px", color: "#888" }}>
+                  Pattern URL for new spaces. Leave empty for system default.
+                </span>
+              </ct-vstack>
             </ct-vstack>
           </ct-tab-panel>
         </ct-tabs>
@@ -1012,6 +1070,8 @@ IMPORTANT:
     favorites,
     journal,
     learned,
+    spaces,
+    defaultAppUrl,
 
     // Exported handlers (bound to state cells for external callers)
     addFavorite: addFavorite({ favorites, journal }),
