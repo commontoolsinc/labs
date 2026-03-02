@@ -2,11 +2,11 @@
 /**
  * .claude/scripts/pre-commit.ts
  *
- * Claude Code Pre-Tool hook.
- * - Intercepts `git commit` commands.
- * - Runs `deno fmt` and `deno lint`.
- * - Exits 2 to block the commit if checks fail.
- * - Tests are skipped (CI will run them).
+ * Claude Code Pre-Tool hook for git commit commands.
+ * - Runs `deno fmt` on staged files, then re-stages them.
+ * - Runs `deno lint`.
+ * - Runs `deno check` on staged .ts/.tsx files only.
+ * - Exits 2 to block the commit if any check fails.
  */
 
 import { guardProjectDir } from "./common/guard.ts";
@@ -19,7 +19,6 @@ try {
   const payload = JSON.parse(rawInput);
   cmd = payload?.tool_input?.command ?? "";
 } catch {
-  // If the JSON is malformed we allow the call rather than choke the hook.
   Deno.exit(0);
 }
 
@@ -33,40 +32,74 @@ if (/--no-verify/.test(cmd)) {
   Deno.exit(0);
 }
 
-// Skip if this is an amend with no changes (e.g., just editing message)
-if (/--amend\s+--no-edit/.test(cmd) || /--amend\s+-C/.test(cmd)) {
+// Get staged files (excluding deleted files)
+const gitDiff = await new Deno.Command("git", {
+  args: ["diff", "--cached", "--name-only", "--diff-filter=d"],
+  stdout: "piped",
+  stderr: "piped",
+}).output();
+
+const allStagedFiles = new TextDecoder()
+  .decode(gitDiff.stdout)
+  .trim()
+  .split("\n")
+  .filter((f) => f.length > 0);
+
+if (allStagedFiles.length === 0) {
   Deno.exit(0);
 }
 
-console.error("Running pre-commit checks (fmt, lint)...");
+const errors: string[] = [];
 
-// Auto-fix formatting first (fast)
+// 1. Auto-fix formatting
+console.error("Running pre-commit checks (fmt, lint, check)...");
+
 const fmtResult = await new Deno.Command("deno", {
   args: ["fmt"],
   stdout: "piped",
   stderr: "piped",
 }).output();
 
-// Run lint
+if (!fmtResult.success) {
+  errors.push("Formatting failed (syntax error?):");
+  errors.push(new TextDecoder().decode(fmtResult.stderr));
+} else {
+  // Re-stage files that fmt may have modified
+  await new Deno.Command("git", {
+    args: ["add", ...allStagedFiles],
+    stdout: "piped",
+    stderr: "piped",
+  }).output();
+}
+
+// 2. Lint
 const lintResult = await new Deno.Command("deno", {
   args: ["lint"],
   stdout: "piped",
   stderr: "piped",
 }).output();
 
-const errors: string[] = [];
-
-if (!fmtResult.success) {
-  errors.push("Formatting failed (syntax error?):");
-  errors.push(new TextDecoder().decode(fmtResult.stderr));
-}
-
 if (!lintResult.success) {
   const lintStderr = new TextDecoder().decode(lintResult.stderr);
-  // "No target files found" is not a real lint error — just means no .ts/.tsx files exist
   if (!lintStderr.includes("No target files found")) {
     errors.push("Lint errors found:");
     errors.push(new TextDecoder().decode(lintResult.stdout));
+  }
+}
+
+// 3. Type-check staged .ts/.tsx files only
+const tsFiles = allStagedFiles.filter((f) => /\.(ts|tsx)$/.test(f));
+
+if (tsFiles.length > 0) {
+  const checkResult = await new Deno.Command("deno", {
+    args: ["check", ...tsFiles],
+    stdout: "piped",
+    stderr: "piped",
+  }).output();
+
+  if (!checkResult.success) {
+    errors.push("Type check failed:");
+    errors.push(new TextDecoder().decode(checkResult.stderr));
   }
 }
 
