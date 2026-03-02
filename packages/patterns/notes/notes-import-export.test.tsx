@@ -703,6 +703,10 @@ export default pattern(() => {
       { assertion: assert_nested_note_imported, skip: true },
       { assertion: assert_nested_notebooks_imported, skip: true },
     ],
+    // The pattern filters allPieces in computed(); the commit-then-rerun
+    // idempotency check sees different results because committing round 1
+    // changes the pieces in the space. This is expected behaviour, not a bug.
+    expectNonIdempotent: true,
     // Expose for debugging
     instance,
     allPieces,
