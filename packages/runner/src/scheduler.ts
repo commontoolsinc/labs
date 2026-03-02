@@ -2197,8 +2197,9 @@ export class Scheduler {
     const readValues = new Map<string, unknown>();
     for (const read of log.reads) {
       const key = makeKey(read);
+      let readerTx: IExtendedStorageTransaction | undefined;
       try {
-        const readerTx = this.runtime.edit();
+        readerTx = this.runtime.edit();
         const result = readerTx.tx.read(
           {
             space: read.space,
@@ -2209,9 +2210,10 @@ export class Scheduler {
           { meta: ignoreReadForScheduling },
         );
         readValues.set(key, result.ok?.value);
-        readerTx.abort();
       } catch {
         readValues.set(key, "[read-error]");
+      } finally {
+        readerTx?.abort();
       }
     }
 
@@ -2970,7 +2972,11 @@ export class Scheduler {
     // Non-settling heuristic: accumulate busy time at end of execute()
     {
       const endNow = performance.now();
-      tracker.busyTime += endNow - tracker.lastExecuteStart;
+      const elapsed = endNow - tracker.lastExecuteStart;
+      tracker.busyTime += elapsed;
+      if (this.diagnosisEnabled) {
+        this.diagnosisBusyTime += elapsed;
+      }
       tracker.isExecuting = false;
 
       const windowDuration = endNow - tracker.windowStart;
