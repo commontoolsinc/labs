@@ -62,8 +62,10 @@ export const backlinkField = StateField.define<BacklinkInfo[]>({
 });
 
 /**
- * Create atomic ranges that make cursor skip over [[ and (id)]] portions.
- * This prevents the cursor from entering the ID area during navigation.
+ * Create atomic ranges that make cursor skip over [[ and ]] portions.
+ * This prevents the cursor from entering the bracket areas during navigation.
+ * For backlinks WITH id (legacy format): protects [[ and (id)]]
+ * For backlinks WITHOUT id (name-only format): protects [[ and ]]
  * Note: We must ensure ranges don't span line breaks.
  */
 export const atomicBacklinkRanges = EditorView.atomicRanges.of((view) => {
@@ -72,8 +74,6 @@ export const atomicBacklinkRanges = EditorView.atomicRanges.of((view) => {
   const decorations: Range<Decoration>[] = [];
 
   for (const bl of backlinks) {
-    if (!bl.id) continue; // Only protect complete backlinks with IDs
-
     // Safety: ensure the backlink is on a single line
     const startLine = doc.lineAt(bl.from).number;
     const endLine = doc.lineAt(bl.to).number;
@@ -84,9 +84,22 @@ export const atomicBacklinkRanges = EditorView.atomicRanges.of((view) => {
       decorations.push(Decoration.mark({}).range(bl.from, bl.nameFrom));
     }
 
-    // Make " (id)]]" atomic (cursor skips from end of name to after ]])
-    if (bl.nameTo < bl.to) {
-      decorations.push(Decoration.mark({}).range(bl.nameTo, bl.to));
+    if (bl.id) {
+      // Legacy format with ID: make " (id)]]" atomic
+      if (bl.nameTo < bl.to) {
+        decorations.push(Decoration.mark({}).range(bl.nameTo, bl.to));
+      }
+    } else {
+      // Name-only format: make ]] atomic
+      // The ]] is at positions bl.to-2 to bl.to
+      const closeBracketStart = bl.to - 2;
+      if (bl.nameTo < closeBracketStart) {
+        // This shouldn't happen in valid backlinks, but safety check
+        decorations.push(Decoration.mark({}).range(closeBracketStart, bl.to));
+      } else if (bl.nameTo === closeBracketStart) {
+        // Normal case: name ends right before ]]
+        decorations.push(Decoration.mark({}).range(closeBracketStart, bl.to));
+      }
     }
   }
 
@@ -178,17 +191,16 @@ export const backlinkEditFilter = EditorState.transactionFilter.of((tr) => {
 
 /**
  * Create a plugin to decorate backlinks with focus-aware styling.
- * - When cursor is outside: show as collapsed pill (hide brackets and ID)
- * - When cursor is adjacent/inside: show [[Name]] with visible brackets (ID never visible)
- * - Incomplete backlinks show as pending pills or [[text]] when editing
+ * - When cursor is outside: show as collapsed pill (hide brackets and ID if present)
+ * - When cursor is adjacent/inside: show [[Name]] with visible brackets (ID never visible for legacy format)
  *
- * The piece ID is never shown to the user - it's stored in the document
- * as [[Name (id)]] but displayed as [[Name]] when editing or just Name when collapsed.
+ * All parsed backlinks with non-empty names are treated as "complete":
+ * - Name-only format: [[Name]] - pill hides [[ and ]]
+ * - Legacy format with ID: [[Name (id)]] - pill hides [[, (id), and ]]
  */
 export function createBacklinkDecorationPlugin() {
   const editingMark = Decoration.mark({ class: "cm-backlink-editing" });
   const pillMark = Decoration.mark({ class: "cm-backlink-pill" });
-  const pendingMark = Decoration.mark({ class: "cm-backlink-pending" });
   const hiddenReplace = Decoration.replace({});
 
   return ViewPlugin.fromClass(
@@ -221,13 +233,16 @@ export function createBacklinkDecorationPlugin() {
         const backlinks = view.state.field(backlinkField);
 
         for (const bl of backlinks) {
-          const { from: start, to: end, nameFrom, nameTo, id } = bl;
+          const { from: start, to: end, nameFrom, nameTo, id, name } = bl;
           const hasId = id !== "";
 
           // Safety: skip backlinks that span multiple lines (would cause decoration errors)
           const startLine = doc.lineAt(start).number;
           const endLine = doc.lineAt(end).number;
           if (startLine !== endLine) continue;
+
+          // Skip truly empty backlinks (shouldn't happen with current regex, but safety check)
+          if (!name.trim()) continue;
 
           // Check if cursor is anywhere within the backlink (including hidden areas)
           // This ensures editing mode triggers when cursor is adjacent to visible pill
@@ -237,33 +252,34 @@ export function createBacklinkDecorationPlugin() {
           const selectionOverlaps = hasFocus && selectionFrom < end &&
             selectionTo > start;
 
-          if (hasId && (cursorInBacklink || selectionOverlaps)) {
-            // EDITING MODE: Show plain [[Name]] text, hide only the " (id)" portion
-            // The closing ]] stays visible so user sees [[Name]]
-            // Safety check: only hide if there's actually content between nameTo and end-2
-            const idStart = nameTo;
-            const idEnd = end - 2; // Position before ]]
-            if (idEnd > idStart) {
-              decorations.push(hiddenReplace.range(idStart, idEnd)); // Hide " (id)"
-            }
-          } else if (!hasId) {
-            // Incomplete backlink - show as pending pill or full text when editing
-            const cursorInside = hasFocus && cursorPos >= start &&
-              cursorPos <= end;
-            if (cursorInside || selectionOverlaps) {
-              // Cursor inside or adjacent - show full [[mention]] with editing style
-              decorations.push(editingMark.range(start, end));
+          if (cursorInBacklink || selectionOverlaps) {
+            // EDITING MODE: Show [[Name]] text with editing style
+            // For legacy format with ID: hide the " (id)" portion
+            if (hasId) {
+              // Show [[Name]] and hide " (id)"
+              decorations.push(editingMark.range(start, nameTo));
+              // Safety check: only hide if there's actually content between nameTo and end-2
+              const idStart = nameTo;
+              const idEnd = end - 2; // Position before ]]
+              if (idEnd > idStart) {
+                decorations.push(hiddenReplace.range(idStart, idEnd)); // Hide " (id)"
+              }
+              decorations.push(editingMark.range(end - 2, end)); // Show ]]
             } else {
-              // Cursor away - show as pending pill
-              decorations.push(hiddenReplace.range(start, start + 2)); // Hide [[
-              decorations.push(pendingMark.range(start + 2, end - 2)); // Style inner text
-              decorations.push(hiddenReplace.range(end - 2, end)); // Hide ]]
+              // Name-only format: show full [[Name]] with editing style
+              decorations.push(editingMark.range(start, end));
             }
           } else {
-            // Complete backlink, cursor outside - show as navigable pill
+            // PILL MODE: Cursor outside - show as navigable pill
             decorations.push(hiddenReplace.range(start, start + 2)); // Hide [[
             decorations.push(pillMark.range(nameFrom, nameTo)); // Style name only
-            decorations.push(hiddenReplace.range(nameTo, end)); // Hide (id)]]
+            if (hasId) {
+              // Legacy format: hide " (id)]]"
+              decorations.push(hiddenReplace.range(nameTo, end));
+            } else {
+              // Name-only format: hide ]]
+              decorations.push(hiddenReplace.range(end - 2, end));
+            }
           }
         }
 

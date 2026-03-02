@@ -272,11 +272,9 @@ const Note = pattern<NoteInput, NoteOutput>(
     const appendLink = action(
       ({ piece }: { piece: Writable<MentionablePiece> }) => {
         const name = piece.get()[NAME] ?? "";
-        const resolved = (piece as any).resolveAsCell();
-        const entityId = resolved?.entityId?.["/"];
-        if (!name || !entityId) return;
+        if (!name) return;
 
-        const link = `[[${name} (${entityId})]]`;
+        const link = `[[${name}]]`;
         const current = content.get();
         content.set(current ? `${current}\n${link}` : link);
 

@@ -277,30 +277,21 @@ export class CTCodeEditor extends BaseElement {
         return null;
       }
 
-      // Check if this is already a complete backlink WITH an ID (not just auto-closed brackets)
-      // Pattern: [[Name (id)]] - if there's an ID, don't show dropdown
-      const afterCursor = context.state.doc.sliceString(
-        context.pos,
-        context.pos + 50, // Look ahead for potential ]] and ID pattern
-      );
-      const hasIdPattern = afterCursor.match(/^\s*\([^)]+\)\]\]/);
-      if (hasIdPattern) {
-        // This is a complete backlink with ID - don't show dropdown
-        return null;
-      }
-
       const query = backlink.text.slice(2); // Remove [[ prefix
 
       const mentionable = this.getFilteredMentionable(query);
 
       // Check if auto-close added ]] after cursor
+      const afterCursor = context.state.doc.sliceString(
+        context.pos,
+        context.pos + 2,
+      );
       const hasAutoCloseBrackets = afterCursor.startsWith("]]");
 
       // Build options from existing mentionable items
-      const options: Completion[] = mentionable.map(([piece, index]) => {
-        const pieceId = this._getPieceId(index);
+      const options: Completion[] = mentionable.map(([piece, _index]) => {
         const pieceName = piece.key(NAME).get() || "";
-        const insertText = `${pieceName} (${pieceId})`;
+        const insertText = `${pieceName}`;
         return {
           label: pieceName,
           // Use apply function to handle auto-closed brackets
@@ -397,13 +388,11 @@ export class CTCodeEditor extends BaseElement {
   }
 
   /**
-   * Complete a backlink by inserting the full [[Name (id)]] format
+   * Complete a backlink by inserting the [[Name]] format
    */
-  private _completeBacklinkWithId(
+  private _completeBacklinkWithName(
     view: EditorView,
-    _queryText: string,
     pieceName: string,
-    pieceId: string,
   ): void {
     // Find the [[ start position
     const pos = view.state.selection.main.head;
@@ -418,7 +407,7 @@ export class CTCodeEditor extends BaseElement {
     const hasAutoClose = afterCursor === "]]";
 
     // Build the complete backlink
-    const fullBacklink = `[[${pieceName} (${pieceId})]]`;
+    const fullBacklink = `[[${pieceName}]]`;
 
     // Calculate replacement range
     const replaceFrom = bracketPos;
@@ -496,26 +485,31 @@ export class CTCodeEditor extends BaseElement {
       const _matchEnd = matchStart + match[0].length;
       const innerText = match[1];
 
-      // Check if has ID
+      // Support both [[Name]] and legacy [[Name (id)]] formats
       const idMatch = innerText.match(/^(.+?)\s+\(([^)]+)\)$/);
-      if (!idMatch) continue; // Skip incomplete backlinks
-
-      const name = idMatch[1];
-      const id = idMatch[2];
+      const name = idMatch ? idMatch[1] : innerText;
+      const id = idMatch ? idMatch[2] : undefined;
       const nameStart = matchStart + 2; // After [[
       const nameEnd = nameStart + name.length;
 
       // Check if click position is within the name portion (the visible pill)
       if (pos >= nameStart && pos <= nameEnd) {
-        const runtime = this.pattern.runtime();
-        const space = this.pattern.space();
+        // Try name-based resolution first, fall back to ID
+        let piece = this.findPieceByName(name);
+        if (!piece && id) {
+          const runtime = this.pattern.runtime();
+          const space = this.pattern.space();
+          const cell = await runtime.getCell(space, id);
+          piece = cell as CellHandle<Mentionable>;
+        }
 
-        const cell = await runtime.getCell(space, id);
-        this.emit("backlink-click", {
-          id,
-          text: innerText,
-          piece: cell,
-        });
+        if (piece) {
+          this.emit("backlink-click", {
+            id,
+            text: innerText,
+            piece,
+          });
+        }
         return;
       }
     }
@@ -547,10 +541,16 @@ export class CTCodeEditor extends BaseElement {
       // Check if cursor is within this backlink
       if (pos >= matchStart && pos <= matchEnd) {
         const backlinkText = match[1];
-        // Extract ID from "Name (id)" format
-        const idMatch = backlinkText.match(/\(([^)]+)\)$/);
-        const backlinkId = idMatch ? idMatch[1] : undefined;
-        const piece = backlinkId ? this.findPieceById(backlinkId) : null;
+        // Try name-based resolution first, fall back to ID for legacy content
+        const idMatch = backlinkText.match(/^(.+?)\s+\(([^)]+)\)$/);
+        const name = idMatch ? idMatch[1] : backlinkText;
+        const backlinkId = idMatch ? idMatch[2] : undefined;
+
+        let piece = this.findPieceByName(name);
+        if (!piece && backlinkId) {
+          piece = this.findPieceById(backlinkId);
+        }
+
         if (piece) {
           this.emit("backlink-click", {
             id: backlinkId,
@@ -560,9 +560,9 @@ export class CTCodeEditor extends BaseElement {
           return true;
         }
 
-        // Only create new backlink if there's NO ID (text-only like [[Name]])
-        if (!backlinkId && this.pattern) {
-          this.createBacklinkFromPattern(backlinkText, true);
+        // Only create new backlink if piece was not found by either method
+        if (!piece && this.pattern) {
+          this.createBacklinkFromPattern(name, true);
         }
 
         return true;
@@ -601,10 +601,7 @@ export class CTCodeEditor extends BaseElement {
       }
       const pieceId = page.id();
 
-      // Insert the ID into the text if we have an editor
-      if (this._editorView && pieceId) {
-        this._insertBacklinkId(backlinkText, pieceId, navigate);
-      }
+      // The [[Name]] text is already in the correct format, no ID insertion needed
 
       this.emit("backlink-create", {
         text: backlinkText,
@@ -618,41 +615,6 @@ export class CTCodeEditor extends BaseElement {
   }
 
   /**
-   * Insert the ID into an incomplete backlink and position cursor appropriately.
-   * Replaces [[text]] with [[text (id)]] and positions cursor after ]].
-   */
-  private _insertBacklinkId(
-    backlinkText: string,
-    id: string,
-    navigate: boolean,
-  ): void {
-    if (!this._editorView) return;
-
-    const view = this._editorView;
-    const state = view.state;
-    const doc = state.doc;
-    const content = doc.toString();
-
-    // Find the incomplete backlink: [[backlinkText]]
-    const searchPattern = `[[${backlinkText}]]`;
-    const index = content.indexOf(searchPattern);
-
-    if (index === -1) return;
-
-    // Replace with complete backlink including ID
-    const replacement = `[[${backlinkText} (${id})]]`;
-    const from = index;
-    const to = index + searchPattern.length;
-
-    view.dispatch({
-      changes: { from, to, insert: replacement },
-      selection: navigate
-        ? undefined // Keep current selection if navigating away
-        : { anchor: from + replacement.length }, // Position after ]] if staying
-    });
-  }
-
-  /**
    * If the cursor is after an unclosed [[... token on the same line,
    * return the current query text. Otherwise return null.
    */
@@ -663,6 +625,31 @@ export class CTCodeEditor extends BaseElement {
     const m = textBefore.match(/\[\[([^\]]*)$/);
     if (!m) return null;
     return m[1] ?? "";
+  }
+
+  /**
+   * Find a piece by name in the mentionable list.
+   * First match wins (no disambiguation).
+   */
+  private findPieceByName(name: string): CellHandle<Mentionable> | null {
+    if (!this.mentionable) return null;
+    const rawMentionable = this.mentionable.get();
+    if (!rawMentionable) return null;
+    const mentionableData = Array.isArray(rawMentionable)
+      ? rawMentionable as MentionableArray
+      : isCellHandle(rawMentionable)
+      ? ((rawMentionable.get() ?? []) as MentionableArray)
+      : [];
+    if (mentionableData.length === 0) return null;
+    for (let i = 0; i < mentionableData.length; i++) {
+      const pieceValue = mentionableData[i];
+      if (!pieceValue) continue;
+      const pieceName = pieceValue[NAME];
+      if (pieceName === name) {
+        return this.mentionable.key(i) as CellHandle<Mentionable>;
+      }
+    }
+    return null;
   }
 
   /**
@@ -1278,16 +1265,14 @@ export class CTCodeEditor extends BaseElement {
               const exactMatch = this._findExactMentionable(text);
 
               if (exactMatch) {
-                // Found exact match - insert complete backlink with stable piece ID
-                const [matchCell, matchIndex] = exactMatch;
-                const pieceId = this._getPieceId(matchIndex);
+                // Found exact match - insert complete backlink with name only
+                const [matchCell, _matchIndex] = exactMatch;
                 const pieceName = matchCell.key(NAME).get() || text;
-                this._completeBacklinkWithId(view, text, pieceName, pieceId);
+                this._completeBacklinkWithName(view, pieceName);
               } else if (this.pattern) {
                 // No exact match - create new piece without navigating
                 // First complete the backlink text, then create the piece
                 this._completeBacklinkText(view);
-                // createBacklinkFromPattern will insert the ID and emit event
                 this.createBacklinkFromPattern(text, false);
               }
               return true;
@@ -1352,25 +1337,25 @@ export class CTCodeEditor extends BaseElement {
   /**
    * Extract mentioned pieces from current content and write to `$mentioned`.
    *
-   * Link syntax: [[Name (id)]]. We parse ids and resolve them against
-   * `$mentionable` to produce live Piece instances.
+   * Link syntax: [[Name]] or legacy [[Name (id)]]. We parse names and resolve
+   * them against `$mentionable` to produce live Piece instances.
    */
   private _updateMentionedFromContent(): void {
     if (!this.mentioned) return;
 
     const content = this.getValue() || "";
 
-    // Extract IDs from content
-    const newIds = this._extractMentionedIds(content);
+    // Extract names from content
+    const newNames = this._extractMentionedNames(content);
 
-    // Get current mentioned IDs by looking them up in mentionable
-    const curIds = this._getCurrentMentionedIds();
+    // Get current mentioned names by looking them up in mentionable
+    const curNames = this._getCurrentMentionedNames();
 
-    // Compare ID sets to avoid unnecessary writes
-    if (newIds.size === curIds.size) {
+    // Compare name sets to avoid unnecessary writes
+    if (newNames.size === curNames.size) {
       let same = true;
-      for (const id of newIds) {
-        if (!curIds.has(id)) {
+      for (const name of newNames) {
+        if (!curNames.has(name)) {
           same = false;
           break;
         }
@@ -1380,35 +1365,37 @@ export class CTCodeEditor extends BaseElement {
       }
     }
 
-    // Resolve IDs to Mentionable values and update the cell
+    // Resolve names to Mentionable values and update the cell
     const newMentioned = this._extractMentionedPieces(content);
     this.mentioned.set(newMentioned);
     this._setupPieceNameSubscriptions();
   }
 
   /**
-   * Extract unique piece IDs from content backlinks.
+   * Extract unique piece names from content backlinks.
    */
-  private _extractMentionedIds(content: string): Set<string> {
-    const ids = new Set<string>();
-    const regex = /\[\[[^\]]*?\(([^)]+)\)\]\]/g;
+  private _extractMentionedNames(content: string): Set<string> {
+    const names = new Set<string>();
+    const regex = /\[\[([^\]]+)\]\]/g;
     let match: RegExpExecArray | null;
     while ((match = regex.exec(content)) !== null) {
-      const id = match[1];
-      if (id) ids.add(id);
+      const innerText = match[1];
+      const idMatch = innerText.match(/^(.+?)\s+\(([^)]+)\)$/);
+      const name = idMatch ? idMatch[1] : innerText;
+      if (name) names.add(name);
     }
-    return ids;
+    return names;
   }
 
   /**
-   * Get IDs of currently mentioned pieces by looking them up in mentionable.
+   * Get names of currently mentioned pieces by looking them up in mentionable.
    */
-  private _getCurrentMentionedIds(): Set<string> {
-    const curIds = new Set<string>();
-    if (!this.mentioned) return curIds;
+  private _getCurrentMentionedNames(): Set<string> {
+    const curNames = new Set<string>();
+    if (!this.mentioned) return curNames;
 
     const rawMentioned = this.mentioned.get();
-    if (!rawMentioned) return curIds;
+    if (!rawMentioned) return curNames;
 
     const currentSource = Array.isArray(rawMentioned)
       ? rawMentioned
@@ -1416,7 +1403,7 @@ export class CTCodeEditor extends BaseElement {
       ? ((rawMentioned.get() ?? []) as MentionableArray)
       : [];
 
-    if (!this.mentionable) return curIds;
+    if (!this.mentionable) return curNames;
 
     const rawMentionable = this.mentionable.get();
     const mentionableData = Array.isArray(rawMentionable)
@@ -1425,19 +1412,19 @@ export class CTCodeEditor extends BaseElement {
       ? ((rawMentionable.get() ?? []) as MentionableArray)
       : [];
 
-    // For each current mentioned value, find its ID by matching in mentionable
+    // For each current mentioned value, find its name by matching in mentionable
     for (const mentionedValue of currentSource) {
       if (!mentionedValue) continue;
       for (let i = 0; i < mentionableData.length; i++) {
         if (mentionableData[i] === mentionedValue) {
-          const pieceId = this._getPieceId(i);
-          if (pieceId) curIds.add(pieceId);
+          const pieceName = mentionableData[i]?.[NAME];
+          if (pieceName) curNames.add(pieceName);
           break;
         }
       }
     }
 
-    return curIds;
+    return curNames;
   }
 
   /**
@@ -1451,35 +1438,38 @@ export class CTCodeEditor extends BaseElement {
     if (!this._editorView) return;
 
     const backlinks = this._editorView.state.field(backlinkField);
-    const activeIds = new Set<string>();
+    const activeNames = new Set<string>();
 
     for (const bl of backlinks) {
-      if (!bl.id) continue;
-      activeIds.add(bl.id);
+      activeNames.add(bl.name);
 
       // Skip if already subscribed
-      if (this._pieceNameSubscriptions.has(bl.id)) continue;
+      if (this._pieceNameSubscriptions.has(bl.name)) continue;
 
-      const pieceCell = this.findPieceById(bl.id);
+      // Try to find piece by name first, fall back to ID for legacy backlinks
+      let pieceCell = this.findPieceByName(bl.name);
+      if (!pieceCell && bl.id) {
+        pieceCell = this.findPieceById(bl.id);
+      }
       if (!pieceCell) continue;
 
       // Subscribe to TITLE cell (not NAME) - this is what we update
       const titleCell = pieceCell.key("title");
-      const pieceId = bl.id;
+      const pieceName = bl.name;
 
       // Subscribe with changeGroup so our own edits are filtered out
       const unsub = titleCell.subscribe(() => {
-        this._handleExternalTitleChange(pieceId, pieceCell);
+        this._handleExternalTitleChange(pieceName, pieceCell);
       });
 
-      this._pieceNameSubscriptions.set(pieceId, unsub);
+      this._pieceNameSubscriptions.set(pieceName, unsub);
     }
 
     // Clean up subscriptions for pieces no longer in document
-    for (const [id, unsub] of this._pieceNameSubscriptions) {
-      if (!activeIds.has(id)) {
+    for (const [name, unsub] of this._pieceNameSubscriptions) {
+      if (!activeNames.has(name)) {
         unsub();
-        this._pieceNameSubscriptions.delete(id);
+        this._pieceNameSubscriptions.delete(name);
       }
     }
   }
@@ -1489,7 +1479,7 @@ export class CTCodeEditor extends BaseElement {
    * This is called when a piece's title field changes externally (not from our own edit).
    */
   private _handleExternalTitleChange(
-    pieceId: string,
+    previousName: string,
     pieceCell: CellHandle<Mentionable>,
   ): void {
     if (!this._editorView) return;
@@ -1498,9 +1488,9 @@ export class CTCodeEditor extends BaseElement {
     const title = pieceCell.key("title").get() as string;
     if (!title) return;
 
-    // Find backlink in document
+    // Find backlink in document by previous name
     const backlinks = this._editorView.state.field(backlinkField);
-    const bl = backlinks.find((b) => b.id === pieceId);
+    const bl = backlinks.find((b) => b.name === previousName);
     if (!bl) return;
 
     // Strip emoji from document name for comparison
@@ -1515,7 +1505,7 @@ export class CTCodeEditor extends BaseElement {
 
     // Update tracking map BEFORE dispatch so _detectAndSyncNameChanges doesn't
     // try to sync this change back to the piece (it runs synchronously during dispatch)
-    this._previousBacklinkNames.set(pieceId, currentName);
+    this._previousBacklinkNames.set(currentName, currentName);
 
     // Update document with annotation to prevent updateListener from calling setValue
     this._editorView.dispatch({
@@ -1546,28 +1536,35 @@ export class CTCodeEditor extends BaseElement {
   private _extractMentionedPieces(content: string): Mentionable[] {
     if (!content || !this.mentionable) return [];
 
-    const ids: string[] = [];
-    const regex = /\[\[[^\]]*?\(([^)]+)\)\]\]/g;
+    // Parse all backlinks from content
+    const backlinkRegex = /\[\[([^\]]+)\]\]/g;
     let match: RegExpExecArray | null;
-    while ((match = regex.exec(content)) !== null) {
-      const id = match[1];
-      if (id) ids.push(id);
-    }
-
-    // Resolve unique ids to pieces using mentionable list.
-    // Push CellHandles (not plain values) so the pattern system receives
-    // live cell references that backlinks-index can traverse.
     const seen = new Set<string>();
     const result: Mentionable[] = [];
-    for (const id of ids) {
-      if (seen.has(id)) continue;
-      const piece = this.findPieceById(id);
+
+    while ((match = backlinkRegex.exec(content)) !== null) {
+      const innerText = match[1];
+      // Check for legacy format: "Name (id)"
+      const idMatch = innerText.match(/^(.+?)\s+\(([^)]+)\)$/);
+      const name = idMatch ? idMatch[1] : innerText;
+      const id = idMatch ? idMatch[2] : null;
+
+      // Skip duplicates by name
+      if (seen.has(name)) continue;
+
+      // Try name-based resolution first
+      let piece = this.findPieceByName(name);
+      // Fall back to ID-based resolution for legacy content
+      if (!piece && id) {
+        piece = this.findPieceById(id);
+      }
+
       if (piece) {
         // Push the CellHandle itself — it serializes as a link (via toJSON)
         // so the runtime resolves it to the actual piece cell, preserving
         // reactive connections for backlinks computation.
         result.push(piece as unknown as Mentionable);
-        seen.add(id);
+        seen.add(name);
       }
     }
     return result;
@@ -1575,6 +1572,8 @@ export class CTCodeEditor extends BaseElement {
 
   /**
    * Detect name changes in backlinks and sync them to linked piece's NAME property.
+   * Only syncs for legacy backlinks with IDs. Name-only backlinks don't support
+   * bidirectional sync (editing the name changes which piece it points to).
    * Called when document changes.
    */
   private _detectAndSyncNameChanges(): void {
@@ -1584,6 +1583,7 @@ export class CTCodeEditor extends BaseElement {
     const currentNames = new Map<string, string>();
 
     for (const bl of backlinks) {
+      // Only sync name changes for legacy backlinks with IDs
       if (!bl.id) continue;
       currentNames.set(bl.id, bl.name);
 
