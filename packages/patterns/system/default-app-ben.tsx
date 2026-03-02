@@ -7,6 +7,7 @@ import {
   NAME,
   navigateTo,
   pattern,
+  patternTool,
   UI,
   Writable,
 } from "commontools";
@@ -192,6 +193,23 @@ const trackRecent = handler<
   recentPieces.set(updated);
 });
 
+/** Read current do list items */
+const readDoList = pattern<
+  { items: Array<{ title: string; done: boolean; indent: number }> },
+  { result: Array<{ title: string; done: boolean; indent: number }> }
+>(({ items }) => {
+  return { result: items };
+});
+
+const doListSystemPrompt = `
+Do-list management:
+- When users mention tasks, action items, or things to do, use addDoItem or addDoItems
+- When users paste a block of text with multiple items, parse into items and use addDoItems to batch-add
+- Use readDoList to check current items before making changes
+- Use updateDoItem to mark done or rename; removeDoItem only for explicit deletion
+- Use indent levels for sub-tasks (0=root, 1=sub-task, 2=sub-sub-task)
+`;
+
 export default pattern<PiecesListInput, PiecesListOutput>((_) => {
   // OWN the data cells (not from wish)
   const allPieces = Writable.of<MentionablePiece[]>([]);
@@ -230,13 +248,31 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
 
   const fab = OmniboxFAB({
     mentionable: index.mentionable,
-    doListTools: {
-      addItem: doList.addItem,
-      addItems: doList.addItems,
-      removeItemByTitle: doList.removeItemByTitle,
-      updateItemByTitle: doList.updateItemByTitle,
-      items: doList.items,
+    extraTools: {
+      addDoItem: {
+        handler: doList.addItem,
+        description:
+          "Add a task to the do list. Use indent for sub-tasks (0=root, 1=sub, 2=sub-sub). Pass attachments array to link pieces.",
+      },
+      addDoItems: {
+        handler: doList.addItems,
+        description:
+          "Add multiple tasks at once. Each item can have attachments to link pieces.",
+      },
+      removeDoItem: {
+        handler: doList.removeItemByTitle,
+        description: "Remove a task and its subtasks by title.",
+      },
+      updateDoItem: {
+        handler: doList.updateItemByTitle,
+        description:
+          "Update a task by title. Set done=true to complete, newTitle to rename, attachments to link pieces.",
+      },
+      readDoList: patternTool(readDoList, {
+        items: doList.items,
+      }),
     },
+    extraSystemPrompt: doListSystemPrompt,
   });
 
   const gridView = PieceGrid({ pieces: visiblePieces });

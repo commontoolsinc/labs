@@ -277,7 +277,7 @@ export default pattern((_) => {
   // Child components use wish() to access favorites/journal through defaultPattern
   const favoritesComponent = FavoritesManager({});
   const journalComponent = Journal({});
-  const activeTab = Writable.of("journal").for("activeTab");
+  const activeTab = Writable.of("spaces").for("activeTab");
 
   // === REACTIVE NARRATIVE ENRICHMENT ===
   // LLM Error Handling: generateText/generateObject return { pending, result, error }.
@@ -723,9 +723,9 @@ IMPORTANT:
 
         <ct-tabs $value={activeTab}>
           <ct-tab-list>
+            <ct-tab value="spaces">Spaces</ct-tab>
             <ct-tab value="journal">Journal</ct-tab>
             <ct-tab value="favorites">Favorites</ct-tab>
-            <ct-tab value="spaces">Spaces</ct-tab>
             <ct-tab value="profile">Profile</ct-tab>
           </ct-tab-list>
           <ct-tab-panel value="journal">{journalComponent}</ct-tab-panel>

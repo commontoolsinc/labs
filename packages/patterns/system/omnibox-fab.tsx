@@ -38,21 +38,10 @@ import {
   searchGraphPattern,
 } from "./knowledge-graph.tsx";
 
-interface DoListTools {
-  addItem: Stream<{ title: string; indent?: number }>;
-  addItems: Stream<{ items: Array<{ title: string; indent?: number }> }>;
-  removeItemByTitle: Stream<{ title: string }>;
-  updateItemByTitle: Stream<{
-    title: string;
-    newTitle?: string;
-    done?: boolean;
-  }>;
-  items: any[];
-}
-
 interface OmniboxFABInput {
   mentionable: Writable<MentionablePiece[]>;
-  doListTools: DoListTools;
+  extraTools: Record<string, unknown>;
+  extraSystemPrompt: string;
 }
 
 const toggle = handler<any, { value: Writable<boolean> }>((_, { value }) => {
@@ -130,24 +119,8 @@ const wishTool = pattern<WishToolParameters, boolean>(
   },
 );
 
-/** Read current do list items */
-const readDoList = pattern<
-  { items: Array<{ title: string; done: boolean; indent: number }> },
-  {
-    result: Array<{
-      title: string;
-      done: boolean;
-      indent: number;
-    }>;
-  }
->(
-  ({ items }) => {
-    return { result: items };
-  },
-);
-
 export default pattern<OmniboxFABInput>(
-  ({ doListTools }) => {
+  ({ extraTools, extraSystemPrompt }) => {
     const mentionable =
       wish<MentionablePiece[]>({ query: "#mentionable" }).result;
     const recentPieces = wish<MentionablePiece[]>({ query: "#recent" }).result;
@@ -185,14 +158,7 @@ Tool usage priority:
 - Remove attachments when no longer relevant
 - Search web only as last resort when nothing exists in the space
 - Use bash to run shell commands in a persistent Linux sandbox (Ubuntu). Installed packages and files persist across calls.
-
-Do-list management:
-- When users mention tasks, action items, or things to do, use addDoItem or addDoItems
-- When users paste a block of text with multiple items, parse into items and use addDoItems to batch-add
-- Use readDoList to check current items before making changes
-- Use updateDoItem to mark done or rename; removeDoItem only for explicit deletion
-- Use indent levels for sub-tasks (0=root, 1=sub-task, 2=sub-sub-task)
-
+${extraSystemPrompt}
 Be matter-of-fact. Prefer action to explanation.`;
     });
 
@@ -216,28 +182,7 @@ Be matter-of-fact. Prefer action to explanation.`;
         listRecent: patternTool(listRecent, { recentPieces }),
         updateProfile: patternTool(updateProfile),
         bash: patternTool(bash, { sandboxId }),
-        addDoItem: {
-          handler: doListTools.addItem,
-          description:
-            "Add a task to the do list. Use indent for sub-tasks (0=root, 1=sub, 2=sub-sub). Pass attachments array to link pieces.",
-        },
-        addDoItems: {
-          handler: doListTools.addItems,
-          description:
-            "Add multiple tasks at once. Each item can have attachments to link pieces.",
-        },
-        removeDoItem: {
-          handler: doListTools.removeItemByTitle,
-          description: "Remove a task and its subtasks by title.",
-        },
-        updateDoItem: {
-          handler: doListTools.updateItemByTitle,
-          description:
-            "Update a task by title. Set done=true to complete, newTitle to rename, attachments to link pieces.",
-        },
-        readDoList: patternTool(readDoList, {
-          items: doListTools.items,
-        }),
+        ...extraTools,
         searchSpace: patternTool(summarySearchPattern, {
           entries: summaryEntries,
         }),
