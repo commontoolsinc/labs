@@ -3,8 +3,8 @@
  * .claude/scripts/pre-commit.ts
  *
  * Claude Code Pre-Tool hook for git commit commands.
- * - Runs `deno fmt` (auto-fixes formatting before the commit).
- * - Runs `deno lint`.
+ * - Runs `deno fmt` on changed files only (auto-fixes before commit).
+ * - Runs `deno lint` on changed files only.
  * - Runs `deno check` on changed .ts/.tsx files only.
  * - Exits 2 to block the commit if any check fails.
  */
@@ -62,25 +62,27 @@ if (allChangedFiles.length === 0) {
 
 const errors: string[] = [];
 
-// 1. Auto-fix formatting
+// 1. Auto-fix formatting (only changed files, not the whole repo)
 console.error("Running pre-commit checks (fmt, lint, check)...");
 
 const fmtResult = await new Deno.Command("deno", {
-  args: ["fmt"],
+  args: ["fmt", ...allChangedFiles],
   stdout: "piped",
   stderr: "piped",
 }).output();
 
 if (!fmtResult.success) {
-  errors.push("Formatting failed (syntax error?):");
-  errors.push(new TextDecoder().decode(fmtResult.stderr));
+  const fmtStderr = new TextDecoder().decode(fmtResult.stderr);
+  // "No target files found" means all changed files are in deno.json exclude
+  if (!fmtStderr.includes("No target files found")) {
+    errors.push("Formatting failed (syntax error?):");
+    errors.push(fmtStderr);
+  }
 }
-// fmt auto-fixes files on disk before the `git add && git commit` runs,
-// so the formatted versions will be staged by the commit command itself.
 
-// 2. Lint
+// 2. Lint (only changed files)
 const lintResult = await new Deno.Command("deno", {
-  args: ["lint"],
+  args: ["lint", ...allChangedFiles],
   stdout: "piped",
   stderr: "piped",
 }).output();
