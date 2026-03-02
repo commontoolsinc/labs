@@ -23,7 +23,10 @@ const MAX_RECENT_CHARMS = 10;
 
 import BacklinksIndex, { type MentionablePiece } from "./backlinks-index.tsx";
 import SummaryIndex from "./summary-index.tsx";
-import KnowledgeGraph from "./knowledge-graph.tsx";
+import KnowledgeGraph, {
+  getNeighborsPattern,
+  searchGraphPattern,
+} from "./knowledge-graph.tsx";
 
 import QuickCapture from "./quick-capture.tsx";
 import OmniboxFAB from "./omnibox-fab.tsx";
@@ -274,8 +277,13 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
       readDoList: patternTool(readDoList, {
         items: doList.items,
       }),
-      getNeighbors: knowledgeGraph.getNeighbors,
-      searchAnnotations: knowledgeGraph.searchGraph,
+      getNeighbors: patternTool(getNeighborsPattern, {
+        edges: knowledgeGraph.edges,
+      }),
+      searchAnnotations: patternTool(searchGraphPattern, {
+        edges: knowledgeGraph.edges,
+        compoundNodes: knowledgeGraph.compoundNodes,
+      }),
     },
     extraSystemPrompt: benExtraSystemPrompt,
   });
