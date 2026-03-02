@@ -597,10 +597,12 @@ export async function compileAndRunPattern(
     throw new Error("Failed to compile pattern");
   }
 
-  return await pieceManager.runPersistent(
+  const result = await pieceManager.runPersistent(
     pattern,
     runOptions,
     undefined,
     llmRequestId,
   );
+  await pieceManager.add([result]);
+  return result;
 }

@@ -84,6 +84,7 @@ export type ErrorWithContext = Error & {
 
 export type ErrorHandler = (error: ErrorWithContext) => void;
 export type NavigateCallback = (target: Cell<any>) => void;
+export type PieceCreatedCallback = (piece: Cell<any>) => void;
 
 /**
  * Feature flags for the space-model data-layer changes. Each flag gates an
@@ -111,6 +112,7 @@ export interface RuntimeOptions {
   errorHandlers?: ErrorHandler[];
   patternEnvironment?: PatternEnvironment;
   navigateCallback?: NavigateCallback;
+  pieceCreatedCallback?: PieceCreatedCallback;
   debug?: boolean;
   telemetry?: RuntimeTelemetry;
   /** Optional feature flags for experimental space-model data-layer changes. */
@@ -176,6 +178,7 @@ export class Runtime {
   readonly harness: Engine;
   readonly runner: Runner;
   readonly navigateCallback?: NavigateCallback;
+  readonly pieceCreatedCallback?: PieceCreatedCallback;
   readonly cfc: ContextualFlowControl;
   readonly staticCache: StaticCache;
   readonly storageManager: IStorageManager;
@@ -253,6 +256,7 @@ export class Runtime {
 
     // Set the navigate callback
     this.navigateCallback = options.navigateCallback;
+    this.pieceCreatedCallback = options.pieceCreatedCallback;
 
     // Handle pattern environment configuration
     if (options.patternEnvironment) {
