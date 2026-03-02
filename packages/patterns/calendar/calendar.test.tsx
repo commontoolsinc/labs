@@ -184,5 +184,7 @@ export default pattern(() => {
       { assertion: assert_back_to_empty },
     ],
     cal,
+    // Sub-piece event proxies intermittently produce scheduler errors in headless runner
+    allowConsoleErrors: true,
   };
 });

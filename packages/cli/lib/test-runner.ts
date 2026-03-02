@@ -65,6 +65,10 @@ export interface TestRunResult {
   error?: string;
   /** Navigation events recorded during the test run */
   navigations: NavigationEvent[];
+  /** console.error messages captured during the test run */
+  consoleErrors: string[];
+  /** If true, console.error output is expected and should not fail the test */
+  allowConsoleErrors?: boolean;
 }
 
 export interface TestRunnerOptions {
@@ -83,6 +87,17 @@ export async function runTestPattern(
 ): Promise<TestRunResult> {
   const TIMEOUT = options.timeout ?? 5000;
   const startTime = performance.now();
+
+  // Intercept console.error to capture runtime errors
+  const consoleErrors: string[] = [];
+  const originalConsoleError = console.error;
+  console.error = (...args: unknown[]) => {
+    const msg = args.map((a) => typeof a === "string" ? a : String(a)).join(
+      " ",
+    );
+    consoleErrors.push(msg);
+    originalConsoleError.apply(console, args);
+  };
 
   // 1. Create emulated runtime (same as piece step)
   const identity = await Identity.fromPassphrase("test-runner");
@@ -202,6 +217,10 @@ export async function runTestPattern(
           JSON.stringify(typeof testsValue),
       );
     }
+
+    // Check for allowConsoleErrors flag
+    const allowConsoleErrors =
+      (patternResult.key("allowConsoleErrors") as Cell<unknown>).get() === true;
 
     if (options.verbose) {
       console.log(`  Found ${testsValue.length} test steps`);
@@ -348,6 +367,8 @@ export async function runTestPattern(
       results,
       totalDurationMs: performance.now() - startTime,
       navigations,
+      consoleErrors,
+      allowConsoleErrors,
     };
   } catch (err) {
     let errorMessage = err instanceof Error ? err.message : String(err);
@@ -367,10 +388,12 @@ export async function runTestPattern(
       results: [],
       totalDurationMs: performance.now() - startTime,
       navigations,
+      consoleErrors,
       error: errorMessage,
     };
   } finally {
     // 6. Cleanup
+    console.error = originalConsoleError;
     sinkCancel?.();
     engine.dispose();
     await storageManager.close();
@@ -432,6 +455,28 @@ export async function runTests(
               .join(", ")
           }`,
         );
+      }
+
+      // Report console.error output
+      if (result.consoleErrors.length > 0) {
+        if (result.allowConsoleErrors) {
+          console.log(
+            `  ⊘ ${result.consoleErrors.length} console.error(s) (allowed)`,
+          );
+        } else {
+          totalFailed++;
+          console.log(
+            `  ✗ ${result.consoleErrors.length} console.error(s) during test:`,
+          );
+          for (const msg of result.consoleErrors) {
+            // Show first line of each error, truncated
+            const firstLine = msg.split("\n")[0];
+            const truncated = firstLine.length > 120
+              ? firstLine.slice(0, 120) + "..."
+              : firstLine;
+            console.log(`    ${truncated}`);
+          }
+        }
       }
     }
   }
