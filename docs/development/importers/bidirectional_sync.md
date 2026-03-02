@@ -364,6 +364,95 @@ try {
 }
 ```
 
+### Why This Works: CAS Atomicity and the No-Loss Guarantee
+
+The sync loop above has a subtle but critical correctness property: **no user
+edit is ever lost or temporarily reverted, even under concurrent modification.**
+This section explains which parts of the code are load-bearing and why.
+
+#### The core invariant
+
+Every sync cycle performs these steps in a single CAS transaction:
+
+1. Read `editsCell` (the pending edit queue)
+2. Apply those edits to the filesystem
+3. Read the filesystem back into `stateCell`
+4. Clear `editsCell`
+
+The transaction reads `editsCell` at step 1 and writes it at step 4. If a user
+appends a new edit between steps 1 and 4, the CAS check fails at commit time —
+the value of `editsCell` changed since we read it. The transaction aborts and
+retries.
+
+This is the key mechanism: **the edit queue is both the input and the sentinel.**
+Reading it at the start and clearing it at the end means any concurrent append
+is automatically detected.
+
+#### What the watermark protects
+
+When a transaction retries, we don't want to re-apply edits that already made it
+to the filesystem. The `editWatermark` (line 164 in the sync loop) tracks how
+far we got:
+
+```
+First attempt:  edits = [A, B]    → apply A, B to fs → watermark = 2
+                tx fails (user appended C)
+Retry:          edits = [A, B, C] → skip A, B (watermark) → apply C → watermark = 3
+```
+
+The watermark lives outside the `while (!committed)` loop but inside `doSync`,
+so it survives across CAS retries within a single sync cycle but resets between
+cycles. The `editIdMap` works the same way — canonical IDs discovered during
+earlier attempts are preserved across retries.
+
+#### Why there's no backsliding
+
+"Backsliding" means: user edits a file, sees the optimistic update in the UI,
+then momentarily sees the old state before the sync catches up. This can't
+happen because the optimistic apply and the queue append happen in the same
+atomic transaction on the pattern side (see the `onRename` handler). And on the
+daemon side, the state overwrite and the queue clear happen in the same atomic
+transaction. There is no window where `stateCell` reflects the old filesystem
+content while `editsCell` is empty.
+
+If those were separate transactions — clear the queue, then update state — a
+reader between the two would see: edits gone, state not yet updated. The single
+transaction eliminates this window.
+
+#### Why append-only matters
+
+The edit queue is append-only during normal operation. Edits are only removed by
+the daemon (step 4: `editsCell.set([])`). This means:
+
+- A CAS retry always sees the original edits plus any new ones — never fewer.
+- The watermark is always valid: edits before the watermark are the same objects
+  in the same order.
+- The daemon never needs to reconcile a partially-modified queue.
+
+If edits could be removed or reordered by the UI, the watermark would be
+meaningless and the retry logic would need to diff against the filesystem to
+figure out what's already applied.
+
+#### The concurrency guard's role
+
+The `syncInProgress` / `syncAgain` guard (lines 130–131) is not about
+correctness — CAS handles that. It's about efficiency. Without it, rapid
+filesystem changes or edit queue appends would spawn overlapping `doSync` calls,
+each doing redundant filesystem reads. The guard serializes sync cycles so at
+most one runs at a time, and the `syncAgain` flag ensures a trailing cycle picks
+up anything that arrived mid-sync.
+
+#### Summary of load-bearing parts
+
+| Code                             | What it protects                              |
+| -------------------------------- | --------------------------------------------- |
+| `editsCell.get()` + `editsCell.set([])` in same tx | No-loss guarantee: CAS detects concurrent appends |
+| `stateCell.set(...)` in same tx  | No-backsliding: state and queue are always consistent |
+| `editWatermark`                  | No double-apply: filesystem edits aren't repeated on retry |
+| `editIdMap` outside retry loop   | Canonical IDs survive CAS retries             |
+| Append-only queue                | Watermark validity: prefix is stable across retries |
+| `syncInProgress` guard           | Efficiency: one sync at a time, no redundant fs reads |
+
 ---
 
 ## Pattern (UI) Side
