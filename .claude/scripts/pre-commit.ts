@@ -18,8 +18,10 @@
  * If any check fails, the hook exits 2 to block the commit.
  *
  * Note: this runs as a PreToolUse hook, meaning it fires BEFORE the Bash
- * command executes. `git add` has not yet run, so `git diff --cached` would
- * be empty — that's why we parse file paths from the command string instead.
+ * command executes. Any `git add` in the command has not yet run, so we
+ * parse those file paths from the command string. However, files staged by
+ * earlier `git add` calls ARE visible via `git diff --cached`, so we always
+ * union both sources to cover the full set of files being committed.
  */
 
 import { guardProjectDir } from "./common/guard.ts";
@@ -60,29 +62,31 @@ async function getFilesToCommit(cmd: string): Promise<string[]> {
     return await getAllChangedFiles();
   }
 
-  // Parse explicit file paths from `git add file1 file2 ...`
-  const addMatch = cmd.match(/\bgit\s+add\s+(.+?)(?:\s*&&|$)/);
-  if (addMatch) {
-    const args = addMatch[1].trim().split(/\s+/);
-    // Filter out flags (e.g. -f, --force)
-    const files = args.filter((a) => !a.startsWith("-"));
-    if (files.length > 0) {
-      return files;
-    }
-  }
-
-  // No `git add` found — files must already be staged
+  // Get already-staged files (these exist regardless of any `git add` in the command)
   const staged = await new Deno.Command("git", {
     args: ["diff", "--cached", "--name-only", "--diff-filter=d"],
     stdout: "piped",
     stderr: "piped",
   }).output();
 
-  return new TextDecoder()
+  const alreadyStaged = new TextDecoder()
     .decode(staged.stdout)
     .trim()
     .split("\n")
     .filter((f) => f.length > 0);
+
+  // Parse explicit file paths from `git add file1 file2 ...`
+  const addMatch = cmd.match(/\bgit\s+add\s+(.+?)(?:\s*&&|$)/);
+  if (addMatch) {
+    const args = addMatch[1].trim().split(/\s+/);
+    // Filter out flags (e.g. -f, --force)
+    const files = args.filter((a) => !a.startsWith("-"));
+    // Union the newly-added files with already-staged files
+    return [...new Set([...alreadyStaged, ...files])];
+  }
+
+  // No `git add` found — only already-staged files will be committed
+  return alreadyStaged;
 }
 
 async function getAllChangedFiles(): Promise<string[]> {
@@ -104,10 +108,10 @@ async function getAllChangedFiles(): Promise<string[]> {
   ].filter((f) => f.length > 0);
 }
 
-// Figure out which files will be committed by parsing the command.
-// At PreToolUse time `git add` hasn't run yet, so `git diff --cached` is empty.
-// We parse file paths from `git add <files>` in the command, or fall back to
-// all changed files for `git add .`, `git add -A`, or `git commit -a`.
+// Figure out which files will be committed by combining:
+// 1. Already-staged files (visible via `git diff --cached`)
+// 2. Files from any `git add <files>` in the command (not yet staged at hook time)
+// 3. All changed files for `git add .`, `git add -A`, or `git commit -a`
 const filesToCheck = await getFilesToCommit(cmd);
 
 if (filesToCheck.length === 0) {
