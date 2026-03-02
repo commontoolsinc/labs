@@ -1,0 +1,8 @@
+{
+  "name": "common-tools",
+  "description": "Common Tools development skills, agents, and workflows",
+  "version": "1.0.0",
+  "skills": "./.claude/skills/",
+  "agents": "./.claude/agents/",
+  "commands": "./.claude/commands/"
+}
