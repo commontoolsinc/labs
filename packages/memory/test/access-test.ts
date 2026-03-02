@@ -1,173 +1,175 @@
 import { assert, assertEquals, assertMatch } from "@std/assert";
+import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { alice, bob, mallory, space } from "./principal.ts";
 import * as Access from "../access.ts";
 import { type DID } from "@commontools/identity";
-import { refer } from "../reference.ts";
+import {
+  refer,
+  resetCanonicalHashConfig,
+  setCanonicalHashConfig,
+} from "../reference.ts";
 import { Invocation } from "../interface.ts";
 
 // Some generated service key.
 const serviceDid = "did:key:z6MkfJPMCrTyDmurrAHPUsEjCgvcjvLtAuzyZ7nSqwZwb8KQ";
 
-const test = (title: string, run: () => unknown) => {
-  const unit = async () => {
-    await run();
-  };
+describe("access", () => {
+  // Explicitly pin canonical hashing off so these tests exercise the legacy
+  // refer() path regardless of what the ambient default is.
+  beforeAll(() => {
+    setCanonicalHashConfig(false);
+  });
+  afterAll(() => {
+    resetCanonicalHashConfig();
+  });
 
-  if (title.startsWith("only")) {
-    Deno.test.only(title, unit);
-  } else if (title.startsWith("skip")) {
-    Deno.test.ignore(title, unit);
-  } else {
-    Deno.test(title, unit);
-  }
-};
+  it("signer.did()", () => {
+    assertEquals(
+      alice.did(),
+      "did:key:z6Mkk89bC3JrVqKie71YEcc5M1SMVxuCgNx6zLZ8SYJsxALi",
+    );
+    assertEquals(
+      bob.did(),
+      "did:key:z6MkffDZCkCTWreg8868fG1FGFogcJj5X6PY93pPcWDn9bob",
+    );
+    assertEquals(
+      mallory.did(),
+      "did:key:z6MktafZTREjJkvV5mfJxcLpNBoVPwDLhTuMg9ng7dY4zMAL",
+    );
+    assertEquals(
+      space.did(),
+      "did:key:z6MkrZ1r5XBFZjBU34qyD8fueMbMRkKw17BZaq2ivKFjnz2z",
+    );
+  });
 
-test("signer.did()", () => {
-  assertEquals(
-    alice.did(),
-    "did:key:z6Mkk89bC3JrVqKie71YEcc5M1SMVxuCgNx6zLZ8SYJsxALi",
-  );
-  assertEquals(
-    bob.did(),
-    "did:key:z6MkffDZCkCTWreg8868fG1FGFogcJj5X6PY93pPcWDn9bob",
-  );
-  assertEquals(
-    mallory.did(),
-    "did:key:z6MktafZTREjJkvV5mfJxcLpNBoVPwDLhTuMg9ng7dY4zMAL",
-  );
-  assertEquals(
-    space.did(),
-    "did:key:z6MkrZ1r5XBFZjBU34qyD8fueMbMRkKw17BZaq2ivKFjnz2z",
-  );
-});
+  it("verifier.did()", () => {
+    assertEquals(alice.did(), alice.verifier.did());
+    assertEquals(bob.did(), bob.verifier.did());
+    assertEquals(mallory.did(), mallory.verifier.did());
+    assertEquals(space.did(), space.verifier.did());
+  });
 
-test("verifier.did()", () => {
-  assertEquals(alice.did(), alice.verifier.did());
-  assertEquals(bob.did(), bob.verifier.did());
-  assertEquals(mallory.did(), mallory.verifier.did());
-  assertEquals(space.did(), space.verifier.did());
-});
-
-test("Access.authorize <-> Access.claim", async () => {
-  const invocation: Invocation = {
-    iss: alice.did(),
-    cmd: "/test/run",
-    sub: alice.did(),
-    args: {},
-    prf: [],
-  };
-
-  const result = await Access.authorize([refer(invocation)], alice);
-  assert(result.ok, "authorization was issued");
-  const authorization = result.ok;
-
-  const claim = await Access.claim(invocation, authorization, serviceDid);
-  assert(claim.ok, "authorization is valid");
-
-  const unauthorized = await Access.claim(
-    {
+  it("Access.authorize <-> Access.claim", async () => {
+    const invocation: Invocation = {
       iss: alice.did(),
-      cmd: "/test/ran",
+      cmd: "/test/run",
       sub: alice.did(),
       args: {},
       prf: [],
-    },
-    authorization,
-    serviceDid,
-  );
+    };
 
-  assertMatch(unauthorized?.error?.message ?? "", /Authorization does not/);
-});
+    const result = await Access.authorize([refer(invocation)], alice);
+    assert(result.ok, "authorization was issued");
+    const authorization = result.ok;
 
-test("Fail authorization if issuer is not a subject", async () => {
-  const invocation: Invocation = {
-    iss: bob.did(),
-    cmd: "/test/run",
-    sub: alice.did(),
-    args: {},
-    prf: [],
-  };
+    const claim = await Access.claim(invocation, authorization, serviceDid);
+    assert(claim.ok, "authorization is valid");
 
-  const result = await Access.authorize([refer(invocation)], bob);
-  assert(result.ok, "authorization was issued");
-  const authorization = result.ok;
+    const unauthorized = await Access.claim(
+      {
+        iss: alice.did(),
+        cmd: "/test/ran",
+        sub: alice.did(),
+        args: {},
+        prf: [],
+      },
+      authorization,
+      serviceDid,
+    );
 
-  const claim = await Access.claim(invocation, authorization, serviceDid);
-  assertMatch(
-    claim.error?.message ?? "",
-    new RegExp(
-      `Principal ${bob.did()} has no authority over ${alice.did()} space`,
-    ),
-  );
-});
+    assertMatch(unauthorized?.error?.message ?? "", /Authorization does not/);
+  });
 
-test("Access.authorize with multiple refs -> each can be claimed", async () => {
-  const invocation1: Invocation = {
-    iss: alice.did(),
-    cmd: "/test/alpha",
-    sub: alice.did(),
-    args: { n: 1 },
-    prf: [],
-  };
-  const invocation2: Invocation = {
-    iss: alice.did(),
-    cmd: "/test/beta",
-    sub: alice.did(),
-    args: { n: 2 },
-    prf: [],
-  };
+  it("Fail authorization if issuer is not a subject", async () => {
+    const invocation: Invocation = {
+      iss: bob.did(),
+      cmd: "/test/run",
+      sub: alice.did(),
+      args: {},
+      prf: [],
+    };
 
-  const result = await Access.authorize(
-    [refer(invocation1), refer(invocation2)],
-    alice,
-  );
-  assert(result.ok, "batch authorization was issued");
-  const authorization = result.ok;
+    const result = await Access.authorize([refer(invocation)], bob);
+    assert(result.ok, "authorization was issued");
+    const authorization = result.ok;
 
-  const claim1 = await Access.claim(invocation1, authorization, serviceDid);
-  assert(claim1.ok, "first invocation is valid");
+    const claim = await Access.claim(invocation, authorization, serviceDid);
+    assertMatch(
+      claim.error?.message ?? "",
+      new RegExp(
+        `Principal ${bob.did()} has no authority over ${alice.did()} space`,
+      ),
+    );
+  });
 
-  const claim2 = await Access.claim(invocation2, authorization, serviceDid);
-  assert(claim2.ok, "second invocation is valid");
+  it("Access.authorize with multiple refs -> each can be claimed", async () => {
+    const invocation1: Invocation = {
+      iss: alice.did(),
+      cmd: "/test/alpha",
+      sub: alice.did(),
+      args: { n: 1 },
+      prf: [],
+    };
+    const invocation2: Invocation = {
+      iss: alice.did(),
+      cmd: "/test/beta",
+      sub: alice.did(),
+      args: { n: 2 },
+      prf: [],
+    };
 
-  const unrelated: Invocation = {
-    iss: alice.did(),
-    cmd: "/test/gamma",
-    sub: alice.did(),
-    args: {},
-    prf: [],
-  };
-  const claimUnrelated = await Access.claim(
-    unrelated,
-    authorization,
-    serviceDid,
-  );
-  assertMatch(
-    claimUnrelated?.error?.message ?? "",
-    /Authorization does not/,
-  );
-});
+    const result = await Access.authorize(
+      [refer(invocation1), refer(invocation2)],
+      alice,
+    );
+    assert(result.ok, "batch authorization was issued");
+    const authorization = result.ok;
 
-test("Fail authorization if subject isn't a did", async () => {
-  const invocation: Invocation = {
-    iss: bob.did(),
-    cmd: "/test/run",
-    sub: alice.did().slice(0, -1) as DID,
-    args: {},
-    prf: [],
-  };
+    const claim1 = await Access.claim(invocation1, authorization, serviceDid);
+    assert(claim1.ok, "first invocation is valid");
 
-  const result = await Access.authorize([refer(invocation)], bob);
-  assert(result.ok, "authorization was issued");
-  const authorization = result.ok;
+    const claim2 = await Access.claim(invocation2, authorization, serviceDid);
+    assert(claim2.ok, "second invocation is valid");
 
-  const claim = await Access.claim(invocation, authorization, serviceDid);
-  assertMatch(
-    claim.error?.message ?? "",
-    new RegExp(
-      `Expected valid did:key identifier instead got "${
-        alice.did().slice(0, -1)
-      }"`,
-    ),
-  );
+    const unrelated: Invocation = {
+      iss: alice.did(),
+      cmd: "/test/gamma",
+      sub: alice.did(),
+      args: {},
+      prf: [],
+    };
+    const claimUnrelated = await Access.claim(
+      unrelated,
+      authorization,
+      serviceDid,
+    );
+    assertMatch(
+      claimUnrelated?.error?.message ?? "",
+      /Authorization does not/,
+    );
+  });
+
+  it("Fail authorization if subject isn't a did", async () => {
+    const invocation: Invocation = {
+      iss: bob.did(),
+      cmd: "/test/run",
+      sub: alice.did().slice(0, -1) as DID,
+      args: {},
+      prf: [],
+    };
+
+    const result = await Access.authorize([refer(invocation)], bob);
+    assert(result.ok, "authorization was issued");
+    const authorization = result.ok;
+
+    const claim = await Access.claim(invocation, authorization, serviceDid);
+    assertMatch(
+      claim.error?.message ?? "",
+      new RegExp(
+        `Expected valid did:key identifier instead got "${
+          alice.did().slice(0, -1)
+        }"`,
+      ),
+    );
+  });
 });

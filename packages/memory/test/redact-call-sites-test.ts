@@ -5,9 +5,19 @@
  * - provider.ts: When commits are broadcast to subscribers
  * - space-schema.ts: When commit log data is included in query results
  */
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  it,
+} from "@std/testing/bdd";
 import { assert, assertEquals, assertFalse } from "@std/assert";
-import { refer } from "../reference.ts";
+import {
+  refer,
+  resetCanonicalHashConfig,
+  setCanonicalHashConfig,
+} from "../reference.ts";
 import * as Changes from "../changes.ts";
 import * as Commit from "../commit.ts";
 import * as Consumer from "../consumer.ts";
@@ -16,6 +26,10 @@ import type { UTCUnixTimestampInSeconds } from "../interface.ts";
 import * as Provider from "../provider.ts";
 import { LABEL_TYPE } from "../space.ts";
 import { alice } from "./principal.ts";
+
+// Explicitly pin canonical hashing off so these tests exercise the legacy
+// refer() path regardless of what the ambient default is.
+setCanonicalHashConfig(false);
 
 const serviceDid = "did:key:z6MkfJPMCrTyDmurrAHPUsEjCgvcjvLtAuzyZ7nSqwZwb8KQ";
 
@@ -34,6 +48,11 @@ const the = "application/json";
 const store = new URL(`memory://`);
 
 describe("redactCommitData call sites", () => {
+  // Clean up the module-level setCanonicalHashConfig(false) after all tests.
+  afterAll(() => {
+    resetCanonicalHashConfig();
+  });
+
   let provider: Provider.Provider<Provider.Protocol>;
   let session: Provider.ProviderSession<Provider.Protocol>;
 

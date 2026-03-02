@@ -201,13 +201,20 @@ Deno.test("StorableContentId", async (t) => {
   await t.step(
     "refer() returns Reference.View when canonical hashing is off",
     () => {
-      // Default state: canonical hashing off.
-      const result = refer({ test: true });
-      assert(Reference.is(result), "Expected a Reference.View instance");
-      assert(
-        !(result instanceof StorableContentId),
-        "Should not be StorableContentId when flag is off",
-      );
+      // Explicitly pin canonical hashing off rather than relying on ambient
+      // default, so this step exercises the legacy path even if the default
+      // changes.
+      setCanonicalHashConfig(false);
+      try {
+        const result = refer({ test: true });
+        assert(Reference.is(result), "Expected a Reference.View instance");
+        assert(
+          !(result instanceof StorableContentId),
+          "Should not be StorableContentId when flag is off",
+        );
+      } finally {
+        resetCanonicalHashConfig();
+      }
     },
   );
 });
