@@ -253,6 +253,7 @@ export function runSyncLoop(
         //    On retry (tx failed because new edits arrived), only new
         //    edits beyond the watermark are applied — earlier ones are
         //    already on disk.
+        const applied: Edit[] = [];
         for (let i = editWatermark; i < edits.length; i++) {
           const edit = edits[i];
           try {
@@ -260,6 +261,7 @@ export function runSyncLoop(
             if (edit.type === "create" && result.canonicalId) {
               editIdMap.set(edit, result.canonicalId);
             }
+            applied.push(edit);
           } catch (err) {
             if (isSystemError(err)) {
               // System error: keep edit in queue, crash loud.
@@ -302,8 +304,8 @@ export function runSyncLoop(
           }
         }
 
-        // 4. Clear edit queue, record applied edits
-        appliedEditsCell.push(...edits);
+        // 4. Clear edit queue, record only successfully applied edits
+        appliedEditsCell.push(...applied);
         editsCell.set([]);
       } finally {
         popFrame();

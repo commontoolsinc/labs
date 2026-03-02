@@ -68,9 +68,7 @@ export default pattern(() => {
   const assert_first_description = computed(() =>
     list.todos[0]?.description === "Buy groceries"
   );
-  const assert_first_not_done = computed(() =>
-    list.todos[0]?.done === false
-  );
+  const assert_first_not_done = computed(() => list.todos[0]?.done === false);
   const assert_one_edit = computed(() => list.edits.length === 1);
   const assert_edit_is_create = computed(() =>
     list.edits[0]?.type === "create"
@@ -86,9 +84,7 @@ export default pattern(() => {
   // After toggling first
   const assert_first_done = computed(() => list.todos[0]?.done === true);
   const assert_three_edits = computed(() => list.edits.length === 3);
-  const assert_toggle_edit = computed(() =>
-    list.edits[2]?.type === "toggle"
-  );
+  const assert_toggle_edit = computed(() => list.edits[2]?.type === "toggle");
 
   // After toggling first again (back to not done)
   const assert_first_undone = computed(() => list.todos[0]?.done === false);
@@ -100,9 +96,7 @@ export default pattern(() => {
     list.todos[0]?.description === "Buy groceries"
   );
   const assert_five_edits = computed(() => list.edits.length === 5);
-  const assert_delete_edit = computed(() =>
-    list.edits[4]?.type === "delete"
-  );
+  const assert_delete_edit = computed(() => list.edits[4]?.type === "delete");
 
   // After deleting remaining
   const assert_empty_again = computed(() => list.todos.length === 0);
