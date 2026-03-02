@@ -891,40 +891,21 @@ export class WorkerReconciler {
           }
           if (existingState) existingState.cancel();
 
-          if (isStream(resolvedTarget)) {
-            const stream = resolvedTarget as Stream<unknown>;
-            const handlerId = ctx.registerHandler((event: unknown) =>
-              stream.send(event)
-            );
-            state.eventHandlers.set(eventType, handlerId);
-            this.queueOps([{
-              op: "set-event",
-              nodeId: state.nodeId,
-              eventType,
-              handlerId,
-            }]);
-            state.propSubscriptions.set(key, {
-              cell: undefined,
-              cancel: () => {},
-              currentValue: resolvedTarget,
-            });
-          } else if (isEventHandler(resolvedTarget)) {
-            const handlerId = ctx.registerHandler(
-              resolvedTarget as (event: unknown) => void,
-            );
-            state.eventHandlers.set(eventType, handlerId);
-            this.queueOps([{
-              op: "set-event",
-              nodeId: state.nodeId,
-              eventType,
-              handlerId,
-            }]);
-            state.propSubscriptions.set(key, {
-              cell: undefined,
-              cancel: () => {},
-              currentValue: resolvedTarget,
-            });
-          }
+          const handlerId = ctx.registerHandler((event: unknown) =>
+            (resolvedTarget as Cell<unknown>).send(event)
+          );
+          state.eventHandlers.set(eventType, handlerId);
+          this.queueOps([{
+            op: "set-event",
+            nodeId: state.nodeId,
+            eventType,
+            handlerId,
+          }]);
+          state.propSubscriptions.set(key, {
+            cell: resolvedTarget as Cell<unknown>,
+            cancel: () => {},
+            currentValue: resolvedTarget,
+          });
         } else if (isBindingProp(key)) {
           // Binding prop - resolve target Cell via navigation
           const resolvedTarget = propsCell.key(key).resolveAsCell();
