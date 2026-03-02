@@ -2,12 +2,24 @@
 /**
  * .claude/scripts/pre-commit.ts
  *
- * Claude Code Pre-Tool hook for git commit commands.
- * - Parses the command to determine which files will be committed.
- * - Runs `deno fmt` on those files only (auto-fixes before commit).
- * - Runs `deno lint` on those files only.
- * - Runs `deno check` on the .ts/.tsx subset only.
- * - Exits 2 to block the commit if any check fails.
+ * Claude Code PreToolUse hook that intercepts `git commit` commands.
+ *
+ * IMPORTANT: This hook only acts on files that are about to be committed,
+ * NOT the entire repo. Other files in the working tree may be in a
+ * half-finished state and must not cause the commit to fail or be modified.
+ *
+ * The hook parses the Bash command (e.g. `git add file1 file2 && git commit`)
+ * to figure out exactly which files will be staged. It then runs:
+ *
+ *   1. `deno fmt`   — auto-fix formatting (only on those files)
+ *   2. `deno lint`  — lint check (only on those files)
+ *   3. `deno check` — type check (only on the .ts/.tsx subset)
+ *
+ * If any check fails, the hook exits 2 to block the commit.
+ *
+ * Note: this runs as a PreToolUse hook, meaning it fires BEFORE the Bash
+ * command executes. `git add` has not yet run, so `git diff --cached` would
+ * be empty — that's why we parse file paths from the command string instead.
  */
 
 import { guardProjectDir } from "./common/guard.ts";
