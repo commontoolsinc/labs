@@ -1184,7 +1184,43 @@ export type JSONSchemaObj = {
   // streams are what handler returns. if you pass that to another handler/lift and declare it as asSteam, you can call .send on it
   readonly asStream?: boolean;
   // temporarily used to assign labels like "confidential"
-  readonly ifc?: { classification?: string[]; integrity?: string[] };
+  readonly ifc?: {
+    classification?: readonly string[];
+    integrity?: readonly string[];
+    maxConfidentiality?: readonly string[];
+    requiredIntegrity?: readonly string[];
+    exactCopyOf?: string;
+    projection?: {
+      from?: string;
+      path?: string;
+    };
+    collection?: {
+      sourceCollection?: string;
+      subsetOf?: string;
+      permutationOf?: string;
+      filteredFrom?: string;
+      lengthPreserved?: boolean;
+      predicate?: string;
+    };
+    recomposeProjections?: {
+      from?: string;
+      baseIntegrityType?: string;
+      parts?: readonly {
+        outputPath?: string;
+        projectionPath?: string;
+      }[];
+    };
+    statePrecondition?: {
+      requiredRead?: string;
+      predicate?: string;
+      path?: string;
+      equals?: JSONValue;
+    };
+    declassify?: JSONValue;
+    exchange?: JSONValue;
+    preConfScope?: "targetClause" | "anywhere";
+    predicate?: string;
+  };
 };
 
 // LLM types matching Vercel AI SDK structure

@@ -82,6 +82,7 @@ import {
 } from "./link-utils.ts";
 import type {
   ChangeGroup,
+  CommitError,
   IExtendedStorageTransaction,
   IReadOptions,
 } from "./storage/interface.ts";
@@ -91,6 +92,7 @@ import {
 } from "./storage/extended-storage-transaction.ts";
 import { fromURI } from "./uri-utils.ts";
 import { ContextualFlowControl } from "./cfc.ts";
+import { isCfcHandlerTransaction } from "./cfc/handler-transaction.ts";
 import { getLogger } from "@commontools/utils/logger";
 import { ensureNotRenderThread } from "@commontools/utils/env";
 ensureNotRenderThread();
@@ -119,7 +121,10 @@ declare module "@commontools/api" {
   interface IWritable<T, C extends AnyBrandedCell<any>> {
     set(
       value: AnyCellWrapping<T> | T,
-      onCommit?: (tx: IExtendedStorageTransaction) => void,
+      onCommit?: (
+        tx: IExtendedStorageTransaction,
+        commitResult: { error?: CommitError },
+      ) => void,
     ): C;
   }
 
@@ -131,11 +136,17 @@ declare module "@commontools/api" {
     send(
       ...args: T extends void ? [] | [AnyCellWrapping<T> | T] | [
           AnyCellWrapping<T> | T,
-          (tx: IExtendedStorageTransaction) => void,
+          (
+            tx: IExtendedStorageTransaction,
+            commitResult: { error?: CommitError },
+          ) => void,
         ]
         : [AnyCellWrapping<T> | T] | [
           AnyCellWrapping<T> | T,
-          (tx: IExtendedStorageTransaction) => void,
+          (
+            tx: IExtendedStorageTransaction,
+            commitResult: { error?: CommitError },
+          ) => void,
         ]
     ): void;
   }
@@ -659,7 +670,10 @@ export class CellImpl<T extends StorableValue>
 
   set(
     newValue: AnyCellWrapping<T> | T,
-    onCommit?: (tx: IExtendedStorageTransaction) => void,
+    onCommit?: (
+      tx: IExtendedStorageTransaction,
+      commitResult: { error?: CommitError },
+    ) => void,
   ): Cell<T> {
     const resolvedToValueLink = resolveLink(
       this.runtime,
@@ -671,14 +685,31 @@ export class CellImpl<T extends StorableValue>
     if (this.isStream(resolvedToValueLink)) {
       // Stream behavior
       const event = convertCellsToLinks(newValue) as AnyCellWrapping<T>;
+      const inHandlerContext = Boolean(getTopFrame()?.inHandler);
+      const isHandlerTransaction = isCfcHandlerTransaction(this.tx);
 
-      // Trigger on fully resolved link
-      this.runtime.scheduler.queueEvent(
-        resolvedToValueLink,
-        event,
-        undefined,
-        onCommit,
-      );
+      if (
+        this.tx?.status().status === "ready" &&
+        (inHandlerContext || isHandlerTransaction)
+      ) {
+        this.tx.markCfcRelevant("stream-side-effect");
+        this.tx.enqueueCfcSideEffect(() => {
+          this.runtime.scheduler.queueEvent(
+            resolvedToValueLink,
+            event,
+            undefined,
+            onCommit,
+          );
+        });
+      } else {
+        // Trigger on fully resolved link
+        this.runtime.scheduler.queueEvent(
+          resolvedToValueLink,
+          event,
+          undefined,
+          onCommit,
+        );
+      }
 
       this.cleanup?.();
       const [cancel, addCancel] = useCancelGroup();
@@ -722,11 +753,17 @@ export class CellImpl<T extends StorableValue>
   send(
     ...args: T extends void ? [] | [AnyCellWrapping<T>] | [
         AnyCellWrapping<T>,
-        (tx: IExtendedStorageTransaction) => void,
+        (
+          tx: IExtendedStorageTransaction,
+          commitResult: { error?: CommitError },
+        ) => void,
       ]
       : [AnyCellWrapping<T>] | [
         AnyCellWrapping<T>,
-        (tx: IExtendedStorageTransaction) => void,
+        (
+          tx: IExtendedStorageTransaction,
+          commitResult: { error?: CommitError },
+        ) => void,
       ]
   ): void {
     const [event, onCommit] = args;

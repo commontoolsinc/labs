@@ -8,7 +8,10 @@ import type { JSONValue } from "@commontools/api";
 import { type StorableDatum } from "@commontools/memory/interface";
 import { createCell, isCell } from "./cell.ts";
 import { readMaybeLink, resolveLink } from "./link-resolution.ts";
-import { type IExtendedStorageTransaction } from "./storage/interface.ts";
+import {
+  type ICfcReadAnnotations,
+  type IExtendedStorageTransaction,
+} from "./storage/interface.ts";
 import { getTransactionForChildCells } from "./storage/extended-storage-transaction.ts";
 import { type Runtime } from "./runtime.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
@@ -17,6 +20,10 @@ import {
   isCellResultForDereferencing,
 } from "./query-result-proxy.ts";
 import { toCell } from "./back-to-cell.ts";
+import {
+  markCfcRelevantForEffectiveLabels,
+  markCfcRelevantForSchema,
+} from "./cfc/relevance.ts";
 import {
   combineSchema,
   IObjectCreator,
@@ -347,6 +354,41 @@ function annotateWithBackToCellSymbols(
   return value;
 }
 
+function readIfcInputAnnotations(
+  schema: JSONSchema | undefined,
+): ICfcReadAnnotations | undefined {
+  const resolvedSchema = resolveSchema(schema);
+  const schemaWithIfc = isObject(resolvedSchema) && isObject(resolvedSchema.ifc)
+    ? resolvedSchema
+    : isObject(schema) && isObject(schema.ifc)
+    ? schema
+    : undefined;
+  if (!schemaWithIfc) {
+    return undefined;
+  }
+  const rawMaxConfidentiality = (schemaWithIfc.ifc as Record<string, unknown>)
+    .maxConfidentiality;
+  const maxConfidentiality = Array.isArray(rawMaxConfidentiality)
+    ? rawMaxConfidentiality.filter(
+      (entry): entry is string => typeof entry === "string" && entry.length > 0,
+    )
+    : [];
+  const rawRequiredIntegrity = (schemaWithIfc.ifc as Record<string, unknown>)
+    .requiredIntegrity;
+  const requiredIntegrity = Array.isArray(rawRequiredIntegrity)
+    ? rawRequiredIntegrity.filter(
+      (entry): entry is string => typeof entry === "string" && entry.length > 0,
+    )
+    : [];
+  if (maxConfidentiality.length === 0 && requiredIntegrity.length === 0) {
+    return undefined;
+  }
+  return {
+    ...(maxConfidentiality.length > 0 ? { maxConfidentiality } : {}),
+    ...(requiredIntegrity.length > 0 ? { requiredIntegrity } : {}),
+  };
+}
+
 export interface ValidateAndTransformOptions {
   /** When true, also read into each Cell created for asCell fields to capture dependencies */
   traverseCells?: boolean;
@@ -414,6 +456,8 @@ export function validateAndTransform(
   // We'll use this for the value, and potentially merge the schema
   // This gets me the result of following all the links, so I can get the value
   const ref = resolveLink(runtime, tx, link);
+  markCfcRelevantForSchema(tx, ref.schema ?? link.schema, "ifc-read-schema");
+  markCfcRelevantForEffectiveLabels(tx, ref);
   const objectCreator = new TransformObjectCreator(
     runtime,
     tx!,
@@ -451,7 +495,14 @@ export function validateAndTransform(
   // Link paths don't include value, but doc address should
   const { space, id, type, path } = ref;
   const address = { space, id, type, path: ["value", ...path] };
-  const doc = { address, value: tx!.readValueOrThrow(ref) };
+  const readCfc = readIfcInputAnnotations(ref.schema ?? link.schema);
+  const doc = {
+    address,
+    value: tx!.readValueOrThrow(
+      ref,
+      readCfc ? { cfc: readCfc } : undefined,
+    ),
+  };
   // If we have a ref with a schema, use that; otherwise, use the link's schema
   const selector = {
     path: doc.address.path,

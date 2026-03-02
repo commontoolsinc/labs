@@ -26,13 +26,21 @@ import {
 } from "./link-utils.ts";
 import type {
   ChangeGroup,
+  CommitError,
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
   IStorageSubscription,
+  IStorageTransactionAborted,
   MediaType,
   MemoryAddressPathComponent,
   Metadata,
+  Result,
+  Unit,
 } from "./storage/interface.ts";
+import {
+  ignoreReadForSchedulingMarker,
+  markReadAsPotentialWriteMarker,
+} from "./storage/read-metadata.ts";
 import {
   addressesToPathByEntity,
   arraysOverlap,
@@ -41,6 +49,12 @@ import {
   type SortedAndCompactPaths,
 } from "./reactive-dependencies.ts";
 import { ensurePieceRunning } from "./ensure-piece-running.ts";
+import {
+  isCommitBearingAttempt,
+  prepareCfcCommitIfNeeded,
+} from "./cfc/prepare-shim.ts";
+import { isCfcCommitError, toCfcRejectLog } from "./cfc/rejection-log.ts";
+import { markCfcHandlerTransaction } from "./cfc/handler-transaction.ts";
 import type {
   ActionStats,
   SchedulerActionInfo,
@@ -109,14 +123,6 @@ export type ReactivityLog = {
   potentialWrites?: IMemorySpaceAddress[];
 };
 
-const ignoreReadForSchedulingMarker: unique symbol = Symbol(
-  "ignoreReadForSchedulingMarker",
-);
-
-const markReadAsPotentialWriteMarker: unique symbol = Symbol(
-  "markReadAsPotentialWriteMarker",
-);
-
 export const ignoreReadForScheduling: Metadata = {
   [ignoreReadForSchedulingMarker]: true,
 };
@@ -146,7 +152,10 @@ export class Scheduler {
     handler: EventHandler;
     event: any;
     retriesLeft: number;
-    onCommit?: (tx: IExtendedStorageTransaction) => void;
+    onCommit?: (
+      tx: IExtendedStorageTransaction,
+      commitResult: { error?: CommitError },
+    ) => void;
   }[] = [];
   private eventHandlers: [NormalizedFullLink, EventHandler][] = [];
 
@@ -720,7 +729,10 @@ export class Scheduler {
           // retry logic below will have re-scheduled this action, so
           // topological sorting should move it before the dependencies.
           logger.timeStart("scheduler", "run", "commit");
-          const commitPromise = tx.commit();
+          const commitPromise = commitWithCfcPrepare(
+            tx,
+            this.runtime.experimental.cfcBoundaryEnforcement,
+          );
           logger.timeEnd("scheduler", "run", "commit");
           commitPromise.then(({ error }) => {
             // On error, retry up to MAX_RETRIES_FOR_REACTIVE times. Note that
@@ -728,11 +740,25 @@ export class Scheduler {
             // even after we run out of retries, this will be re-triggered when
             // input data changes.
             if (error) {
-              logger.info(
-                "schedule-run-error",
-                "Error committing transaction",
-                error,
-              );
+              const cfcReject = toCfcRejectLog(error);
+              if (cfcReject) {
+                logger.warn(
+                  "cfc-reject",
+                  "Reactive commit rejected by CFC boundary gate",
+                  cfcReject,
+                );
+              } else {
+                logger.info(
+                  "schedule-run-error",
+                  "Error committing transaction",
+                  error,
+                );
+              }
+
+              if (!shouldRetryCommitError(error)) {
+                this.retries.delete(action);
+                return;
+              }
 
               this.retries.set(action, (this.retries.get(action) ?? 0) + 1);
               if (this.retries.get(action)! < MAX_RETRIES_FOR_REACTIVE) {
@@ -820,7 +846,10 @@ export class Scheduler {
     eventLink: NormalizedFullLink,
     event: any,
     retries: number = DEFAULT_RETRIES_FOR_EVENTS,
-    onCommit?: (tx: IExtendedStorageTransaction) => void,
+    onCommit?: (
+      tx: IExtendedStorageTransaction,
+      commitResult: { error?: CommitError },
+    ) => void,
     doNotLoadPieceIfNotRunning: boolean = false,
   ): void {
     let handlerFound = false;
@@ -2093,60 +2122,76 @@ export class Scheduler {
         // Continue to process pending actions
         // The event will be processed in the next execute() cycle
       } else {
-        const finalize = (error?: unknown) => {
+        const finalize = async (error?: unknown): Promise<void> => {
           try {
             if (error) this.handleError(error as Error, action);
           } finally {
-            tx.commit().then(({ error }) => {
-              // If the transaction failed, and we have retries left, queue the
-              // event again at the beginning of the queue. This isn't guaranteed
-              // to be the same order as the original event, but it's close
-              // enough, especially for a series of event that act on the same
-              // conflicting data.
-              if (error && retriesLeft > 0) {
-                logger.warn(
-                  "scheduler",
-                  `Event handler transaction failed, retrying (${retriesLeft} retries left)`,
-                  { error, handlerId },
-                );
-                this.eventQueue.unshift({
-                  action,
-                  handler,
-                  event: eventValue,
-                  retriesLeft: retriesLeft - 1,
-                  onCommit,
-                });
-                // Ensure the re-queued event gets processed even if the scheduler
-                // finished this cycle before the commit completed.
-                this.queueExecution();
-              } else {
-                if (error) {
+            const { error: commitError } = await commitWithCfcPrepare(
+              tx,
+              this.runtime.experimental.cfcBoundaryEnforcement,
+            );
+            // If the transaction failed, and we have retries left, queue the
+            // event again at the beginning of the queue. This isn't guaranteed
+            // to be the same order as the original event, but it's close
+            // enough, especially for a series of event that act on the same
+            // conflicting data.
+            if (
+              commitError &&
+              retriesLeft > 0 &&
+              shouldRetryCommitError(commitError)
+            ) {
+              logger.warn(
+                "scheduler",
+                `Event handler transaction failed, retrying (${retriesLeft} retries left)`,
+                { error: commitError, handlerId },
+              );
+              this.eventQueue.unshift({
+                action,
+                handler,
+                event: eventValue,
+                retriesLeft: retriesLeft - 1,
+                onCommit,
+              });
+              // Ensure the re-queued event gets processed even if the scheduler
+              // finished this cycle before the commit completed.
+              this.queueExecution();
+            } else {
+              if (commitError) {
+                const cfcReject = toCfcRejectLog(commitError);
+                if (cfcReject) {
+                  logger.warn(
+                    "cfc-reject",
+                    "Event handler commit rejected by CFC boundary gate",
+                    { handlerId, ...cfcReject },
+                  );
+                } else {
                   logger.error(
                     "schedule-error",
                     "Event handler transaction failed after exhausting all retries",
-                    { error, handlerId },
+                    { error: commitError, handlerId },
                   );
                 }
-                if (onCommit) {
-                  // Call commit callback when:
-                  // - Commit succeeds (!error), OR
-                  // - Commit fails but we're out of retries (retriesLeft === 0)
-                  try {
-                    onCommit(tx);
-                  } catch (callbackError) {
-                    logger.error(
-                      "schedule-error",
-                      "Error in event commit callback:",
-                      callbackError,
-                    );
-                  }
+              }
+              if (onCommit) {
+                // Call commit callback when:
+                // - Commit succeeds (!commitError), OR
+                // - Commit fails but we're out of retries (retriesLeft === 0)
+                try {
+                  onCommit(tx, { error: commitError });
+                } catch (callbackError) {
+                  logger.error(
+                    "schedule-error",
+                    "Error in event commit callback:",
+                    callbackError,
+                  );
                 }
               }
-            });
+            }
           }
         };
         const tx = this.runtime.edit();
         tx.tx.immediate = true;
+        markCfcHandlerTransaction(tx);
         const actionId = this.getActionId(action);
 
         try {
@@ -2163,11 +2208,11 @@ export class Scheduler {
                 `Action ${actionId} completed in ${duration.toFixed(3)}s`,
               ];
             });
-            finalize();
+            return finalize();
           }).catch((error) => finalize(error));
           await this.runningPromise;
         } catch (error) {
-          finalize(error);
+          await finalize(error);
         }
       } // Close else block for shouldSkipEvent
     }
@@ -2661,6 +2706,60 @@ export function txToReactivityLog(
     }
   }
   return log;
+}
+
+function transactionAbortedFromError(
+  error: unknown,
+): IStorageTransactionAborted {
+  return {
+    name: "StorageTransactionAborted",
+    message: "Transaction was aborted",
+    reason: error,
+  };
+}
+
+function shouldRetryCommitError(error: CommitError): boolean {
+  return !isCfcCommitError(error);
+}
+
+function commitWithCfcPrepare(
+  tx: IExtendedStorageTransaction,
+  enforceBoundary: boolean,
+): Promise<Result<Unit, CommitError>> {
+  if (tx.status().status !== "ready") {
+    return tx.commit();
+  }
+
+  if (!tx.cfcRelevant || !isCommitBearingAttempt(tx)) {
+    return tx.commit();
+  }
+
+  return prepareCfcCommitIfNeeded(tx, {
+    enforceBoundary,
+  })
+    .then(() => tx.commit())
+    .catch((error) => {
+      tx.abort(error);
+      if (isCfcCommitError(error)) {
+        const cfcReject = toCfcRejectLog(error);
+        if (cfcReject) {
+          logger.warn(
+            "cfc-reject",
+            "Prepare step rejected commit at CFC boundary",
+            {
+              cfcReasons: tx.cfcReasons,
+              ...cfcReject,
+            },
+          );
+        }
+        return { error };
+      }
+      const status = tx.status();
+      if (status.status === "error") {
+        return { error: status.error as CommitError };
+      }
+      return { error: transactionAbortedFromError(error) };
+    });
 }
 
 function getPieceMetadataFromFrame(frame?: Frame): {

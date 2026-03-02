@@ -2,6 +2,8 @@ import type { StorableDatum } from "@commontools/memory/interface";
 import type {
   Activity,
   IAttestation,
+  ICfcReadAnnotations,
+  IInvalidReadOptionsError,
   IMemoryAddress,
   InactiveTransactionError,
   IReadOptions,
@@ -14,10 +16,15 @@ import type {
   ITransactionWriter,
   JournalArchive,
   MemorySpace,
+  Metadata,
   ReadError,
   Result,
   WriteError,
 } from "../interface.ts";
+import {
+  ignoreReadForSchedulingMarker,
+  markReadAsPotentialWriteMarker,
+} from "../read-metadata.ts";
 import * as Chronicle from "./chronicle.ts";
 
 export interface UnknownState {
@@ -99,6 +106,171 @@ class Journal implements IJournal, ITransactionJournal {
   }
 }
 
+type ValidationResult<T> =
+  | { ok: T }
+  | { error: IInvalidReadOptionsError };
+
+const InvalidReadOptionsError = (
+  option: "meta" | "cfc",
+  reason: string,
+): IInvalidReadOptionsError => ({
+  name: "InvalidReadOptionsError",
+  message: `Invalid read ${option}: ${reason}`,
+  option,
+  reason,
+  from(_space: MemorySpace) {
+    return this;
+  },
+});
+
+function isObjectLike(value: unknown): value is Record<PropertyKey, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function validateReadMetadata(
+  meta: unknown,
+): Result<Metadata, IInvalidReadOptionsError> {
+  if (meta === undefined) {
+    return { ok: {} };
+  }
+  if (!isObjectLike(meta)) {
+    return { error: InvalidReadOptionsError("meta", "must be an object") };
+  }
+
+  const stringKeys = Object.keys(meta);
+  if (stringKeys.length > 0) {
+    return {
+      error: InvalidReadOptionsError(
+        "meta",
+        `unsupported keys: ${stringKeys.join(", ")}`,
+      ),
+    };
+  }
+
+  const allowedSymbols = new Set<PropertyKey>([
+    ignoreReadForSchedulingMarker,
+    markReadAsPotentialWriteMarker,
+  ]);
+  for (const symbolKey of Object.getOwnPropertySymbols(meta)) {
+    if (!allowedSymbols.has(symbolKey)) {
+      return {
+        error: InvalidReadOptionsError(
+          "meta",
+          `unsupported symbol key: ${String(symbolKey)}`,
+        ),
+      };
+    }
+    if ((meta as Record<PropertyKey, unknown>)[symbolKey] !== true) {
+      return {
+        error: InvalidReadOptionsError(
+          "meta",
+          `${String(symbolKey)} must be true when present`,
+        ),
+      };
+    }
+  }
+
+  return { ok: meta as Metadata };
+}
+
+function validateCfcStringList(
+  key: "maxConfidentiality" | "requiredIntegrity",
+  raw: unknown,
+): ValidationResult<readonly string[] | undefined> {
+  if (raw === undefined) {
+    return { ok: undefined };
+  }
+  if (!Array.isArray(raw)) {
+    return {
+      error: InvalidReadOptionsError(
+        "cfc",
+        `${key} must be an array of strings`,
+      ),
+    };
+  }
+  const values = raw.filter((entry): entry is string =>
+    typeof entry === "string" && entry.length > 0
+  );
+  if (values.length !== raw.length) {
+    return {
+      error: InvalidReadOptionsError(
+        "cfc",
+        `${key} must contain only non-empty strings`,
+      ),
+    };
+  }
+  return { ok: values };
+}
+
+function validateCfcAnnotations(
+  cfc: unknown,
+): ValidationResult<ICfcReadAnnotations | undefined> {
+  if (cfc === undefined) {
+    return { ok: undefined };
+  }
+  if (!isObjectLike(cfc)) {
+    return { error: InvalidReadOptionsError("cfc", "must be an object") };
+  }
+  const stringKeys = Object.keys(cfc as Record<string, unknown>);
+  const allowedKeys = new Set([
+    "internalVerifierRead",
+    "maxConfidentiality",
+    "requiredIntegrity",
+  ]);
+  for (const key of stringKeys) {
+    if (!allowedKeys.has(key)) {
+      return {
+        error: InvalidReadOptionsError("cfc", `unsupported key: ${key}`),
+      };
+    }
+  }
+  const symbolKeys = Object.getOwnPropertySymbols(cfc);
+  if (symbolKeys.length > 0) {
+    return {
+      error: InvalidReadOptionsError(
+        "cfc",
+        `unsupported symbol keys: ${symbolKeys.map(String).join(", ")}`,
+      ),
+    };
+  }
+
+  const internalVerifierRead = (cfc as { internalVerifierRead?: unknown })
+    .internalVerifierRead;
+  if (internalVerifierRead !== undefined && internalVerifierRead !== true) {
+    return {
+      error: InvalidReadOptionsError(
+        "cfc",
+        "internalVerifierRead must be true when present",
+      ),
+    };
+  }
+
+  const maxConfidentialityResult = validateCfcStringList(
+    "maxConfidentiality",
+    (cfc as { maxConfidentiality?: unknown }).maxConfidentiality,
+  );
+  if ("error" in maxConfidentialityResult) {
+    return { error: maxConfidentialityResult.error };
+  }
+  const requiredIntegrityResult = validateCfcStringList(
+    "requiredIntegrity",
+    (cfc as { requiredIntegrity?: unknown }).requiredIntegrity,
+  );
+  if ("error" in requiredIntegrityResult) {
+    return { error: requiredIntegrityResult.error };
+  }
+
+  const maxConfidentiality = maxConfidentialityResult.ok;
+  const requiredIntegrity = requiredIntegrityResult.ok;
+  return {
+    ok: {
+      ...(internalVerifierRead === true ? { internalVerifierRead: true } : {}),
+      ...(maxConfidentiality ? { maxConfidentiality } : {}),
+      ...(requiredIntegrity ? { requiredIntegrity } : {}),
+    },
+  };
+}
+
 export const read = (
   journal: IJournal,
   space: MemorySpace,
@@ -109,16 +281,30 @@ export const read = (
   if (error) {
     return { error };
   } else {
+    const metadataResult = validateReadMetadata(options?.meta);
+    if (metadataResult.error) {
+      return { error: metadataResult.error.from(space) };
+    }
+    const cfcResult = validateCfcAnnotations(options?.cfc);
+    if ("error" in cfcResult) {
+      return { error: cfcResult.error.from(space) };
+    }
+    const readOptions: IReadOptions = {
+      meta: metadataResult.ok,
+      ...(cfcResult.ok ? { cfc: cfcResult.ok } : {}),
+    };
+
     // Track read activity with metadata
     journal.state.activity.push({
       read: {
         ...address,
         space,
-        meta: options?.meta ?? {},
+        meta: readOptions.meta ?? {},
+        ...(readOptions.cfc ? { cfc: readOptions.cfc } : {}),
       },
     });
 
-    const result = branch.read(address, options);
+    const result = branch.read(address, readOptions);
     if (result.error) {
       return { error: result.error.from(space) };
     } else {

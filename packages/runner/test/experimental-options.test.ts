@@ -44,6 +44,7 @@ describe("ExperimentalOptions", () => {
         storableProtocol: false,
         unifiedJsonEncoding: false,
         canonicalHashing: false,
+        cfcBoundaryEnforcement: true,
       });
       await runtime.dispose();
       await sm.close();
@@ -64,7 +65,22 @@ describe("ExperimentalOptions", () => {
         storableProtocol: false,
         unifiedJsonEncoding: false,
         canonicalHashing: true,
+        cfcBoundaryEnforcement: true,
       });
+      await runtime.dispose();
+      await sm.close();
+    });
+
+    it("allows disabling CFC boundary enforcement explicitly", async () => {
+      const sm = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: sm,
+        experimental: {
+          cfcBoundaryEnforcement: false,
+        },
+      });
+      expect(runtime.experimental.cfcBoundaryEnforcement).toBe(false);
       await runtime.dispose();
       await sm.close();
     });

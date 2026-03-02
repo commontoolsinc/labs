@@ -25,6 +25,13 @@ import type {
 } from "@commontools/memory/interface";
 import { BaseMemoryAddress } from "@commontools/runner/traverse";
 import { Cell } from "../cell.ts";
+import type { ICfcReadAnnotations, Metadata } from "./read-metadata.ts";
+
+export {
+  ignoreReadForSchedulingMarker,
+  markReadAsPotentialWriteMarker,
+} from "./read-metadata.ts";
+export type { ICfcReadAnnotations, Metadata } from "./read-metadata.ts";
 
 export type {
   Assertion,
@@ -56,21 +63,18 @@ export interface IStorageError {
 }
 
 /**
- * Metadata that can be attached to read operations
- */
-export interface Metadata extends Record<PropertyKey, unknown> {}
-
-/**
  * Options for read operations
  */
 export interface IReadOptions {
   meta?: Metadata;
+  cfc?: ICfcReadAnnotations;
 }
 
 // This type is used to tag a document with any important metadata.
-// Currently, the only supported type is the classification.
+// Labels currently support confidentiality-like classification and integrity tags.
 export type Labels = {
   classification?: string[];
+  integrity?: string[];
 };
 
 /** Immutable storage value container. */
@@ -312,8 +316,8 @@ export interface ICommitNotification {
    */
   changes: IMergedChanges;
   /**
-   * Transaction that committed changes. If legacy API is used it will not have
-   * a source transaction.
+   * Transaction that committed changes when available. Notifications produced
+   * from external integrations may omit a source transaction.
    */
   source?: IStorageTransaction;
 }
@@ -347,8 +351,8 @@ export interface IRevertNotification {
   reason: StorageTransactionRejected;
 
   /**
-   * Transaction that committed changes. If legacy API is used it will not have
-   * a source transaction.
+   * Transaction that committed changes when available. Notifications produced
+   * from external integrations may omit a source transaction.
    */
   source?: IStorageTransaction;
 }
@@ -546,6 +550,11 @@ export interface IStorageTransaction {
 
 export interface IExtendedStorageTransaction extends IStorageTransaction {
   tx: IStorageTransaction;
+  readonly cfcRelevant: boolean;
+  readonly cfcPrepared: boolean;
+  readonly preparedActivityDigest?: string;
+  readonly cfcReasons: readonly string[];
+  readonly cfcOutboxSize: number;
 
   /**
    * Add a callback to be called when the transaction commit completes.
@@ -557,7 +566,12 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    *
    * @param callback - Function to call after commit
    */
-  addCommitCallback(callback: (tx: IExtendedStorageTransaction) => void): void;
+  addCommitCallback(
+    callback: (
+      tx: IExtendedStorageTransaction,
+      commitResult: { error?: CommitError },
+    ) => void,
+  ): void;
 
   /**
    * Reads a value from a (local) memory address and throws on error, except for
@@ -610,6 +624,14 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
     address: IMemorySpaceAddress,
     value: StorableValue,
   ): void;
+
+  markCfcRelevant(reason: string): void;
+
+  markCfcPrepared(digest: string): void;
+
+  invalidateCfcPreparation(): void;
+
+  enqueueCfcSideEffect(effect: () => void): void;
 }
 
 export interface ITransactionReader {
@@ -707,6 +729,83 @@ export interface IStorageTransactionInconsistent extends IStorageError {
   from(space: MemorySpace): IStorageTransactionInconsistent;
 }
 
+export interface ICfcPrepareRequiredError extends IStorageError {
+  readonly name: "CfcPrepareRequiredError";
+}
+
+export interface ICfcPreparedDigestMismatchError extends IStorageError {
+  readonly name: "CfcPreparedDigestMismatchError";
+  readonly expectedDigest: string;
+  readonly actualDigest: string;
+}
+
+export interface ICfcPrepareSchemaUnavailableError extends IStorageError {
+  readonly name: "CfcPrepareSchemaUnavailableError";
+  readonly space: MemorySpace;
+  readonly id: URI;
+  readonly type: string;
+}
+
+export interface ICfcSchemaHashMismatchError extends IStorageError {
+  readonly name: "CfcSchemaHashMismatchError";
+  readonly expectedSchemaHash: string;
+  readonly actualSchemaHash: string;
+  readonly space: MemorySpace;
+  readonly id: URI;
+  readonly type: string;
+}
+
+export interface ICfcInputRequirementViolationError extends IStorageError {
+  readonly name: "CfcInputRequirementViolationError";
+  readonly requirement:
+    | "maxConfidentiality"
+    | "requiredIntegrity"
+    | "statePreconditionRead"
+    | "statePreconditionPredicate";
+  readonly space: MemorySpace;
+  readonly id: URI;
+  readonly type: string;
+  readonly path: string;
+  readonly maxConfidentiality?: readonly string[];
+  readonly requiredIntegrity?: readonly string[];
+  readonly actualClassification?: string;
+  readonly actualIntegrity?: readonly string[];
+  readonly requiredReadPath?: string;
+  readonly predicatePath?: string;
+  readonly expectedValue?: unknown;
+  readonly actualValue?: unknown;
+}
+
+export interface ICfcOutputTransitionViolationError extends IStorageError {
+  readonly name: "CfcOutputTransitionViolationError";
+  readonly requirement:
+    | "confidentialityMonotonicity"
+    | "exactCopyOf"
+    | "projection"
+    | "subsetOf"
+    | "permutationOf"
+    | "filteredFrom"
+    | "lengthPreserved"
+    | "recomposeProjections";
+  readonly space: MemorySpace;
+  readonly id: URI;
+  readonly type: string;
+  readonly path: string;
+  readonly sourcePath?: string;
+  readonly projectionPath?: string;
+  readonly minClassification?: string;
+  readonly actualClassification?: string;
+}
+
+export interface ICfcPolicyNonConvergenceError extends IStorageError {
+  readonly name: "CfcPolicyNonConvergenceError";
+  readonly space: MemorySpace;
+  readonly id: URI;
+  readonly type: string;
+  readonly path: string;
+  readonly fuel: number;
+}
+
 /**
  * Error that indicating that no change could be made to a transaction is it is
  * no longer active.
@@ -729,7 +828,14 @@ export type StorageTransactionRejected =
 
 export type CommitError =
   | InactiveTransactionError
-  | StorageTransactionRejected;
+  | StorageTransactionRejected
+  | ICfcPrepareRequiredError
+  | ICfcPreparedDigestMismatchError
+  | ICfcPrepareSchemaUnavailableError
+  | ICfcSchemaHashMismatchError
+  | ICfcInputRequirementViolationError
+  | ICfcOutputTransitionViolationError
+  | ICfcPolicyNonConvergenceError;
 
 /**
  * Error returned when a read or write operation fails because the intra-value
@@ -776,10 +882,21 @@ export interface IInvalidDataURIError extends IStorageError {
   from(space: MemorySpace): IInvalidDataURIError;
 }
 
+/**
+ * Error returned when read options are malformed.
+ */
+export interface IInvalidReadOptionsError extends IStorageError {
+  readonly name: "InvalidReadOptionsError";
+  readonly option: "meta" | "cfc";
+  readonly reason: string;
+  from(space: MemorySpace): IInvalidReadOptionsError;
+}
+
 export type ReadError =
   | INotFoundError
   | InactiveTransactionError
   | IInvalidDataURIError
+  | IInvalidReadOptionsError
   | IUnsupportedMediaTypeError
   | ITypeMismatchError;
 
@@ -918,6 +1035,7 @@ export type Activity = Variant<{
 
 export interface IReadActivity extends IMemorySpaceAddress {
   meta: Metadata;
+  cfc?: ICfcReadAnnotations;
 }
 
 /**

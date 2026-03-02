@@ -8,6 +8,8 @@ import type {
 import type {
   CommitError,
   IAttestation,
+  ICfcPreparedDigestMismatchError,
+  ICfcPrepareRequiredError,
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
   InactiveTransactionError,
@@ -30,6 +32,14 @@ import { toThrowable } from "./interface.ts";
 
 import { ignoreReadForScheduling } from "../scheduler.ts";
 import { isArrayIndexPropertyName } from "@commontools/memory/storable-value";
+import { computeCfcActivityDigest } from "../cfc/activity-digest.ts";
+import { hasWriteActivity } from "../cfc/canonical-activity.ts";
+import {
+  recordCfcGateReject,
+  recordCfcOutboxFlush,
+  recordCfcPreparedTx,
+  recordCfcRelevantTx,
+} from "../cfc/debug-counters.ts";
 
 const logger = getLogger("extended-storage-transaction", {
   enabled: false,
@@ -48,12 +58,66 @@ const logResult = (
   }
 };
 
+const CfcPrepareRequiredError = (): ICfcPrepareRequiredError => ({
+  name: "CfcPrepareRequiredError",
+  message: "CFC-relevant transaction must be prepared before commit",
+});
+
+const CfcPreparedDigestMismatchError = (
+  expectedDigest: string,
+  actualDigest: string,
+): ICfcPreparedDigestMismatchError => ({
+  name: "CfcPreparedDigestMismatchError",
+  message:
+    "CFC prepared digest did not match transaction activity at commit time",
+  expectedDigest,
+  actualDigest,
+});
+
+type CfcTxState = {
+  relevant: boolean;
+  prepared: boolean;
+  preparedActivityDigest: string | undefined;
+  reasons: string[];
+  outbox: Array<() => void>;
+};
+
 export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   private commitCallbacks = new Set<
-    (tx: IExtendedStorageTransaction) => void
+    (
+      tx: IExtendedStorageTransaction,
+      commitResult: { error?: CommitError },
+    ) => void
   >();
+  private cfcState: CfcTxState = {
+    relevant: false,
+    prepared: false,
+    preparedActivityDigest: undefined,
+    reasons: [],
+    outbox: [],
+  };
 
   constructor(public tx: IStorageTransaction) {}
+
+  get cfcRelevant(): boolean {
+    return this.cfcState.relevant;
+  }
+
+  get cfcPrepared(): boolean {
+    return this.cfcState.prepared;
+  }
+
+  get preparedActivityDigest(): string | undefined {
+    return this.cfcState.preparedActivityDigest;
+  }
+
+  get cfcReasons(): readonly string[] {
+    return this.cfcState.reasons.slice();
+  }
+
+  get cfcOutboxSize(): number {
+    return this.cfcState.outbox.length;
+  }
 
   get journal(): ITransactionJournal {
     return this.tx.journal;
@@ -198,11 +262,12 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   abort(reason?: any): Result<any, InactiveTransactionError> {
+    this.clearCfcOutbox();
     return this.tx.abort(reason);
   }
 
   commit(): Promise<Result<Unit, CommitError>> {
-    const promise = this.tx.commit();
+    const promise = this.commitWithGate();
 
     // Call commit callbacks after commit completes (success or failure) Note
     // that promise always resolves, even if the commit fails, in which case it
@@ -211,9 +276,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     promise.then((_result) => {
       // Call all callbacks, wrapping each in try/catch to prevent one
       // failing callback from breaking others
+      const commitResult = _result.error ? { error: _result.error } : {};
       for (const callback of this.commitCallbacks) {
         try {
-          callback(this);
+          callback(this, commitResult);
         } catch (error) {
           logger.error("storage-error", "Error in commit callback:", error);
         }
@@ -221,6 +287,127 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     });
 
     return promise;
+  }
+
+  markCfcRelevant(reason: string): void {
+    if (!this.cfcState.relevant) {
+      recordCfcRelevantTx();
+    }
+    this.cfcState.relevant = true;
+    if (reason && !this.cfcState.reasons.includes(reason)) {
+      this.cfcState.reasons.push(reason);
+    }
+  }
+
+  markCfcPrepared(digest: string): void {
+    if (!this.cfcState.prepared) {
+      recordCfcPreparedTx();
+    }
+    this.cfcState.relevant = true;
+    this.cfcState.prepared = true;
+    this.cfcState.preparedActivityDigest = digest;
+  }
+
+  invalidateCfcPreparation(): void {
+    this.cfcState.prepared = false;
+    this.cfcState.preparedActivityDigest = undefined;
+  }
+
+  enqueueCfcSideEffect(effect: () => void): void {
+    this.cfcState.outbox.push(effect);
+    this.invalidateCfcPreparation();
+  }
+
+  private isCommitBearingAttempt(): boolean {
+    return this.cfcState.outbox.length > 0 ||
+      hasWriteActivity(this.journal.activity());
+  }
+
+  private clearCfcOutbox(): void {
+    this.cfcState.outbox.length = 0;
+  }
+
+  private flushCfcOutbox(): void {
+    const effects = this.cfcState.outbox.splice(0, this.cfcState.outbox.length);
+    if (effects.length > 0) {
+      recordCfcOutboxFlush();
+    }
+    for (const effect of effects) {
+      try {
+        effect();
+      } catch (error) {
+        logger.error("storage-error", "Failed to flush CFC side effect", error);
+      }
+    }
+  }
+
+  private async commitWithGate(): Promise<Result<Unit, CommitError>> {
+    const status = this.tx.status();
+    if (status.status !== "ready") {
+      this.clearCfcOutbox();
+      return await this.tx.commit();
+    }
+
+    const commitBearing = this.isCommitBearingAttempt();
+    if (!this.cfcState.relevant || !commitBearing) {
+      const commitResult = await this.tx.commit();
+      if (commitResult.error) {
+        this.clearCfcOutbox();
+        return commitResult;
+      }
+      this.flushCfcOutbox();
+      return commitResult;
+    }
+
+    if (!this.cfcState.prepared || !this.cfcState.preparedActivityDigest) {
+      const error = CfcPrepareRequiredError();
+      recordCfcGateReject();
+      this.clearCfcOutbox();
+      const abortResult = this.tx.abort(error);
+      if (abortResult.error) {
+        logger.warn(
+          "storage-error",
+          "Failed to abort tx after CFC gate error",
+          {
+            gateError: error,
+            abortError: abortResult.error,
+          },
+        );
+      }
+      return { error };
+    }
+
+    const actualDigest = computeCfcActivityDigest(
+      this.journal.activity(),
+    );
+    if (actualDigest !== this.cfcState.preparedActivityDigest) {
+      const error = CfcPreparedDigestMismatchError(
+        this.cfcState.preparedActivityDigest,
+        actualDigest,
+      );
+      recordCfcGateReject();
+      this.clearCfcOutbox();
+      const abortResult = this.tx.abort(error);
+      if (abortResult.error) {
+        logger.warn(
+          "storage-error",
+          "Failed to abort tx after CFC gate error",
+          {
+            gateError: error,
+            abortError: abortResult.error,
+          },
+        );
+      }
+      return { error };
+    }
+
+    const commitResult = await this.tx.commit();
+    if (commitResult.error) {
+      this.clearCfcOutbox();
+      return commitResult;
+    }
+    this.flushCfcOutbox();
+    return commitResult;
   }
 
   /**
@@ -233,7 +420,12 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
    *
    * @param callback - Function to call after commit
    */
-  addCommitCallback(callback: (tx: IExtendedStorageTransaction) => void): void {
+  addCommitCallback(
+    callback: (
+      tx: IExtendedStorageTransaction,
+      commitResult: { error?: CommitError },
+    ) => void,
+  ): void {
     this.commitCallbacks.add(callback);
   }
 }
@@ -281,6 +473,26 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   get tx(): IStorageTransaction {
     return this.wrapped.tx;
+  }
+
+  get cfcRelevant(): boolean {
+    return this.wrapped.cfcRelevant;
+  }
+
+  get cfcPrepared(): boolean {
+    return this.wrapped.cfcPrepared;
+  }
+
+  get preparedActivityDigest(): string | undefined {
+    return this.wrapped.preparedActivityDigest;
+  }
+
+  get cfcReasons(): readonly string[] {
+    return this.wrapped.cfcReasons;
+  }
+
+  get cfcOutboxSize(): number {
+    return this.wrapped.cfcOutboxSize;
   }
 
   get journal(): ITransactionJournal {
@@ -365,8 +577,29 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     return this.wrapped.commit();
   }
 
-  addCommitCallback(callback: (tx: IExtendedStorageTransaction) => void): void {
+  addCommitCallback(
+    callback: (
+      tx: IExtendedStorageTransaction,
+      commitResult: { error?: CommitError },
+    ) => void,
+  ): void {
     return this.wrapped.addCommitCallback(callback);
+  }
+
+  markCfcRelevant(reason: string): void {
+    return this.wrapped.markCfcRelevant(reason);
+  }
+
+  markCfcPrepared(digest: string): void {
+    return this.wrapped.markCfcPrepared(digest);
+  }
+
+  invalidateCfcPreparation(): void {
+    return this.wrapped.invalidateCfcPreparation();
+  }
+
+  enqueueCfcSideEffect(effect: () => void): void {
+    return this.wrapped.enqueueCfcSideEffect(effect);
   }
 }
 

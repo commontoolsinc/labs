@@ -4,6 +4,10 @@
 
 This guide covers coding standards, design principles, and build/test workflows for CommonTools development.
 
+Related runtime implementation notes:
+
+- [Runner CFC commit boundary](./CFC_RUNNER_COMMIT_BOUNDARY.md)
+
 ## Style & Conventions
 
 ### Formatting
