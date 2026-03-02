@@ -4,7 +4,11 @@ import {
   isCellHandle,
   NAME,
 } from "@commontools/runtime-client";
-import { type Mentionable, type MentionableArray } from "./mentionable.ts";
+import {
+  type Mentionable,
+  type MentionableArray,
+  MentionableArraySchema,
+} from "./mentionable.ts";
 
 /**
  * Configuration for the MentionController
@@ -86,6 +90,7 @@ export class MentionController implements ReactiveController {
 
   // Mentionable items
   private _mentionable: CellHandle<MentionableArray> | null = null;
+  private _mentionableTyped: CellHandle<MentionableArray> | null = null;
   private _mentionableUnsubscribe: (() => void) | null = null;
 
   constructor(
@@ -141,11 +146,12 @@ export class MentionController implements ReactiveController {
    * Get filtered mentions based on current query
    */
   getFilteredMentions(): CellHandle<Mentionable>[] {
-    if (!this._mentionable) {
+    const handle = this._mentionableTyped ?? this._mentionable;
+    if (!handle) {
       return [];
     }
 
-    const mentionableArray = this._mentionable.get();
+    const mentionableArray = handle.get();
     if (!Array.isArray(mentionableArray) || mentionableArray.length === 0) {
       return [];
     }
@@ -155,7 +161,7 @@ export class MentionController implements ReactiveController {
     const filtered: CellHandle<Mentionable>[] = [];
     for (let i = 0; i < mentionableArray.length; i++) {
       // Use .key(i) to get Cell reference, preserving cell-ness
-      const mentionCell = this._mentionable.key(i);
+      const mentionCell = handle.key(i);
 
       // Only call .get() to read the name for filtering
       const name = mentionCell.get()?.[NAME];
@@ -329,11 +335,12 @@ export class MentionController implements ReactiveController {
   }
 
   private readMentionables(): CellHandle<Mentionable>[] {
-    if (!this._mentionable) {
+    const handle = this._mentionableTyped ?? this._mentionable;
+    if (!handle) {
       return [];
     }
 
-    const mentionableArray = this._mentionable.get();
+    const mentionableArray = handle.get();
     if (!Array.isArray(mentionableArray) || mentionableArray.length === 0) {
       return [];
     }
@@ -341,7 +348,7 @@ export class MentionController implements ReactiveController {
     // Use .key(i) to preserve cell-ness of items
     const mentions: CellHandle<Mentionable>[] = [];
     for (let i = 0; i < mentionableArray.length; i++) {
-      const mentionCell = this._mentionable.key(i);
+      const mentionCell = handle.key(i);
       if (mentionCell) {
         mentions.push(mentionCell);
       }
@@ -361,15 +368,14 @@ export class MentionController implements ReactiveController {
     this._cleanupMentionableSubscription();
 
     if (isCellHandle(this._mentionable)) {
-      const handle = this._mentionable;
-      this._mentionableUnsubscribe = handle.subscribe((value) => {
-        if (isCellHandle(value)) {
-          // The cell value is a @link that got hydrated as a CellHandle.
-          // Re-sync to follow the link and get the actual data.
-          handle.sync().then(() => this.host.requestUpdate());
-        } else {
-          this.host.requestUpdate();
-        }
+      // Use asSchema() so the runtime resolves @link indirection before
+      // delivering values — without this, cells from wish results / computed
+      // cells deliver @link values hydrated as nested CellHandles.
+      this._mentionableTyped = this._mentionable.asSchema<MentionableArray>(
+        MentionableArraySchema,
+      );
+      this._mentionableUnsubscribe = this._mentionableTyped.subscribe(() => {
+        this.host.requestUpdate();
       });
     }
   }
@@ -383,5 +389,6 @@ export class MentionController implements ReactiveController {
       this._mentionableUnsubscribe();
       this._mentionableUnsubscribe = null;
     }
+    this._mentionableTyped = null;
   }
 }
