@@ -819,7 +819,16 @@ export class WorkerReconciler {
       for (const [key, value] of Object.entries(props)) {
         if (isEventProp(key)) {
           // Event prop - resolve target via Cell navigation
-          const resolvedTarget = propsCell.key(key).resolveAsCell();
+          let resolvedTarget: Cell<unknown>;
+          try {
+            resolvedTarget = propsCell.key(key).resolveAsCell();
+          } catch (e) {
+            logger.error(
+              "resolveAsCell failed for event prop",
+              () => ({ nodeId: state.nodeId, key, error: e }),
+            );
+            continue;
+          }
           const existingState = state.propSubscriptions.get(key);
 
           // Skip if same target Cell
@@ -846,7 +855,7 @@ export class WorkerReconciler {
           if (existingState) existingState.cancel();
 
           const handlerId = ctx.registerHandler((event: unknown) =>
-            (resolvedTarget as Cell<unknown>).send(event)
+            resolvedTarget.send(event)
           );
           state.eventHandlers.set(eventType, handlerId);
           this.queueOps([{
@@ -856,12 +865,21 @@ export class WorkerReconciler {
             handlerId,
           }]);
           state.propSubscriptions.set(key, {
-            cell: resolvedTarget as Cell<unknown>,
+            cell: resolvedTarget,
             cancel: () => {},
           });
         } else if (isBindingProp(key)) {
           // Binding prop - resolve target Cell via navigation
-          const resolvedTarget = propsCell.key(key).resolveAsCell();
+          let resolvedTarget: Cell<unknown>;
+          try {
+            resolvedTarget = propsCell.key(key).resolveAsCell();
+          } catch (e) {
+            logger.error(
+              "resolveAsCell failed for binding prop",
+              () => ({ nodeId: state.nodeId, key, error: e }),
+            );
+            continue;
+          }
           const existingState = state.propSubscriptions.get(key);
 
           // Skip if same Cell
@@ -882,7 +900,7 @@ export class WorkerReconciler {
             cellRef,
           }]);
           state.propSubscriptions.set(key, {
-            cell: resolvedTarget as Cell<unknown>,
+            cell: resolvedTarget,
             cancel: () => {},
           });
         } else if (
