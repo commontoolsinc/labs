@@ -5,6 +5,7 @@
  * - Favorites: user's favorited pieces
  * - Journal: user's activity log
  * - Learned: user's learned profile data
+ * - Spaces: user's managed spaces list
  *
  * This package exists to break the circular dependency between
  * @commontools/runner and @commontools/piece. Both packages can
@@ -42,6 +43,13 @@ export {
   type Question,
   questionSchema,
 } from "./learned.ts";
+
+export {
+  type SpaceEntry,
+  spaceEntrySchema,
+  type SpacesList,
+  spacesListSchema,
+} from "./spaces.ts";
 
 export { type Home, homeSchema } from "./home.ts";
 

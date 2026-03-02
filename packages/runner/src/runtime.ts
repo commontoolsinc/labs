@@ -118,7 +118,20 @@ export interface RuntimeOptions {
 export const spaceCellSchema: JSONSchema = {
   type: "object",
   properties: {
-    defaultPattern: { type: "object", properties: {}, asCell: true },
+    defaultPattern: {
+      type: "object",
+      properties: {
+        spaces: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { name: { type: "string" }, did: { type: "string" } },
+          },
+        },
+        defaultAppUrl: { type: "string" },
+      },
+      asCell: true,
+    },
   },
 } as JSONSchema;
 
