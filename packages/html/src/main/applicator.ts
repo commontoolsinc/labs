@@ -363,6 +363,12 @@ export class DomApplicator {
     // Set the CellHandle on the element's property
     // Custom elements like ct-input and ct-checkbox expect this
     (node as any)[propName] = cellHandle;
+
+    // Pre-sync the cell to resolve any link indirection in the value.
+    // Without this, cells from wish results / computed cells deliver @link
+    // values that get hydrated as nested CellHandles, causing .get() to
+    // return a CellHandle instead of the actual data.
+    cellHandle.sync().catch(() => {});
   }
 
   private insertChild(

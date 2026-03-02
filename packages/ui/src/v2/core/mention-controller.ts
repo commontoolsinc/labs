@@ -361,8 +361,15 @@ export class MentionController implements ReactiveController {
     this._cleanupMentionableSubscription();
 
     if (isCellHandle(this._mentionable)) {
-      this._mentionableUnsubscribe = this._mentionable.subscribe(() => {
-        this.host.requestUpdate();
+      const handle = this._mentionable;
+      this._mentionableUnsubscribe = handle.subscribe((value) => {
+        if (isCellHandle(value)) {
+          // The cell value is a @link that got hydrated as a CellHandle.
+          // Re-sync to follow the link and get the actual data.
+          handle.sync().then(() => this.host.requestUpdate());
+        } else {
+          this.host.requestUpdate();
+        }
       });
     }
   }
