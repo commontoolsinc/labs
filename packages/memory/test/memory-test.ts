@@ -1,4 +1,11 @@
 import { assert, assertEquals } from "@std/assert";
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  it,
+} from "@std/testing/bdd";
 import * as Memory from "../memory.ts";
 import * as Fact from "../fact.ts";
 import * as Transaction from "../transaction.ts";
@@ -20,134 +27,104 @@ const the = "application/json";
 // Some generated service key.
 const serviceDid = "did:key:z6MkfJPMCrTyDmurrAHPUsEjCgvcjvLtAuzyZ7nSqwZwb8KQ";
 
-const baseTest = (
-  title: string,
-  url: URL,
-  run: (replica: Memory.MemorySession) => Promise<unknown>,
-) => {
-  const unit = async () => {
-    const open = await Memory.open({
-      store: url,
-      serviceDid,
-    });
-
-    assert(open.ok, "Open create repository if it does not exist");
-    const session = open.ok;
-
-    try {
-      await run(session);
-    } finally {
-      await session.close();
-    }
-  };
-
-  if (title.startsWith("only")) {
-    Deno.test.only(title, unit);
-  } else if (title.startsWith("skip")) {
-    Deno.test.ignore(title, unit);
-  } else {
-    Deno.test(title, unit);
-  }
-};
-
 const memory = new URL(`memory://`);
 
 for (const canonicalHashing of [false, true]) {
-  const prefix = canonicalHashing ? "[canonical] " : "[legacy] ";
-  setCanonicalHashConfig(canonicalHashing);
-  const doc = `of:${refer({ hello: "world" })}` as const;
+  describe(`canonicalHashing=${canonicalHashing}`, () => {
+    let doc: `of:${string}`;
+    let session: Memory.MemorySession;
 
-  // Wrapper that sets/resets the flag inside the test execution body,
-  // not just at registration time. Deno.test() defers execution, so
-  // without this the flag would not be active when canonical tests run.
-  const test = (
-    title: string,
-    url: URL,
-    run: (replica: Memory.MemorySession) => Promise<unknown>,
-  ) => {
-    baseTest(`${prefix}${title}`, url, async (session) => {
+    beforeAll(() => {
       setCanonicalHashConfig(canonicalHashing);
-      try {
-        await run(session);
-      } finally {
-        resetCanonicalHashConfig();
-      }
-    });
-  };
-
-  test("query non-existing", memory, async (session) => {
-    const unclaimed = await session.query(
-      Query.create({
-        issuer: alice,
-        subject: space,
-        select: { [doc]: { [the]: {} } },
-      }),
-    );
-
-    assertEquals(
-      unclaimed,
-      {
-        ok: { [space]: { [doc]: { [the]: {} } } },
-      },
-      "no matching facts",
-    );
-  });
-
-  test("create new memory", memory, async (session) => {
-    const v1 = Fact.assert({
-      the: "application/json",
-      of: doc,
-      is: { v: 1 },
+      doc = `of:${refer({ hello: "world" })}` as const;
+      resetCanonicalHashConfig();
     });
 
-    const tr1 = Transaction.create({
-      issuer: alice,
-      subject: space,
-      changes: Changes.from([v1]),
+    beforeEach(async () => {
+      setCanonicalHashConfig(canonicalHashing);
+      const open = await Memory.open({
+        store: memory,
+        serviceDid,
+      });
+      assert(open.ok, "Open create repository if it does not exist");
+      session = open.ok;
     });
 
-    const result = await session.transact(tr1);
-    assert(result.ok);
-    const c1 = Commit.create({
-      space,
-      transaction: tr1,
+    afterEach(async () => {
+      await session.close();
+      resetCanonicalHashConfig();
     });
 
-    assertEquals(result, { ok: Changes.from([c1]) });
-
-    assertEquals(
-      await session.query(
+    it("query non-existing", async () => {
+      const unclaimed = await session.query(
         Query.create({
           issuer: alice,
           subject: space,
           select: { [doc]: { [the]: {} } },
         }),
-      ),
-      {
-        ok: { [space]: Selection.from([[v1, c1.is.since]]) },
-      },
-      "fact was added to the memory",
-    );
+      );
 
-    assertEquals(
-      await session.query(
-        Query.create({
-          issuer: alice,
-          subject: alice,
-          select: { [doc]: { [the]: {} } },
-        }),
-      ),
-      {
-        ok: { [alice]: { [doc]: { [the]: {} } } },
-      },
-      "fact is unclaimed in another memory space",
-    );
-  });
+      assertEquals(
+        unclaimed,
+        {
+          ok: { [space]: { [doc]: { [the]: {} } } },
+        },
+        "no matching facts",
+      );
+    });
 
-  test(
-    "create memory fails if already exists",
-    memory,
-    async (session) => {
+    it("create new memory", async () => {
+      const v1 = Fact.assert({
+        the: "application/json",
+        of: doc,
+        is: { v: 1 },
+      });
+
+      const tr1 = Transaction.create({
+        issuer: alice,
+        subject: space,
+        changes: Changes.from([v1]),
+      });
+
+      const result = await session.transact(tr1);
+      assert(result.ok);
+      const c1 = Commit.create({
+        space,
+        transaction: tr1,
+      });
+
+      assertEquals(result, { ok: Changes.from([c1]) });
+
+      assertEquals(
+        await session.query(
+          Query.create({
+            issuer: alice,
+            subject: space,
+            select: { [doc]: { [the]: {} } },
+          }),
+        ),
+        {
+          ok: { [space]: Selection.from([[v1, c1.is.since]]) },
+        },
+        "fact was added to the memory",
+      );
+
+      assertEquals(
+        await session.query(
+          Query.create({
+            issuer: alice,
+            subject: alice,
+            select: { [doc]: { [the]: {} } },
+          }),
+        ),
+        {
+          ok: { [alice]: { [doc]: { [the]: {} } } },
+        },
+        "fact is unclaimed in another memory space",
+      );
+    });
+
+    it("create memory fails if already exists", async () => {
       const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
       const create = await session.transact(
         Transaction.create({
@@ -180,212 +157,208 @@ for (const canonicalHashing of [false, true]) {
         existsInHistory: false,
         actual: { ...v1, since: 0 },
       });
-    },
-  );
+    });
 
-  // List tests
+    // List tests
 
-  test("list empty memory", memory, async (session) => {
-    const result = await session.query(
-      Query.create({
-        issuer: alice,
-        subject: space,
-        select: { _: { [the]: {} } },
-      }),
-    );
-
-    assertEquals(
-      result,
-      {
-        ok: { [space]: {} },
-      },
-      "no facts exist",
-    );
-  });
-
-  test("list single fact", memory, async (session) => {
-    const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
-    // First create a fact
-    const tr1 = await session.transact(
-      Transaction.create({
-        issuer: alice,
-        subject: space,
-        changes: Changes.from([v1]),
-      }),
-    );
-    assert(tr1.ok);
-    const c1 = Commit.toRevision(tr1.ok);
-
-    const result = await session.query(
-      Query.create({
-        issuer: alice,
-        subject: space,
-        select: { _: { [the]: {} } },
-      }),
-    );
-
-    assertEquals(
-      result,
-      {
-        ok: { [space]: Selection.from([[v1, c1.is.since]]) },
-      },
-      "lists single fact",
-    );
-  });
-
-  test("list multiple facts", memory, async (session) => {
-    const doc2 = `of:${refer({ doc: 2 })}` as const;
-
-    const facts = [
-      Fact.assert({ the, of: doc, is: { v: 1 } }),
-      Fact.assert({ the, of: doc2, is: { v: 2 } }),
-    ];
-
-    // Create multiple facts
-    const tr1 = await session.transact(
-      Transaction.create({
-        issuer: alice,
-        subject: space,
-        changes: Changes.from(facts),
-      }),
-    );
-    assert(tr1.ok);
-    const c1 = Commit.toRevision(tr1.ok);
-
-    const result = await session.query(
-      Query.create({
-        issuer: alice,
-        subject: space,
-        select: { _: { [the]: {} } },
-      }),
-    );
-
-    assertEquals(
-      result,
-      {
-        ok: {
-          [space]: Selection.from(facts.map((fact) => [fact, c1.is.since])),
-        },
-      },
-      "lists multiple facts",
-    );
-  });
-
-  test("list excludes retracted facts", memory, async (session) => {
-    const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
-    // First create and then retract a fact
-    const tr1 = await session.transact(
-      Transaction.create({
-        issuer: alice,
-        subject: space,
-        changes: Changes.from([v1]),
-      }),
-    );
-    assert(tr1.ok);
-    const c1 = Commit.toRevision(tr1.ok);
-
-    assertEquals(
-      await session.query(
+    it("list empty memory", async () => {
+      const result = await session.query(
         Query.create({
           issuer: alice,
           subject: space,
-          select: { [doc]: { [the]: {} } },
+          select: { _: { [the]: {} } },
         }),
-      ),
-      {
-        ok: { [space]: Selection.from([[v1, c1.is.since]]) },
-      },
-    );
+      );
 
-    const v2 = Fact.retract(v1);
+      assertEquals(
+        result,
+        {
+          ok: { [space]: {} },
+        },
+        "no facts exist",
+      );
+    });
 
-    await session.transact(
-      Transaction.create({
-        issuer: alice,
-        subject: space,
-        changes: Changes.from([v2]),
-      }),
-    );
+    it("list single fact", async () => {
+      const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
+      // First create a fact
+      const tr1 = await session.transact(
+        Transaction.create({
+          issuer: alice,
+          subject: space,
+          changes: Changes.from([v1]),
+        }),
+      );
+      assert(tr1.ok);
+      const c1 = Commit.toRevision(tr1.ok);
 
-    const result = await session.query(
-      Query.create({
-        issuer: alice,
-        subject: space,
-        select: {
-          [doc]: {
-            [the]: {
-              "_": {
-                is: {},
+      const result = await session.query(
+        Query.create({
+          issuer: alice,
+          subject: space,
+          select: { _: { [the]: {} } },
+        }),
+      );
+
+      assertEquals(
+        result,
+        {
+          ok: { [space]: Selection.from([[v1, c1.is.since]]) },
+        },
+        "lists single fact",
+      );
+    });
+
+    it("list multiple facts", async () => {
+      const doc2 = `of:${refer({ doc: 2 })}` as const;
+
+      const facts = [
+        Fact.assert({ the, of: doc, is: { v: 1 } }),
+        Fact.assert({ the, of: doc2, is: { v: 2 } }),
+      ];
+
+      // Create multiple facts
+      const tr1 = await session.transact(
+        Transaction.create({
+          issuer: alice,
+          subject: space,
+          changes: Changes.from(facts),
+        }),
+      );
+      assert(tr1.ok);
+      const c1 = Commit.toRevision(tr1.ok);
+
+      const result = await session.query(
+        Query.create({
+          issuer: alice,
+          subject: space,
+          select: { _: { [the]: {} } },
+        }),
+      );
+
+      assertEquals(
+        result,
+        {
+          ok: {
+            [space]: Selection.from(facts.map((fact) => [fact, c1.is.since])),
+          },
+        },
+        "lists multiple facts",
+      );
+    });
+
+    it("list excludes retracted facts", async () => {
+      const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
+      // First create and then retract a fact
+      const tr1 = await session.transact(
+        Transaction.create({
+          issuer: alice,
+          subject: space,
+          changes: Changes.from([v1]),
+        }),
+      );
+      assert(tr1.ok);
+      const c1 = Commit.toRevision(tr1.ok);
+
+      assertEquals(
+        await session.query(
+          Query.create({
+            issuer: alice,
+            subject: space,
+            select: { [doc]: { [the]: {} } },
+          }),
+        ),
+        {
+          ok: { [space]: Selection.from([[v1, c1.is.since]]) },
+        },
+      );
+
+      const v2 = Fact.retract(v1);
+
+      await session.transact(
+        Transaction.create({
+          issuer: alice,
+          subject: space,
+          changes: Changes.from([v2]),
+        }),
+      );
+
+      const result = await session.query(
+        Query.create({
+          issuer: alice,
+          subject: space,
+          select: {
+            [doc]: {
+              [the]: {
+                "_": {
+                  is: {},
+                },
               },
             },
           },
+        }),
+      );
+
+      assertEquals(
+        result,
+        {
+          ok: { [space]: { [doc]: { [the]: {} } } },
         },
-      }),
-    );
-
-    assertEquals(
-      result,
-      {
-        ok: { [space]: { [doc]: { [the]: {} } } },
-      },
-      "excludes retracted facts with undefined value",
-    );
-  });
-
-  test("list different fact types", memory, async (session) => {
-    const json = Fact.assert({ the, of: doc, is: { v: 1 } });
-    const text = Fact.assert({ the: "text/plain", of: doc, is: "Hello" });
-
-    const tr = Transaction.create({
-      issuer: alice,
-      subject: space,
-      changes: Changes.from([json, text]),
+        "excludes retracted facts with undefined value",
+      );
     });
 
-    // Create facts of different types
-    const result = await session.transact(tr);
-    assert(result.ok);
-    const c1 = Commit.toRevision(result.ok);
+    it("list different fact types", async () => {
+      const json = Fact.assert({ the, of: doc, is: { v: 1 } });
+      const text = Fact.assert({ the: "text/plain", of: doc, is: "Hello" });
 
-    const jsonResult = await session.query(
-      Query.create({
+      const tr = Transaction.create({
         issuer: alice,
         subject: space,
-        select: { _: { [the]: {} } },
-      }),
-    );
+        changes: Changes.from([json, text]),
+      });
 
-    const textResult = await session.query(
-      Query.create({
-        issuer: alice,
-        subject: space,
-        select: { _: { ["text/plain"]: {} } },
-      }),
-    );
+      // Create facts of different types
+      const result = await session.transact(tr);
+      assert(result.ok);
+      const c1 = Commit.toRevision(result.ok);
 
-    assertEquals(
-      jsonResult,
-      {
-        ok: { [space]: Selection.from([[json, c1.is.since]]) },
-      },
-      "lists json facts",
-    );
+      const jsonResult = await session.query(
+        Query.create({
+          issuer: alice,
+          subject: space,
+          select: { _: { [the]: {} } },
+        }),
+      );
 
-    assertEquals(
-      textResult,
-      {
-        ok: {
-          [space]: Selection.from([[text, c1.is.since]]),
+      const textResult = await session.query(
+        Query.create({
+          issuer: alice,
+          subject: space,
+          select: { _: { ["text/plain"]: {} } },
+        }),
+      );
+
+      assertEquals(
+        jsonResult,
+        {
+          ok: { [space]: Selection.from([[json, c1.is.since]]) },
         },
-      },
-      "lists text facts",
-    );
-  });
+        "lists json facts",
+      );
 
-  test(
-    "list facts from different replicas",
-    memory,
-    async (session) => {
+      assertEquals(
+        textResult,
+        {
+          ok: {
+            [space]: Selection.from([[text, c1.is.since]]),
+          },
+        },
+        "lists text facts",
+      );
+    });
+
+    it("list facts from different replicas", async () => {
       const a = Fact.assert({ the, of: doc, is: { v: 1 } });
       const b = Fact.assert({ the, of: doc, is: { v: 2 } });
 
@@ -441,27 +414,25 @@ for (const canonicalHashing of [false, true]) {
         },
         "lists bob's facts",
       );
-    },
-  );
-
-  test("list from non-existent replica", memory, async (session) => {
-    const result = await session.query({
-      cmd: "/memory/query",
-      iss: alice,
-      sub: space,
-      args: {
-        select: {
-          _: {},
-        },
-      },
-      prf: [],
     });
-    assertEquals(
-      result,
-      { ok: { [space]: {} } },
-      "empty list from new replica",
-    );
-  });
 
-  resetCanonicalHashConfig();
-} // for canonicalHashing
+    it("list from non-existent replica", async () => {
+      const result = await session.query({
+        cmd: "/memory/query",
+        iss: alice,
+        sub: space,
+        args: {
+          select: {
+            _: {},
+          },
+        },
+        prf: [],
+      });
+      assertEquals(
+        result,
+        { ok: { [space]: {} } },
+        "empty list from new replica",
+      );
+    });
+  });
+}
