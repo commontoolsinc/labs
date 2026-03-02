@@ -411,7 +411,8 @@ describe("CFC pattern output transitions", () => {
       classification: ["secret"],
     });
 
-    // Prepare commit-gate digest, but keep boundary enforcement disabled in this transition-focused suite.
+    // Setup tx only bootstraps cells and labels — skip boundary enforcement
+    // since no IFC schema context is registered yet.
     await prepareCfcCommitIfNeeded(tx, { enforceBoundary: false });
     let committed = await tx.commit();
     expect(committed.error).toBeUndefined();
@@ -427,7 +428,7 @@ describe("CFC pattern output transitions", () => {
       resultCell,
     );
     // This commit is the one exercising CFC transition handling for the pattern output write.
-    await prepareCfcCommitIfNeeded(tx, { enforceBoundary: false });
+    await prepareCfcCommitIfNeeded(tx);
     committed = await tx.commit();
     expect(committed.error).toBeUndefined();
 
