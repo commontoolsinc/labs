@@ -86,15 +86,37 @@ async function run(
 
 console.error("Running pre-commit checks (fmt, lint, check)...");
 
+// 1. Format first — must complete before lint/check see the files
+const fmtErr = await run("Formatting failed", ["fmt", ...files]);
+
+// Re-stage any already-staged files that fmt may have modified on disk,
+// so the index matches the working tree and the commit gets formatted code.
+const stagedFiles = await git(
+  "diff",
+  "--cached",
+  "--name-only",
+  "--diff-filter=d",
+);
+if (stagedFiles.length > 0) {
+  await new Deno.Command("git", {
+    args: ["add", ...stagedFiles],
+    stdout: "piped",
+    stderr: "piped",
+  }).output();
+}
+
+// 2. Lint and type-check can run in parallel (both read-only)
 const tsFiles = files.filter((f) => /\.(ts|tsx)$/.test(f));
 
-const errors = (await Promise.all([
-  run("Formatting failed", ["fmt", ...files]),
-  run("Lint errors", ["lint", ...files]),
-  tsFiles.length > 0
-    ? run("Type check failed", ["check", ...tsFiles])
-    : null,
-])).filter(Boolean);
+const errors = [
+  fmtErr,
+  ...(await Promise.all([
+    run("Lint errors", ["lint", ...files]),
+    tsFiles.length > 0
+      ? run("Type check failed", ["check", ...tsFiles])
+      : null,
+  ])),
+].filter(Boolean);
 
 if (errors.length > 0) {
   console.error(errors.join("\n\n"));
