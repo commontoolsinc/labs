@@ -467,43 +467,6 @@ for (const canonicalHashing of [false, true]) {
       );
     });
 
-    it("subscribe receives unclaimed state (duplicate)", async () => {
-      const clock = new Clock();
-      const memory = Consumer.open({ as: subject, session, clock })
-        .mount(subject.did());
-
-      const { ok: query } = await memory.query({
-        select: { [doc]: { [the]: {} } },
-      });
-      assert(query);
-      assertEquals(
-        query.selection,
-        {
-          [subject.did()]: {
-            [doc]: {
-              [the]: {},
-            },
-          },
-        },
-        "noting yet",
-      );
-      query.subscribe();
-
-      const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
-      const tr1 = await memory.transact({ changes: Changes.from([v1]) });
-      assert(tr1.ok);
-      const c1 = Commit.toRevision(tr1.ok);
-
-      assertEquals(query.selection, {
-        [subject.did()]: Selection.from([[v1, c1.is.since]]),
-      });
-      assertEquals(
-        query.facts,
-        [{ ...v1, since: c1.is.since }],
-        "changes were reflected",
-      );
-    });
-
     it("subscription receives retraction", async () => {
       const clock = new Clock();
       const memory = Consumer.open({ as: subject, session, clock })
