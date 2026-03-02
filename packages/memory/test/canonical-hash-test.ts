@@ -16,7 +16,12 @@ const nodeCrypto = await import("node:crypto");
  * byte-level spec examples).
  */
 function sha256(bytes: number[]): Uint8Array {
-  return nodeCrypto.createHash("sha256").update(new Uint8Array(bytes)).digest();
+  // node:crypto digest() returns Buffer; normalize to plain Uint8Array so
+  // assertEquals comparisons against production code (which also normalizes)
+  // work correctly.
+  const buf = nodeCrypto.createHash("sha256").update(new Uint8Array(bytes))
+    .digest();
+  return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
 }
 
 function hex(hash: Uint8Array): string {
