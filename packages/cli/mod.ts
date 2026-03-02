@@ -1,9 +1,6 @@
 import { parse } from "./commands/mod.ts";
 import { CompilerError, TransformerError } from "@commontools/js-compiler";
-import {
-  type LogLevel,
-  setGlobalLogFloor,
-} from "@commontools/utils/logger";
+import { type LogLevel, setGlobalLogFloor } from "@commontools/utils/logger";
 
 const VALID_LOG_LEVELS = new Set([
   "debug",
