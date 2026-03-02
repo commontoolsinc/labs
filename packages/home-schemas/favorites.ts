@@ -9,8 +9,8 @@ import type { Schema } from "@commontools/api/schema";
 export const favoriteEntrySchema = {
   type: "object",
   properties: {
-    // we use empty properties to validate, but avoid including children
-    cell: { type: "object", properties: {}, asCell: true },
+    // we use type unknown to validate, but avoid including children
+    cell: { type: "unknown", asCell: true },
     tag: { type: "string", default: "" },
     userTags: { type: "array", items: { type: "string" }, default: [] },
     spaceName: { type: "string" },
