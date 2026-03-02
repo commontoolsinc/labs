@@ -3,25 +3,12 @@
  * .claude/scripts/pre-commit.ts
  *
  * Claude Code PreToolUse hook that intercepts `git commit` commands.
+ * Runs deno fmt, lint, and check on ONLY the files being committed.
+ * Exits 2 to block the commit if any check fails.
  *
- * IMPORTANT: This hook only acts on files that are about to be committed,
- * NOT the entire repo. Other files in the working tree may be in a
- * half-finished state and must not cause the commit to fail or be modified.
- *
- * The hook parses the Bash command (e.g. `git add file1 file2 && git commit`)
- * to figure out exactly which files will be staged. It then runs:
- *
- *   1. `deno fmt`   — auto-fix formatting (only on those files)
- *   2. `deno lint`  — lint check (only on those files)
- *   3. `deno check` — type check (only on the .ts/.tsx subset)
- *
- * If any check fails, the hook exits 2 to block the commit.
- *
- * Note: this runs as a PreToolUse hook, meaning it fires BEFORE the Bash
- * command executes. Any `git add` in the command has not yet run, so we
- * parse those file paths from the command string. However, files staged by
- * earlier `git add` calls ARE visible via `git diff --cached`, so we always
- * union both sources to cover the full set of files being committed.
+ * This fires BEFORE the Bash command executes, so any `git add` in
+ * the command hasn't run yet. We combine already-staged files (from
+ * `git diff --cached`) with files parsed from the command string.
  */
 
 import { guardProjectDir } from "./common/guard.ts";
@@ -37,140 +24,80 @@ try {
   Deno.exit(0);
 }
 
-// Only intercept git commit commands
-if (!/\bgit\s+commit\b/.test(cmd)) {
+if (!/\bgit\s+commit\b/.test(cmd) || /--no-verify/.test(cmd)) {
   Deno.exit(0);
 }
 
-// Skip if using --no-verify
-if (/--no-verify/.test(cmd)) {
-  Deno.exit(0);
+// --- Determine which files will be committed ---
+
+async function git(...args: string[]): Promise<string[]> {
+  const { stdout } = await new Deno.Command("git", {
+    args,
+    stdout: "piped",
+    stderr: "piped",
+  }).output();
+  return new TextDecoder().decode(stdout).trim().split("\n").filter(Boolean);
 }
 
-/**
- * Parse the command to figure out which files will actually be committed.
- * Handles: `git add file1 file2 && git commit`, `git add . && git commit`,
- * `git add -A && git commit`, `git commit -a`, and already-staged files.
- */
-async function getFilesToCommit(cmd: string): Promise<string[]> {
-  // Check for broad adds: `git add .`, `git add -A`, `git commit -a`
-  const isAddAll = /\bgit\s+add\s+(-A|\.)\s*(&|$)/.test(cmd) ||
+async function getFilesToCommit(): Promise<string[]> {
+  const addsAll = /\bgit\s+add\s+(-A|\.)\s*(&|$)/.test(cmd) ||
     /\bgit\s+commit\s+.*-a/.test(cmd);
 
-  if (isAddAll) {
-    // All changed + untracked files
-    return await getAllChangedFiles();
+  if (addsAll) {
+    const tracked = await git("diff", "--name-only", "--diff-filter=d", "HEAD");
+    const untracked = await git("ls-files", "--others", "--exclude-standard");
+    return [...new Set([...tracked, ...untracked])];
   }
 
-  // Get already-staged files (these exist regardless of any `git add` in the command)
-  const staged = await new Deno.Command("git", {
-    args: ["diff", "--cached", "--name-only", "--diff-filter=d"],
-    stdout: "piped",
-    stderr: "piped",
-  }).output();
+  // Start with files already staged from prior `git add` calls
+  const files = await git("diff", "--cached", "--name-only", "--diff-filter=d");
 
-  const alreadyStaged = new TextDecoder()
-    .decode(staged.stdout)
-    .trim()
-    .split("\n")
-    .filter((f) => f.length > 0);
-
-  // Parse explicit file paths from `git add file1 file2 ...`
+  // Add any files from a `git add <paths>` in this command (not yet staged)
   const addMatch = cmd.match(/\bgit\s+add\s+(.+?)(?:\s*&&|$)/);
   if (addMatch) {
-    const args = addMatch[1].trim().split(/\s+/);
-    // Filter out flags (e.g. -f, --force)
-    const files = args.filter((a) => !a.startsWith("-"));
-    // Union the newly-added files with already-staged files
-    return [...new Set([...alreadyStaged, ...files])];
+    for (const arg of addMatch[1].trim().split(/\s+/)) {
+      if (!arg.startsWith("-")) files.push(arg);
+    }
   }
 
-  // No `git add` found — only already-staged files will be committed
-  return alreadyStaged;
+  return [...new Set(files)];
 }
 
-async function getAllChangedFiles(): Promise<string[]> {
-  const tracked = await new Deno.Command("git", {
-    args: ["diff", "--name-only", "--diff-filter=d", "HEAD"],
+const files = await getFilesToCommit();
+if (files.length === 0) Deno.exit(0);
+
+// --- Run checks ---
+
+async function run(
+  label: string,
+  args: string[],
+): Promise<string | null> {
+  const result = await new Deno.Command("deno", {
+    args,
     stdout: "piped",
     stderr: "piped",
   }).output();
-
-  const untracked = await new Deno.Command("git", {
-    args: ["ls-files", "--others", "--exclude-standard"],
-    stdout: "piped",
-    stderr: "piped",
-  }).output();
-
-  return [
-    ...new TextDecoder().decode(tracked.stdout).trim().split("\n"),
-    ...new TextDecoder().decode(untracked.stdout).trim().split("\n"),
-  ].filter((f) => f.length > 0);
+  if (result.success) return null;
+  const stderr = new TextDecoder().decode(result.stderr);
+  if (stderr.includes("No target files found")) return null;
+  const stdout = new TextDecoder().decode(result.stdout);
+  return `${label}:\n${stdout || stderr}`;
 }
 
-// Figure out which files will be committed by combining:
-// 1. Already-staged files (visible via `git diff --cached`)
-// 2. Files from any `git add <files>` in the command (not yet staged at hook time)
-// 3. All changed files for `git add .`, `git add -A`, or `git commit -a`
-const filesToCheck = await getFilesToCommit(cmd);
-
-if (filesToCheck.length === 0) {
-  Deno.exit(0);
-}
-
-const errors: string[] = [];
-
-// 1. Auto-fix formatting (only changed files, not the whole repo)
 console.error("Running pre-commit checks (fmt, lint, check)...");
 
-const fmtResult = await new Deno.Command("deno", {
-  args: ["fmt", ...filesToCheck],
-  stdout: "piped",
-  stderr: "piped",
-}).output();
+const tsFiles = files.filter((f) => /\.(ts|tsx)$/.test(f));
 
-if (!fmtResult.success) {
-  const fmtStderr = new TextDecoder().decode(fmtResult.stderr);
-  // "No target files found" means all changed files are in deno.json exclude
-  if (!fmtStderr.includes("No target files found")) {
-    errors.push("Formatting failed (syntax error?):");
-    errors.push(fmtStderr);
-  }
-}
-
-// 2. Lint (only changed files)
-const lintResult = await new Deno.Command("deno", {
-  args: ["lint", ...filesToCheck],
-  stdout: "piped",
-  stderr: "piped",
-}).output();
-
-if (!lintResult.success) {
-  const lintStderr = new TextDecoder().decode(lintResult.stderr);
-  if (!lintStderr.includes("No target files found")) {
-    errors.push("Lint errors found:");
-    errors.push(new TextDecoder().decode(lintResult.stdout));
-  }
-}
-
-// 3. Type-check changed .ts/.tsx files only
-const tsFiles = filesToCheck.filter((f) => /\.(ts|tsx)$/.test(f));
-
-if (tsFiles.length > 0) {
-  const checkResult = await new Deno.Command("deno", {
-    args: ["check", ...tsFiles],
-    stdout: "piped",
-    stderr: "piped",
-  }).output();
-
-  if (!checkResult.success) {
-    errors.push("Type check failed:");
-    errors.push(new TextDecoder().decode(checkResult.stderr));
-  }
-}
+const errors = (await Promise.all([
+  run("Formatting failed", ["fmt", ...files]),
+  run("Lint errors", ["lint", ...files]),
+  tsFiles.length > 0
+    ? run("Type check failed", ["check", ...tsFiles])
+    : null,
+])).filter(Boolean);
 
 if (errors.length > 0) {
-  console.error(errors.join("\n"));
+  console.error(errors.join("\n\n"));
   Deno.exit(2);
 }
 
