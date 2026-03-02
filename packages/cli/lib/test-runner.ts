@@ -82,6 +82,10 @@ export interface TestRunResult {
   runtimeErrors: string[];
   /** If true, runtime errors are expected and should not fail the test */
   allowRuntimeErrors?: boolean;
+  /** Non-idempotent computation names detected by the idempotency check */
+  nonIdempotent: string[];
+  /** If true, non-idempotent computations are expected and should not fail the test */
+  expectNonIdempotent?: boolean;
 }
 
 export interface TestRunnerOptions {
@@ -460,9 +464,12 @@ export async function runTestPattern(
       );
     }
 
-    // Check for allowRuntimeErrors flag
+    // Check for allowRuntimeErrors and expectNonIdempotent flags
     const allowRuntimeErrors =
       (patternResult.key("allowRuntimeErrors") as Cell<unknown>).get() === true;
+    const expectNonIdempotent =
+      (patternResult.key("expectNonIdempotent") as Cell<unknown>).get() ===
+        true;
 
     if (options.verbose) {
       console.log(`  Found ${testsValue.length} test steps`);
@@ -629,14 +636,9 @@ export async function runTestPattern(
 
     // Run idempotency check after all test steps
     const idempotencyResult = await engine.runIdempotencyCheck();
-    if (idempotencyResult.nonIdempotent.length > 0) {
-      console.warn("  ⚠ Non-idempotent computations detected:");
-      for (const report of idempotencyResult.nonIdempotent) {
-        console.warn(
-          `    - ${report.actionInfo?.patternName ?? report.actionId}`,
-        );
-      }
-    }
+    const nonIdempotent = idempotencyResult.nonIdempotent.map(
+      (r) => r.actionInfo?.patternName ?? r.actionId,
+    );
 
     const errorMessages = runtimeErrors.map((e) => String(e));
     return {
@@ -646,6 +648,8 @@ export async function runTestPattern(
       navigations,
       runtimeErrors: errorMessages,
       allowRuntimeErrors,
+      nonIdempotent,
+      expectNonIdempotent,
     };
   } catch (err) {
     let errorMessage = err instanceof Error ? err.message : String(err);
@@ -667,6 +671,7 @@ export async function runTestPattern(
       totalDurationMs: performance.now() - startTime,
       navigations,
       runtimeErrors: errorMessages,
+      nonIdempotent: [],
       error: errorMessage,
     };
   } finally {
@@ -732,6 +737,23 @@ export async function runTests(
               .join(", ")
           }`,
         );
+      }
+
+      // Report non-idempotent computations
+      if (result.nonIdempotent.length > 0) {
+        if (result.expectNonIdempotent) {
+          console.log(
+            `  ⊘ ${result.nonIdempotent.length} non-idempotent computation(s) (expected)`,
+          );
+        } else {
+          totalFailed++;
+          console.log(
+            `  ✗ ${result.nonIdempotent.length} non-idempotent computation(s):`,
+          );
+          for (const name of result.nonIdempotent) {
+            console.log(`    ${name}`);
+          }
+        }
       }
 
       // Report runtime errors
