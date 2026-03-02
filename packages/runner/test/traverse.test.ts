@@ -10,10 +10,12 @@ import type {
   URI,
 } from "@commontools/memory/interface";
 import {
+  canBranchMatch,
   CompoundCycleTracker,
   getAtPath,
   ManagedStorageTransaction,
   MapSet,
+  mergeAnyOfBranchSchemas,
   PointerCycleTracker,
   SchemaObjectTraverser,
 } from "../src/traverse.ts";
@@ -1242,5 +1244,894 @@ describe("CompoundCycleTracker cleanup", () => {
     expect(disposable).not.toBeNull();
     disposable![Symbol.dispose]();
     expect((tracker as any).partial.size).toBe(0);
+  });
+});
+
+describe("canBranchMatch", () => {
+  it("rejects type mismatch: string value vs number schema", () => {
+    expect(canBranchMatch({ type: "number" }, "hello")).toBe(false);
+  });
+
+  it("rejects type mismatch: number value vs string schema", () => {
+    expect(canBranchMatch({ type: "string" }, 42)).toBe(false);
+  });
+
+  it("rejects type mismatch: object value vs array schema", () => {
+    expect(canBranchMatch({ type: "array" }, { a: 1 })).toBe(false);
+  });
+
+  it("accepts matching type", () => {
+    expect(canBranchMatch({ type: "string" }, "hello")).toBe(true);
+    expect(canBranchMatch({ type: "number" }, 42)).toBe(true);
+    expect(canBranchMatch({ type: "object" }, { a: 1 })).toBe(true);
+    expect(canBranchMatch({ type: "array" }, [1, 2])).toBe(true);
+    expect(canBranchMatch({ type: "boolean" }, true)).toBe(true);
+    expect(canBranchMatch({ type: "null" }, null)).toBe(true);
+  });
+
+  it("conservatively accepts const schemas (values may contain unresolved links)", () => {
+    expect(canBranchMatch({ const: "a" }, "b")).toBe(true);
+    expect(canBranchMatch({ const: "a" }, "a")).toBe(true);
+  });
+
+  it("conservatively accepts enum schemas (values may contain unresolved links)", () => {
+    expect(canBranchMatch({ enum: ["a", "b"] }, "c")).toBe(true);
+    expect(canBranchMatch({ enum: ["a", "b"] }, "a")).toBe(true);
+  });
+
+  it("rejects missing required properties", () => {
+    expect(
+      canBranchMatch(
+        { type: "object", required: ["name", "age"] },
+        { name: "Alice" },
+      ),
+    ).toBe(false);
+  });
+
+  it("accepts when all required properties present", () => {
+    expect(
+      canBranchMatch(
+        { type: "object", required: ["name"] },
+        { name: "Alice", extra: true },
+      ),
+    ).toBe(true);
+  });
+
+  it("conservatively accepts property-level const (values may be unresolved links)", () => {
+    // Even when the property value doesn't match the const, we can't reject
+    // because the value might be a link that resolves to a matching value.
+    expect(
+      canBranchMatch(
+        {
+          type: "object",
+          properties: { kind: { const: "cat" } },
+        },
+        { kind: "dog", name: "Rex" },
+      ),
+    ).toBe(true);
+    expect(
+      canBranchMatch(
+        {
+          type: "object",
+          properties: { kind: { const: "cat" } },
+        },
+        { kind: "cat", name: "Whiskers" },
+      ),
+    ).toBe(true);
+  });
+
+  it("conservatively accepts property-level enum (values may be unresolved links)", () => {
+    expect(
+      canBranchMatch(
+        {
+          type: "object",
+          properties: { status: { enum: ["active", "inactive"] } },
+        },
+        { status: "deleted" },
+      ),
+    ).toBe(true);
+  });
+
+  it("returns true (conservative) when uncertain — no type specified", () => {
+    expect(canBranchMatch({}, "anything")).toBe(true);
+    expect(canBranchMatch({}, 123)).toBe(true);
+    expect(canBranchMatch({}, { a: 1 })).toBe(true);
+  });
+
+  it("never rejects asCell branches", () => {
+    expect(canBranchMatch({ asCell: true, type: "number" }, "hello")).toBe(
+      true,
+    );
+  });
+
+  it("never rejects asStream branches", () => {
+    expect(
+      canBranchMatch({ asStream: true, type: "number" }, "hello"),
+    ).toBe(true);
+  });
+
+  it("handles boolean schemas", () => {
+    expect(canBranchMatch(true, "anything")).toBe(true);
+    expect(canBranchMatch(false, "anything")).toBe(false);
+  });
+
+  it("accepts when properties have const/enum (no property-level discrimination)", () => {
+    // Property-level const/enum are not checked because values may contain
+    // unresolved links. This test confirms no rejection happens.
+    expect(
+      canBranchMatch(
+        {
+          type: "object",
+          properties: { kind: { const: "cat" } },
+        },
+        { name: "Whiskers" },
+      ),
+    ).toBe(true);
+  });
+
+  it("handles array type in schema", () => {
+    expect(canBranchMatch({ type: ["string", "number"] }, "hello")).toBe(true);
+    expect(canBranchMatch({ type: ["string", "number"] }, 42)).toBe(true);
+    expect(canBranchMatch({ type: ["string", "number"] }, true)).toBe(false);
+  });
+
+  it("checks required properties when type is an array including 'object'", () => {
+    // type: ["object", "null"] should still check required properties
+    expect(
+      canBranchMatch(
+        { type: ["object", "null"], required: ["name"] },
+        { name: "Alice" },
+      ),
+    ).toBe(true);
+    expect(
+      canBranchMatch(
+        { type: ["object", "null"], required: ["name"] },
+        { age: 30 },
+      ),
+    ).toBe(false);
+    // type array without "object" should skip required check
+    expect(
+      canBranchMatch(
+        { type: ["string", "number"], required: ["name"] },
+        { age: 30 },
+      ),
+    ).toBe(false); // rejected by type mismatch, not required
+  });
+
+  it("conservatively accepts when value is a cell link object", () => {
+    const linkValue = { "/": { [LINK_V1_TAG]: { id: "of:target", path: [] } } };
+    // Even if the branch type doesn't match the link's shape, links get
+    // resolved during traversal so we must not reject.
+    expect(canBranchMatch({ type: "string" }, linkValue)).toBe(true);
+    expect(canBranchMatch({ type: "number" }, linkValue)).toBe(true);
+    expect(
+      canBranchMatch(
+        { type: "object", required: ["missing"] },
+        linkValue,
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("mergeAnyOfBranchSchemas", () => {
+  it("returns null for fewer than 2 branches", () => {
+    expect(
+      mergeAnyOfBranchSchemas([{ type: "object" }], {}),
+    ).toBe(null);
+  });
+
+  it("returns null when a branch is not an object type", () => {
+    expect(
+      mergeAnyOfBranchSchemas(
+        [{ type: "string" }, { type: "object" }],
+        {},
+      ),
+    ).toBe(null);
+  });
+
+  it("merges disjoint properties from two branches", () => {
+    const result = mergeAnyOfBranchSchemas(
+      [
+        { type: "object", properties: { a: { type: "string" } } },
+        { type: "object", properties: { b: { type: "number" } } },
+      ],
+      {},
+    );
+    expect(result).not.toBe(null);
+    const r = result as Record<string, unknown>;
+    expect(r.type).toBe("object");
+    const props = r.properties as Record<string, unknown>;
+    expect(props.a).toEqual({ type: "string" });
+    expect(props.b).toEqual({ type: "number" });
+  });
+
+  it("wraps overlapping properties with different schemas in anyOf", () => {
+    const result = mergeAnyOfBranchSchemas(
+      [
+        { type: "object", properties: { x: { type: "string" } } },
+        { type: "object", properties: { x: { type: "number" } } },
+      ],
+      {},
+    );
+    expect(result).not.toBe(null);
+    const props = (result as Record<string, unknown>)
+      .properties as Record<string, unknown>;
+    const xSchema = props.x as Record<string, unknown>;
+    expect(xSchema.anyOf).toBeDefined();
+    expect((xSchema.anyOf as unknown[]).length).toBe(2);
+  });
+
+  it("uses single schema when overlapping properties are identical", () => {
+    const result = mergeAnyOfBranchSchemas(
+      [
+        { type: "object", properties: { x: { type: "string" } } },
+        { type: "object", properties: { x: { type: "string" } } },
+      ],
+      {},
+    );
+    expect(result).not.toBe(null);
+    const props = (result as Record<string, unknown>)
+      .properties as Record<string, unknown>;
+    expect(props.x).toEqual({ type: "string" });
+  });
+
+  it("computes required as intersection", () => {
+    const result = mergeAnyOfBranchSchemas(
+      [
+        {
+          type: "object",
+          properties: { a: { type: "string" }, b: { type: "string" } },
+          required: ["a", "b"],
+        },
+        {
+          type: "object",
+          properties: { a: { type: "string" }, c: { type: "number" } },
+          required: ["a"],
+        },
+      ],
+      {},
+    );
+    expect(result).not.toBe(null);
+    const r = result as Record<string, unknown>;
+    // Only "a" is required by both branches
+    expect(r.required).toEqual(["a"]);
+  });
+
+  it("merges $defs from all branches", () => {
+    const result = mergeAnyOfBranchSchemas(
+      [
+        {
+          type: "object",
+          properties: { a: { type: "string" } },
+          $defs: { Foo: { type: "string" } },
+        },
+        {
+          type: "object",
+          properties: { b: { type: "number" } },
+          $defs: { Bar: { type: "number" } },
+        },
+      ],
+      {},
+    );
+    expect(result).not.toBe(null);
+    const r = result as Record<string, unknown>;
+    const defs = r.$defs as Record<string, unknown>;
+    expect(defs.Foo).toEqual({ type: "string" });
+    expect(defs.Bar).toEqual({ type: "number" });
+  });
+
+  it("returns null when branches have no properties", () => {
+    expect(
+      mergeAnyOfBranchSchemas(
+        [{ type: "object" }, { type: "object" }],
+        {},
+      ),
+    ).toBe(null);
+  });
+
+  it("returns null for boolean branch schemas", () => {
+    expect(
+      mergeAnyOfBranchSchemas([true, { type: "object" }], {}),
+    ).toBe(null);
+  });
+});
+
+describe("anyOf optimization integration", () => {
+  it("fast-rejects incompatible branches and still produces correct result", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-discriminated" as URI;
+    const docEntity = docUri as Entity;
+
+    const docValue = { kind: "circle", radius: 5 };
+
+    const docRevision: Revision<State> = {
+      the: type,
+      of: docEntity,
+      is: { value: docValue },
+      cause: refer({ the: type, of: docEntity }),
+      since: 1,
+    };
+    store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+
+    // Discriminated union by "kind" const
+    const schema = {
+      anyOf: [
+        {
+          type: "object",
+          properties: {
+            kind: { const: "square" },
+            side: { type: "number" },
+          },
+          required: ["kind"],
+        },
+        {
+          type: "object",
+          properties: {
+            kind: { const: "circle" },
+            radius: { type: "number" },
+          },
+          required: ["kind"],
+        },
+        {
+          type: "object",
+          properties: {
+            kind: { const: "triangle" },
+            base: { type: "number" },
+            height: { type: "number" },
+          },
+          required: ["kind"],
+        },
+      ],
+    } as JSONSchema;
+
+    const traverser = getTraverser(store, { path: ["value"], schema });
+
+    const result = traverser.traverse({
+      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
+      value: docValue,
+    });
+
+    expect(result).toEqual({ kind: "circle", radius: 5 });
+  });
+
+  it("property-merges disjoint object branches into a single traversal", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-disjoint" as URI;
+    const docEntity = docUri as Entity;
+
+    const docValue = { name: "Alice", age: 30 };
+
+    const docRevision: Revision<State> = {
+      the: type,
+      of: docEntity,
+      is: { value: docValue },
+      cause: refer({ the: type, of: docEntity }),
+      since: 1,
+    };
+    store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+
+    const schema = {
+      anyOf: [
+        {
+          type: "object",
+          properties: { name: { type: "string" } },
+        },
+        {
+          type: "object",
+          properties: { age: { type: "number" } },
+        },
+      ],
+    } as JSONSchema;
+
+    const traverser = getTraverser(store, { path: ["value"], schema });
+
+    const result = traverser.traverse({
+      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
+      value: docValue,
+    });
+
+    // Both properties should be discovered via branch-by-branch + mergeAnyOfMatches
+    expect(result).toEqual({ name: "Alice", age: 30 });
+  });
+
+  it("preserves link discovery across all branches", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-links" as URI;
+    const docEntity = docUri as Entity;
+    const linkedUri = "of:linked-doc" as URI;
+    const linkedEntity = linkedUri as Entity;
+
+    const linkedRevision: Revision<State> = {
+      the: type,
+      of: linkedEntity,
+      is: { value: "linked-value" },
+      cause: refer({ the: type, of: linkedEntity }),
+      since: 1,
+    };
+    store.set(`${linkedRevision.of}/${linkedRevision.the}`, linkedRevision);
+
+    const docValue = {
+      title: "test",
+      ref: {
+        "/": {
+          [LINK_V1_TAG]: {
+            id: linkedUri,
+            path: [],
+          },
+        },
+      },
+    };
+
+    const docRevision: Revision<State> = {
+      the: type,
+      of: docEntity,
+      is: { value: docValue },
+      cause: refer({ the: type, of: docEntity }),
+      since: 1,
+    };
+    store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+
+    const schema = {
+      anyOf: [
+        {
+          type: "object",
+          properties: {
+            title: { type: "string" },
+            ref: { type: "string" },
+          },
+        },
+        {
+          type: "object",
+          properties: {
+            title: { type: "string" },
+          },
+        },
+      ],
+    } as JSONSchema;
+
+    const traverser = getTraverser(store, { path: ["value"], schema });
+
+    const result = traverser.traverse({
+      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
+      value: docValue,
+    });
+
+    // Both branches survive (both are object types). Branch 1 includes ref,
+    // branch 2 does not. mergeAnyOfMatches combines them via Object.assign.
+    // The link value is preserved as-is (not resolved in this unit test context).
+    expect((result as Record<string, unknown>).title).toBe("test");
+    expect((result as Record<string, unknown>).ref).toEqual(docValue.ref);
+  });
+
+  it("falls back correctly for primitive values", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-primitive-anyof" as URI;
+    const docEntity = docUri as Entity;
+
+    const docValue = 42;
+
+    const docRevision: Revision<State> = {
+      the: type,
+      of: docEntity,
+      is: { value: docValue },
+      cause: refer({ the: type, of: docEntity }),
+      since: 1,
+    };
+    store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+
+    const schema = {
+      anyOf: [
+        { type: "string" },
+        { type: "number" },
+        { type: "boolean" },
+      ],
+    } as JSONSchema;
+
+    const traverser = getTraverser(store, { path: ["value"], schema });
+
+    const result = traverser.traverse({
+      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
+      value: docValue,
+    });
+
+    expect(result).toBe(42);
+    // String and boolean branches should be fast-rejected
+    expect(traverser.anyOfFastRejects).toBeGreaterThanOrEqual(2);
+  });
+
+  it("handles mixed object and primitive anyOf branches", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-mixed-anyof" as URI;
+    const docEntity = docUri as Entity;
+
+    const docValue = { name: "test" };
+
+    const docRevision: Revision<State> = {
+      the: type,
+      of: docEntity,
+      is: { value: docValue },
+      cause: refer({ the: type, of: docEntity }),
+      since: 1,
+    };
+    store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+
+    const schema = {
+      anyOf: [
+        { type: "string" },
+        { type: "null" },
+        { type: "object", properties: { name: { type: "string" } } },
+      ],
+    } as JSONSchema;
+
+    const traverser = getTraverser(store, { path: ["value"], schema });
+
+    const result = traverser.traverse({
+      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
+      value: docValue,
+    });
+
+    expect(result).toEqual({ name: "test" });
+    // string and null branches should be fast-rejected
+    expect(traverser.anyOfFastRejects).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("anyOf fast-reject reactivity invariants (traverseCells)", () => {
+  // These tests verify that the fast-reject optimization does NOT break
+  // reactivity. When traverseCells=true (the default), the schemaTracker
+  // must record every document whose value can affect the result, so that
+  // subscriptions fire when any contributing document changes.
+  //
+  // Key invariants:
+  //   1. The root document is ALWAYS tracked.
+  //   2. Linked documents reachable through surviving branches are tracked.
+  //   3. If the root document later changes (e.g. discriminator flips), the
+  //      subscription fires and a fresh traversal discovers the new branch's
+  //      links. Therefore, links exclusive to fast-rejected branches do NOT
+  //      need to be tracked preemptively — the root doc subscription covers
+  //      that scenario.
+
+  const SPACE = "did:null:null";
+  const TYPE = "application/json" as const;
+
+  /** Build a tracker key matching the internal getTrackerKey() format. */
+  function trackerKey(id: string): string {
+    return `${SPACE}/${id}/${TYPE}`;
+  }
+
+  /** Shortcut: store a document in the map-based store. */
+  function putDoc(
+    store: Map<string, Revision<State>>,
+    id: string,
+    value: unknown,
+  ) {
+    const entity = id as Entity;
+    store.set(`${entity}/${TYPE}`, {
+      the: TYPE,
+      of: entity,
+      is: { value },
+      cause: refer({ the: TYPE, of: entity }),
+      since: 1,
+    } as Revision<State>);
+  }
+
+  /** Create a link value (sigil v1 format). */
+  function makeLink(targetId: string, path: string[] = []) {
+    return {
+      "/": {
+        [LINK_V1_TAG]: { id: targetId, path },
+      },
+    };
+  }
+
+  /** Access the protected schemaTracker from the traverser. */
+  function getSchemaTracker(
+    traverser: SchemaObjectTraverser<StorableDatum>,
+  ): MapSet<string, SchemaPathSelector> {
+    return (traverser as any).schemaTracker;
+  }
+
+  it("tracks the root document even when all anyOf branches are fast-rejected", () => {
+    const store = new Map<string, Revision<State>>();
+    const docUri = "of:doc-no-match" as URI;
+
+    // Value is a number, but all branches expect string or boolean
+    putDoc(store, docUri, 42);
+
+    const schema = {
+      anyOf: [
+        { type: "string" },
+        { type: "boolean" },
+      ],
+    } as JSONSchema;
+
+    const traverser = getTraverser(store, { path: ["value"], schema });
+    traverser.traverse({
+      address: { space: SPACE, id: docUri, type: TYPE, path: ["value"] },
+      value: 42,
+    });
+
+    const tracker = getSchemaTracker(traverser);
+    // Root doc must ALWAYS be tracked — if its value changes, we re-traverse
+    expect(tracker.has(trackerKey(docUri))).toBe(true);
+  });
+
+  it("tracks linked docs reached through the matching branch (type-based rejection)", () => {
+    const store = new Map<string, Revision<State>>();
+    const rootUri = "of:doc-disc-root" as URI;
+    const circleDataUri = "of:circle-data" as URI;
+
+    putDoc(store, circleDataUri, "radius-info");
+
+    const rootValue = {
+      kind: "circle",
+      data: makeLink(circleDataUri),
+    };
+    putDoc(store, rootUri, rootValue);
+
+    // Object branch has a link property; string branch is type-rejected
+    const schema = {
+      anyOf: [
+        {
+          type: "object",
+          properties: {
+            kind: { type: "string" },
+            data: { type: "string" },
+          },
+        },
+        { type: "string" },
+      ],
+    } as JSONSchema;
+
+    const traverser = getTraverser(store, { path: ["value"], schema });
+    const result = traverser.traverse({
+      address: { space: SPACE, id: rootUri, type: TYPE, path: ["value"] },
+      value: rootValue,
+    });
+
+    // Correct result — link resolved through object branch
+    expect((result as any).kind).toBe("circle");
+    expect((result as any).data).toBe("radius-info");
+
+    // "string" branch should be fast-rejected (type mismatch)
+    expect(traverser.anyOfFastRejects).toBeGreaterThanOrEqual(1);
+
+    // Reactivity: both root and linked doc must be tracked
+    const tracker = getSchemaTracker(traverser);
+    expect(tracker.has(trackerKey(rootUri))).toBe(true);
+    expect(tracker.has(trackerKey(circleDataUri))).toBe(true);
+  });
+
+  it("tracks linked docs in shared properties even when some branches are fast-rejected", () => {
+    const store = new Map<string, Revision<State>>();
+    const rootUri = "of:doc-shared-link" as URI;
+    const sharedUri = "of:shared-target" as URI;
+
+    putDoc(store, sharedUri, "shared-value");
+
+    // Both branches reference the same property "ref" which has a link.
+    // "string" branch is fast-rejected (value is an object), but the
+    // surviving "object" branch still traverses "ref".
+    const rootValue = {
+      name: "test",
+      ref: makeLink(sharedUri),
+    };
+    putDoc(store, rootUri, rootValue);
+
+    const schema = {
+      anyOf: [
+        { type: "string" },
+        {
+          type: "object",
+          properties: {
+            name: { type: "string" },
+            ref: { type: "string" },
+          },
+        },
+      ],
+    } as JSONSchema;
+
+    const traverser = getTraverser(store, { path: ["value"], schema });
+    const result = traverser.traverse({
+      address: { space: SPACE, id: rootUri, type: TYPE, path: ["value"] },
+      value: rootValue,
+    });
+
+    expect((result as any).ref).toBe("shared-value");
+    expect(traverser.anyOfFastRejects).toBeGreaterThanOrEqual(1);
+
+    const tracker = getSchemaTracker(traverser);
+    expect(tracker.has(trackerKey(rootUri))).toBe(true);
+    expect(tracker.has(trackerKey(sharedUri))).toBe(true);
+  });
+
+  it("tracks all linked docs when multiple links survive fast-reject", () => {
+    const store = new Map<string, Revision<State>>();
+    const rootUri = "of:doc-multi-link" as URI;
+    const linkAUri = "of:link-a" as URI;
+    const linkBUri = "of:link-b" as URI;
+
+    putDoc(store, linkAUri, "value-a");
+    putDoc(store, linkBUri, "value-b");
+
+    const rootValue = {
+      kind: "circle",
+      linkA: makeLink(linkAUri),
+      linkB: makeLink(linkBUri),
+    };
+    putDoc(store, rootUri, rootValue);
+
+    // Object branch has two links; null and string branches are type-rejected
+    const schema = {
+      anyOf: [
+        {
+          type: "object",
+          properties: {
+            kind: { type: "string" },
+            linkA: { type: "string" },
+            linkB: { type: "string" },
+          },
+        },
+        { type: "null" },
+        { type: "string" },
+      ],
+    } as JSONSchema;
+
+    const traverser = getTraverser(store, { path: ["value"], schema });
+    const result = traverser.traverse({
+      address: { space: SPACE, id: rootUri, type: TYPE, path: ["value"] },
+      value: rootValue,
+    });
+
+    expect((result as any).linkA).toBe("value-a");
+    expect((result as any).linkB).toBe("value-b");
+
+    // "null" and "string" branches should be fast-rejected (type mismatch)
+    expect(traverser.anyOfFastRejects).toBeGreaterThanOrEqual(2);
+
+    // ALL three docs (root + 2 links) must be tracked for reactivity
+    const tracker = getSchemaTracker(traverser);
+    expect(tracker.has(trackerKey(rootUri))).toBe(true);
+    expect(tracker.has(trackerKey(linkAUri))).toBe(true);
+    expect(tracker.has(trackerKey(linkBUri))).toBe(true);
+  });
+
+  it("root doc subscription ensures rejected-branch links become discoverable on change", () => {
+    // Scenario: branch A matches now and has linkA tracked.
+    // Branch B is fast-rejected (missing required property); its exclusive
+    // linkB is NOT tracked. This is safe because: if the root doc changes
+    // to include branch B's required property, the root-doc subscription
+    // fires and a fresh traversal will now match branch B and discover linkB.
+    //
+    // We verify this by doing TWO traversals with different root values.
+    // Uses required-property discrimination (const/enum checks removed per
+    // review — values may contain unresolved links).
+    const store = new Map<string, Revision<State>>();
+    const rootUri = "of:doc-flip" as URI;
+    const circleLinkUri = "of:circle-link" as URI;
+    const squareLinkUri = "of:square-link" as URI;
+
+    putDoc(store, circleLinkUri, "circle-data");
+    putDoc(store, squareLinkUri, "square-data");
+
+    // First traversal: has circleOnly → branch A matches, branch B rejected
+    const circleValue = {
+      circleOnly: true,
+      circleLink: makeLink(circleLinkUri),
+      squareLink: makeLink(squareLinkUri),
+    };
+    putDoc(store, rootUri, circleValue);
+
+    const schema = {
+      anyOf: [
+        {
+          type: "object",
+          properties: {
+            circleLink: { type: "string" },
+          },
+          required: ["circleOnly"],
+        },
+        {
+          type: "object",
+          properties: {
+            squareLink: { type: "string" },
+          },
+          required: ["squareOnly"],
+        },
+      ],
+    } as JSONSchema;
+
+    const traverser1 = getTraverser(store, { path: ["value"], schema });
+    const result1 = traverser1.traverse({
+      address: { space: SPACE, id: rootUri, type: TYPE, path: ["value"] },
+      value: circleValue,
+    });
+
+    expect((result1 as any).circleLink).toBe("circle-data");
+    expect(traverser1.anyOfFastRejects).toBeGreaterThanOrEqual(1);
+    const tracker1 = getSchemaTracker(traverser1);
+    expect(tracker1.has(trackerKey(rootUri))).toBe(true);
+    expect(tracker1.has(trackerKey(circleLinkUri))).toBe(true);
+
+    // Second traversal: root doc changes to have squareOnly
+    // (simulates a reactive re-run after the root subscription fires)
+    const squareValue = {
+      squareOnly: true,
+      circleLink: makeLink(circleLinkUri),
+      squareLink: makeLink(squareLinkUri),
+    };
+    putDoc(store, rootUri, squareValue);
+
+    const traverser2 = getTraverser(store, { path: ["value"], schema });
+    const result2 = traverser2.traverse({
+      address: { space: SPACE, id: rootUri, type: TYPE, path: ["value"] },
+      value: squareValue,
+    });
+
+    expect((result2 as any).squareLink).toBe("square-data");
+    expect(traverser2.anyOfFastRejects).toBeGreaterThanOrEqual(1);
+    const tracker2 = getSchemaTracker(traverser2);
+    expect(tracker2.has(trackerKey(rootUri))).toBe(true);
+    expect(tracker2.has(trackerKey(squareLinkUri))).toBe(true);
+  });
+
+  it("tracks nested linked docs through surviving anyOf branches", () => {
+    // Chain: root → midDoc → leafDoc, all through an anyOf-guarded schema
+    const store = new Map<string, Revision<State>>();
+    const rootUri = "of:doc-nested-root" as URI;
+    const midUri = "of:doc-mid" as URI;
+    const leafUri = "of:doc-leaf" as URI;
+
+    putDoc(store, leafUri, "leaf-value");
+    putDoc(store, midUri, { inner: makeLink(leafUri) });
+
+    const rootValue = {
+      kind: "deep",
+      ref: makeLink(midUri),
+    };
+    putDoc(store, rootUri, rootValue);
+
+    // Object branch has nested link chain; string and null branches type-rejected
+    const schema = {
+      anyOf: [
+        {
+          type: "object",
+          properties: {
+            kind: { type: "string" },
+            ref: {
+              type: "object",
+              properties: {
+                inner: { type: "string" },
+              },
+            },
+          },
+        },
+        { type: "string" },
+        { type: "null" },
+      ],
+    } as JSONSchema;
+
+    const traverser = getTraverser(store, { path: ["value"], schema });
+    const result = traverser.traverse({
+      address: { space: SPACE, id: rootUri, type: TYPE, path: ["value"] },
+      value: rootValue,
+    });
+
+    expect((result as any).kind).toBe("deep");
+    expect((result as any).ref).toEqual({ inner: "leaf-value" });
+
+    // "string" and "null" branches fast-rejected (type mismatch)
+    expect(traverser.anyOfFastRejects).toBeGreaterThanOrEqual(2);
+
+    // All three docs in the chain must be tracked
+    const tracker = getSchemaTracker(traverser);
+    expect(tracker.has(trackerKey(rootUri))).toBe(true);
+    expect(tracker.has(trackerKey(midUri))).toBe(true);
+    expect(tracker.has(trackerKey(leafUri))).toBe(true);
   });
 });
