@@ -171,7 +171,11 @@ import { isDeno } from "@commontools/utils/env";
 
 export type LogMessage = unknown | (() => unknown);
 
-export type LogLevel = "debug" | "info" | "warn" | "error";
+/** Active log levels used for actual log messages. */
+export type ActiveLogLevel = "debug" | "info" | "warn" | "error";
+
+/** All log levels including "silent" which suppresses all output. */
+export type LogLevel = ActiveLogLevel | "silent";
 
 /**
  * Point in a CDF (Cumulative Distribution Function)
@@ -367,6 +371,7 @@ const LOG_LEVELS: Record<LogLevel, number> = {
   info: 1,
   warn: 2,
   error: 3,
+  silent: 4,
 };
 
 /**
@@ -385,10 +390,57 @@ export const LOG_COLORS = {
 } as const;
 
 /**
- * Check if a message at the given level should be logged
+ * Global log level floor. When set, `shouldLog()` uses the more restrictive
+ * of (floor, per-logger level). This allows suppressing all logging by default
+ * (e.g. in CLI mode) while still letting individual loggers be more restrictive.
+ */
+let _globalLevelFloor: LogLevel | undefined;
+
+/**
+ * Set (or clear) the global log-level floor.
+ * Pass `undefined` to remove the floor entirely.
+ */
+export function setGlobalLogFloor(level: LogLevel | undefined): void {
+  _globalLevelFloor = level;
+}
+
+/**
+ * Get the current global log-level floor.
+ */
+export function getGlobalLogFloor(): LogLevel | undefined {
+  return _globalLevelFloor;
+}
+
+/**
+ * Read `CT_LOG_LEVEL` from the environment (Deno only).
+ * Returns undefined when not set or not a valid level.
+ */
+function getEnvFloor(): LogLevel | undefined {
+  if (isDeno()) {
+    try {
+      const envLevel = Deno.env.get("CT_LOG_LEVEL");
+      if (envLevel && envLevel in LOG_LEVELS) return envLevel as LogLevel;
+    } catch { /* ignore permission errors */ }
+  }
+  return undefined;
+}
+
+// Auto-initialize floor from CT_LOG_LEVEL so workers inherit it.
+_globalLevelFloor = getEnvFloor();
+
+/**
+ * Check if a message at the given level should be logged.
+ * Respects the global floor when set — the effective threshold is the
+ * more restrictive of (floor, per-logger level).
  */
 function shouldLog(level: LogLevel, loggerLevel?: LogLevel): boolean {
   const effectiveLevel = loggerLevel ?? "info";
+  const floor = _globalLevelFloor;
+  if (floor !== undefined) {
+    const floorNum = LOG_LEVELS[floor];
+    const loggerNum = LOG_LEVELS[effectiveLevel];
+    return LOG_LEVELS[level] >= Math.max(floorNum, loggerNum);
+  }
   return LOG_LEVELS[level] >= LOG_LEVELS[effectiveLevel];
 }
 
@@ -559,7 +611,7 @@ export class Logger {
   /**
    * Increment the count for a specific message key and log level
    */
-  private incrementKeyCount(key: string, level: LogLevel): void {
+  private incrementKeyCount(key: string, level: ActiveLogLevel): void {
     // Skip reserved key name "total" to prevent corruption of breakdown totals
     if (key === "total") {
       console.warn(
@@ -602,7 +654,9 @@ export class Logger {
   /**
    * Get the prefix and color for a log level
    */
-  private getLogFormat(level: LogLevel): { prefix: string; color: string } {
+  private getLogFormat(
+    level: ActiveLogLevel,
+  ): { prefix: string; color: string } {
     const levelUpper = level.toUpperCase();
     const timestamp = getTimeStamp();
 
@@ -966,7 +1020,7 @@ function getEnvLevel() {
   if (isDeno()) {
     try {
       const envLevel = Deno.env.get("LOG_LEVEL");
-      if (envLevel && envLevel in LOG_LEVELS) {
+      if (envLevel && envLevel !== "silent" && envLevel in LOG_LEVELS) {
         return envLevel as LogLevel;
       }
     } catch {
@@ -1247,6 +1301,8 @@ if (typeof globalThis !== "undefined") {
       resetAllTimingStats?: typeof resetAllTimingStats;
       resetAllCountBaselines?: typeof resetAllCountBaselines;
       resetAllTimingBaselines?: typeof resetAllTimingBaselines;
+      setGlobalLogFloor?: typeof setGlobalLogFloor;
+      getGlobalLogFloor?: typeof getGlobalLogFloor;
     };
   };
   if (!global.commontools) {
@@ -1260,4 +1316,6 @@ if (typeof globalThis !== "undefined") {
   global.commontools.resetAllTimingStats = resetAllTimingStats;
   global.commontools.resetAllCountBaselines = resetAllCountBaselines;
   global.commontools.resetAllTimingBaselines = resetAllTimingBaselines;
+  global.commontools.setGlobalLogFloor = setGlobalLogFloor;
+  global.commontools.getGlobalLogFloor = getGlobalLogFloor;
 }
