@@ -37,7 +37,10 @@ if (isDeno()) {
   try {
     nodeCrypto = await import("node:crypto");
     sha256Fn = (payload: Uint8Array): Uint8Array => {
-      return nodeCrypto.createHash("sha256").update(payload).digest();
+      // node:crypto digest() returns Buffer (a Uint8Array subclass); normalize
+      // to plain Uint8Array so downstream equality checks work correctly.
+      const buf = nodeCrypto.createHash("sha256").update(payload).digest();
+      return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
     };
   } catch {
     // node:crypto not available
@@ -71,7 +74,9 @@ if (nodeCrypto) {
         h.update(data);
       },
       digest(): Uint8Array {
-        return h.digest();
+        // node:crypto digest() returns Buffer; normalize to plain Uint8Array.
+        const buf = h.digest();
+        return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
       },
     };
   };
