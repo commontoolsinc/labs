@@ -27,7 +27,12 @@
 
 import { Identity } from "@commontools/identity";
 import { Engine, Runtime } from "@commontools/runner";
-import type { Cell, Pattern, Stream } from "@commontools/runner";
+import type {
+  Cell,
+  ErrorWithContext,
+  Pattern,
+  Stream,
+} from "@commontools/runner";
 import type { OpaqueRef } from "@commontools/api";
 import { FileSystemProgramResolver } from "@commontools/js-compiler";
 import { basename } from "@std/path";
@@ -65,10 +70,10 @@ export interface TestRunResult {
   error?: string;
   /** Navigation events recorded during the test run */
   navigations: NavigationEvent[];
-  /** console.error messages captured during the test run */
-  consoleErrors: string[];
-  /** If true, console.error output is expected and should not fail the test */
-  allowConsoleErrors?: boolean;
+  /** Runtime errors captured via errorHandlers during the test run */
+  runtimeErrors: string[];
+  /** If true, runtime errors are expected and should not fail the test */
+  allowRuntimeErrors?: boolean;
 }
 
 export interface TestRunnerOptions {
@@ -88,16 +93,8 @@ export async function runTestPattern(
   const TIMEOUT = options.timeout ?? 5000;
   const startTime = performance.now();
 
-  // Intercept console.error to capture runtime errors
-  const consoleErrors: string[] = [];
-  const originalConsoleError = console.error;
-  console.error = (...args: unknown[]) => {
-    const msg = args.map((a) => typeof a === "string" ? a : String(a)).join(
-      " ",
-    );
-    consoleErrors.push(msg);
-    originalConsoleError.apply(console, args);
-  };
+  // Collect runtime errors via the scheduler's error handler
+  const runtimeErrors: ErrorWithContext[] = [];
 
   // 1. Create emulated runtime (same as piece step)
   const identity = await Identity.fromPassphrase("test-runner");
@@ -114,6 +111,7 @@ export async function runTestPattern(
   const runtime = new Runtime({
     storageManager,
     apiUrl: new URL(import.meta.url),
+    errorHandlers: [(error: ErrorWithContext) => runtimeErrors.push(error)],
     navigateCallback: (target) => {
       const name = (target.key("$NAME") as Cell<string | undefined>).get();
       navigations.push({
@@ -218,9 +216,9 @@ export async function runTestPattern(
       );
     }
 
-    // Check for allowConsoleErrors flag
-    const allowConsoleErrors =
-      (patternResult.key("allowConsoleErrors") as Cell<unknown>).get() === true;
+    // Check for allowRuntimeErrors flag
+    const allowRuntimeErrors =
+      (patternResult.key("allowRuntimeErrors") as Cell<unknown>).get() === true;
 
     if (options.verbose) {
       console.log(`  Found ${testsValue.length} test steps`);
@@ -362,13 +360,14 @@ export async function runTestPattern(
       }
     }
 
+    const errorMessages = runtimeErrors.map((e) => String(e));
     return {
       path: testPath,
       results,
       totalDurationMs: performance.now() - startTime,
       navigations,
-      consoleErrors,
-      allowConsoleErrors,
+      runtimeErrors: errorMessages,
+      allowRuntimeErrors,
     };
   } catch (err) {
     let errorMessage = err instanceof Error ? err.message : String(err);
@@ -383,17 +382,17 @@ export async function runTestPattern(
         "\n    Hint: If the test imports from sibling directories (e.g., ../shared/), use --root to specify a common ancestor.";
     }
 
+    const errorMessages = runtimeErrors.map((e) => String(e));
     return {
       path: testPath,
       results: [],
       totalDurationMs: performance.now() - startTime,
       navigations,
-      consoleErrors,
+      runtimeErrors: errorMessages,
       error: errorMessage,
     };
   } finally {
     // 6. Cleanup
-    console.error = originalConsoleError;
     sinkCancel?.();
     engine.dispose();
     await storageManager.close();
@@ -457,18 +456,18 @@ export async function runTests(
         );
       }
 
-      // Report console.error output
-      if (result.consoleErrors.length > 0) {
-        if (result.allowConsoleErrors) {
+      // Report runtime errors
+      if (result.runtimeErrors.length > 0) {
+        if (result.allowRuntimeErrors) {
           console.log(
-            `  ⊘ ${result.consoleErrors.length} console.error(s) (allowed)`,
+            `  ⊘ ${result.runtimeErrors.length} runtime error(s) (allowed)`,
           );
         } else {
           totalFailed++;
           console.log(
-            `  ✗ ${result.consoleErrors.length} console.error(s) during test:`,
+            `  ✗ ${result.runtimeErrors.length} runtime error(s) during test:`,
           );
-          for (const msg of result.consoleErrors) {
+          for (const msg of result.runtimeErrors) {
             // Show first line of each error, truncated
             const firstLine = msg.split("\n")[0];
             const truncated = firstLine.length > 120

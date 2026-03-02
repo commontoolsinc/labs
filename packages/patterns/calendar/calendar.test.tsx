@@ -185,6 +185,6 @@ export default pattern(() => {
     ],
     cal,
     // Sub-piece event proxies intermittently produce scheduler errors in headless runner
-    allowConsoleErrors: true,
+    allowRuntimeErrors: true,
   };
 });

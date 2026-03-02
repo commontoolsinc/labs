@@ -131,6 +131,6 @@ export default pattern(() => {
     searcher,
     customSearcher,
     // Pattern triggers scheduler errors from auth/filter computations in headless runner
-    allowConsoleErrors: true,
+    allowRuntimeErrors: true,
   };
 });
