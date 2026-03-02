@@ -267,14 +267,12 @@ describe("link-resolution", () => {
 
     it("should preserve schema when available", () => {
       // Use a simple schema without $ref
-      const rootSchema = {
+      const schema = {
         type: "object",
         properties: {
           name: { type: "string" },
         },
       } as const;
-
-      const schema = rootSchema;
 
       const targetCell = runtime.getCell<any>(
         space,
@@ -284,7 +282,7 @@ describe("link-resolution", () => {
       );
       targetCell.set({ name: "Test User" });
 
-      // Create a link with setRaw to preserve rootSchema
+      // Create a link with setRaw to preserve schema
       const sourceCell = runtime.getCell<any>(
         space,
         "rootschema-source",
@@ -302,7 +300,7 @@ describe("link-resolution", () => {
 
       const link = parseLink(sourceCell.get().link, sourceCell)!;
       const resolved = resolveLink(runtime, tx, link);
-      expect(resolved.schema).toEqual(rootSchema);
+      expect(resolved.schema).toEqual(schema);
     });
 
     it("should handle schema through multiple link hops", () => {

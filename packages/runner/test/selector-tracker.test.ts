@@ -129,7 +129,7 @@ describe("SelectorTracker", () => {
       expect(existingSelector2).toEqual(standardInitialSelector);
     });
 
-    it("should ignore rootSchema mismatches when schema has no $ref", () => {
+    it("should ignore schema mismatches when schema has no $ref", () => {
       const address: BaseMemoryAddress = {
         "id": "of:baeddoc",
         type: "application/json",

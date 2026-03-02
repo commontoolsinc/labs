@@ -124,26 +124,26 @@ export class SchemaGenerator implements ISchemaGenerator {
     };
 
     // Auto-detect: Should we use node-based or type-based analysis?
-    let rootSchema: SchemaDefinition;
+    let schema: SchemaDefinition;
     if (this.shouldUseNodeBasedAnalysis(type, typeNode, checker)) {
       // Use node-based analysis (for synthetic nodes or when type is unreliable)
-      rootSchema = this.analyzeTypeNodeStructure(
+      schema = this.analyzeTypeNodeStructure(
         typeNode!,
         checker,
         context,
       );
       // Build final schema with $schema and $defs
-      return this.buildFinalSchemaForSynthetic(rootSchema, context);
+      return this.buildFinalSchemaForSynthetic(schema, context);
     }
 
     // Use type-based analysis (normal path)
-    rootSchema = this.formatType(type, context, true);
+    schema = this.formatType(type, context, true);
 
     // Attach root-level description from JSDoc if available
-    rootSchema = this.attachRootDescription(rootSchema, type, context);
+    schema = this.attachRootDescription(schema, type, context);
 
     // Build final schema with definitions if needed
-    return this.buildFinalSchema(rootSchema, type, context, typeNode);
+    return this.buildFinalSchema(schema, type, context, typeNode);
   }
 
   /**
@@ -410,7 +410,7 @@ export class SchemaGenerator implements ISchemaGenerator {
    * Build the final schema with definitions if needed
    */
   private buildFinalSchema(
-    rootSchema: SchemaDefinition,
+    schema: SchemaDefinition,
     type: ts.Type,
     context: GenerationContext,
     _typeNode?: ts.TypeNode,
@@ -419,7 +419,7 @@ export class SchemaGenerator implements ISchemaGenerator {
 
     // If no definitions were created or used, return simple schema without $schema
     if (Object.keys(definitions).length === 0 || emittedRefs.size === 0) {
-      return rootSchema;
+      return schema;
     }
 
     // Decide if we promote root to a $ref
@@ -431,11 +431,11 @@ export class SchemaGenerator implements ISchemaGenerator {
     if (shouldPromoteRoot && namedKey) {
       // Ensure root is present in definitions
       if (!definitions[namedKey]) {
-        definitions[namedKey] = rootSchema;
+        definitions[namedKey] = schema;
       }
       base = { $ref: `#/$defs/${namedKey}` } as SchemaDefinition;
     } else {
-      base = rootSchema;
+      base = schema;
     }
 
     // Handle boolean schemas (rare, but supported by JSON Schema)
@@ -739,25 +739,25 @@ export class SchemaGenerator implements ISchemaGenerator {
    * Build final schema for synthetic TypeNode with $schema and $defs
    */
   private buildFinalSchemaForSynthetic(
-    rootSchema: SchemaDefinition,
+    schema: SchemaDefinition,
     context: GenerationContext,
   ): SchemaDefinition {
     const { definitions, emittedRefs } = context;
 
     // Handle boolean schemas (rare, but supported by JSON Schema)
-    if (typeof rootSchema === "boolean") {
-      return rootSchema;
+    if (typeof schema === "boolean") {
+      return schema;
     }
 
     // If no definitions were created or used, return simple schema
     if (Object.keys(definitions).length === 0 || emittedRefs.size === 0) {
-      return rootSchema;
+      return schema;
     }
 
     // Object schema: attach only the definitions actually referenced
-    const filtered = this.collectReferencedDefinitions(rootSchema, definitions);
+    const filtered = this.collectReferencedDefinitions(schema, definitions);
     const out: Record<string, unknown> = {
-      ...(rootSchema as Record<string, unknown>),
+      ...(schema as Record<string, unknown>),
     };
     if (Object.keys(filtered).length > 0) out.$defs = filtered;
     return out as SchemaDefinition;

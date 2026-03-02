@@ -171,7 +171,7 @@ describe("Storage", () => {
       let synced = false;
       const selector = {
         path: [],
-        schemaContext: { schema: true, rootSchema: true },
+        schemaContext: { schema: true },
       };
       const testCellURI = testCell.getAsNormalizedFullLink().id;
       storageManager.open(space).sync(testCellURI, selector)
