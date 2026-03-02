@@ -125,7 +125,7 @@ export default pattern((__ct_pattern_input) => {
                     }
                 }
             } as const satisfies __ctHelpers.JSONSchema, { result: {
-                    tasks: result.key("tasks")
+                    tasks: result.tasks
                 } }, ({ result }) => {
                 return result.tasks.map((task) => <li>{task.name}</li>);
             })}

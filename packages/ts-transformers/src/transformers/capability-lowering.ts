@@ -549,6 +549,28 @@ function isOpaqueOriginCall(
   const kind = detectCallKind(expression, context.checker);
   if (!kind) return false;
 
+  if (kind.kind === "builder") {
+    return kind.builderName === "lift" || kind.builderName === "pattern";
+  }
+
+  return false;
+}
+
+/**
+ * Broader variant of isOpaqueOriginCall used only during the pre-scan to
+ * classify map captures. Unlike isOpaqueOriginCall (which is conservative
+ * to avoid over-rewriting property accesses in rewritePatternBody), this
+ * recognises all reactive-producing call kinds so that captures from
+ * Cell.of(), cell(), computed(), action(), wish(), etc. are correctly
+ * classified as reactive.
+ */
+function isReactiveOriginCall(
+  expression: ts.CallExpression,
+  context: TransformationContext,
+): boolean {
+  const kind = detectCallKind(expression, context.checker);
+  if (!kind) return false;
+
   switch (kind.kind) {
     case "builder":
     case "cell-factory":
@@ -584,6 +606,43 @@ function isOpaqueSourceExpression(
       const methodName = current.expression.name.text;
       if (methodName === "key" || methodName === "get") {
         return isOpaqueSourceExpression(
+          current.expression.expression,
+          opaqueRoots,
+          opaqueRootSymbols,
+          context,
+        );
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Broader variant of isOpaqueSourceExpression for the pre-scan.
+ * Uses isReactiveOriginCall to recognise all reactive-producing calls.
+ */
+function isReactiveSourceExpression(
+  expression: ts.Expression,
+  opaqueRoots: ReadonlySet<string>,
+  opaqueRootSymbols: ReadonlySet<ts.Symbol>,
+  context: TransformationContext,
+): boolean {
+  const current = unwrapExpression(expression);
+  const info = getAccessInfo(current, context);
+  if (isOpaqueRootInfo(info, opaqueRoots, opaqueRootSymbols, context)) {
+    return true;
+  }
+
+  if (ts.isCallExpression(current)) {
+    if (isReactiveOriginCall(current, context)) {
+      return true;
+    }
+
+    if (ts.isPropertyAccessExpression(current.expression)) {
+      const methodName = current.expression.name.text;
+      if (methodName === "key" || methodName === "get") {
+        return isReactiveSourceExpression(
           current.expression.expression,
           opaqueRoots,
           opaqueRootSymbols,
@@ -1351,8 +1410,8 @@ export class CapabilityLoweringTransformer extends Transformer {
         }
       };
 
-      /** Walk the pattern body to propagate opaque bindings. */
-      const collectOpaqueBindings = (
+      /** Walk the pattern body to propagate reactive bindings. */
+      const collectReactiveBindings = (
         body: ts.ConciseBody,
         scope: ScopeInfo,
       ): void => {
@@ -1363,7 +1422,7 @@ export class CapabilityLoweringTransformer extends Transformer {
             if (!decl.initializer) continue;
             if (
               ts.isIdentifier(decl.name) &&
-              isOpaqueSourceExpression(
+              isReactiveSourceExpression(
                 decl.initializer,
                 scope.opaqueNames,
                 scope.opaqueSymbols,
@@ -1400,7 +1459,7 @@ export class CapabilityLoweringTransformer extends Transformer {
               );
             }
             const scope: ScopeInfo = { opaqueNames, opaqueSymbols };
-            collectOpaqueBindings(cb.body, scope);
+            collectReactiveBindings(cb.body, scope);
             scopeStack.push(scope);
             pushed = true;
           }
