@@ -38,6 +38,12 @@ LOCAL DEVELOPMENT:
   ./scripts/start-local-dev.sh      # Start local servers
   ./scripts/stop-local-dev.sh       # Stop local servers
 ${envStatus()}
+LOGGING:
+  Only errors are shown by default. Enable more with:
+    ct --log-level info check ./pattern.tsx
+    CT_LOG_LEVEL=debug ct piece ls
+  Valid levels: debug, info, warn, error (default), silent
+
 Run 'ct <command> --help' for command-specific help.`;
 
 export const main = new Command()
