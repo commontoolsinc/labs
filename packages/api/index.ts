@@ -12,9 +12,9 @@ export declare const ID_FIELD: unique symbol;
 
 // Should be Symbol("UI") or so, but this makes repeat() use these when
 // iterating over patterns.
-export declare const TYPE: "$TYPE";
-export declare const NAME: "$NAME";
-export declare const UI: "$UI";
+export const TYPE = "$TYPE";
+export const NAME = "$NAME";
+export const UI = "$UI";
 
 // Symbol for accessing self-reference in patterns
 export declare const SELF: unique symbol;

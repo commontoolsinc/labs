@@ -6,16 +6,19 @@ import {
   equals,
   generateText,
   handler,
+  NAME as NAME_TYPE,
   navigateTo,
   pattern,
   patternTool,
   type PatternToolResult,
   SELF,
   type Stream,
+  UI as UI_TYPE,
   type VNode,
   wish,
   Writable,
 } from "commontools";
+import { NAME, UI } from "@commontools/runner";
 import NoteMd from "./note-md.tsx";
 import {
   type MentionablePiece,
@@ -31,8 +34,8 @@ export { NotePiece };
 
 /** Represents a small #note a user took to remember some text. */
 interface NoteOutput {
-  [NAME]: string;
-  [UI]: VNode;
+  [NAME_TYPE]: string;
+  [UI_TYPE]: VNode;
   title: string;
   content: string;
   summary: string;
@@ -227,7 +230,11 @@ const Note = pattern<NoteInput, NoteOutput>(
       const notebook = parentNotebook.get();
 
       if (notebook) {
-        notebook.createNote.send({ title: "New Note", content: "" });
+        notebook.createNote.send({
+          title: "New Note",
+          content: "",
+          navigate: true,
+        });
       } else {
         const note = Note({
           title: "New Note",
