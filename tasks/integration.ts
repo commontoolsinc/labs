@@ -158,9 +158,12 @@ async function runPatternTests(
     const batch = testFiles.slice(i, i + concurrency);
     const results = await Promise.all(
       batch.map(async (testFile) => {
-        const result = await runCommand([...ctCmd, "test", testFile], {
-          cwd: rootDir,
-        });
+        const result = await runCommand(
+          [...ctCmd, "test", "--root", patternsDir, testFile],
+          {
+            cwd: rootDir,
+          },
+        );
         return { testFile, ...result };
       }),
     );
