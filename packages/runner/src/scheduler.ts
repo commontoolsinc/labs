@@ -27,6 +27,7 @@ import {
 } from "./link-utils.ts";
 import type {
   ChangeGroup,
+  CommitCallback,
   CommitError,
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
@@ -176,10 +177,7 @@ export class Scheduler {
     handler: EventHandler;
     event: any;
     retriesLeft: number;
-    onCommit?: (
-      tx: IExtendedStorageTransaction,
-      commitResult: { error?: CommitError },
-    ) => void;
+    onCommit?: CommitCallback;
   }[] = [];
   private eventHandlers: [NormalizedFullLink, EventHandler][] = [];
 
@@ -1057,10 +1055,7 @@ export class Scheduler {
     eventLink: NormalizedFullLink,
     event: any,
     retries: number = DEFAULT_RETRIES_FOR_EVENTS,
-    onCommit?: (
-      tx: IExtendedStorageTransaction,
-      commitResult: { error?: CommitError },
-    ) => void,
+    onCommit?: CommitCallback,
     doNotLoadPieceIfNotRunning: boolean = false,
   ): void {
     let handlerFound = false;
