@@ -211,7 +211,9 @@ export class CTCodeEditor extends BaseElement {
   private _modeComp = new Compartment();
   private _proseMarkdownComp = new Compartment();
   private _cleanupFns: Array<() => void> = [];
+  private _mentionableTyped: CellHandle<MentionableArray> | null = null;
   private _mentionableUnsub: (() => void) | null = null;
+  private _mentionedTyped: CellHandle<MentionableArray> | null = null;
   private _mentionedUnsub: (() => void) | null = null;
   // Track previous backlink names to detect changes for syncing to piece NAME
   private _previousBacklinkNames = new Map<string, string>();
@@ -334,16 +336,12 @@ export class CTCodeEditor extends BaseElement {
   private getFilteredMentionable(
     query: string,
   ): Array<[CellHandle<Mentionable>, number]> {
-    if (!this.mentionable) {
+    const handle = this._mentionableTyped ?? this.mentionable;
+    if (!handle) {
       return [];
     }
 
-    const rawMentionable = this.mentionable.get();
-    const mentionableData = Array.isArray(rawMentionable)
-      ? rawMentionable as MentionableArray
-      : isCellHandle(rawMentionable)
-      ? ((rawMentionable.get() ?? []) as MentionableArray)
-      : [];
+    const mentionableData = (handle.get() ?? []) as MentionableArray;
 
     if (mentionableData.length === 0) {
       return [];
@@ -360,7 +358,7 @@ export class CTCodeEditor extends BaseElement {
           ?.toLowerCase()
           ?.includes(queryLower)
       ) {
-        matches.push([this.mentionable.key(i) as CellHandle<Mentionable>, i]);
+        matches.push([handle.key(i) as CellHandle<Mentionable>, i]);
       }
     }
 
@@ -374,14 +372,10 @@ export class CTCodeEditor extends BaseElement {
   private _findExactMentionable(
     query: string,
   ): [CellHandle<Mentionable>, number] | null {
-    if (!this.mentionable) return null;
+    const handle = this._mentionableTyped ?? this.mentionable;
+    if (!handle) return null;
 
-    const rawMentionable = this.mentionable.get();
-    const mentionableData = Array.isArray(rawMentionable)
-      ? rawMentionable as MentionableArray
-      : isCellHandle(rawMentionable)
-      ? ((rawMentionable.get() ?? []) as MentionableArray)
-      : [];
+    const mentionableData = (handle.get() ?? []) as MentionableArray;
 
     const queryLower = query.toLowerCase();
 
@@ -389,7 +383,7 @@ export class CTCodeEditor extends BaseElement {
       const mention = mentionableData[i];
       const name = mention?.[NAME] ?? "";
       if (name.toLowerCase() === queryLower) {
-        return [this.mentionable.key(i), i];
+        return [handle.key(i), i];
       }
     }
 
@@ -670,15 +664,10 @@ export class CTCodeEditor extends BaseElement {
    * Uses pre-resolved stable piece IDs from _resolvedPieceIds cache.
    */
   private findPieceById(id: string): CellHandle<Mentionable> | null {
-    if (!this.mentionable) return null;
+    const handle = this._mentionableTyped ?? this.mentionable;
+    if (!handle) return null;
 
-    const rawMentionable = this.mentionable.get();
-    if (!rawMentionable) return null;
-    const mentionableData = Array.isArray(rawMentionable)
-      ? rawMentionable as MentionableArray
-      : isCellHandle(rawMentionable)
-      ? ((rawMentionable.get() ?? []) as MentionableArray)
-      : [];
+    const mentionableData = (handle.get() ?? []) as MentionableArray;
 
     if (mentionableData.length === 0) return null;
 
@@ -687,7 +676,7 @@ export class CTCodeEditor extends BaseElement {
       if (!pieceValue) continue;
       const pieceId = this._getPieceId(i);
       if (pieceId === id) {
-        return this.mentionable.key(i) as CellHandle<Mentionable>;
+        return handle.key(i) as CellHandle<Mentionable>;
       }
     }
 
@@ -711,15 +700,10 @@ export class CTCodeEditor extends BaseElement {
    * follows the indirection to get the piece's own stable cell ID.
    */
   private async _resolvePieceIds(): Promise<void> {
-    if (!this.mentionable) return;
+    const handle = this._mentionableTyped ?? this.mentionable;
+    if (!handle) return;
 
-    const rawMentionable = this.mentionable.get();
-    if (!rawMentionable) return;
-    const mentionableData = Array.isArray(rawMentionable)
-      ? rawMentionable as MentionableArray
-      : isCellHandle(rawMentionable)
-      ? ((rawMentionable.get() ?? []) as MentionableArray)
-      : [];
+    const mentionableData = (handle.get() ?? []) as MentionableArray;
 
     // Keep a reference to the current mentionable to detect staleness
     const currentMentionable = this.mentionable;
@@ -729,7 +713,7 @@ export class CTCodeEditor extends BaseElement {
     const promises = mentionableData.map(async (item, i) => {
       if (!item) return;
       try {
-        const subCell = currentMentionable.key(i);
+        const subCell = handle.key(i);
         const resolved = await subCell.resolveAsCell();
         const resolvedId = resolved.id();
         if (resolvedId) {
@@ -851,7 +835,13 @@ export class CTCodeEditor extends BaseElement {
     }
 
     if (!this.mentionable) return;
-    const unsubscribe = this.mentionable
+    // Use asSchema() so the runtime resolves @link indirection before
+    // delivering values — without this, cells from wish results / computed
+    // cells deliver @link values hydrated as nested CellHandles.
+    this._mentionableTyped = this.mentionable.asSchema<MentionableArray>(
+      MentionableArraySchema,
+    );
+    const unsubscribe = this._mentionableTyped
       .subscribe((_value) => {
         // Clear stale resolved IDs and re-resolve asynchronously
         this._resolvedPieceIds.clear();
@@ -872,7 +862,10 @@ export class CTCodeEditor extends BaseElement {
     }
 
     if (!this.mentioned) return;
-    const unsubscribe = this.mentioned
+    this._mentionedTyped = this.mentioned.asSchema<MentionableArray>(
+      MentionableArraySchema,
+    );
+    const unsubscribe = this._mentionedTyped
       .subscribe((_value) => {
         // Re-sync piece name subscriptions when mentioned list changes externally
         this._setupPieceNameSubscriptions();
@@ -888,10 +881,12 @@ export class CTCodeEditor extends BaseElement {
       this._mentionableUnsub();
       this._mentionableUnsub = null;
     }
+    this._mentionableTyped = null;
     if (this._mentionedUnsub) {
       this._mentionedUnsub();
       this._mentionedUnsub = null;
     }
+    this._mentionedTyped = null;
     this._cleanupFns.forEach((fn) => fn());
     this._cleanupFns = [];
     if (this._editorView) {
@@ -1405,25 +1400,15 @@ export class CTCodeEditor extends BaseElement {
    */
   private _getCurrentMentionedIds(): Set<string> {
     const curIds = new Set<string>();
-    if (!this.mentioned) return curIds;
+    const mentionedHandle = this._mentionedTyped ?? this.mentioned;
+    if (!mentionedHandle) return curIds;
 
-    const rawMentioned = this.mentioned.get();
-    if (!rawMentioned) return curIds;
+    const currentSource = (mentionedHandle.get() ?? []) as MentionableArray;
 
-    const currentSource = Array.isArray(rawMentioned)
-      ? rawMentioned
-      : isCellHandle(rawMentioned)
-      ? ((rawMentioned.get() ?? []) as MentionableArray)
-      : [];
+    const mentionableHandle = this._mentionableTyped ?? this.mentionable;
+    if (!mentionableHandle) return curIds;
 
-    if (!this.mentionable) return curIds;
-
-    const rawMentionable = this.mentionable.get();
-    const mentionableData = Array.isArray(rawMentionable)
-      ? rawMentionable as MentionableArray
-      : isCellHandle(rawMentionable)
-      ? ((rawMentionable.get() ?? []) as MentionableArray)
-      : [];
+    const mentionableData = (mentionableHandle.get() ?? []) as MentionableArray;
 
     // For each current mentioned value, find its ID by matching in mentionable
     for (const mentionedValue of currentSource) {
