@@ -140,7 +140,8 @@ export default pattern<ReadingListInput, ReadingListOutput>(({ items }) => {
 
   const summary = computed(() => {
     return items.get()
-      .map((item) => `${item.title} (${item.status})`)
+      .filter((item) => item)
+      .map((item) => `${item.title ?? ""} (${item.status ?? ""})`)
       .join(", ");
   });
 

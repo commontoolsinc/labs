@@ -36,14 +36,16 @@ import { timeout } from "@commontools/utils/sleep";
 /**
  * A test step is an object with either an 'assertion' or 'action' property.
  * This discriminated union avoids TypeScript trying to unify incompatible Cell/Stream types.
+ * Add `skip: true` to temporarily disable a step (like it.skip in other frameworks).
  */
 export type TestStep =
-  | { assertion: OpaqueRef<boolean> }
-  | { action: Stream<void> };
+  | { assertion: OpaqueRef<boolean>; skip?: boolean }
+  | { action: Stream<void>; skip?: boolean };
 
 export interface TestResult {
   name: string;
   passed: boolean;
+  skipped?: boolean;
   afterAction: string | null;
   error?: string;
   durationMs: number;
@@ -216,6 +218,7 @@ export async function runTestPattern(
       const stepValue = testsValue[i] as {
         action?: unknown;
         assertion?: unknown;
+        skip?: boolean;
       };
 
       // Check if this step has 'action' or 'assertion' key
@@ -228,6 +231,36 @@ export async function runTestPattern(
             JSON.stringify(Object.keys(stepValue))
           }`,
         );
+      }
+
+      // Handle skipped steps
+      if (stepValue.skip) {
+        if (isAction) {
+          actionCount++;
+          const actionName = `action_${actionCount}`;
+          if (options.verbose) {
+            console.log(`  ⊘ ${actionName} (skipped)`);
+          }
+        } else {
+          assertionCount++;
+          const assertionName = `assertion_${assertionCount}`;
+          const suffix = lastActionIndex !== null
+            ? ` (after action_${actionCount})`
+            : "";
+          results.push({
+            name: assertionName,
+            passed: true,
+            skipped: true,
+            afterAction: lastActionIndex !== null
+              ? `action_${actionCount}`
+              : null,
+            durationMs: 0,
+          });
+          if (options.verbose) {
+            console.log(`  ⊘ ${assertionName}${suffix} (skipped)`);
+          }
+        }
+        continue;
       }
 
       if (isAction) {
@@ -350,11 +383,17 @@ export async function runTestPattern(
 export async function runTests(
   pathOrPaths: string | string[],
   options: TestRunnerOptions = {},
-): Promise<{ passed: number; failed: number; results: TestRunResult[] }> {
+): Promise<{
+  passed: number;
+  failed: number;
+  skipped: number;
+  results: TestRunResult[];
+}> {
   const paths = Array.isArray(pathOrPaths) ? pathOrPaths : [pathOrPaths];
   const allResults: TestRunResult[] = [];
   let totalPassed = 0;
   let totalFailed = 0;
+  let totalSkipped = 0;
 
   for (const testPath of paths) {
     console.log(`\n${basename(testPath)}`);
@@ -367,17 +406,20 @@ export async function runTests(
       totalFailed++;
     } else {
       for (const test of result.results) {
-        const status = test.passed ? "✓" : "✗";
-        const suffix = test.afterAction ? ` (after ${test.afterAction})` : "";
-        console.log(`  ${status} ${test.name}${suffix}`);
-        if (!test.passed && test.error) {
-          console.log(`    ${test.error}`);
-        }
-
-        if (test.passed) {
+        if (test.skipped) {
+          totalSkipped++;
+        } else if (test.passed) {
           totalPassed++;
         } else {
           totalFailed++;
+        }
+
+        const status = test.skipped ? "⊘" : test.passed ? "✓" : "✗";
+        const suffix = test.afterAction ? ` (after ${test.afterAction})` : "";
+        const skipLabel = test.skipped ? " (skipped)" : "";
+        console.log(`  ${status} ${test.name}${suffix}${skipLabel}`);
+        if (!test.passed && !test.skipped && test.error) {
+          console.log(`    ${test.error}`);
         }
       }
 
@@ -396,13 +438,18 @@ export async function runTests(
 
   // Summary
   const totalTime = allResults.reduce((sum, r) => sum + r.totalDurationMs, 0);
-  console.log(
-    `\n${totalPassed} passed, ${totalFailed} failed (${
-      Math.round(totalTime)
-    }ms)`,
-  );
+  const parts = [`${totalPassed} passed`, `${totalFailed} failed`];
+  if (totalSkipped > 0) {
+    parts.push(`${totalSkipped} skipped`);
+  }
+  console.log(`\n${parts.join(", ")} (${Math.round(totalTime)}ms)`);
 
-  return { passed: totalPassed, failed: totalFailed, results: allResults };
+  return {
+    passed: totalPassed,
+    failed: totalFailed,
+    skipped: totalSkipped,
+    results: allResults,
+  };
 }
 
 /**
