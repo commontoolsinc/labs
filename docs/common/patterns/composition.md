@@ -66,3 +66,38 @@ Both patterns receive the same `items` cell - changes sync automatically.
 **When to use which:**
 - **Pattern Composition**: Multiple views in one UI, reusable components
 - **Linked Charms**: Independent deployments that communicate
+
+## Merging Complex Objects from Pattern Inputs
+
+Pattern inputs are cellified — they become cell proxies, not plain objects. You **cannot** spread a pattern input directly into an object literal, because the spread operates on the proxy's own properties (which are empty) rather than the underlying value.
+
+```tsx
+// BROKEN: ...extraTools spreads a cell proxy, yields nothing
+const omnibot = Chatbot({
+  tools: {
+    ...baseTools,
+    ...extraTools,  // extraTools is a pattern input — this is a no-op
+  },
+});
+```
+
+**Fix:** wrap the merge in `computed()`. Inside a computed body, CTS auto-unwraps cell proxies to their actual values, so the spread works on the plain object:
+
+```tsx
+// WORKS: computed() unwraps extraTools before spreading
+const baseTools = {
+  searchWeb: { pattern: searchWeb },
+  calculator: { pattern: calculator },
+};
+
+const allTools = computed(() => ({
+  ...baseTools,
+  ...extraTools,  // extraTools is unwrapped here
+}));
+
+const omnibot = Chatbot({
+  tools: allTools,  // passed as a single cell reference
+});
+```
+
+This pattern is useful when a sub-pattern needs to accept additional configuration (e.g. extra chatbot tools, extra fields) from its caller while also defining its own base set internally.

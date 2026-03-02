@@ -34,7 +34,7 @@ import {
 
 interface OmniboxFABInput {
   mentionable: Writable<MentionablePiece[]>;
-  extraTools: Record<string, unknown>;
+  extraTools: any;
   extraSystemPrompt: string;
 }
 
@@ -150,31 +150,37 @@ ${extraSystemPrompt}
 Be matter-of-fact. Prefer action to explanation.`;
     });
 
+    const baseTools = {
+      searchWeb: {
+        pattern: searchWeb,
+      },
+      readWebpage: {
+        pattern: readWebpage,
+      },
+      calculator: {
+        pattern: calculator,
+      },
+      fetchAndRunPattern: patternTool(fetchAndRunPattern),
+      listPatternIndex: patternTool(listPatternIndex),
+      navigateTo: patternTool(navigateToPattern),
+      wishAndNavigate: patternTool(wishTool),
+      listMentionable: patternTool(listMentionable, { mentionable }),
+      listRecent: patternTool(listRecent, { recentPieces }),
+      updateProfile: patternTool(updateProfile),
+      bash: patternTool(bash, { sandboxId }),
+      searchSpace: patternTool(summarySearchPattern, {
+        entries: summaryEntries,
+      }),
+    };
+
+    const allTools = computed(() => ({
+      ...baseTools,
+      ...extraTools,
+    }));
+
     const omnibot = Chatbot({
       system: systemPrompt,
-      tools: {
-        searchWeb: {
-          pattern: searchWeb,
-        },
-        readWebpage: {
-          pattern: readWebpage,
-        },
-        calculator: {
-          pattern: calculator,
-        },
-        fetchAndRunPattern: patternTool(fetchAndRunPattern),
-        listPatternIndex: patternTool(listPatternIndex),
-        navigateTo: patternTool(navigateToPattern),
-        wishAndNavigate: patternTool(wishTool),
-        listMentionable: patternTool(listMentionable, { mentionable }),
-        listRecent: patternTool(listRecent, { recentPieces }),
-        updateProfile: patternTool(updateProfile),
-        bash: patternTool(bash, { sandboxId }),
-        ...extraTools,
-        searchSpace: patternTool(summarySearchPattern, {
-          entries: summaryEntries,
-        }),
-      },
+      tools: allTools,
     });
 
     const fabExpanded = Writable.of(false);
