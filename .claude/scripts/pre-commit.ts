@@ -3,9 +3,9 @@
  * .claude/scripts/pre-commit.ts
  *
  * Claude Code Pre-Tool hook for git commit commands.
- * - Runs `deno fmt` on staged files, then re-stages them.
+ * - Runs `deno fmt` (auto-fixes formatting before the commit).
  * - Runs `deno lint`.
- * - Runs `deno check` on staged .ts/.tsx files only.
+ * - Runs `deno check` on changed .ts/.tsx files only.
  * - Exits 2 to block the commit if any check fails.
  */
 
@@ -32,20 +32,31 @@ if (/--no-verify/.test(cmd)) {
   Deno.exit(0);
 }
 
-// Get staged files (excluding deleted files)
-const gitDiff = await new Deno.Command("git", {
-  args: ["diff", "--cached", "--name-only", "--diff-filter=d"],
+// Get changed files vs HEAD (staged + unstaged + untracked that are about to
+// be committed). At PreToolUse time the `git add` hasn't run yet, so
+// --cached would be empty. We combine --name-only HEAD (tracked changes) with
+// ls-files --others --exclude-standard (new untracked files).
+const trackedDiff = await new Deno.Command("git", {
+  args: ["diff", "--name-only", "--diff-filter=d", "HEAD"],
   stdout: "piped",
   stderr: "piped",
 }).output();
 
-const allStagedFiles = new TextDecoder()
-  .decode(gitDiff.stdout)
-  .trim()
-  .split("\n")
-  .filter((f) => f.length > 0);
+const untrackedResult = await new Deno.Command("git", {
+  args: ["ls-files", "--others", "--exclude-standard"],
+  stdout: "piped",
+  stderr: "piped",
+}).output();
 
-if (allStagedFiles.length === 0) {
+const trackedFiles = new TextDecoder().decode(trackedDiff.stdout).trim();
+const untrackedFiles = new TextDecoder().decode(untrackedResult.stdout).trim();
+
+const allChangedFiles = [
+  ...trackedFiles.split("\n"),
+  ...untrackedFiles.split("\n"),
+].filter((f) => f.length > 0);
+
+if (allChangedFiles.length === 0) {
   Deno.exit(0);
 }
 
@@ -63,14 +74,9 @@ const fmtResult = await new Deno.Command("deno", {
 if (!fmtResult.success) {
   errors.push("Formatting failed (syntax error?):");
   errors.push(new TextDecoder().decode(fmtResult.stderr));
-} else {
-  // Re-stage files that fmt may have modified
-  await new Deno.Command("git", {
-    args: ["add", ...allStagedFiles],
-    stdout: "piped",
-    stderr: "piped",
-  }).output();
 }
+// fmt auto-fixes files on disk before the `git add && git commit` runs,
+// so the formatted versions will be staged by the commit command itself.
 
 // 2. Lint
 const lintResult = await new Deno.Command("deno", {
@@ -87,8 +93,8 @@ if (!lintResult.success) {
   }
 }
 
-// 3. Type-check staged .ts/.tsx files only
-const tsFiles = allStagedFiles.filter((f) => /\.(ts|tsx)$/.test(f));
+// 3. Type-check changed .ts/.tsx files only
+const tsFiles = allChangedFiles.filter((f) => /\.(ts|tsx)$/.test(f));
 
 if (tsFiles.length > 0) {
   const checkResult = await new Deno.Command("deno", {
