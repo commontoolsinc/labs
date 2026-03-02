@@ -11,6 +11,17 @@ import {
 import { StorableError } from "../storable-native-instances.ts";
 
 describe("storable-value", () => {
+  // Explicitly pin richStorableValues off so the legacy-path tests (below the
+  // rich-path section) exercise flag-off behavior regardless of the ambient
+  // default. The rich-path describe blocks override this in their own
+  // beforeEach.
+  beforeEach(() => {
+    setExperimentalStorableConfig({ richStorableValues: false });
+  });
+  afterEach(() => {
+    resetExperimentalStorableConfig();
+  });
+
   describe("isArrayIndexPropertyName", () => {
     describe("returns true for valid array indices", () => {
       it("accepts '0'", () => {

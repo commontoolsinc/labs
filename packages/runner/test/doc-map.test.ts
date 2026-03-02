@@ -1,8 +1,19 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  it,
+} from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createRef, getEntityId } from "../src/create-ref.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
-import { refer } from "@commontools/memory/reference";
+import {
+  refer,
+  resetCanonicalHashConfig,
+  setCanonicalHashConfig,
+} from "@commontools/memory/reference";
 import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
@@ -12,6 +23,15 @@ const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
 describe("refer", () => {
+  // Explicitly pin canonical hashing off so these tests exercise the legacy
+  // refer() path regardless of what the ambient default is.
+  beforeAll(() => {
+    setCanonicalHashConfig(false);
+  });
+  afterAll(() => {
+    resetCanonicalHashConfig();
+  });
+
   it("should create a reference that is equal to another reference with the same source", () => {
     const ref = refer({ hello: "world" });
     const ref2 = refer({ hello: "world" });

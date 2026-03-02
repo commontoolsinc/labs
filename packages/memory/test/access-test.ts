@@ -2,8 +2,16 @@ import { assert, assertEquals, assertMatch } from "@std/assert";
 import { alice, bob, mallory, space } from "./principal.ts";
 import * as Access from "../access.ts";
 import { type DID } from "@commontools/identity";
-import { refer } from "../reference.ts";
+import {
+  refer,
+  resetCanonicalHashConfig,
+  setCanonicalHashConfig,
+} from "../reference.ts";
 import { Invocation } from "../interface.ts";
+
+// Explicitly pin canonical hashing off so these tests exercise the legacy
+// refer() path regardless of what the ambient default is.
+setCanonicalHashConfig(false);
 
 // Some generated service key.
 const serviceDid = "did:key:z6MkfJPMCrTyDmurrAHPUsEjCgvcjvLtAuzyZ7nSqwZwb8KQ";

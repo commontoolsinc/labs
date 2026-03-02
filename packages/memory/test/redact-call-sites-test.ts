@@ -7,7 +7,7 @@
  */
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { assert, assertEquals, assertFalse } from "@std/assert";
-import { refer } from "../reference.ts";
+import { refer, setCanonicalHashConfig } from "../reference.ts";
 import * as Changes from "../changes.ts";
 import * as Commit from "../commit.ts";
 import * as Consumer from "../consumer.ts";
@@ -16,6 +16,10 @@ import type { UTCUnixTimestampInSeconds } from "../interface.ts";
 import * as Provider from "../provider.ts";
 import { LABEL_TYPE } from "../space.ts";
 import { alice } from "./principal.ts";
+
+// Explicitly pin canonical hashing off so these tests exercise the legacy
+// refer() path regardless of what the ambient default is.
+setCanonicalHashConfig(false);
 
 const serviceDid = "did:key:z6MkfJPMCrTyDmurrAHPUsEjCgvcjvLtAuzyZ7nSqwZwb8KQ";
 
