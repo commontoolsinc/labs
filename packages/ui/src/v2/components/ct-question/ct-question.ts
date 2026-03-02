@@ -9,6 +9,7 @@ import { BaseElement } from "../../core/base-element.ts";
  *
  * @attr {string} question - The question text to display
  * @attr {string[]} options - Optional multiple choice options (JSON array)
+ * @attr {boolean} allow-custom - Allow custom text input alongside options (default: false)
  *
  * @fires ct-answer - Fired when user submits an answer, detail: { answer: string }
  *
@@ -16,6 +17,13 @@ import { BaseElement } from "../../core/base-element.ts";
  * <ct-question
  *   question="What's your preferred cooking style?"
  *   options='["Quick & easy", "Elaborate meals", "Healthy focus"]'
+ * ></ct-question>
+ *
+ * @example
+ * <ct-question
+ *   question="What's your preferred cooking style?"
+ *   options='["Quick & easy", "Elaborate meals", "Healthy focus"]'
+ *   allow-custom
  * ></ct-question>
  */
 export class CTQuestion extends BaseElement {
@@ -136,6 +144,9 @@ export class CTQuestion extends BaseElement {
   @property({ type: Array })
   options: string[] = [];
 
+  @property({ type: Boolean, attribute: "allow-custom" })
+  allowCustom = false;
+
   @state()
   private _selectedOption: string | null = null;
 
@@ -185,13 +196,15 @@ export class CTQuestion extends BaseElement {
     }
 
     const hasAnswer = this._selectedOption || this._customAnswer;
+    const showOptions = this.options.length > 0;
+    const showTextInput = !showOptions || this.allowCustom;
 
     return html`
       <div class="question-card">
         <p class="question-text">${this.question}</p>
-        ${this.options.length > 0
-          ? this._renderOptions()
-          : this._renderTextInput()}
+        ${showOptions ? this._renderOptions() : null} ${showTextInput
+          ? this._renderTextInput()
+          : null}
         <button
           class="submit-btn"
           ?disabled="${!hasAnswer}"
@@ -222,11 +235,15 @@ export class CTQuestion extends BaseElement {
   }
 
   private _renderTextInput() {
+    const placeholder = this.options.length > 0
+      ? "Or type your own answer..."
+      : "Type your answer...";
+
     return html`
       <input
         type="text"
         class="text-input"
-        placeholder="Type your answer..."
+        placeholder="${placeholder}"
         .value="${this._customAnswer}"
         @input="${this._handleInputChange}"
         @keydown="${this._handleKeyDown}"
