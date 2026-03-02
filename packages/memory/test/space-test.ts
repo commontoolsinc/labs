@@ -1,4 +1,4 @@
-import { assert, assertEquals, assertExists, assertMatch } from "@std/assert";
+import { assert, assertEquals, assertExists } from "@std/assert";
 import {
   refer,
   resetCanonicalHashConfig,
