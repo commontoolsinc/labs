@@ -2,11 +2,7 @@ import { assert, assertEquals, assertMatch } from "@std/assert";
 import { alice, bob, mallory, space } from "./principal.ts";
 import * as Access from "../access.ts";
 import { type DID } from "@commontools/identity";
-import {
-  refer,
-  resetCanonicalHashConfig,
-  setCanonicalHashConfig,
-} from "../reference.ts";
+import { refer, setCanonicalHashConfig } from "../reference.ts";
 import { Invocation } from "../interface.ts";
 
 // Explicitly pin canonical hashing off so these tests exercise the legacy

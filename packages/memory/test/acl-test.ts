@@ -1,11 +1,7 @@
 import { assert, assertMatch } from "@std/assert";
 import { alice, bob, space } from "./principal.ts";
 import * as Access from "../access.ts";
-import {
-  refer,
-  resetCanonicalHashConfig,
-  setCanonicalHashConfig,
-} from "../reference.ts";
+import { refer, setCanonicalHashConfig } from "../reference.ts";
 import { type ACL, type Invocation } from "../interface.ts";
 import { ANYONE_USER, checkACL } from "../acl.ts";
 
