@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
+  getGlobalLogFloor,
   getLogger,
   getLoggerCountsBreakdown,
   getTimingStatsBreakdown,
@@ -9,12 +10,15 @@ import {
   LOG_COLORS,
   resetAllLoggerCounts,
   resetAllTimingStats,
+  setGlobalLogFloor,
 } from "../src/logger.ts";
 
 describe("logger", () => {
   beforeEach(() => {
     // Reset to default log level before each test
     log.level = "info";
+    // Clear global floor so it doesn't interfere with tests
+    setGlobalLogFloor(undefined);
   });
 
   afterEach(() => {
@@ -1720,6 +1724,172 @@ describe("logger", () => {
         const stats = logger.getTimeStats("does-not-exist");
         expect(stats).toBeUndefined();
       });
+    });
+  });
+
+  describe("global log floor", () => {
+    // Helper to capture console output (duplicated for scope)
+    function captureConsole<T>(
+      method: keyof Console,
+      fn: () => T,
+    ): { result: T; calls: unknown[][] } {
+      const originalMethod = console[method];
+      const calls: unknown[][] = [];
+      (console[method] as (...args: unknown[]) => void) = (
+        ...args: unknown[]
+      ) => {
+        calls.push(args);
+      };
+      try {
+        const result = fn();
+        return { result, calls };
+      } finally {
+        (console[method] as unknown) = originalMethod;
+      }
+    }
+
+    afterEach(() => {
+      setGlobalLogFloor(undefined);
+    });
+
+    it("should default to undefined (no floor)", () => {
+      expect(getGlobalLogFloor()).toBeUndefined();
+    });
+
+    it("should suppress all output when floor is 'silent'", () => {
+      setGlobalLogFloor("silent");
+      const logger = getLogger("floor-silent-test", {
+        level: "debug",
+        enabled: true,
+      });
+
+      const { calls: debugCalls } = captureConsole("debug", () => {
+        logger.debug("d", "debug msg");
+      });
+      const { calls: logCalls } = captureConsole("log", () => {
+        logger.info("i", "info msg");
+      });
+      const { calls: warnCalls } = captureConsole("warn", () => {
+        logger.warn("w", "warn msg");
+      });
+      const { calls: errorCalls } = captureConsole("error", () => {
+        logger.error("e", "error msg");
+      });
+
+      expect(debugCalls).toHaveLength(0);
+      expect(logCalls).toHaveLength(0);
+      expect(warnCalls).toHaveLength(0);
+      expect(errorCalls).toHaveLength(0);
+    });
+
+    it("should allow error+ when floor is 'error'", () => {
+      setGlobalLogFloor("error");
+      const logger = getLogger("floor-error-test", {
+        level: "debug",
+        enabled: true,
+      });
+
+      const { calls: logCalls } = captureConsole("log", () => {
+        logger.info("i", "info msg");
+      });
+      const { calls: errorCalls } = captureConsole("error", () => {
+        logger.error("e", "error msg");
+      });
+
+      expect(logCalls).toHaveLength(0);
+      expect(errorCalls).toHaveLength(1);
+    });
+
+    it("should allow warn+ when floor is 'warn'", () => {
+      setGlobalLogFloor("warn");
+      const logger = getLogger("floor-warn-test", {
+        level: "debug",
+        enabled: true,
+      });
+
+      const { calls: logCalls } = captureConsole("log", () => {
+        logger.info("i", "info msg");
+      });
+      const { calls: warnCalls } = captureConsole("warn", () => {
+        logger.warn("w", "warn msg");
+      });
+      const { calls: errorCalls } = captureConsole("error", () => {
+        logger.error("e", "error msg");
+      });
+
+      expect(logCalls).toHaveLength(0);
+      expect(warnCalls).toHaveLength(1);
+      expect(errorCalls).toHaveLength(1);
+    });
+
+    it("should use the more restrictive of floor and per-logger level", () => {
+      // Floor is "info" but logger is "error" — logger is more restrictive
+      setGlobalLogFloor("info");
+      const logger = getLogger("floor-restrictive-test", {
+        level: "error",
+        enabled: true,
+      });
+
+      const { calls: logCalls } = captureConsole("log", () => {
+        logger.info("i", "info msg");
+      });
+      const { calls: errorCalls } = captureConsole("error", () => {
+        logger.error("e", "error msg");
+      });
+
+      expect(logCalls).toHaveLength(0); // filtered by per-logger "error" level
+      expect(errorCalls).toHaveLength(1);
+    });
+
+    it("should still respect logger disabled flag", () => {
+      setGlobalLogFloor("debug");
+      const logger = getLogger("floor-disabled-test", {
+        level: "debug",
+        enabled: false,
+      });
+
+      const { calls } = captureConsole("error", () => {
+        logger.error("e", "error msg");
+      });
+
+      expect(calls).toHaveLength(0);
+    });
+
+    it("should be clearable by setting undefined", () => {
+      setGlobalLogFloor("silent");
+      expect(getGlobalLogFloor()).toBe("silent");
+
+      setGlobalLogFloor(undefined);
+      expect(getGlobalLogFloor()).toBeUndefined();
+
+      // After clearing, normal logging should work
+      const logger = getLogger("floor-clear-test", {
+        level: "info",
+        enabled: true,
+      });
+      const { calls } = captureConsole("log", () => {
+        logger.info("i", "info msg");
+      });
+      expect(calls).toHaveLength(1);
+    });
+
+    it("should still track counts even when floor suppresses output", () => {
+      setGlobalLogFloor("silent");
+      const logger = getLogger("floor-counts-test", {
+        level: "debug",
+        enabled: true,
+      });
+
+      logger.debug("d", "debug msg");
+      logger.info("i", "info msg");
+      logger.warn("w", "warn msg");
+      logger.error("e", "error msg");
+
+      expect(logger.counts.total).toBe(4);
+      expect(logger.counts.debug).toBe(1);
+      expect(logger.counts.info).toBe(1);
+      expect(logger.counts.warn).toBe(1);
+      expect(logger.counts.error).toBe(1);
     });
   });
 });
