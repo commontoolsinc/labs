@@ -1,0 +1,12 @@
+{
+  "name": "@commontools/fs-sync-example",
+  "tasks": {
+    "test": "deno test"
+  },
+  "exports": {
+    ".": "./src/daemon.ts",
+    "./types": "./src/types.ts",
+    "./markdown": "./src/markdown.ts",
+    "./pattern": "./src/pattern.tsx"
+  }
+}
