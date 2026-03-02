@@ -566,12 +566,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    *
    * @param callback - Function to call after commit
    */
-  addCommitCallback(
-    callback: (
-      tx: IExtendedStorageTransaction,
-      commitResult: { error?: CommitError },
-    ) => void,
-  ): void;
+  addCommitCallback(callback: CommitCallback): void;
 
   /**
    * Reads a value from a (local) memory address and throws on error, except for
@@ -836,6 +831,11 @@ export type CommitError =
   | ICfcInputRequirementViolationError
   | ICfcOutputTransitionViolationError
   | ICfcPolicyNonConvergenceError;
+
+export type CommitCallback = (
+  tx: IExtendedStorageTransaction,
+  commitResult: { error?: CommitError },
+) => void;
 
 /**
  * Error returned when a read or write operation fails because the intra-value

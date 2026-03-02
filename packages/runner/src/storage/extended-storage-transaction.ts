@@ -6,6 +6,7 @@ import type {
   StorableValue,
 } from "@commontools/memory/interface";
 import type {
+  CommitCallback,
   CommitError,
   IAttestation,
   ICfcPreparedDigestMismatchError,
@@ -83,12 +84,7 @@ type CfcTxState = {
 };
 
 export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
-  private commitCallbacks = new Set<
-    (
-      tx: IExtendedStorageTransaction,
-      commitResult: { error?: CommitError },
-    ) => void
-  >();
+  private commitCallbacks = new Set<CommitCallback>();
   private cfcState: CfcTxState = {
     relevant: false,
     prepared: false,
@@ -420,12 +416,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
    *
    * @param callback - Function to call after commit
    */
-  addCommitCallback(
-    callback: (
-      tx: IExtendedStorageTransaction,
-      commitResult: { error?: CommitError },
-    ) => void,
-  ): void {
+  addCommitCallback(callback: CommitCallback): void {
     this.commitCallbacks.add(callback);
   }
 }
@@ -577,12 +568,7 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     return this.wrapped.commit();
   }
 
-  addCommitCallback(
-    callback: (
-      tx: IExtendedStorageTransaction,
-      commitResult: { error?: CommitError },
-    ) => void,
-  ): void {
+  addCommitCallback(callback: CommitCallback): void {
     return this.wrapped.addCommitCallback(callback);
   }
 

@@ -82,7 +82,7 @@ import {
 } from "./link-utils.ts";
 import type {
   ChangeGroup,
-  CommitError,
+  CommitCallback,
   IExtendedStorageTransaction,
   IReadOptions,
 } from "./storage/interface.ts";
@@ -121,10 +121,7 @@ declare module "@commontools/api" {
   interface IWritable<T, C extends AnyBrandedCell<any>> {
     set(
       value: AnyCellWrapping<T> | T,
-      onCommit?: (
-        tx: IExtendedStorageTransaction,
-        commitResult: { error?: CommitError },
-      ) => void,
+      onCommit?: CommitCallback,
     ): C;
   }
 
@@ -136,18 +133,9 @@ declare module "@commontools/api" {
     send(
       ...args: T extends void ? [] | [AnyCellWrapping<T> | T] | [
           AnyCellWrapping<T> | T,
-          (
-            tx: IExtendedStorageTransaction,
-            commitResult: { error?: CommitError },
-          ) => void,
+          CommitCallback,
         ]
-        : [AnyCellWrapping<T> | T] | [
-          AnyCellWrapping<T> | T,
-          (
-            tx: IExtendedStorageTransaction,
-            commitResult: { error?: CommitError },
-          ) => void,
-        ]
+        : [AnyCellWrapping<T> | T] | [AnyCellWrapping<T> | T, CommitCallback]
     ): void;
   }
 
@@ -670,10 +658,7 @@ export class CellImpl<T extends StorableValue>
 
   set(
     newValue: AnyCellWrapping<T> | T,
-    onCommit?: (
-      tx: IExtendedStorageTransaction,
-      commitResult: { error?: CommitError },
-    ) => void,
+    onCommit?: CommitCallback,
   ): Cell<T> {
     const resolvedToValueLink = resolveLink(
       this.runtime,
@@ -751,20 +736,9 @@ export class CellImpl<T extends StorableValue>
   }
 
   send(
-    ...args: T extends void ? [] | [AnyCellWrapping<T>] | [
-        AnyCellWrapping<T>,
-        (
-          tx: IExtendedStorageTransaction,
-          commitResult: { error?: CommitError },
-        ) => void,
-      ]
-      : [AnyCellWrapping<T>] | [
-        AnyCellWrapping<T>,
-        (
-          tx: IExtendedStorageTransaction,
-          commitResult: { error?: CommitError },
-        ) => void,
-      ]
+    ...args: T extends void
+      ? [] | [AnyCellWrapping<T>] | [AnyCellWrapping<T>, CommitCallback]
+      : [AnyCellWrapping<T>] | [AnyCellWrapping<T>, CommitCallback]
   ): void {
     const [event, onCommit] = args;
     this.set(event as AnyCellWrapping<T>, onCommit);

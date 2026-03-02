@@ -8,6 +8,7 @@ const CFC_COMMIT_ERROR_NAMES = new Set<string>([
   "CfcInputRequirementViolationError",
   "CfcOutputTransitionViolationError",
   "CfcPolicyNonConvergenceError",
+  "CfcLabelLubError",
 ]);
 
 type SanitizedErrorRecord = {
