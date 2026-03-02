@@ -1,3 +1,4 @@
+/// <cts-enable />
 /**
  * UI pattern for the todo list.
  *
@@ -11,7 +12,9 @@ import {
   handler,
   ifElse,
   NAME,
+  OpaqueRef,
   pattern,
+  Stream,
   UI,
   Writable,
 } from "commontools";
@@ -91,6 +94,9 @@ interface Output {
   edits: Edit[];
   appliedEdits: Edit[];
   failedEdits: FailedEdit[];
+  create: OpaqueRef<Stream<{ detail: { message: string } }>>;
+  toggles: OpaqueRef<unknown>[];
+  deletes: OpaqueRef<unknown>[];
 }
 
 /** Filesystem-synced todo list. #fsSyncTodo */
@@ -209,6 +215,9 @@ export default pattern<Input, Output>(
       edits,
       appliedEdits,
       failedEdits,
+      create: onCreate({ todos, edits }),
+      toggles: todos.map((todo) => onToggle({ todo, todos, edits })),
+      deletes: todos.map((todo) => onDelete({ todo, todos, edits })),
     };
   },
 );
