@@ -205,14 +205,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
   const doListItems = Writable.of<any[]>([]);
   const doList = DoList({ items: doListItems });
 
-  // Combine user-managed allPieces with system pieces (like doList) so
-  // BacklinksIndex picks up their mentionable items.
-  const allPiecesWithSystem = computed(() => [
-    ...allPieces.get(),
-    doList as any,
-  ]);
-
-  const index = BacklinksIndex({ allPieces: allPiecesWithSystem });
+  const index = BacklinksIndex({ allPieces });
   const summaryIdx = SummaryIndex({});
   const knowledgeGraph = KnowledgeGraph({});
 
@@ -366,16 +359,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
         </ct-toolbar>
 
         <ct-vscroll flex showScrollbar>
-          <ct-hstack gap="6" padding="6" align="start">
-            <div style={{ flex: "1", minWidth: "0" }}>
-              <ct-vstack gap="4">
-                <h3 style={{ margin: "0", fontSize: "16px" }}>Do List</h3>
-                <ct-cell-link $cell={doList} />
-                {doList.compactUI}
-              </ct-vstack>
-            </div>
-
-            <div style={{ flex: "1", minWidth: "0" }}>
+          <ct-vstack gap="6" padding="6">
               {ifElse(
                 computed(() => recentPieces.get().length > 0),
                 <ct-vstack gap="4" style={{ marginBottom: "16px" }}>
@@ -455,8 +439,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                   </tbody>
                 </ct-table>
               </ct-vstack>
-            </div>
-          </ct-hstack>
+          </ct-vstack>
         </ct-vscroll>
       </ct-screen>
     ),

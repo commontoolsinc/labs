@@ -1024,7 +1024,13 @@ IMPORTANT:
                   </ct-hstack>
                 ))}
                 {computed(() => spaces.get().length === 0) && (
-                  <p style={{ color: "#888", fontStyle: "italic", textAlign: "center" }}>
+                  <p
+                    style={{
+                      color: "#888",
+                      fontStyle: "italic",
+                      textAlign: "center",
+                    }}
+                  >
                     No spaces yet. Add one below.
                   </p>
                 )}
@@ -1033,7 +1039,9 @@ IMPORTANT:
               <hr style={{ border: "none", borderTop: "1px solid #e5e5e7" }} />
 
               <ct-vstack gap="1">
-                <h3 style={{ margin: 0, fontSize: "14px" }}>Add or Create Space</h3>
+                <h3 style={{ margin: 0, fontSize: "14px" }}>
+                  Add or Create Space
+                </h3>
                 <ct-message-input
                   placeholder="Space name..."
                   appearance="rounded"
@@ -1044,7 +1052,13 @@ IMPORTANT:
                 </span>
               </ct-vstack>
 
-              <hr style={{ border: "none", borderTop: "1px solid #e5e5e7", margin: "8px 0" }} />
+              <hr
+                style={{
+                  border: "none",
+                  borderTop: "1px solid #e5e5e7",
+                  margin: "8px 0",
+                }}
+              />
 
               <ct-vstack gap="1">
                 <h3 style={{ margin: 0, fontSize: "14px" }}>Settings</h3>
@@ -1054,7 +1068,11 @@ IMPORTANT:
                 <ct-input
                   $value={defaultAppUrl}
                   placeholder="/api/patterns/system/default-app.tsx"
-                  style={{ width: "100%", fontFamily: "monospace", fontSize: "12px" }}
+                  style={{
+                    width: "100%",
+                    fontFamily: "monospace",
+                    fontSize: "12px",
+                  }}
                 />
                 <span style={{ fontSize: "11px", color: "#888" }}>
                   Pattern URL for new spaces. Leave empty for system default.
