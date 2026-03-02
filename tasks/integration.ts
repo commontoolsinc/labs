@@ -29,7 +29,7 @@ const PACKAGES_WITH_SERVER = [
 ];
 
 // Packages with integration tests that DON'T need a running server
-const PACKAGES_WITHOUT_SERVER = ["generated-patterns"];
+const PACKAGES_WITHOUT_SERVER = ["generated-patterns", "pattern-tests"];
 
 // All packages with integration tests
 const ALL_PACKAGES = [...PACKAGES_WITH_SERVER, ...PACKAGES_WITHOUT_SERVER];
@@ -96,6 +96,125 @@ async function startServers(
   return true;
 }
 
+/**
+ * Resolve the ct binary: CT_BINARY env var, or fall back to running
+ * the CLI entrypoint via deno.
+ */
+function getCtCommand(rootDir: string): string[] {
+  const ctBinary = Deno.env.get("CT_BINARY");
+  if (ctBinary) {
+    return [ctBinary];
+  }
+  return [
+    "deno",
+    "run",
+    "--allow-net",
+    "--allow-ffi",
+    "--allow-read",
+    "--allow-write",
+    "--allow-env",
+    "--allow-run",
+    path.join(rootDir, "packages/cli/mod.ts"),
+  ];
+}
+
+/**
+ * Find and run all .test.tsx pattern tests via `ct test`.
+ */
+async function runPatternTests(
+  rootDir: string,
+  filter?: string,
+): Promise<boolean> {
+  const patternsDir = path.join(rootDir, "packages/patterns");
+  const ctCmd = getCtCommand(rootDir);
+
+  // Find all .test.tsx files
+  const testFiles: string[] = [];
+  for await (const entry of walkDir(patternsDir)) {
+    if (entry.endsWith(".test.tsx")) {
+      const relative = path.relative(rootDir, entry);
+      if (!filter || relative.includes(filter)) {
+        testFiles.push(relative);
+      }
+    }
+  }
+
+  testFiles.sort();
+
+  if (testFiles.length === 0) {
+    console.log("No pattern test files found.");
+    return true;
+  }
+
+  const concurrency = 5;
+  console.log(
+    `Found ${testFiles.length} pattern test(s), running ${concurrency} at a time`,
+  );
+
+  const failed: string[] = [];
+
+  // Process in batches of `concurrency`
+  for (let i = 0; i < testFiles.length; i += concurrency) {
+    const batch = testFiles.slice(i, i + concurrency);
+    const results = await Promise.all(
+      batch.map(async (testFile) => {
+        const result = await runCommand(
+          [...ctCmd, "test", "--root", patternsDir, testFile],
+          {
+            cwd: rootDir,
+          },
+        );
+        return { testFile, ...result };
+      }),
+    );
+
+    for (const { testFile, success, stdout, stderr } of results) {
+      if (success) {
+        console.log(`✅ ${testFile}`);
+      } else {
+        console.log(`❌ ${testFile}`);
+        failed.push(testFile);
+      }
+      // Print output (stdout has the test details)
+      if (stdout) {
+        for (const line of stdout.trimEnd().split("\n")) {
+          console.log(`   ${line}`);
+        }
+      }
+      if (stderr) {
+        for (const line of stderr.trimEnd().split("\n")) {
+          console.error(`   ${line}`);
+        }
+      }
+    }
+  }
+
+  if (failed.length === 0) {
+    console.log(`\n✅ All ${testFiles.length} pattern tests passed`);
+  } else {
+    console.error(
+      `\n❌ ${failed.length}/${testFiles.length} pattern tests failed:`,
+    );
+    for (const f of failed) {
+      console.error(`   ${f}`);
+    }
+  }
+
+  return failed.length === 0;
+}
+
+/** Recursively walk a directory yielding file paths. */
+async function* walkDir(dir: string): AsyncGenerator<string> {
+  for await (const entry of Deno.readDir(dir)) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory) {
+      yield* walkDir(fullPath);
+    } else {
+      yield fullPath;
+    }
+  }
+}
+
 async function runPackageIntegration(
   pkg: string,
   apiUrl: string,
@@ -131,7 +250,9 @@ async function runPackageIntegration(
 
   let result: { success: boolean; code: number };
 
-  if (pkg === "cli") {
+  if (pkg === "pattern-tests") {
+    return await runPatternTests(rootDir, filter);
+  } else if (pkg === "cli") {
     // CLI uses a special shell script
     env.CT_CLI_INTEGRATION_USE_LOCAL = "1";
     result = await runCommand(
@@ -200,8 +321,13 @@ Examples:
   deno task integration                       # Run all, auto-cleanup
   deno task integration cli                   # Run only cli tests
   deno task integration patterns counter      # Filter by test name
+  deno task integration pattern-tests         # Run .test.tsx pattern unit tests
   deno task integration --port-offset=500     # Use specific port offset
   deno task integration --port-offset=500 cli # Combine options
+
+Environment:
+  CT_BINARY      - Path to the ct binary (for pattern-tests target).
+                   Falls back to running packages/cli/mod.ts via deno.
 
 Server ports (with offset):
   Toolshed:  8000 + offset
