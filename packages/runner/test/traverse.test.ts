@@ -2456,6 +2456,134 @@ for (const canonicalHashing of [false, true]) {
         expect(tracker.has(trackerKey(leafUri))).toBe(true);
       });
     });
+    describe("sparse array preservation in traverseDAG", () => {
+      it("should preserve sparse array holes through traversal", () => {
+        const store = new Map<string, Revision<State>>();
+        const type = "application/json" as const;
+        const docUri = "of:sparse-test" as URI;
+        const docEntity = docUri as Entity;
+
+        // Create a sparse array: [10, <hole>, 30]
+        // deno-lint-ignore no-explicit-any
+        const sparseArray: any[] = new Array(3);
+        sparseArray[0] = 10;
+        sparseArray[2] = 30;
+
+        const docRevision: Revision<State> = {
+          the: type,
+          of: docEntity,
+          is: { value: sparseArray },
+          cause: refer({ the: type, of: docEntity }),
+          since: 1,
+        };
+        store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+
+        const traverser = getTraverser(store, {
+          path: ["value"],
+          schema: true,
+        });
+        const { ok: result } = traverser.traverse({
+          address: {
+            space: "did:null:null",
+            id: docUri,
+            type,
+            path: ["value"],
+          },
+          value: sparseArray,
+        });
+        // Result should be an array with the same sparseness
+        expect(Array.isArray(result)).toBe(true);
+        const arr = result as unknown[];
+        expect(arr.length).toBe(3);
+        expect(arr[0]).toBe(10);
+        expect(1 in arr).toBe(false); // hole preserved
+        expect(arr[2]).toBe(30);
+      });
+
+      it("should not change dense array behavior with null elements", () => {
+        const store = new Map<string, Revision<State>>();
+        const type = "application/json" as const;
+        const docUri = "of:dense-test" as URI;
+        const docEntity = docUri as Entity;
+
+        const denseArray = [1, null, 3];
+
+        const docRevision: Revision<State> = {
+          the: type,
+          of: docEntity,
+          is: { value: denseArray },
+          cause: refer({ the: type, of: docEntity }),
+          since: 1,
+        };
+        store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+
+        const traverser = getTraverser(store, {
+          path: ["value"],
+          schema: true,
+        });
+        const { ok: result } = traverser.traverse({
+          address: {
+            space: "did:null:null",
+            id: docUri,
+            type,
+            path: ["value"],
+          },
+          value: denseArray,
+        });
+        const arr = result as unknown[];
+        expect(arr.length).toBe(3);
+        expect(arr[0]).toBe(1);
+        expect(1 in arr).toBe(true); // null is present, not a hole
+        expect(arr[1]).toBe(null);
+        expect(arr[2]).toBe(3);
+      });
+    });
+
+    describe("sparse array preservation in traverseArrayWithSchema", () => {
+      it("should preserve sparse array holes through schema-driven traversal", () => {
+        const store = new Map<string, Revision<State>>();
+        const type = "application/json" as const;
+        const docUri = "of:sparse-schema-test" as URI;
+        const docEntity = docUri as Entity;
+
+        // Create a sparse array: [10, <hole>, 30]
+        // deno-lint-ignore no-explicit-any
+        const sparseArray: any[] = new Array(3);
+        sparseArray[0] = 10;
+        sparseArray[2] = 30;
+
+        const docRevision: Revision<State> = {
+          the: type,
+          of: docEntity,
+          is: { value: sparseArray },
+          cause: refer({ the: type, of: docEntity }),
+          since: 1,
+        };
+        store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+
+        const schema = {
+          type: "array",
+          items: { type: "number" },
+        } as JSONSchema;
+        const traverser = getTraverser(store, { path: ["value"], schema });
+        const { ok: result } = traverser.traverse({
+          address: {
+            space: "did:null:null",
+            id: docUri,
+            type,
+            path: ["value"],
+          },
+          value: sparseArray,
+        });
+        // Result should be an array with the same sparseness
+        expect(Array.isArray(result)).toBe(true);
+        const arr = result as unknown[];
+        expect(arr.length).toBe(3);
+        expect(arr[0]).toBe(10);
+        expect(1 in arr).toBe(false); // hole preserved
+        expect(arr[2]).toBe(30);
+      });
+    });
   }); // describe(`canonicalHashing=${canonicalHashing}`)
 } // for canonicalHashing
 

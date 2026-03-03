@@ -1,276 +1,227 @@
-# Design: Sparse Array Preservation Through the Reactive Pipeline
+# Sparse Array Preservation
 
-**Status:** Draft
-**Author:** Mike
-**Date:** 2026-03-03
-**Stacked on:** PR #2942 (identity-based reconciliation in map builtin)
+## What is a sparse array?
 
-## Problem
+A sparse array is a JavaScript array with "holes" — indices that have no value
+at all, not even `undefined`. They're created by `new Array(len)`, by `delete
+arr[i]`, or by literal syntax like `[1, , 3]`.
 
-When a sparse JavaScript array (an array with true holes, e.g. `[A, , , B]`
-where `1 in arr === false`) flows through the reactive pipeline, sparseness is
-destroyed at multiple intermediate layers. By the time the `map` builtin sees
-it, every index is populated, and the map runs a pattern instance for every
-position — including what were originally holes.
-
-The desired behavior: if the input to `map` is `[A, <hole>, <hole>, B]`, the
-output should be `[f(A), <hole>, <hole>, f(B)]`. No pattern should run for
-holes. This should be reactive — filling a hole should spin up a new pattern
-run, and creating a hole (removing a value) should stop producing output at
-that index.
-
-## Background: What Already Works
-
-The low-level storage and serialization layers already handle sparse arrays
-correctly when `richStorableValues` is enabled (which it is):
-
-| Layer | File | Status |
-|-------|------|--------|
-| Rich storable value (shallow) | `packages/memory/rich-storable-value.ts:98-112` | Preserves holes via `i in arr` |
-| Rich storable value (deep) | `packages/memory/rich-storable-value.ts:415-432` | Preserves holes via `i in value` |
-| Serialization | `packages/memory/serialization.ts:160-181` | Run-length-encoded `/hole` entries |
-| Deserialization | `packages/memory/serialization.ts:325-354` | Reconstructs true holes via `new Array(len)` |
-| Canonical hashing | `packages/memory/canonical-hash.ts:241-250` | Handles holes in hash computation |
-| Attestation (delete) | `packages/runner/src/storage/transaction/attestation.ts:130-131` | `delete newArray[index]` creates true holes |
-| Attestation (extend) | `packages/runner/src/storage/transaction/attestation.ts:112-114` | Array extension preserves sparseness |
-
-The problem is in the layers between storage and consumers.
-
-## Layers That Destroy Sparseness
-
-Six sites in four files actively destroy array sparseness. Listed bottom-up
-from storage to consumer.
-
-### 1. Attestation array copies
-
-**File:** `packages/runner/src/storage/transaction/attestation.ts`
-**Lines:** 113, 129, 151
-
-When `setAtPath` needs to mutate an array element, it copies the array with
-`[...root]` (spread). The spread operator converts holes to `undefined`,
-destroying true sparseness. This happens in three places:
-
-- Line 113: Array extension path
-- Line 129: Terminal case (setting an element)
-- Line 151: Recursive case (updating a nested value inside an element)
-
-Ironically, line 131 then creates a hole with `delete newArray[index]` — but
-all *other* holes in the array were already destroyed by the spread on line 129.
-
-### 2. Cell write path (`recursivelyAddIDIfNeeded`)
-
-**File:** `packages/runner/src/cell.ts:1791-1808`
-
-When values are written to cells, `recursivelyAddIDIfNeeded` adds internal `_id`
-fields to objects in arrays for change tracking. For arrays, it uses:
-
-```ts
-result.push(...value.map((v) => { ... }));
+```js
+const sparse = [1, , 3];
+sparse.length;    // 3
+0 in sparse;      // true  — index 0 has a value
+1 in sparse;      // false — index 1 is a hole
+sparse[1];        // undefined (but so would an explicit undefined be)
 ```
 
-`.map()` on a sparse array preserves holes in its output, but `...spread` into
-`push()` converts holes to `undefined`, then `push` adds them as real elements.
-The result is always dense.
+The only reliable way to distinguish a hole from an explicit `undefined` is the
+`in` operator: `i in arr` returns `false` for holes and `true` for present
+values (including `undefined`).
 
-### 3. Cell `push` method
+## Why we care
 
-**File:** `packages/runner/src/cell.ts:850`
+Sparse arrays are a core data structure in our reactive pipeline. They represent
+collections where some positions are intentionally empty — for example, a list
+that uses stable indices as identity keys, where items can be removed without
+shifting other elements.
 
-The cell's array `push` implementation uses `[...array, ...value]` to
-concatenate. If the existing array is sparse, the spread densifies it.
+When the `map` builtin processes a list, it creates one pattern run per element.
+If holes are filled in with `undefined` or `null`, map creates pattern runs for
+those positions too — wasting resources and producing incorrect output. The
+correct behavior: `map([A, <hole>, B])` should produce `[f(A), <hole>, f(B)]`
+with only two pattern runs.
 
-### 4. Cell read/traverse path
+## How JavaScript destroys sparseness
 
-**File:** `packages/runner/src/traverse.ts:645-698`
+Many common array operations silently convert holes to `undefined`:
 
-When reading an array from a cell, `traverseDAG` processes elements with:
+| Operation | Preserves holes? |
+|-----------|-----------------|
+| `[...arr]` (spread) | No — holes become `undefined` |
+| `arr.map(fn)` | Skips holes in callback, but output has `undefined` at those positions |
+| `Array.from(arr)` | No — holes become `undefined` |
+| `for...of` | Yields `undefined` for holes |
+| `arr.push(...other)` | Densifies `other` via spread |
+| `arr.slice()` | Yes |
+| `arr.forEach(fn)` | Yes — callback is only called for present indices |
+| `for (let i = 0; i < len; i++)` with `arr[i]` | Reads `undefined` (indistinguishable from explicit `undefined`) |
+| `for (let i = 0; i < len; i++)` with `i in arr` | Correctly detects holes |
+
+The last two rows are the key techniques. We use `forEach` when we only need to
+visit present elements. We use `for` + `i in arr` when we also need to detect
+absent indices (e.g. to emit deletions in the diff engine).
+
+## The two sparse-safe patterns
+
+We use two patterns depending on the situation. Both produce the same result for
+sparse arrays — only the style differs.
+
+### `forEach` (preferred for iteration)
 
 ```ts
-const entries = doc.value.map((item, index) => { ... });
-for (const v of entries) {
-    newValue.push(v === undefined ? null : v);
+const result = new Array(arr.length);       // pre-allocate with holes
+arr.forEach((v, i) => {
+  result[i] = transform(v);                // only called for present indices
+});
+```
+
+`forEach` skips holes automatically — the callback is never called for absent
+indices. This makes sparse-safety structural: you can't forget to check `i in
+arr` because there's no check to write. Use this for copies, transforms, and any
+iteration where you only care about present elements.
+
+For a plain copy, `attestation.ts` has a `sparseArrayCopy` helper that uses
+this pattern.
+
+### `for` + `i in arr` (when you need to detect absences)
+
+```ts
+for (let i = 0; i < arr.length; i++) {
+  if (!(i in arr)) continue;               // skip holes
+  result[i] = transform(arr[i]);           // only touch populated indices
 }
 ```
 
-This has three layers of densification:
-1. `.map()` skips holes (but preserves them in output)
-2. `for...of` yields `undefined` for holes
-3. `v === undefined ? null : v` converts to `null`
+Use this when you need to compare two arrays and detect indices that are present
+in one but absent in the other (e.g. the diff engine emitting deletions), when
+you need early exit (`break`/`return`), or when you have complex loop state that
+doesn't fit a callback.
 
-The final array is always dense, with `null` where holes were. This is
-particularly harmful because it makes holes indistinguishable from explicitly
-`null` values.
+## Where sparse arrays flow through the codebase
 
-### 5. Diff engine
-
-**File:** `packages/runner/src/data-updating.ts:472-491, 625-634`
-
-The `normalizeAndDiff` array loop iterates every index:
-
-```ts
-for (let i = 0; i < newValue.length; i++) {
-    normalizeAndDiff(..., newValue[i], ..., currentArray?.[i]);
-}
-```
-
-For holes, `newValue[i]` evaluates to `undefined`, which gets diffed as a value
-change. The diff engine doesn't distinguish "this index has no value (hole)"
-from "this index has the value `undefined`."
-
-Additionally, `hasPath` at line 631 uses `element !== undefined` to check array
-element existence, which conflates holes with `undefined` values:
-
-```ts
-const element = (value as Record<string, unknown>)[first];
-return element !== undefined && hasPath(element, rest);
-```
-
-### 6. Map builtin
-
-**File:** `packages/runner/src/builtins/map.ts`
-
-In the PR #2942 version, the identity computation uses:
-
-```ts
-const identityInfo = list.map((_, i) => getElementKey(listCell, i, tx, keyCounts));
-```
-
-`.map()` skips holes in sparse arrays, so `identityInfo` itself becomes sparse.
-The subsequent `for (let i = 0; i < list.length; i++)` loop then destructures
-`identityInfo[i]` at a hole index, which is `undefined`, causing a crash.
-
-Even without the crash, the reconciliation loop processes every index and
-creates a pattern run for each, producing a dense output.
-
-## Data Flow (Current vs. Desired)
+Data flows through the reactive pipeline in this order. Every layer preserves
+sparseness:
 
 ```
-External sparse array: [A, <hole>, <hole>, B]
-
-CURRENT FLOW:
-  toRichStorableValue    → [A, <hole>, <hole>, B]     (preserved)
-  recursivelyAddIDIfNeeded → [A, undefined, undefined, B]  (DENSIFIED)
-  storage write          → [A, undefined, undefined, B]
-  traverse.ts read       → [A, null, null, B]          (DENSIFIED AGAIN)
-  data-updating diff     → diffs all 4 indices
-  map builtin            → runs 4 pattern instances
-
-DESIRED FLOW:
-  toRichStorableValue    → [A, <hole>, <hole>, B]     (preserved)
-  recursivelyAddIDIfNeeded → [A, <hole>, <hole>, B]   (preserved)
-  storage write          → [A, <hole>, <hole>, B]
-  traverse.ts read       → [A, <hole>, <hole>, B]     (preserved)
-  data-updating diff     → diffs only indices 0 and 3
-  map builtin            → runs 2 pattern instances, output is [f(A), <hole>, <hole>, f(B)]
+Write path:  value → toStorableValue → recursivelyAddIDIfNeeded → storage
+Read path:   storage → traverseDAG → normalizeAndDiff → builtins (map, etc.)
 ```
 
-## Proposed Fix
+### Storage and serialization (foundation)
 
-The fix is straightforward and mechanical: at each site, replace array iteration
-that skips or densifies holes with a `for` loop that checks `i in array` and
-preserves holes via indexed assignment into a pre-allocated `new Array(len)`.
+These layers handle sparse arrays correctly and are less likely to regress
+because their sparse support was part of the original design:
 
-### Pattern
+- **`packages/memory/rich-storable-value.ts`** — `toRichStorableValue` and
+  `toDeepRichStorableValue` use `i in arr` checks.
+- **`packages/memory/serialization.ts`** — Encodes holes as run-length-encoded
+  `/hole` entries; decodes them back to true holes via `new Array(len)`.
+- **`packages/memory/canonical-hash.ts`** — Handles holes in hash computation.
 
-Every fix follows the same pattern. Replace:
-```ts
-const result = [...array];           // or array.map(...) + spread
-```
-With:
-```ts
-const result = new Array(array.length);
-for (let i = 0; i < array.length; i++) {
-  if (!(i in array)) continue;      // preserve hole
-  result[i] = transform(array[i]);  // only process populated indices
-}
-```
+### Value validation (`packages/memory/storable-value.ts`)
 
-A shared `sparseArrayCopy(arr)` utility could reduce repetition.
+`isStorableArray` accepts sparse arrays — holes are valid storable structure. It
+uses `for` + `i in` because it needs early return.  `toStorableValueLegacy` and
+`toDeepStorableValueInternal` both use `forEach` to preserve holes during
+conversion.
 
-### Site-specific notes
+### Attestation (`packages/runner/src/storage/transaction/attestation.ts`)
 
-**Attestation (sites 1):** Extract a `sparseArrayCopy` helper since the pattern
-repeats 3 times in `setAtPath`.
+The `setAtPath` function does copy-on-write: when it needs to modify an element
+in an array, it copies the array first. The `sparseArrayCopy` helper (which uses
+`forEach`) is used at all three copy sites (extension, element set, nested
+modification). The `delete` operation at `setAtPath` creates true holes via
+`delete newArray[index]`.
 
-**Cell write path (site 2):** The `generatedIdCounter` for `_id` fields only
-applies to object elements — holes have no object, so the counter is unaffected.
+### Cell write path (`packages/runner/src/cell.ts`)
 
-**Traverse (site 4):** The `for...of` + `push` secondary loop (lines 692-698)
-is eliminated. Elements are assigned directly by index during the main loop.
+`recursivelyAddIDIfNeeded` adds internal ID fields to objects in arrays for
+change tracking. It uses `forEach` into a pre-allocated `new Array(value.length)`
+— the callback is only called for present elements, so holes are preserved. The
+ID counter only increments for object elements; holes are skipped.
 
-**Diff engine (site 5):** Requires four-case handling:
+The cell `push` method concatenates arrays using `forEach` on the original
+(sparse) array, then a `for` loop for the appended (dense) values.
 
-| Old index | New index | Action |
-|-----------|-----------|--------|
-| hole | hole | Skip (no change) |
-| value | hole | Emit deletion (`value: undefined` — attestation interprets this as "create hole") |
-| hole | value | Diff as new value (current value is `undefined`) |
-| value | value | Diff normally (existing behavior) |
+### Cell read path (`packages/runner/src/traverse.ts`)
 
-The `hasPath` function should use `index in value` instead of `element !== undefined`.
+`traverseDAG` reconstructs arrays from storage. It uses `forEach` on
+`doc.value`, assigning populated elements by index into `new Array(len)`. The
+result array is registered with the cycle tracker before population so that
+circular references can return it early.
 
-**Map builtin (site 6):** Replace `.map()` for identity computation with a
-`for` loop. In the reconciliation loop, skip hole indices — don't create pattern
-runs, don't assign to the output array. Use `new Array(list.length)` for the
-output so holes are preserved structurally.
+`traverseArrayWithSchema` (the schema-driven traversal path) uses `for` + `i in`
+because it has early `return undefined` exits (broken redirects, schema
+mismatches). It pre-allocates with `new Array(len)` and uses indexed assignment
+instead of `push`.
 
-Reactive behavior when the list changes:
-- **Value becomes hole:** The pattern run stays in `elementRuns` for potential
-  reuse (consistent with how PR #2942 handles removed elements). The output has
-  a hole at that index.
-- **Hole becomes value:** Creates a new pattern run (or reuses from
-  `elementRuns` if the identity key matches a previous run).
+### Diff engine (`packages/runner/src/data-updating.ts`)
 
-## Existing Tests That Need Updating
+`normalizeAndDiff` compares the new array against the current array to produce a
+changeset. It uses `for` + `i in` (not `forEach`) because it needs to detect
+indices present in the old array but absent in the new one. It handles four cases
+for each index:
 
-Three existing tests explicitly assert densification behavior:
+| `i in new` | `i in current` | Action |
+|-----------|----------------|--------|
+| No | No | Skip — hole unchanged |
+| No | Yes | Emit delete (attestation interprets `value: undefined` as "create hole") |
+| Yes | No | Diff as new value |
+| Yes | Yes | Diff normally |
 
-1. `packages/runner/test/cell.test.ts:135` — "should densify sparse arrays
-   during set" — update to expect holes are preserved
-2. `packages/runner/test/cell.test.ts:152` — "should densify shared sparse
-   arrays and preserve sharing" — update to expect holes are preserved (sharing
-   should still work)
-3. `packages/runner/test/attestation.test.ts:566` — "should convert sparse
-   array holes to undefined (spread behavior)" — update to expect holes are
-   preserved (`1 in items` should be `false`)
+The `hasPath` function uses `index in value` (not `value[index] !== undefined`)
+to correctly report that a path through a hole does not exist.
 
-## New Tests Needed
+### Map builtin (`packages/runner/src/builtins/map.ts`)
 
-1. **Cell roundtrip:** Write a sparse array to a cell, read it back, verify
-   holes are preserved (`i in arr` is `false` for hole indices).
-2. **Diff transitions:** Verify correct changesets for sparse-to-dense,
-   dense-to-sparse, and sparse-to-sparse array transitions.
-3. **Map with sparse input:** Verify the output array is sparse at the same
-   indices as the input, and that only populated indices have pattern runs.
-4. **Map reactive sparseness:** Verify that filling a hole in the input spins up
-   a new pattern run, and that the output reflects the new value.
+The main loop checks `initializedUpTo in list` before creating a pattern run.
+For holes, it extends `newArrayValue.length` without pushing — preserving the
+hole in the output. When the input list changes reactively:
 
-## Files Changed
+- **Value becomes hole:** The output gets a hole at that index. The pattern run
+  is kept for potential reuse if the same key reappears.
+- **Hole becomes value:** A new pattern run is created (or reused by key match).
 
-| File | Nature of change |
-|------|-----------------|
-| `packages/runner/src/storage/transaction/attestation.ts` | Sparse-safe array copy (3 sites) |
-| `packages/runner/src/cell.ts` | `recursivelyAddIDIfNeeded` + `push` method |
-| `packages/runner/src/traverse.ts` | `traverseDAG` array branch |
-| `packages/runner/src/data-updating.ts` | `normalizeAndDiff` array loop + `hasPath` |
-| `packages/runner/src/builtins/map.ts` | Identity computation + reconciliation loop |
-| `packages/runner/test/attestation.test.ts` | Update sparse test expectations |
-| `packages/runner/test/cell.test.ts` | Update 2 densification tests |
-| `packages/runner/test/patterns.test.ts` | New sparse map tests |
+## Writing new code that handles arrays
 
-## Risks and Considerations
+When you write code that iterates, copies, or transforms arrays anywhere in the
+reactive pipeline:
 
-- **Backwards compatibility:** Dense arrays are unaffected — `i in denseArray`
-  is `true` for all valid indices, so the `continue` branches are never taken.
-- **`undefined` vs hole ambiguity:** The diff engine currently can't distinguish
-  "value is `undefined`" from "index is a hole." The fix uses `i in array` which
-  makes the distinction. Code that previously stored `undefined` at an index
-  will continue to work (it's a present value, not a hole).
-- **ID generation:** The `generatedIdCounter` in `recursivelyAddIDIfNeeded`
-  only applies to object elements. Holes don't increment the counter, which
-  could change ID assignment for subsequent objects if holes appear before them.
-  This should be fine since IDs are only used for entity derivation within a
-  single write, not persisted directly.
-- **Performance:** The `for` loop with `i in` check has identical performance
-  characteristics to the current code for dense arrays. For sparse arrays, it
-  does less work (skips holes instead of processing them).
+1. **Prefer `forEach`** for iteration, copies, and transforms. It skips holes
+   automatically, making sparse-safety the default.
+2. **Use `for` + `i in arr`** when you need to detect absent indices, need early
+   exit, or have complex loop state.
+3. **Never use** `for...of`, `.map()`, spread (`[...arr]`), or `Array.from()` on
+   arrays that might be sparse.
+4. **Pre-allocate with `new Array(len)`**, not `[]`. An empty array that you
+   `push` into will never have holes.
+5. **Use indexed assignment** (`result[i] = ...`), not `push`.
+6. **Test with sparse arrays.** Create them with `[1, , 3]` (note the lint
+   directive `// deno-lint-ignore no-sparse-arrays`) and verify holes survive
+   with `i in result`.
+
+If you're writing a plain array copy, use or follow `sparseArrayCopy` from
+`attestation.ts`.
+
+## How we ensure this stays correct
+
+Test coverage verifies sparse preservation at each layer:
+
+- **`packages/memory/test/storable-value-test.ts`** — `isStorableValue` accepts
+  sparse arrays; `toStorableValue` and `toDeepStorableValue` preserve holes.
+- **`packages/runner/test/attestation.test.ts`** — `setAtPath` preserves holes
+  through array copies (extension, element set, nested modification).
+- **`packages/runner/test/cell.test.ts`** — Writing a sparse array to a cell and
+  reading it back preserves holes; `push` onto a sparse array preserves existing
+  holes.
+- **`packages/runner/test/traverse.test.ts`** — Sparse array roundtrip through
+  `traverse` preserves holes (both `traverseDAG` and schema-driven
+  `traverseArrayWithSchema` paths).
+- **`packages/runner/test/data-updating.test.ts`** — All four hole transition
+  cases (hole-to-hole, value-to-hole, hole-to-value, value-to-value); `hasPath`
+  returns false through holes.
+- **`packages/runner/test/experimental-options.test.ts`** — `isStorableValue`
+  accepts sparse arrays regardless of the `richStorableValues` flag.
+
+These tests use the `in` operator to assert true sparseness (`1 in result`
+should be `false`), not just value equality. A regression that densifies arrays
+will fail these assertions.
+
+## Known limitations
+
+- **Merkle hashing:** The merkle-reference library does not handle sparse arrays
+  in its type system. End-to-end tests that hash sparse array output from `map`
+  are not yet possible.
+- **`rich-storable-value.ts` `HasToJSON` path:** `Object.freeze([...converted])`
+  in the `HasToJSON` case would densify a sparse array returned from `toJSON()`.
+  This is an edge case — `toJSON()` rarely returns sparse arrays.

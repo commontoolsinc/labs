@@ -156,11 +156,11 @@ describe("storable-value", () => {
         expect(isStorableValue([undefined])).toBe(false);
       });
 
-      it("rejects sparse arrays (arrays with holes)", () => {
+      it("accepts sparse arrays (arrays with holes)", () => {
         const sparse: unknown[] = [];
         sparse[0] = 1;
         sparse[2] = 3; // hole at index 1
-        expect(isStorableValue(sparse)).toBe(false);
+        expect(isStorableValue(sparse)).toBe(true);
       });
 
       it("rejects arrays with extra non-numeric properties", () => {
@@ -265,22 +265,31 @@ describe("storable-value", () => {
     });
 
     describe("handles sparse arrays and undefined elements", () => {
-      it("densifies sparse arrays by filling holes with null", () => {
+      it("preserves sparse array holes", () => {
         const sparse: unknown[] = [];
         sparse[0] = 1;
         sparse[2] = 3; // hole at index 1
-        const result = toStorableValue(sparse);
-        expect(result).not.toBe(sparse); // returns a new array
-        expect(result).toEqual([1, null, 3]);
+        const result = toStorableValue(sparse) as unknown[];
+        expect(result).toBe(sparse); // sparse arrays pass through as-is
+        expect(result[0]).toBe(1);
+        expect(1 in result).toBe(false); // hole preserved
+        expect(result[2]).toBe(3);
+        expect(result.length).toBe(3);
       });
 
-      it("densifies arrays with multiple holes", () => {
+      it("preserves arrays with multiple holes", () => {
         const sparse: unknown[] = [];
         sparse[0] = "a";
         sparse[3] = "b"; // holes at indices 1 and 2
         sparse[5] = "c"; // hole at index 4
-        const result = toStorableValue(sparse);
-        expect(result).toEqual(["a", null, null, "b", null, "c"]);
+        const result = toStorableValue(sparse) as unknown[];
+        expect(result[0]).toBe("a");
+        expect(1 in result).toBe(false);
+        expect(2 in result).toBe(false);
+        expect(result[3]).toBe("b");
+        expect(4 in result).toBe(false);
+        expect(result[5]).toBe("c");
+        expect(result.length).toBe(6);
       });
 
       it("converts undefined elements to null", () => {
@@ -618,8 +627,10 @@ describe("storable-value", () => {
           a: unknown[];
           b: unknown[];
         };
-        expect(result.a).toEqual([1, null, 3]);
-        expect(result.b).toEqual([1, null, 3]);
+        expect(result.a[0]).toBe(1);
+        expect(1 in result.a).toBe(false); // hole preserved
+        expect(result.a[2]).toBe(3);
+        expect(result.a.length).toBe(3);
         // Both should reference the same converted array
         expect(result.a).toBe(result.b);
       });
@@ -819,28 +830,38 @@ describe("storable-value", () => {
     });
 
     describe("handles sparse arrays and undefined elements", () => {
-      it("densifies top-level sparse arrays with null", () => {
+      it("preserves top-level sparse array holes", () => {
         const sparse: unknown[] = [];
         sparse[0] = 1;
         sparse[2] = 3; // hole at index 1
-        const result = toDeepStorableValue(sparse);
-        expect(result).toEqual([1, null, 3]);
+        const result = toDeepStorableValue(sparse) as unknown[];
+        expect(result[0]).toBe(1);
+        expect(1 in result).toBe(false); // hole preserved
+        expect(result[2]).toBe(3);
+        expect(result.length).toBe(3);
       });
 
-      it("densifies nested sparse arrays with null", () => {
+      it("preserves nested sparse array holes", () => {
         const sparse: unknown[] = [];
         sparse[0] = "a";
         sparse[2] = "c";
-        const result = toDeepStorableValue({ arr: sparse });
-        expect(result).toEqual({ arr: ["a", null, "c"] });
+        const result = toDeepStorableValue({ arr: sparse }) as {
+          arr: unknown[];
+        };
+        expect(result.arr[0]).toBe("a");
+        expect(1 in result.arr).toBe(false); // hole preserved
+        expect(result.arr[2]).toBe("c");
       });
 
-      it("densifies sparse arrays inside arrays with null", () => {
+      it("preserves sparse arrays inside arrays", () => {
         const sparse: unknown[] = [];
         sparse[0] = 1;
         sparse[2] = 3;
-        const result = toDeepStorableValue([[sparse]]);
-        expect(result).toEqual([[[1, null, 3]]]);
+        const result = toDeepStorableValue([[sparse]]) as unknown[][][];
+        const inner = result[0][0];
+        expect(inner[0]).toBe(1);
+        expect(1 in inner).toBe(false); // hole preserved
+        expect(inner[2]).toBe(3);
       });
 
       it("converts undefined elements to null", () => {
@@ -848,14 +869,14 @@ describe("storable-value", () => {
         expect(result).toEqual([1, null, 3]);
       });
 
-      it("recursively processes elements after densifying", () => {
+      it("recursively processes elements and preserves holes", () => {
         const sparse: unknown[] = [];
         sparse[0] = new Date("2024-01-15T12:00:00.000Z");
         sparse[2] = { nested: true };
-        const result = toDeepStorableValue(sparse);
-        expect(result).toEqual(["2024-01-15T12:00:00.000Z", null, {
-          nested: true,
-        }]);
+        const result = toDeepStorableValue(sparse) as unknown[];
+        expect(result[0]).toBe("2024-01-15T12:00:00.000Z");
+        expect(1 in result).toBe(false); // hole preserved
+        expect(result[2]).toEqual({ nested: true });
       });
     });
 
