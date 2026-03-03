@@ -224,8 +224,8 @@ function getCellSchema(
     if (isNonEmptySchema(resolvedSchema)) {
       return resolvedSchema;
     }
-  } catch {
-    // ignore — fall through to minimal schema
+  } catch (e) {
+    logger.debug("llm", "getCellSchema fallback failed:", e);
   }
 
   // Fall back to minimal schema based on current value
