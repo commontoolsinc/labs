@@ -47,7 +47,7 @@ describe("CT-1173: array push with complex objects", () => {
   });
 
   afterEach(async () => {
-    tx.commit();
+    await tx.commit();
     await runtime?.dispose();
     await storageManager?.close();
   });
