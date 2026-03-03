@@ -739,8 +739,14 @@ export class ContextualFlowControl {
         } else {
           return false;
         }
+      } else if (
+        cursor.type === "unknown" ||
+        Array.isArray(cursor.type) && cursor.type.includes("unknown")
+      ) {
+        // we can descend into unknown, but we just get more unknown
+        cursor = { type: "unknown", ...(cursor.ifc && { ifc: cursor.ifc }) };
       } else {
-        // we can only descend into objects and arrays
+        // we can only descend into objects and arrays or unknown
         return false;
       }
     }
