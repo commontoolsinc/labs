@@ -64,7 +64,7 @@ import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
 import "./builtins/index.ts";
 import { isCellResult } from "./query-result-proxy.ts";
 
-const logger = getLogger("runner", { enabled: true, level: "info" });
+const logger = getLogger("runner", { enabled: true, level: "warn" });
 
 export class Runner {
   readonly cancels = new Map<`${MemorySpace}/${URI}`, Cancel>();
