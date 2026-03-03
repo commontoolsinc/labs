@@ -196,14 +196,36 @@ function prepareSchemaForLLM(schema: JSONSchema): JSONSchema {
  * - Prefer a non-empty pattern.resultSchema if pattern is loaded
  * - Otherwise derive a simple object schema from the current value
  */
+function isNonEmptySchema(schema: unknown): schema is JSONSchema {
+  return typeof schema === "object" && schema !== null &&
+    Object.keys(schema as Record<string, unknown>).length > 0;
+}
+
 function getCellSchema(
   cell: Cell<unknown>,
 ): JSONSchema | undefined {
   // Extract schema from cell, including from resultSchema of associated pattern
   const { schema } = cell.asSchemaFromLinks().getAsNormalizedFullLink();
 
-  if (schema !== undefined) {
+  if (isNonEmptySchema(schema)) {
     return schema;
+  }
+
+  // Try harder: resolve all links, clear the schema, then look up the schema
+  // from the source pattern's resultSchema. This handles cells accessed via
+  // arrays (e.g., mentionables, recents) where the intermediate cell doesn't
+  // carry a schema but the underlying piece cell's pattern does.
+  // Uses the same trick as addFavorite in home.tsx: clearing the schema with
+  // asSchema(undefined) forces asSchemaFromLinks to look it up fresh from the
+  // source pattern.
+  try {
+    const resolvedSchema = cell.resolveAsCell().asSchema(undefined)
+      .asSchemaFromLinks()?.getAsNormalizedFullLink()?.schema;
+    if (isNonEmptySchema(resolvedSchema)) {
+      return resolvedSchema;
+    }
+  } catch (e) {
+    logger.debug("llm", "getCellSchema fallback failed:", e);
   }
 
   // Fall back to minimal schema based on current value
@@ -1024,60 +1046,80 @@ function buildAvailableCellsDocumentation(
   context: Record<string, Cell<any>> | undefined,
   pinnedCells: Cell<PinnedCell[]>,
 ): string {
-  const entries: string[] = [];
+  // Collect all cell entries, deduplicating by resolved path.
+  // When the same cell appears multiple times (e.g., from context AND pinned),
+  // prefer the entry with a schema.
+  const seenPaths = new Map<
+    string,
+    { name: string; entry: string; hasSchema: boolean }
+  >();
+
+  function addCellEntry(
+    name: string,
+    cell: Cell<any>,
+  ): void {
+    const resolvedCell = cell.resolveAsCell();
+    const link = resolvedCell.getAsNormalizedFullLink();
+    const path = createLLMFriendlyLink(link, space);
+    const schemaInfo = getCellSchema(resolvedCell);
+
+    // Deduplicate: skip if we already have an entry with schema for this path
+    const existing = seenPaths.get(path);
+    if (existing?.hasSchema && !schemaInfo) return;
+
+    let entry = `## ${name} (${path})\n`;
+
+    if (schemaInfo !== undefined) {
+      const schemaStr = getSchemaTypeString(schemaInfo);
+      entry += `- Schema: \`\`\`typescript\n${schemaStr}\n\`\`\`\n`;
+    }
+
+    try {
+      const value = resolvedCell.get();
+      const serialized = traverseAndSerialize(
+        value,
+        schemaInfo,
+        new Set(),
+        space,
+      );
+
+      let valueJson = JSON.stringify(serialized, null, 2);
+
+      const MAX_VALUE_LENGTH = 2000;
+      if (valueJson.length > MAX_VALUE_LENGTH) {
+        valueJson = valueJson.substring(0, MAX_VALUE_LENGTH) +
+          "\n... (truncated)";
+      }
+
+      entry += `- Current Value: \`\`\`json\n${valueJson}\n\`\`\`\n`;
+    } catch (e) {
+      logger.warn(
+        "llm",
+        `Failed to serialize value for cell ${name}:`,
+        e,
+      );
+      entry += `- Current Value: (unable to serialize)\n`;
+    }
+
+    seenPaths.set(path, {
+      name,
+      entry,
+      hasSchema: schemaInfo !== undefined,
+    });
+  }
 
   // First, process context cells (if provided)
   if (context) {
     for (const [name, cell] of Object.entries(context)) {
       try {
-        const resolvedCell = cell.resolveAsCell();
-        const link = resolvedCell.getAsNormalizedFullLink();
-        const path = createLLMFriendlyLink(link, space);
-        const schemaInfo = getCellSchema(resolvedCell);
-
-        let entry = `## ${name} (${path})\n`;
-
-        if (schemaInfo !== undefined) {
-          const schemaStr = getSchemaTypeString(schemaInfo);
-
-          entry += `- Schema: \`\`\`typescript\n${schemaStr}\n\`\`\`\n`;
-        }
-
-        try {
-          const value = resolvedCell.get();
-          const serialized = traverseAndSerialize(
-            value,
-            schemaInfo,
-            new Set(),
-            space,
-          );
-
-          let valueJson = JSON.stringify(serialized, null, 2);
-
-          const MAX_VALUE_LENGTH = 2000;
-          if (valueJson.length > MAX_VALUE_LENGTH) {
-            valueJson = valueJson.substring(0, MAX_VALUE_LENGTH) +
-              "\n... (truncated)";
-          }
-
-          entry += `- Current Value: \`\`\`json\n${valueJson}\n\`\`\`\n`;
-        } catch (e) {
-          logger.warn(
-            "llm",
-            `Failed to serialize value for context cell ${name}:`,
-            e,
-          );
-          entry += `- Current Value: (unable to serialize)\n`;
-        }
-
-        entries.push(entry);
+        addCellEntry(name, cell);
       } catch (e) {
         logger.warn("llm", `Failed to document context cell ${name}:`, e);
       }
     }
   }
 
-  // Then, process pinned cells
+  // Then, process pinned cells (may override context entries if they have schema)
   const currentPinnedCells = pinnedCells.get() || [];
   for (const pinnedCell of currentPinnedCells) {
     try {
@@ -1094,50 +1136,7 @@ function buildAvailableCellsDocumentation(
         continue;
       }
 
-      const resolvedCell = cell.resolveAsCell();
-
-      // Get schema for the cell. Resolve picks up all schemas on links from it.
-      const schemaInfo = getCellSchema(resolvedCell);
-
-      // Build documentation entry with both schema and value
-      let entry = `## ${pinnedCell.name} (${pinnedCell.path})\n`;
-
-      // Add schema if available
-      if (schemaInfo !== undefined) {
-        const schemaStr = getSchemaTypeString(schemaInfo);
-        entry += `- Schema: \`\`\`typescript\n${schemaStr}\n\`\`\`\n`;
-      }
-
-      // Add current value
-      try {
-        const value = resolvedCell.get();
-        const serialized = traverseAndSerialize(
-          value,
-          schemaInfo,
-          new Set(),
-          space,
-        );
-
-        let valueJson = JSON.stringify(serialized, null, 2);
-
-        // Truncate if too large
-        const MAX_VALUE_LENGTH = 2000;
-        if (valueJson.length > MAX_VALUE_LENGTH) {
-          valueJson = valueJson.substring(0, MAX_VALUE_LENGTH) +
-            "\n... (truncated)";
-        }
-
-        entry += `- Current Value: \`\`\`json\n${valueJson}\n\`\`\`\n`;
-      } catch (e) {
-        logger.warn(
-          "llm",
-          `Failed to serialize value for ${pinnedCell.name}:`,
-          e,
-        );
-        entry += `- Current Value: (unable to serialize)\n`;
-      }
-
-      entries.push(entry);
+      addCellEntry(pinnedCell.name, cell);
     } catch (e) {
       logger.warn(
         "llm",
@@ -1147,10 +1146,11 @@ function buildAvailableCellsDocumentation(
     }
   }
 
-  if (entries.length === 0) {
+  if (seenPaths.size === 0) {
     return "";
   }
 
+  const entries = [...seenPaths.values()].map((v) => v.entry);
   return "\n\n# Available Cells\n\n" + entries.join("\n\n");
 }
 

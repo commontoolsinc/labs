@@ -648,8 +648,8 @@ export class CTPromptInput extends BaseElement {
          * Insert mention at cursor position
          */
         private _insertMentionAtCursor(
-          _markdown: string,
-          mentionCell: CellHandle<Mentionable>,
+          markdown: string,
+          _mentionCell: CellHandle<Mentionable>,
         ): void {
           const textarea = this._textareaElement as HTMLTextAreaElement;
           if (!textarea) return;
@@ -663,28 +663,13 @@ export class CTPromptInput extends BaseElement {
           const beforeMention = this.value.substring(0, lastAtIndex);
           const afterMention = this.value.substring(cursorPos);
 
-          // Get the name from the mention cell
-          const name = mentionCell.get()?.[NAME] || "Unknown";
-
-          // Get the link in /of: format
-          const link = mentionCell.ref();
-          const handle = link.id || "";
-          const pathSegments = link.path || [];
-
-          // Format as /of:handle/path/segments
-          let linkPath = `/${handle}`;
-          if (pathSegments.length > 0) {
-            linkPath += `/${pathSegments.join("/")}`;
-          }
-
-          // Format as markdown link: [Name](/of:...)
-          const markdownLink = `[${name}](${linkPath})`;
-
-          this.value = beforeMention + markdownLink + afterMention;
+          // Use the markdown link from the mention controller, which includes
+          // the resolved piece entity ID (not the array sub-path)
+          this.value = beforeMention + markdown + afterMention;
           textarea.value = this.value;
 
           // Set cursor after the inserted mention
-          const newCursorPos = beforeMention.length + markdownLink.length;
+          const newCursorPos = beforeMention.length + markdown.length;
           textarea.setSelectionRange(newCursorPos, newCursorPos);
           textarea.focus();
 
