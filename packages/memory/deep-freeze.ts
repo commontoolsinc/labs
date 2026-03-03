@@ -18,10 +18,7 @@ export function deepFreeze<T>(value: T): T {
 
   if (Array.isArray(value)) {
     for (let i = 0; i < value.length; i++) {
-      if (i in value) {
-        const frozen = deepFreeze(value[i]);
-        if (!alreadyFrozen) value[i] = frozen;
-      }
+      if (i in value) deepFreeze(value[i]);
     }
     if (!alreadyFrozen) Object.freeze(value);
     return value;
@@ -29,8 +26,7 @@ export function deepFreeze<T>(value: T): T {
 
   const obj = value as Record<string, unknown>;
   for (const key of Object.keys(obj)) {
-    const frozen = deepFreeze(obj[key]);
-    if (!alreadyFrozen) obj[key] = frozen;
+    deepFreeze(obj[key]);
   }
   if (!alreadyFrozen) Object.freeze(obj);
   return value;
