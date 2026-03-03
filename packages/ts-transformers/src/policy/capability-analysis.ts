@@ -791,14 +791,15 @@ export function analyzeFunctionCapabilities(
               )
             )
           ) {
-            if (isCallOrNewArgumentUsage(usage)) {
+            if (
+              isCallOrNewArgumentUsage(usage) ||
+              isPassThroughIdentifierUsage(node)
+            ) {
               if (source.path.length === 0 && !source.dynamic) {
                 markPassthrough(source.root);
               } else {
                 trackReadRef(source);
               }
-            } else if (isPassThroughIdentifierUsage(node)) {
-              markPassthrough(source.root);
             } else {
               trackReadRef(source);
             }
