@@ -2141,47 +2141,22 @@ export class Scheduler {
       const writes2 = captureWrites(tx2, log2);
       tx2.abort();
 
-      // Compare: round 2 should have same or fewer writes with same values
-      const allKeys = new Set([...writes1.keys(), ...writes2.keys()]);
+      // Compare: only flag when round 2 writes a different value or writes
+      // new keys that round 1 didn't. Keys written by round 1 but not round 2
+      // are OK — round 2 read the committed value and skipped redundant writes.
       const differingKeys: string[] = [];
-      for (const key of allKeys) {
-        const v1 = writes1.get(key);
+      for (const key of writes2.keys()) {
         const v2 = writes2.get(key);
-        if (!this.deepEqual(v1, v2)) {
+        if (!writes1.has(key)) {
+          // Round 2 wrote a key that round 1 didn't — non-idempotent
+          differingKeys.push(key);
+        } else if (!this.deepEqual(writes1.get(key), v2)) {
+          // Both wrote the key but with different values — non-idempotent
           differingKeys.push(key);
         }
       }
 
       if (differingKeys.length > 0) {
-        console.error(`[idempotency] NON-IDEMPOTENT: ${actionId}`);
-        console.warn(
-          `[idempotency]   round1 wrote ${writes1.size} keys, round2 wrote ${writes2.size} keys`,
-        );
-        for (const key of differingKeys) {
-          const v1 = writes1.get(key);
-          const v2 = writes2.get(key);
-          const onlyIn = !writes1.has(key)
-            ? "(only in round2)"
-            : !writes2.has(key)
-            ? "(only in round1)"
-            : "(value differs)";
-          try {
-            console.error(`[idempotency]   ${onlyIn} key=${key}`);
-            console.warn(
-              `[idempotency]     round1=${JSON.stringify(v1)?.slice(0, 500)}`,
-            );
-            console.warn(
-              `[idempotency]     round2=${JSON.stringify(v2)?.slice(0, 500)}`,
-            );
-          } catch {
-            console.warn(
-              `[idempotency]     round1=${String(v1)?.slice(0, 200)}`,
-            );
-            console.warn(
-              `[idempotency]     round2=${String(v2)?.slice(0, 200)}`,
-            );
-          }
-        }
         nonIdempotent.push({
           actionId,
           actionInfo: this.getActionTelemetryInfo(action),
