@@ -240,14 +240,6 @@ export class Engine extends EventTarget implements Harness {
     return eval(source);
   }
 
-  /**
-   * Proactively checks all computations for idempotency.
-   * Delegates to the runtime's scheduler.
-   */
-  runIdempotencyCheck() {
-    return this.ctRuntime.runIdempotencyCheck();
-  }
-
   // Map a single position to its original source location.
   // Returns null if no source map is loaded for the filename.
   mapPosition(

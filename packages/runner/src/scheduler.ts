@@ -1,3 +1,4 @@
+import { deepEqual } from "@commontools/utils/deep-equal";
 import { getLogger } from "@commontools/utils/logger";
 import { isRecord } from "@commontools/utils/types";
 import type { MemorySpace, URI } from "@commontools/memory/interface";
@@ -2150,7 +2151,7 @@ export class Scheduler {
         if (!writes1.has(key)) {
           // Round 2 wrote a key that round 1 didn't — non-idempotent
           differingKeys.push(key);
-        } else if (!this.deepEqual(writes1.get(key), v2)) {
+        } else if (!deepEqual(writes1.get(key), v2)) {
           // Both wrote the key but with different values — non-idempotent
           differingKeys.push(key);
         }
@@ -2283,7 +2284,7 @@ export class Scheduler {
       const prev = history[i];
 
       // Check if reads are the same
-      if (!this.mapsEqual(latest.readValues, prev.readValues)) continue;
+      if (!mapsEqual(latest.readValues, prev.readValues)) continue;
 
       // Reads are the same - check if writes differ
       const differingKeys: string[] = [];
@@ -2295,7 +2296,7 @@ export class Scheduler {
       for (const key of allWriteKeys) {
         const latestVal = latest.writeValues.get(key);
         const prevVal = prev.writeValues.get(key);
-        if (!this.deepEqual(latestVal, prevVal)) {
+        if (!deepEqual(latestVal, prevVal)) {
           differingKeys.push(key);
         }
       }
@@ -2383,44 +2384,6 @@ export class Scheduler {
     }
 
     return cycles;
-  }
-
-  /**
-   * Deep equality check for two values (used by diagnosis).
-   */
-  private deepEqual(a: unknown, b: unknown): boolean {
-    if (a === b) return true;
-    if (a === null || b === null) return false;
-    if (typeof a !== typeof b) return false;
-    if (typeof a !== "object") return false;
-
-    if (Array.isArray(a)) {
-      if (!Array.isArray(b)) return false;
-      if (a.length !== b.length) return false;
-      return a.every((val, i) => this.deepEqual(val, (b as unknown[])[i]));
-    }
-
-    const aObj = a as Record<string, unknown>;
-    const bObj = b as Record<string, unknown>;
-    const aKeys = Object.keys(aObj);
-    const bKeys = Object.keys(bObj);
-    if (aKeys.length !== bKeys.length) return false;
-    return aKeys.every((key) => this.deepEqual(aObj[key], bObj[key]));
-  }
-
-  /**
-   * Checks if two Maps have the same keys and deeply equal values.
-   */
-  private mapsEqual(
-    a: Map<string, unknown>,
-    b: Map<string, unknown>,
-  ): boolean {
-    if (a.size !== b.size) return false;
-    for (const [key, val] of a) {
-      if (!b.has(key)) return false;
-      if (!this.deepEqual(val, b.get(key))) return false;
-    }
-    return true;
   }
 
   private handleError(error: Error, action: any) {
@@ -3072,6 +3035,18 @@ export class Scheduler {
     }
     this.diagnosisEnabled = false;
   }
+}
+
+function mapsEqual(
+  a: Map<string, unknown>,
+  b: Map<string, unknown>,
+): boolean {
+  if (a.size !== b.size) return false;
+  for (const [key, val] of a) {
+    if (!b.has(key)) return false;
+    if (!deepEqual(val, b.get(key))) return false;
+  }
+  return true;
 }
 
 function topologicalSort(

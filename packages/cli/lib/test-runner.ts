@@ -635,7 +635,7 @@ export async function runTestPattern(
     }
 
     // Run idempotency check after all test steps
-    const idempotencyResult = await engine.runIdempotencyCheck();
+    const idempotencyResult = await runtime.runIdempotencyCheck();
     const nonIdempotent = idempotencyResult.nonIdempotent.map(
       (r) => r.actionInfo?.patternName ?? r.actionId,
     );
