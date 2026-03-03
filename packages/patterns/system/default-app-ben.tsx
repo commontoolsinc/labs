@@ -127,7 +127,6 @@ const menuNewNote = handler<void, { menuOpen: Writable<boolean> }>(
       Note({
         title: "New Note",
         content: "",
-        noteId: generateId(),
       }),
     );
   },
