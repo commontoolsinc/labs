@@ -4,6 +4,7 @@ import {
   StaticCacheHTTP,
 } from "@commontools/static";
 import { RuntimeTelemetry } from "@commontools/runner";
+import type { NonIdempotentReport } from "./telemetry.ts";
 import type {
   AnyCell,
   JSONSchema,
@@ -268,6 +269,22 @@ export class Runtime {
    */
   runIdempotencyCheck() {
     return this.scheduler.runIdempotencyCheck();
+  }
+
+  /**
+   * Enables inline idempotency checking: every computation that runs through
+   * the scheduler's run() will automatically get a second synchronous run
+   * for comparison.
+   */
+  enableIdempotencyCheck(): void {
+    this.scheduler.enableIdempotencyCheck();
+  }
+
+  /**
+   * Returns violations collected while inline idempotency check mode is enabled.
+   */
+  getIdempotencyViolations(): NonIdempotentReport[] {
+    return this.scheduler.getIdempotencyViolations();
   }
 
   /**

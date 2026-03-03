@@ -208,6 +208,11 @@ export class Scheduler {
   }[]>();
   private diagnosisNonIdempotent: NonIdempotentReport[] = [];
 
+  // Inline idempotency check mode: when enabled, every computation re-run
+  // in run() is followed by a second synchronous run for comparison.
+  private idempotencyCheckMode = false;
+  private idempotencyViolations: NonIdempotentReport[] = [];
+
   // Cycle detection (Phase 3): tracks causal edges between actions
   private causalEdges: {
     writer: string;
@@ -385,6 +390,109 @@ export class Scheduler {
     if (!isRecord(value)) return undefined;
     const name = value.name;
     return typeof name === "string" ? name : undefined;
+  }
+
+  // ── Inline idempotency check mode ──────────────────────────────────
+
+  enableIdempotencyCheck(): void {
+    this.idempotencyCheckMode = true;
+    this.idempotencyViolations = [];
+  }
+
+  disableIdempotencyCheck(): void {
+    this.idempotencyCheckMode = false;
+  }
+
+  getIdempotencyViolations(): NonIdempotentReport[] {
+    return [...this.idempotencyViolations];
+  }
+
+  private makeAddressKey(addr: IMemorySpaceAddress): string {
+    return `${addr.space}/${addr.id}/${addr.path.join("/")}`;
+  }
+
+  private captureWrites(
+    tx: IExtendedStorageTransaction,
+    log: ReactivityLog,
+  ): Map<string, unknown> {
+    const writes = new Map<string, unknown>();
+    for (const write of log.writes) {
+      const key = this.makeAddressKey(write);
+      for (const att of tx.journal.novelty(write.space)) {
+        if (att.address.id === write.id) {
+          // Normalize: post-commit journals wrap values in {value: ...},
+          // pre-commit journals store raw values. Unwrap for consistency.
+          const raw = att.value;
+          const value = isRecord(raw) && "value" in raw ? raw.value : raw;
+          writes.set(key, value);
+          break;
+        }
+      }
+      if (!writes.has(key)) writes.set(key, undefined);
+    }
+    return writes;
+  }
+
+  private runIdempotencyRecheck(
+    action: Action,
+    tx: IExtendedStorageTransaction,
+    log: ReactivityLog,
+  ): void {
+    const writes1 = this.captureWrites(tx, log);
+
+    const tx2 = this.runtime.edit();
+    let isAsync = false;
+    try {
+      const result = this.runtime.harness.invoke(() => action(tx2));
+      // Async actions (e.g. raw module actions like wish) can't be safely
+      // rechecked: their continuations may fire side effects (runtime.runSynced,
+      // sub-pattern instantiation) that persist beyond tx2.abort(). Skip the
+      // comparison entirely and just swallow the dangling promise.
+      if (result && typeof result.then === "function") {
+        isAsync = true;
+        result.then(undefined, () => {});
+      }
+    } catch { /* ignore errors */ }
+    const log2 = txToReactivityLog(tx2);
+    const writes2 = isAsync ? new Map() : this.captureWrites(tx2, log2);
+    tx2.abort();
+
+    // Skip comparison for async actions — writes are incomplete/unreliable
+    if (isAsync) return;
+
+    const differingKeys: string[] = [];
+    for (const key of writes2.keys()) {
+      const v2 = writes2.get(key);
+      if (!writes1.has(key)) {
+        differingKeys.push(key);
+      } else if (!deepEqual(writes1.get(key), v2)) {
+        differingKeys.push(key);
+      }
+    }
+
+    if (differingKeys.length > 0) {
+      const actionId = this.getActionId(action);
+      // Deduplicate: only record first violation per action
+      if (!this.idempotencyViolations.some((v) => v.actionId === actionId)) {
+        this.idempotencyViolations.push({
+          actionId,
+          actionInfo: this.getActionTelemetryInfo(action),
+          runs: [
+            {
+              timestamp: performance.now(),
+              reads: {},
+              writes: Object.fromEntries(writes1),
+            },
+            {
+              timestamp: performance.now(),
+              reads: {},
+              writes: Object.fromEntries(writes2),
+            },
+          ],
+          differingWriteKeys: differingKeys,
+        });
+      }
+    }
   }
 
   private updateActionType(
@@ -805,6 +913,18 @@ export class Scheduler {
             if (cg) {
               this.changeGroupToActionId.set(cg, actionId);
             }
+          }
+
+          // Inline idempotency re-run: when the mode is on, every
+          // computation gets a second synchronous run against post-commit
+          // state. An idempotent computation produces the same writes
+          // both times. Uses isEffectAction (persists past unsubscribe)
+          // since execute() calls unsubscribe() before run().
+          if (
+            this.idempotencyCheckMode &&
+            !this.isEffectAction.get(action)
+          ) {
+            this.runIdempotencyRecheck(action, tx, log);
           }
 
           this.resubscribe(action, log);
@@ -2080,106 +2200,23 @@ export class Scheduler {
   }
 
   /**
-   * Checks all computations for idempotency using commit-then-rerun.
-   *
-   * Round 1: run the computation and COMMIT so accumulated state becomes
-   * visible. Round 2: run again WITHOUT commit (reads post-commit state).
-   * An idempotent computation produces the same writes in both rounds.
-   * A non-idempotent computation (accumulator, Math.random, Date.now)
-   * produces different writes.
+   * Checks all computations for idempotency by enabling inline mode
+   * and force-running each computation through run(). Each run()
+   * automatically gets a second synchronous run for comparison.
    */
   async runIdempotencyCheck(): Promise<SchedulerDiagnosisResult> {
-    const makeKey = (addr: IMemorySpaceAddress): string =>
-      `${addr.space}/${addr.id}/${addr.path.join("/")}`;
+    this.idempotencyViolations = [];
+    this.idempotencyCheckMode = true;
 
-    type Snapshot = Map<string, unknown>;
-
-    const captureWrites = (
-      tx: IExtendedStorageTransaction,
-      log: ReactivityLog,
-    ): Snapshot => {
-      const writes: Snapshot = new Map();
-      for (const write of log.writes) {
-        const key = makeKey(write);
-        for (const att of tx.journal.novelty(write.space)) {
-          if (att.address.id === write.id) {
-            writes.set(key, att.value);
-            break;
-          }
-        }
-        if (!writes.has(key)) writes.set(key, undefined);
-      }
-      return writes;
-    };
-
-    const nonIdempotent: NonIdempotentReport[] = [];
-
-    // Snapshot computations to avoid iterating a live Set that grows during commits
+    // Snapshot computations to avoid iterating a live Set
     const computationsSnapshot = [...this.computations];
     for (const action of computationsSnapshot) {
-      const actionId = this.getActionId(action);
-
-      // Round 1: run and COMMIT (so accumulated state becomes visible)
-      const tx1 = this.runtime.edit();
-      try {
-        this.runtime.harness.invoke(() => action(tx1));
-      } catch {
-        // Ignore errors (e.g. unresolved cells)
-      }
-      const log1 = txToReactivityLog(tx1);
-      const writes1 = captureWrites(tx1, log1);
-      const { error } = await tx1.commit();
-      if (error) continue; // skip on commit failure
-
-      // Round 2: run WITHOUT commit (reads post-commit state)
-      const tx2 = this.runtime.edit();
-      try {
-        this.runtime.harness.invoke(() => action(tx2));
-      } catch {
-        // Ignore errors (e.g. unresolved cells)
-      }
-      const log2 = txToReactivityLog(tx2);
-      const writes2 = captureWrites(tx2, log2);
-      tx2.abort();
-
-      // Compare: only flag when round 2 writes a different value or writes
-      // new keys that round 1 didn't. Keys written by round 1 but not round 2
-      // are OK — round 2 read the committed value and skipped redundant writes.
-      const differingKeys: string[] = [];
-      for (const key of writes2.keys()) {
-        const v2 = writes2.get(key);
-        if (!writes1.has(key)) {
-          // Round 2 wrote a key that round 1 didn't — non-idempotent
-          differingKeys.push(key);
-        } else if (!deepEqual(writes1.get(key), v2)) {
-          // Both wrote the key but with different values — non-idempotent
-          differingKeys.push(key);
-        }
-      }
-
-      if (differingKeys.length > 0) {
-        nonIdempotent.push({
-          actionId,
-          actionInfo: this.getActionTelemetryInfo(action),
-          runs: [
-            {
-              timestamp: performance.now(),
-              reads: {},
-              writes: Object.fromEntries(writes1),
-            },
-            {
-              timestamp: performance.now(),
-              reads: {},
-              writes: Object.fromEntries(writes2),
-            },
-          ],
-          differingWriteKeys: differingKeys,
-        });
-      }
+      await this.run(action);
     }
 
+    this.idempotencyCheckMode = false;
     return {
-      nonIdempotent,
+      nonIdempotent: [...this.idempotencyViolations],
       cycles: [],
       duration: 0,
       busyTime: 0,

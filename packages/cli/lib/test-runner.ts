@@ -372,6 +372,7 @@ export async function runTestPattern(
       }
     },
   });
+  runtime.enableIdempotencyCheck();
   const engine = new Engine(runtime);
 
   // Track sink subscription for cleanup
@@ -634,11 +635,9 @@ export async function runTestPattern(
       }
     }
 
-    // Run idempotency check after all test steps
-    const idempotencyResult = await runtime.runIdempotencyCheck();
-    const nonIdempotent = idempotencyResult.nonIdempotent.map(
-      (r) => r.actionInfo?.patternName ?? r.actionId,
-    );
+    // Collect idempotency violations detected during normal execution
+    const nonIdempotent = runtime.getIdempotencyViolations()
+      .map((r) => r.actionInfo?.patternName ?? r.actionId);
 
     const errorMessages = runtimeErrors.map((e) => String(e));
     return {
