@@ -77,8 +77,30 @@ export const claim = async <Access extends Invocation>(
       };
     }
   } else {
+    const availableKeys = Object.keys(authorization.access);
+    const details = [
+      `Authorization does not include claimed access.`,
+      `  Expected claim hash: ${claim}`,
+      `  Available keys (${availableKeys.length}): ${
+        availableKeys.length > 0 ? availableKeys.join(", ") : "(none)"
+      }`,
+    ];
+    // Detect legacy-vs-canonical hash format mismatch
+    const claimIsCanonical = claim.includes(":");
+    const keysAreCanonical = availableKeys.some((k) => k.includes(":"));
+    if (claimIsCanonical !== keysAreCanonical && availableKeys.length > 0) {
+      details.push(
+        `  ⚠ Hash format mismatch: server computed ${
+          claimIsCanonical ? "canonical" : "legacy"
+        } hash but client sent ${
+          keysAreCanonical ? "canonical" : "legacy"
+        } hashes.`,
+        `  This usually means the client and server have different EXPERIMENTAL_CANONICAL_HASHING settings.`,
+      );
+    }
+    console.error(`[access] ${details.join("\n")}`);
     return {
-      error: unauthorized(`Authorization does not include claimed access`),
+      error: unauthorized(details.join("\n")),
     };
   }
 };
