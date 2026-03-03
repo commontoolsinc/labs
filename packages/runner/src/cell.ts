@@ -95,7 +95,7 @@ import { getLogger } from "@commontools/utils/logger";
 import { ensureNotRenderThread } from "@commontools/utils/env";
 ensureNotRenderThread();
 
-const logger = getLogger("cell");
+const logger = getLogger("cell", { level: "warn" });
 
 type SinkOptions = {
   changeGroup?: ChangeGroup;
