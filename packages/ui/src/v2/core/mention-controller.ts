@@ -301,31 +301,38 @@ export class MentionController implements ReactiveController {
       const resolved = await piece.resolveAsCell();
       return `[${name}](/${resolved.ref().id})`;
     } catch {
-      // Fallback: build path from raw ref
-      const ref = piece.ref();
-      let href = `/${ref.id}`;
-      if (ref.path?.length) {
-        href += `/${ref.path.join("/")}`;
-      }
-      return `[${name}](${href})`;
+      return `[${name}](${this._buildHref(piece.ref())})`;
     }
   }
 
   /**
-   * Decode piece reference from href (entity ID)
+   * Decode piece reference from href (entity ID).
+   * Matches against both the raw sub-cell ref path and the resolved piece ID,
+   * since encodePieceAsMarkdown resolves to the stable entity ID.
    */
-  decodePieceFromHref(href: string | null): CellHandle<Mentionable> | null {
+  async decodePieceFromHref(
+    href: string | null,
+  ): Promise<CellHandle<Mentionable> | null> {
     if (!href) return null;
 
     const all = this.readMentionables();
+
+    // First pass: try matching the raw sub-cell ref path
     for (const mention of all) {
-      const ref = mention.ref();
-      let rawHref = `/${ref.id}`;
-      if (ref.path?.length) {
-        rawHref += `/${ref.path.join("/")}`;
-      }
-      if (href === rawHref) {
+      if (href === this._buildHref(mention.ref())) {
         return mention;
+      }
+    }
+
+    // Second pass: resolve each and match against stable entity ID
+    for (const mention of all) {
+      try {
+        const resolved = await mention.resolveAsCell();
+        if (href === `/${resolved.ref().id}`) {
+          return mention;
+        }
+      } catch {
+        // Skip unresolvable mentions
       }
     }
 
@@ -333,23 +340,37 @@ export class MentionController implements ReactiveController {
   }
 
   /**
-   * Extract all mentions from markdown text
-   * Returns array of CellHandle<Mentionable> objects referenced in the text
+   * Extract all mentions from markdown text.
+   * Returns array of CellHandle<Mentionable> objects referenced in the text.
    */
-  extractMentionsFromText(text: string): CellHandle<Mentionable>[] {
+  async extractMentionsFromText(
+    text: string,
+  ): Promise<CellHandle<Mentionable>[]> {
     const mentions: CellHandle<Mentionable>[] = [];
     const linkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
     let match;
 
     while ((match = linkRegex.exec(text)) !== null) {
       const href = match[2];
-      const mention = this.decodePieceFromHref(href);
+      const mention = await this.decodePieceFromHref(href);
       if (mention) {
         mentions.push(mention);
       }
     }
 
     return mentions;
+  }
+
+  /** Build an href string from a CellRef in /of:id/path format. */
+  private _buildHref(ref: { id: string; path?: readonly string[] }): string {
+    let href = `/${ref.id}`;
+    if (ref.path?.length) {
+      // Encode path segments per RFC 6901 (JSON Pointer)
+      for (const segment of ref.path) {
+        href += `/${segment.replace(/~/g, "~0").replace(/\//g, "~1")}`;
+      }
+    }
+    return href;
   }
 
   private readMentionables(): CellHandle<Mentionable>[] {

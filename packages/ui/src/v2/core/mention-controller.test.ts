@@ -274,7 +274,7 @@ describe("MentionController — mention insertion", () => {
 // ---------------------------------------------------------------------------
 
 describe("MentionController — extractMentionsFromText", () => {
-  it("extracts mentions from markdown links", () => {
+  it("extracts mentions from markdown links", async () => {
     const ctrl = new MentionController(createMockHost());
     const cell = createMentionableCell(["Alice", "Bob"]);
     ctrl.setMentionable(cell);
@@ -291,25 +291,27 @@ describe("MentionController — extractMentionsFromText", () => {
     }`;
 
     const text = `Hello [Alice](${aliceHref}) and [Bob](${bobHref})!`;
-    const extracted = ctrl.extractMentionsFromText(text);
+    const extracted = await ctrl.extractMentionsFromText(text);
     expect(extracted.length).toBe(2);
   });
 
-  it("returns empty for text with no markdown links", () => {
+  it("returns empty for text with no markdown links", async () => {
     const ctrl = new MentionController(createMockHost());
     const cell = createMentionableCell(["Alice"]);
     ctrl.setMentionable(cell);
 
-    const extracted = ctrl.extractMentionsFromText("Hello world");
+    const extracted = await ctrl.extractMentionsFromText("Hello world");
     expect(extracted).toEqual([]);
   });
 
-  it("ignores links that don't match any mentionable", () => {
+  it("ignores links that don't match any mentionable", async () => {
     const ctrl = new MentionController(createMockHost());
     const cell = createMentionableCell(["Alice"]);
     ctrl.setMentionable(cell);
 
-    const extracted = ctrl.extractMentionsFromText("[Unknown](unknown-id)");
+    const extracted = await ctrl.extractMentionsFromText(
+      "[Unknown](unknown-id)",
+    );
     expect(extracted).toEqual([]);
   });
 });
