@@ -22,14 +22,33 @@ deno task ct check --help     # Type checking
 **Identity key** (required for most operations):
 ```bash
 ls -la claude.key              # Check for existing
-deno task ct id new > claude.key  # Create if missing
+
+# For local dev: derive key matching toolshed's "implicit trust" identity
+deno run -A packages/cli/mod.ts id derive "implicit trust" > claude.key
+
+# For a fresh random key (e.g., against production):
+deno run -A packages/cli/mod.ts id new > claude.key
 ```
+
+**IMPORTANT:** Do NOT use `deno task ct id new > file` — the `deno task` wrapper
+prints ANSI-colored preamble to stdout, which pollutes the key file. Always use
+`deno run -A packages/cli/mod.ts` when redirecting output.
 
 **Environment variables** (avoid repeating flags):
 ```bash
 export CT_API_URL=http://localhost:8000  # or https://toolshed.saga-castor.ts.net/
 export CT_IDENTITY=./claude.key
 ```
+
+**Experimental flags** (must be set on both servers AND CLI commands):
+```bash
+# Pass experiment env vars to CLI commands:
+EXPERIMENTAL_CANONICAL_HASHING=true \
+EXPERIMENTAL_RICH_STORABLE_VALUES=true \
+deno task ct piece new pattern.tsx ...
+```
+
+See `docs/development/EXPERIMENTAL_OPTIONS.md` for all available flags.
 
 **Local servers**: See `docs/development/LOCAL_DEV_SERVERS.md`
 

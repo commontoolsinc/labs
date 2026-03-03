@@ -24,9 +24,26 @@
 | Frontend/Shell | `http://localhost:8000` |
 | Access a space | `http://localhost:8000/[space-name]` |
 
+**Experimental flags:** Pass env vars to the start/restart scripts to enable
+experiments on both servers:
+```bash
+EXPERIMENTAL_CANONICAL_HASHING=true \
+EXPERIMENTAL_RICH_STORABLE_VALUES=true \
+./scripts/restart-local-dev.sh --force --dangerously-clear-all-spaces
+```
+The same env vars must also be set when running `ct` CLI commands against the
+server. See `docs/development/EXPERIMENTAL_OPTIONS.md` for all available flags.
+
 **Logs:**
 - `packages/shell/local-dev-shell.log`
 - `packages/toolshed/local-dev-toolshed.log`
+
+**CLI identity for local dev:** The local toolshed uses an identity derived from
+the passphrase `"implicit trust"`. To create a matching key for CLI operations:
+```bash
+deno run -A packages/cli/mod.ts id derive "implicit trust" > claude.key
+export CT_IDENTITY=./claude.key
+```
 
 **First-time browser login:**
 
