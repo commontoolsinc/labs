@@ -223,6 +223,10 @@ export default pattern(() => {
     () => note.menuOpen === false,
   );
 
+  const assert_menu_open_before_close = computed(
+    () => note.menuOpen === true,
+  );
+
   const assert_menu_closed_via_close = computed(
     () => note.menuOpen === false,
   );
@@ -308,6 +312,7 @@ export default pattern(() => {
       { action: action_toggle_menu_again },
       { assertion: assert_menu_closed_after_toggle },
       { action: action_toggle_menu_for_close },
+      { assertion: assert_menu_open_before_close },
       { action: action_close_menu },
       { assertion: assert_menu_closed_via_close },
 
