@@ -4,7 +4,11 @@ import {
   isCellHandle,
   NAME,
 } from "@commontools/runtime-client";
-import { type Mentionable, type MentionableArray } from "./mentionable.ts";
+import {
+  type Mentionable,
+  type MentionableArray,
+  MentionableArraySchema,
+} from "./mentionable.ts";
 
 /**
  * Configuration for the MentionController
@@ -86,6 +90,7 @@ export class MentionController implements ReactiveController {
 
   // Mentionable items
   private _mentionable: CellHandle<MentionableArray> | null = null;
+  private _mentionableTyped: CellHandle<MentionableArray> | null = null;
   private _mentionableUnsubscribe: (() => void) | null = null;
 
   constructor(
@@ -141,11 +146,12 @@ export class MentionController implements ReactiveController {
    * Get filtered mentions based on current query
    */
   getFilteredMentions(): CellHandle<Mentionable>[] {
-    if (!this._mentionable) {
+    const handle = this._mentionableTyped ?? this._mentionable;
+    if (!handle) {
       return [];
     }
 
-    const mentionableArray = this._mentionable.get();
+    const mentionableArray = handle.get();
     if (!Array.isArray(mentionableArray) || mentionableArray.length === 0) {
       return [];
     }
@@ -155,7 +161,7 @@ export class MentionController implements ReactiveController {
     const filtered: CellHandle<Mentionable>[] = [];
     for (let i = 0; i < mentionableArray.length; i++) {
       // Use .key(i) to get Cell reference, preserving cell-ness
-      const mentionCell = this._mentionable.key(i);
+      const mentionCell = handle.key(i);
 
       // Only call .get() to read the name for filtering
       const name = mentionCell.get()?.[NAME];
@@ -255,10 +261,11 @@ export class MentionController implements ReactiveController {
   }
 
   /**
-   * Insert a mention at the current cursor position
+   * Insert a mention at the current cursor position.
+   * Resolves the sub-cell to the real piece entity ID at insertion time.
    */
-  insertMention(mention: CellHandle<Mentionable>): void {
-    const markdown = this.encodePieceAsMarkdown(mention);
+  async insertMention(mention: CellHandle<Mentionable>): Promise<void> {
+    const markdown = await this.encodePieceAsMarkdown(mention);
     this.config.onInsert(markdown, mention);
     this.hide();
   }
@@ -282,26 +289,50 @@ export class MentionController implements ReactiveController {
   }
 
   /**
-   * Encode a piece as markdown link [name](#entityId)
+   * Encode a piece as markdown link [name](/of:entityId).
+   * Resolves the sub-cell to the real piece entity ID so downstream
+   * consumers (LLM tools, read operations) can access the full schema.
    */
-  private encodePieceAsMarkdown(piece: CellHandle<Mentionable>): string {
-    // Only call .get() when we need the actual values
+  private async encodePieceAsMarkdown(
+    piece: CellHandle<Mentionable>,
+  ): Promise<string> {
     const name = piece.get()?.[NAME] || "Unknown";
-    const href = encodeURIComponent(piece.id()) || "";
-    return `[${name}](${href})`;
+    try {
+      const resolved = await piece.resolveAsCell();
+      return `[${name}](/${resolved.ref().id})`;
+    } catch {
+      return `[${name}](${this._buildHref(piece.ref())})`;
+    }
   }
 
   /**
-   * Decode piece reference from href (entity ID)
+   * Decode piece reference from href (entity ID).
+   * Matches against both the raw sub-cell ref path and the resolved piece ID,
+   * since encodePieceAsMarkdown resolves to the stable entity ID.
    */
-  decodePieceFromHref(href: string | null): CellHandle<Mentionable> | null {
+  async decodePieceFromHref(
+    href: string | null,
+  ): Promise<CellHandle<Mentionable> | null> {
     if (!href) return null;
 
     const all = this.readMentionables();
+
+    // First pass: try matching the raw sub-cell ref path
     for (const mention of all) {
-      const mentionEntityId = encodeURIComponent(mention.id());
-      if (mentionEntityId === href) {
+      if (href === this._buildHref(mention.ref())) {
         return mention;
+      }
+    }
+
+    // Second pass: resolve each and match against stable entity ID
+    for (const mention of all) {
+      try {
+        const resolved = await mention.resolveAsCell();
+        if (href === `/${resolved.ref().id}`) {
+          return mention;
+        }
+      } catch {
+        // Skip unresolvable mentions
       }
     }
 
@@ -309,17 +340,19 @@ export class MentionController implements ReactiveController {
   }
 
   /**
-   * Extract all mentions from markdown text
-   * Returns array of CellHandle<Mentionable> objects referenced in the text
+   * Extract all mentions from markdown text.
+   * Returns array of CellHandle<Mentionable> objects referenced in the text.
    */
-  extractMentionsFromText(text: string): CellHandle<Mentionable>[] {
+  async extractMentionsFromText(
+    text: string,
+  ): Promise<CellHandle<Mentionable>[]> {
     const mentions: CellHandle<Mentionable>[] = [];
     const linkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
     let match;
 
     while ((match = linkRegex.exec(text)) !== null) {
       const href = match[2];
-      const mention = this.decodePieceFromHref(href);
+      const mention = await this.decodePieceFromHref(href);
       if (mention) {
         mentions.push(mention);
       }
@@ -328,12 +361,25 @@ export class MentionController implements ReactiveController {
     return mentions;
   }
 
+  /** Build an href string from a CellRef in /of:id/path format. */
+  private _buildHref(ref: { id: string; path?: readonly string[] }): string {
+    let href = `/${ref.id}`;
+    if (ref.path?.length) {
+      // Encode path segments per RFC 6901 (JSON Pointer)
+      for (const segment of ref.path) {
+        href += `/${segment.replace(/~/g, "~0").replace(/\//g, "~1")}`;
+      }
+    }
+    return href;
+  }
+
   private readMentionables(): CellHandle<Mentionable>[] {
-    if (!this._mentionable) {
+    const handle = this._mentionableTyped ?? this._mentionable;
+    if (!handle) {
       return [];
     }
 
-    const mentionableArray = this._mentionable.get();
+    const mentionableArray = handle.get();
     if (!Array.isArray(mentionableArray) || mentionableArray.length === 0) {
       return [];
     }
@@ -341,7 +387,7 @@ export class MentionController implements ReactiveController {
     // Use .key(i) to preserve cell-ness of items
     const mentions: CellHandle<Mentionable>[] = [];
     for (let i = 0; i < mentionableArray.length; i++) {
-      const mentionCell = this._mentionable.key(i);
+      const mentionCell = handle.key(i);
       if (mentionCell) {
         mentions.push(mentionCell);
       }
@@ -361,7 +407,13 @@ export class MentionController implements ReactiveController {
     this._cleanupMentionableSubscription();
 
     if (isCellHandle(this._mentionable)) {
-      this._mentionableUnsubscribe = this._mentionable.subscribe(() => {
+      // Use asSchema() so the runtime resolves @link indirection before
+      // delivering values — without this, cells from wish results / computed
+      // cells deliver @link values hydrated as nested CellHandles.
+      this._mentionableTyped = this._mentionable.asSchema<MentionableArray>(
+        MentionableArraySchema,
+      );
+      this._mentionableUnsubscribe = this._mentionableTyped.subscribe(() => {
         this.host.requestUpdate();
       });
     }
@@ -376,5 +428,6 @@ export class MentionController implements ReactiveController {
       this._mentionableUnsubscribe();
       this._mentionableUnsubscribe = null;
     }
+    this._mentionableTyped = null;
   }
 }
