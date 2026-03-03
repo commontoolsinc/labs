@@ -2208,13 +2208,16 @@ export class Scheduler {
     this.idempotencyViolations = [];
     this.idempotencyCheckMode = true;
 
-    // Snapshot computations to avoid iterating a live Set
-    const computationsSnapshot = [...this.computations];
-    for (const action of computationsSnapshot) {
-      await this.run(action);
+    try {
+      // Snapshot computations to avoid iterating a live Set
+      const computationsSnapshot = [...this.computations];
+      for (const action of computationsSnapshot) {
+        await this.run(action);
+      }
+    } finally {
+      this.idempotencyCheckMode = false;
     }
 
-    this.idempotencyCheckMode = false;
     return {
       nonIdempotent: [...this.idempotencyViolations],
       cycles: [],
