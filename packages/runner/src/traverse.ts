@@ -2306,7 +2306,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
       if (match === undefined) {
         return TypeValidity.False;
       } else {
-        anyOfValidity = match ?? TypeValidity.False;
+        anyOfValidity = match;
       }
     }
     // Limited oneOf handling
