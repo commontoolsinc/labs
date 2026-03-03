@@ -87,7 +87,7 @@ describe("Pattern Runner - Regressions", () => {
         { name: "C", visible: true },
       ],
     }, resultCell);
-    tx.commit();
+    await tx.commit();
 
     await result.pull();
 

@@ -78,7 +78,7 @@ describe("Pattern Runner - Schemas", () => {
       tx,
     );
     settingsCell.withTx(tx).set({ value: 5 });
-    tx.commit();
+    await tx.commit();
     await settingsCell.pull();
     tx = runtime.edit();
 
