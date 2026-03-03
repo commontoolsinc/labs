@@ -1087,9 +1087,6 @@ export class CellImpl<T extends StorableValue>
   sync(): Promise<Cell<T>> | Cell<T> {
     this.synced = true;
     logger.info("sync", this.link);
-    if (this.link.id.startsWith("data:")) {
-      return this as unknown as Cell<T>;
-    }
     return this.runtime.storageManager.syncCell<T>(this as unknown as Cell<T>);
   }
 
