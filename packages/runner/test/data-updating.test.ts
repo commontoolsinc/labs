@@ -42,7 +42,7 @@ describe("data-updating", () => {
   });
 
   afterEach(async () => {
-    tx.commit();
+    await tx.commit();
     await runtime?.dispose();
     await storageManager?.close();
   });
