@@ -263,7 +263,12 @@ export class Runtime {
   }
 
   /**
-   * Clean up resources and cancel all operations
+   * Clean up resources and cancel all operations.
+   *
+   * NOTE: This does not wait for in-flight transactions to settle.
+   * Any unawaited tx.commit() calls will be canceled when
+   * storageManager.close() tears down storage sessions. Callers
+   * should await all pending commits before calling dispose().
    */
   async dispose(): Promise<void> {
     // Stop all running docs
