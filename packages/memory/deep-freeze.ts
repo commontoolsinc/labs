@@ -10,7 +10,7 @@
  * Handles sparse arrays correctly (only visits populated indices).
  */
 export function deepFreeze<T>(value: T): T {
-  if (value === null || value === undefined || typeof value !== "object") {
+  if (value === null || typeof value !== "object") {
     return value;
   }
 
