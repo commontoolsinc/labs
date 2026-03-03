@@ -103,7 +103,39 @@ export function createQueryResultProxy<T>(
     return createCell(runtime, link, tx, false, "stream") as T;
   }
 
-  if (!isRecord(value) || Object.isFrozen(value)) return value;
+  if (!isRecord(value)) return value;
+
+  // When richStorableValues is OFF, frozen objects are terminal values that
+  // don't need proxy wrapping (the legacy assumption: "frozen = terminal").
+  // When richStorableValues is ON, frozen objects may contain link structures
+  // that need resolution, so we fall through to proxy-wrap them below.
+  if (Object.isFrozen(value) && !runtime.experimental.richStorableValues) {
+    return value as T;
+  }
+
+  // When richStorableValues is enabled, stored objects are deep-frozen during
+  // storage normalization (toDeepRichStorableValue). A frozen proxy target
+  // would force every property access through the invariant guard (ECMAScript
+  // 10.5.8: a [[Get]] trap on a non-configurable, non-writable data property
+  // must return the target's own value), bypassing the get trap's link
+  // resolution entirely.
+  //
+  // Fix: use an unfrozen empty stub as the proxy target. The stub's contents
+  // are irrelevant -- the get trap always reads live data from the transaction,
+  // never from the target. The stub only needs to:
+  //   1. Be unfrozen, so all properties are configurable (no invariant
+  //      conflicts).
+  //   2. Match the value's type: [] for arrays (so Array.isArray checks on the
+  //      proxy target work) and {} for objects.
+  //   3. For arrays, match the length (getOwnPropertyDescriptor returns the
+  //      target's non-configurable length property, so it must be correct).
+  //
+  // Sparse arrays (new Array(n)) are used for array stubs -- JS engines
+  // represent these as holey arrays with no element allocation until writes,
+  // and we never write to the stub.
+  const proxyTarget = Object.isFrozen(value)
+    ? (Array.isArray(value) ? new Array(value.length) : {})
+    : value;
 
   // Get the appropriate cache index by log
   const cacheIndex = tx ?? defaultTx;
@@ -113,11 +145,13 @@ export function createQueryResultProxy<T>(
     proxyCacheByTx.set(cacheIndex, txCache);
   }
 
-  // Check if we already have a proxy for this target in the cache
+  // Check if we already have a proxy for this target in the cache.
+  // The cache key is the original `value` (not the stub), ensuring that
+  // the same frozen object always maps to the same proxy instance.
   const existingProxy = txCache?.get(value);
   if (existingProxy) return existingProxy;
 
-  const proxy = new Proxy(value as object, {
+  const proxy = new Proxy(proxyTarget as object, {
     get: (target, prop, receiver) => {
       // When encountering a frozen property, we just return the value to
       // maintain proxy invariants.
@@ -129,7 +163,7 @@ export function createQueryResultProxy<T>(
       if (typeof prop === "symbol") {
         if (prop === toCell) {
           return () => createCell(runtime, link, tx);
-        } else if (prop === Symbol.iterator && Array.isArray(target)) {
+        } else if (prop === Symbol.iterator && Array.isArray(value)) {
           return function () {
             let index = 0;
             return {
