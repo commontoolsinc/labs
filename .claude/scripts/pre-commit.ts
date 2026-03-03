@@ -89,17 +89,19 @@ console.error("Running pre-commit checks (fmt, lint, check)...");
 // 1. Format first — must complete before lint/check see the files
 const fmtErr = await run("Formatting failed", ["fmt", ...files]);
 
-// Re-stage any already-staged files that fmt may have modified on disk,
-// so the index matches the working tree and the commit gets formatted code.
+// Re-stage fully-staged files that fmt may have modified on disk.
+// Skip partially-staged files to avoid committing unstaged hunks.
 const stagedFiles = await git(
   "diff",
   "--cached",
   "--name-only",
   "--diff-filter=d",
 );
-if (stagedFiles.length > 0) {
+const unstaged = new Set(await git("diff", "--name-only"));
+const safeToRestage = stagedFiles.filter((f) => !unstaged.has(f));
+if (safeToRestage.length > 0) {
   await new Deno.Command("git", {
-    args: ["add", ...stagedFiles],
+    args: ["add", ...safeToRestage],
     stdout: "piped",
     stderr: "piped",
   }).output();
