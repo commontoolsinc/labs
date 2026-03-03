@@ -9,7 +9,7 @@ import {
   isACLUser,
 } from "@commontools/memory/acl";
 import { ACLManager } from "@commontools/piece/ops";
-import { experimentalOptionsFromEnv } from "./utils.ts";
+import { awaitSyncWithTimeout, experimentalOptionsFromEnv } from "./utils.ts";
 
 export interface SpaceConfig {
   apiUrl: URL;
@@ -50,25 +50,7 @@ export async function createRuntime(
     throw new Error(`Could not connect to "${config.apiUrl.toString()}".`);
   }
 
-  const SYNC_TIMEOUT_MS = 30_000;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => {
-      reject(
-        new Error(
-          `Sync timed out after ${SYNC_TIMEOUT_MS / 1000}s. ` +
-            `This often indicates a client/server configuration mismatch ` +
-            `(e.g., EXPERIMENTAL_CANONICAL_HASHING enabled on the server but not the CLI). ` +
-            `Check toolshed logs for AuthorizationError details.`,
-        ),
-      );
-    }, SYNC_TIMEOUT_MS);
-  });
-  try {
-    await Promise.race([runtime.storageManager.synced(), timeout]);
-  } finally {
-    clearTimeout(timer);
-  }
+  await awaitSyncWithTimeout(runtime.storageManager.synced());
   return runtime;
 }
 

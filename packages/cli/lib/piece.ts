@@ -16,7 +16,7 @@ import { dirname, join } from "@std/path";
 import { FileSystemProgramResolver } from "@commontools/js-compiler";
 import { setLLMUrl } from "@commontools/llm";
 import { isObject } from "@commontools/utils/types";
-import { experimentalOptionsFromEnv } from "./utils.ts";
+import { awaitSyncWithTimeout, experimentalOptionsFromEnv } from "./utils.ts";
 
 export interface EntryConfig {
   mainPath: string;
@@ -93,38 +93,8 @@ export async function loadManager(config: SpaceConfig): Promise<PieceManager> {
 
   const pieceManager = new PieceManager(session, runtime);
   pieceManagerRef.current = pieceManager;
-  await syncWithTimeout(pieceManager, 30_000);
+  await awaitSyncWithTimeout(pieceManager.synced());
   return pieceManager;
-}
-
-const SYNC_TIMEOUT_MS = 30_000;
-
-/**
- * Await `pieceManager.synced()` with a timeout. If sync takes too long,
- * emit a diagnostic to stderr and throw so the CLI doesn't hang silently.
- */
-async function syncWithTimeout(
-  pieceManager: PieceManager,
-  timeoutMs: number = SYNC_TIMEOUT_MS,
-): Promise<void> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => {
-      reject(
-        new Error(
-          `Sync timed out after ${timeoutMs / 1000}s. ` +
-            `This often indicates a client/server configuration mismatch ` +
-            `(e.g., EXPERIMENTAL_CANONICAL_HASHING enabled on the server but not the CLI). ` +
-            `Check toolshed logs for AuthorizationError details.`,
-        ),
-      );
-    }, timeoutMs);
-  });
-  try {
-    await Promise.race([pieceManager.synced(), timeout]);
-  } finally {
-    clearTimeout(timer);
-  }
 }
 
 async function getProgramFromFile(
