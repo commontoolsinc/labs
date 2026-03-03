@@ -2223,7 +2223,7 @@ for (const canonicalHashing of [false, true]) {
         } as JSONSchema;
 
         const traverser1 = getTraverser(store, { path: ["value"], schema });
-        const result1 = traverser1.traverse({
+        const { ok: result1 } = traverser1.traverse({
           address: { space: SPACE, id: rootUri, type: TYPE, path: ["value"] },
           value: circleValue,
         });
@@ -2244,7 +2244,7 @@ for (const canonicalHashing of [false, true]) {
         putDoc(store, rootUri, squareValue);
 
         const traverser2 = getTraverser(store, { path: ["value"], schema });
-        const result2 = traverser2.traverse({
+        const { ok: result2 } = traverser2.traverse({
           address: { space: SPACE, id: rootUri, type: TYPE, path: ["value"] },
           value: squareValue,
         });
