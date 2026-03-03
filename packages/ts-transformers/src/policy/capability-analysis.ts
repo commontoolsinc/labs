@@ -957,7 +957,7 @@ export function analyzeFunctionCapabilities(
       }
     }
 
-    if (ts.isForInStatement(node)) {
+    if (ts.isForInStatement(node) || ts.isForOfStatement(node)) {
       markWildcardFromExpression(node.expression);
     }
 

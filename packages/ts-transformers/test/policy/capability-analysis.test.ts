@@ -348,3 +348,46 @@ const fn = (input) => helper(input);`;
     assertEquals(input.readPaths.length, 0);
   },
 );
+
+Deno.test("Capability analysis marks for...in over tracked source as wildcard", () => {
+  const fn = parseFirstCallback(
+    `const fn = (input) => {
+      for (const key in input) {
+        console.log(key);
+      }
+    };`,
+  );
+  const summary = analyzeFunctionCapabilities(fn);
+  const input = getPaths(summary, "input");
+
+  assertEquals(input.wildcard, true);
+});
+
+Deno.test("Capability analysis marks for...of over tracked source as wildcard", () => {
+  const fn = parseFirstCallback(
+    `const fn = (input) => {
+      for (const item of input) {
+        console.log(item);
+      }
+    };`,
+  );
+  const summary = analyzeFunctionCapabilities(fn);
+  const input = getPaths(summary, "input");
+
+  assertEquals(input.wildcard, true);
+});
+
+Deno.test("Capability analysis marks for...of over tracked sub-path as wildcard", () => {
+  const fn = parseFirstCallback(
+    `const fn = (input) => {
+      for (const item of input.items) {
+        console.log(item);
+      }
+    };`,
+  );
+  const summary = analyzeFunctionCapabilities(fn);
+  const input = getPaths(summary, "input");
+
+  assertEquals(input.wildcard, true);
+  assert(input.readPaths.includes("items"));
+});
