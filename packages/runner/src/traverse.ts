@@ -2243,12 +2243,13 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     }
     const schemaObj = schema as JSONSchemaObj;
     // Check the top level type flag
+    let typeValidity: TypeValidity.True | TypeValidity.Unknown | undefined;
     if ("type" in schemaObj) {
       if (Array.isArray(schemaObj["type"])) {
         const types = schemaObj["type"];
         // type unknown matches anything
         if (types.includes("unknown")) {
-          return TypeValidity.Unknown;
+          typeValidity = TypeValidity.Unknown;
         } else if (!types.includes(valueType)) {
           return TypeValidity.False;
         }
@@ -2256,7 +2257,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         const type = schemaObj["type"];
         // type unknown matches anything
         if (type === "unknown") {
-          return TypeValidity.Unknown;
+          typeValidity = TypeValidity.Unknown;
         } else if (type !== valueType) {
           return TypeValidity.False;
         }
@@ -2266,10 +2267,10 @@ export class SchemaObjectTraverser<V extends StorableDatum>
       }
     }
     // Limited allOf handling
-    let allOfValidity: TypeValidity | undefined;
+    let allOfValidity: TypeValidity.True | TypeValidity.Unknown | undefined;
     if (schemaObj.allOf) {
       // unknown & T => T
-      let match: TypeValidity | undefined;
+      let match: TypeValidity.True | TypeValidity.Unknown | undefined;
       for (const option of schemaObj.allOf) {
         const valid = this.isValidType(option, valueType);
         // ignore undefined result (unknown type), but if any option returns
@@ -2285,14 +2286,15 @@ export class SchemaObjectTraverser<V extends StorableDatum>
       allOfValidity = match ?? TypeValidity.True;
     }
     // Limited anyOf handling
-    let anyOfValidity: TypeValidity | undefined;
+    let anyOfValidity: TypeValidity.True | TypeValidity.Unknown | undefined;
     if (schemaObj.anyOf) {
       // unknown | T => unknown
-      let match: TypeValidity | undefined;
+      let match: TypeValidity.True | TypeValidity.Unknown | undefined;
       for (const option of schemaObj.anyOf) {
         if (ContextualFlowControl.isTrueSchema(option)) {
           // unknown | any => any
-          return TypeValidity.True;
+          anyOfValidity = TypeValidity.True;
+          break;
         }
         const valid = this.isValidType(option, valueType);
         if (valid === TypeValidity.False) {
@@ -2301,17 +2303,22 @@ export class SchemaObjectTraverser<V extends StorableDatum>
           match = valid;
         }
       }
-      anyOfValidity = match ?? TypeValidity.False;
+      if (match === undefined) {
+        return TypeValidity.False;
+      } else {
+        anyOfValidity = match ?? TypeValidity.False;
+      }
     }
     // Limited oneOf handling
     // This is handled the same as anyOf here
-    let oneOfValidity: TypeValidity | undefined;
+    let oneOfValidity: TypeValidity.True | TypeValidity.Unknown | undefined;
     if (schemaObj.oneOf) {
-      let match: TypeValidity | undefined;
+      let match: TypeValidity.True | TypeValidity.Unknown | undefined;
       for (const option of schemaObj.oneOf) {
         if (ContextualFlowControl.isTrueSchema(option)) {
           // unknown | any => any
-          return TypeValidity.True;
+          oneOfValidity = TypeValidity.True;
+          break;
         }
         const valid = this.isValidType(option, valueType);
         if (valid === TypeValidity.False) {
@@ -2322,22 +2329,28 @@ export class SchemaObjectTraverser<V extends StorableDatum>
           match = valid;
         }
       }
-      oneOfValidity = match ?? TypeValidity.False;
+      if (match === undefined) {
+        return TypeValidity.False;
+      } else {
+        oneOfValidity = match;
+      }
     }
+    // TODO(@ubik2): At some point I should dig into `not` handling here.
+    // We have four sources of validity, which are all and-ed together.
+    // Since unknown disappears in type intersections, any true will win.
+    const validities = [
+      typeValidity,
+      allOfValidity,
+      anyOfValidity,
+      oneOfValidity,
+    ];
     if (
-      allOfValidity === TypeValidity.False ||
-      anyOfValidity === TypeValidity.False ||
-      oneOfValidity === TypeValidity.False
+      validities.some((x) => x === TypeValidity.True) ||
+      validities.every((x) => x === undefined)
     ) {
-      return TypeValidity.False;
-    } else if (
-      allOfValidity === TypeValidity.Unknown ||
-      anyOfValidity === TypeValidity.Unknown ||
-      oneOfValidity === TypeValidity.Unknown
-    ) {
-      return TypeValidity.Unknown;
+      return TypeValidity.True;
     }
-    return TypeValidity.True;
+    return TypeValidity.Unknown;
   }
 
   /**
