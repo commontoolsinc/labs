@@ -159,10 +159,9 @@ export default pattern(() => {
       { assertion: assert_has_three },
 
       // === Sorting: earliest date first, then by time ===
-      // SKIP: sortedEvents sub-piece properties don't resolve in headless runner
-      { assertion: assert_sorted_first_is_kickoff, skip: true },
-      { assertion: assert_sorted_second_is_meeting, skip: true },
-      { assertion: assert_sorted_third_is_lunch, skip: true },
+      { assertion: assert_sorted_first_is_kickoff },
+      { assertion: assert_sorted_second_is_meeting },
+      { assertion: assert_sorted_third_is_lunch },
 
       // === Empty/whitespace rejected ===
       { action: action_add_empty },
@@ -171,9 +170,8 @@ export default pattern(() => {
       { assertion: assert_still_three },
 
       // === Update notes via piece action ===
-      // SKIP: sub-piece action (setNotes) doesn't propagate in headless runner
       { action: action_update_notes },
-      { assertion: assert_notes_updated, skip: true },
+      { assertion: assert_notes_updated },
 
       // === Remove events ===
       { action: action_remove_first },
@@ -184,7 +182,5 @@ export default pattern(() => {
       { assertion: assert_back_to_empty },
     ],
     cal,
-    // Sub-piece event proxies intermittently produce scheduler errors in headless runner
-    allowRuntimeErrors: true,
   };
 });
