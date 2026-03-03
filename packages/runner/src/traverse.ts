@@ -2335,7 +2335,8 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         oneOfValidity = match;
       }
     }
-    // TODO(@ubik2): At some point I should dig into `not` handling here.
+    // We can't rule out a matched type based on the logical `not` clause,
+    // so we don't deal with that here.
     // We have four sources of validity, which are all and-ed together.
     // Since unknown disappears in type intersections, any true will win.
     const validities = [
