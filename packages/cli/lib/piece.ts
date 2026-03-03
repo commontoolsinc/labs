@@ -16,6 +16,7 @@ import { dirname, join } from "@std/path";
 import { FileSystemProgramResolver } from "@commontools/js-compiler";
 import { setLLMUrl } from "@commontools/llm";
 import { isObject } from "@commontools/utils/types";
+import { awaitSyncWithTimeout, experimentalOptionsFromEnv } from "./utils.ts";
 
 export interface EntryConfig {
   mainPath: string;
@@ -49,6 +50,7 @@ export async function loadManager(config: SpaceConfig): Promise<PieceManager> {
   const pieceManagerRef: { current?: PieceManager } = {};
   const runtime = new Runtime({
     apiUrl: new URL(config.apiUrl),
+    experimental: experimentalOptionsFromEnv(),
     storageManager: StorageManager.open({
       as: session.as,
       address: new URL("/api/storage/memory", config.apiUrl),
@@ -91,7 +93,7 @@ export async function loadManager(config: SpaceConfig): Promise<PieceManager> {
 
   const pieceManager = new PieceManager(session, runtime);
   pieceManagerRef.current = pieceManager;
-  await pieceManager.synced();
+  await awaitSyncWithTimeout(pieceManager.synced());
   return pieceManager;
 }
 
