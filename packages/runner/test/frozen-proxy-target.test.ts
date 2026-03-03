@@ -68,6 +68,10 @@ describe("frozen proxy target: link resolution through frozen objects", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      experimental: {
+        richStorableValues: true,
+        canonicalHashing: true,
+      },
     });
     tx = runtime.edit();
   });
@@ -131,6 +135,10 @@ describe("frozen proxy target: proxy wrapping and trap behavior", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      experimental: {
+        richStorableValues: true,
+        canonicalHashing: true,
+      },
     });
     tx = runtime.edit();
   });
@@ -419,5 +427,49 @@ describe("frozen proxy target: proxy wrapping and trap behavior", () => {
     expect(String(proxy.kept.link)).toBe("resolved");
     // "changed" sibling was rewritten and should return the direct value.
     expect(String(proxy.changed.value)).toBe("direct");
+  });
+});
+
+describe("frozen proxy target: legacy behavior with richStorableValues OFF", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    // No experimental flags -- richStorableValues defaults to false.
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    tx = runtime.edit();
+  });
+
+  afterEach(async () => {
+    await tx.commit();
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("returns frozen objects raw when richStorableValues is OFF", () => {
+    const link = writeFrozenCell(runtime, tx, "legacy-frozen-raw", {
+      a: 1,
+      b: 2,
+    });
+
+    const rawValue = tx.readValueOrThrow(link);
+    expect(Object.isFrozen(rawValue)).toBe(true);
+
+    const result = createQueryResultProxy<{ a: number; b: number }>(
+      runtime,
+      tx,
+      link,
+      0,
+      false,
+    );
+
+    // With richStorableValues OFF, frozen objects should be returned as-is
+    // (the original "frozen = terminal" behavior).
+    expect(result).toBe(rawValue);
   });
 });

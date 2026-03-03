@@ -105,6 +105,14 @@ export function createQueryResultProxy<T>(
 
   if (!isRecord(value)) return value;
 
+  // When richStorableValues is OFF, frozen objects are terminal values that
+  // don't need proxy wrapping (the legacy assumption: "frozen = terminal").
+  // When richStorableValues is ON, frozen objects may contain link structures
+  // that need resolution, so we fall through to proxy-wrap them below.
+  if (Object.isFrozen(value) && !runtime.experimental.richStorableValues) {
+    return value as T;
+  }
+
   // When richStorableValues is enabled, stored objects are deep-frozen during
   // storage normalization (toDeepRichStorableValue). A frozen proxy target
   // would force every property access through the invariant guard (ECMAScript
