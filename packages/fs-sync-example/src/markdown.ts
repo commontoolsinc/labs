@@ -16,12 +16,15 @@ export interface MarkdownState {
   todos: Array<{ id: string; description: string; done: boolean }>;
 }
 
-const TODO_RE = /^- \[([ x])\] (T-\d+) (.+)$/;
+const TODO_RE = /^- \[([ x])\] (T-\d+) (.+?)$/;
 const NEXT_ID_RE = /^nextId:\s*(\d+)/m;
 
 export function parseMarkdown(text: string): MarkdownState {
+  // Normalize CRLF to LF so regexes work on Windows-formatted files
+  const normalized = text.replace(/\r\n/g, "\n");
+
   // Split on frontmatter delimiters (---)
-  const parts = text.split(/^---$/m);
+  const parts = normalized.split(/^---$/m);
 
   let nextId = 1;
   let body = "";

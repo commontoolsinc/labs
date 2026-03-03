@@ -81,6 +81,24 @@ nextId: 2
     const result = parseMarkdown(text);
     assertEquals(result.todos[0].description, "Buy milk & eggs (2 dozen)");
   });
+
+  it("handles CRLF line endings", () => {
+    const text =
+      "---\r\nnextId: 3\r\n---\r\n- [ ] T-01 Buy groceries\r\n- [x] T-02 Write docs\r\n";
+    const result = parseMarkdown(text);
+    assertEquals(result.nextId, 3);
+    assertEquals(result.todos.length, 2);
+    assertEquals(result.todos[0], {
+      id: "T-01",
+      description: "Buy groceries",
+      done: false,
+    });
+    assertEquals(result.todos[1], {
+      id: "T-02",
+      description: "Write docs",
+      done: true,
+    });
+  });
 });
 
 describe("serializeMarkdown", () => {
