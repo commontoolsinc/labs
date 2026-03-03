@@ -196,13 +196,18 @@ function prepareSchemaForLLM(schema: JSONSchema): JSONSchema {
  * - Prefer a non-empty pattern.resultSchema if pattern is loaded
  * - Otherwise derive a simple object schema from the current value
  */
+function isNonEmptySchema(schema: unknown): schema is JSONSchema {
+  return typeof schema === "object" && schema !== null &&
+    Object.keys(schema as Record<string, unknown>).length > 0;
+}
+
 function getCellSchema(
   cell: Cell<unknown>,
 ): JSONSchema | undefined {
   // Extract schema from cell, including from resultSchema of associated pattern
   const { schema } = cell.asSchemaFromLinks().getAsNormalizedFullLink();
 
-  if (schema !== undefined) {
+  if (isNonEmptySchema(schema)) {
     return schema;
   }
 
@@ -210,10 +215,13 @@ function getCellSchema(
   // from the source pattern's resultSchema. This handles cells accessed via
   // arrays (e.g., mentionables, recents) where the intermediate cell doesn't
   // carry a schema but the underlying piece cell's pattern does.
+  // Uses the same trick as addFavorite in home.tsx: clearing the schema with
+  // asSchema(undefined) forces asSchemaFromLinks to look it up fresh from the
+  // source pattern.
   try {
     const resolvedSchema = cell.resolveAsCell().asSchema(undefined)
       .asSchemaFromLinks()?.getAsNormalizedFullLink()?.schema;
-    if (typeof resolvedSchema === "object" && resolvedSchema !== null) {
+    if (isNonEmptySchema(resolvedSchema)) {
       return resolvedSchema;
     }
   } catch {
