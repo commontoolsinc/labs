@@ -1,0 +1,171 @@
+{
+  "rubric_version": "2.0",
+  "pattern": "parking-coordinator",
+  "run_id": "2026-02-27-parking-coordinator-q3m8",
+  "dimensions": {
+    "correctness": {
+      "score": 95,
+      "pass_count": 5,
+      "fail_count": 1,
+      "na_count": 0,
+      "failures": [
+        {
+          "check_id": "COR-5",
+          "description": "Default spots #1, #5, #12 are not pre-populated on fresh deploy. The ParkingInput interface defaults spots to an empty array (Writable<Default<ParkingSpot[], []>>), so a new pattern instance starts with no spots, showing 'No parking spots configured' and disabling the request flow. Spec Assumption 1 and the first acceptance criterion both require the three default spots to be present from the start.",
+          "line_number": 79,
+          "suggested_fix": "Initialize the spots Writable with the three default spots in the pattern body: spots.set([{ number: 1, label: 'Near entrance', notes: '' }, { number: 5, label: '', notes: '' }, { number: 12, label: 'Covered', notes: '' }]) inside an if (spots.get().length === 0) guard at the start of the pattern function."
+        }
+      ],
+      "justification": "Compiles cleanly (ct check --no-run passes). All 44 tests pass. All handlers fire correctly per CLI and browser testing. State propagates reactively throughout (spot status updates, request cancellations, cascading removal). The one failure is an edge case gap: the three default spots are not pre-populated on first load, forcing an admin to add them before any team member can use the tool. The critic's .get() concerns were platform-specific misunderstandings — the platform's Proxy auto-unwrapping handles computed access correctly inside reactive contexts, confirmed by passing tests and browser verification."
+    },
+    "idiomaticity": {
+      "score": 95,
+      "pass_count": 13,
+      "fail_count": 1,
+      "na_count": 1,
+      "failures": [
+        {
+          "check_id": "IDI-4",
+          "description": "Input array fields typed as Writable<Default<ParkingSpot[], []>> (and same for Person[], SpotRequest[]) instead of the idiomatic Default<Writable<ParkingSpot[]>, []>. The Default<> wrapper should be on the outside, meaning 'the cell defaults to an empty array if not provided' rather than 'the default within the writable defaults to an empty array'.",
+          "line_number": 79,
+          "suggested_fix": "Change interface ParkingInput to: spots: Default<Writable<ParkingSpot[]>, []>; people: Default<Writable<Person[]>, []>; requests: Default<Writable<SpotRequest[]>, []>;"
+        }
+      ],
+      "justification": "Strong convention adherence throughout. action() used correctly at pattern scope for all handlers; no handler() misuse. All reactive bindings use $value/$checked prefix. Style syntax was fixed (object on HTML, string on ct-*). COMMUTE_LABELS moved to module scope. All event names are correct (onct-change, onClick). No Map/Set in cell data. No Stream.of() or async/await. Union literal types for commuteMode and status are correctly applied in the final version. IDI-8 is N/A (no LLM, directive present harmlessly). One minor type-ordering convention violation on input array fields."
+    },
+    "reactivity": {
+      "score": 95,
+      "pass_count": 7,
+      "fail_count": 1,
+      "na_count": 2,
+      "failures": [
+        {
+          "check_id": "REA-7",
+          "description": "Writable.of(0) created inside a computed() body at the manual assignment section (line 1438). The computed wraps the entire pending-requests map, so rowSpot = Writable.of(0) is re-instantiated on every reactive update to requests. This means the row-level spot selector resets to 0 whenever any request changes, which could disrupt an admin mid-selection if another request changes concurrently. This is a subtle state-lifecycle issue rather than a correctness bug in typical usage.",
+          "line_number": 1438,
+          "suggested_fix": "Move per-row Writable state above the computed, keyed by request identifier, or restructure the manual assignment section as a separate computed with stable per-row state. Alternatively, use a single Writable<Record<string, number>> keyed by 'personName:date' to track per-row selections."
+        }
+      ],
+      "justification": "The pattern's reactivity model is sound. The critic's .get() concerns (occupant === '', myUpcoming.length, myUpcoming.map()) were based on a misunderstanding of the platform's Proxy-based auto-unwrapping — 44 tests pass including all allocation logic and browser testing confirms the today view displays free/taken status correctly. Computed values are used throughout for derived state. No inline filter/sort in JSX. No Writable.of(reactive). The one deduction is for creating a Writable inside a computed body in the manual assignment section."
+    },
+    "ui_quality": {
+      "score": 95,
+      "pass_count": 6,
+      "fail_count": 1,
+      "na_count": 0,
+      "failures": [
+        {
+          "check_id": "UIQ-4",
+          "description": "When the admin mode checkbox is toggled in the header, the header area reflows and clips the 'Parking Coordinator' heading and 'People (priority order)' section heading (manual test Issue 2). This is a layout reflow bug that makes the header unreadable momentarily and leaves section headings truncated until the user navigates tabs.",
+          "line_number": 481,
+          "suggested_fix": "Use fixed-width or min-width on the header hstack to prevent reflow when the admin checkbox appears. Alternatively, always reserve space for the admin checkbox in the header regardless of adminMode state."
+        }
+      ],
+      "justification": "All form inputs use ct-* components correctly. $value/$checked bindings are correct throughout. ct-screen with header/footer slots and ct-vstack/ct-hstack layout are used appropriately. The tab navigation is clear. Empty states are shown for no spots, no people, and no requests. One layout issue: toggling admin mode causes header clipping that disrupts readability until the user navigates away."
+    },
+    "test_coverage": {
+      "score": 95,
+      "pass_count": 4,
+      "fail_count": 1,
+      "na_count": 0,
+      "failures": [
+        {
+          "check_id": "TST-5",
+          "description": "Two minor coverage gaps: (1) action_manual_assign_diana_spot_5 is defined at lines 139-141 of the test file but never placed in the test sequence — dead code. Diana's manual-assign scenario goes untested. (2) The 'cancel allocated request frees spot for others' chain is not explicitly tested in sequence (cancel Bob → verify Diana can now claim the freed spot).",
+          "line_number": 139,
+          "suggested_fix": "Remove the dead action_manual_assign_diana_spot_5 definition, or add a test sequence step after action_cancel_bob_today to re-request for Diana and assert she now gets an allocated status with a specific spot number."
+        }
+      ],
+      "justification": "Excellent test coverage for a complex pattern. 44 tests pass across: initial state, spot CRUD with duplicate rejection, people CRUD with validation, priority reordering, default spots, spot preferences, auto-allocation cascade (default -> preferences -> any free), denial when full, duplicate request prevention, cancellation, remove person cascading, remove spot cascading, manual assignment, and preference fallthrough. Pattern-as-test approach used correctly. Dead code in the test file and one missing explicit chain are the only gaps."
+    },
+    "code_quality": {
+      "score": 95,
+      "pass_count": 6,
+      "fail_count": 1,
+      "na_count": 0,
+      "failures": [
+        {
+          "check_id": "CQA-3",
+          "description": "The free-spots-for-date calculation is implemented in three places: the today panel header (lines 570-581), each week-ahead row (lines 750-761), and the manual assignment section (lines 1439-1449). Extracting a pure helper function countTakenSpots(allReqs, dateStr) would eliminate this duplication and reduce the risk of the three implementations diverging.",
+          "line_number": 570,
+          "suggested_fix": "Extract: const countTakenSpots = (allReqs: SpotRequest[], dateStr: string): number => allReqs.filter(r => r.requestedDate === dateStr && r.status === 'allocated' && r.assignedSpot > 0).length; and call this at all three usage sites."
+        }
+      ],
+      "justification": "Clear domain-aligned type names (ParkingSpot, Person, SpotRequest). Action names match user intent precisely (requestSpot, cancelRequest, movePersonUp, setDefaultSpot, manualAssign). Code organized with clear section comment headers. All helper functions at module scope. Unidirectional data flow maintained — spots/people/requests are owned at root and mutated only through named actions. Single source of truth with no redundant state. One notable duplication: free-spot-count logic implemented three times."
+    },
+    "spec_fidelity": {
+      "score": 75,
+      "pass_count": 1,
+      "fail_count": 3,
+      "na_count": 0,
+      "failures": [
+        {
+          "check_id": "SPF-1",
+          "description": "Default parking spots #1, #5, #12 are not pre-populated on fresh deploy. Spec Assumption 1 explicitly states these three spots are 'treated as the initial starting state of the pattern.' The first acceptance criterion states 'On initial load, the pattern shows today's date and the status of all three parking spots (#1, #5, #12).' On a fresh deploy, the spots array is empty and the pattern shows 'No parking spots configured' instead.",
+          "line_number": 79,
+          "suggested_fix": "Initialize the spots array with the three default spots if it is empty at pattern startup. Guard with: if (spots.get().length === 0) { spots.set([{ number: 1, label: 'Near entrance', notes: '' }, { number: 5, label: '', notes: '' }, { number: 12, label: 'Covered', notes: '' }]); }"
+        },
+        {
+          "check_id": "SPF-3",
+          "description": "Week-ahead view shows only a count of free spots per day ('X of Y free') rather than individual spot details. The acceptance criterion states the week-ahead 'clearly shows which spots are free vs. taken on each day.' The today view shows per-spot detail correctly; the week-ahead does not.",
+          "line_number": 749,
+          "suggested_fix": "For each day row in the week-ahead, show the individual spot status (free or occupant name) using the same pattern as the today panel, or at minimum indicate which specific spot numbers are available."
+        },
+        {
+          "check_id": "SPF-3",
+          "description": "No admin warning before spot removal. The spec states 'the admin is warned before removal' and the edge cases say 'An admin warning before removal is appropriate.' Clicking Remove on a spot immediately removes it with no confirmation, even when it has active allocations.",
+          "line_number": 1293,
+          "suggested_fix": "Before calling removeSpot.send(), check for active allocations and show an inline confirmation: 'N active allocations will be reverted to pending. Remove anyway?'"
+        }
+      ],
+      "justification": "The data model matches the spec precisely (ParkingSpot, Person, SpotRequest with all specified fields and relationships). All user interactions specified in the spec are implemented (request, cancel, admin CRUD, reorder, manual assign, preferences). The admin mode toggle works correctly. Auto-allocation logic follows the exact priority chain specified. Three gaps: the most significant is missing pre-populated default spots (-15); two minor gaps are week-ahead per-spot detail and missing removal warning (-5 each)."
+    },
+    "ux_design": {
+      "score": 90,
+      "pass_count": 4,
+      "fail_count": 2,
+      "na_count": 0,
+      "failures": [
+        {
+          "check_id": "UXD-4",
+          "description": "On a fresh deploy (as specified by the spec), the default parking view shows 'No parking spots configured. An admin needs to add spots in Admin mode.' While this message is informative for an admin, it is a dead end for a non-admin team member who opens the app expecting to see spot availability. The designed experience (spots pre-populated) would have been a clear, inviting first-use state. The implementation failure creates a poor empty state.",
+          "line_number": 554,
+          "suggested_fix": "Fix the underlying spec gap by pre-populating default spots. Once spots exist, the empty state (no requests yet) is already well-designed: spots show as free, and the user sees an immediate 'Request spot' button."
+        },
+        {
+          "check_id": "UXD-6",
+          "description": "The admin tab presents three major sections (People, Parking Spots, Manual Assignment) as an undifferentiated vertical scroll with only thin horizontal dividers separating them. All sections have equal visual weight. The 'Manual Assignment' section at the bottom is easily missed, and the visual hierarchy within the admin tab doesn't guide the admin's attention to the most commonly used operations.",
+          "line_number": 996,
+          "suggested_fix": "Give each admin section a more distinct visual boundary (card wrapper or section header with accent). Promote 'People' and 'Spots' as primary sections; consider collapsing 'Manual Assignment' under a toggle since it's a rare admin action."
+        }
+      ],
+      "justification": "Information architecture is clear and well-designed: Parking view gives the at-a-glance answer immediately, My Requests tab shows personal history, Admin tab separates management from usage. Core task (request today's spot) is reachable in 2 interactions from default view. Navigation is tab-based and obvious. Progressive disclosure works well: admin mode adds capabilities without cluttering the primary view. Two deductions: empty state on fresh deploy is worse than designed due to the spec implementation gap, and admin tab visual hierarchy is flat with all sections competing equally."
+    },
+    "experience_quality": {
+      "score": 90,
+      "pass_count": 4,
+      "fail_count": 2,
+      "na_count": 0,
+      "failures": [
+        {
+          "check_id": "EXQ-4",
+          "description": "No confirmation dialog before removing a parking spot, despite the spec saying admins should be warned and the action having significant cascade effects (all allocations for that spot revert to pending). An admin who accidentally clicks Remove on a busy spot would silently disrupt all team members who had parking allocated for that spot. The UX design called for an inline warning with impact count.",
+          "line_number": 1293,
+          "suggested_fix": "Before executing removeSpot, check if any active allocations exist for this spot. If so, show an inline confirmation: 'Removing Spot #X will revert N active allocations to pending. Remove anyway? [Yes] [Cancel]'"
+        },
+        {
+          "check_id": "EXQ-6",
+          "description": "A new user opening the app on a fresh deploy sees 'No parking spots configured. An admin needs to add spots in Admin mode.' With no authentication, a non-admin new user has no path forward and may be confused about why the tool appears broken. Even for admins, there is no onboarding guidance about what steps to take next (add spots, then add people, then users can request). The experience would be clear if default spots were pre-populated per spec.",
+          "line_number": 554,
+          "suggested_fix": "Pre-populate default spots. Additionally, when the spots list is empty, direct the user more specifically: 'An admin should enable Admin mode (toggle in the header), go to the Admin tab, and add the office parking spots.'"
+        }
+      ],
+      "justification": "The core experience is efficient and satisfying: requesting a spot takes 2 interactions, feedback is immediate and color-coded, cancellation is one click, the week-ahead gives planning visibility at a glance. The pattern clearly justifies itself over a spreadsheet through auto-allocation, priority ordering, personal history, and admin management. The aesthetic is calm and appropriate for a workplace utility. Two deductions: error prevention is missing for spot removal (significant cascade action without confirmation), and first-time user experience is impaired by the missing default spots."
+    }
+  },
+  "overall": {
+    "score": 88,
+    "interpretation": "solid",
+    "summary": "The Parking Coordinator is a well-built intermediate-tier pattern with strong code foundations, correct reactive patterns, comprehensive test coverage (44/44 pass), and a clear, efficient UX for its primary flows. Its main weakness is a spec implementation gap: the three default parking spots (#1, #5, #12) are not pre-populated on fresh deploy as the spec requires, which hurts first-time experience and spec fidelity. The pattern went through 3 build iterations, and a -5 process efficiency modifier is applied. With the default-spots gap fixed, this pattern would score in the 93-95 range."
+  }
+}
