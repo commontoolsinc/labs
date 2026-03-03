@@ -2436,54 +2436,270 @@ describe("SchemaObjectTraverser unknown type handling", () => {
     expect(obj?.data).toBeUndefined();
   });
 
-  it("does not resolve linked array items when items schema is type: unknown", () => {
+  it("does not resolve linked properties when property schema is type: unknown", () => {
+    // Chain: outer => inner => redir => first -> second -> data
+    //
+    // Behavior: All redirect links are followed, toCell() stops at first non-redirect
+    // The data is fully resolved to { test: "foo" } but the cell reference stops at `first`
+
     const store = new Map<string, Revision<State>>();
     const type = "application/json" as const;
-    const targetUri = "of:doc-unknown-item-target" as URI;
-    const containerUri = "of:doc-unknown-item-container" as URI;
+    const redirectTestDataUri = "of:doc-redirect-test-data" as URI;
+    const redirectTestSecondUri = "of:doc-redirect-test-second" as URI;
+    const redirectTestFirstUri = "of:doc-redirect-test-first" as URI;
+    const redirectTestRedirUri = "of:doc-redirect-test-redir" as URI;
+    const redirectTestInnerUri = "of:doc-redirect-test-inner" as URI;
+    const redirectTestOuterUri = "of:doc-redirect-test-outer" as URI;
 
-    store.set(`${targetUri}/${type}`, {
+    // redirect-test-data: holds the actual value
+    store.set(`${redirectTestDataUri}/${type}`, {
       the: type,
-      of: targetUri as Entity,
+      of: redirectTestDataUri as Entity,
       is: { value: { label: "should not appear" } },
-      cause: refer({ the: type, of: targetUri as Entity }),
+      cause: refer({ the: type, of: redirectTestDataUri as Entity }),
       since: 1,
     });
 
-    const containerValue = [
-      "plain-string",
-      { "/": { [LINK_V1_TAG]: { id: targetUri, path: [] } } },
-    ];
-    store.set(`${containerUri}/${type}`, {
+    // redirect-test-second: points the actual value
+    const secondValue = {
+      "/": { [LINK_V1_TAG]: { id: redirectTestDataUri, path: [] } },
+    };
+    store.set(`${redirectTestSecondUri}/${type}`, {
       the: type,
-      of: containerUri as Entity,
-      is: { value: containerValue },
-      cause: refer({ the: type, of: containerUri as Entity }),
+      of: redirectTestSecondUri as Entity,
+      is: { value: secondValue },
+      cause: refer({ the: type, of: redirectTestSecondUri as Entity }),
       since: 2,
     });
 
+    // redirect-test-first: points the actual value
+    const firstValue = {
+      "/": { [LINK_V1_TAG]: { id: redirectTestSecondUri, path: [] } },
+    };
+    store.set(`${redirectTestFirstUri}/${type}`, {
+      the: type,
+      of: redirectTestFirstUri as Entity,
+      is: { value: firstValue },
+      cause: refer({ the: type, of: redirectTestFirstUri as Entity }),
+      since: 3,
+    });
+
+    // redirect-test-redir: holds the actual value
+    const redirValue = {
+      "/": {
+        [LINK_V1_TAG]: { id: redirectTestFirstUri, path: [] },
+        overwrite: "redirect",
+      },
+    };
+    store.set(`${redirectTestRedirUri}/${type}`, {
+      the: type,
+      of: redirectTestRedirUri as Entity,
+      is: { value: redirValue },
+      cause: refer({ the: type, of: redirectTestRedirUri as Entity }),
+      since: 4,
+    });
+
+    const innerValue = {
+      "/": {
+        [LINK_V1_TAG]: { id: redirectTestRedirUri, path: [] },
+        overwrite: "redirect",
+      },
+    };
+    store.set(`${redirectTestInnerUri}/${type}`, {
+      the: type,
+      of: redirectTestInnerUri as Entity,
+      is: { value: innerValue },
+      cause: refer({ the: type, of: redirectTestInnerUri as Entity }),
+      since: 5,
+    });
+
+    const outerValue = {
+      inner: {
+        "/": {
+          [LINK_V1_TAG]: { id: redirectTestInnerUri, path: [] },
+          overwrite: "redirect",
+        },
+      },
+    };
+    store.set(`${redirectTestOuterUri}/${type}`, {
+      the: type,
+      of: redirectTestOuterUri as Entity,
+      is: { value: outerValue },
+      cause: refer({ the: type, of: redirectTestOuterUri as Entity }),
+      since: 6,
+    });
+
     const schema = {
-      type: "array",
-      items: { type: "unknown" },
+      type: "object",
+      properties: {
+        inner: { type: "unknown" },
+      },
+      required: ["inner"],
+      additionalProperties: false,
     } as JSONSchema;
 
-    const traverser = getTraverser(store, { path: ["value"], schema });
+    // Create these without the helper, so we can check the manager to see
+    // which objects we include.
+    const manager = new StoreObjectManager(store);
+    const managedTx = new ManagedStorageTransaction(manager);
+    const tx = new ExtendedStorageTransaction(managedTx);
+    const traverser = new SchemaObjectTraverser(tx, {
+      path: ["value"],
+      schema,
+    });
+
     const { ok: result, error } = traverser.traverse({
       address: {
         space: "did:null:null",
-        id: containerUri,
+        id: redirectTestOuterUri,
         type,
         path: ["value"],
       },
-      value: containerValue,
+      value: outerValue,
     });
 
     expect(error).toBeUndefined();
-    // String primitive passes through; linked object is not resolved into content
-    const arr = result as unknown[];
-    expect(Array.isArray(arr)).toBe(true);
-    expect(arr[0]).toBe("plain-string");
-    expect(arr[1]).toBeUndefined();
+    // linked object is not resolved into content
+    expect(result).toEqual({ inner: undefined });
+    // We should have read all the way through to the data object
+    expect(
+      [...manager.getReadDocs()].some((att) =>
+        att.address.id === redirectTestDataUri
+      ),
+    ).toBe(true);
+  });
+
+  it("does not resolve linked properties when property schema is type: unknown and asCell is true", () => {
+    // Chain: outer => inner => redir => first -> second -> data
+    //
+    // Behavior: All redirect links are followed, toCell() stops at first non-redirect
+    // The data is fully resolved to { test: "foo" } but the cell reference stops at `first`
+
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const redirectTestDataUri = "of:doc-redirect-test-data" as URI;
+    const redirectTestSecondUri = "of:doc-redirect-test-second" as URI;
+    const redirectTestFirstUri = "of:doc-redirect-test-first" as URI;
+    const redirectTestRedirUri = "of:doc-redirect-test-redir" as URI;
+    const redirectTestInnerUri = "of:doc-redirect-test-inner" as URI;
+    const redirectTestOuterUri = "of:doc-redirect-test-outer" as URI;
+
+    // redirect-test-data: holds the actual value
+    store.set(`${redirectTestDataUri}/${type}`, {
+      the: type,
+      of: redirectTestDataUri as Entity,
+      is: { value: { label: "should not appear" } },
+      cause: refer({ the: type, of: redirectTestDataUri as Entity }),
+      since: 1,
+    });
+
+    // redirect-test-second: points the actual value
+    const secondValue = {
+      "/": { [LINK_V1_TAG]: { id: redirectTestDataUri, path: [] } },
+    };
+    store.set(`${redirectTestSecondUri}/${type}`, {
+      the: type,
+      of: redirectTestSecondUri as Entity,
+      is: { value: secondValue },
+      cause: refer({ the: type, of: redirectTestSecondUri as Entity }),
+      since: 2,
+    });
+
+    // redirect-test-first: points the actual value
+    const firstValue = {
+      "/": { [LINK_V1_TAG]: { id: redirectTestSecondUri, path: [] } },
+    };
+    store.set(`${redirectTestFirstUri}/${type}`, {
+      the: type,
+      of: redirectTestFirstUri as Entity,
+      is: { value: firstValue },
+      cause: refer({ the: type, of: redirectTestFirstUri as Entity }),
+      since: 3,
+    });
+
+    // redirect-test-redir: holds the actual value
+    const redirValue = {
+      "/": {
+        [LINK_V1_TAG]: { id: redirectTestFirstUri, path: [] },
+        overwrite: "redirect",
+      },
+    };
+    store.set(`${redirectTestRedirUri}/${type}`, {
+      the: type,
+      of: redirectTestRedirUri as Entity,
+      is: { value: redirValue },
+      cause: refer({ the: type, of: redirectTestRedirUri as Entity }),
+      since: 4,
+    });
+
+    const innerValue = {
+      "/": {
+        [LINK_V1_TAG]: { id: redirectTestRedirUri, path: [] },
+        overwrite: "redirect",
+      },
+    };
+    store.set(`${redirectTestInnerUri}/${type}`, {
+      the: type,
+      of: redirectTestInnerUri as Entity,
+      is: { value: innerValue },
+      cause: refer({ the: type, of: redirectTestInnerUri as Entity }),
+      since: 5,
+    });
+
+    const outerValue = {
+      inner: {
+        "/": {
+          [LINK_V1_TAG]: { id: redirectTestInnerUri, path: [] },
+          overwrite: "redirect",
+        },
+      },
+    };
+    store.set(`${redirectTestOuterUri}/${type}`, {
+      the: type,
+      of: redirectTestOuterUri as Entity,
+      is: { value: outerValue },
+      cause: refer({ the: type, of: redirectTestOuterUri as Entity }),
+      since: 6,
+    });
+
+    const schema = {
+      type: "object",
+      properties: {
+        inner: { type: "unknown", asCell: true },
+      },
+      required: ["inner"],
+      additionalProperties: false,
+    } as JSONSchema;
+
+    // Create these without the helper, so we can check the manager to see
+    // which objects we include.
+    const manager = new StoreObjectManager(store);
+    const managedTx = new ManagedStorageTransaction(manager);
+    const tx = new ExtendedStorageTransaction(managedTx);
+    const traverser = new SchemaObjectTraverser(tx, {
+      path: ["value"],
+      schema,
+    });
+
+    const { ok: result, error } = traverser.traverse({
+      address: {
+        space: "did:null:null",
+        id: redirectTestOuterUri,
+        type,
+        path: ["value"],
+      },
+      value: outerValue,
+    });
+
+    expect(error).toBeUndefined();
+    // linked object is not resolved into content
+    expect(result).toEqual({ inner: undefined });
+    // We should have read all the way through to the data object
+    expect(
+      [...manager.getReadDocs()].some((att) =>
+        att.address.id === redirectTestDataUri
+      ),
+    ).toBe(true);
   });
 });
 
