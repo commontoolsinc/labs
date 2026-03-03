@@ -160,7 +160,7 @@ export type TempRefMap = Map<number, Cell<Todo>>;
 export function runSyncLoop(
   runtime: Runtime,
   space: MemorySpace,
-  stateCell: Cell<State>,
+  todosCell: Cell<Todo[]>,
   editsCell: Cell<Edit[]>,
   appliedEditsCell: Cell<Edit[]>,
   failedEditsCell: Cell<FailedEdit[]>,
@@ -243,10 +243,17 @@ export function runSyncLoop(
         runtime,
         tx,
         space,
+        inHandler: true,
       });
 
       try {
-        const edits = editsCell.get();
+        // Bind cells to this transaction so .set()/.push() work
+        const txTodos = todosCell.withTx(tx);
+        const txEdits = editsCell.withTx(tx);
+        const txApplied = appliedEditsCell.withTx(tx);
+        const txFailed = failedEditsCell.withTx(tx);
+
+        const edits = txEdits.get();
 
         // 1. Apply NEW edits to the filesystem (only past the watermark).
         //    On first iteration watermark is 0, so all edits are applied.
@@ -282,8 +289,8 @@ export function runSyncLoop(
 
         // 2. Read full filesystem state, build cell structure.
         //    Cell.of() is used inside buildStateFromFs for each todo.
-        stateCell.set(
-          buildStateFromFs(todoFilePath, CellConstructor.of),
+        txTodos.set(
+          buildStateFromFs(todoFilePath, CellConstructor.of).todos,
         );
 
         // 3. Write redirect links for newly created items.
@@ -306,9 +313,9 @@ export function runSyncLoop(
         }
 
         // 4. Clear edit queue, record applied and failed edits
-        appliedEditsCell.push(...applied);
-        failedEditsCell.push(...failed);
-        editsCell.set([]);
+        txApplied.push(...applied);
+        txFailed.push(...failed);
+        txEdits.set([]);
       } finally {
         popFrame();
       }
