@@ -38,7 +38,13 @@ import { isObject, isRecord } from "@commontools/utils/types";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { deepEqual } from "@commontools/utils/deep-equal";
-import { BaseMemoryAddress, MapSet } from "../traverse.ts";
+import { BaseMemoryAddress, MapSet, stableStringify } from "../traverse.ts";
+import { getJSONFromDataURI } from "../uri-utils.ts";
+import {
+  isPrimitiveCellLink,
+  type NormalizedLink,
+  parseLinkPrimitive,
+} from "../link-types.ts";
 import type {
   Assert,
   Claim,
@@ -128,6 +134,10 @@ const logger = getLogger("storage.cache", {
   level: "error",
   logCountEvery: 0, // Disable auto-logging of counts
 });
+
+// Module-level cache: data URI + schema hash + path + space → Promise
+const DATA_URI_SYNC_CACHE_MAX = 10_000;
+const _dataURISyncCache = new Map<string, Promise<Cell<any>>>();
 
 interface NotFoundError extends Error {
   name: "NotFound";
@@ -2194,6 +2204,11 @@ export class StorageManager implements IStorageManager {
   ): Promise<Cell<T>> {
     const { space, id, schema } = cell.getAsNormalizedFullLink();
     if (!space) throw new Error("No space set");
+
+    if (id.startsWith("data:")) {
+      return this.syncDataURICell(cell, space, id, schema);
+    }
+
     const storageProvider = this.open(space);
 
     const selector = {
@@ -2203,6 +2218,131 @@ export class StorageManager implements IStorageManager {
 
     await storageProvider.sync(id, selector);
     return cell;
+  }
+
+  private syncDataURICell<T>(
+    cell: Cell<T>,
+    space: MemorySpace,
+    id: string,
+    schema: JSONSchema | undefined,
+  ): Promise<Cell<T>> {
+    // Build cache key: data URI + schema hash + path + space
+    const pathStr = JSON.stringify(cell.path);
+    const schemaStr = schema ? stableStringify(schema) : "";
+    const cacheKey = `${id}|${schemaStr}|${pathStr}|${space}`;
+
+    const existing = _dataURISyncCache.get(cacheKey);
+    if (existing) return existing as Promise<Cell<T>>;
+
+    const promise = this.syncDataURICellUncached(cell, space, id, schema);
+    if (_dataURISyncCache.size >= DATA_URI_SYNC_CACHE_MAX) {
+      _dataURISyncCache.clear();
+    }
+    _dataURISyncCache.set(cacheKey, promise);
+    return promise;
+  }
+
+  private async syncDataURICellUncached<T>(
+    cell: Cell<T>,
+    space: MemorySpace,
+    id: string,
+    schema: JSONSchema | undefined,
+  ): Promise<Cell<T>> {
+    // 1. Decode the data: URI
+    const json = getJSONFromDataURI(id);
+    if (!isRecord(json)) return cell;
+    let value = json["value"];
+
+    // 2. Walk the cell's path into the value
+    const path = [...cell.path.map(String)];
+    for (const segment of path) {
+      if (!isRecord(value) && !Array.isArray(value)) return cell;
+      value = (value as any)[segment];
+    }
+
+    // 3. Walk the resolved value, find links, sync them
+    //    Use a base link for resolving relative references (provides space)
+    const base: NormalizedLink = {
+      space,
+      id: id as any,
+      path: [],
+      type: "application/json",
+    };
+    const promises: Promise<any>[] = [];
+    const cfc = new ContextualFlowControl();
+
+    this.collectLinkedCellSyncs(value, base, schema, cfc, promises, new Set());
+
+    if (promises.length > 0) {
+      await Promise.all(promises);
+    }
+    return cell;
+  }
+
+  private collectLinkedCellSyncs(
+    value: any,
+    base: NormalizedLink,
+    schema: JSONSchema | undefined,
+    cfc: ContextualFlowControl,
+    promises: Promise<any>[],
+    seen: Set<any>,
+  ): void {
+    if (value === null || value === undefined || seen.has(value)) return;
+    if (typeof value !== "object") return;
+    seen.add(value);
+
+    if (isPrimitiveCellLink(value)) {
+      // Found a link — resolve it with base (for space) and sync
+      const link = parseLinkPrimitive(value, base);
+      if (link.id && !link.id.startsWith("data:")) {
+        const linkSchema = link.schema ?? schema;
+        const storageProvider = this.open(link.space ?? base.space!);
+        const selector = {
+          path: link.path.map(String),
+          schema: linkSchema ?? false,
+        };
+        const p = storageProvider.sync(link.id, selector);
+        promises.push(p);
+      }
+      return;
+    }
+
+    // Recurse into object/array
+    if (Array.isArray(value)) {
+      const itemSchema = schema && isObject(schema) && schema.items
+        ? schema.items as JSONSchema
+        : undefined;
+      for (const item of value) {
+        this.collectLinkedCellSyncs(
+          item,
+          base,
+          itemSchema,
+          cfc,
+          promises,
+          seen,
+        );
+      }
+    } else if (isRecord(value)) {
+      for (const key of Object.keys(value)) {
+        const child = value[key];
+        if (
+          child === null || child === undefined || typeof child !== "object"
+        ) {
+          continue;
+        }
+        const childSchema = schema
+          ? cfc.getSchemaAtPath(schema, [key])
+          : undefined;
+        this.collectLinkedCellSyncs(
+          child,
+          base,
+          childSchema,
+          cfc,
+          promises,
+          seen,
+        );
+      }
+    }
   }
 }
 
