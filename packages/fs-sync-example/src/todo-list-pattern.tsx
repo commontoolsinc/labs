@@ -4,6 +4,10 @@
  *
  * Renders synced state from the daemon and enqueues edits atomically
  * with optimistic local updates (via handler()).
+ *
+ * Per-item handler streams are wrapped in objects when exposed as output
+ * values. This prevents the reactive system from spuriously invoking them
+ * when the mapped list changes.
  */
 import {
   computed,
@@ -24,10 +28,15 @@ import type { Edit, FailedEdit, Todo } from "./types.ts";
 // ---------------------------------------------------------------------------
 
 const onCreate = handler<
-  { detail: { message: string } },
-  { todos: Writable<Todo[]>; edits: Writable<Edit[]> }
->(({ detail }, { todos, edits }) => {
-  const description = detail?.message?.trim();
+  { description?: string },
+  {
+    todos: Writable<Todo[]>;
+    edits: Writable<Edit[]>;
+    newTodoText: Writable<string>;
+  }
+>((event, { todos, edits, newTodoText }) => {
+  // Accept description from event payload (testing) or from cell (form UI)
+  const description = (event?.description || newTodoText.get()).trim();
   if (!description) return;
 
   const pendingId = `pending-${Date.now()}-${
@@ -43,6 +52,9 @@ const onCreate = handler<
 
   // Enqueue edit for the daemon (pendingId lets the daemon map it to canonical)
   edits.push({ type: "create", description, pendingId });
+
+  // Clear the input
+  newTodoText.set("");
 });
 
 const onToggle = handler<
@@ -60,13 +72,29 @@ const onToggle = handler<
 
 const onDelete = handler<
   unknown,
-  { todo: Todo; todos: Writable<Todo[]>; edits: Writable<Edit[]> }
+  {
+    todo: Todo;
+    todos: Writable<Todo[]>;
+    edits: Writable<Edit[]>;
+  }
 >((_event, { todo, todos, edits }) => {
   // Optimistic: remove from local state
   todos.remove(todo);
 
   // Enqueue edit
   edits.push({ type: "delete", id: todo.id });
+});
+
+const onUpdate = handler<
+  unknown,
+  { todo: Writable<Todo>; edits: Writable<Edit[]> }
+>((_event, { todo, edits }) => {
+  // $value binding already updated the cell — just enqueue the edit
+  edits.push({
+    type: "update",
+    id: todo.get().id,
+    description: todo.get().description,
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -85,15 +113,20 @@ interface Output {
   edits: Edit[];
   appliedEdits: Edit[];
   failedEdits: FailedEdit[];
-  create: OpaqueRef<Stream<{ detail: { message: string } }>>;
-  toggles: unknown[];
-  deletes: unknown[];
+  create: OpaqueRef<Stream<{ description?: string }>>;
+  // Per-item actions wrapped in objects (safe from spurious invocation)
+  actions: Array<{
+    toggle: OpaqueRef<Stream<unknown>>;
+    delete: OpaqueRef<Stream<unknown>>;
+    update: OpaqueRef<Stream<unknown>>;
+  }>;
 }
 
 /** Filesystem-synced todo list. #fsSyncTodo */
 export default pattern<Input, Output>(
   ({ todos, edits, appliedEdits, failedEdits }) => {
     const isSyncing = computed(() => edits.get().length > 0);
+    const newTodoText = Writable.of("");
 
     return {
       [NAME]: "Todo List (fs-sync)",
@@ -122,12 +155,17 @@ export default pattern<Input, Output>(
 
           <ct-vscroll flex showScrollbar fadeEdges>
             <ct-vstack gap="2" style="padding: 1rem; max-width: 600px;">
-              {/* Add todo input */}
-              <ct-message-input
-                placeholder="Add a todo..."
-                appearance="rounded"
-                onct-send={onCreate({ todos, edits })}
-              />
+              {/* Add todo via form */}
+              <ct-form onct-submit={onCreate({ todos, edits, newTodoText })}>
+                <ct-hstack gap="2" align="center">
+                  <ct-input
+                    $value={newTodoText}
+                    placeholder="Add a todo..."
+                    style={{ flex: "1" }}
+                  />
+                  <ct-button type="submit" variant="primary">Add</ct-button>
+                </ct-hstack>
+              </ct-form>
 
               {/* Empty state */}
               {ifElse(
@@ -152,19 +190,11 @@ export default pattern<Input, Output>(
                       $checked={todo.done}
                       onChange={onToggle({ todo, edits })}
                     />
-                    <span
-                      style={{
-                        flex: "1",
-                        textDecoration: ifElse(
-                          todo.done,
-                          "line-through",
-                          "none",
-                        ),
-                        opacity: ifElse(todo.done, 0.5, 1),
-                      }}
-                    >
-                      {todo.description}
-                    </span>
+                    <ct-input
+                      $value={todo.description}
+                      onct-submit={onUpdate({ todo, edits })}
+                      style={{ flex: "1" }}
+                    />
                     <span
                       style={{
                         fontSize: "11px",
@@ -206,9 +236,13 @@ export default pattern<Input, Output>(
       edits,
       appliedEdits,
       failedEdits,
-      create: onCreate({ todos, edits }),
-      toggles: todos.map((todo) => onToggle({ todo, edits })),
-      deletes: todos.map((todo) => onDelete({ todo, todos, edits })),
+      create: onCreate({ todos, edits, newTodoText }),
+      // Per-item actions wrapped in objects (safe from spurious invocation)
+      actions: todos.map((todo) => ({
+        toggle: onToggle({ todo, edits }),
+        delete: onDelete({ todo, todos, edits }),
+        update: onUpdate({ todo, edits }),
+      })),
     };
   },
 );

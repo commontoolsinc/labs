@@ -14,7 +14,8 @@ export interface State {
 export type Edit =
   | { type: "create"; description: string; pendingId?: string }
   | { type: "toggle"; id: string; done: boolean }
-  | { type: "delete"; id: string };
+  | { type: "delete"; id: string }
+  | { type: "update"; id: string; description: string };
 
 /** An edit that could not be applied to the filesystem. */
 export interface FailedEdit {

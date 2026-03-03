@@ -16,8 +16,7 @@ import { popFrame, pushFrameFromCause } from "@commontools/runner";
 import type { Cell, MemorySpace } from "@commontools/runner";
 import { debounce } from "@std/async";
 
-import type { Edit, FailedEdit, State } from "./types.ts";
-import type { Todo } from "./types.ts";
+import type { Edit, FailedEdit, State, Todo } from "./types.ts";
 import { parseMarkdown, serializeMarkdown } from "./markdown.ts";
 
 // ---------------------------------------------------------------------------
@@ -84,7 +83,9 @@ function resolveEdit(
   edit: Edit,
   pendingToCanonical: Map<string, string>,
 ): Edit {
-  if (edit.type === "toggle" || edit.type === "delete") {
+  if (
+    edit.type === "toggle" || edit.type === "delete" || edit.type === "update"
+  ) {
     const resolved = pendingToCanonical.get(edit.id);
     if (resolved) {
       return { ...edit, id: resolved };
@@ -132,6 +133,16 @@ function applyEdit(
         return {};
       }
       state.todos.splice(idx, 1);
+      Deno.writeTextFileSync(filePath, serializeMarkdown(state));
+      return {};
+    }
+
+    case "update": {
+      const todo = state.todos.find((t) => t.id === edit.id);
+      if (!todo) {
+        throw new Error(`Cannot update: todo ${edit.id} not found`);
+      }
+      todo.description = edit.description;
       Deno.writeTextFileSync(filePath, serializeMarkdown(state));
       return {};
     }
