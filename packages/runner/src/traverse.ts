@@ -1946,7 +1946,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
           if (ContextualFlowControl.isFalseSchema(optionSchema)) {
             continue;
           }
-          if (!canBranchMatch(optionSchema, doc.value)) {
+          if (!canBranchMatch(optionSchema, doc.value, restSchema)) {
             this.anyOfFastRejects++;
             continue;
           }
@@ -2771,6 +2771,7 @@ function mergeSchemaOption(
 export function canBranchMatch(
   branch: JSONSchema,
   value: unknown,
+  outerSchema?: JSONSchemaObj,
 ): boolean {
   // Boolean schemas: true matches everything, false matches nothing
   if (!isObject(branch)) return branch !== false;
@@ -2785,10 +2786,17 @@ export function canBranchMatch(
     return true;
   }
 
-  // Resolve top-level $ref if present
+  // Resolve top-level $ref if present. When an outerSchema is provided (e.g.
+  // the restSchema from anyOf destructuring), merge first so that $defs are
+  // available for resolution. mergeSchemaOption is cached, so the later merge
+  // in the traversal loop will hit the cache.
   let resolved: JSONSchema | undefined = branch;
   if ("$ref" in branch) {
-    resolved = ContextualFlowControl.resolveSchemaRefs(branch);
+    const toResolve = outerSchema
+      ? mergeSchemaOption(outerSchema, branch)
+      : branch;
+    if (!isObject(toResolve)) return toResolve !== false;
+    resolved = ContextualFlowControl.resolveSchemaRefs(toResolve);
     if (resolved === undefined || !isObject(resolved)) return true;
   }
 
