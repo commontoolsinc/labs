@@ -281,6 +281,30 @@ Rich text editor with wiki-link mentions. **Uses `[[` for completions, not `@`.*
 
 **To trigger completions:** Type `[[` (double brackets), not `@`.
 
+Mentions are inserted as wiki-links: `[[Name (entityId)]]` where `entityId`
+is the bare CID. For rendering in `ct-markdown`, convert to markdown links
+with `/of:` prefix (see [mentionable](../conventions/mentionable.md)).
+
+---
+
+## ct-prompt-input
+
+Multiline textarea with `@`-mention autocomplete, attachments, and voice input.
+
+```tsx
+<ct-prompt-input
+  $mentionable={mentionable}
+  placeholder="Type @ to mention..."
+  buttonText="Send"
+  onct-send={handleSend}
+/>
+```
+
+Mentions are inserted as markdown links: `[Name](/of:entityId)`. The entity
+ID is resolved to the stable piece cell ID at insertion time via
+`resolveAsCell()`. See [mentionable](../conventions/mentionable.md) for details
+on cell resolution and link formats.
+
 ---
 
 ## ct-map

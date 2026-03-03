@@ -192,7 +192,7 @@ describe("MentionController — keyboard navigation", () => {
     expect(ctrl.isShowing).toBe(false);
   });
 
-  it("Enter inserts the selected mention", () => {
+  it("Enter inserts the selected mention", async () => {
     const inserts: string[] = [];
     const content = "@";
     const cursor = 1;
@@ -209,6 +209,8 @@ describe("MentionController — keyboard navigation", () => {
       fakeKeyEvent("Enter"),
     );
     expect(handled).toBe(true);
+    // insertMention is async; wait for it to complete
+    await new Promise((r) => setTimeout(r, 0));
     expect(inserts.length).toBe(1);
     expect(inserts[0]).toContain("[Alice]");
     expect(ctrl.isShowing).toBe(false);
@@ -245,7 +247,7 @@ describe("MentionController — keyboard navigation", () => {
 // ---------------------------------------------------------------------------
 
 describe("MentionController — mention insertion", () => {
-  it("encodes mention as markdown link [name](encodedId)", () => {
+  it("encodes mention as markdown link [name](encodedId)", async () => {
     const inserts: string[] = [];
     const content = "@";
     const cursor = 1;
@@ -259,7 +261,7 @@ describe("MentionController — mention insertion", () => {
     ctrl.handleInput(new Event("input"));
 
     const filtered = ctrl.getFilteredMentions();
-    ctrl.insertMention(filtered[0]);
+    await ctrl.insertMention(filtered[0]);
 
     expect(inserts.length).toBe(1);
     expect(inserts[0]).toMatch(/^\[Test Item\]\(.+\)$/);
@@ -272,36 +274,44 @@ describe("MentionController — mention insertion", () => {
 // ---------------------------------------------------------------------------
 
 describe("MentionController — extractMentionsFromText", () => {
-  it("extracts mentions from markdown links", () => {
+  it("extracts mentions from markdown links", async () => {
     const ctrl = new MentionController(createMockHost());
     const cell = createMentionableCell(["Alice", "Bob"]);
     ctrl.setMentionable(cell);
 
-    // Get the actual encoded IDs
+    // Build hrefs matching the new /${ref.id}/${path} format
     const allMentions = ctrl.getFilteredMentions();
-    const aliceId = encodeURIComponent(allMentions[0].id());
-    const bobId = encodeURIComponent(allMentions[1].id());
+    const aliceRef = allMentions[0].ref();
+    const bobRef = allMentions[1].ref();
+    const aliceHref = `/${aliceRef.id}${
+      aliceRef.path?.length ? `/${aliceRef.path.join("/")}` : ""
+    }`;
+    const bobHref = `/${bobRef.id}${
+      bobRef.path?.length ? `/${bobRef.path.join("/")}` : ""
+    }`;
 
-    const text = `Hello [Alice](${aliceId}) and [Bob](${bobId})!`;
-    const extracted = ctrl.extractMentionsFromText(text);
+    const text = `Hello [Alice](${aliceHref}) and [Bob](${bobHref})!`;
+    const extracted = await ctrl.extractMentionsFromText(text);
     expect(extracted.length).toBe(2);
   });
 
-  it("returns empty for text with no markdown links", () => {
+  it("returns empty for text with no markdown links", async () => {
     const ctrl = new MentionController(createMockHost());
     const cell = createMentionableCell(["Alice"]);
     ctrl.setMentionable(cell);
 
-    const extracted = ctrl.extractMentionsFromText("Hello world");
+    const extracted = await ctrl.extractMentionsFromText("Hello world");
     expect(extracted).toEqual([]);
   });
 
-  it("ignores links that don't match any mentionable", () => {
+  it("ignores links that don't match any mentionable", async () => {
     const ctrl = new MentionController(createMockHost());
     const cell = createMentionableCell(["Alice"]);
     ctrl.setMentionable(cell);
 
-    const extracted = ctrl.extractMentionsFromText("[Unknown](unknown-id)");
+    const extracted = await ctrl.extractMentionsFromText(
+      "[Unknown](unknown-id)",
+    );
     expect(extracted).toEqual([]);
   });
 });
