@@ -8,10 +8,10 @@
  * - Toggling a todo (optimistic done flip + edit enqueued)
  * - Deleting a todo (optimistic remove + edit enqueued)
  *
- * Run: deno task ct test packages/fs-sync-example/src/pattern.test.tsx --verbose
+ * Run: deno task ct test packages/fs-sync-example/src/todo-list-pattern.test.tsx --verbose
  */
 import { action, computed, pattern, type Stream } from "commontools";
-import TodoList from "./pattern.tsx";
+import TodoList from "./todo-list-pattern.tsx";
 
 // Helper: the reactive .map() erases handler types to unknown.
 // At runtime they are Streams, so we cast for .send() access.

@@ -7,6 +7,6 @@
     ".": "./src/daemon.ts",
     "./types": "./src/types.ts",
     "./markdown": "./src/markdown.ts",
-    "./pattern": "./src/pattern.tsx"
+    "./pattern": "./src/todo-list-pattern.tsx"
   }
 }
