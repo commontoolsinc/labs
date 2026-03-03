@@ -105,7 +105,7 @@ describe("SchemaObjectTraverser.traverseDAG", () => {
 
     const traverser = getTraverser(store, { path: ["value"], schema: true });
 
-    const result = traverser.traverse({
+    const { ok: result } = traverser.traverse({
       address: { space: "did:null:null", id: doc2Uri, type, path: ["value"] },
       value: doc2Value,
     });
@@ -164,7 +164,7 @@ describe("SchemaObjectTraverser missing value handling", () => {
 
     const traverser = getTraverser(store, { path: ["value"], schema: true });
 
-    const result = traverser.traverse({
+    const { ok: result } = traverser.traverse({
       address: { space: "did:null:null", id: docUri, type, path: ["value"] },
       value: docValue,
     });
@@ -202,7 +202,7 @@ describe("SchemaObjectTraverser missing value handling", () => {
       schema: { type: "object", additionalProperties: { type: "string" } },
     });
 
-    const result = traverser.traverse({
+    const { ok: result } = traverser.traverse({
       address: { space: "did:null:null", id: docUri, type, path: ["value"] },
       value: docValue,
     });
@@ -247,7 +247,7 @@ describe("SchemaObjectTraverser missing value handling", () => {
       },
     });
 
-    const result = traverser.traverse({
+    const { ok: result } = traverser.traverse({
       address: { space: "did:null:null", id: docUri, type, path: ["value"] },
       value: docValue,
     });
@@ -296,7 +296,7 @@ describe("SchemaObjectTraverser missing value handling", () => {
     } as JSONSchema;
     const traverser = getTraverser(store, { path: ["value"], schema });
 
-    const result = traverser.traverse({
+    const { ok: result } = traverser.traverse({
       address: { space: "did:null:null", id: docUri, type, path: ["value"] },
       value: docValue,
     });
@@ -335,13 +335,13 @@ describe("SchemaObjectTraverser missing value handling", () => {
     } as JSONSchema;
     const traverser = getTraverser(store, { path: ["value"], schema });
 
-    const result = traverser.traverse({
+    const { error } = traverser.traverse({
       address: { space: "did:null:null", id: docUri, type, path: ["value"] },
       value: docValue,
     });
 
-    // Missing elements make the array invalid, thus undefined.
-    expect(result).toBeUndefined();
+    // Missing elements make the array invalid.
+    expect(error).toBeDefined();
   });
 
   it("uses undefined for missing array elements with schema when allowed", () => {
@@ -379,7 +379,7 @@ describe("SchemaObjectTraverser missing value handling", () => {
     } as JSONSchema;
     const traverser = getTraverser(store, { path: ["value"], schema });
 
-    const result = traverser.traverse({
+    const { ok: result } = traverser.traverse({
       address: { space: "did:null:null", id: docUri, type, path: ["value"] },
       value: docValue,
     });
@@ -424,7 +424,7 @@ describe("SchemaObjectTraverser array traversal", () => {
 
     const traverser = getTraverser(store, { path: ["value"], schema });
 
-    const result = traverser.traverse({
+    const { ok: result } = traverser.traverse({
       address: { space: "did:null:null", id: docUri, type, path: ["value"] },
       value: docValue,
     });
@@ -460,12 +460,12 @@ describe("SchemaObjectTraverser array traversal", () => {
 
     const traverser = getTraverser(store, { path: ["value"], schema });
 
-    const result = traverser.traverse({
+    const { error } = traverser.traverse({
       address: { space: "did:null:null", id: docUri, type, path: ["value"] },
       value: docValue,
     });
 
-    expect(result).toBeUndefined();
+    expect(error).toBeDefined();
   });
 
   describe("SchemaObjectTraverser getAtPath", () => {
@@ -813,7 +813,7 @@ describe("SchemaObjectTraverser boolean type handling", () => {
 
     const traverser = getTraverser(store, { path: ["value"], schema });
 
-    const result = traverser.traverse({
+    const { ok: result } = traverser.traverse({
       address: { space: "did:null:null", id: docUri, type, path: ["value"] },
       value: docValue,
     });
@@ -845,13 +845,13 @@ describe("SchemaObjectTraverser boolean type handling", () => {
 
     const traverser = getTraverser(store, { path: ["value"], schema });
 
-    const result = traverser.traverse({
+    const { error } = traverser.traverse({
       address: { space: "did:null:null", id: docUri, type, path: ["value"] },
       value: docValue,
     });
 
-    // Should return undefined because boolean doesn't match string schema
-    expect(result).toBeUndefined();
+    // boolean doesn't match string schema
+    expect(error).toBeDefined();
   });
 });
 
@@ -883,7 +883,7 @@ describe("SchemaObjectTraverser anyOf/oneOf handling", () => {
 
     const traverser = getTraverser(store, { path: ["value"], schema });
 
-    const result = traverser.traverse({
+    const { ok: result } = traverser.traverse({
       address: { space: "did:null:null", id: docUri, type, path: ["value"] },
       value: docValue,
     });
@@ -928,7 +928,7 @@ describe("SchemaObjectTraverser anyOf/oneOf handling", () => {
 
     const traverser = getTraverser(store, { path: ["value"], schema });
 
-    const result = traverser.traverse({
+    const { ok: result } = traverser.traverse({
       address: { space: "did:null:null", id: docUri, type, path: ["value"] },
       value: docValue,
     });
@@ -973,7 +973,7 @@ describe("SchemaObjectTraverser anyOf/oneOf handling", () => {
 
     const traverser = getTraverser(store, { path: ["value"], schema });
 
-    const result = traverser.traverse({
+    const { ok: result } = traverser.traverse({
       address: { space: "did:null:null", id: docUri, type, path: ["value"] },
       value: docValue,
     });
@@ -1026,10 +1026,11 @@ describe("SchemaObjectTraverser array element validation fallback priority", () 
       items: { anyOf: [{ type: "string" }, { type: "undefined" }] },
     } as JSONSchema;
 
-    const result = getTraverser(store, { path: ["value"], schema }).traverse({
-      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
-      value: docValue,
-    });
+    const { ok: result } = getTraverser(store, { path: ["value"], schema })
+      .traverse({
+        address: { space: "did:null:null", id: docUri, type, path: ["value"] },
+        value: docValue,
+      });
 
     expect(result).toEqual(["hello", undefined, "world"]);
   });
@@ -1042,10 +1043,11 @@ describe("SchemaObjectTraverser array element validation fallback priority", () 
       items: { anyOf: [{ type: "string" }, { type: "null" }] },
     } as JSONSchema;
 
-    const result = getTraverser(store, { path: ["value"], schema }).traverse({
-      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
-      value: docValue,
-    });
+    const { ok: result } = getTraverser(store, { path: ["value"], schema })
+      .traverse({
+        address: { space: "did:null:null", id: docUri, type, path: ["value"] },
+        value: docValue,
+      });
 
     expect(result).toEqual(["hello", null, "world"]);
   });
@@ -1061,15 +1063,16 @@ describe("SchemaObjectTraverser array element validation fallback priority", () 
       },
     } as JSONSchema;
 
-    const result = getTraverser(store, { path: ["value"], schema }).traverse({
-      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
-      value: docValue,
-    });
+    const { ok: result } = getTraverser(store, { path: ["value"], schema })
+      .traverse({
+        address: { space: "did:null:null", id: docUri, type, path: ["value"] },
+        value: docValue,
+      });
 
     expect(result).toEqual(["hello", undefined, "world"]);
   });
 
-  it("returns undefined for the whole array when element fails and neither fallback is allowed", () => {
+  it("returns an error for the whole array when element fails and neither fallback is allowed", () => {
     const docValue = ["hello", 42, "world"];
     const { store, docUri, type } = makeArrayDoc(docValue);
     const schema = {
@@ -1077,12 +1080,14 @@ describe("SchemaObjectTraverser array element validation fallback priority", () 
       items: { type: "string" },
     } as JSONSchema;
 
-    const result = getTraverser(store, { path: ["value"], schema }).traverse({
-      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
-      value: docValue,
-    });
+    const { error } = getTraverser(store, { path: ["value"], schema }).traverse(
+      {
+        address: { space: "did:null:null", id: docUri, type, path: ["value"] },
+        value: docValue,
+      },
+    );
 
-    expect(result).toBeUndefined();
+    expect(error).toBeDefined();
   });
 });
 
@@ -1119,12 +1124,12 @@ describe("SchemaObjectTraverser oneOf correctness", () => {
     } as const satisfies JSONSchema;
 
     const traverser = getTraverser(store, { path: ["value"], schema });
-    const result = traverser.traverse({
+    const { error } = traverser.traverse({
       address: { space: "did:null:null", id: docUri, type, path: ["value"] },
       value: docValue,
     });
 
-    expect(result).toBeUndefined();
+    expect(error).toBeDefined();
   });
 
   it("rejects values that only match oneOf by type but not constraints", () => {
@@ -1155,12 +1160,12 @@ describe("SchemaObjectTraverser oneOf correctness", () => {
     } as const satisfies JSONSchema;
 
     const traverser = getTraverser(store, { path: ["value"], schema });
-    const result = traverser.traverse({
+    const { error } = traverser.traverse({
       address: { space: "did:null:null", id: docUri, type, path: ["value"] },
       value: docValue,
     });
 
-    expect(result).toBeUndefined();
+    expect(error).toBeDefined();
   });
 });
 
@@ -1199,7 +1204,7 @@ describe("SchemaObjectTraverser allOf correctness", () => {
     } as const satisfies JSONSchema;
 
     const traverser = getTraverser(store, { path: ["value"], schema });
-    const result = traverser.traverse({
+    const { ok: result } = traverser.traverse({
       address: { space: "did:null:null", id: docUri, type, path: ["value"] },
       value: docValue,
     });
@@ -1225,12 +1230,185 @@ describe("SchemaObjectTraverser defaults with $ref", () => {
     } as const satisfies JSONSchema;
 
     const traverser = getTraverser(store, { path: ["value"], schema });
-    const result = traverser.traverse({
+    const { ok: result } = traverser.traverse({
       address: { space: "did:null:null", id: docUri, type, path: ["value"] },
       value: undefined,
     });
 
     expect(result).toBe("from-ref");
+  });
+});
+
+describe("SchemaObjectTraverser unknown type handling", () => {
+  it("returns undefined for object value matched by type: unknown schema", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-unknown-object" as URI;
+    const docEntity = docUri as Entity;
+
+    const docValue = { key: "value", nested: { count: 42 } };
+
+    const docRevision: Revision<State> = {
+      the: type,
+      of: docEntity,
+      is: { value: docValue },
+      cause: refer({ the: type, of: docEntity }),
+      since: 1,
+    };
+    store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+
+    const schema = { type: "unknown" } as JSONSchema;
+    const traverser = getTraverser(store, { path: ["value"], schema });
+
+    const { ok: result, error } = traverser.traverse({
+      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
+      value: docValue,
+    });
+
+    // type: "unknown" marks the value as opaque — traversal short-circuits
+    // without descending, so any links within are not followed
+    expect(error).toBeUndefined();
+    expect(result).toBeUndefined();
+  });
+
+  it("returns undefined for array value matched by type: unknown schema", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-unknown-array" as URI;
+    const docEntity = docUri as Entity;
+
+    const linkedUri = "of:doc-unknown-array-target" as URI;
+    const docValue = [
+      "a",
+      { "/": { [LINK_V1_TAG]: { id: linkedUri, path: [] } } },
+      "c",
+    ];
+
+    store.set(`${docEntity}/${type}`, {
+      the: type,
+      of: docEntity,
+      is: { value: docValue },
+      cause: refer({ the: type, of: docEntity }),
+      since: 1,
+    });
+    store.set(`${linkedUri}/${type}`, {
+      the: type,
+      of: linkedUri as Entity,
+      is: { value: { label: "should not appear" } },
+      cause: refer({ the: type, of: linkedUri as Entity }),
+      since: 1,
+    });
+
+    const schema = { type: "unknown" } as JSONSchema;
+    const traverser = getTraverser(store, { path: ["value"], schema });
+
+    const { ok: result, error } = traverser.traverse({
+      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
+      value: docValue,
+    });
+
+    // type: "unknown" on an array means the whole array is treated as opaque —
+    // traversal short-circuits without following the embedded link
+    expect(error).toBeUndefined();
+    expect(result).toBeUndefined();
+  });
+
+  it("does not resolve linked content for object property with type: unknown schema", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const doc1Uri = "of:doc-unknown-prop-target" as URI;
+    const doc2Uri = "of:doc-unknown-prop-container" as URI;
+
+    // doc1 is the link target — its content should not appear in the result
+    store.set(`${doc1Uri}/${type}`, {
+      the: type,
+      of: doc1Uri as Entity,
+      is: { value: { name: "Alice", secret: "hidden" } },
+      cause: refer({ the: type, of: doc1Uri as Entity }),
+      since: 1,
+    });
+
+    const doc2Value = {
+      id: 1,
+      data: { "/": { [LINK_V1_TAG]: { id: doc1Uri, path: [] } } },
+    };
+    store.set(`${doc2Uri}/${type}`, {
+      the: type,
+      of: doc2Uri as Entity,
+      is: { value: doc2Value },
+      cause: refer({ the: type, of: doc2Uri as Entity }),
+      since: 2,
+    });
+
+    const schema = {
+      type: "object",
+      properties: {
+        id: { type: "number" },
+        // type: "unknown" prevents the link target from being traversed
+        data: { type: "unknown" },
+      },
+    } as JSONSchema;
+
+    const traverser = getTraverser(store, { path: ["value"], schema });
+    const { ok: result } = traverser.traverse({
+      address: { space: "did:null:null", id: doc2Uri, type, path: ["value"] },
+      value: doc2Value,
+    });
+
+    // "id" is traversed normally; "data" link target is not resolved into content
+    const obj = result as Record<string, unknown>;
+    expect(obj?.id).toBe(1);
+    expect(obj?.data).toBeUndefined();
+  });
+
+  it("does not resolve linked array items when items schema is type: unknown", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const targetUri = "of:doc-unknown-item-target" as URI;
+    const containerUri = "of:doc-unknown-item-container" as URI;
+
+    store.set(`${targetUri}/${type}`, {
+      the: type,
+      of: targetUri as Entity,
+      is: { value: { label: "should not appear" } },
+      cause: refer({ the: type, of: targetUri as Entity }),
+      since: 1,
+    });
+
+    const containerValue = [
+      "plain-string",
+      { "/": { [LINK_V1_TAG]: { id: targetUri, path: [] } } },
+    ];
+    store.set(`${containerUri}/${type}`, {
+      the: type,
+      of: containerUri as Entity,
+      is: { value: containerValue },
+      cause: refer({ the: type, of: containerUri as Entity }),
+      since: 2,
+    });
+
+    const schema = {
+      type: "array",
+      items: { type: "unknown" },
+    } as JSONSchema;
+
+    const traverser = getTraverser(store, { path: ["value"], schema });
+    const { ok: result, error } = traverser.traverse({
+      address: {
+        space: "did:null:null",
+        id: containerUri,
+        type,
+        path: ["value"],
+      },
+      value: containerValue,
+    });
+
+    expect(error).toBeUndefined();
+    // String primitive passes through; linked object is not resolved into content
+    const arr = result as unknown[];
+    expect(Array.isArray(arr)).toBe(true);
+    expect(arr[0]).toBe("plain-string");
+    expect(arr[1]).toBeUndefined();
   });
 });
 

@@ -468,7 +468,11 @@ export function validateAndTransform(
     objectCreator,
     options?.traverseCells ?? false,
   );
-  return traverser.traverse(doc, link);
+  const { ok: val, error: _err } = traverser.traverse(doc, link);
+  // TODO(@ubik2): Now that undefined is a valid return value from traverse,
+  // we need some other way to indicate success to our caller. For now, I'm
+  // still just returning undefined in the error case.
+  return val;
 }
 
 class TransformObjectCreator
