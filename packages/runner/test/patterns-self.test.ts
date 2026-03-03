@@ -1,3 +1,6 @@
+// SELF references: patterns that reference their own output cell for
+// self-referential data structures, serialization, and type inference.
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 

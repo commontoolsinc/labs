@@ -1,3 +1,6 @@
+// Conditional logic: ifElse branching, interaction with derive, and patterns
+// where control flow determines which values propagate.
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 

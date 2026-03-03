@@ -1,3 +1,6 @@
+// Dynamic pattern instantiation: patterns created at runtime inside lifts
+// or handlers, and ensuring they execute in the correct dependency order.
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 

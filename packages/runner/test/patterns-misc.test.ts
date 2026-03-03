@@ -1,3 +1,6 @@
+// Tests that don't fit other categories. If a theme emerges, factor out
+// a new file.
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 

@@ -1,3 +1,6 @@
+// Lifted functions: pure transformations via lift(), error and recovery behavior,
+// cell creation inside lifts, reactivity control (sample), and evaluation timing.
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 

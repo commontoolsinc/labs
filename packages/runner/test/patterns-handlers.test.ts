@@ -1,3 +1,6 @@
+// Event handlers: defining and invoking handlers, handler metadata,
+// handler-produced side effects, schema-annotated handlers, and handler errors.
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { spy } from "@std/testing/mock";

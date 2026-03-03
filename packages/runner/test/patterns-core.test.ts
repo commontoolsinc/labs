@@ -1,3 +1,6 @@
+// Basic pattern mechanics: defining patterns, passing inputs, returning outputs,
+// nesting patterns, default values, and map/iteration over collections.
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import "@commontools/utils/equal-ignoring-symbols";

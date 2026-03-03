@@ -1,3 +1,6 @@
+// Regression tests for specific bug fixes. Each test should reference
+// the issue number (e.g. CT-1158). New regressions go here.
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 

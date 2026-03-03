@@ -1,3 +1,6 @@
+// Async scheduling: how the runtime handles promises returned (or not returned)
+// by lifts and handlers, and the interaction between async work and idle/pull.
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
