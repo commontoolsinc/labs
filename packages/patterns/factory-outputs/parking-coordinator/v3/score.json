@@ -1,0 +1,177 @@
+{
+  "rubric_version": "3.0",
+  "pattern": "parking-coordinator",
+  "run_id": "2026-03-02-parking-coordinator-k9m4",
+  "iteration_count": 3,
+  "process_efficiency_modifier": -5,
+  "dimensions": {
+    "correctness": {
+      "score": 80,
+      "scoring_model": "deduction",
+      "ceiling": 85,
+      "pass_count": 5,
+      "fail_count": 1,
+      "na_count": 0,
+      "failures": [
+        {
+          "check_id": "COR-5",
+          "description": "The add_empty_person edge-case guard (empty name rejection) produces a test timeout in the iteration 3 build, indicating the action does not properly settle the reactive scheduler when it returns early. The guard code is present (line 414: `if (!trimmedName) return;`) and CLI testing confirms the action does not create a person, but the timeout regression introduced in the manual-test fix pass leaves this edge case unreliable in automated testing.",
+          "line_number": 414,
+          "suggested_fix": "Investigate why addPerson returns early without triggering reactive settlement. Consider restructuring the guard to always produce a definitive state outcome, or ensure the test framework can handle action early-returns without timing out."
+        }
+      ],
+      "justification": "Compiles cleanly (COR-1 PASS). No runtime crashes (COR-2 PASS). All 16 CLI handlers verified as firing correctly including complex actions: manualAssign with displacement, auto-allocation cascade, adminCancelAllocation (COR-3 PASS). State propagation works after iteration 3 fixes — Today tab no longer goes blank after cancel (spotCount computed approach), Manage tab spots section renders spot data correctly (manageSpots computed workaround) (COR-4 PASS). No TypeScript type errors in source (COR-6 PASS). Minor deduction: empty-name edge case timeout regression from iteration 3 changes leaves one edge case path unreliable (-5 COR-5)."
+    },
+    "code_craft": {
+      "score": 75,
+      "scoring_model": "deduction",
+      "ceiling": 85,
+      "pass_count": 9,
+      "fail_count": 1,
+      "na_count": 1,
+      "failures": [
+        {
+          "check_id": "CCR-3",
+          "description": "Unnecessary computed() created inside JSX as a child text node at lines 893-895. The outer ternary already guards on myTodayAllocation being truthy; accessing .spotNumber on the reactive proxy does not require an additional computed() wrapper. The critic identified this as FAIL in critic-001.md; the maker declined to fix it in iteration 2, claiming it prevents a TypeError. However, the framework Proxy auto-unwraps property access on reactive objects, making the inner computed() redundant.",
+          "line_number": 893,
+          "suggested_fix": "Replace `computed(() => \\`You have Spot #${myTodayAllocation.spotNumber} today\\`)` with the bare template literal `\\`You have Spot #${myTodayAllocation.spotNumber} today\\``. The outer ternary ensures myTodayAllocation is non-null at this branch."
+        }
+      ],
+      "justification": "Strong idiomatic code throughout. All 12 pattern-scope handlers correctly use action() (CCR-1 PASS). All helpers (getTodayDate, getDateOffset, formatDateLabel, findAvailableSpot) at module scope (CCR-2 PASS). All pre-computed derived values correctly wrapped: todayAllocations, myRequests, sortedPeople, spotCount, manageSpots, identityState, showTodayTab, showWeekTab (CCR-3 mostly PASS). All $value/$checked bindings correct on all ct-* form elements (CCR-6 PASS). Style syntax correct throughout — object on HTML elements, string on ct-* custom elements (CCR-7 PASS). No Stream.of()/.subscribe() or async/await (CCR-8 PASS). The spots.get() static read in ct-select items was fixed to spots.map() in iteration 2 (CCR-9 PASS). Clean domain naming (CCR-10 PASS). N/A: no LLM integration (CCR-5 informational only; [NAME] and [UI] both present). One deduction: unnecessary computed() wrapper inside JSX text node at line 893, confirmed FAIL by critic, not fixed (-10 CCR-3)."
+    },
+    "test_coverage": {
+      "score": 30,
+      "scoring_model": "deduction",
+      "ceiling": 85,
+      "pass_count": 2,
+      "fail_count": 3,
+      "na_count": 0,
+      "failures": [
+        {
+          "check_id": "TST-2",
+          "description": "Live test run confirms 6 failures out of 55 test steps: assertion_50 and assertion_51 (pre-existing removePerson reactive scheduler timing flakiness present before iteration 1); action_24 timeout (add_empty_person regression introduced in iteration 3); assertion_52 and assertion_53 cascading from the action_24 timeout. 49 steps pass. TST-2 critical failure caps the test_coverage dimension at 30.",
+          "line_number": null,
+          "suggested_fix": "Fix the add_empty_person timeout regression from iteration 3. For the pre-existing removePerson flakiness, restructure the test to use reactive assertion polling rather than immediate evaluation."
+        },
+        {
+          "check_id": "TST-5",
+          "description": "Multiple non-trivial edge case categories are untested: (1) future date requests (auto-allocation on non-today dates), (2) past date rejection guard, (3) spot preference fallthrough when default is taken and preferences list is non-empty, (4) cascading allocation cancellation when a spot is removed. The test report acknowledges these gaps explicitly.",
+          "line_number": null,
+          "suggested_fix": "Add test cases covering: requestSpot with a future date, requestSpot with a past date returning no new request, a person with preferences list that exercises the preference fallthrough path, and removeSpot verifying that corresponding allocations and requests are cancelled."
+        },
+        {
+          "check_id": "TST-3",
+          "description": "The computed values driving the week tab (dayAllocs per day, freeCount, myAlloc per day) are entirely untested. These are derived business logic values, not pure UI, and could be asserted without testing browser rendering.",
+          "line_number": null,
+          "suggested_fix": "Add assertions verifying todayAllocations count updates after requestSpot, allSpotsFullToday transitions after multiple allocations, and spotCount updates after addSpot/removeSpot."
+        }
+      ],
+      "justification": "Test file exists with correct pattern-as-test approach (TST-1 PASS, TST-4 PASS). Coverage is substantive: 53+ assertions covering CRUD operations, the complete request lifecycle (request, allocate, deny, cancel, re-request), manual assignment with displacement verification (new assertion added in iteration 2), priority reordering with rank recomputation, and key edge cases. However, TST-2 fails — live test run confirms 6 failures (2 pre-existing, 4 new or cascading from iteration 3 regression). The TST-2 critical failure caps this dimension at 30. Additional gaps: future date paths, past date guard, preference fallthrough, and week-tab computed logic are untested."
+    },
+    "spec_fidelity": {
+      "score": 65,
+      "scoring_model": "deduction",
+      "ceiling": 85,
+      "pass_count": 2,
+      "fail_count": 2,
+      "na_count": 0,
+      "failures": [
+        {
+          "check_id": "SPF-1",
+          "description": "Spot preferences editing is entirely absent from the UI. The spec explicitly defines Person as having 'spot preferences — an ordered list of preferred spot numbers' and Interaction 8 requires admins to be able to update 'spot preferences.' The addPerson form (lines 1676-1730) and editPerson form (lines 1462-1526) both lack any preferences field. The auto-allocation algorithm does consume preferences (lines 161-168), but there is no way for users to set them. The feature is structurally wired but inaccessible.",
+          "line_number": null,
+          "suggested_fix": "Add a spotPreferences field to both addPerson and editPerson forms. A minimal implementation: a multi-line text input for comma-separated spot numbers parsed into the spotPreferences array. Update the editPerson action (line 441) to accept and persist the spotPreferences field."
+        },
+        {
+          "check_id": "SPF-3",
+          "description": "No user interaction exists to set or manage spot preferences. The editPerson action signature (lines 441-463) also does not include spotPreferences as a parameter, meaning the fix requires both UI changes and action updates.",
+          "line_number": 441,
+          "suggested_fix": "Update the editPerson action type and body to accept spotPreferences: string[] and persist it to the person record."
+        }
+      ],
+      "justification": "All 20 acceptance criteria are substantively addressed: today status view, spot requests (today and future), auto-allocation with 3-tier priority (default spot, preferences, any available), denial messaging, cancel request with immediate state update, past-date blocking, 7-day week view (Today prefix on all days fixed in iteration 3), admin CRUD for people and spots (Manage tab rendering bug fixed in iteration 3), priority reorder with rank recomputation, confirmation warning before spot removal with upcoming allocation count, manual assign with displacement handling, no-duplicate-request enforcement, dynamic spot count, and human-readable spot labels (double-hash display bug fixed in iteration 3). No-people bootstrap state renders correctly. Significant deduction: spot preferences editing is missing from the UI despite being a named spec feature (-15 SPF-1, -5 SPF-3)."
+    },
+    "ux_design": {
+      "score": 68,
+      "scoring_model": "evidence",
+      "baseline": 55,
+      "positive_evidence": [
+        "Clear 4-tab information architecture (Today, Week, My Requests, Manage) that maps precisely to distinct user modes. Each tab has a singular, unambiguous purpose evident within 2 seconds of viewing it.",
+        "Core task (request today's spot) is a single button tap from the default view — 'Request a Spot' appears directly in the status banner context with no navigation required. This matches the design principle exactly.",
+        "Identity selector dropdown in header is always visible and provides persistent context. Users can switch identity without navigating away from their current view.",
+        "Progressive disclosure executed well: Manage tab hidden for non-admins (admin panel not cluttering the primary experience), admin manual-assign section in week expanded view is visually separated behind a divider.",
+        "Inline confirmation dialogs for all destructive actions — remove person/spot with contextual consequence ('Future allocations will be cancelled', 'This spot has N upcoming allocations. They will be cancelled.') and cancel request showing the specific spot being freed.",
+        "Week view compact rows provide at-a-glance status without drill-in: 'free of total' count and personal allocation badge ('You: #5') visible immediately.",
+        "Empty states are contextually appropriate: no-people bootstrap state explains the path forward, no-spots message differentiates admin vs non-admin guidance, My Requests empty state includes actionable direction.",
+        "ct-* components used correctly throughout the pattern — $value on all ct-input and ct-select elements, $checked on ct-checkbox, camelCase props, string style on custom elements.",
+        "Visual hierarchy is clear: status banner with color-coded background (green for allocated, gray for unallocated) dominates Today tab; spot cards use colored left borders as immediate free/taken signal."
+      ],
+      "negative_evidence": [
+        "No spot preferences field in the edit-person form despite preferences being a spec-defined core feature. Users configuring their preferences have no UI surface for this.",
+        "Priority reordering implemented as Up/Down buttons rather than the drag-and-drop interaction specified in the UX design. Functional but substantially less intuitive for reordering a list.",
+        "No feedback toasts after actions — the UX design specified 'a brief informational toast: Spot #5 assigned for today.' Actions succeed silently; users must notice the state change in the banner or spot grid themselves.",
+        "The Setup tab button (lines 797-802) during bootstrap renders as a tab button but has no associated content panel visible — clicking it does not navigate to different content, producing a confusing non-action.",
+        "Admin manual assign interface requires: (1) click Week tab, (2) click a day row to expand, (3) find the admin section below a divider, (4) select person and spot dropdowns, (5) click Assign. Somewhat buried for an admin-only power feature."
+      ],
+      "justification": "Strong information architecture and core task efficiency clearly elevate this above the baseline. The tab structure maps well to user modes, the one-tap request flow is correctly implemented, week view is scannable, and progressive disclosure of admin features is appropriate. The pattern reads as designed rather than assembled for the primary user flows. Deductions: missing spot preferences UI is a meaningful gap for a named spec feature; no post-action toasts remove a planned feedback mechanism; Up/Down priority reordering falls short of the designed drag interaction; the Setup tab button is a confusing artifact. Score 68 — thoughtfully designed with clear intent for the primary flows, but specific gaps in admin completeness and feedback mechanisms."
+    },
+    "experience_quality": {
+      "score": 62,
+      "scoring_model": "evidence",
+      "baseline": 55,
+      "positive_evidence": [
+        "Requesting today's spot is genuinely a single action — no navigation, no form, no confirmation before submission. The status banner provides immediate, unambiguous outcome display. This core flow is well-executed.",
+        "The 'denied is not an error' philosophy is correctly implemented — 'No spots are available today.' is calm and informative, not alarming. The message tone matches the domain's low-stakes nature.",
+        "Auto-allocation result appears immediately in the same view — status banner updates, spot card changes, no page transitions or loading states. The outcome is legible without hunting for it.",
+        "Error prevention is thorough: request button hidden when user already has allocation; request button hidden when all spots are full and a re-request would be futile; past-date submission blocked at the action level; inline confirms before all destructive actions.",
+        "The week-ahead view provides genuine value over a spreadsheet — 7 days of spot availability with personal indicators, expandable to full detail and action. Structurally better than any flat list or shared calendar.",
+        "Week view expanded day shows the current user's situation plus an actionable button for that date — the information and action are co-located, reducing navigation."
+      ],
+      "negative_evidence": [
+        "Missing spot preferences means the auto-allocation system works with less information than it should. A user who always wants spot #12 has no way to express that preference, so they may repeatedly get sub-optimal allocations.",
+        "No session persistence for user identity — currentUser starts as empty string on every load. The 'Who are you?' screen appears on every session, adding friction for a tool expected to be checked daily on the way to work.",
+        "The bootstrap experience for a first-time admin is non-obvious: add self in People form, note the system accepts them, return to the identity selection, select self, then use edit to mark self as admin to access the Manage tab. Not a critical blocker but a real workflow pain.",
+        "Action feedback is entirely reliant on visible state change. If the user's attention was not on the status banner when they tapped 'Request a Spot,' they have no way to confirm the action succeeded without reading the current state and inferring the change.",
+        "The edit-person form does not pre-populate spot preferences (because the field doesn't exist) and there is no spot preferences UI, meaning the tool's priority-based allocation benefit is partially inaccessible to users who want to use it."
+      ],
+      "justification": "The core request flow is genuinely efficient and would be preferable to a shared spreadsheet for the daily parking coordination use case. The one-tap request, immediate outcome, and week summary view are real workflow improvements. Error prevention is solid. Score above baseline because the primary use case works well. Deductions: missing spot preferences degrades the tool's primary differentiator (priority-based allocation with preferences); no session persistence means daily friction; no action feedback beyond state changes. Score 62 — above baseline because core task is genuinely good, but specific design gaps prevent the pattern from reaching its potential."
+    },
+    "first_run": {
+      "score": 47,
+      "scoring_model": "evidence",
+      "baseline": 55,
+      "positive_evidence": [
+        "After iteration 3 fixes, all UI elements render correctly on fresh deploy — Manage tab shows spot data (not person data), Today tab does not go blank after cancel actions, week view labels only the first day as 'Today.'",
+        "The no-people bootstrap state is properly handled: user sees a clear message ('No team members yet. Use the forms below to add people and parking spots to get started.') with immediate access to People and Spots forms in the same view.",
+        "No circular dependency blocks first use — admins can add people and spots before selecting an identity, and the Manage tab forms are accessible in the no-people bootstrap state without first selecting a user.",
+        "No-spots message differentiates admin vs non-admin guidance ('Go to Manage to add spots' vs 'Ask an admin to set up the system') — contextually appropriate first-run guidance."
+      ],
+      "negative_evidence": [
+        "No pre-populated default data. On first deploy, users see an entirely empty system requiring full manual setup (add people, add spots, mark an admin, select identity) before any parking coordination can occur. The rubric specifically benchmarks a good parking coordinator as deploying with spots pre-populated and a spot requestable within 10 seconds.",
+        "The Setup tab button (lines 797-802) during bootstrap renders as a tab label but clicking it does not navigate to different content or trigger any action — a confusing dead-end for a user attempting to discover the bootstrap path.",
+        "A first-time non-admin user who opens the pattern before an admin has configured the system sees 'No team members yet. Use the forms below...' — but the forms below require admin access. The message does not tell them to contact an admin.",
+        "No identity persistence across sessions means every new session opens with the 'Who are you?' screen, which requires people to exist. On a completely fresh deploy, this compounds the bootstrap confusion."
+      ],
+      "justification": "Significant improvement over the previous run's first-run experience: the bootstrap path is accessible, UI renders correctly, and guidance messages are contextual. However, the core first-run gap remains: no pre-populated default data means the pattern is not immediately useful. A new user must complete a multi-step admin bootstrap before anyone can request a parking spot. The Setup tab button adds confusion. Score 47 — below baseline because the no-defaults gap is the primary failure mode for factory patterns described in the rubric, and this pattern does not address it."
+    }
+  },
+  "overall": {
+    "score": 58,
+    "interpretation": "functional",
+    "raw_weighted_score": 63,
+    "process_efficiency_modifier": -5,
+    "modifier_reason": "3 build iterations required: initial build (iteration 1) + critic fix pass (iteration 2) + manual-test fix pass (iteration 3). Modifier: -2 for 2nd iteration + -3 for 3rd iteration = -5 total.",
+    "dimension_breakdown": {
+      "correctness": "80 * 0.15 = 12.00",
+      "code_craft": "75 * 0.15 = 11.25",
+      "test_coverage": "30 * 0.10 = 3.00",
+      "spec_fidelity": "65 * 0.10 = 6.50",
+      "ux_design": "68 * 0.20 = 13.60",
+      "experience_quality": "62 * 0.20 = 12.40",
+      "first_run": "47 * 0.10 = 4.70",
+      "raw_total": "63.45 → 63",
+      "after_modifier": "63 - 5 = 58"
+    },
+    "summary": "A well-architected parking coordinator with solid business logic, a genuinely efficient one-tap request flow, and good information architecture — but dragged down by failing tests (TST-2 cap at 30 applies), missing spot preferences UI (a named spec feature with auto-allocation logic wired but no user-facing surface), no pre-populated defaults for first-run, and the cost of three build iterations. The browser rendering bugs from manual testing were successfully fixed. The core daily use case works correctly and would be preferable to a spreadsheet, but the pattern is not ready to hand to a real team without spot preferences, session persistence, and sensible startup data."
+  }
+}
