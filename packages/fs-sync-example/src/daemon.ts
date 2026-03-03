@@ -77,6 +77,28 @@ interface ApplyResult {
   canonicalId?: string; // Set for "create" edits
 }
 
+/**
+ * Resolve pending IDs to canonical IDs in toggle/delete edits.
+ * Returns null for spurious deletes: a delete targeting a pending ID is
+ * always a reactive artifact (the optimistic todo was replaced by the
+ * canonical state). Real user deletes target canonical IDs.
+ */
+function resolveEdit(
+  edit: Edit,
+  pendingToCanonical: Map<string, string>,
+): Edit | null {
+  if (edit.type === "toggle" || edit.type === "delete") {
+    const resolved = pendingToCanonical.get(edit.id);
+    if (resolved) {
+      if (edit.type === "delete") {
+        return null; // Spurious — real deletes use canonical IDs
+      }
+      return { ...edit, id: resolved };
+    }
+  }
+  return edit;
+}
+
 function applyEdit(
   edit: Edit,
   filePath: string,
@@ -189,6 +211,11 @@ export function runSyncLoop(
     );
   }
 
+  // Map pending IDs (e.g. "pending-1234") to canonical IDs (e.g. "T-01").
+  // Lives for the daemon's lifetime so toggle/delete edits that arrive after
+  // the create sync can still be resolved.
+  const pendingToCanonical = new Map<string, string>();
+
   // Concurrency guard: only one sync runs at a time.
   let syncInProgress = false;
   let syncAgain = false;
@@ -263,11 +290,20 @@ export function runSyncLoop(
         const applied: Edit[] = [];
         const failed: FailedEdit[] = [];
         for (let i = editWatermark; i < edits.length; i++) {
-          const edit = edits[i];
+          const original = edits[i];
+          const edit = resolveEdit(original, pendingToCanonical);
+          if (edit === null) {
+            continue; // Spurious delete — skip
+          }
           try {
             const result = applyEdit(edit, todoFilePath);
-            if (edit.type === "create" && result.canonicalId) {
-              editIdMap.set(edit, result.canonicalId);
+            if (original.type === "create" && result.canonicalId) {
+              editIdMap.set(original, result.canonicalId);
+              // Record pending→canonical so future toggle/delete edits
+              // referencing this pending ID get resolved.
+              if (original.pendingId) {
+                pendingToCanonical.set(original.pendingId, result.canonicalId);
+              }
             }
             applied.push(edit);
           } catch (err) {

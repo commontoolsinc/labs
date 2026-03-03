@@ -31,15 +31,17 @@ const onCreate = handler<
   const description = detail?.message?.trim();
   if (!description) return;
 
+  const pendingId = `pending-${Date.now()}`;
+
   // Optimistic: add to local state immediately
   todos.push({
-    id: `pending-${Date.now()}`,
+    id: pendingId,
     description,
     done: false,
   });
 
-  // Enqueue edit for the daemon
-  edits.push({ type: "create", description });
+  // Enqueue edit for the daemon (pendingId lets the daemon map it to canonical)
+  edits.push({ type: "create", description, pendingId });
 });
 
 const onToggle = handler<

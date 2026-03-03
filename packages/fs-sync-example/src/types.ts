@@ -12,7 +12,7 @@ export interface State {
 
 /** An edit the user wants to apply. */
 export type Edit =
-  | { type: "create"; description: string }
+  | { type: "create"; description: string; pendingId?: string }
   | { type: "toggle"; id: string; done: boolean }
   | { type: "delete"; id: string };
 
