@@ -13,7 +13,11 @@
  * reactive context" errors when accessing proxy objects like subject.submitItem.
  */
 import { Cell, computed, handler, pattern, Stream } from "commontools";
-import SelfImprovingClassifier from "./self-improving-classifier.tsx";
+import SelfImprovingClassifier, {
+  type ClassificationRule,
+  type LabeledExample,
+  type PendingClassification,
+} from "./self-improving-classifier.tsx";
 
 // Handler to set up a tier 4 rule
 const setupTier4Rule = handler<
@@ -89,9 +93,9 @@ export default pattern(() => {
       harmAsymmetry: "equal" as const,
       enableLLMFallback: true,
     }),
-    examples: Cell.of([]),
-    rules: Cell.of([]),
-    pendingClassifications: Cell.of([]),
+    examples: Cell.of<LabeledExample[]>([]),
+    rules: Cell.of<ClassificationRule[]>([]),
+    pendingClassifications: Cell.of<PendingClassification[]>([]),
     currentItem: Cell.of(null),
   });
 
