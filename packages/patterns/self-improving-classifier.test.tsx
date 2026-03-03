@@ -192,7 +192,7 @@ export default pattern(() => {
       { assertion: assert_config_set },
       // SKIP: Cell array proxy doesn't expose .length/properties after handler set()
       { action: action_setup_tier4_rule },
-      { assertion: assert_rule_added, skip: true },
+      { assertion: assert_rule_added },
 
       // Test 3: Auto-classification works for matching items
       // SKIP: depends on rule setup above + submitItem stream
