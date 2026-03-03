@@ -37,6 +37,7 @@ import type { OpaqueRef } from "@commontools/api";
 import { FileSystemProgramResolver } from "@commontools/js-compiler";
 import { basename } from "@std/path";
 import { timeout } from "@commontools/utils/sleep";
+import { experimentalOptionsFromEnv } from "./utils.ts";
 
 /**
  * A test step is an object with either an 'assertion' or 'action' property.
@@ -110,6 +111,7 @@ export async function runTestPattern(
 
   const runtime = new Runtime({
     storageManager,
+    experimental: experimentalOptionsFromEnv(),
     apiUrl: new URL(import.meta.url),
     errorHandlers: [(error: ErrorWithContext) => runtimeErrors.push(error)],
     navigateCallback: (target) => {

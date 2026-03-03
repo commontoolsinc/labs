@@ -837,6 +837,14 @@ export class Replica {
             "query-error",
             () => ["query failure", queryArgs, result.error],
           );
+          // Surface auth errors prominently so they're not silently swallowed
+          if ((result.error as any).name === "AuthorizationError") {
+            console.error(
+              `[storage] AuthorizationError during query/sync: ${
+                (result.error as any).message ?? result.error
+              }`,
+            );
+          }
           return Promise.resolve({ error: result.error });
         } else {
           const integrateStart = performance.now();
@@ -1163,6 +1171,12 @@ export class Replica {
             ]
             : [],
         ]);
+        // Surface auth errors prominently so they're not silently swallowed
+        if (result.error.name === "AuthorizationError") {
+          console.error(
+            `[storage] AuthorizationError during transaction commit: ${result.error.message}`,
+          );
+        }
       }
 
       // Checkout current state of facts so we can compute

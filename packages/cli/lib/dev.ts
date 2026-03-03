@@ -3,6 +3,7 @@ import { FileSystemProgramResolver } from "@commontools/js-compiler";
 import { Identity } from "@commontools/identity";
 import { Engine, Runtime } from "@commontools/runner";
 import { basename } from "@std/path";
+import { experimentalOptionsFromEnv } from "./utils.ts";
 
 async function createRuntime() {
   const { StorageManager } = await import(
@@ -13,6 +14,7 @@ async function createRuntime() {
   });
   return new Runtime({
     storageManager,
+    experimental: experimentalOptionsFromEnv(),
     apiUrl: new URL(import.meta.url),
   });
 }
