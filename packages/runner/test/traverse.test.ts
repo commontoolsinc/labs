@@ -1299,6 +1299,91 @@ for (const canonicalHashing of [false, true]) {
 
         expect(error).toBeDefined();
       });
+
+      it("oneOf [unknown, non-matching type] with object returns opaque (only unknown matches)", () => {
+        const store = new Map<string, Revision<State>>();
+        const type = "application/json" as const;
+        const docUri = "of:doc-oneof-unknown-obj" as URI;
+        const docEntity = docUri as Entity;
+
+        const linkedUri = "of:doc-oneof-unknown-link" as URI;
+        const docValue = {
+          ref: { "/": { [LINK_V1_TAG]: { id: linkedUri, path: [] } } },
+        };
+
+        store.set(`${docUri}/${type}`, {
+          the: type,
+          of: docEntity,
+          is: { value: docValue },
+          cause: refer({ the: type, of: docEntity }),
+          since: 1,
+        });
+        store.set(`${linkedUri}/${type}`, {
+          the: type,
+          of: linkedUri as Entity,
+          is: { value: { label: "should not appear" } },
+          cause: refer({ the: type, of: linkedUri as Entity }),
+          since: 2,
+        });
+
+        // oneOf: only the unknown branch matches an object (string branch rejects it)
+        const schema = {
+          oneOf: [{ type: "unknown" }, { type: "string" }],
+        } as JSONSchema;
+
+        const traverser = getTraverser(store, { path: ["value"], schema });
+        const { ok: result, error } = traverser.traverse({
+          address: {
+            space: "did:null:null",
+            id: docUri,
+            type,
+            path: ["value"],
+          },
+          value: docValue,
+        });
+
+        expect(error).toBeUndefined();
+        // unknown branch matched — value is opaque, link not followed
+        expect(result).toBeUndefined();
+      });
+
+      it("oneOf [unknown, matching object schema] returns error (multiple matches)", () => {
+        const store = new Map<string, Revision<State>>();
+        const type = "application/json" as const;
+        const docUri = "of:doc-oneof-unknown-multi" as URI;
+        const docEntity = docUri as Entity;
+        const docValue = { name: "Alice" };
+
+        store.set(`${docUri}/${type}`, {
+          the: type,
+          of: docEntity,
+          is: { value: docValue },
+          cause: refer({ the: type, of: docEntity }),
+          since: 1,
+        });
+
+        // Both branches match: unknown accepts anything, object branch also matches
+        const schema = {
+          oneOf: [
+            { type: "unknown" },
+            { type: "object", properties: { name: { type: "string" } } },
+          ],
+        } as JSONSchema;
+
+        const traverser = getTraverser(store, { path: ["value"], schema });
+        const { error } = traverser.traverse({
+          address: {
+            space: "did:null:null",
+            id: docUri,
+            type,
+            path: ["value"],
+          },
+          value: docValue,
+        });
+
+        // Both branches match → multiple matching oneOf error
+        expect(error).toBeDefined();
+      });
     });
 
     describe("SchemaObjectTraverser allOf correctness", () => {
@@ -1347,6 +1432,66 @@ for (const canonicalHashing of [false, true]) {
         });
 
         expect(result).toEqual({ a: "x", b: "y" });
+      });
+
+      it("treats allOf [unknown, concrete] as concrete (unknown & T = T)", () => {
+        const store = new Map<string, Revision<State>>();
+        const type = "application/json" as const;
+        const targetUri = "of:doc-allof-unknown-target" as URI;
+        const docUri = "of:doc-allof-unknown-container" as URI;
+
+        store.set(`${targetUri}/${type}`, {
+          the: type,
+          of: targetUri as Entity,
+          is: { value: { city: "Paris" } },
+          cause: refer({ the: type, of: targetUri as Entity }),
+          since: 1,
+        });
+
+        const docValue = {
+          name: "Alice",
+          address: { "/": { [LINK_V1_TAG]: { id: targetUri, path: [] } } },
+        };
+        store.set(`${docUri}/${type}`, {
+          the: type,
+          of: docUri as Entity,
+          is: { value: docValue },
+          cause: refer({ the: type, of: docUri as Entity }),
+          since: 1,
+        });
+
+        // allOf: unknown & object => object; link should be followed
+        const schema = {
+          allOf: [
+            { type: "unknown" },
+            {
+              type: "object",
+              properties: {
+                name: { type: "string" },
+                address: {
+                  type: "object",
+                  properties: { city: { type: "string" } },
+                },
+              },
+            },
+          ],
+        } as JSONSchema;
+
+        const traverser = getTraverser(store, { path: ["value"], schema });
+        const { ok: result } = traverser.traverse({
+          address: {
+            space: "did:null:null",
+            id: docUri,
+            type,
+            path: ["value"],
+          },
+          value: docValue,
+        });
+
+        const obj = result as Record<string, unknown>;
+        expect(obj.name).toBe("Alice");
+        // Link is followed because the concrete schema wins over unknown in allOf
+        expect((obj.address as Record<string, unknown>)?.city).toBe("Paris");
       });
     });
 
@@ -2704,5 +2849,72 @@ describe("SchemaObjectTraverser unknown type handling", () => {
         att.address.id === redirectTestDataUri
       ),
     ).toBe(true);
+  });
+
+  it("type union [unknown, string] treats object value as opaque", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const linkedUri = "of:doc-union-unknown-link" as URI;
+    const docUri = "of:doc-union-unknown-obj" as URI;
+
+    store.set(`${linkedUri}/${type}`, {
+      the: type,
+      of: linkedUri as Entity,
+      is: { value: { label: "should not appear" } },
+      cause: refer({ the: type, of: linkedUri as Entity }),
+      since: 1,
+    });
+
+    const docValue = {
+      ref: { "/": { [LINK_V1_TAG]: { id: linkedUri, path: [] } } },
+    };
+    store.set(`${docUri}/${type}`, {
+      the: type,
+      of: docUri as Entity,
+      is: { value: docValue },
+      cause: refer({ the: type, of: docUri as Entity }),
+      since: 2,
+    });
+
+    // "unknown" in a type array makes any object value opaque
+    const schema = { type: ["unknown", "string"] } as JSONSchema;
+    const traverser = getTraverser(store, { path: ["value"], schema });
+
+    const { ok: result, error } = traverser.traverse({
+      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
+      value: docValue,
+    });
+
+    expect(error).toBeUndefined();
+    // Object is treated as opaque — link not followed
+    expect(result).toBeUndefined();
+  });
+
+  it("type union [unknown, string] passes string values through", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-union-unknown-str" as URI;
+    const docEntity = docUri as Entity;
+    const docValue = "hello";
+
+    store.set(`${docUri}/${type}`, {
+      the: type,
+      of: docEntity,
+      is: { value: docValue },
+      cause: refer({ the: type, of: docEntity }),
+      since: 1,
+    });
+
+    // Primitives are not opaque even when type union includes "unknown"
+    const schema = { type: ["unknown", "string"] } as JSONSchema;
+    const traverser = getTraverser(store, { path: ["value"], schema });
+
+    const { ok: result, error } = traverser.traverse({
+      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
+      value: docValue,
+    });
+
+    expect(error).toBeUndefined();
+    expect(result).toBe("hello");
   });
 });
