@@ -60,6 +60,7 @@ export interface NotebookPiece {
   title?: string;
   notes?: NotePiece[];
   backlinks?: MentionablePiece[];
+  isHidden?: boolean;
 
   createNote: Stream<{ title: string; content: string; navigate?: boolean }>;
   createNotes: Stream<{ notesData: Array<{ title: string; content: string }> }>;

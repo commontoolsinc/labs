@@ -16,7 +16,6 @@ import {
 } from "commontools";
 import Note from "../notes/note.tsx";
 import Notebook from "../notes/notebook.tsx";
-import { generateId } from "../notes/schemas.tsx";
 import { listMentionable, listRecent } from "./common-tools.tsx";
 import {
   searchPattern as summarySearchPattern,

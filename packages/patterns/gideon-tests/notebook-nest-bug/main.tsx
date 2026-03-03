@@ -12,7 +12,7 @@ import {
 } from "commontools";
 import Note from "../../notes/note.tsx";
 import Notebook from "../../notes/notebook.tsx";
-import { generateId, type MinimalPiece } from "../../notes/schemas.tsx";
+import { type MinimalPiece } from "../../notes/schemas.tsx";
 
 export default pattern<
   Record<PropertyKey, never>,

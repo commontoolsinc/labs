@@ -57,6 +57,8 @@ interface Output {
   importComplete: boolean;
   selectedNoteIndices: readonly number[];
   selectedNotebookIndices: readonly number[];
+  debugError: string;
+  debugParsedCount: number;
 
   // Actions as Stream<T> for testing
   analyzeImport: Stream<void>;
@@ -168,7 +170,7 @@ function getNotebookContents(
   notebook: NotebookPiece,
   getNoteId?: (note: NotePiece) => string | undefined,
 ): { noteIds: string[]; childNotebookTitles: string[] } {
-  const notes = (notebook as any)?.notes ?? [];
+  const notes = notebook?.notes ?? [];
   const noteIds: string[] = [];
   const childNotebookTitles: string[] = [];
 
@@ -224,7 +226,7 @@ function generateExport(
     const content = stripMentionIds(rawContent);
     const noteId = getNoteId(note) || "";
     const notebookNames = getNotebookNamesForNote(note, notebooks);
-    const isHidden = resolveBooleanValue((note as any)?.isHidden, note);
+    const isHidden = resolveBooleanValue(note?.isHidden, note);
 
     const escapedTitle = title.replace(/"/g, "&quot;");
     const notebooksStr = notebookNames.join(", ");
@@ -242,12 +244,12 @@ function generateExport(
       const notebookName = notebook?.[NAME];
       for (const piece of allPiecesRaw) {
         if (piece?.[NAME] === notebookName) {
-          isHidden = resolveBooleanValue((piece as any)?.isHidden, piece);
+          isHidden = resolveBooleanValue(piece?.isHidden, piece);
           break;
         }
       }
     } else {
-      isHidden = resolveBooleanValue((notebook as any)?.isHidden, notebook);
+      isHidden = resolveBooleanValue(notebook?.isHidden, notebook);
     }
 
     const { noteIds, childNotebookTitles } = getNotebookContents(
@@ -953,7 +955,7 @@ const goToNote = handler<void, { note: Writable<NotePiece> }>(
 );
 
 // Navigate to notebook
-const goToNotebook = handler<void, { notebook: Writable<NotebookPiece> }>(
+const goToNotebook = handler<void, { notebook: NotebookPiece }>(
   (_, { notebook }) => navigateTo(notebook),
 );
 
@@ -1118,7 +1120,7 @@ const NotesImportExport = pattern<Input, Output>(
       }> = [];
 
       for (const nb of notebooks) {
-        const nbNotes = (nb as any)?.notes ?? [];
+        const nbNotes = nb?.notes ?? [];
         const cleanName = getCleanNotebookTitle(nb);
         for (const n of nbNotes) {
           let entry = result.find((item) => equals(item.note, n));
@@ -1128,7 +1130,7 @@ const NotesImportExport = pattern<Input, Output>(
           }
           entry.memberships.push({
             name: cleanName,
-            notebook: nb as any,
+            notebook: nb,
           });
         }
       }
@@ -1142,7 +1144,7 @@ const NotesImportExport = pattern<Input, Output>(
     // Selection actions
     const selectAllNotes = action(() => {
       console.log(">>>> selectAllNotes TRIGGERED!");
-      const rawNotes = (notes as any).get() ?? [];
+      const rawNotes = [...notes];
       console.log(">>>> RAW NOTES LENGTH", rawNotes.length);
       const idxs: number[] = [];
       for (let i = 0; i < rawNotes.length; i++) idxs.push(i);
@@ -1168,7 +1170,7 @@ const NotesImportExport = pattern<Input, Output>(
 
     // Visibility bulk actions
     const toggleAllNotesVisibility = action(() => {
-      if ((noteCount as any).get() === 0) return;
+      if (noteCount === 0) return;
 
       const anyVisible = notes.some((n: any) => !n?.isHidden);
       const newHiddenState = anyVisible;
@@ -1289,7 +1291,7 @@ const NotesImportExport = pattern<Input, Output>(
           const baseTitle = getCleanNotebookTitle(original);
           const nb = Notebook({
             title: baseTitle + " (Clone)",
-            notes: [...((original as any)?.notes ?? [])],
+            notes: [...(original?.notes ?? [])],
           });
           allPieces.push(nb);
         }
@@ -1303,15 +1305,18 @@ const NotesImportExport = pattern<Input, Output>(
       for (const idx of selected) {
         const original = notebooks[idx];
         if (original) {
-          const newNotes = ((original as any).notes ?? []).map((
-            note: NotePiece,
-          ) =>
-            Note({
-              title: note.title ?? "Note",
-              content: note.content ?? "",
-              isHidden: true,
-            })
-          );
+          const originalNotes = original.notes;
+          const newNotes = originalNotes
+            ? originalNotes.map((
+              note: NotePiece,
+            ) =>
+              Note({
+                title: note.title ?? "Note",
+                content: note.content ?? "",
+                isHidden: true,
+              })
+            )
+            : [];
 
           for (const note of newNotes) {
             allPieces.push(note);
@@ -1479,7 +1484,7 @@ const NotesImportExport = pattern<Input, Output>(
       // Make contained notes visible
       for (const idx of selected) {
         const nb = notebooks[idx];
-        const nbNotes = (nb as any)?.notes ?? [];
+        const nbNotes = nb?.notes ?? [];
         for (const note of nbNotes) {
           for (let i = 0; i < allPiecesList.length; i++) {
             if (equals(allPiecesList[i], note)) {
@@ -1529,7 +1534,7 @@ const NotesImportExport = pattern<Input, Output>(
       const notesToDelete: any[] = [];
       for (const idx of selected) {
         const nb = notebooks[idx];
-        const nbNotes = (nb as any)?.notes ?? [];
+        const nbNotes = nb?.notes ?? [];
         notesToDelete.push(...nbNotes);
       }
 
@@ -1661,7 +1666,7 @@ const NotesImportExport = pattern<Input, Output>(
       const allPiecesArray = [...allPieces.get()];
       const result = generateExport(
         allPiecesArray,
-        (notebooks as any).get() ?? [],
+        [...notebooks],
         allPiecesArray,
       );
       exportedMarkdown.set(result.markdown);
@@ -1683,7 +1688,7 @@ const NotesImportExport = pattern<Input, Output>(
       for (const idx of selected) {
         const nb = notebooks[idx];
         const cleanName = getCleanNotebookTitle(nb);
-        const nbNotes = (nb as any)?.notes ?? [];
+        const nbNotes = nb?.notes ?? [];
         for (const note of nbNotes) {
           if (note?.title !== undefined && note?.content !== undefined) {
             allNotes.push({
@@ -1739,11 +1744,11 @@ const NotesImportExport = pattern<Input, Output>(
     // ========================================================================
 
     const analyzeImport = action(() => {
-      const markdown = (importMarkdown as any).get();
+      const markdown = importMarkdown;
       const result = analyzeImportContent(
         markdown,
-        (notes as any).get() ?? [],
-        (notebooks as any).get() ?? [],
+        [...notes],
+        [...notebooks],
       );
 
       if (!result) {
@@ -1787,8 +1792,8 @@ const NotesImportExport = pattern<Input, Output>(
 
         const result = analyzeImportContent(
           content,
-          (notes as any).get() ?? [],
-          (notebooks as any).get() ?? [],
+          [...notes],
+          [...notebooks],
         );
         if (!result) return;
         processImportResult(content, result, {
@@ -1854,8 +1859,8 @@ const NotesImportExport = pattern<Input, Output>(
         const original = notesList[idx];
         if (original) {
           const newNote = Note({
-            title: ((original as any).title ?? "Note") + " (Copy)",
-            content: (original as any).content ?? "",
+            title: (original.title ?? "Note") + " (Copy)",
+            content: original.content ?? "",
           });
           allPieces.push(newNote);
         }
@@ -2014,7 +2019,7 @@ const NotesImportExport = pattern<Input, Output>(
                             }}
                           >
                             <ct-switch
-                              checked={computed(() => !(note as any)?.isHidden)}
+                              checked={computed(() => !note?.isHidden)}
                               onct-change={toggleNoteVisibility({ note })}
                             />
                           </td>
@@ -2026,9 +2031,7 @@ const NotesImportExport = pattern<Input, Output>(
                   {/* Select All footer */}
                   <div
                     style={{
-                      display: computed(() =>
-                        (noteCount as any).get() > 1 ? "flex" : "none"
-                      ),
+                      display: computed(() => noteCount > 1 ? "flex" : "none"),
                       alignItems: "center",
                       padding: "4px 0",
                       fontSize: "13px",
@@ -2038,13 +2041,13 @@ const NotesImportExport = pattern<Input, Output>(
                     <div style={{ width: "32px", padding: "0 4px" }}>
                       <ct-checkbox
                         checked={computed(() =>
-                          (noteCount as any).get() > 0 &&
+                          noteCount > 0 &&
                           selectedNoteIndices.get().length ===
-                            (noteCount as any).get()
+                            noteCount
                         )}
                         onct-change={computed(() =>
                           selectedNoteIndices.get().length ===
-                              (noteCount as any).get()
+                              noteCount
                             ? deselectAllNotes
                             : selectAllNotes
                         )}
@@ -2180,7 +2183,7 @@ const NotesImportExport = pattern<Input, Output>(
                             <div
                               style={{ cursor: "pointer" }}
                               onClick={goToNotebook({
-                                notebook: notebook as any,
+                                notebook,
                               })}
                             >
                               <ct-chip
@@ -2200,11 +2203,9 @@ const NotesImportExport = pattern<Input, Output>(
                             }}
                           >
                             <ct-switch
-                              checked={computed(() =>
-                                !(notebook as any)?.isHidden
-                              )}
+                              checked={computed(() => !notebook?.isHidden)}
                               onct-change={toggleNotebookVisibility({
-                                notebook: notebook as any,
+                                notebook,
                               })}
                             />
                           </td>
@@ -2217,7 +2218,7 @@ const NotesImportExport = pattern<Input, Output>(
                   <div
                     style={{
                       display: computed(() =>
-                        (notebookCount as any).get() > 1 ? "flex" : "none"
+                        notebookCount > 1 ? "flex" : "none"
                       ),
                       alignItems: "center",
                       padding: "4px 0",
@@ -2227,14 +2228,13 @@ const NotesImportExport = pattern<Input, Output>(
                   >
                     <div style={{ width: "32px", padding: "0 4px" }}>
                       <ct-checkbox
-                        checked={computed(() =>
-                          (notebookCount as any).get() > 0 &&
+                        checked={computed(() => notebookCount > 0 &&
                           selectedNotebookIndices.get().length ===
-                            (notebookCount as any).get()
+                            notebookCount
                         )}
                         onct-change={computed(() =>
                           selectedNotebookIndices.get().length ===
-                              (notebookCount as any).get()
+                              notebookCount
                             ? deselectAllNotebooks
                             : selectAllNotebooks
                         )}
