@@ -72,8 +72,26 @@ export const getBaseUrl = (url: string): string => {
   }
 };
 
+// Escape special HTML characters to prevent XSS when interpolating into HTML.
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 // Helper function to generate HTML for the callback page
 export function generateCallbackHtml(result: Record<string, unknown>): string {
+  // Escape user-controlled values before interpolation into HTML body.
+  const statusMessage = result.success
+    ? "You can close this window now."
+    : escapeHtml(String(result.error || "An error occurred"));
+
+  // Escape '<' in JSON to prevent </script> breakout in script context.
+  const safeJson = JSON.stringify(result).replace(/</g, "\\u003c");
+
   return `
     <!DOCTYPE html>
     <html>
@@ -99,19 +117,15 @@ export function generateCallbackHtml(result: Record<string, unknown>): string {
     result.success ? "Authentication Successful!" : "Authentication Failed"
   }
       </h1>
-      <p>${
-    result.success
-      ? "You can close this window now."
-      : result.error || "An error occurred"
-  }</p>
+      <p>${statusMessage}</p>
       <script>
         // Send message to opener and close window
         if (window.opener) {
           window.opener.postMessage({
             type: 'oauth-callback',
-            result: ${JSON.stringify(result)}
+            result: ${safeJson}
           }, window.location.origin);
-          
+
           // Close the window after a short delay
           setTimeout(() => window.close(), 2000);
         }
