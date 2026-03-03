@@ -92,8 +92,6 @@ export class MentionController implements ReactiveController {
   private _mentionable: CellHandle<MentionableArray> | null = null;
   private _mentionableTyped: CellHandle<MentionableArray> | null = null;
   private _mentionableUnsubscribe: (() => void) | null = null;
-  // Maps raw cell ID (array sub-path) → resolved piece cell ID (the real entity)
-  private _resolvedPieceIds = new Map<string, string>();
 
   constructor(
     host: ReactiveControllerHost,
@@ -263,10 +261,11 @@ export class MentionController implements ReactiveController {
   }
 
   /**
-   * Insert a mention at the current cursor position
+   * Insert a mention at the current cursor position.
+   * Resolves the sub-cell to the real piece entity ID at insertion time.
    */
-  insertMention(mention: CellHandle<Mentionable>): void {
-    const markdown = this.encodePieceAsMarkdown(mention);
+  async insertMention(mention: CellHandle<Mentionable>): Promise<void> {
+    const markdown = await this.encodePieceAsMarkdown(mention);
     this.config.onInsert(markdown, mention);
     this.hide();
   }
@@ -290,47 +289,26 @@ export class MentionController implements ReactiveController {
   }
 
   /**
-   * Encode a piece as markdown link [name](#entityId)
-   * Uses the resolved piece ID (the real entity, not the mentionable array sub-path)
-   * so that downstream consumers (LLM tools, read operations) can access the
-   * piece's full schema and handlers.
+   * Encode a piece as markdown link [name](/of:entityId).
+   * Resolves the sub-cell to the real piece entity ID so downstream
+   * consumers (LLM tools, read operations) can access the full schema.
    */
-  private encodePieceAsMarkdown(piece: CellHandle<Mentionable>): string {
-    // Only call .get() when we need the actual values
+  private async encodePieceAsMarkdown(
+    piece: CellHandle<Mentionable>,
+  ): Promise<string> {
     const name = piece.get()?.[NAME] || "Unknown";
-    // Prefer the resolved piece ID (real entity) over the array sub-path
-    const rawId = piece.id();
-    const href =
-      encodeURIComponent(this._resolvedPieceIds.get(rawId) ?? rawId) || "";
-    return `[${name}](${href})`;
-  }
-
-  /**
-   * Resolve all mentionable cell IDs to their real piece entity IDs.
-   * Array sub-cells like `/of:.../internal/mentionable/1` resolve to the
-   * actual piece cell ID so downstream consumers can access the full schema.
-   */
-  private async _resolvePieceIds(): Promise<void> {
-    const handle = this._mentionableTyped ?? this._mentionable;
-    if (!handle) return;
-
-    const arr = handle.get();
-    if (!Array.isArray(arr)) return;
-
-    const currentMentionable = this._mentionable;
-
-    await Promise.all(arr.map(async (_item, i) => {
-      try {
-        const subCell = handle.key(i);
-        const resolved = await subCell.resolveAsCell();
-        const resolvedId = resolved.id();
-        if (resolvedId && this._mentionable === currentMentionable) {
-          this._resolvedPieceIds.set(subCell.id(), resolvedId);
-        }
-      } catch {
-        // If resolution fails, we'll use the raw sub-cell ID as fallback
+    try {
+      const resolved = await piece.resolveAsCell();
+      return `[${name}](/${resolved.ref().id})`;
+    } catch {
+      // Fallback: build path from raw ref
+      const ref = piece.ref();
+      let href = `/${ref.id}`;
+      if (ref.path?.length) {
+        href += `/${ref.path.join("/")}`;
       }
-    }));
+      return `[${name}](${href})`;
+    }
   }
 
   /**
@@ -341,13 +319,12 @@ export class MentionController implements ReactiveController {
 
     const all = this.readMentionables();
     for (const mention of all) {
-      const rawId = mention.id();
-      const resolvedId = this._resolvedPieceIds.get(rawId);
-      // Match against both the raw sub-cell ID and the resolved piece ID
-      if (
-        encodeURIComponent(rawId) === href ||
-        (resolvedId && encodeURIComponent(resolvedId) === href)
-      ) {
+      const ref = mention.ref();
+      let rawHref = `/${ref.id}`;
+      if (ref.path?.length) {
+        rawHref += `/${ref.path.join("/")}`;
+      }
+      if (href === rawHref) {
         return mention;
       }
     }
@@ -416,7 +393,6 @@ export class MentionController implements ReactiveController {
         MentionableArraySchema,
       );
       this._mentionableUnsubscribe = this._mentionableTyped.subscribe(() => {
-        this._resolvePieceIds();
         this.host.requestUpdate();
       });
     }
@@ -432,6 +408,5 @@ export class MentionController implements ReactiveController {
       this._mentionableUnsubscribe = null;
     }
     this._mentionableTyped = null;
-    this._resolvedPieceIds.clear();
   }
 }
