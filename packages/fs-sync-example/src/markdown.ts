@@ -38,7 +38,7 @@ export function parseMarkdown(text: string): MarkdownState {
     }
     body = parts.slice(2).join("---");
   } else {
-    body = text;
+    body = normalized;
   }
 
   const todos: MarkdownState["todos"] = [];

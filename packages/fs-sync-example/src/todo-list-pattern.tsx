@@ -8,7 +8,6 @@
 import {
   computed,
   Default,
-  equals,
   handler,
   ifElse,
   NAME,
@@ -31,7 +30,9 @@ const onCreate = handler<
   const description = detail?.message?.trim();
   if (!description) return;
 
-  const pendingId = `pending-${Date.now()}`;
+  const pendingId = `pending-${Date.now()}-${
+    Math.random().toString(36).slice(2)
+  }`;
 
   // Optimistic: add to local state immediately
   todos.push({
@@ -46,23 +47,15 @@ const onCreate = handler<
 
 const onToggle = handler<
   unknown,
-  { todo: Todo; todos: Writable<Todo[]>; edits: Writable<Edit[]> }
->((_event, { todo, todos, edits }) => {
-  const newDone = !todo.done;
+  { todo: Writable<Todo>; edits: Writable<Edit[]> }
+>((_event, { todo, edits }) => {
+  const newDone = !todo.get().done;
 
-  // Optimistic update
-  const current = todos.get();
-  const idx = current.findIndex((t: Todo) => equals(todo, t));
-  if (idx >= 0) {
-    todos.set(
-      current.map((t: Todo, i: number) =>
-        i === idx ? { ...t, done: newDone } : t
-      ),
-    );
-  }
+  // Optimistic update — write directly to the todo cell
+  todo.key("done").set(newDone);
 
   // Enqueue edit with target state
-  edits.push({ type: "toggle", id: todo.id, done: newDone });
+  edits.push({ type: "toggle", id: todo.get().id, done: newDone });
 });
 
 const onDelete = handler<
@@ -70,11 +63,7 @@ const onDelete = handler<
   { todo: Todo; todos: Writable<Todo[]>; edits: Writable<Edit[]> }
 >((_event, { todo, todos, edits }) => {
   // Optimistic: remove from local state
-  const current = todos.get();
-  const idx = current.findIndex((t: Todo) => equals(todo, t));
-  if (idx >= 0) {
-    todos.set(current.toSpliced(idx, 1));
-  }
+  todos.remove(todo);
 
   // Enqueue edit
   edits.push({ type: "delete", id: todo.id });
@@ -97,8 +86,8 @@ interface Output {
   appliedEdits: Edit[];
   failedEdits: FailedEdit[];
   create: OpaqueRef<Stream<{ detail: { message: string } }>>;
-  toggles: OpaqueRef<unknown>[];
-  deletes: OpaqueRef<unknown>[];
+  toggles: unknown[];
+  deletes: unknown[];
 }
 
 /** Filesystem-synced todo list. #fsSyncTodo */
@@ -161,7 +150,7 @@ export default pattern<Input, Output>(
                   <ct-hstack gap="2" align="center">
                     <ct-checkbox
                       $checked={todo.done}
-                      onChange={onToggle({ todo, todos, edits })}
+                      onChange={onToggle({ todo, edits })}
                     />
                     <span
                       style={{
@@ -218,7 +207,7 @@ export default pattern<Input, Output>(
       appliedEdits,
       failedEdits,
       create: onCreate({ todos, edits }),
-      toggles: todos.map((todo) => onToggle({ todo, todos, edits })),
+      toggles: todos.map((todo) => onToggle({ todo, edits })),
       deletes: todos.map((todo) => onDelete({ todo, todos, edits })),
     };
   },

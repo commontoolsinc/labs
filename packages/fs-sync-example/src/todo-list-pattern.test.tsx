@@ -13,8 +13,6 @@
 import { action, computed, pattern, type Stream } from "commontools";
 import TodoList from "./todo-list-pattern.tsx";
 
-// Helper: the reactive .map() erases handler types to unknown.
-// At runtime they are Streams, so we cast for .send() access.
 function asStream(ref: unknown): Stream<void> {
   return ref as Stream<void>;
 }

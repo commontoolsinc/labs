@@ -79,20 +79,14 @@ interface ApplyResult {
 
 /**
  * Resolve pending IDs to canonical IDs in toggle/delete edits.
- * Returns null for spurious deletes: a delete targeting a pending ID is
- * always a reactive artifact (the optimistic todo was replaced by the
- * canonical state). Real user deletes target canonical IDs.
  */
 function resolveEdit(
   edit: Edit,
   pendingToCanonical: Map<string, string>,
-): Edit | null {
+): Edit {
   if (edit.type === "toggle" || edit.type === "delete") {
     const resolved = pendingToCanonical.get(edit.id);
     if (resolved) {
-      if (edit.type === "delete") {
-        return null; // Spurious — real deletes use canonical IDs
-      }
       return { ...edit, id: resolved };
     }
   }
@@ -292,9 +286,6 @@ export function runSyncLoop(
         for (let i = editWatermark; i < edits.length; i++) {
           const original = edits[i];
           const edit = resolveEdit(original, pendingToCanonical);
-          if (edit === null) {
-            continue; // Spurious delete — skip
-          }
           try {
             const result = applyEdit(edit, todoFilePath);
             if (original.type === "create" && result.canonicalId) {
@@ -325,9 +316,8 @@ export function runSyncLoop(
 
         // 2. Read full filesystem state, build cell structure.
         //    Cell.of() is used inside buildStateFromFs for each todo.
-        txTodos.set(
-          buildStateFromFs(todoFilePath, CellConstructor.of).todos,
-        );
+        const fsState = buildStateFromFs(todoFilePath, CellConstructor.of);
+        txTodos.set(fsState.todos);
 
         // 3. Write redirect links for newly created items.
         //    tempRefs maps edit indices to the temp cells allocated by the
