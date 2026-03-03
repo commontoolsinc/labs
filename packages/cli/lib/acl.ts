@@ -9,6 +9,7 @@ import {
   isACLUser,
 } from "@commontools/memory/acl";
 import { ACLManager } from "@commontools/piece/ops";
+import { experimentalOptionsFromEnv } from "./utils.ts";
 
 export interface SpaceConfig {
   apiUrl: URL;
@@ -37,6 +38,7 @@ export async function createRuntime(
 ): Promise<Runtime> {
   const runtime = new Runtime({
     apiUrl: config.apiUrl,
+    experimental: experimentalOptionsFromEnv(),
     storageManager: StorageManager.open({
       as: session.as,
       address: new URL("/api/storage/memory", config.apiUrl),
