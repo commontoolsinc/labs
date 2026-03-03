@@ -267,10 +267,7 @@ export class CommonToolsFormatter implements TypeFormatter {
       if (hint?.items === false) {
         isArrayPropertyOnlyAccess = true;
         // Build items override with object stub and the appropriate wrapper semantic
-        const itemsOverride: Record<string, unknown> = {
-          type: "object",
-          properties: {},
-        };
+        const itemsOverride: SchemaDefinition = { type: "unknown" };
         if (wrapperKind === "Cell") {
           itemsOverride.asCell = true;
         } else if (wrapperKind === "OpaqueRef") {

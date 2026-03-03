@@ -220,10 +220,11 @@ export const uiSchema = {
 
 export type UISchema = Schema<typeof uiSchema>;
 
-// We specify not true for the items, since we don't want to recursively load them
+// We specify type unknown for the items, since we don't want to recursively
+// load them
 export const pieceListSchema = {
   type: "array",
-  items: { type: "object", properties: {}, asCell: true },
+  items: { type: "unknown", asCell: true },
   default: [],
 } as const satisfies JSONSchema;
 
