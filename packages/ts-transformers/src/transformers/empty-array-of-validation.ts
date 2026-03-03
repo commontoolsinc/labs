@@ -43,21 +43,21 @@ export class EmptyArrayOfValidationTransformer extends Transformer {
       firstArg.elements.length === 0 &&
       !call.typeArguments?.length
     ) {
-      // Determine the class name for the error message.
-      // For `Cell.of([])` the expression is a PropertyAccessExpression;
-      // for the deprecated `cell([])` it's just an identifier.
+      // Build a display name matching the actual call site.
+      // For `Cell.of([])` the expression is a PropertyAccessExpression → "Cell.of";
+      // for the deprecated `cell([])` it's just an identifier → "cell".
       const callee = call.expression;
-      const className = ts.isPropertyAccessExpression(callee) &&
+      const displayName = ts.isPropertyAccessExpression(callee) &&
           ts.isIdentifier(callee.expression)
-        ? callee.expression.text
+        ? `${callee.expression.text}.${factoryName}`
         : factoryName;
 
       context.reportDiagnostic({
         severity: "error",
         type: "cell-factory:empty-array",
         message:
-          `${className}.${factoryName}([]) creates a Cell<never[]> because TypeScript infers [] as never[]. ` +
-          `Provide an explicit type argument: ${className}.${factoryName}<MyType[]>([])`,
+          `${displayName}([]) creates a Cell<never[]> because TypeScript infers [] as never[]. ` +
+          `Provide an explicit type argument: ${displayName}<MyType[]>([])`,
         node: call,
       });
     }
