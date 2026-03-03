@@ -2293,7 +2293,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
       for (const option of schemaObj.anyOf) {
         if (ContextualFlowControl.isTrueSchema(option)) {
           // unknown | any => any
-          anyOfValidity = TypeValidity.True;
+          match = TypeValidity.True;
           break;
         }
         const valid = this.isValidType(option, valueType);
@@ -2317,7 +2317,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
       for (const option of schemaObj.oneOf) {
         if (ContextualFlowControl.isTrueSchema(option)) {
           // unknown | any => any
-          oneOfValidity = TypeValidity.True;
+          match = TypeValidity.True;
           break;
         }
         const valid = this.isValidType(option, valueType);
