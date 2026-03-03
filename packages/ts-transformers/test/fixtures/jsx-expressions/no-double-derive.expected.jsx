@@ -25,7 +25,11 @@ export default function TestComponent({ items, cellRef }: {
         type: "object",
         properties: {
             name: {
-                type: "string"
+                anyOf: [{
+                        type: "string"
+                    }, {
+                        type: "undefined"
+                    }]
             }
         }
     } as const satisfies __ctHelpers.JSONSchema, {

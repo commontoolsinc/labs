@@ -712,28 +712,19 @@ export class SchemaGenerator implements ISchemaGenerator {
       return { type: "array", items };
     }
 
-    // Handle unions in synthetic nodes. This avoids widening optional
-    // properties like `name?: string` to `true` when checker resolution falls
-    // back to `any`.
+    // Handle unions in synthetic nodes. Keep all members including undefined
+    // to match the type-based UnionFormatter which emits { type: "undefined" }
+    // explicitly. Keyword types (string, number, boolean, undefined, null) are
+    // resolved directly by the switch below, so they never cause widening.
     if (ts.isUnionTypeNode(typeNode)) {
-      const nonUndefinedMembers = typeNode.types.filter((member) =>
-        member.kind !== ts.SyntaxKind.UndefinedKeyword
-      );
-      if (nonUndefinedMembers.length === 0) {
-        return { type: "undefined" };
-      }
-      if (nonUndefinedMembers.length === 1) {
-        return this.analyzeTypeNodeStructure(
-          nonUndefinedMembers[0]!,
-          checker,
-          context,
-        );
-      }
-      const memberSchemas = nonUndefinedMembers.map((member) =>
+      const memberSchemas = typeNode.types.map((member) =>
         this.analyzeTypeNodeStructure(member, checker, context)
       );
       if (memberSchemas.some((schema) => schema === true)) {
         return true as SchemaDefinition;
+      }
+      if (memberSchemas.length === 1) {
+        return memberSchemas[0]!;
       }
       return { anyOf: memberSchemas as Exclude<SchemaDefinition, boolean>[] };
     }
