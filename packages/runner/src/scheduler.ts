@@ -2113,7 +2113,9 @@ export class Scheduler {
 
     const nonIdempotent: NonIdempotentReport[] = [];
 
-    for (const action of this.computations) {
+    // Snapshot computations to avoid iterating a live Set that grows during commits
+    const computationsSnapshot = [...this.computations];
+    for (const action of computationsSnapshot) {
       const actionId = this.getActionId(action);
 
       // Round 1: run and COMMIT (so accumulated state becomes visible)
