@@ -38,6 +38,13 @@ import { FileSystemProgramResolver } from "@commontools/js-compiler";
 import { basename } from "@std/path";
 import { timeout } from "@commontools/utils/sleep";
 import { experimentalOptionsFromEnv } from "./utils.ts";
+import {
+  type CDFPoint,
+  getLoggerCountsBreakdown,
+  getTimingStatsBreakdown,
+  resetAllCountBaselines,
+  resetAllTimingBaselines,
+} from "@commontools/utils/logger";
 
 /**
  * A test step is an object with either an 'assertion' or 'action' property.
@@ -82,6 +89,241 @@ export interface TestRunnerOptions {
   verbose?: boolean;
   /** Root directory for resolving imports. If not provided, uses the test file's directory. */
   root?: string;
+  /** Print logger stats for steps slower than this (ms). 0 = every step. Default 5000. Only applies when verbose is true. */
+  statsThreshold?: number;
+}
+
+// ---------------------------------------------------------------------------
+// Verbose-mode logger stats helpers
+// ---------------------------------------------------------------------------
+
+type GlobalWithLoggers = {
+  commontools?: {
+    logger?: Record<
+      string,
+      {
+        counts: {
+          debug: number;
+          info: number;
+          warn: number;
+          error: number;
+          total: number;
+        };
+        getCountDeltas(): {
+          debug: number;
+          info: number;
+          warn: number;
+          error: number;
+          total: number;
+        };
+      }
+    >;
+  };
+};
+
+function fmtMs(ms: number): string {
+  if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`;
+  if (ms >= 10) return `${Math.round(ms)}ms`;
+  if (ms >= 1) return `${ms.toFixed(1)}ms`;
+  return `${ms.toFixed(2)}ms`;
+}
+
+function getGlobalLogCounts(): {
+  debug: number;
+  info: number;
+  warn: number;
+  error: number;
+  total: number;
+} {
+  const g = globalThis as unknown as GlobalWithLoggers;
+  const r = { debug: 0, info: 0, warn: 0, error: 0, total: 0 };
+  if (g.commontools?.logger) {
+    for (const logger of Object.values(g.commontools.logger)) {
+      const c = logger.counts;
+      r.debug += c.debug;
+      r.info += c.info;
+      r.warn += c.warn;
+      r.error += c.error;
+      r.total += c.total;
+    }
+  }
+  return r;
+}
+
+function getGlobalLogCountDeltas(): {
+  debug: number;
+  info: number;
+  warn: number;
+  error: number;
+  total: number;
+} {
+  const g = globalThis as unknown as GlobalWithLoggers;
+  const r = { debug: 0, info: 0, warn: 0, error: 0, total: 0 };
+  if (g.commontools?.logger) {
+    for (const logger of Object.values(g.commontools.logger)) {
+      const d = logger.getCountDeltas();
+      r.debug += d.debug;
+      r.info += d.info;
+      r.warn += d.warn;
+      r.error += d.error;
+      r.total += d.total;
+    }
+  }
+  return r;
+}
+
+function cdfPercentile(cdf: CDFPoint[], p: number): number {
+  for (const point of cdf) {
+    if (point.y >= p) return point.x;
+  }
+  return cdf[cdf.length - 1]?.x ?? 0;
+}
+
+function printLoggerStats(
+  elapsedMs: number,
+  useDelta: boolean,
+  label?: string,
+): void {
+  const counts = useDelta ? getGlobalLogCountDeltas() : getGlobalLogCounts();
+  const dp = useDelta ? "Δ" : "";
+  const labelStr = label ? ` | ${label}:` : ":";
+  console.log(
+    `  ⏱ ${
+      fmtMs(elapsedMs)
+    }${labelStr} ${dp}${counts.total} calls (d:${counts.debug} i:${counts.info} w:${counts.warn} e:${counts.error})`,
+  );
+
+  const breakdown = getTimingStatsBreakdown();
+  const entries: {
+    name: string;
+    n: number;
+    p50: number;
+    p95: number;
+    max: number;
+  }[] = [];
+
+  for (const [loggerName, timings] of Object.entries(breakdown)) {
+    for (const [key, timing] of Object.entries(timings)) {
+      if (useDelta) {
+        if (!timing.cdfSinceBaseline || timing.cdfSinceBaseline.length === 0) {
+          continue;
+        }
+        const cdf = timing.cdfSinceBaseline;
+        entries.push({
+          name: `${loggerName}/${key}`,
+          n: cdf.length,
+          p50: cdfPercentile(cdf, 0.5),
+          p95: cdfPercentile(cdf, 0.95),
+          max: cdf[cdf.length - 1].x,
+        });
+      } else {
+        if (timing.count === 0) continue;
+        entries.push({
+          name: `${loggerName}/${key}`,
+          n: timing.count,
+          p50: timing.p50,
+          p95: timing.p95,
+          max: timing.max,
+        });
+      }
+    }
+  }
+
+  if (entries.length > 0) {
+    entries.sort((a, b) => b.p95 - a.p95);
+    console.log(`           Timings (top 10 by p95):`);
+    for (const entry of entries.slice(0, 10)) {
+      const name = entry.name.padEnd(35);
+      const np = useDelta ? "Δn" : " n";
+      console.log(
+        `             ${name} ${np}=${String(entry.n).padStart(5)} p50=${
+          fmtMs(entry.p50).padStart(7)
+        } p95=${fmtMs(entry.p95).padStart(7)} max=${
+          fmtMs(entry.max).padStart(7)
+        }`,
+      );
+    }
+  }
+
+  // Count breakdown: per-logger/per-key for absolute, per-logger for delta
+  type CountEntry = {
+    name: string;
+    d: number;
+    i: number;
+    w: number;
+    e: number;
+    total: number;
+  };
+  const countEntries: CountEntry[] = [];
+  if (useDelta) {
+    const g = globalThis as unknown as GlobalWithLoggers;
+    if (g.commontools?.logger) {
+      for (const [name, logger] of Object.entries(g.commontools.logger)) {
+        const c = logger.getCountDeltas();
+        if (c.total > 0) {
+          countEntries.push({
+            name,
+            d: c.debug,
+            i: c.info,
+            w: c.warn,
+            e: c.error,
+            total: c.total,
+          });
+        }
+      }
+    }
+  } else {
+    const countBreakdown = getLoggerCountsBreakdown();
+    for (const [loggerName, loggerData] of Object.entries(countBreakdown)) {
+      if (loggerName === "total") continue;
+      for (
+        const [key, keyCounts] of Object.entries(
+          loggerData as Record<
+            string,
+            {
+              debug: number;
+              info: number;
+              warn: number;
+              error: number;
+              total: number;
+            }
+          >,
+        )
+      ) {
+        if (key === "total") continue;
+        if (keyCounts.total > 0) {
+          countEntries.push({
+            name: `${loggerName}/${key}`,
+            d: keyCounts.debug,
+            i: keyCounts.info,
+            w: keyCounts.warn,
+            e: keyCounts.error,
+            total: keyCounts.total,
+          });
+        }
+      }
+    }
+  }
+
+  if (countEntries.length > 0) {
+    countEntries.sort((a, b) => b.total - a.total);
+    const np = useDelta ? "Δ" : "";
+    console.log(`           Counts (top 10 by calls):`);
+    for (const entry of countEntries.slice(0, 10)) {
+      const name = entry.name.padEnd(35);
+      const parts: string[] = [];
+      if (entry.d > 0) parts.push(`d:${entry.d}`);
+      if (entry.i > 0) parts.push(`i:${entry.i}`);
+      if (entry.w > 0) parts.push(`w:${entry.w}`);
+      if (entry.e > 0) parts.push(`e:${entry.e}`);
+      const levels = parts.length > 0 ? ` (${parts.join(" ")})` : "";
+      console.log(
+        `             ${name} ${np}n=${
+          String(entry.total).padStart(7)
+        }${levels}`,
+      );
+    }
+  }
 }
 
 /**
@@ -224,6 +466,9 @@ export async function runTestPattern(
 
     if (options.verbose) {
       console.log(`  Found ${testsValue.length} test steps`);
+      printLoggerStats(performance.now() - startTime, false, "Setup");
+      resetAllCountBaselines();
+      resetAllTimingBaselines();
     }
 
     // 5. Process tests sequentially
@@ -233,6 +478,10 @@ export async function runTestPattern(
     let actionCount = 0;
 
     for (let i = 0; i < testsValue.length; i++) {
+      if (options.verbose) {
+        resetAllCountBaselines();
+        resetAllTimingBaselines();
+      }
       const itemStart = performance.now();
       const stepValue = testsValue[i] as {
         action?: unknown;
@@ -358,6 +607,22 @@ export async function runTestPattern(
             ? ` (after action_${actionCount})`
             : "";
           console.log(`  ${status} ${assertionName}${suffix}`);
+        }
+      }
+
+      // Print delta stats for slow steps
+      if (options.verbose) {
+        const statsThreshold = options.statsThreshold ?? 5000;
+        const stepDuration = performance.now() - itemStart;
+        if (stepDuration > statsThreshold || statsThreshold === 0) {
+          const stepLabel = isAction
+            ? `action_${actionCount}`
+            : `assertion_${assertionCount}`;
+          printLoggerStats(
+            performance.now() - startTime,
+            true,
+            `${stepLabel} took ${fmtMs(stepDuration)}`,
+          );
         }
       }
     }

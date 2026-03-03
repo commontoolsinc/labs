@@ -39,6 +39,11 @@ export const test = new Command()
     "--root <dir:string>",
     "Root directory for resolving imports. Enables imports like '../shared/utils.tsx'.",
   )
+  .option(
+    "--stats-threshold <ms:number>",
+    "Print logger stats for steps slower than this (ms). 0 = every step. Requires --verbose.",
+    { default: 5000 },
+  )
   .arguments("<paths...:string>")
   .action(async (options, ...paths) => {
     const testFiles: string[] = [];
@@ -103,6 +108,7 @@ export const test = new Command()
       timeout: options.timeout,
       verbose: options.verbose,
       root,
+      statsThreshold: options.statsThreshold,
     });
 
     // Exit with error code if any tests failed
