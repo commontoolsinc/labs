@@ -5,6 +5,7 @@ import {
 } from "./storable-protocol.ts";
 import type { SerializationContext } from "./serialization-context.ts";
 import type { SerializedForm } from "./json-serialization-context.ts";
+import { deepFreeze } from "./deep-freeze.ts";
 import { UnknownStorable } from "./unknown-storable.ts";
 import { ProblematicStorable } from "./problematic-storable.ts";
 import {
@@ -68,34 +69,6 @@ export function deserializeFromBytes(
 ): StorableValue {
   const tree = context.parse(bytes);
   return deserialize(tree, context, runtime, registry);
-}
-
-/**
- * Recursively freeze arrays and plain objects. Primitives pass through
- * unchanged. Used by the `TAGS.quote` deserialization path to ensure the
- * freeze guarantee applies uniformly to all `deserialize()` output.
- */
-function deepFreeze(value: SerializedForm): SerializedForm {
-  if (value === null || typeof value !== "object") {
-    return value;
-  }
-
-  if (Array.isArray(value)) {
-    for (let i = 0; i < value.length; i++) {
-      if (i in value) {
-        value[i] = deepFreeze(value[i]);
-      }
-    }
-    Object.freeze(value);
-    return value;
-  }
-
-  const obj = value as Record<string, SerializedForm>;
-  for (const key of Object.keys(obj)) {
-    obj[key] = deepFreeze(obj[key]);
-  }
-  Object.freeze(obj);
-  return obj;
 }
 
 /**
