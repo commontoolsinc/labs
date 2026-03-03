@@ -1,7 +1,11 @@
 /**
- * Recursively freeze an object tree in place. Primitives and already-frozen
- * objects pass through unchanged. Arrays and plain objects are frozen after
- * their children are recursively frozen.
+ * Recursively freeze an object tree in place. Primitives pass through
+ * unchanged. Arrays and plain objects are frozen after their children are
+ * recursively frozen.
+ *
+ * Already-frozen objects are still recursed into (their children may not be
+ * frozen). A WeakMap cache could enable safe short-circuiting in the future,
+ * but for now correctness requires the full walk.
  *
  * Handles sparse arrays correctly (only visits populated indices).
  */
@@ -10,22 +14,24 @@ export function deepFreeze<T>(value: T): T {
     return value;
   }
 
-  if (Object.isFrozen(value)) return value;
+  const alreadyFrozen = Object.isFrozen(value);
 
   if (Array.isArray(value)) {
     for (let i = 0; i < value.length; i++) {
       if (i in value) {
-        value[i] = deepFreeze(value[i]);
+        const frozen = deepFreeze(value[i]);
+        if (!alreadyFrozen) value[i] = frozen;
       }
     }
-    Object.freeze(value);
+    if (!alreadyFrozen) Object.freeze(value);
     return value;
   }
 
   const obj = value as Record<string, unknown>;
   for (const key of Object.keys(obj)) {
-    obj[key] = deepFreeze(obj[key]);
+    const frozen = deepFreeze(obj[key]);
+    if (!alreadyFrozen) obj[key] = frozen;
   }
-  Object.freeze(obj);
+  if (!alreadyFrozen) Object.freeze(obj);
   return value;
 }
