@@ -90,7 +90,7 @@ export async function runTestPattern(
   testPath: string,
   options: TestRunnerOptions = {},
 ): Promise<TestRunResult> {
-  const TIMEOUT = options.timeout ?? 5000;
+  const TIMEOUT = options.timeout ?? 60000;
   const startTime = performance.now();
 
   // Collect runtime errors via the scheduler's error handler
