@@ -2266,6 +2266,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
       }
     }
     // Limited allOf handling
+    let allOfValidity: TypeValidity | undefined;
     if (schemaObj.allOf) {
       // unknown & T => T
       let match: TypeValidity | undefined;
@@ -2281,9 +2282,10 @@ export class SchemaObjectTraverser<V extends StorableDatum>
           match = TypeValidity.Unknown;
         }
       }
-      return match ?? TypeValidity.True;
+      allOfValidity = match ?? TypeValidity.True;
     }
     // Limited anyOf handling
+    let anyOfValidity: TypeValidity | undefined;
     if (schemaObj.anyOf) {
       // unknown | T => unknown
       let match: TypeValidity | undefined;
@@ -2299,10 +2301,11 @@ export class SchemaObjectTraverser<V extends StorableDatum>
           match = valid;
         }
       }
-      return match ?? TypeValidity.False;
+      anyOfValidity = match ?? TypeValidity.False;
     }
     // Limited oneOf handling
     // This is handled the same as anyOf here
+    let oneOfValidity: TypeValidity | undefined;
     if (schemaObj.oneOf) {
       let match: TypeValidity | undefined;
       for (const option of schemaObj.oneOf) {
@@ -2319,7 +2322,20 @@ export class SchemaObjectTraverser<V extends StorableDatum>
           match = valid;
         }
       }
-      return match ?? TypeValidity.False;
+      oneOfValidity = match ?? TypeValidity.False;
+    }
+    if (
+      allOfValidity === TypeValidity.False ||
+      anyOfValidity === TypeValidity.False ||
+      oneOfValidity === TypeValidity.False
+    ) {
+      return TypeValidity.False;
+    } else if (
+      allOfValidity === TypeValidity.Unknown ||
+      anyOfValidity === TypeValidity.Unknown ||
+      oneOfValidity === TypeValidity.Unknown
+    ) {
+      return TypeValidity.Unknown;
     }
     return TypeValidity.True;
   }

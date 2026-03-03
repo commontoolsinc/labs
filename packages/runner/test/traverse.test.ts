@@ -2562,6 +2562,10 @@ describe("SchemaObjectTraverser unknown type handling", () => {
     // linked object is not resolved into content
     expect(result).toEqual({ inner: undefined });
     // We should have read all the way through to the data object
+    // While we can change this in the future, this does ensure that we can
+    // create a cell on the client for the queried object. For example,
+    // we could exclude doc-redirect-test-data here in the future. However,
+    // currently, we include all docs we examined, and we did examine this.
     expect(
       [...manager.getReadDocs()].some((att) =>
         att.address.id === redirectTestDataUri
@@ -2702,4 +2706,3 @@ describe("SchemaObjectTraverser unknown type handling", () => {
     ).toBe(true);
   });
 });
-
