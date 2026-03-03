@@ -254,6 +254,7 @@ export function runSyncLoop(
         //    edits beyond the watermark are applied — earlier ones are
         //    already on disk.
         const applied: Edit[] = [];
+        const failed: FailedEdit[] = [];
         for (let i = editWatermark; i < edits.length; i++) {
           const edit = edits[i];
           try {
@@ -270,8 +271,8 @@ export function runSyncLoop(
                   `Edit remains in queue. Fix the issue and restart.`,
               );
             }
-            // Conflict error: move to failedEdits for user reformulation
-            failedEditsCell.push({
+            // Conflict error: collect for commit alongside applied edits
+            failed.push({
               edit,
               error: (err as Error).message,
             });
@@ -304,8 +305,9 @@ export function runSyncLoop(
           }
         }
 
-        // 4. Clear edit queue, record only successfully applied edits
+        // 4. Clear edit queue, record applied and failed edits
         appliedEditsCell.push(...applied);
+        failedEditsCell.push(...failed);
         editsCell.set([]);
       } finally {
         popFrame();
