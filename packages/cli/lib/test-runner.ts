@@ -79,7 +79,7 @@ export async function runTestPattern(
   testPath: string,
   options: TestRunnerOptions = {},
 ): Promise<TestRunResult> {
-  const TIMEOUT = options.timeout ?? 5000;
+  const TIMEOUT = options.timeout ?? 60000;
   const startTime = performance.now();
 
   // 1. Create emulated runtime (same as piece step)
