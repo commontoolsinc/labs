@@ -102,7 +102,7 @@ function internSet(
   cache.set(key, value);
 }
 
-function stableStringify(value: unknown): string {
+export function stableStringify(value: unknown): string {
   if (value === null) return "n";
   if (value === undefined) return "u";
   const t = typeof value;
