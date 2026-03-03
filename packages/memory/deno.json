@@ -54,6 +54,7 @@
     "./explicit-tag-storable": "./explicit-tag-storable.ts",
     "./unknown-storable": "./unknown-storable.ts",
     "./problematic-storable": "./problematic-storable.ts",
+    "./deep-freeze": "./deep-freeze.ts",
     "./frozen-builtins": "./frozen-builtins.ts",
     "./storable-native-instances": "./storable-native-instances.ts",
     "./special-primitive-value": "./special-primitive-value.ts",

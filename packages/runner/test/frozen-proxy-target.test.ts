@@ -20,23 +20,10 @@ import { Runtime } from "../src/runtime.ts";
 import { createQueryResultProxy } from "../src/query-result-proxy.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import type { NormalizedFullLink } from "../src/link-utils.ts";
+import { deepFreeze } from "@commontools/memory/deep-freeze";
 
 const signer = await Identity.fromPassphrase("test frozen proxy");
 const space = signer.did();
-
-/**
- * Deep-freeze an object tree, simulating what `toDeepRichStorableValue` does
- * at commit time when `richStorableValues` is enabled.
- */
-function deepFreeze<T>(value: T): T {
-  if (value === null || typeof value !== "object") return value;
-  if (Object.isFrozen(value)) return value;
-  Object.freeze(value);
-  for (const val of Object.values(value as Record<string, unknown>)) {
-    deepFreeze(val);
-  }
-  return value;
-}
 
 /**
  * Helper: write a deep-frozen value into a cell via the transaction, then
