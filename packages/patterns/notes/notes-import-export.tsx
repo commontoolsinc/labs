@@ -119,8 +119,9 @@ function _getPieceName(
 function isNotebookPiece(
   piece: Partial<MinimalPiece> & { isNotebook?: boolean },
 ): boolean {
-  const name = piece?.[NAME];
-  if (typeof name === "string" && name.startsWith("📓")) return true;
+  // Use direct property access (not JSON round-trip) to preserve reactive tracking
+  const name = String(piece?.[NAME] ?? "");
+  if (name.startsWith("📓")) return true;
   return piece?.isNotebook === true;
 }
 
