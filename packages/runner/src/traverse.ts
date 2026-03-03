@@ -603,7 +603,9 @@ export abstract class BaseObjectTraverser {
   protected dagMemo = new Map<string, Immutable<StorableValue>>();
   traverseDAGCalls = 0;
   getDocAtPathCalls = 0;
-  abstract traverse(doc: IMemorySpaceAttestation): Immutable<StorableValue>;
+  abstract traverse(
+    doc: IMemorySpaceAttestation,
+  ): TraverseResult<Immutable<StorableValue>>;
   /**
    * Attempt to traverse the document as a directed acyclic graph.
    * This is the simplest form of traversal, where we include everything.
@@ -1726,7 +1728,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
   override traverse(
     doc: IMemorySpaceAttestation,
     link?: NormalizedFullLink,
-  ): Immutable<StorableValue> {
+  ): TraverseResult<Immutable<StorableValue>> {
     // Reset per-traverse stats (but NOT the shared memo)
     this.traverseWithSchemaCalls = 0;
     this.traversePointerCalls = 0;
@@ -1752,11 +1754,12 @@ export class SchemaObjectTraverser<V extends StorableDatum>
 
     logger.timeStart("traverse");
     this.schemaTracker.add(getTrackerKey(doc.address), this.selector);
-    const { ok: val, error } = this.traverseWithSelector(
+    const rv = this.traverseWithSelector(
       doc,
       this.selector,
       link,
     );
+    const { error } = rv;
     const elapsed = logger.timeEnd("traverse") ?? 0;
     if (elapsed > 100) {
       // Find top visited docs
@@ -1797,7 +1800,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         this.getDebugValue(doc),
       ]);
     }
-    return val;
+    return rv;
   }
 
   // Traverse the specified doc with the selector.
