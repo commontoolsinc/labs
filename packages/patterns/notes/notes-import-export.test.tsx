@@ -656,29 +656,27 @@ export default pattern(() => {
       { action: action_reset },
 
       // === Test 8: Cancel import preserves state ===
-      // SKIP: action_set_duplicate_both_markdown times out in headless runner
       { action: action_create_existing_note },
       { action: action_create_existing_notebook },
-      { action: action_set_duplicate_both_markdown, skip: true },
-      { action: action_analyze_import, skip: true },
-      { assertion: assert_both_duplicates_detected, skip: true },
-      { assertion: assert_duplicate_modal_shown, skip: true },
-      { action: action_cancel_import, skip: true },
-      { assertion: assert_after_cancel_state_unchanged, skip: true },
+      { action: action_set_duplicate_both_markdown },
+      { action: action_analyze_import },
+      { assertion: assert_both_duplicates_detected },
+      { assertion: assert_duplicate_modal_shown },
+      { action: action_cancel_import },
+      { assertion: assert_after_cancel_state_unchanged },
       { action: action_reset },
 
       // === Test 9: Export all generates v2 format with notes and notebooks ===
-      // SKIP: action_open_export_all_modal times out in headless runner
       { action: action_create_existing_note },
       { action: action_create_existing_notebook },
       { assertion: assert_has_one_note },
       { assertion: assert_has_one_notebook },
-      { action: action_open_export_all_modal, skip: true },
-      { assertion: assert_export_has_v2_header, skip: true },
-      { assertion: assert_export_has_notes_section, skip: true },
-      { assertion: assert_export_has_note_content, skip: true },
-      { assertion: assert_export_has_notebooks_section, skip: true },
-      { assertion: assert_export_has_notebook_content, skip: true },
+      { action: action_open_export_all_modal },
+      { assertion: assert_export_has_v2_header },
+      { assertion: assert_export_has_notes_section },
+      { assertion: assert_export_has_note_content },
+      { assertion: assert_export_has_notebooks_section },
+      { assertion: assert_export_has_notebook_content },
       { action: action_reset },
 
       // === Test 10: Select all / deselect all notes ===
@@ -689,27 +687,24 @@ export default pattern(() => {
       { assertion: assert_has_two_notes },
       { assertion: assert_has_two_notebooks },
       // Select all notes
-      // SKIP: action_select_all_notes times out in headless runner
-      { action: action_select_all_notes, skip: true },
-      { assertion: assert_all_notes_selected, skip: true },
+      { action: action_select_all_notes },
+      { assertion: assert_all_notes_selected },
       // Deselect all notes
-      { action: action_deselect_all_notes, skip: true },
-      { assertion: assert_no_notes_selected, skip: true },
+      { action: action_deselect_all_notes },
+      { assertion: assert_no_notes_selected },
       // Select all notebooks
-      // SKIP: action_select_all_notebooks times out in headless runner
-      { action: action_select_all_notebooks, skip: true },
-      { assertion: assert_all_notebooks_selected, skip: true },
+      { action: action_select_all_notebooks },
+      { assertion: assert_all_notebooks_selected },
       // Deselect all notebooks
-      { action: action_deselect_all_notebooks, skip: true },
-      { assertion: assert_no_notebooks_selected, skip: true },
+      { action: action_deselect_all_notebooks },
+      { assertion: assert_no_notebooks_selected },
       { action: action_reset },
 
       // === Test 11: Import nested notebooks ===
-      // SKIP: action_set_nested_notebook_markdown times out in headless runner
-      { action: action_set_nested_notebook_markdown, skip: true },
-      { action: action_analyze_import, skip: true },
-      { assertion: assert_nested_note_imported, skip: true },
-      { assertion: assert_nested_notebooks_imported, skip: true },
+      { action: action_set_nested_notebook_markdown },
+      { action: action_analyze_import },
+      { assertion: assert_nested_note_imported },
+      { assertion: assert_nested_notebooks_imported },
     ],
     // The pattern filters allPieces in computed(); the commit-then-rerun
     // idempotency check sees different results because committing round 1
