@@ -71,7 +71,13 @@ function configureDispatch(): void {
     // ----- Passthrough (flag OFF) -----
 
     jsonFromValue = (value: StorableValue): string => {
-      return JSON.stringify(value);
+      const result = JSON.stringify(value);
+      if (result === undefined) {
+        throw new Error(
+          "jsonFromValue: cannot stringify undefined (flag OFF)",
+        );
+      }
+      return result;
     };
 
     valueFromJson = (
