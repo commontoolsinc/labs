@@ -809,7 +809,7 @@ export class PieceManager {
     await this.runtime.idle();
     const piece = this.runtime.getCell<T>(
       this.space,
-      cause,
+      cause ?? { space: this.space, random: crypto.randomUUID() },
       pattern.resultSchema,
     );
     this.runtime.setup(undefined, pattern, inputs ?? {}, piece);
