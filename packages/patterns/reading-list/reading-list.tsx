@@ -62,6 +62,11 @@ const renderStars = (rating: number | null): string => {
   return "★".repeat(rating) + "☆".repeat(5 - rating);
 };
 
+// Safely coerce items.get() to an array — during intermediate reactive
+// updates the value can momentarily be a non-array (e.g. object proxy).
+const asArray = <T,>(v: readonly T[] | T[]): T[] =>
+  Array.isArray(v) ? v as T[] : [];
+
 export default pattern<ReadingListInput, ReadingListOutput>(({ items }) => {
   const filterStatus = Writable.of<ItemStatus | "all">("all");
   const newTitle = Writable.of("");
@@ -94,7 +99,7 @@ export default pattern<ReadingListInput, ReadingListOutput>(({ items }) => {
   );
 
   const removeItem = action(({ item }: { item: ReadingItemPiece }) => {
-    const current = items.get();
+    const current = asArray(items.get());
     const index = current.findIndex((el) => equals(item, el));
     if (index >= 0) {
       items.set(current.toSpliced(index, 1));
@@ -125,13 +130,13 @@ export default pattern<ReadingListInput, ReadingListOutput>(({ items }) => {
   );
 
   // Computed values
-  const totalCount = computed(() => items.get().length);
+  const totalCount = computed(() => asArray(items.get()).length);
 
   const filteredItems = computed((): ReadingItemPiece[] => {
     const status = filterStatus.get();
-    const allItems = items.get();
+    const allItems = asArray(items.get());
     if (status === "all") {
-      return [...allItems];
+      return allItems.filter((item) => item);
     }
     return allItems.filter((item) => item && item.status === status);
   });
@@ -139,7 +144,7 @@ export default pattern<ReadingListInput, ReadingListOutput>(({ items }) => {
   const filteredCount = computed(() => filteredItems.length);
 
   const summary = computed(() => {
-    return items.get()
+    return asArray(items.get())
       .filter((item) => item)
       .map((item) => `${item.title ?? ""} (${item.status ?? ""})`)
       .join(", ");
@@ -152,7 +157,7 @@ export default pattern<ReadingListInput, ReadingListOutput>(({ items }) => {
   const currentFilter = computed(() => filterStatus.get());
 
   return {
-    [NAME]: computed(() => `Reading List (${items.get().length})`),
+    [NAME]: computed(() => `Reading List (${asArray(items.get()).length})`),
     [UI]: (
       <ct-screen>
         <ct-vstack slot="header" gap="2">
@@ -174,7 +179,9 @@ export default pattern<ReadingListInput, ReadingListOutput>(({ items }) => {
         <ct-vscroll flex showScrollbar fadeEdges>
           <ct-vstack gap="2" style="padding: 1rem;">
             {computed(() => {
-              return filteredItems.map((item: ReadingItemPiece) => (
+              return filteredItems.filter((item) => item).map((
+                item: ReadingItemPiece,
+              ) => (
                 <ct-card>
                   <ct-hstack gap="2" align="center">
                     <span style="font-size: 1.5rem;">

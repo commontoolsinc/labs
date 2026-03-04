@@ -558,10 +558,31 @@ export async function runTestPattern(
         // Send undefined for void streams
         actionStream.send(undefined);
 
-        // Wait for idle with timeout
+        // Wait for idle, then settle commits and re-idle.
+        // Optimistic commits can fail (CAS conflicts), causing rollbacks
+        // and reactive re-scheduling. We loop idle→synced until both
+        // resolve quickly (< 1ms), indicating quiescence. Max iterations
+        // as a safety net against infinite loops.
         try {
+          const MAX_SETTLE = 20;
           await Promise.race([
-            runtime.idle(),
+            (async () => {
+              for (let settle = 0; settle < MAX_SETTLE; settle++) {
+                const iterStart = performance.now();
+                await runtime.idle();
+                await storageManager.synced();
+                const totalMs = performance.now() - iterStart;
+                if (options.verbose && totalMs > 1) {
+                  console.log(
+                    `      settle[${settle}]: ${fmtMs(totalMs)}`,
+                  );
+                }
+                // If both resolved nearly instantly, the system is settled.
+                // synced() has ~1ms of overhead even when idle, so use 2ms.
+                if (settle > 0 && totalMs < 2) break;
+              }
+              await runtime.idle();
+            })(),
             timeout(
               TIMEOUT,
               `Action at index ${i} timed out after ${TIMEOUT}ms`,
