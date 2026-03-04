@@ -32,7 +32,7 @@ export interface Person {
 }
 
 interface FormDemoInput {
-  people?: Writable<Default<Person[], []>>;
+  people: Writable<Default<Person[], []>>;
 }
 
 interface FormDemoOutput {
@@ -41,6 +41,12 @@ interface FormDemoOutput {
   people: Person[];
 }
 
+const createEmptyPerson = (): Person => ({
+  name: "",
+  email: "",
+  role: "user",
+});
+
 // Form submit handler - must be at module scope
 // ct-form flushes buffered values to bound cells before emitting ct-submit,
 // so handlers read from the cells directly (type-safe, no reconstruction needed)
@@ -48,34 +54,44 @@ const handleFormSubmit = handler<
   unknown,
   {
     formData: Writable<Person>;
-    editing: Writable<{ editing: Writable<Person | null> }>;
     people: Writable<Person[]>;
+    editing: Writable<{ editing: Person | null }>;
+    modalOpen: Writable<boolean>;
   }
->((_, { formData, editing, people }) => {
-  if (editing.get().editing) {
-    // Edit mode - update existing person
-    editing.get().editing.set(formData.get());
+>((_, { formData, people, editing, modalOpen }) => {
+  const next = { ...formData.get() };
+  const target = editing.get().editing;
+  if (target === null) {
+    people.push(next);
   } else {
-    // Create mode - add new person
-    people.push(formData.get());
+    const current = people.get();
+    const index = current.findIndex((p) => equals(p, target));
+    if (index >= 0) {
+      const updated = [...current];
+      updated[index] = next;
+      people.set(updated);
+    }
   }
 
+  modalOpen.set(false);
   editing.set({ editing: null });
 });
 
 export const EditPerson = pattern<
-  { editing: Writable<{ editing: Person | null }>; people: Writable<Person[]> },
+  {
+    editing: Writable<{ editing: Person | null }>;
+    formData: Writable<Person>;
+    people: Writable<Person[]>;
+    modalOpen: Writable<boolean>;
+  },
   { [UI]: VNode }
 >(
-  ({ editing, people }) => {
-    const formData = Writable.of<Person>(
-      editing.get().editing || { name: "", email: "", role: "user" },
-    );
-
+  ({ editing, formData, people, modalOpen }) => {
     const isEditMode = computed(() => editing.get().editing !== null);
 
     // Cancel handler - close modal without saving
     const handleCancel = action(() => {
+      modalOpen.set(false);
       editing.set({ editing: null });
       // Form fields automatically reset via form.reset()
     });
@@ -85,8 +101,9 @@ export const EditPerson = pattern<
         <ct-form
           onct-submit={handleFormSubmit({
             formData,
-            editing,
             people,
+            editing,
+            modalOpen,
           })}
         >
           <ct-vstack gap="3">
@@ -135,7 +152,7 @@ export const EditPerson = pattern<
             {/* Form actions */}
             <ct-hstack gap="2" style="margin-top: 1rem;">
               <ct-button
-                type="button"
+                type="reset"
                 variant="secondary"
                 onClick={handleCancel}
                 style="flex: 1;"
@@ -162,13 +179,20 @@ export const EditPerson = pattern<
 const startEdit = handler<
   unknown,
   {
-    person: Writable<Person>;
+    person: Person;
+    people: Writable<Person[]>;
     editing: Writable<{ editing: Person | null }>;
-    showModal: Writable<boolean>;
+    formData: Writable<Person>;
+    modalOpen: Writable<boolean>;
   }
->((_event, { person, editing, showModal }) => {
-  editing.set({ editing: person });
-  showModal.set(true);
+>((_event, { person, people, editing, formData, modalOpen }) => {
+  const current = people.get();
+  const index = current.findIndex((p) => equals(p, person));
+  if (index >= 0) {
+    formData.set({ ...current[index] });
+    editing.set({ editing: person });
+    modalOpen.set(true);
+  }
 });
 
 const deletePerson = handler<
@@ -181,7 +205,7 @@ const deletePerson = handler<
   // Stop propagation to prevent card's onClick (startEdit) from firing
   event?.stopPropagation?.();
   const current = people.get();
-  const filteredPeople = current.filter((p) => equals(p, person));
+  const filteredPeople = current.filter((p) => !equals(p, person));
   people.set(filteredPeople);
 });
 
@@ -189,23 +213,21 @@ const deletePerson = handler<
 
 export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
   const editing = Writable.of<{ editing: Person | null }>({ editing: null });
+  const formData = Writable.of<Person>(createEmptyPerson());
+  const modalOpen = Writable.of(false);
 
   // Computed values
   const peopleCount = computed(() => people.get().length);
   const isEditMode = computed(() => editing.get().editing !== null);
   const modalTitle = ifElse(isEditMode, "Edit Person", "Add Person");
 
-  const showModal = computed(() => isEditMode);
+  const showModal = computed(() => modalOpen.get());
 
   // Open modal in create mode
   const startCreate = action(() => {
-    editing.set({
-      editing: Writable.of<Person>({
-        name: "",
-        email: "",
-        role: "user",
-      }),
-    });
+    formData.set(createEmptyPerson());
+    editing.set({ editing: null });
+    modalOpen.set(true);
   });
 
   return {
@@ -218,7 +240,9 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
             <ct-heading level={4}>People Directory</ct-heading>
             <span style="font-size: 0.875rem; color: var(--ct-color-gray-500);">
               {peopleCount}{" "}
-              {computed(() => people.get().length === 1 ? "person" : "people")}
+              {computed(() =>
+                people.get().length === 1 ? "person" : "people"
+              )}
             </span>
           </ct-hstack>
         </ct-vstack>
@@ -226,13 +250,15 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
         {/* Main content - list of people */}
         <ct-vscroll flex showScrollbar fadeEdges>
           <ct-vstack gap="2" style="padding: 1rem;">
-            {people.map((person, index) => (
+            {people.map((person) => (
               <ct-card
                 style="cursor: pointer;"
                 onClick={startEdit({
                   person,
+                  people,
                   editing,
-                  showModal,
+                  formData,
+                  modalOpen,
                 })}
               >
                 <ct-hstack gap="2" align="center">
@@ -296,9 +322,26 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
         </ct-hstack>
 
         {/* Modal form */}
-        <ct-modal $open={showModal} dismissable size="md">
+        <ct-modal
+          $open={modalOpen}
+          dismissable
+          size="md"
+          onct-modal-close={action(() => {
+            modalOpen.set(false);
+            editing.set({ editing: null });
+          })}
+        >
           <span slot="header">{modalTitle}</span>
-          <EditPerson editing={editing} people={people} />
+          {ifElse(
+            showModal,
+            <EditPerson
+              editing={editing}
+              formData={formData}
+              people={people}
+              modalOpen={modalOpen}
+            />,
+            null,
+          )}
         </ct-modal>
       </ct-screen>
     ),
