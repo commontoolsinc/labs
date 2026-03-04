@@ -38,9 +38,9 @@ interface Input {
 
 /** Import records from an Airtable base. #airtableImporter */
 interface Output {
-  records: AirtableRecordData[];
-  bases: BaseInfo[];
-  tables: TableInfo[];
+  records: readonly AirtableRecordData[];
+  bases: readonly BaseInfo[];
+  tables: readonly TableInfo[];
   selectedBaseId: string;
   selectedTableId: string;
   selectedBaseName: string;
@@ -195,18 +195,18 @@ export default pattern<Input, Output>(
     const loading = Writable.of(false);
     const error = Writable.of("");
 
-    const hasBases = computed(() => (bases.get() as BaseInfo[]).length > 0);
-    const hasTables = computed(() => (tables.get() as TableInfo[]).length > 0);
+    const hasBases = computed(() => bases.get().length > 0);
+    const hasTables = computed(() => tables.get().length > 0);
     const hasRecords = computed(
-      () => (records.get() as AirtableRecordData[]).length > 0,
+      () => records.get().length > 0,
     );
     const recordCount = computed(
-      () => (records.get() as AirtableRecordData[]).length,
+      () => records.get().length,
     );
 
     const selectedBaseName = computed(() => {
       if (!selectedBaseId) return "";
-      const base = (bases.get() as BaseInfo[]).find(
+      const base = bases.get().find(
         (b) => b.id === selectedBaseId,
       );
       return base?.name || "";
@@ -214,7 +214,7 @@ export default pattern<Input, Output>(
 
     const selectedTableName = computed(() => {
       if (!selectedTableId) return "";
-      const table = (tables.get() as TableInfo[]).find(
+      const table = tables.get().find(
         (t) => t.id === selectedTableId,
       );
       return table?.name || "";
@@ -251,7 +251,7 @@ export default pattern<Input, Output>(
 
     // Column headers extracted from records
     const columnHeaders = computed(() => {
-      const recs = records.get() as AirtableRecordData[];
+      const recs = records.get();
       if (recs.length === 0) return [] as string[];
       const allKeys = new Set<string>();
       for (const rec of recs.slice(0, 10)) {
@@ -267,7 +267,7 @@ export default pattern<Input, Output>(
 
     // Pre-compute base/table lists for JSX
     const baseListUI = computed(() =>
-      (bases.get() as BaseInfo[]).map((base) => (
+      bases.get().map((base) => (
         <button
           type="button"
           onClick={boundSelectBase}
@@ -291,7 +291,7 @@ export default pattern<Input, Output>(
     );
 
     const tableListUI = computed(() =>
-      (tables.get() as TableInfo[]).map((table) => (
+      tables.get().map((table) => (
         <button
           type="button"
           onClick={boundSelectTable}
@@ -316,16 +316,14 @@ export default pattern<Input, Output>(
 
     // Precompute table rows as plain data (avoid nested JSX .map() in computed)
     const tableRows = computed(() => {
-      const recs = records.get() as AirtableRecordData[];
-      const hdrs = columnHeaders as string[];
+      const recs = records.get();
+      const hdrs = columnHeaders;
       return recs.map((rec) => ({
-        cells: (hdrs as string[]).map((col) =>
-          formatCellValue(rec.fields[col])
-        ),
+        cells: hdrs.map((col) => formatCellValue(rec.fields[col])),
       }));
     });
 
-    const hasError = computed(() => !!(error.get() as string));
+    const hasError = computed(() => !!error.get());
 
     return {
       [NAME]: computed(() => {
@@ -555,7 +553,7 @@ export default pattern<Input, Output>(
                                 top: "0",
                               }}
                             >
-                              {(columnHeaders as string[]).map((col) => (
+                              {columnHeaders.map((col) => (
                                 <th
                                   style={{
                                     padding: "8px 12px",
@@ -571,7 +569,7 @@ export default pattern<Input, Output>(
                             </tr>
                           </thead>
                           <tbody>
-                            {(tableRows as { cells: string[] }[]).map(
+                            {tableRows.map(
                               (row) => (
                                 <tr>
                                   {row.cells.map((cell) => (
@@ -627,9 +625,9 @@ export default pattern<Input, Output>(
           )}
         </div>
       ),
-      records: computed(() => records.get() as AirtableRecordData[]),
-      bases: computed(() => bases.get() as BaseInfo[]),
-      tables: computed(() => tables.get() as TableInfo[]),
+      records: computed(() => records.get()),
+      bases: computed(() => bases.get()),
+      tables: computed(() => tables.get()),
       selectedBaseId,
       selectedTableId,
       selectedBaseName,

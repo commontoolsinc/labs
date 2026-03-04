@@ -1,4 +1,5 @@
 import type { Tokens } from "@cmd-johnson/oauth2-client";
+import type { Context } from "@hono/hono";
 import { getLogger } from "@commontools/utils/logger";
 import { setBGCharm } from "@commontools/background-charm";
 import { runtime } from "@/index.ts";
@@ -29,51 +30,73 @@ import {
 } from "./oauth2-common.utils.ts";
 
 /**
- * Server-side state store for OAuth2 flows.
+ * Encode OAuth2 state as a base64 string for the `state` query parameter.
  *
- * Some providers (e.g. Airtable) impose strict limits on the `state` parameter
- * length. Our authCellId includes the full JSON schema, which can exceed 2KB.
- * Instead of encoding the full state in the URL, we store it server-side keyed
- * by a short random token and pass only the token as `state`.
- *
- * Entries expire after 10 minutes to prevent memory leaks.
+ * Uses short field names to keep the encoded value compact. A typical encoded
+ * state is ~400-500 bytes of base64, well within any provider's URL length
+ * limits. This avoids the need for any server-side state store, which would
+ * break when multiple server instances sit behind a load balancer (login hits
+ * instance A, callback hits instance B).
  */
-const STATE_STORE = new Map<
-  string,
-  {
-    data: {
-      authCellId: string;
-      integrationPieceId: string;
-      codeVerifier: string;
-      scopes?: string[];
-    };
-    expiresAt: number;
-  }
->();
-const STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
-
-function storeState(data: {
+function encodeOAuthState(data: {
   authCellId: string;
   integrationPieceId: string;
   codeVerifier: string;
   scopes?: string[];
 }): string {
-  // Purge expired entries
-  const now = Date.now();
-  for (const [key, entry] of STATE_STORE) {
-    if (entry.expiresAt < now) STATE_STORE.delete(key);
+  // Single-letter keys to minimise payload:
+  // a = authCellId, p = integrationPieceId, v = codeVerifier, s = scopes
+  const compact: Record<string, unknown> = {
+    a: data.authCellId,
+    p: data.integrationPieceId,
+    v: data.codeVerifier,
+  };
+  if (data.scopes && data.scopes.length > 0) {
+    compact.s = data.scopes;
   }
-  const key = crypto.randomUUID();
-  STATE_STORE.set(key, { data, expiresAt: now + STATE_TTL_MS });
-  return key;
+  return btoa(JSON.stringify(compact));
 }
 
-function retrieveState(key: string) {
-  const entry = STATE_STORE.get(key);
-  if (!entry) return null;
-  STATE_STORE.delete(key); // one-time use
-  if (entry.expiresAt < Date.now()) return null;
-  return entry.data;
+/**
+ * Decode an OAuth2 state string back into the original fields.
+ *
+ * Supports both the compact format (single-letter keys) and the legacy
+ * format (full field names) for backward compatibility with any in-flight
+ * OAuth flows that were started before this change was deployed.
+ */
+function decodeOAuthState(state: string): {
+  authCellId: string;
+  integrationPieceId: string;
+  codeVerifier: string;
+  scopes?: string[];
+} | null {
+  try {
+    const parsed = JSON.parse(atob(state));
+
+    // New compact format (single-letter keys)
+    if (parsed.a && parsed.v) {
+      return {
+        authCellId: parsed.a,
+        integrationPieceId: parsed.p,
+        codeVerifier: parsed.v,
+        scopes: parsed.s,
+      };
+    }
+
+    // Legacy format (full field names)
+    if (parsed.authCellId && parsed.codeVerifier) {
+      return parsed as {
+        authCellId: string;
+        integrationPieceId: string;
+        codeVerifier: string;
+        scopes?: string[];
+      };
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 const EMPTY_OAUTH2_DATA: Record<string, unknown> = {
@@ -96,8 +119,7 @@ export function createOAuth2Handlers(
   config: OAuth2ProviderConfig,
   options: OAuth2HandlerOptions = {},
 ) {
-  // deno-lint-ignore no-explicit-any
-  const logger = getLogger(`${config.name}-oauth`) as any;
+  const logger = getLogger(`${config.name}-oauth`);
   const tokenMapper = options.tokenMapper ?? tokenToGenericAuthData;
   const authSchema: JSONSchema = options.authSchema ??
     (OAuth2TokenSchema as unknown as JSONSchema);
@@ -106,10 +128,10 @@ export function createOAuth2Handlers(
   // -----------------------------------------------------------------------
   // LOGIN
   // -----------------------------------------------------------------------
-  async function login(c: any) {
+  async function login(c: Context) {
     try {
       const payload = await c.req.json();
-      logger.info({ payload }, `Received ${config.name} OAuth login request`);
+      logger.info(`Received ${config.name} OAuth login request`, payload);
 
       if (!payload.authCellId) {
         logger.error("Missing authCellId in request payload");
@@ -126,7 +148,7 @@ export function createOAuth2Handlers(
         scope: scopeString,
       });
 
-      const stateKey = storeState({
+      const stateParam = encodeOAuthState({
         authCellId: payload.authCellId,
         integrationPieceId: payload.integrationPieceId,
         codeVerifier,
@@ -134,7 +156,7 @@ export function createOAuth2Handlers(
       });
 
       const authUrl = new URL(uri.toString());
-      authUrl.searchParams.set("state", stateKey);
+      authUrl.searchParams.set("state", stateParam);
 
       // Apply provider-specific extra params (e.g. access_type=offline)
       if (config.extraAuthParams) {
@@ -147,10 +169,10 @@ export function createOAuth2Handlers(
         authUrl.searchParams.set("scope", scopeString);
       }
 
-      logger.info({ authUrl: authUrl.toString() }, "Generated OAuth URL");
+      logger.info("Generated OAuth URL", authUrl.toString());
       return createLoginSuccessResponse(c, authUrl.toString());
     } catch (error) {
-      logger.error({ error }, "Failed to process login request");
+      logger.error("Failed to process login request", error);
       return createLoginErrorResponse(c, "Failed to process login request");
     }
   }
@@ -158,15 +180,15 @@ export function createOAuth2Handlers(
   // -----------------------------------------------------------------------
   // CALLBACK
   // -----------------------------------------------------------------------
-  async function callback(c: any) {
+  async function callback(c: Context) {
     const query = c.req.query();
-    logger.info({ query }, `Received ${config.name} OAuth callback`);
+    logger.info(`Received ${config.name} OAuth callback`, query);
 
     try {
       const { code, state, scope, error: oauthError } = query;
 
       if (oauthError) {
-        logger.error({ oauthError }, "OAuth error received");
+        logger.error("OAuth error received", oauthError);
         return createCallbackResponse({
           success: false,
           error: `Authentication failed: ${oauthError}`,
@@ -180,25 +202,10 @@ export function createOAuth2Handlers(
         return createCallbackResponse({ success: false, error: errorMsg });
       }
 
-      // Try server-side state store first (short UUID key),
-      // fall back to legacy base64-encoded state for backward compat.
-      let decodedState: {
-        authCellId: string;
-        integrationPieceId: string;
-        codeVerifier: string;
-        scopes?: string[];
-      } | null = retrieveState(state);
-
-      if (!decodedState) {
-        try {
-          decodedState = JSON.parse(atob(state));
-        } catch (_error) {
-          return createCallbackResponse({
-            success: false,
-            error: "Invalid or expired state parameter",
-          });
-        }
-      }
+      // Decode the base64-encoded state parameter. Supports both the new
+      // compact format (single-letter keys) and the legacy format (full
+      // field names) for backward compatibility.
+      const decodedState = decodeOAuthState(state);
 
       if (!decodedState) {
         return createCallbackResponse({
@@ -245,8 +252,9 @@ export function createOAuth2Handlers(
         if (!tokenResponse.ok) {
           const errText = await tokenResponse.text();
           logger.error(
-            { status: tokenResponse.status, errText },
             "Token exchange failed",
+            tokenResponse.status,
+            errText,
           );
           return createCallbackResponse({
             success: false,
@@ -306,8 +314,8 @@ export function createOAuth2Handlers(
         }
       } catch (error) {
         logger.error(
-          { error },
           "Failed to register piece for background updates, continuing anyway",
+          error,
         );
       }
 
@@ -324,7 +332,7 @@ export function createOAuth2Handlers(
       };
       return createCallbackResponse(callbackResult);
     } catch (error) {
-      logger.error(error, "Failed to process callback");
+      logger.error("Failed to process callback", error);
       return createCallbackResponse({
         success: false,
         error: "Failed to process callback",
@@ -335,7 +343,7 @@ export function createOAuth2Handlers(
   // -----------------------------------------------------------------------
   // REFRESH
   // -----------------------------------------------------------------------
-  async function refresh(c: any) {
+  async function refresh(c: Context) {
     try {
       const payload = await c.req.json();
       if (!payload.refreshToken) {
@@ -401,7 +409,7 @@ export function createOAuth2Handlers(
   // -----------------------------------------------------------------------
   // LOGOUT
   // -----------------------------------------------------------------------
-  async function logout(c: any) {
+  async function logout(c: Context) {
     try {
       const payload = await c.req.json();
       if (!payload.authCellId) {
@@ -433,7 +441,7 @@ export function createOAuth2Handlers(
   // -----------------------------------------------------------------------
   // BACKGROUND INTEGRATION (shared, not provider-specific)
   // -----------------------------------------------------------------------
-  async function backgroundIntegration(c: any) {
+  async function backgroundIntegration(c: Context) {
     try {
       const payload = await c.req.json();
       await setBGCharm({

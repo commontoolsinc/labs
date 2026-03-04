@@ -9,9 +9,8 @@ import linkPreview from "@/routes/link-preview/link-preview.index.ts";
 import agentToolsWebSearch from "@/routes/agent-tools/web-search/web-search.index.ts";
 import agentToolsWebRead from "@/routes/agent-tools/web-read/web-read.index.ts";
 import discord from "@/routes/integrations/discord/discord.index.ts";
-import googleOAuth from "@/routes/integrations/google-oauth/google-oauth.index.ts";
-import airtableOAuth from "@/routes/integrations/airtable-oauth/airtable-oauth.index.ts";
 import plaidOAuth from "@/routes/integrations/plaid-oauth/plaid-oauth.index.ts";
+import { buildProviderRouters } from "@/routes/integrations/provider-registry.ts";
 import memory from "@/routes/storage/memory/memory.index.ts";
 import whoami from "@/routes/whoami/whoami.index.ts";
 import meta from "@/routes/meta/meta.index.ts";
@@ -25,6 +24,7 @@ const app = createApp();
 
 configureOpenAPI(app);
 
+// Static routes (non-OAuth2, plus non-standard OAuth like Discord and Plaid)
 const routes = [
   health,
   aiLLM,
@@ -35,8 +35,6 @@ const routes = [
   agentToolsWebSearch,
   agentToolsWebRead,
   discord,
-  googleOAuth,
-  airtableOAuth,
   plaidOAuth,
   memory,
   whoami,
@@ -50,6 +48,10 @@ const routes = [
 routes.forEach((route) => {
   app.route("/", route);
 });
+
+// Dynamic OAuth2 provider routes (Google, Airtable, etc.)
+const providerRouters = await buildProviderRouters();
+providerRouters.forEach((router) => app.route("/", router));
 
 // Shell serves at root, so add it last to catch all unmatched routes
 app.route("/", shell);

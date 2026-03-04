@@ -1,9 +1,9 @@
 /**
- * Airtable OAuth2 provider configuration.
+ * Airtable OAuth2 provider descriptor.
  *
  * ## Setup
  *
- * 1. Go to https://airtable.com/create/oauth (Builder Hub → OAuth integrations)
+ * 1. Go to https://airtable.com/create/oauth (Builder Hub -> OAuth integrations)
  * 2. Create a new integration (or edit an existing one)
  * 3. Set the OAuth redirect URL to:
  *      http://localhost:8000/api/integrations/airtable-oauth/callback
@@ -21,14 +21,15 @@
  * base64-encoded in the Authorization header), hence tokenAuthMethod: "basic".
  */
 import env from "@/env.ts";
-import type { OAuth2ProviderConfig } from "../oauth2-common/oauth2-common.index.ts";
+import type { ProviderDescriptor } from "../oauth2-common/oauth2-common.types.ts";
 
-export const AirtableProviderConfig: OAuth2ProviderConfig = {
+export const AirtableDescriptor: ProviderDescriptor = {
   name: "airtable",
+  brandColor: "#18BFFF",
   clientId: env.AIRTABLE_CLIENT_ID,
   clientSecret: env.AIRTABLE_CLIENT_SECRET,
-  authorizationEndpointUri: "https://airtable.com/oauth2/v1/authorize",
-  tokenUri: "https://airtable.com/oauth2/v1/token",
+  authorizationEndpoint: "https://airtable.com/oauth2/v1/authorize",
+  tokenEndpoint: "https://airtable.com/oauth2/v1/token",
   userInfoEndpoint: "https://api.airtable.com/v0/meta/whoami",
   userInfoMapper: (raw) => ({
     id: raw.id as string,

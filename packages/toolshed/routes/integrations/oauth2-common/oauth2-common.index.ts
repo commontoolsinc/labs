@@ -3,6 +3,7 @@ export type {
   OAuth2HandlerOptions,
   OAuth2ProviderConfig,
   OAuth2Tokens,
+  ProviderDescriptor,
   UserInfo,
 } from "./oauth2-common.types.ts";
 
@@ -18,6 +19,7 @@ export {
   createOAuth2Client,
   createRefreshErrorResponse,
   createRefreshSuccessResponse,
+  discoverProviderConfig,
   fetchUserInfo,
   getAuthCell,
   getBaseUrl,

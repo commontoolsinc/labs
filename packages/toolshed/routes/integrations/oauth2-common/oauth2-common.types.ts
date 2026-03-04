@@ -62,3 +62,60 @@ export interface OAuth2HandlerOptions {
   /** Empty data object used when clearing auth (logout) */
   emptyAuthData?: Record<string, unknown>;
 }
+
+/**
+ * Everything needed to describe an OAuth2 provider and auto-wire its routes.
+ * Replaces the combination of {provider}.config.ts + {provider}.handlers.ts +
+ * {provider}.routes.ts + {provider}.index.ts.
+ */
+export interface ProviderDescriptor {
+  /** Lowercase slug used in URL paths: /api/integrations/{name}-oauth/... */
+  name: string;
+
+  /** Optional hex brand color for future UI use (e.g. "#FF3366"). */
+  brandColor?: string;
+
+  /** Authorization endpoint. If omitted, resolved via metadataUrl discovery. */
+  authorizationEndpoint?: string;
+
+  /** Token endpoint. If omitted, resolved via metadataUrl discovery. */
+  tokenEndpoint?: string;
+
+  /**
+   * URL of the provider's OAuth authorization server metadata document
+   * (RFC 8414). When provided, authorizationEndpoint and tokenEndpoint
+   * can be omitted; they will be discovered at startup and cached.
+   */
+  metadataUrl?: string;
+
+  /** Endpoint to fetch user profile after token exchange. */
+  userInfoEndpoint?: string;
+
+  clientId: string;
+  clientSecret: string;
+
+  /**
+   * How to authenticate against the token endpoint.
+   * - "body" (default): client_id + client_secret in POST body
+   * - "basic": HTTP Basic Authorization header
+   */
+  tokenAuthMethod?: "body" | "basic";
+
+  /** Space-separated default scope string. */
+  defaultScopes: string;
+
+  /** Extra query parameters appended to the authorization URL. */
+  extraAuthParams?: Record<string, string>;
+
+  /** Map raw user-info JSON to normalized UserInfo shape. */
+  userInfoMapper?: (raw: Record<string, unknown>) => UserInfo;
+
+  /** Map OAuth2 tokens to auth cell data shape. Defaults to tokenToGenericAuthData. */
+  tokenMapper?: (token: OAuth2Tokens) => Record<string, unknown>;
+
+  /** JSON schema for auth cell. Defaults to OAuth2TokenSchema. */
+  authSchema?: JSONSchema;
+
+  /** Value written to auth cell on logout. */
+  emptyAuthData?: Record<string, unknown>;
+}

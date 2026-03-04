@@ -1,4 +1,5 @@
 import { OAuth2Client, type Tokens } from "@cmd-johnson/oauth2-client";
+import type { Context } from "@hono/hono";
 import { getLogger } from "@commontools/utils/logger";
 import { runtime } from "@/index.ts";
 import type { JSONSchema } from "@commontools/runner";
@@ -229,16 +230,16 @@ export function createCallbackResponse(
   });
 }
 
-export function createLoginSuccessResponse(c: any, url: string) {
+export function createLoginSuccessResponse(c: Context, url: string) {
   return c.json({ url }, 200);
 }
 
-export function createLoginErrorResponse(c: any, errorMessage: string) {
+export function createLoginErrorResponse(c: Context, errorMessage: string) {
   return c.json({ error: errorMessage }, 400);
 }
 
 export function createRefreshSuccessResponse(
-  c: any,
+  c: Context,
   message: string,
   tokenInfo: Record<string, unknown>,
 ) {
@@ -246,36 +247,77 @@ export function createRefreshSuccessResponse(
 }
 
 export function createRefreshErrorResponse(
-  c: any,
+  c: Context,
   errorMessage: string,
-  status = 400,
+  status: 400 | 401 | 500 = 400,
 ) {
   return c.json({ error: errorMessage }, status);
 }
 
-export function createLogoutSuccessResponse(c: any, message: string) {
-  return c.json({ success: true, message });
+export function createLogoutSuccessResponse(c: Context, message: string) {
+  return c.json({ success: true, message }, 200);
 }
 
 export function createLogoutErrorResponse(
-  c: any,
+  c: Context,
   errorMessage: string,
-  status = 400,
+  status: 400 | 500 = 400,
 ) {
   return c.json({ success: false, error: errorMessage }, status);
 }
 
 export function createBackgroundIntegrationSuccessResponse(
-  c: any,
+  c: Context,
   message: string,
 ) {
   return c.json({ success: true, message }, 200);
 }
 
 export function createBackgroundIntegrationErrorResponse(
-  c: any,
+  c: Context,
   errorMessage: string,
-  status = 400,
+  status: 400 | 500 = 400,
 ) {
   return c.json({ success: false, error: errorMessage }, status);
+}
+
+// ---------------------------------------------------------------------------
+// Provider metadata discovery (RFC 8414 / OIDC)
+// ---------------------------------------------------------------------------
+
+// In-memory cache: metadataUrl → discovered endpoints
+const metadataCache = new Map<string, {
+  authorizationEndpoint: string;
+  tokenEndpoint: string;
+}>();
+
+/**
+ * Fetch well-known OAuth metadata (RFC 8414 / OIDC) and return resolved
+ * endpoints. Results are cached for the lifetime of the process.
+ */
+export async function discoverProviderConfig(metadataUrl: string): Promise<{
+  authorizationEndpoint: string;
+  tokenEndpoint: string;
+}> {
+  const cached = metadataCache.get(metadataUrl);
+  if (cached) return cached;
+
+  const response = await fetch(metadataUrl);
+  if (!response.ok) {
+    throw new Error(
+      `Metadata discovery failed for ${metadataUrl}: ${response.status}`,
+    );
+  }
+  const doc = await response.json();
+  const result = {
+    authorizationEndpoint: doc.authorization_endpoint as string,
+    tokenEndpoint: doc.token_endpoint as string,
+  };
+  if (!result.authorizationEndpoint || !result.tokenEndpoint) {
+    throw new Error(
+      `Metadata document at ${metadataUrl} missing required fields`,
+    );
+  }
+  metadataCache.set(metadataUrl, result);
+  return result;
 }
