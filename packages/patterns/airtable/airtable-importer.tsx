@@ -28,6 +28,9 @@ type AirtableRecordData = {
   fields: Record<string, unknown>;
 };
 
+type BaseInfo = { id: string; name: string };
+type TableInfo = { id: string; name: string };
+
 interface Input {
   selectedBaseId: Default<string, "">;
   selectedTableId: Default<string, "">;
@@ -36,8 +39,8 @@ interface Input {
 /** Import records from an Airtable base. #airtableImporter */
 interface Output {
   records: AirtableRecordData[];
-  bases: Array<{ id: string; name: string }>;
-  tables: Array<{ id: string; name: string }>;
+  bases: BaseInfo[];
+  tables: TableInfo[];
   selectedBaseId: string;
   selectedTableId: string;
   selectedBaseName: string;
@@ -62,7 +65,7 @@ const fetchBases = handler<
   unknown,
   {
     auth: Writable<AirtableAuth>;
-    bases: Writable<Array<{ id: string; name: string }>>;
+    bases: Writable<BaseInfo[]>;
     loading: Writable<boolean>;
     error: Writable<string>;
   }
@@ -81,15 +84,15 @@ const fetchBases = handler<
 });
 
 const fetchTables = handler<
-  { baseId: string },
+  unknown,
   {
     auth: Writable<AirtableAuth>;
-    tables: Writable<Array<{ id: string; name: string }>>;
+    baseId: string;
+    tables: Writable<TableInfo[]>;
     loading: Writable<boolean>;
     error: Writable<string>;
   }
->(async (event, { auth, tables, loading, error }) => {
-  const baseId = event.baseId;
+>(async (_event, { auth, baseId, tables, loading, error }) => {
   if (!baseId) return;
   loading.set(true);
   error.set("");
@@ -105,15 +108,16 @@ const fetchTables = handler<
 });
 
 const fetchRecords = handler<
-  { baseId: string; tableId: string },
+  unknown,
   {
     auth: Writable<AirtableAuth>;
+    baseId: string;
+    tableId: string;
     records: Writable<AirtableRecordData[]>;
     loading: Writable<boolean>;
     error: Writable<string>;
   }
->(async (event, { auth, records, loading, error }) => {
-  const { baseId, tableId } = event;
+>(async (_event, { auth, baseId, tableId, records, loading, error }) => {
   if (!baseId || !tableId) return;
   loading.set(true);
   error.set("");
@@ -136,29 +140,29 @@ const fetchRecords = handler<
   }
 });
 
-const selectBase = handler<
+const onSelectBase = handler<
   { baseId: string },
   {
     selectedBaseId: Writable<string>;
     selectedTableId: Writable<string>;
-    tables: Writable<Array<{ id: string; name: string }>>;
+    tables: Writable<TableInfo[]>;
     records: Writable<AirtableRecordData[]>;
   }
->((_event, { selectedBaseId, selectedTableId, tables, records }) => {
-  selectedBaseId.set(_event.baseId);
+>((event, { selectedBaseId, selectedTableId, tables, records }) => {
+  selectedBaseId.set(event.baseId);
   selectedTableId.set("");
   tables.set([]);
   records.set([]);
 });
 
-const selectTable = handler<
+const onSelectTable = handler<
   { tableId: string },
   {
     selectedTableId: Writable<string>;
     records: Writable<AirtableRecordData[]>;
   }
->((_event, { selectedTableId, records }) => {
-  selectedTableId.set(_event.tableId);
+>((event, { selectedTableId, records }) => {
+  selectedTableId.set(event.tableId);
   records.set([]);
 });
 
@@ -177,19 +181,18 @@ export default pattern<Input, Output>(
       requiredScopes: REQUIRED_SCOPES,
     });
 
-    const auth = authResult as unknown as Writable<AirtableAuth>;
+    // deno-lint-ignore no-explicit-any
+    const auth = authResult as any;
 
     // State
-    const bases = Writable.of<Array<{ id: string; name: string }>>([]);
-    const tables = Writable.of<Array<{ id: string; name: string }>>([]);
+    const bases = Writable.of<BaseInfo[]>([]);
+    const tables = Writable.of<TableInfo[]>([]);
     const records = Writable.of<AirtableRecordData[]>([]);
     const loading = Writable.of(false);
     const error = Writable.of("");
 
-    const hasBases = computed(() => (bases.get() as Array<unknown>).length > 0);
-    const hasTables = computed(
-      () => (tables.get() as Array<unknown>).length > 0,
-    );
+    const hasBases = computed(() => (bases.get() as BaseInfo[]).length > 0);
+    const hasTables = computed(() => (tables.get() as TableInfo[]).length > 0);
     const hasRecords = computed(
       () => (records.get() as AirtableRecordData[]).length > 0,
     );
@@ -198,45 +201,51 @@ export default pattern<Input, Output>(
     );
 
     const selectedBaseName = computed(() => {
-      const id = selectedBaseId as unknown as string;
-      if (!id) return "";
-      const base = (bases.get() as Array<{ id: string; name: string }>).find(
-        (b) => b.id === id,
+      if (!selectedBaseId) return "";
+      const base = (bases.get() as BaseInfo[]).find(
+        (b) => b.id === selectedBaseId,
       );
-      return base?.name || id;
+      return base?.name || "";
     });
 
     const selectedTableName = computed(() => {
-      const id = selectedTableId as unknown as string;
-      if (!id) return "";
-      const table = (tables.get() as Array<{ id: string; name: string }>).find(
-        (t) => t.id === id,
+      if (!selectedTableId) return "";
+      const table = (tables.get() as TableInfo[]).find(
+        (t) => t.id === selectedTableId,
       );
-      return table?.name || id;
+      return table?.name || "";
     });
 
-    // Bound handlers
+    // Bound handlers — pass reactive inputs directly (no double-cast)
     const boundFetchBases = fetchBases({ auth, bases, loading, error });
-    const boundFetchTables = fetchTables({ auth, tables, loading, error });
+    const boundFetchTables = fetchTables({
+      auth,
+      baseId: selectedBaseId,
+      tables,
+      loading,
+      error,
+    });
     const boundFetchRecords = fetchRecords({
       auth,
+      baseId: selectedBaseId,
+      tableId: selectedTableId,
       records,
       loading,
       error,
     });
 
-    const boundSelectBase = selectBase({
-      selectedBaseId: selectedBaseId as unknown as Writable<string>,
-      selectedTableId: selectedTableId as unknown as Writable<string>,
+    const boundSelectBase = onSelectBase({
+      selectedBaseId,
+      selectedTableId,
       tables,
       records,
     });
-    const boundSelectTable = selectTable({
-      selectedTableId: selectedTableId as unknown as Writable<string>,
+    const boundSelectTable = onSelectTable({
+      selectedTableId,
       records,
     });
 
-    // Column headers extracted from first record
+    // Column headers extracted from records
     const columnHeaders = computed(() => {
       const recs = records.get() as AirtableRecordData[];
       if (recs.length === 0) return [] as string[];
@@ -249,13 +258,96 @@ export default pattern<Input, Output>(
       return Array.from(allKeys);
     });
 
-    // Has data flags
-    const hasBaseSelected = computed(
-      () => !!(selectedBaseId as unknown as string),
+    const hasBaseSelected = computed(() => !!selectedBaseId);
+    const hasTableSelected = computed(() => !!selectedTableId);
+
+    // Pre-compute base/table lists for JSX
+    const baseListUI = computed(() =>
+      (bases.get() as BaseInfo[]).map((base) => (
+        <button
+          type="button"
+          onClick={boundSelectBase}
+          data-base-id={base.id}
+          style={{
+            padding: "10px 14px",
+            backgroundColor: selectedBaseId === base.id ? "#e0f2fe" : "white",
+            border: selectedBaseId === base.id
+              ? "1px solid #18BFFF"
+              : "1px solid #e0e0e0",
+            borderRadius: "6px",
+            cursor: "pointer",
+            textAlign: "left",
+            fontSize: "14px",
+            fontWeight: selectedBaseId === base.id ? "600" : "normal",
+          }}
+        >
+          {base.name}
+        </button>
+      ))
     );
-    const hasTableSelected = computed(
-      () => !!(selectedTableId as unknown as string),
+
+    const tableListUI = computed(() =>
+      (tables.get() as TableInfo[]).map((table) => (
+        <button
+          type="button"
+          onClick={boundSelectTable}
+          data-table-id={table.id}
+          style={{
+            padding: "10px 14px",
+            backgroundColor: selectedTableId === table.id ? "#e0f2fe" : "white",
+            border: selectedTableId === table.id
+              ? "1px solid #18BFFF"
+              : "1px solid #e0e0e0",
+            borderRadius: "6px",
+            cursor: "pointer",
+            textAlign: "left",
+            fontSize: "14px",
+            fontWeight: selectedTableId === table.id ? "600" : "normal",
+          }}
+        >
+          {table.name}
+        </button>
+      ))
     );
+
+    const headerRowUI = computed(() =>
+      (columnHeaders as string[]).map((h) => (
+        <th
+          style={{
+            padding: "8px 12px",
+            textAlign: "left",
+            borderBottom: "2px solid #e0e0e0",
+            fontWeight: "600",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {h}
+        </th>
+      ))
+    );
+
+    const bodyRowsUI = computed(() =>
+      (records.get() as AirtableRecordData[]).map((rec) => (
+        <tr>
+          {(columnHeaders as string[]).map((h) => (
+            <td
+              style={{
+                padding: "8px 12px",
+                borderBottom: "1px solid #f0f0f0",
+                maxWidth: "300px",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {formatCellValue(rec.fields[h])}
+            </td>
+          ))}
+        </tr>
+      ))
+    );
+
+    const hasError = computed(() => !!(error.get() as string));
 
     return {
       [NAME]: computed(() => {
@@ -339,40 +431,7 @@ export default pattern<Input, Output>(
                       gap: "4px",
                     }}
                   >
-                    {computed(() =>
-                      (bases.get() as Array<{ id: string; name: string }>).map(
-                        (base) => (
-                          <button
-                            type="button"
-                            onClick={boundSelectBase}
-                            data-base-id={base.id}
-                            style={{
-                              padding: "10px 14px",
-                              backgroundColor:
-                                (selectedBaseId as unknown as string) ===
-                                    base.id
-                                  ? "#e0f2fe"
-                                  : "white",
-                              border: (selectedBaseId as unknown as string) ===
-                                  base.id
-                                ? "1px solid #18BFFF"
-                                : "1px solid #e0e0e0",
-                              borderRadius: "6px",
-                              cursor: "pointer",
-                              textAlign: "left",
-                              fontSize: "14px",
-                              fontWeight:
-                                (selectedBaseId as unknown as string) ===
-                                    base.id
-                                  ? "600"
-                                  : "normal",
-                            }}
-                          >
-                            {base.name}
-                          </button>
-                        ),
-                      )
-                    )}
+                    {baseListUI}
                   </div>,
                   <p style={{ color: "#666", fontSize: "14px", margin: "0" }}>
                     Click "Load Bases" to see your Airtable bases.
@@ -430,40 +489,7 @@ export default pattern<Input, Output>(
                         gap: "4px",
                       }}
                     >
-                      {computed(() =>
-                        (
-                          tables.get() as Array<{ id: string; name: string }>
-                        ).map((table) => (
-                          <button
-                            type="button"
-                            onClick={boundSelectTable}
-                            data-table-id={table.id}
-                            style={{
-                              padding: "10px 14px",
-                              backgroundColor:
-                                (selectedTableId as unknown as string) ===
-                                    table.id
-                                  ? "#e0f2fe"
-                                  : "white",
-                              border: (selectedTableId as unknown as string) ===
-                                  table.id
-                                ? "1px solid #18BFFF"
-                                : "1px solid #e0e0e0",
-                              borderRadius: "6px",
-                              cursor: "pointer",
-                              textAlign: "left",
-                              fontSize: "14px",
-                              fontWeight:
-                                (selectedTableId as unknown as string) ===
-                                    table.id
-                                  ? "600"
-                                  : "normal",
-                            }}
-                          >
-                            {table.name}
-                          </button>
-                        ))
-                      )}
+                      {tableListUI}
                     </div>,
                     <p
                       style={{ color: "#666", fontSize: "14px", margin: "0" }}
@@ -551,50 +577,11 @@ export default pattern<Input, Output>(
                                 top: "0",
                               }}
                             >
-                              {computed(() =>
-                                (columnHeaders as unknown as string[]).map(
-                                  (h) => (
-                                    <th
-                                      style={{
-                                        padding: "8px 12px",
-                                        textAlign: "left",
-                                        borderBottom: "2px solid #e0e0e0",
-                                        fontWeight: "600",
-                                        whiteSpace: "nowrap",
-                                      }}
-                                    >
-                                      {h}
-                                    </th>
-                                  ),
-                                )
-                              )}
+                              {headerRowUI}
                             </tr>
                           </thead>
                           <tbody>
-                            {computed(() =>
-                              (
-                                records.get() as AirtableRecordData[]
-                              ).map((rec) => (
-                                <tr>
-                                  {(columnHeaders as unknown as string[]).map(
-                                    (h) => (
-                                      <td
-                                        style={{
-                                          padding: "8px 12px",
-                                          borderBottom: "1px solid #f0f0f0",
-                                          maxWidth: "300px",
-                                          overflow: "hidden",
-                                          textOverflow: "ellipsis",
-                                          whiteSpace: "nowrap",
-                                        }}
-                                      >
-                                        {formatCellValue(rec.fields[h])}
-                                      </td>
-                                    ),
-                                  )}
-                                </tr>
-                              ))
-                            )}
+                            {bodyRowsUI}
                           </tbody>
                         </table>
                       </div>
@@ -611,7 +598,7 @@ export default pattern<Input, Output>(
 
               {/* Error display */}
               {ifElse(
-                computed(() => !!(error.get() as string)),
+                hasError,
                 <div
                   style={{
                     padding: "12px",
@@ -632,17 +619,13 @@ export default pattern<Input, Output>(
         </div>
       ),
       records: computed(() => records.get() as AirtableRecordData[]),
-      bases: computed(
-        () => bases.get() as Array<{ id: string; name: string }>,
-      ),
-      tables: computed(
-        () => tables.get() as Array<{ id: string; name: string }>,
-      ),
-      selectedBaseId: selectedBaseId as unknown as string,
-      selectedTableId: selectedTableId as unknown as string,
-      selectedBaseName: selectedBaseName as unknown as string,
-      selectedTableName: selectedTableName as unknown as string,
-      recordCount: recordCount as unknown as number,
+      bases: computed(() => bases.get() as BaseInfo[]),
+      tables: computed(() => tables.get() as TableInfo[]),
+      selectedBaseId,
+      selectedTableId,
+      selectedBaseName,
+      selectedTableName,
+      recordCount,
     };
   },
 );
