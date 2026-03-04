@@ -3407,6 +3407,9 @@ describe("Schema Support", () => {
         outerLink.id,
       );
 
+      // Test that we have our object
+      expect(resultInnerContents!.test).toEqual({ foo: "bar" });
+
       // resultInnerContents was returned from outer's inner.get(), and
       // inner->redir->first are all writeRedirect, so its toCell() returns
       // the first cell.
@@ -4056,6 +4059,9 @@ describe("Schema Support", () => {
         .getAsNormalizedFullLink();
       expect(resultInnerContentsCellLink.id).toBe(secondCellLink.id);
       expect(resultInnerContentsCellLink.path).toEqual([]);
+
+      // Test that unknown type from object turns into undefined
+      expect(resultInnerContents!.test).toBeUndefined();
 
       // resultInnerContents was returned from outer's inner.get(), and
       // inner->redir->first are all writeRedirect, so its toCell() returns
