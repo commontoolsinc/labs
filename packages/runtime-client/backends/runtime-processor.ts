@@ -41,6 +41,8 @@ import {
   type CellSetRequest,
   type CellSubscribeRequest,
   type CellUnsubscribeRequest,
+  type DetectNonIdempotentRequest,
+  type DetectNonIdempotentResponse,
   type EnsureHomePatternRunningRequest,
   type GetCellRequest,
   GetGraphSnapshotRequest,
@@ -733,6 +735,13 @@ export class RuntimeProcessor {
     handler.send({ piece: target });
   }
 
+  async detectNonIdempotent(
+    _request: DetectNonIdempotentRequest,
+  ): Promise<DetectNonIdempotentResponse> {
+    const result = await this.runtime.scheduler.runIdempotencyCheck();
+    return { result };
+  }
+
   async handleRequest(
     request: IPCClientRequest,
   ): Promise<RemoteResponse | void> {
@@ -797,6 +806,8 @@ export class RuntimeProcessor {
         return this.setTelemetryEnabled(request);
       case RequestType.ResetLoggerBaselines:
         return this.resetLoggerBaselines(request);
+      case RequestType.DetectNonIdempotent:
+        return await this.detectNonIdempotent(request);
       case RequestType.VDomEvent:
         return this.handleVDomEvent(request);
       case RequestType.VDomMount:

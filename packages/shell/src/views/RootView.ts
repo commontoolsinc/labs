@@ -116,6 +116,17 @@ export class XRootView extends BaseView {
         }
         globalThis.commontools.rt = this.runtime;
         globalThis.commontools.vdom = createVDomDebugHelpers();
+        globalThis.commontools.detectNonIdempotent = async () => {
+          const result = await rt.runtime().detectNonIdempotent();
+          console.table(
+            result.nonIdempotent.map((r: any) => ({
+              action: r.actionId,
+              differingWrites: r.differingWriteKeys.join(", "),
+            })),
+          );
+          console.log("Cycles:", result.cycles);
+          return result;
+        };
 
         return rt;
       },

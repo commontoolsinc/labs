@@ -56,6 +56,44 @@ export interface SchedulerActionInfo {
   writes?: string[];
 }
 
+// ============================================================
+// Diagnosis types for non-settling / non-idempotent detection
+// ============================================================
+
+/**
+ * Report for a single action detected as non-idempotent.
+ * Same inputs (reads) produced different outputs (writes) across runs.
+ */
+export interface NonIdempotentReport {
+  actionId: string;
+  actionInfo?: SchedulerActionInfo;
+  runs: {
+    timestamp: number;
+    reads: Record<string, unknown>;
+    writes: Record<string, unknown>;
+  }[];
+  differingWriteKeys: string[];
+}
+
+/**
+ * A cycle found in the causal chain of action triggers.
+ * e.g. A writes cell X -> triggers B, B writes cell Y -> triggers A.
+ */
+export interface CycleReport {
+  cycle: { actionId: string; writesCell: string }[];
+  timestamp: number;
+}
+
+/**
+ * Aggregated result from a diagnosis run.
+ */
+export interface SchedulerDiagnosisResult {
+  nonIdempotent: NonIdempotentReport[];
+  cycles: CycleReport[];
+  duration: number;
+  busyTime: number;
+}
+
 // Types of markers that can be submitted by the runtime.
 export type RuntimeTelemetryMarker = {
   type: "scheduler.run";
@@ -125,6 +163,11 @@ export type RuntimeTelemetryMarker = {
   actionId: string;
   reads: string[]; // cell paths this action reads
   writes: string[]; // cell paths this action writes
+} | {
+  type: "scheduler.non-settling";
+  busyTime: number;
+  windowDuration: number;
+  busyRatio: number;
 };
 
 export type RuntimeTelemetryMarkerResult = RuntimeTelemetryMarker & {

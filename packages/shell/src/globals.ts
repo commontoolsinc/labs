@@ -5,6 +5,7 @@ declare global {
   var app: App;
   var commontools: {
     rt?: RuntimeClient;
+    detectNonIdempotent?: (durationMs?: number) => Promise<unknown>;
     [key: string]: unknown;
   };
 }
