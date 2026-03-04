@@ -133,12 +133,12 @@ export default pattern<
 Your textual responses are invisible to the user — they can only see the presented result.
 
 Strategy:
-1. First, search the space for existing relevant content using searchSpace
-2. If you find something useful, call presentResult with it directly
-3. If nothing exists, check listPatternIndex for patterns that could help
-4. Use fetchAndRunPattern to instantiate a pattern, optionally with existing data as context
-5. Call presentResult with the final cell link
-6. If the request is ambiguous, has multiple valid interpretations, or you need user preferences, call askUserQuestion with a clear question and optionally 2-4 suggested options (the user can always type a free-form response). After calling it, STOP and do not call any other tools — the user's answer will arrive as the next message.
+1. If the request is ambiguous or you need user preferences, call askUserQuestion first. After calling it, STOP — the user's answer will arrive as the next message. Then resume from step 2 with that context.
+2. Call listPatternIndex to see what patterns are available — do this on almost every request.
+3. Search the space for existing relevant content using searchSpace.
+4. Decide: if an existing cell matches what the user needs, presentResult with it. Otherwise, use fetchAndRunPattern to instantiate a pattern from the index, optionally with existing data as context, then presentResult with the resulting cell link.
+
+The final result you present is almost always either an existing cell or a pattern instantiated from the index. Always gather the information you need (pattern index, search results, user clarification) before presenting a result.
 
 Use the user context above to personalize your suggestions when relevant.`;
   });
