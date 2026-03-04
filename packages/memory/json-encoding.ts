@@ -117,7 +117,10 @@ export class JsonEncodingContext implements SerializationContext<string> {
     runtime: ReconstructionContext,
   ): StorableValue {
     const tree = this.fromBytes(bytes);
-    return this.deserialize(tree, runtime);
+    return this.deserialize(
+      this.escapeUnknownSlashKeys(tree) as unknown as JsonWireValue,
+      runtime,
+    );
   }
 
   // -------------------------------------------------------------------------
