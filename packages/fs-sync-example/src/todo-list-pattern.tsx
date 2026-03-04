@@ -32,12 +32,13 @@ const onCreate = handler<
   {
     todos: Writable<Todo[]>;
     edits: Writable<Edit[]>;
-    newTodoText: Writable<string>;
+    draftTitle: Writable<string>;
   }
->((event, { todos, edits, newTodoText }) => {
-  // Accept description from event payload (testing) or from cell (form UI)
-  const description = (event?.description || newTodoText.get()).trim();
+>((event, { todos, edits, draftTitle }) => {
+  // Tests send { description }, UI reads from draftTitle cell
+  const description = (event?.description || draftTitle.get()).trim();
   if (!description) return;
+  draftTitle.set("");
 
   const pendingId = `pending-${Date.now()}-${
     Math.random().toString(36).slice(2)
@@ -52,9 +53,6 @@ const onCreate = handler<
 
   // Enqueue edit for the daemon (pendingId lets the daemon map it to canonical)
   edits.push({ type: "create", description, pendingId });
-
-  // Clear the input
-  newTodoText.set("");
 });
 
 const onToggle = handler<
@@ -62,11 +60,7 @@ const onToggle = handler<
   { todo: Writable<Todo>; edits: Writable<Edit[]> }
 >((_event, { todo, edits }) => {
   const newDone = !todo.get().done;
-
-  // Optimistic update — write directly to the todo cell
   todo.key("done").set(newDone);
-
-  // Enqueue edit with target state
   edits.push({ type: "toggle", id: todo.get().id, done: newDone });
 });
 
@@ -126,7 +120,7 @@ interface Output {
 export default pattern<Input, Output>(
   ({ todos, edits, appliedEdits, failedEdits }) => {
     const isSyncing = computed(() => edits.get().length > 0);
-    const newTodoText = Writable.of("");
+    const draftTitle = Writable.of("");
 
     return {
       [NAME]: "Todo List (fs-sync)",
@@ -155,17 +149,21 @@ export default pattern<Input, Output>(
 
           <ct-vscroll flex showScrollbar fadeEdges>
             <ct-vstack gap="2" style="padding: 1rem; max-width: 600px;">
-              {/* Add todo via form */}
-              <ct-form onct-submit={onCreate({ todos, edits, newTodoText })}>
-                <ct-hstack gap="2" align="center">
-                  <ct-input
-                    $value={newTodoText}
-                    placeholder="Add a todo..."
-                    style={{ flex: "1" }}
-                  />
-                  <ct-button type="submit" variant="primary">Add</ct-button>
-                </ct-hstack>
-              </ct-form>
+              {/* Add todo */}
+              <ct-hstack gap="2" align="center">
+                <ct-input
+                  $value={draftTitle}
+                  placeholder="Add a todo..."
+                  onct-submit={onCreate({ todos, edits, draftTitle })}
+                  style={{ flex: "1" }}
+                />
+                <ct-button
+                  variant="primary"
+                  onClick={onCreate({ todos, edits, draftTitle })}
+                >
+                  Add
+                </ct-button>
+              </ct-hstack>
 
               {/* Empty state */}
               {ifElse(
@@ -187,7 +185,7 @@ export default pattern<Input, Output>(
                 <ct-card>
                   <ct-hstack gap="2" align="center">
                     <ct-checkbox
-                      $checked={todo.done}
+                      checked={todo.done}
                       onChange={onToggle({ todo, edits })}
                     />
                     <ct-input
@@ -236,7 +234,7 @@ export default pattern<Input, Output>(
       edits,
       appliedEdits,
       failedEdits,
-      create: onCreate({ todos, edits, newTodoText }),
+      create: onCreate({ todos, edits, draftTitle }),
       // Per-item actions wrapped in objects (safe from spurious invocation)
       actions: todos.map((todo) => ({
         toggle: onToggle({ todo, edits }),
