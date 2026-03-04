@@ -334,9 +334,14 @@ function toStorableValueLegacy(value: unknown): StorableValueLayer {
         } else if (isStorableArray(value)) {
           return value;
         } else {
-          // Array has holes or `undefined` elements. Densify and convert
-          // `undefined` to `null`.
-          return [...value].map((v) => (v === undefined ? null : v));
+          // Array has holes or `undefined` elements. Preserve holes (sparse
+          // slots) and convert `undefined` values to `null`.
+          const arr = value as unknown[];
+          const result = new Array(arr.length);
+          arr.forEach((v, i) => {
+            result[i] = v === undefined ? null : v;
+          });
+          return result;
         }
       } else {
         return value;
@@ -471,9 +476,11 @@ function toDeepStorableValueInternal(
 
   // Recursively process arrays and objects.
   if (Array.isArray(value)) {
-    result = value.map((element) =>
-      toDeepStorableValueInternal(element, converted, true)
-    ) as StorableValue;
+    const arr = new Array(value.length);
+    value.forEach((v, i) => {
+      arr[i] = toDeepStorableValueInternal(v, converted, true);
+    });
+    result = arr as StorableValue;
   } else {
     const entries: [string, StorableValue][] = [];
     for (const [key, val] of Object.entries(value)) {
@@ -520,26 +527,24 @@ function isArrayWithOnlyIndexProperties(array: unknown[]): boolean {
 /**
  * Helper for other functions in this file, which accepts an array and checks to
  * see whether or not it in storable form. To be in storable form, an array must
- * have all numeric keys from `0` through `.length - 1`, it must have no other
- * (enumerable own) properties, and it must not contain any `undefined` elements.
+ * have only numeric index properties (no extra named properties) and must not
+ * contain any explicit `undefined` values at populated indices. Sparse holes
+ * are allowed.
  *
  * @param array The array to check.
  * @returns `true` if the array is in storable form, `false` otherwise.
  */
 function isStorableArray(array: unknown[]): boolean {
-  const len = array.length;
-
-  // Quick check: key count must equal length. This fails if there are holes
-  // (sparse array) or extra non-numeric properties.
-  if (Object.keys(array).length !== len) {
+  // Reject extra non-numeric properties by checking that all keys are valid
+  // array indices. Sparse arrays have fewer keys than length, which is fine.
+  if (!isArrayWithOnlyIndexProperties(array)) {
     return false;
   }
 
-  // Reject holes and `undefined` elements (neither should be present once a
-  // value has been converted to storable form). Note: `array[i]` returns
-  // `undefined` for holes, so this covers both cases.
-  for (let i = 0; i < len; i++) {
-    if (array[i] === undefined) {
+  // Reject `undefined` elements at populated indices. Holes (missing indices)
+  // are allowed — they are preserved as sparse slots.
+  for (let i = 0; i < array.length; i++) {
+    if (i in array && array[i] === undefined) {
       return false;
     }
   }

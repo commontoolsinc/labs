@@ -132,10 +132,10 @@ describe("Cell", () => {
     expect(result?.data).toEqual({ exposed: true });
   });
 
-  it("should densify sparse arrays during set", () => {
+  it("should preserve sparse arrays during set", () => {
     const c = runtime.getCell<unknown>(
       space,
-      "should densify sparse arrays during set",
+      "should preserve sparse arrays during set",
       undefined,
       tx,
     );
@@ -145,14 +145,17 @@ describe("Cell", () => {
     c.set({ arr: sparse });
 
     const result = c.get() as { arr: unknown[] } | undefined;
-    // Sparse array should be densified with null in the hole
-    expect(result?.arr).toEqual(["a", null, "c"]);
+    // Sparse array holes should be preserved
+    expect(result?.arr[0]).toBe("a");
+    expect(1 in (result?.arr ?? [])).toBe(false);
+    expect(result?.arr[2]).toBe("c");
+    expect(result?.arr.length).toBe(3);
   });
 
-  it("should densify shared sparse arrays and preserve sharing", () => {
+  it("should preserve shared sparse arrays and preserve sharing", () => {
     const c = runtime.getCell<unknown>(
       space,
-      "should densify shared sparse arrays and preserve sharing",
+      "should preserve shared sparse arrays and preserve sharing",
       undefined,
       tx,
     );
@@ -163,11 +166,41 @@ describe("Cell", () => {
     c.set([sparse, sparse]);
 
     const result = c.get() as unknown[][] | undefined;
-    // Both should be densified
-    expect(result?.[0]).toEqual([1, null, null, 2]);
-    expect(result?.[1]).toEqual([1, null, null, 2]);
+    // Both should preserve holes
+    expect(result?.[0][0]).toBe(1);
+    expect(1 in (result?.[0] ?? [])).toBe(false);
+    expect(2 in (result?.[0] ?? [])).toBe(false);
+    expect(result?.[0][3]).toBe(2);
+    expect(result?.[0].length).toBe(4);
     // Both should reference the same array (sharing preserved)
     expect(result?.[0]).toBe(result?.[1]);
+  });
+
+  it("should preserve holes and add IDs to objects in sparse arrays", () => {
+    const c = runtime.getCell<unknown>(
+      space,
+      "should preserve holes and add IDs to objects in sparse arrays",
+      undefined,
+      tx,
+    );
+    // deno-lint-ignore no-explicit-any
+    const sparse: any[] = new Array(4);
+    sparse[0] = "hello";
+    sparse[1] = { name: "Alice" };
+    // index 2 is a hole
+    sparse[3] = { name: "Bob" };
+    c.set(sparse);
+
+    // deno-lint-ignore no-explicit-any
+    const result = c.get() as any[];
+    expect(result[0]).toBe("hello");
+    // Objects should have their properties
+    expect(result[1]).toHaveProperty("name", "Alice");
+    // Hole at index 2 should be preserved
+    expect(2 in result).toBe(false);
+    // Object at index 3 should have its properties
+    expect(result[3]).toHaveProperty("name", "Bob");
+    expect(result.length).toBe(4);
   });
 
   it("should call toJSON() on arrays with toJSON method during set", () => {
@@ -2208,6 +2241,30 @@ describe("asCell with schema", () => {
 
     arrayCell.push(5);
     expect(arrayCell.get()).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it("should preserve holes when pushing onto a sparse array", () => {
+    const c = runtime.getCell<{ items: number[] }>(
+      space,
+      "push-sparse-preserve",
+      undefined,
+      tx,
+    );
+    // deno-lint-ignore no-explicit-any
+    const sparse: any[] = new Array(3);
+    sparse[0] = 10;
+    sparse[2] = 30;
+    c.set({ items: sparse });
+
+    const arrayCell = c.key("items");
+    arrayCell.push(40);
+
+    const result = arrayCell.get() as number[];
+    expect(result.length).toBe(4);
+    expect(result[0]).toBe(10);
+    expect(1 in result).toBe(false); // original hole preserved
+    expect(result[2]).toBe(30);
+    expect(result[3]).toBe(40); // pushed element
   });
 
   it("should throw when pushing values to `null`", () => {

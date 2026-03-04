@@ -249,11 +249,11 @@ describe("ExperimentalOptions", () => {
       expect(isStorableValue(sparse)).toBe(true);
     });
 
-    it("rejects sparse arrays when flag is OFF", () => {
+    it("accepts sparse arrays when flag is OFF", () => {
       setExperimentalStorableConfig({ richStorableValues: false });
       // deno-lint-ignore no-sparse-arrays
       const sparse = [1, , 3];
-      expect(isStorableValue(sparse)).toBe(false);
+      expect(isStorableValue(sparse)).toBe(true);
     });
 
     it("returns to flag-OFF behavior after reset", () => {

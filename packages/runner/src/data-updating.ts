@@ -470,6 +470,25 @@ export function normalizeAndDiff(
     const currentArray = Array.isArray(currentValue) ? currentValue : undefined;
 
     for (let i = 0; i < newValue.length; i++) {
+      const inNew = i in newValue;
+      const inCur = currentArray ? i in currentArray : false;
+
+      if (!inNew && !inCur) continue; // hole→hole: no change
+
+      if (!inNew && inCur) {
+        // value→hole: emit delete (set to undefined)
+        changes.push({
+          location: {
+            ...link,
+            path: [...link.path, i.toString()],
+            schema: runtime.cfc.getSchemaAtPath(link.schema, [i.toString()]),
+          },
+          value: undefined,
+        });
+        continue;
+      }
+
+      // hole→value or value→value: recurse normally
       const childSchema = runtime.cfc.getSchemaAtPath(link.schema, [
         i.toString(),
       ]);
@@ -485,7 +504,7 @@ export function normalizeAndDiff(
         context,
         options,
         seen,
-        currentArray?.[i],
+        inCur ? currentArray![i] : undefined,
       );
       changes.push(...nestedChanges);
     }
@@ -627,11 +646,10 @@ function hasPath(value: unknown, path: readonly string[]): boolean {
     if (first === "length" && rest.length === 0) return true;
     // Only valid array index strings can access array elements
     if (!isArrayIndexPropertyName(first)) return false;
-    // Access with string key works for arrays (array["1"] === array[1]).
-    // JSON arrays can't be sparse or contain `undefined`, so `undefined`
-    // means the index is out of range.
-    const element = (value as unknown as Record<string, unknown>)[first];
-    return element !== undefined && hasPath(element, rest);
+    // Use `in` to correctly handle sparse arrays (holes are not present)
+    const index = Number(first);
+    if (!(index in value)) return false;
+    return hasPath(value[index], rest);
   }
 
   const obj = value as Record<string, unknown>;
