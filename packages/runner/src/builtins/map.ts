@@ -5,7 +5,6 @@ import { type Action } from "../scheduler.ts";
 import { type AddCancel } from "../cancel.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import { addressKey } from "../link-types.ts";
 
 /**
  * Implementation of built-in map module. Unlike regular modules, this will be
@@ -107,17 +106,11 @@ export function map(
     const keyCounts = new Map<string, number>();
     const newArrayValue: any[] = [];
     for (let i = 0; i < list.length; i++) {
-      const link = list[i].getAsNormalizedFullLink();
-      const baseKey = addressKey(link);
-      const occurrence = keyCounts.get(baseKey) ?? 0;
-      keyCounts.set(baseKey, occurrence + 1);
-      const elementKey = JSON.stringify([
-        link.space,
-        link.id,
-        link.type,
-        link.path,
-        occurrence,
-      ]);
+      const { space: s, id, type, path } = list[i].getAsNormalizedFullLink();
+      const dedupKey = JSON.stringify([s, id, type, path]);
+      const occurrence = keyCounts.get(dedupKey) ?? 0;
+      keyCounts.set(dedupKey, occurrence + 1);
+      const elementKey = JSON.stringify([s, id, type, path, occurrence]);
 
       if (elementRuns.has(elementKey)) {
         const existing = elementRuns.get(elementKey)!;
