@@ -80,7 +80,7 @@ export type * from "./interface.ts";
  */
 const storageReconstructionContext: ReconstructionContext = {
   getCell() {
-    throw new Error(
+    throw new globalThis.Error(
       "getCell is not available at the storage boundary (step 0)",
     );
   },
@@ -564,7 +564,15 @@ const recall = <Space extends MemorySpace>(
     };
 
     if (row.is) {
-      revision.is = valueFromJson(row.is, storageReconstructionContext);
+      // `revision.is` is typed `undefined` in some union members, but at
+      // runtime the storage row can carry a value. Before the encoding
+      // dispatch, `JSON.parse` returned `any` which silently satisfied the
+      // type; `valueFromJson` returns `StorableValue`, so we need a cast.
+      // deno-lint-ignore no-explicit-any
+      (revision as any).is = valueFromJson(
+        row.is,
+        storageReconstructionContext,
+      );
     }
 
     return revision;
@@ -643,7 +651,12 @@ const getFact = <Space extends MemorySpace>(
     since: row.since,
   };
   if (row.is) {
-    revision.is = valueFromJson(row.is, storageReconstructionContext);
+    // See comment in `recall` for why this cast is needed.
+    // deno-lint-ignore no-explicit-any
+    (revision as any).is = valueFromJson(
+      row.is,
+      storageReconstructionContext,
+    );
   }
   return revision;
 };
