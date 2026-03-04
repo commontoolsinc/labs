@@ -5,9 +5,21 @@ import {
   type ReconstructionContext,
   type StorableInstance,
 } from "./storable-protocol.ts";
-import type { JsonWireValue } from "./json-serialization-context.ts";
 import { ExplicitTagStorable } from "./explicit-tag-storable.ts";
 import { ProblematicStorable } from "./problematic-storable.ts";
+
+/**
+ * JSON-compatible wire format value. This is the intermediate tree
+ * representation used during serialization tree walking -- NOT the final
+ * serialized form (which is `string`). Internal to the JSON implementation.
+ */
+export type JsonWireValue =
+  | null
+  | boolean
+  | number
+  | string
+  | JsonWireValue[]
+  | { [key: string]: JsonWireValue };
 import {
   StorableEpochDays,
   StorableEpochNsec,

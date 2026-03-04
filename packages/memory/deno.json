@@ -47,7 +47,6 @@
     "./storable-protocol": "./storable-protocol.ts",
     "./serialization-context": "./serialization-context.ts",
     "./type-tags": "./type-tags.ts",
-    "./json-serialization-context": "./json-serialization-context.ts",
     "./json-encoding": "./json-encoding.ts",
     "./json-encoding-dispatch": "./json-encoding-dispatch.ts",
     "./json-type-handlers": "./json-type-handlers.ts",

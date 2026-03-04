@@ -9,7 +9,7 @@ import {
 } from "../storable-protocol.ts";
 import type { StorableClass, StorableInstance } from "../storable-protocol.ts";
 import type { StorableValue } from "../interface.ts";
-import type { JsonWireValue } from "../json-serialization-context.ts";
+import type { JsonWireValue } from "../json-type-handlers.ts";
 import { UnknownStorable } from "../unknown-storable.ts";
 import { ProblematicStorable } from "../problematic-storable.ts";
 import { ExplicitTagStorable } from "../explicit-tag-storable.ts";
