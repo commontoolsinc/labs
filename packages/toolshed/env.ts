@@ -105,6 +105,13 @@ const EnvSchema = z.object({
   GOOGLE_CLIENT_SECRET: z.string().default(""),
 
   // ===========================================================================
+  // Airtable Integration
+  //   * /routes/integrations/airtable-oauth
+  // ===========================================================================
+  AIRTABLE_CLIENT_ID: z.string().default(""),
+  AIRTABLE_CLIENT_SECRET: z.string().default(""),
+
+  // ===========================================================================
   // Plaid Integration
   //   * /routes/integrations/plaid-oauth
   // ===========================================================================
