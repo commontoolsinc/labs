@@ -262,6 +262,7 @@ function buildShrunkTypeNodeFromTypeNode(
   node: ts.TypeNode,
   paths: readonly (readonly string[])[],
   factory: ts.NodeFactory,
+  checker?: ts.TypeChecker,
 ): ts.TypeNode | undefined {
   const normalized = uniquePaths(paths);
   if (normalized.length === 0) {
@@ -272,44 +273,9 @@ function buildShrunkTypeNodeFromTypeNode(
     return node;
   }
 
+  // Shrink object type literals by filtering to only the accessed members.
   if (ts.isTypeLiteralNode(node)) {
-    const grouped = groupPathsByHead(normalized);
-    const members: ts.TypeElement[] = [];
-
-    for (const member of node.members) {
-      if (!ts.isPropertySignature(member) || !member.name || !member.type) {
-        continue;
-      }
-
-      const propertyName = getPropertyNameText(member.name);
-      if (!propertyName) continue;
-      const childPaths = grouped.get(propertyName);
-      if (!childPaths) continue;
-
-      const shrunkChild = buildShrunkTypeNodeFromTypeNode(
-        member.type,
-        childPaths,
-        factory,
-      ) ?? member.type;
-
-      members.push(
-        factory.updatePropertySignature(
-          member,
-          member.modifiers,
-          member.name,
-          member.questionToken ??
-            (typeNodeIncludesUndefined(shrunkChild)
-              ? factory.createToken(ts.SyntaxKind.QuestionToken)
-              : undefined),
-          shrunkChild,
-        ),
-      );
-    }
-
-    if (members.length === 0) {
-      return undefined;
-    }
-    return factory.createTypeLiteralNode(members);
+    return shrinkTypeLiteralMembers(node.members, normalized, factory, checker);
   }
 
   if (
@@ -324,6 +290,7 @@ function buildShrunkTypeNodeFromTypeNode(
       inner,
       normalized,
       factory,
+      checker,
     ) ?? inner;
     return factory.updateTypeReferenceNode(
       node,
@@ -332,7 +299,138 @@ function buildShrunkTypeNodeFromTypeNode(
     );
   }
 
+  // For non-Cell-like TypeReferences (type aliases, interfaces), resolve the
+  // declaration and shrink its members directly.  This preserves source-level
+  // TypeNodes (e.g. Date, string-literal unions) that would be lost by the
+  // type-driven fallback.
+  if (ts.isTypeReferenceNode(node) && checker) {
+    const members = resolveTypeReferenceMembers(node, checker);
+    if (members) {
+      const shrunk = shrinkTypeLiteralMembers(
+        members,
+        normalized,
+        factory,
+        checker,
+      );
+      if (!shrunk) return undefined;
+      // If the shrunk type is identical to the original declaration (same
+      // member count and no nested changes), keep the original TypeReference
+      // to preserve $ref/$defs in schema generation.
+      if (isUnchangedShrink(members, shrunk)) {
+        return node;
+      }
+      return shrunk;
+    }
+    // Could not resolve to concrete members — let the caller fall back.
+    return undefined;
+  }
+
   return node;
+}
+
+/**
+ * Resolves a TypeReference to its declaration members (PropertySignatures).
+ * Works for type aliases with TypeLiteral bodies and interface declarations.
+ */
+function resolveTypeReferenceMembers(
+  node: ts.TypeReferenceNode,
+  checker: ts.TypeChecker,
+): readonly ts.TypeElement[] | undefined {
+  const type = checker.getTypeFromTypeNode(node);
+  const symbol = type.aliasSymbol ?? type.symbol;
+  if (!symbol?.declarations?.length) return undefined;
+  for (const decl of symbol.declarations) {
+    if (ts.isTypeAliasDeclaration(decl) && ts.isTypeLiteralNode(decl.type)) {
+      return decl.type.members;
+    }
+    if (ts.isInterfaceDeclaration(decl)) {
+      return decl.members;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Returns true when the shrunk TypeLiteral is structurally identical to the
+ * original declaration members — same member count, same member names, and
+ * each member's type node is the original (not a newly created node).
+ */
+function isUnchangedShrink(
+  originalMembers: readonly ts.TypeElement[],
+  shrunk: ts.TypeNode,
+): boolean {
+  if (!ts.isTypeLiteralNode(shrunk)) return false;
+  const origProps = originalMembers.filter(
+    (m): m is ts.PropertySignature =>
+      ts.isPropertySignature(m) && !!m.name && !!m.type,
+  );
+  if (shrunk.members.length !== origProps.length) return false;
+  // Check each shrunk member's type is the exact same node object as the
+  // original — if any type was recreated by recursive shrinking, the node
+  // identity will differ.
+  for (const member of shrunk.members) {
+    if (!ts.isPropertySignature(member) || !member.name || !member.type) {
+      return false;
+    }
+    const name = getPropertyNameText(member.name);
+    if (!name) return false;
+    const orig = origProps.find(
+      (p) => getPropertyNameText(p.name) === name,
+    );
+    if (!orig) return false;
+    if (member.type !== orig.type) return false;
+  }
+  return true;
+}
+
+/**
+ * Shared logic: filters a list of type members to only the accessed property
+ * heads and recursively shrinks child types.
+ */
+function shrinkTypeLiteralMembers(
+  members: readonly ts.TypeElement[],
+  normalizedPaths: readonly (readonly string[])[],
+  factory: ts.NodeFactory,
+  checker?: ts.TypeChecker,
+): ts.TypeNode | undefined {
+  const grouped = groupPathsByHead(normalizedPaths);
+  const result: ts.TypeElement[] = [];
+
+  for (const member of members) {
+    if (!ts.isPropertySignature(member) || !member.name || !member.type) {
+      continue;
+    }
+
+    const propertyName = getPropertyNameText(member.name);
+    if (!propertyName) continue;
+    const childPaths = grouped.get(propertyName);
+    if (!childPaths) continue;
+
+    const shrunkChild = buildShrunkTypeNodeFromTypeNode(
+      member.type,
+      childPaths,
+      factory,
+      checker,
+    ) ?? member.type;
+
+    result.push(
+      factory.updatePropertySignature(
+        member,
+        member.modifiers,
+        member.name,
+        member.questionToken ??
+          (typeNodeIncludesUndefined(shrunkChild)
+            ? factory.createToken(ts.SyntaxKind.QuestionToken)
+            : undefined),
+        shrunkChild,
+      ),
+    );
+  }
+
+  if (result.length === 0) {
+    return undefined;
+  }
+  return factory.createTypeLiteralNode(result);
 }
 
 function isSyntheticTypeNode(node: ts.TypeNode): boolean {
@@ -889,6 +987,7 @@ function applyShrinkAndWrap(
         baseTypeNode,
         paths,
         factory,
+        checker,
       );
       shrunk = typeDriven ?? nodeDriven;
       if (
@@ -903,7 +1002,12 @@ function applyShrinkAndWrap(
       }
     } else {
       // Source-authored nodes preserve exact unions/aliases; keep them first.
-      shrunk = buildShrunkTypeNodeFromTypeNode(baseTypeNode, paths, factory);
+      shrunk = buildShrunkTypeNodeFromTypeNode(
+        baseTypeNode,
+        paths,
+        factory,
+        checker,
+      );
       if (!shrunk && baseType) {
         shrunk = buildShrunkTypeNodeFromType(
           baseType,

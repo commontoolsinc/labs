@@ -11,10 +11,6 @@ const myHandler = handler(false as const satisfies __ctHelpers.JSONSchema, {
         value: {
             type: "number",
             asCell: true
-        },
-        name: {
-            type: "string",
-            asCell: true
         }
     },
     required: ["value"]

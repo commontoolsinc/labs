@@ -47,27 +47,14 @@ const removeItemAlias = handler(true as const satisfies __ctHelpers.JSONSchema, 
     properties: {
         items: {
             type: "array",
-            items: {
-                $ref: "#/$defs/Item"
-            },
+            items: true,
             asCell: true
         },
         index: {
             type: "number"
         }
     },
-    required: ["items", "index"],
-    $defs: {
-        Item: {
-            type: "object",
-            properties: {
-                text: {
-                    type: "string"
-                }
-            },
-            required: ["text"]
-        }
-    }
+    required: ["items", "index"]
 } as const satisfies __ctHelpers.JSONSchema, (_, { items, index }) => {
     const next = items.get().slice();
     if (index >= 0 && index < next.length)

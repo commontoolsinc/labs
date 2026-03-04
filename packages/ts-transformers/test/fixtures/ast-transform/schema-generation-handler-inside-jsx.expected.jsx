@@ -28,21 +28,9 @@ export const result = (<div>
         properties: {
             clicks: {
                 type: "number"
-            },
-            lastPosition: {
-                type: "object",
-                properties: {
-                    x: {
-                        type: "number"
-                    },
-                    y: {
-                        type: "number"
-                    }
-                },
-                required: ["x", "y"]
             }
         },
-        required: ["clicks", "lastPosition"]
+        required: ["clicks"]
     } as const satisfies __ctHelpers.JSONSchema, (event: ClickEvent, state: AppState) => ({
         clicks: state.clicks + 1,
         lastPosition: { x: event.x, y: event.y },
