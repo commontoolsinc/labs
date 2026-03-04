@@ -1,7 +1,5 @@
 import type { StorableValue } from "./interface.ts";
 import type { ReconstructionContext } from "./storable-protocol.ts";
-import type { SerializedForm } from "./json-serialization-context.ts";
-import { deserialize, serialize } from "./serialization.ts";
 import { JsonEncodingContext } from "./json-encoding.ts";
 
 // ---------------------------------------------------------------------------
@@ -14,26 +12,27 @@ const jsonEncodingContext = new JsonEncodingContext();
 // Flag-dispatched public API
 //
 // These two symbols are reassigned by `configureDispatch()` whenever the
-// unified JSON encoding flag changes. When OFF (default), both are
-// passthrough no-ops. When ON, they serialize/deserialize via the storable
-// protocol and `JsonEncodingContext`.
+// unified JSON encoding flag changes. When OFF (default), both are plain
+// JSON.stringify / JSON.parse. When ON, they route through the
+// `JsonEncodingContext` codec which handles serialization and deserialization internally.
 // ---------------------------------------------------------------------------
 
 /**
- * Encode a storable value for JSON storage. When unified JSON encoding is
+ * Encode a storable value to a JSON string. When unified JSON encoding is
  * ON, serializes rich types (bigint, undefined, Map, etc.) into the
- * `/<Type>@<Version>` tagged wire format. When OFF, returns the value
- * unchanged (passthrough).
+ * `/<Type>@<Version>` tagged wire format and stringifies. When OFF,
+ * equivalent to `JSON.stringify(value)`.
  */
-export let encodeJsonValue: (value: StorableValue) => StorableValue;
+export let jsonFromValue: (value: StorableValue) => string;
 
 /**
- * Decode a storable value from JSON storage. When unified JSON encoding is
- * ON, deserializes `/<Type>@<Version>` tagged wire format back into rich
- * runtime types. When OFF, returns the data unchanged (passthrough).
+ * Decode a JSON string back into a storable value. When unified JSON
+ * encoding is ON, parses the string and deserializes tagged forms back
+ * into rich runtime types. When OFF,
+ * equivalent to `JSON.parse(json)`.
  */
-export let decodeJsonValue: (
-  data: StorableValue,
+export let valueFromJson: (
+  json: string,
   runtime: ReconstructionContext,
 ) => StorableValue;
 
@@ -44,8 +43,8 @@ export let decodeJsonValue: (
 /**
  * Module-level flag for unified JSON encoding, set by the `Runtime`
  * constructor via `setJsonEncodingConfig()`. When enabled, the public API
- * symbols dispatch to serialize/deserialize implementations instead of
- * passthrough.
+ * symbols dispatch to the `JsonEncodingContext` codec instead of plain
+ * JSON.stringify / JSON.parse.
  */
 let jsonEncodingEnabled = false;
 
@@ -58,35 +57,28 @@ function configureDispatch(): void {
   if (jsonEncodingEnabled) {
     // ----- Unified JSON encoding implementations -----
 
-    encodeJsonValue = (value: StorableValue): StorableValue => {
-      return serialize(
-        value,
-        jsonEncodingContext,
-      ) as unknown as StorableValue;
+    jsonFromValue = (value: StorableValue): string => {
+      return jsonEncodingContext.encode(value);
     };
 
-    decodeJsonValue = (
-      data: StorableValue,
+    valueFromJson = (
+      json: string,
       runtime: ReconstructionContext,
     ): StorableValue => {
-      return deserialize(
-        data as unknown as SerializedForm,
-        jsonEncodingContext,
-        runtime,
-      );
+      return jsonEncodingContext.decode(json, runtime);
     };
   } else {
     // ----- Passthrough (flag OFF) -----
 
-    encodeJsonValue = (value: StorableValue): StorableValue => {
-      return value;
+    jsonFromValue = (value: StorableValue): string => {
+      return JSON.stringify(value);
     };
 
-    decodeJsonValue = (
-      data: StorableValue,
+    valueFromJson = (
+      json: string,
       _runtime: ReconstructionContext,
     ): StorableValue => {
-      return data;
+      return JSON.parse(json) as StorableValue;
     };
   }
 }
