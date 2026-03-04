@@ -3,8 +3,10 @@ import { expect } from "@std/expect";
 import {
   decodeJsonValue,
   encodeJsonValue,
+  jsonFromValue,
   resetJsonEncodingConfig,
   setJsonEncodingConfig,
+  valueFromJson,
 } from "../json-encoding-dispatch.ts";
 import type { ReconstructionContext } from "../storable-protocol.ts";
 import type { StorableValue } from "../interface.ts";
@@ -314,6 +316,69 @@ describe("json-encoding-dispatch", () => {
       const parsed = JSON.parse(json) as StorableValue;
       const decoded = decodeJsonValue(parsed, mockRuntime);
       expect(decoded).toEqual(value);
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Combined functions (jsonFromValue / valueFromJson)
+  // --------------------------------------------------------------------------
+
+  describe("combined functions", () => {
+    it("jsonFromValue produces valid JSON (flag OFF)", () => {
+      const value = { hello: "world" } as StorableValue;
+      const json = jsonFromValue(value);
+      expect(json).toBe('{"hello":"world"}');
+    });
+
+    it("valueFromJson parses JSON (flag OFF)", () => {
+      const json = '{"hello":"world"}';
+      const value = valueFromJson(json, mockRuntime);
+      expect(value).toEqual({ hello: "world" });
+    });
+
+    it("round-trip through jsonFromValue/valueFromJson (flag OFF)", () => {
+      const original = { a: 1, b: [2, 3] } as StorableValue;
+      const json = jsonFromValue(original);
+      const restored = valueFromJson(json, mockRuntime);
+      expect(restored).toEqual(original);
+    });
+
+    it("jsonFromValue encodes rich types (flag ON)", () => {
+      setJsonEncodingConfig(true);
+      const json = jsonFromValue(42n as StorableValue);
+      expect(json).toBe('{"\/BigInt@1":"Kg"}');
+    });
+
+    it("valueFromJson decodes rich types (flag ON)", () => {
+      setJsonEncodingConfig(true);
+      const json = '{"\/BigInt@1":"Kg"}';
+      const value = valueFromJson(json, mockRuntime);
+      expect(value).toBe(42n);
+    });
+
+    it("round-trip through jsonFromValue/valueFromJson (flag ON)", () => {
+      setJsonEncodingConfig(true);
+      const original = {
+        count: 42n,
+        ref: { "/": { "link@1": { id: "of:bafyabc", path: [] } } },
+      } as StorableValue;
+      const json = jsonFromValue(original);
+      const restored = valueFromJson(json, mockRuntime);
+      const result = restored as Record<string, unknown>;
+      expect(result.count).toBe(42n);
+      expect(result.ref).toEqual(
+        { "/": { "link@1": { id: "of:bafyabc", path: [] } } },
+      );
+    });
+
+    it("valueFromJson handles legacy sigil links (flag ON)", () => {
+      setJsonEncodingConfig(true);
+      // Simulate legacy JSON stored without the flag.
+      const legacyJson = '{"\/":{"link@1":{"id":"of:bafyabc","path":[]}}}';
+      const value = valueFromJson(legacyJson, mockRuntime);
+      expect(value).toEqual(
+        { "/": { "link@1": { id: "of:bafyabc", path: [] } } },
+      );
     });
   });
 

@@ -68,7 +68,7 @@ export type {
 } from "./space-schema.ts";
 import { StorableDatum, StorableValue } from "./interface.ts";
 import { isObject } from "../utils/src/types.ts";
-import { decodeJsonValue, encodeJsonValue } from "./json-encoding-dispatch.ts";
+import { jsonFromValue, valueFromJson } from "./json-encoding-dispatch.ts";
 import type { ReconstructionContext } from "./storable-protocol.ts";
 export type * from "./interface.ts";
 
@@ -564,10 +564,7 @@ const recall = <Space extends MemorySpace>(
     };
 
     if (row.is) {
-      revision.is = decodeJsonValue(
-        JSON.parse(row.is),
-        storageReconstructionContext,
-      );
+      revision.is = valueFromJson(row.is, storageReconstructionContext);
     }
 
     return revision;
@@ -646,10 +643,7 @@ const getFact = <Space extends MemorySpace>(
     since: row.since,
   };
   if (row.is) {
-    revision.is = decodeJsonValue(
-      JSON.parse(row.is),
-      storageReconstructionContext,
-    );
+    revision.is = valueFromJson(row.is, storageReconstructionContext);
   }
   return revision;
 };
@@ -708,10 +702,7 @@ const toFact = function (row: StateRow): SelectedFact {
       ? row.cause as CauseString
       : unclaimedRef(row as FactAddress).toString() as CauseString,
     is: row.is
-      ? decodeJsonValue(
-        JSON.parse(row.is),
-        storageReconstructionContext,
-      ) as StorableDatum
+      ? valueFromJson(row.is, storageReconstructionContext) as StorableDatum
       : undefined,
     since: row.since,
   };
@@ -784,7 +775,7 @@ const importDatum = <Space extends MemorySpace>(
     );
     stmt.run({
       this: is,
-      source: JSON.stringify(encodeJsonValue(datum)),
+      source: jsonFromValue(datum),
     });
 
     return is;

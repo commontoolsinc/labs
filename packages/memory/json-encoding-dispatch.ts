@@ -129,6 +129,23 @@ export let decodeJsonValue: (
   runtime: ReconstructionContext,
 ) => StorableValue;
 
+/**
+ * Encode a storable value and stringify to JSON in one step. Combines
+ * `encodeJsonValue` and `JSON.stringify` so call sites don't need to know
+ * about JSON internals. When OFF, equivalent to `JSON.stringify(value)`.
+ */
+export let jsonFromValue: (value: StorableValue) => string;
+
+/**
+ * Parse a JSON string and decode the resulting value in one step. Combines
+ * `JSON.parse` and `decodeJsonValue` so call sites don't need to know
+ * about JSON internals. When OFF, equivalent to `JSON.parse(json)`.
+ */
+export let valueFromJson: (
+  json: string,
+  runtime: ReconstructionContext,
+) => StorableValue;
+
 // ---------------------------------------------------------------------------
 // Unified JSON encoding flag and dispatch configuration
 // ---------------------------------------------------------------------------
@@ -167,6 +184,25 @@ function configureDispatch(): void {
         runtime,
       );
     };
+
+    jsonFromValue = (value: StorableValue): string => {
+      return JSON.stringify(
+        serialize(value, jsonEncodingContext),
+      );
+    };
+
+    valueFromJson = (
+      json: string,
+      runtime: ReconstructionContext,
+    ): StorableValue => {
+      return deserialize(
+        escapeUnknownSlashKeys(
+          JSON.parse(json) as StorableValue,
+        ) as unknown as SerializedForm,
+        jsonEncodingContext,
+        runtime,
+      );
+    };
   } else {
     // ----- Passthrough (flag OFF) -----
 
@@ -179,6 +215,17 @@ function configureDispatch(): void {
       _runtime: ReconstructionContext,
     ): StorableValue => {
       return data;
+    };
+
+    jsonFromValue = (value: StorableValue): string => {
+      return JSON.stringify(value);
+    };
+
+    valueFromJson = (
+      json: string,
+      _runtime: ReconstructionContext,
+    ): StorableValue => {
+      return JSON.parse(json) as StorableValue;
     };
   }
 }
