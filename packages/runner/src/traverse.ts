@@ -1950,31 +1950,19 @@ export class SchemaObjectTraverser<V extends StorableDatum>
           ...anyOf.filter(SchemaObjectTraverser.asCellOrStream),
         ];
 
-        // Layer 1: Fast-reject branches that clearly can't match the value
-        const survivingBranches: JSONSchema[] = [];
+        // Branch-by-branch traversal; fast-reject after merge so canBranchMatch
+        // sees the full merged constraints (type/required from restSchema too).
+        const matches: Immutable<StorableValue>[] = [];
         for (const optionSchema of sortedAnyOf) {
           this.anyOfBranches++;
           if (ContextualFlowControl.isFalseSchema(optionSchema)) {
             continue;
           }
-          if (!canBranchMatch(optionSchema, doc.value, restSchema)) {
+          const mergedSchema = mergeSchemaOption(restSchema, optionSchema);
+          if (!canBranchMatch(mergedSchema, doc.value)) {
             this.anyOfFastRejects++;
             continue;
           }
-          survivingBranches.push(optionSchema);
-        }
-
-        // Layer 2 (mergeAnyOfBranchSchemas — merge surviving object branches
-        // into a single schema and traverse once) is disabled. It caused
-        // regressions with link resolution during traversal because the merged
-        // schema loses per-branch context that followPointer relies on.
-        // The helper and its tests are retained for future use.
-
-        // Branch-by-branch traversal on surviving branches
-        const matches: Immutable<StorableValue>[] = [];
-        for (const optionSchema of survivingBranches) {
-          this.anyOfBranches++;
-          const mergedSchema = mergeSchemaOption(restSchema, optionSchema);
           // TODO(@ubik2): do i need to merge the link schema?
           const { ok: val, error } = this.traverseWithSchema(
             doc,
@@ -2863,7 +2851,6 @@ function mergeSchemaOption(
 export function canBranchMatch(
   branch: JSONSchema,
   value: unknown,
-  outerSchema?: JSONSchemaObj,
 ): boolean {
   // Boolean schemas: true matches everything, false matches nothing
   if (!isObject(branch)) return branch !== false;
@@ -2878,17 +2865,9 @@ export function canBranchMatch(
     return true;
   }
 
-  // Resolve top-level $ref if present. When an outerSchema is provided (e.g.
-  // the restSchema from anyOf destructuring), merge first so that $defs are
-  // available for resolution. mergeSchemaOption is cached, so the later merge
-  // in the traversal loop will hit the cache.
   let resolved: JSONSchema | undefined = branch;
   if ("$ref" in branch) {
-    const toResolve = outerSchema
-      ? mergeSchemaOption(outerSchema, branch)
-      : branch;
-    if (!isObject(toResolve)) return toResolve !== false;
-    resolved = ContextualFlowControl.resolveSchemaRefs(toResolve);
+    resolved = ContextualFlowControl.resolveSchemaRefs(branch);
     if (resolved === undefined || !isObject(resolved)) return true;
   }
 
