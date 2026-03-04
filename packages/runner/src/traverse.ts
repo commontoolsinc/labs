@@ -653,12 +653,12 @@ export abstract class BaseObjectTraverser {
     } else if (isPrimitive(doc.value)) {
       return doc.value;
     } else if (Array.isArray(doc.value)) {
-      const newValue: Immutable<StorableValue>[] = [];
+      const newValue = new Array<Immutable<StorableValue>>(doc.value.length);
       using t = this.tracker.include(doc.value, true, newValue, doc);
       if (t === null) {
         return this.tracker.getExisting(doc.value, true);
       }
-      const entries = doc.value.map((item, index) => {
+      doc.value.forEach((item, index) => {
         const itemDefault =
           isObject(defaultValue) && Array.isArray(defaultValue) &&
             index < defaultValue.length
@@ -697,15 +697,11 @@ export abstract class BaseObjectTraverser {
             );
           }
         }
-        return this.traverseDAG(docItem, itemDefault, arrayElementLink);
-      });
-      // We copy the contents of our result into newValue so that if we have a
-      // cycle, we can return newValue before we actually finish populating it.
-      for (const v of entries) {
+        const v = this.traverseDAG(docItem, itemDefault, arrayElementLink);
         // Use null for missing/undefined elements (consistent with other value
         // transforms in this system, e.g. toJSON and toStorableValue)
-        newValue.push(v === undefined ? null : v as StorableDatum);
-      }
+        newValue[index] = v === undefined ? null : v as StorableDatum;
+      });
       // Our link is based on the last link in the chain and not the first.
       const newLink = getNormalizedLink(doc.address, true);
       const arrayResult = this.objectCreator.createObject(newLink, newValue);
@@ -2175,9 +2171,10 @@ export class SchemaObjectTraverser<V extends StorableDatum>
       if (!Array.isArray(entries)) {
         return { error: new Error("Invalid array") };
       }
-      for (const item of entries) {
-        newValue.push(item);
-      }
+      entries.forEach((item, i) => {
+        newValue[i] = item;
+      });
+      newValue.length = entries.length;
       return { ok: this.objectCreator.createObject(newLink, newValue) };
     } else if (isObject(doc.value)) {
       if (isPrimitiveCellLink(doc.value)) {
@@ -2370,10 +2367,11 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     _link?: NormalizedFullLink,
   ): Immutable<StorableValue>[] | undefined {
     this.traverseArrayCalls++;
-    const arrayObj: Immutable<StorableValue>[] = [];
-    for (
-      const [index, item] of (doc.value as Immutable<StorableDatum>[]).entries()
-    ) {
+    const docArray = doc.value as Immutable<StorableDatum>[];
+    const arrayObj = new Array<Immutable<StorableValue>>(docArray.length);
+    for (let index = 0; index < docArray.length; index++) {
+      if (!(index in docArray)) continue; // preserve sparse holes
+      const item = docArray[index];
       const itemSchema = this.cfc.schemaAtPath(schema, [index.toString()]);
       let curDoc: IMemorySpaceAttestation = {
         address: {
@@ -2485,7 +2483,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
           ? getNextCellLink(curDoc, curSelector.schema!)
           : getNormalizedLink(curDoc.address, curSelector.schema);
         const val = this.objectCreator.createObject(cellLink, undefined);
-        arrayObj.push(val);
+        arrayObj[index] = val;
       } else {
         // We want those links to point directly at the linked cells, instead
         // of using our path (e.g. ["items", "0"]), so don't pass in a
@@ -2498,9 +2496,9 @@ export class SchemaObjectTraverser<V extends StorableDatum>
           // If our item doesn't match our schema, we may be able to use
           // undefined or null if those are valid according to our schema.
           if (this.isValidType(curSelector.schema!, "undefined")) {
-            arrayObj.push(undefined);
+            arrayObj[index] = undefined;
           } else if (this.isValidType(curSelector.schema!, "null")) {
-            arrayObj.push(null);
+            arrayObj[index] = null;
           } else {
             // this array is invalid; one or more items do not match the schema
             logger.info(
@@ -2510,7 +2508,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
             return undefined;
           }
         } else {
-          arrayObj.push(val);
+          arrayObj[index] = val;
         }
       }
     }

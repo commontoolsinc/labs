@@ -207,6 +207,28 @@ const wrappedNodeBuilder = {
       return node;
     }
 
+    // merkle-reference can't hash sparse array holes (undefined type).
+    // Densify by converting holes to null before hashing.
+    if (Array.isArray(source)) {
+      let hasSparseHole = false;
+      for (let i = 0; i < source.length; i++) {
+        if (!(i in source)) {
+          hasSparseHole = true;
+          break;
+        }
+      }
+      if (hasSparseHole) {
+        const dense = new Array(source.length);
+        source.forEach((v, i) => {
+          dense[i] = v;
+        });
+        for (let i = 0; i < dense.length; i++) {
+          if (!(i in dense)) dense[i] = null;
+        }
+        return defaultNodeBuilder.toTree(dense, builder);
+      }
+    }
+
     return defaultNodeBuilder.toTree(source, builder);
   },
 };

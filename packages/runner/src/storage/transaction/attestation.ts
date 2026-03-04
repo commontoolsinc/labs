@@ -24,6 +24,15 @@ import { unclaimed } from "@commontools/memory/fact";
 import { getLogger } from "@commontools/utils/logger";
 import { LRUCache } from "@commontools/utils/cache";
 
+/** Copies an array preserving sparse holes (unlike [...arr] which fills them with undefined). */
+const sparseArrayCopy = <T>(arr: T[]): T[] => {
+  const copy = new Array<T>(arr.length);
+  arr.forEach((v, i) => {
+    copy[i] = v;
+  });
+  return copy;
+};
+
 const logger = getLogger("attestation", {
   enabled: false,
   level: "debug",
@@ -109,8 +118,8 @@ const setAtPath = (
       if (newLen < root.length || newLen < 0 || !Number.isFinite(newLen)) {
         return { ok: root.slice(0, newLen) };
       } else {
-        // Extension: create array with new length (sparse slots become undefined in JSON)
-        const extended = [...root];
+        // Extension: create array with new length (sparse slots preserved)
+        const extended = sparseArrayCopy(root);
         extended.length = newLen;
         return { ok: extended };
       }
@@ -126,7 +135,7 @@ const setAtPath = (
     // Terminal case
     if (rest.length === 0) {
       if (root[index] === value) return { ok: root }; // noop
-      const newArray = [...root];
+      const newArray = sparseArrayCopy(root);
       if (value === undefined) {
         delete newArray[index]; // creates hole, not splice
       } else {
@@ -148,7 +157,7 @@ const setAtPath = (
       };
     }
     if (result.ok === nested) return { ok: root }; // noop propagation
-    const newArray = [...root];
+    const newArray = sparseArrayCopy(root);
     newArray[index] = result.ok as StorableDatum;
     return { ok: newArray };
   }

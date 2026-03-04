@@ -563,7 +563,7 @@ describe("Attestation Module", () => {
     });
 
     // 5. SPARSE ARRAY BEHAVIOR
-    it("should convert sparse array holes to undefined (spread behavior)", () => {
+    it("should preserve sparse array holes", () => {
       // Create sparse array using explicit assignment
       // deno-lint-ignore no-explicit-any
       const sparseArray: any[] = [];
@@ -588,12 +588,68 @@ describe("Attestation Module", () => {
       // deno-lint-ignore no-explicit-any
       const items = (result.ok!.value as any).items;
       expect(items[0]).toBe(999);
-      // NOTE: [...array] spread converts holes to undefined (1 in items is now true)
-      // Old JSON.parse(JSON.stringify()) would convert holes to null
-      // This is a known behavioral difference, but both result in "filled" arrays
-      expect(1 in items).toBe(true); // hole is converted to undefined
-      expect(items[1]).toBe(undefined);
+      // Sparse array holes are preserved through copy
+      expect(1 in items).toBe(false); // hole is preserved
       expect(items[2]).toBe(3);
+    });
+
+    it("should preserve sparseness when extending array length", () => {
+      // deno-lint-ignore no-explicit-any
+      const sparseArray: any[] = [];
+      sparseArray[0] = "a";
+      sparseArray[2] = "c"; // hole at index 1
+
+      const source = {
+        address: {
+          id: "test:sparse-extend" as const,
+          type: "application/json" as const,
+          path: [] as const,
+        },
+        value: { items: sparseArray },
+      };
+      // Extend the array by setting its length to 5
+      const result = Attestation.write(
+        source,
+        { ...source.address, path: ["items", "length"] },
+        5,
+      );
+      expect(result.ok).toBeDefined();
+      // deno-lint-ignore no-explicit-any
+      const items = (result.ok!.value as any).items;
+      expect(items.length).toBe(5);
+      expect(items[0]).toBe("a");
+      expect(1 in items).toBe(false); // original hole preserved
+      expect(items[2]).toBe("c");
+      expect(3 in items).toBe(false); // new extension slot is a hole
+      expect(4 in items).toBe(false); // new extension slot is a hole
+    });
+
+    it("should preserve sparseness when modifying nested property inside array element", () => {
+      // deno-lint-ignore no-explicit-any
+      const sparseArray: any[] = [];
+      sparseArray[0] = { name: "Alice" };
+      sparseArray[2] = { name: "Charlie" }; // hole at index 1
+
+      const source = {
+        address: {
+          id: "test:sparse-nested" as const,
+          type: "application/json" as const,
+          path: [] as const,
+        },
+        value: sparseArray,
+      };
+      // Modify a nested property in element 0
+      const result = Attestation.write(
+        source,
+        { ...source.address, path: ["0", "name"] },
+        "Bob",
+      );
+      expect(result.ok).toBeDefined();
+      // deno-lint-ignore no-explicit-any
+      const arr = result.ok!.value as any[];
+      expect(arr[0]).toEqual({ name: "Bob" });
+      expect(1 in arr).toBe(false); // hole preserved
+      expect(arr[2]).toEqual({ name: "Charlie" });
     });
   });
 

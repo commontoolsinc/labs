@@ -842,12 +842,19 @@ export class CellImpl<T extends StorableValue>
         : [];
     }
 
-    // Append the new values to the array.
+    // Append the new values to the array, preserving sparse holes in the original.
+    const combined = new Array(array.length + value.length);
+    array.forEach((v, i) => {
+      combined[i] = v;
+    });
+    for (let i = 0; i < value.length; i++) {
+      combined[array.length + i] = value[i];
+    }
     diffAndUpdate(
       this.runtime,
       this.tx,
       resolvedLink,
-      recursivelyAddIDIfNeeded([...array, ...value], this._frame),
+      recursivelyAddIDIfNeeded(combined, this._frame),
       cause,
     );
   }
@@ -1786,22 +1793,22 @@ export function recursivelyAddIDIfNeeded<T>(
   }
 
   if (Array.isArray(value)) {
-    const result: unknown[] = [];
+    const result = new Array<unknown>(value.length);
 
     // Set before traversing, otherwise we'll infinite recurse.
     seen.set(value, result);
 
-    result.push(...value.map((v) => {
-      const value = recursivelyAddIDIfNeeded(v, frame, seen);
+    value.forEach((el, i) => {
+      const v = recursivelyAddIDIfNeeded(el, frame, seen);
       // For objects on arrays only: Add ID if not already present.
       if (
-        isObject(value) && !isCellLink(value) && !(ID in value)
+        isObject(v) && !isCellLink(v) && !(ID in v)
       ) {
-        return { [ID]: frame.generatedIdCounter++, ...value };
+        result[i] = { [ID]: frame.generatedIdCounter++, ...v };
       } else {
-        return value;
+        result[i] = v;
       }
-    }));
+    });
     return result as T;
   } else {
     // At this point we know `value` is a non-array record (we returned early

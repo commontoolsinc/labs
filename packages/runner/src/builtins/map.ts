@@ -104,8 +104,11 @@ export function map(
     }
 
     const keyCounts = new Map<string, number>();
-    const newArrayValue: any[] = [];
+    const newArrayValue = new Array<any>(list.length);
     for (let i = 0; i < list.length; i++) {
+      // Skip sparse holes — don't create pattern runs for them
+      if (!(i in list)) continue;
+
       const { space: s, id, type, path } = list[i].getAsNormalizedFullLink();
       const dedupKey = JSON.stringify([s, id, type, path]);
       const occurrence = keyCounts.get(dedupKey) ?? 0;
@@ -129,7 +132,7 @@ export function map(
           );
           existing.lastIndex = i;
         }
-        newArrayValue.push(existing.resultCell);
+        newArrayValue[i] = existing.resultCell;
       } else {
         const resultCell = runtime.getCell(
           parentCell.space,
@@ -152,7 +155,7 @@ export function map(
         resultCell.getSourceCell()!.setSourceCell(parentCell);
         addCancel(() => runtime.runner.stop(resultCell));
         elementRuns.set(elementKey, { resultCell, lastIndex: i });
-        newArrayValue.push(resultCell);
+        newArrayValue[i] = resultCell;
       }
     }
     resultWithLog.set(newArrayValue);
