@@ -155,12 +155,11 @@ export const vnodeSchema = {
       }, {
         type: "object",
         properties: {},
+        // stop query from descending
+        additionalProperties: { type: "unknown" },
       }, {
         $ref: "#/$defs/UIRenderable",
         asOpaque: true,
-      }, {
-        type: "object",
-        properties: {},
       }, {
         type: "array",
         items: {
@@ -175,31 +174,10 @@ export const vnodeSchema = {
     Props: {
       type: "object",
       properties: {
-        style: { anyOf: [{ type: "object" }, { type: "string" }] },
+        style: { type: ["object", "string"] },
       },
-      additionalProperties: {
-        anyOf: [{
-          type: "string",
-        }, {
-          type: "number",
-        }, {
-          type: "boolean",
-        }, {
-          type: "object",
-          properties: {}, // stop query from descending
-        }, {
-          type: "array",
-          items: { type: "null" }, // stop query from descending
-        }, {
-          asCell: true,
-        }, {
-          asStream: true,
-        }, {
-          type: "null",
-        }, {
-          type: "undefined",
-        }],
-      },
+      // stop query from descending
+      additionalProperties: { type: "unknown" },
     },
   },
 } as const satisfies JSONSchema;
@@ -231,7 +209,7 @@ export const pieceListSchema = {
 export const pieceLineageSchema = {
   type: "object",
   properties: {
-    piece: { type: "object", properties: {}, asCell: true },
+    piece: { type: "unknown", asCell: true },
     relation: { type: "string" },
     timestamp: { type: "number" },
   },

@@ -89,8 +89,9 @@ type CalculatorRequest = {
         "T",
       );
       const schema = generator.generateSchema(type, checker, typeNode);
-      // unknown returns true (accept any value - type safety at compile time)
-      expect(schema).toEqual(true);
+      // unknown returns {type: "unknown"}, which means we don't have any
+      // expections on the object - it may be undefined when used this way
+      expect(schema).toEqual({ type: "unknown" });
     });
   });
 
