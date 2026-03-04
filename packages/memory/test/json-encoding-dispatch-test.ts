@@ -295,13 +295,13 @@ describe("json-encoding-dispatch", () => {
   describe("flag OFF behavior (explicit)", () => {
     it("jsonFromValue is plain stringify after explicit OFF", () => {
       setJsonEncodingConfig(false);
-      const value = { x: 1 } as StorableValue;
-      expect(jsonFromValue(value)).toBe('{"x":1}');
+      const value = { "/foo": 1 } as StorableValue;
+      expect(jsonFromValue(value)).toBe('{"/foo":1}');
     });
 
     it("valueFromJson is plain parse after explicit OFF", () => {
       setJsonEncodingConfig(false);
-      expect(valueFromJson('{"x":1}', mockRuntime)).toEqual({ x: 1 });
+      expect(valueFromJson('{"/foo":1}', mockRuntime)).toEqual({ "/foo": 1 });
     });
   });
 
