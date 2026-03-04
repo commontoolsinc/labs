@@ -69,7 +69,7 @@ function fromWireFormat(data: SerializedForm): StorableValue {
 // Tests
 // ============================================================================
 
-describe("serialization", () => {
+describe("json encoding", () => {
   // --------------------------------------------------------------------------
   // Public API: Uint8Array boundary
   // --------------------------------------------------------------------------
