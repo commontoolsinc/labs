@@ -10,11 +10,3 @@ export type JsonWireValue =
   | string
   | JsonWireValue[]
   | { [key: string]: JsonWireValue };
-
-/**
- * Alias for `JsonWireValue` used throughout serialization internals
- * (tree-walking functions, type handlers). Named `SerializedForm` for
- * historical reasons; represents the intermediate wire format, not the
- * final boundary type.
- */
-export type SerializedForm = JsonWireValue;

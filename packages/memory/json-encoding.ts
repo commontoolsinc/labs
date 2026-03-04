@@ -6,7 +6,7 @@ import {
   type StorableInstance,
 } from "./storable-protocol.ts";
 import type { SerializationContext } from "./serialization-context.ts";
-import type { SerializedForm } from "./json-serialization-context.ts";
+import type { JsonWireValue } from "./json-serialization-context.ts";
 import { ExplicitTagStorable } from "./explicit-tag-storable.ts";
 import { deepFreeze } from "./deep-freeze.ts";
 import { UnknownStorable } from "./unknown-storable.ts";
@@ -15,7 +15,7 @@ import {
   createDefaultRegistry,
   type TypeHandlerCodec,
   type TypeHandlerRegistry,
-} from "./type-handlers.ts";
+} from "./json-type-handlers.ts";
 import {
   StorableError,
   StorableMap,
@@ -59,7 +59,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
 
     // Create a codec view that delegates to our private methods.
     this.codec = {
-      wrapTag: (tag: string, state: SerializedForm) => this.wrapTag(tag, state),
+      wrapTag: (tag: string, state: JsonWireValue) => this.wrapTag(tag, state),
       getTagFor: (value: StorableInstance) => this.getTagFor(value),
     };
 
@@ -93,7 +93,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
   decode(data: string, runtime: ReconstructionContext): StorableValue {
     const parsed = JSON.parse(data) as StorableValue;
     return this.deserialize(
-      this.escapeUnknownSlashKeys(parsed) as unknown as SerializedForm,
+      this.escapeUnknownSlashKeys(parsed) as unknown as JsonWireValue,
       runtime,
     );
   }
@@ -149,8 +149,8 @@ export class JsonEncodingContext implements SerializationContext<string> {
    * Wrap a tag and state into the `/<tag>` wire format. Prepends `/` to the
    * tag to produce the JSON key. See Section 5.2 of the formal spec.
    */
-  private wrapTag(tag: string, state: SerializedForm): SerializedForm {
-    return { [`/${tag}`]: state } as SerializedForm;
+  private wrapTag(tag: string, state: JsonWireValue): JsonWireValue {
+    return { [`/${tag}`]: state } as JsonWireValue;
   }
 
   /**
@@ -159,8 +159,8 @@ export class JsonEncodingContext implements SerializationContext<string> {
    * See Section 5.4 of the formal spec.
    */
   private unwrapTag(
-    data: SerializedForm,
-  ): { tag: string; state: SerializedForm } | null {
+    data: JsonWireValue,
+  ): { tag: string; state: JsonWireValue } | null {
     if (
       data === null || typeof data !== "object" || Array.isArray(data)
     ) {
@@ -178,7 +178,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
     }
 
     const tag = key.slice(1);
-    const state = (data as Record<string, SerializedForm>)[key];
+    const state = (data as Record<string, JsonWireValue>)[key];
     return { tag, state };
   }
 
@@ -187,13 +187,13 @@ export class JsonEncodingContext implements SerializationContext<string> {
   // -------------------------------------------------------------------------
 
   /** Convert a wire-format tree to UTF-8-encoded JSON bytes. */
-  private toBytes(data: SerializedForm): Uint8Array {
+  private toBytes(data: JsonWireValue): Uint8Array {
     return new TextEncoder().encode(JSON.stringify(data));
   }
 
   /** Parse UTF-8-encoded JSON bytes back into a wire-format tree. */
-  private fromBytes(bytes: Uint8Array): SerializedForm {
-    return JSON.parse(new TextDecoder().decode(bytes)) as SerializedForm;
+  private fromBytes(bytes: Uint8Array): JsonWireValue {
+    return JSON.parse(new TextDecoder().decode(bytes)) as JsonWireValue;
   }
 
   // -------------------------------------------------------------------------
@@ -211,7 +211,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
     value: StorableValue,
     _seen?: Set<object>,
     registry: TypeHandlerRegistry = defaultRegistry,
-  ): SerializedForm {
+  ): JsonWireValue {
     // --- Try type handlers first ---
     const handler = registry.findSerializer(value);
     if (handler) {
@@ -242,7 +242,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
       value === null || typeof value === "boolean" ||
       typeof value === "number" || typeof value === "string"
     ) {
-      return value as SerializedForm;
+      return value as JsonWireValue;
     }
 
     // --- Arrays ---
@@ -253,7 +253,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
       }
       seen.add(value);
 
-      const result: SerializedForm[] = [];
+      const result: JsonWireValue[] = [];
       let i = 0;
       while (i < value.length) {
         if (!(i in value)) {
@@ -272,7 +272,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
       }
 
       seen.delete(value);
-      return result as SerializedForm;
+      return result as JsonWireValue;
     }
 
     // --- Plain objects ---
@@ -282,7 +282,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
     }
     seen.add(value as object);
 
-    const result: Record<string, SerializedForm> = {};
+    const result: Record<string, JsonWireValue> = {};
     for (
       const [key, val] of Object.entries(
         value as Record<string, StorableValue>,
@@ -296,10 +296,10 @@ export class JsonEncodingContext implements SerializationContext<string> {
     // Apply `TAGS.object` escaping per Section 5.6.
     const keys = Object.keys(result);
     if (keys.length === 1 && keys[0].startsWith("/")) {
-      return this.wrapTag(TAGS.object, result) as SerializedForm;
+      return this.wrapTag(TAGS.object, result) as JsonWireValue;
     }
 
-    return result as SerializedForm;
+    return result as JsonWireValue;
   }
 
   // -------------------------------------------------------------------------
@@ -311,7 +311,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
    * See Section 4.5 of the formal spec.
    */
   private deserialize(
-    data: SerializedForm,
+    data: JsonWireValue,
     runtime: ReconstructionContext,
     registry: TypeHandlerRegistry = defaultRegistry,
   ): StorableValue {
@@ -321,7 +321,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
 
       // `TAGS.object` unwrapping (Section 5.6).
       if (tag === TAGS.object) {
-        const inner = state as Record<string, SerializedForm>;
+        const inner = state as Record<string, JsonWireValue>;
         const result: Record<string, StorableValue> = {};
         for (const [key, val] of Object.entries(inner)) {
           result[key] = this.deserialize(val, runtime, registry);
@@ -342,7 +342,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
             return handler.deserialize(
               state,
               runtime,
-              (v: SerializedForm) => this.deserialize(v, runtime, registry),
+              (v: JsonWireValue) => this.deserialize(v, runtime, registry),
             );
           } catch (e: unknown) {
             return new ProblematicStorable(
@@ -355,7 +355,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
         return handler.deserialize(
           state,
           runtime,
-          (v: SerializedForm) => this.deserialize(v, runtime, registry),
+          (v: JsonWireValue) => this.deserialize(v, runtime, registry),
         );
       }
 

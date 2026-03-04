@@ -5,7 +5,7 @@ import {
   type ReconstructionContext,
   type StorableInstance,
 } from "./storable-protocol.ts";
-import type { SerializedForm } from "./json-serialization-context.ts";
+import type { JsonWireValue } from "./json-serialization-context.ts";
 import { ExplicitTagStorable } from "./explicit-tag-storable.ts";
 import { ProblematicStorable } from "./problematic-storable.ts";
 import {
@@ -30,7 +30,7 @@ import {
  */
 export interface TypeHandlerCodec {
   /** Wrap a tag and state into the wire format's tagged representation. */
-  wrapTag(tag: string, state: SerializedForm): SerializedForm;
+  wrapTag(tag: string, state: JsonWireValue): JsonWireValue;
   /** Get the wire format tag for a storable instance's type. */
   getTagFor(value: StorableInstance): string;
 }
@@ -60,8 +60,8 @@ export interface TypeHandler {
   serialize(
     value: StorableValue,
     codec: TypeHandlerCodec,
-    recurse: (v: StorableValue) => SerializedForm,
-  ): SerializedForm;
+    recurse: (v: StorableValue) => JsonWireValue,
+  ): JsonWireValue;
 
   /**
    * Deserialize a value from its wire format state. The state has already been
@@ -69,9 +69,9 @@ export interface TypeHandler {
    * deserialized -- the handler must call `recurse` on nested values.
    */
   deserialize(
-    state: SerializedForm,
+    state: JsonWireValue,
     runtime: ReconstructionContext,
-    recurse: (v: SerializedForm) => StorableValue,
+    recurse: (v: JsonWireValue) => StorableValue,
   ): StorableValue;
 }
 
@@ -127,7 +127,7 @@ export class TypeHandlerRegistry {
  */
 function makeProblematic(
   tag: string,
-  state: SerializedForm,
+  state: JsonWireValue,
   message: string,
 ): ProblematicStorable {
   return new ProblematicStorable(tag, state as StorableValue, message);
@@ -151,15 +151,15 @@ export const UndefinedHandler: TypeHandler = {
   serialize(
     _value: StorableValue,
     codec: TypeHandlerCodec,
-    _recurse: (v: StorableValue) => SerializedForm,
-  ): SerializedForm {
+    _recurse: (v: StorableValue) => JsonWireValue,
+  ): JsonWireValue {
     return codec.wrapTag(TAGS.Undefined, null);
   },
 
   deserialize(
-    _state: SerializedForm,
+    _state: JsonWireValue,
     _runtime: ReconstructionContext,
-    _recurse: (v: SerializedForm) => StorableValue,
+    _recurse: (v: JsonWireValue) => StorableValue,
   ): StorableValue {
     return undefined;
   },
@@ -184,17 +184,17 @@ export const BigIntHandler: TypeHandler = {
   serialize(
     value: StorableValue,
     codec: TypeHandlerCodec,
-    _recurse: (v: StorableValue) => SerializedForm,
-  ): SerializedForm {
+    _recurse: (v: StorableValue) => JsonWireValue,
+  ): JsonWireValue {
     const bytes = bigintToMinimalTwosComplement(value as bigint);
     const b64 = toUnpaddedBase64url(bytes);
-    return codec.wrapTag(TAGS.BigInt, b64 as SerializedForm);
+    return codec.wrapTag(TAGS.BigInt, b64 as JsonWireValue);
   },
 
   deserialize(
-    state: SerializedForm,
+    state: JsonWireValue,
     _runtime: ReconstructionContext,
-    _recurse: (v: SerializedForm) => StorableValue,
+    _recurse: (v: JsonWireValue) => StorableValue,
   ): StorableValue {
     if (typeof state !== "string") {
       return makeProblematic(
@@ -234,18 +234,18 @@ export const EpochNsecHandler: TypeHandler = {
   serialize(
     value: StorableValue,
     codec: TypeHandlerCodec,
-    _recurse: (v: StorableValue) => SerializedForm,
-  ): SerializedForm {
+    _recurse: (v: StorableValue) => JsonWireValue,
+  ): JsonWireValue {
     const nsec = (value as StorableEpochNsec).value;
     const bytes = bigintToMinimalTwosComplement(nsec);
     const b64 = toUnpaddedBase64url(bytes);
-    return codec.wrapTag(TAGS.EpochNsec, b64 as SerializedForm);
+    return codec.wrapTag(TAGS.EpochNsec, b64 as JsonWireValue);
   },
 
   deserialize(
-    state: SerializedForm,
+    state: JsonWireValue,
     _runtime: ReconstructionContext,
-    _recurse: (v: SerializedForm) => StorableValue,
+    _recurse: (v: JsonWireValue) => StorableValue,
   ): StorableValue {
     if (typeof state !== "string") {
       return makeProblematic(
@@ -286,18 +286,18 @@ export const EpochDaysHandler: TypeHandler = {
   serialize(
     value: StorableValue,
     codec: TypeHandlerCodec,
-    _recurse: (v: StorableValue) => SerializedForm,
-  ): SerializedForm {
+    _recurse: (v: StorableValue) => JsonWireValue,
+  ): JsonWireValue {
     const days = (value as StorableEpochDays).value;
     const bytes = bigintToMinimalTwosComplement(days);
     const b64 = toUnpaddedBase64url(bytes);
-    return codec.wrapTag(TAGS.EpochDays, b64 as SerializedForm);
+    return codec.wrapTag(TAGS.EpochDays, b64 as JsonWireValue);
   },
 
   deserialize(
-    state: SerializedForm,
+    state: JsonWireValue,
     _runtime: ReconstructionContext,
-    _recurse: (v: SerializedForm) => StorableValue,
+    _recurse: (v: JsonWireValue) => StorableValue,
   ): StorableValue {
     if (typeof state !== "string") {
       return makeProblematic(
@@ -341,8 +341,8 @@ export const StorableInstanceHandler: TypeHandler = {
   serialize(
     value: StorableValue,
     codec: TypeHandlerCodec,
-    recurse: (v: StorableValue) => SerializedForm,
-  ): SerializedForm {
+    recurse: (v: StorableValue) => JsonWireValue,
+  ): JsonWireValue {
     const inst = value as StorableInstance;
 
     // ExplicitTagStorable (UnknownStorable, ProblematicStorable): use
@@ -360,9 +360,9 @@ export const StorableInstanceHandler: TypeHandler = {
   },
 
   deserialize(
-    _state: SerializedForm,
+    _state: JsonWireValue,
     _runtime: ReconstructionContext,
-    _recurse: (v: SerializedForm) => StorableValue,
+    _recurse: (v: JsonWireValue) => StorableValue,
   ): StorableValue {
     // Not reached via tag dispatch -- StorableInstance deserialization is
     // handled by the class registry fallback in deserialize().

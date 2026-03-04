@@ -9,7 +9,7 @@ import {
 } from "../storable-protocol.ts";
 import type { StorableClass, StorableInstance } from "../storable-protocol.ts";
 import type { StorableValue } from "../interface.ts";
-import type { SerializedForm } from "../json-serialization-context.ts";
+import type { JsonWireValue } from "../json-serialization-context.ts";
 import { UnknownStorable } from "../unknown-storable.ts";
 import { ProblematicStorable } from "../problematic-storable.ts";
 import { ExplicitTagStorable } from "../explicit-tag-storable.ts";
@@ -51,16 +51,16 @@ function roundTrip(value: StorableValue): StorableValue {
  * Helper: encode a value and return the wire-format tree (parsed JSON).
  * Used for assertions about the intermediate wire representation.
  */
-function toWireFormat(value: StorableValue): SerializedForm {
+function toWireFormat(value: StorableValue): JsonWireValue {
   const { context } = makeTestContext();
-  return JSON.parse(context.encode(value)) as SerializedForm;
+  return JSON.parse(context.encode(value)) as JsonWireValue;
 }
 
 /**
  * Helper: decode from a wire-format tree. Stringifies to JSON first,
  * then feeds through the public decode API.
  */
-function fromWireFormat(data: SerializedForm): StorableValue {
+function fromWireFormat(data: JsonWireValue): StorableValue {
   const { context, runtime } = makeTestContext();
   return context.decode(JSON.stringify(data), runtime);
 }
@@ -370,7 +370,7 @@ describe("json encoding", () => {
 
     it("rejects padded base64 input (ProblematicStorable)", () => {
       // "Kg==" is the padded form of "Kg" (42n) -- padding is now rejected.
-      const data = { "/BigInt@1": "Kg==" } as SerializedForm;
+      const data = { "/BigInt@1": "Kg==" } as JsonWireValue;
       const result = fromWireFormat(data);
       expect(result).toBeInstanceOf(ProblematicStorable);
       const prob = result as unknown as ProblematicStorable;
@@ -378,7 +378,7 @@ describe("json encoding", () => {
     });
 
     it("deserializes non-string state to ProblematicStorable", () => {
-      const data = { "/BigInt@1": 42 } as SerializedForm;
+      const data = { "/BigInt@1": 42 } as JsonWireValue;
       const result = fromWireFormat(data);
       expect(result).toBeInstanceOf(ProblematicStorable);
       const prob = result as unknown as ProblematicStorable;
@@ -387,19 +387,19 @@ describe("json encoding", () => {
     });
 
     it("deserializes null state to ProblematicStorable", () => {
-      const data = { "/BigInt@1": null } as SerializedForm;
+      const data = { "/BigInt@1": null } as JsonWireValue;
       const result = fromWireFormat(data);
       expect(result).toBeInstanceOf(ProblematicStorable);
     });
 
     it("deserializes object state to ProblematicStorable", () => {
-      const data = { "/BigInt@1": { bad: true } } as SerializedForm;
+      const data = { "/BigInt@1": { bad: true } } as JsonWireValue;
       const result = fromWireFormat(data);
       expect(result).toBeInstanceOf(ProblematicStorable);
     });
 
     it("deserializes empty base64 string to ProblematicStorable", () => {
-      const data = { "/BigInt@1": "" } as SerializedForm;
+      const data = { "/BigInt@1": "" } as JsonWireValue;
       const result = fromWireFormat(data);
       expect(result).toBeInstanceOf(ProblematicStorable);
       const prob = result as unknown as ProblematicStorable;
@@ -802,7 +802,7 @@ describe("json encoding", () => {
     it("serializes [1,,3] with /hole", () => {
       // deno-lint-ignore no-sparse-arrays
       const arr = [1, , 3] as StorableValue;
-      const result = toWireFormat(arr) as SerializedForm[];
+      const result = toWireFormat(arr) as JsonWireValue[];
       expect(result.length).toBe(3);
       expect(result[0]).toBe(1);
       expect(result[1]).toEqual({ "/hole": 1 });
@@ -822,7 +822,7 @@ describe("json encoding", () => {
     it("serializes consecutive holes as run-length encoded", () => {
       // deno-lint-ignore no-sparse-arrays
       const arr = [1, , , , 5] as StorableValue;
-      const result = toWireFormat(arr) as SerializedForm[];
+      const result = toWireFormat(arr) as JsonWireValue[];
       expect(result.length).toBe(3); // [1, {"/hole": 3}, 5]
       expect(result[0]).toBe(1);
       expect(result[1]).toEqual({ "/hole": 3 });
@@ -884,7 +884,7 @@ describe("json encoding", () => {
       arr[0] = 1;
       arr[2] = undefined;
       arr[4] = 3;
-      const result = toWireFormat(arr as StorableValue) as SerializedForm[];
+      const result = toWireFormat(arr as StorableValue) as JsonWireValue[];
       expect(result).toEqual([
         1,
         { "/hole": 1 },
@@ -986,7 +986,7 @@ describe("json encoding", () => {
     it("deserializes /quote as literal (no inner deserialization)", () => {
       const data = {
         "/quote": { "/Link@1": { id: "abc" } },
-      } as SerializedForm;
+      } as JsonWireValue;
       const result = fromWireFormat(data);
       // The inner structure is returned as-is, not reconstructed.
       const obj = result as Record<string, unknown>;
@@ -996,7 +996,7 @@ describe("json encoding", () => {
     it("deep-freezes /quote result objects", () => {
       const data = {
         "/quote": { "/Link@1": { id: "abc" } },
-      } as SerializedForm;
+      } as JsonWireValue;
       const result = fromWireFormat(data) as Record<string, unknown>;
       expect(Object.isFrozen(result)).toBe(true);
       expect(Object.isFrozen(result["/Link@1"])).toBe(true);
@@ -1005,7 +1005,7 @@ describe("json encoding", () => {
     it("deep-freezes /quote result arrays", () => {
       const data = {
         "/quote": [1, { nested: "obj" }, [2, 3]],
-      } as SerializedForm;
+      } as JsonWireValue;
       const result = fromWireFormat(data) as unknown[];
       expect(Object.isFrozen(result)).toBe(true);
       expect(Object.isFrozen(result[1])).toBe(true);
@@ -1015,7 +1015,7 @@ describe("json encoding", () => {
     it("mutation of /quote result throws", () => {
       const data = {
         "/quote": { key: "val" },
-      } as SerializedForm;
+      } as JsonWireValue;
       const result = fromWireFormat(data) as Record<string, unknown>;
       expect(() => {
         result.key = "changed";
@@ -1034,7 +1034,7 @@ describe("json encoding", () => {
       // frozen object rather than an UnknownStorable.
       const data = {
         "/FutureType@2": { some: "data" },
-      } as SerializedForm;
+      } as JsonWireValue;
       const result = fromWireFormat(data) as Record<string, unknown>;
       // The unknown tag is preserved as a literal key after /object unwrap.
       expect(result["/FutureType@2"]).toEqual({ some: "data" });
@@ -1054,7 +1054,7 @@ describe("json encoding", () => {
       // `/hole` is in KNOWN_TAGS, so escapeUnknownSlashKeys does not wrap
       // it. Outside an array context, it falls through to the class registry
       // (not found) and becomes an UnknownStorable.
-      const data = { "/hole": 5 } as SerializedForm;
+      const data = { "/hole": 5 } as JsonWireValue;
       const result = fromWireFormat(data);
       expect(result).toBeInstanceOf(UnknownStorable);
       const unknown = result as unknown as UnknownStorable;
@@ -1148,7 +1148,7 @@ describe("json encoding", () => {
 
       // BigInt@1 with a non-string state produces ProblematicStorable
       // in lenient mode because the handler validates the state type.
-      const data = { "/BigInt@1": 42 } as SerializedForm;
+      const data = { "/BigInt@1": 42 } as JsonWireValue;
       const result = context.decode(JSON.stringify(data), runtime);
       expect(result).toBeInstanceOf(ProblematicStorable);
       const prob = result as unknown as ProblematicStorable;
@@ -1167,7 +1167,7 @@ describe("json encoding", () => {
       // triggering lenient wrapping.
       const data = {
         "/Map@1": [["key", "value"]],
-      } as SerializedForm;
+      } as JsonWireValue;
       const result = context.decode(JSON.stringify(data), runtime);
       expect(result).toBeInstanceOf(ProblematicStorable);
       const prob = result as unknown as ProblematicStorable;
@@ -1182,21 +1182,21 @@ describe("json encoding", () => {
   describe("freeze guarantees", () => {
     it("deserialized arrays are frozen", () => {
       const result = fromWireFormat(
-        [1, 2, 3] as SerializedForm,
+        [1, 2, 3] as JsonWireValue,
       ) as StorableValue[];
       expect(Object.isFrozen(result)).toBe(true);
     });
 
     it("deserialized objects are frozen", () => {
       const result = fromWireFormat(
-        { a: 1 } as SerializedForm,
+        { a: 1 } as JsonWireValue,
       ) as Record<string, StorableValue>;
       expect(Object.isFrozen(result)).toBe(true);
     });
 
     it("mutation of deserialized array throws", () => {
       const result = fromWireFormat(
-        [1, 2, 3] as SerializedForm,
+        [1, 2, 3] as JsonWireValue,
       ) as StorableValue[];
       expect(() => {
         (result as unknown as number[])[0] = 99;
@@ -1205,7 +1205,7 @@ describe("json encoding", () => {
 
     it("mutation of deserialized object throws", () => {
       const result = fromWireFormat(
-        { a: 1 } as SerializedForm,
+        { a: 1 } as JsonWireValue,
       ) as Record<string, StorableValue>;
       expect(() => {
         (result as Record<string, unknown>).a = 99;
@@ -1214,14 +1214,14 @@ describe("json encoding", () => {
 
     it("nested deserialized objects are frozen", () => {
       const result = fromWireFormat(
-        { inner: { val: 42 } } as SerializedForm,
+        { inner: { val: 42 } } as JsonWireValue,
       ) as Record<string, Record<string, StorableValue>>;
       expect(Object.isFrozen(result)).toBe(true);
       expect(Object.isFrozen(result.inner)).toBe(true);
     });
 
     it("deserialized /object-unwrapped objects are frozen", () => {
-      const data = { "/object": { "/myKey": "val" } } as SerializedForm;
+      const data = { "/object": { "/myKey": "val" } } as JsonWireValue;
       const result = fromWireFormat(data) as Record<
         string,
         StorableValue
