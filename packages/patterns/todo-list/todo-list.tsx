@@ -3,6 +3,7 @@ import {
   action,
   computed,
   Default,
+  ifElse,
   NAME,
   pattern,
   Stream,
@@ -10,8 +11,6 @@ import {
   type VNode,
   Writable,
 } from "commontools";
-
-import Suggestion from "../system/suggestion.tsx";
 
 // ===== Types =====
 
@@ -34,6 +33,7 @@ interface TodoListOutput {
   summary: string;
   addItem: Stream<{ title: string }>;
   removeItem: Stream<{ item: TodoItem }>;
+  archiveCompleted: Stream<unknown>;
 }
 
 // ===== Pattern =====
@@ -61,15 +61,26 @@ export const TodoItemPiece = pattern<
             x
           </ct-button>
         </ct-hstack>
+      </ct-card>
+    ),
+  };
+});
 
-        <details>
-          <summary>AI Suggestions</summary>
-          <Suggestion
-            situation="Help the user complete this todo"
-            context={{ title: item.title }}
-            initialResults={[]}
-          />
-        </details>
+const CompletedTodoItem = pattern<
+  { item: TodoItem },
+  { [UI]: VNode; [NAME]: string; summary: string }
+>(({ item }) => {
+  return {
+    [NAME]: computed(() => item.title),
+    summary: computed(() => item.title),
+    [UI]: (
+      <ct-card style="opacity: 0.7;">
+        <ct-hstack gap="2" align="center">
+          <ct-checkbox $checked={item.done} />
+          <span style="text-decoration: line-through; flex: 1; color: var(--ct-color-gray-500);">
+            {item.title}
+          </span>
+        </ct-hstack>
       </ct-card>
     ),
   };
@@ -89,9 +100,16 @@ export default pattern<TodoListInput, TodoListOutput>(({ items }) => {
     items.remove(item);
   });
 
+  const archiveCompleted = action(() => {
+    items.set(items.get().filter((i) => !i.done));
+  });
+
   // Computed values
   const itemCount = computed(() => items.get().length);
-  const hasNoItems = computed(() => items.get().length === 0);
+  const activeItems = computed(() => items.get().filter((i) => !i.done));
+  const completedItems = computed(() => items.get().filter((i) => i.done));
+  const hasCompleted = computed(() => completedItems.length > 0);
+  const hasNoItems = computed(() => activeItems.length === 0);
 
   const summary = computed(() => {
     return items.get()
@@ -99,9 +117,13 @@ export default pattern<TodoListInput, TodoListOutput>(({ items }) => {
       .join(", ");
   });
 
-  // Map items to sub-pattern instances once — reused for UI and mentionable
-  const itemCards = items.map((item) => (
+  // Map items to sub-pattern instances — reused for UI and mentionable
+  const itemCards = activeItems.map((item: TodoItem) => (
     <TodoItemPiece item={item} removeItem={removeItem} />
+  ));
+
+  const completedCards = completedItems.map((item: TodoItem) => (
+    <CompletedTodoItem item={item} />
   ));
 
   return {
@@ -112,7 +134,7 @@ export default pattern<TodoListInput, TodoListOutput>(({ items }) => {
           <ct-hstack justify="between" align="center">
             <ct-heading level={4}>Todo List</ct-heading>
             <span style="font-size: 0.875rem; color: var(--ct-color-gray-500);">
-              {itemCount} items
+              {computed(() => activeItems.length)} items
             </span>
           </ct-hstack>
         </ct-vstack>
@@ -128,6 +150,29 @@ export default pattern<TodoListInput, TodoListOutput>(({ items }) => {
                 </div>
               )
               : null}
+
+            {ifElse(
+              hasCompleted,
+              <details style="margin-top: 1rem;">
+                <summary style="cursor: pointer; font-size: 0.875rem; color: var(--ct-color-gray-500); padding: 0.5rem 0;">
+                  Completed ({computed(() => completedItems.length)})
+                </summary>
+                <ct-vstack gap="2" style="padding-top: 0.5rem;">
+                  {completedCards}
+                  <ct-hstack justify="end">
+                    <ct-button
+                      variant="ghost"
+                      size="sm"
+                      style="font-size: 0.8rem; color: var(--ct-color-gray-500);"
+                      onClick={() => archiveCompleted.send()}
+                    >
+                      Archive all
+                    </ct-button>
+                  </ct-hstack>
+                </ct-vstack>
+              </details>,
+              null,
+            )}
           </ct-vstack>
         </ct-vscroll>
 
@@ -151,5 +196,6 @@ export default pattern<TodoListInput, TodoListOutput>(({ items }) => {
     summary,
     addItem,
     removeItem,
+    archiveCompleted,
   };
 });
