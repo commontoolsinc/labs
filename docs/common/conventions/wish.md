@@ -132,3 +132,17 @@ This ensures the wish is established once. Conditional logic belongs in how you
 
 Keep a handle to important information in a piece, e.g. google auth, user
 preferences/biography, cross-cutting data (calendar).
+
+### Adding Pieces via `#default`
+
+To add new pieces to the space, wish for the `addPiece` handler as a `Stream`:
+
+```tsx
+const defaultApp = wish<{ addPiece: Stream<{ piece: MentionablePiece }> }>({
+  query: "#default",
+});
+defaultApp.result.addPiece.send({ piece: newPiece });
+```
+
+Do **not** wish for `allPieces` as a `Writable` — see
+[Adding Pieces](adding-pieces.md).
