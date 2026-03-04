@@ -11,6 +11,7 @@ import {
   type Stream,
   UI,
   type VNode,
+  wish,
   Writable,
 } from "commontools";
 
@@ -33,8 +34,6 @@ type MinimalPiece = {
 interface Input {
   title?: Default<string, "All Notes">;
   importMarkdown?: Default<string, "">;
-  /** Pass allPieces directly from default-app for proper cell sharing */
-  allPieces?: Writable<Default<NotePiece[], []>>;
 }
 
 /** Manages all notes and notebooks in the space. #allNotes */
@@ -115,14 +114,14 @@ function _getPieceName(
   return "";
 }
 
-// Helper to check if a piece is a notebook
+// Type guard: narrows to NotebookPiece based on 📓 NAME prefix or isNotebook flag
+// Still used in getNotebookContents, deleteNotebooksOnly, deleteNotebooksAndNotes
 function isNotebookPiece(
-  piece: Partial<MinimalPiece> & { isNotebook?: boolean },
-): boolean {
-  // Use direct property access (not JSON round-trip) to preserve reactive tracking
-  const name = String(piece?.[NAME] ?? "");
-  if (name.startsWith("📓")) return true;
-  return piece?.isNotebook === true;
+  piece: NotePiece | NotebookPiece,
+): piece is NotebookPiece {
+  const name = piece?.[NAME];
+  if (typeof name === "string" && name.startsWith("📓")) return true;
+  return (piece as NotebookPiece)?.isNotebook === true;
 }
 
 // Helper to get clean notebook title (strip emoji and count)
@@ -408,7 +407,7 @@ export type DetectedDuplicate = {
 
 function performImport(
   parsedNotes: ParsedNote[],
-  allPieces: Writable<Default<NotePiece[], []>>,
+  allPieces: Writable<(NotePiece | NotebookPiece)[]>,
   notebooks: NotebookPiece[],
   skipTitles: Set<string>,
   skipNotebookTitles: Set<string>,
@@ -677,7 +676,7 @@ type ImportAnalysisResult = {
  * Passed from pattern body to allow module-scope function to update state.
  */
 type ImportProcessingContext = {
-  allPieces: Writable<Default<NotePiece[], []>>;
+  allPieces: Writable<(NotePiece | NotebookPiece)[]>;
   notebooks: NotebookPiece[];
   pendingImportData: Writable<string>;
   detectedDuplicates: Writable<DetectedDuplicate[]>;
@@ -995,32 +994,22 @@ const getExportFilename = (prefix: string) => {
 // MAIN PATTERN
 // ============================================================================
 
-// Define raw resolvers to avoid Computed array proxy traps in actions
-function resolveRawNotes(allPieces: any): any[] {
-  return (allPieces?.get() ?? []).filter((piece: any) => {
-    const name = resolveValue(piece?.[NAME]);
-    return name.startsWith("📝");
-  });
-}
-
-function resolveRawNotebooks(allPieces: any): NotebookPiece[] {
-  return (allPieces?.get() ?? []).filter((piece: any) =>
-    isNotebookPiece(piece)
-  ) as NotebookPiece[];
-}
-
 const NotesImportExport = pattern<Input, Output>(
-  ({ title, importMarkdown, allPieces }) => {
-    // allPieces is passed directly from default-app for proper cell sharing
-    // Used for both reads (filtering) and writes (push new notes/notebooks during import)
-    // Note: wish({ scope: ["."] }) is not used here because allPieces is a direct prop,
-    // not from the mentionable list. The emoji filtering is reliable for this context.
+  ({ title, importMarkdown }) => {
+    // Reads — typed discovery by schema tag
+    const noteWish = wish<NotePiece>({ query: "#note", scope: ["."] });
+    const notebookWish = wish<NotebookPiece>({
+      query: "#notebook",
+      scope: ["."],
+    });
+    const notes = noteWish.candidates;
+    const notebooks = notebookWish.candidates;
 
-    // Filter to only notes using 📝 marker in NAME (same pattern as notebooks)
-    // Note: Using NAME prefix is more reliable than checking title/content through proxy
-    // Derived collections for UI reactivity
-    const notes = computed(() => resolveRawNotes(allPieces));
-    const notebooks = computed(() => resolveRawNotebooks(allPieces));
+    // Writes — writable cell from default pattern
+    const { allPieces } =
+      wish<{ allPieces: Writable<(NotePiece | NotebookPiece)[]> }>(
+        { query: "#default" },
+      ).result;
 
     // Counts
     const noteCount = computed(() => notes.length);
@@ -1083,10 +1072,7 @@ const NotesImportExport = pattern<Input, Output>(
 
     // Computed items for ct-select dropdowns
     const notebookAddItems = computed(() => [
-      ...resolveRawNotebooks(allPieces).map((
-        nb,
-        idx,
-      ) => ({
+      ...notebooks.map((nb, idx) => ({
         label: nb?.[NAME] ?? nb?.title ?? "Untitled",
         value: String(idx),
       })),
@@ -1095,10 +1081,7 @@ const NotesImportExport = pattern<Input, Output>(
     ]);
 
     const notebookMoveItems = computed(() => [
-      ...resolveRawNotebooks(allPieces).map((
-        nb,
-        idx,
-      ) => ({
+      ...notebooks.map((nb, idx) => ({
         label: nb?.[NAME] ?? nb?.title ?? "Untitled",
         value: String(idx),
       })),
@@ -1144,14 +1127,7 @@ const NotesImportExport = pattern<Input, Output>(
 
     // Selection actions
     const selectAllNotes = action(() => {
-      console.log(">>>> selectAllNotes TRIGGERED!");
-      const rawNotes = [...notes];
-      console.log(">>>> RAW NOTES LENGTH", rawNotes.length);
-      const idxs: number[] = [];
-      for (let i = 0; i < rawNotes.length; i++) idxs.push(i);
-      console.log(">>>> SETTING IDXS", idxs);
-      selectedNoteIndices.set(idxs);
-      console.log(">>>> FINISHED selectAllNotes");
+      selectedNoteIndices.set(notes.map((_: NotePiece, i: number) => i));
     });
 
     const deselectAllNotes = action(() => {
@@ -1159,10 +1135,9 @@ const NotesImportExport = pattern<Input, Output>(
     });
 
     const selectAllNotebooks = action(() => {
-      const len = resolveRawNotebooks(allPieces).length;
-      const idxs: number[] = [];
-      for (let i = 0; i < len; i++) idxs.push(i);
-      selectedNotebookIndices.set(idxs);
+      selectedNotebookIndices.set(
+        notebooks.map((_: NotebookPiece, i: number) => i),
+      );
     });
 
     const deselectAllNotebooks = action(() => {
@@ -1171,22 +1146,21 @@ const NotesImportExport = pattern<Input, Output>(
 
     // Visibility bulk actions
     const toggleAllNotesVisibility = action(() => {
-      if (noteCount === 0) return;
+      if (notes.length === 0) return;
 
       const anyVisible = notes.some((n: any) => !n?.isHidden);
       const newHiddenState = anyVisible;
 
       // notes is a computed filter of allPieces, so we need to find the actual index in allPieces
       const notesList = notes;
-      const allPiecesList = allPieces?.get();
+      const allPiecesList = allPieces.get();
 
       notesList.forEach((note) => {
-        if (!allPiecesList) return;
         const allPiecesIdx = allPiecesList.findIndex((p: any) =>
           equals(p, note)
         );
         if (allPiecesIdx >= 0) {
-          allPieces?.key(allPiecesIdx).key("isHidden").set(newHiddenState);
+          allPieces.key(allPiecesIdx).key("isHidden").set(newHiddenState);
         }
       });
     });
@@ -1199,18 +1173,17 @@ const NotesImportExport = pattern<Input, Output>(
 
       // notebooks is a computed filter of allPieces, find indices in allPieces
       const notebooksList = notebooks;
-      const allPiecesList = allPieces?.get();
+      const allPiecesList = allPieces.get();
 
       notebooksList.forEach((nb: any) => {
         const nbName = nb?.[NAME];
         if (!nbName) return;
-        if (!allPiecesList) return;
 
         const allPiecesIdx = allPiecesList.findIndex((p: any) =>
           p?.[NAME] === nbName
         );
         if (allPiecesIdx >= 0) {
-          allPieces?.key(allPiecesIdx).key("isHidden").set(newHiddenState);
+          allPieces.key(allPiecesIdx).key("isHidden").set(newHiddenState);
         }
       });
     });
@@ -1664,11 +1637,9 @@ const NotesImportExport = pattern<Input, Output>(
 
     // Export actions
     const openExportAllModal = action(() => {
-      const allPiecesArray = [...allPieces.get()];
       const result = generateExport(
-        allPiecesArray,
+        [...notes],
         [...notebooks],
-        allPiecesArray,
       );
       exportedMarkdown.set(result.markdown);
       showExportAllModal.set(true);
@@ -1762,7 +1733,7 @@ const NotesImportExport = pattern<Input, Output>(
 
       processImportResult(markdown, result, {
         allPieces,
-        notebooks: resolveRawNotebooks(allPieces),
+        notebooks: [...notebooks],
         pendingImportData,
         detectedDuplicates,
         showDuplicateModal,
@@ -1799,7 +1770,7 @@ const NotesImportExport = pattern<Input, Output>(
         if (!result) return;
         processImportResult(content, result, {
           allPieces,
-          notebooks: resolveRawNotebooks(allPieces),
+          notebooks: [...notebooks],
           pendingImportData,
           detectedDuplicates,
           showDuplicateModal,
@@ -1816,7 +1787,7 @@ const NotesImportExport = pattern<Input, Output>(
     const importSkipDuplicates = action(() => {
       executePendingImport(true, {
         allPieces,
-        notebooks: resolveRawNotebooks(allPieces),
+        notebooks: [...notebooks],
         pendingImportData,
         detectedDuplicates,
         showDuplicateModal,
@@ -1832,7 +1803,7 @@ const NotesImportExport = pattern<Input, Output>(
     const importAllAsCopies = action(() => {
       executePendingImport(false, {
         allPieces,
-        notebooks: resolveRawNotebooks(allPieces),
+        notebooks: [...notebooks],
         pendingImportData,
         detectedDuplicates,
         showDuplicateModal,

@@ -147,7 +147,7 @@ const menuAllNotebooks = handler<
   if (existing) {
     return navigateTo(existing);
   }
-  return navigateTo(NotesImportExport({ importMarkdown: "", allPieces }));
+  return navigateTo(NotesImportExport({ importMarkdown: "" }));
 });
 
 // Handler: Add piece to allPieces if not already present
