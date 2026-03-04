@@ -34,7 +34,7 @@ const defaultRegistry: TypeHandlerRegistry = createDefaultRegistry();
  *
  * Public interface: `SerializationContext<string>`
  * - `encode(value)` -- full pipeline: serialize + stringify
- * - `decode(data, runtime)` -- full pipeline: parse + legacy escape + deserialize
+ * - `decode(data, runtime)` -- full pipeline: parse + deserialize
  *
  * All internal machinery (tag wrapping, tree walking, byte conversion) is
  * private. Type handlers receive a narrow `TypeHandlerCodec` view of `this`
@@ -87,15 +87,11 @@ export class JsonEncodingContext implements SerializationContext<string> {
 
   /**
    * Decode a JSON string back into a storable value. Parses the string,
-   * escapes legacy `/`-prefixed markers, then deserializes tagged forms
-   * back into rich runtime types.
+   * then deserializes tagged forms back into rich runtime types.
    */
   decode(data: string, runtime: ReconstructionContext): StorableValue {
-    const parsed = JSON.parse(data) as StorableValue;
-    return this.deserialize(
-      this.escapeUnknownSlashKeys(parsed) as unknown as JsonWireValue,
-      runtime,
-    );
+    const parsed = JSON.parse(data) as JsonWireValue;
+    return this.deserialize(parsed, runtime);
   }
 
   // -------------------------------------------------------------------------
@@ -117,10 +113,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
     runtime: ReconstructionContext,
   ): StorableValue {
     const tree = this.fromBytes(bytes);
-    return this.deserialize(
-      this.escapeUnknownSlashKeys(tree) as unknown as JsonWireValue,
-      runtime,
-    );
+    return this.deserialize(tree, runtime);
   }
 
   // -------------------------------------------------------------------------
@@ -435,64 +428,4 @@ export class JsonEncodingContext implements SerializationContext<string> {
     }
     return Object.freeze(result);
   }
-
-  // -------------------------------------------------------------------------
-  // Legacy marker escaping (private)
-  // -------------------------------------------------------------------------
-
-  /**
-   * Walk a parsed JSON tree and wrap any `/`-prefixed single-key objects
-   * whose tag is not recognized by the serialization engine.
-   */
-  private escapeUnknownSlashKeys(data: StorableValue): StorableValue {
-    if (data === null || data === undefined || typeof data !== "object") {
-      return data;
-    }
-
-    if (Array.isArray(data)) {
-      let changed = false;
-      const result = data.map((item) => {
-        const processed = this.escapeUnknownSlashKeys(item);
-        if (processed !== item) changed = true;
-        return processed;
-      });
-      return changed ? result : data;
-    }
-
-    const obj = data as Record<string, StorableValue>;
-    const keys = Object.keys(obj);
-
-    if (keys.length === 1 && keys[0].startsWith("/")) {
-      const tag = keys[0].slice(1);
-
-      if (tag === TAGS.object || tag === TAGS.quote) {
-        return data;
-      }
-
-      if (KNOWN_TAGS.has(tag)) {
-        const innerProcessed = this.escapeUnknownSlashKeys(obj[keys[0]]);
-        if (innerProcessed !== obj[keys[0]]) {
-          return { [keys[0]]: innerProcessed } as StorableValue;
-        }
-        return data;
-      }
-
-      const innerProcessed = this.escapeUnknownSlashKeys(obj[keys[0]]);
-      return {
-        [`/${TAGS.object}`]: { [keys[0]]: innerProcessed },
-      } as StorableValue;
-    }
-
-    let changed = false;
-    const result: Record<string, StorableValue> = {};
-    for (const key of keys) {
-      const processed = this.escapeUnknownSlashKeys(obj[key]);
-      result[key] = processed;
-      if (processed !== obj[key]) changed = true;
-    }
-    return changed ? result as StorableValue : data;
-  }
 }
-
-/** Set of all known serialization tags (without the `/` prefix). */
-const KNOWN_TAGS: ReadonlySet<string> = new Set(Object.values(TAGS));

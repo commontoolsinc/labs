@@ -14,8 +14,7 @@ const jsonEncodingContext = new JsonEncodingContext();
 // These two symbols are reassigned by `configureDispatch()` whenever the
 // unified JSON encoding flag changes. When OFF (default), both are plain
 // JSON.stringify / JSON.parse. When ON, they route through the
-// `JsonEncodingContext` codec which handles serialization, legacy marker
-// escaping, and deserialization internally.
+// `JsonEncodingContext` codec which handles serialization and deserialization internally.
 // ---------------------------------------------------------------------------
 
 /**
@@ -28,8 +27,8 @@ export let jsonFromValue: (value: StorableValue) => string;
 
 /**
  * Decode a JSON string back into a storable value. When unified JSON
- * encoding is ON, parses the string, escapes legacy `/`-prefixed markers,
- * and deserializes tagged forms back into rich runtime types. When OFF,
+ * encoding is ON, parses the string and deserializes tagged forms back
+ * into rich runtime types. When OFF,
  * equivalent to `JSON.parse(json)`.
  */
 export let valueFromJson: (

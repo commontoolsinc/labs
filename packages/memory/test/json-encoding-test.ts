@@ -1023,17 +1023,15 @@ describe("json encoding", () => {
   // --------------------------------------------------------------------------
 
   describe("unknown type tags", () => {
-    it("decode() escapes unknown tags via /object wrapping", () => {
-      // Unknown slash-prefixed single-key objects are escaped by
-      // escapeUnknownSlashKeys in the decode path, producing a plain
-      // frozen object rather than an UnknownStorable.
+    it("decode() produces UnknownStorable for unrecognized tags", () => {
       const data = {
         "/FutureType@2": { some: "data" },
       } as JsonWireValue;
-      const result = fromWireFormat(data) as Record<string, unknown>;
-      // The unknown tag is preserved as a literal key after /object unwrap.
-      expect(result["/FutureType@2"]).toEqual({ some: "data" });
-      expect(Object.isFrozen(result)).toBe(true);
+      const result = fromWireFormat(data);
+      expect(result).toBeInstanceOf(UnknownStorable);
+      const unknown = result as unknown as UnknownStorable;
+      expect(unknown.typeTag).toBe("FutureType@2");
+      expect(unknown.state).toEqual({ some: "data" });
     });
 
     it("encode preserves UnknownStorable tag in wire format", () => {
@@ -1045,10 +1043,16 @@ describe("json encoding", () => {
       });
     });
 
-    it("/hole is a known tag and passes through decode()", () => {
-      // `/hole` is in KNOWN_TAGS, so escapeUnknownSlashKeys does not wrap
-      // it. Outside an array context, it falls through to the class registry
-      // (not found) and becomes an UnknownStorable.
+    it("UnknownStorable round-trips through encode/decode", () => {
+      const us = new UnknownStorable("FutureType@2", { some: "data" });
+      const result = roundTrip(us as StorableValue);
+      expect(result).toBeInstanceOf(UnknownStorable);
+      const unknown = result as unknown as UnknownStorable;
+      expect(unknown.typeTag).toBe("FutureType@2");
+      expect(unknown.state).toEqual({ some: "data" });
+    });
+
+    it("/hole outside array context becomes UnknownStorable", () => {
       const data = { "/hole": 5 } as JsonWireValue;
       const result = fromWireFormat(data);
       expect(result).toBeInstanceOf(UnknownStorable);

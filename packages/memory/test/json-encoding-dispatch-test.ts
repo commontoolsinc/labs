@@ -172,19 +172,20 @@ describe("json-encoding-dispatch", () => {
   });
 
   // --------------------------------------------------------------------------
-  // Legacy marker passthrough (flag ON)
+  // Slash-prefixed keys and legacy markers (flag ON)
   // --------------------------------------------------------------------------
 
-  describe("legacy marker passthrough (flag ON)", () => {
-    it("sigil link round-trips through jsonFromValue/valueFromJson", () => {
+  describe("slash-prefixed keys and legacy markers (flag ON)", () => {
+    it("{ '/': value } round-trips via /object escaping", () => {
       setJsonEncodingConfig(true);
+      // Write path wraps in /object, read path unwraps it.
       const sigilLink = {
         "/": { "link@1": { id: "of:bafyabc", path: [], space: "did:key:z1" } },
       } as StorableValue;
       expect(roundTrip(sigilLink)).toEqual(sigilLink);
     });
 
-    it("nested sigil link within object round-trips", () => {
+    it("nested { '/': value } within object round-trips", () => {
       setJsonEncodingConfig(true);
       const value = {
         name: "test",
@@ -197,7 +198,7 @@ describe("json-encoding-dispatch", () => {
       );
     });
 
-    it("entity ID { '/': 'string' } round-trips", () => {
+    it("{ '/': 'string' } round-trips via /object escaping", () => {
       setJsonEncodingConfig(true);
       const entityId = { "/": "bafyabc123" } as StorableValue;
       expect(roundTrip(entityId)).toEqual(entityId);
@@ -219,7 +220,7 @@ describe("json-encoding-dispatch", () => {
       });
     });
 
-    it("$alias marker passes through unchanged", () => {
+    it("$alias marker with nested { '/': value } round-trips", () => {
       setJsonEncodingConfig(true);
       const value = {
         $alias: { path: ["value", "name"], cell: { "/": "bafyabc" } },
@@ -229,24 +230,7 @@ describe("json-encoding-dispatch", () => {
       });
     });
 
-    it("legacy sigil link decodes correctly (no /object wrapping)", () => {
-      setJsonEncodingConfig(true);
-      // Simulate legacy JSON stored without the flag.
-      const legacyJson = '{"\/":{"link@1":{"id":"of:bafyabc","path":[]}}}';
-      const decoded = valueFromJson(legacyJson, mockRuntime);
-      expect(decoded).toEqual(
-        { "/": { "link@1": { id: "of:bafyabc", path: [] } } },
-      );
-    });
-
-    it("legacy entity ID decodes correctly", () => {
-      setJsonEncodingConfig(true);
-      const legacyJson = '{"\/":"bafyabc123"}';
-      const decoded = valueFromJson(legacyJson, mockRuntime);
-      expect(decoded).toEqual({ "/": "bafyabc123" });
-    });
-
-    it("mixed value with rich types and sigil links round-trips", () => {
+    it("mixed value with rich types and slash-keys round-trips", () => {
       setJsonEncodingConfig(true);
       const value = {
         count: 42n,
@@ -263,7 +247,7 @@ describe("json-encoding-dispatch", () => {
       expect((decoded.items as unknown[])[2]).toBe(undefined);
     });
 
-    it("sigil link inside array round-trips", () => {
+    it("{ '/': value } inside array round-trips", () => {
       setJsonEncodingConfig(true);
       const value = [
         { "/": { "link@1": { id: "of:bafyabc", path: [] } } },
