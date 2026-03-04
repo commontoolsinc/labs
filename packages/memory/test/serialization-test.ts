@@ -1,11 +1,5 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import {
-  deserialize,
-  deserializeFromBytes,
-  serialize,
-  serializeToBytes,
-} from "../serialization.ts";
 import { JsonEncodingContext } from "../json-encoding.ts";
 import type { ReconstructionContext } from "../storable-protocol.ts";
 import {
@@ -46,11 +40,29 @@ function makeTestContext() {
   return { context, runtime };
 }
 
-/** Helper: serialize then deserialize (round-trip). */
+/** Helper: encode then decode (round-trip) through the public API. */
 function roundTrip(value: StorableValue): StorableValue {
   const { context, runtime } = makeTestContext();
-  const serialized = serialize(value, context);
-  return deserialize(serialized, context, runtime);
+  const encoded = context.encode(value);
+  return context.decode(encoded, runtime);
+}
+
+/**
+ * Helper: encode a value and return the wire-format tree (parsed JSON).
+ * Used for assertions about the intermediate wire representation.
+ */
+function toWireFormat(value: StorableValue): SerializedForm {
+  const { context } = makeTestContext();
+  return JSON.parse(context.encode(value)) as SerializedForm;
+}
+
+/**
+ * Helper: decode from a wire-format tree. Stringifies to JSON first,
+ * then feeds through the public decode API.
+ */
+function fromWireFormat(data: SerializedForm): StorableValue {
+  const { context, runtime } = makeTestContext();
+  return context.decode(JSON.stringify(data), runtime);
 }
 
 // ============================================================================
@@ -63,28 +75,26 @@ describe("serialization", () => {
   // --------------------------------------------------------------------------
 
   describe("Uint8Array public API", () => {
-    it("serializeToBytes returns Uint8Array", () => {
+    it("encodeToBytes returns Uint8Array", () => {
       const { context } = makeTestContext();
-      const result = serializeToBytes(42, context);
+      const result = context.encodeToBytes(42);
       expect(result).toBeInstanceOf(Uint8Array);
     });
 
-    it("serializeToBytes produces valid JSON bytes", () => {
+    it("encodeToBytes produces valid JSON bytes", () => {
       const { context } = makeTestContext();
-      const bytes = serializeToBytes(
+      const bytes = context.encodeToBytes(
         { a: 1 } as unknown as StorableValue,
-        context,
       );
       const json = new TextDecoder().decode(bytes);
       expect(JSON.parse(json)).toEqual({ a: 1 });
     });
 
-    it("deserializeFromBytes accepts Uint8Array", () => {
+    it("decodeFromBytes accepts Uint8Array", () => {
       const { context, runtime } = makeTestContext();
       const bytes = new TextEncoder().encode(JSON.stringify({ a: 1 }));
-      const result = deserializeFromBytes(
+      const result = context.decodeFromBytes(
         bytes,
-        context,
         runtime,
       ) as Record<string, StorableValue>;
       expect(result.a).toBe(1);
@@ -96,10 +106,9 @@ describe("serialization", () => {
         name: "test",
         count: 42,
       } as unknown as StorableValue;
-      const bytes = serializeToBytes(value, context);
-      const result = deserializeFromBytes(
+      const bytes = context.encodeToBytes(value);
+      const result = context.decodeFromBytes(
         bytes,
-        context,
         runtime,
       ) as Record<string, StorableValue>;
       expect(result.name).toBe("test");
@@ -109,10 +118,9 @@ describe("serialization", () => {
     it("round-trips StorableError through Uint8Array", () => {
       const { context, runtime } = makeTestContext();
       const err = new StorableError(new TypeError("oops"));
-      const bytes = serializeToBytes(err as StorableValue, context);
-      const result = deserializeFromBytes(
+      const bytes = context.encodeToBytes(err as StorableValue);
+      const result = context.decodeFromBytes(
         bytes,
-        context,
         runtime,
       );
       expect(result).toBeInstanceOf(StorableError);
@@ -123,8 +131,8 @@ describe("serialization", () => {
 
     it("round-trips undefined through Uint8Array", () => {
       const { context, runtime } = makeTestContext();
-      const bytes = serializeToBytes(undefined, context);
-      const result = deserializeFromBytes(bytes, context, runtime);
+      const bytes = context.encodeToBytes(undefined);
+      const result = context.decodeFromBytes(bytes, runtime);
       expect(result).toBe(undefined);
     });
 
@@ -135,10 +143,9 @@ describe("serialization", () => {
         error: new StorableError(new Error("fail")),
         nothing: undefined,
       } as unknown as StorableValue;
-      const bytes = serializeToBytes(value, context);
-      const result = deserializeFromBytes(
+      const bytes = context.encodeToBytes(value);
+      const result = context.decodeFromBytes(
         bytes,
-        context,
         runtime,
       ) as Record<string, StorableValue>;
       const users = result.users as StorableValue[];
@@ -209,8 +216,7 @@ describe("serialization", () => {
 
   describe("undefined", () => {
     it("serializes to { '/Undefined@1': null }", () => {
-      const { context } = makeTestContext();
-      const result = serialize(undefined, context);
+      const result = toWireFormat(undefined);
       expect(result).toEqual({ "/Undefined@1": null });
     });
 
@@ -236,9 +242,8 @@ describe("serialization", () => {
     });
 
     it("is distinct from null", () => {
-      const { context } = makeTestContext();
-      const serializedNull = serialize(null, context);
-      const serializedUndef = serialize(undefined, context);
+      const serializedNull = toWireFormat(null);
+      const serializedUndef = toWireFormat(undefined);
       expect(serializedNull).not.toEqual(serializedUndef);
     });
   });
@@ -249,47 +254,38 @@ describe("serialization", () => {
 
   describe("bigint", () => {
     it("serializes 42n to base64 of two's complement bytes", () => {
-      const { context } = makeTestContext();
-      const result = serialize(
-        42n as StorableValue,
-        context,
-      );
+      const result = toWireFormat(42n as StorableValue);
       // 42n -> [0x2a] -> base64 "Kg"
       expect(result).toEqual({ "/BigInt@1": "Kg" });
     });
 
     it("serializes 0n to base64 'AA'", () => {
-      const { context } = makeTestContext();
-      const result = serialize(0n as StorableValue, context);
+      const result = toWireFormat(0n as StorableValue);
       // 0n -> [0x00] -> base64 "AA"
       expect(result).toEqual({ "/BigInt@1": "AA" });
     });
 
     it("serializes -1n to base64url '_w'", () => {
-      const { context } = makeTestContext();
-      const result = serialize(-1n as StorableValue, context);
+      const result = toWireFormat(-1n as StorableValue);
       // -1n -> [0xFF] -> base64url "_w"
       expect(result).toEqual({ "/BigInt@1": "_w" });
     });
 
     it("serializes 1n to base64 'AQ'", () => {
-      const { context } = makeTestContext();
-      const result = serialize(1n as StorableValue, context);
+      const result = toWireFormat(1n as StorableValue);
       // 1n -> [0x01] -> base64 "AQ"
       expect(result).toEqual({ "/BigInt@1": "AQ" });
     });
 
     it("serializes 128n with sign-extension byte", () => {
-      const { context } = makeTestContext();
-      const result = serialize(128n as StorableValue, context);
+      const result = toWireFormat(128n as StorableValue);
       // 128n -> [0x00, 0x80] -> base64 "AIA"
       expect(result).toEqual({ "/BigInt@1": "AIA" });
     });
 
     it("base64 output is unpadded (no trailing =)", () => {
-      const { context } = makeTestContext();
       // 42n produces 1 byte -> 2 base64 chars (would be "Kg==" with padding)
-      const result = serialize(42n as StorableValue, context) as Record<
+      const result = toWireFormat(42n as StorableValue) as Record<
         string,
         string
       >;
@@ -367,29 +363,23 @@ describe("serialization", () => {
     });
 
     it("is distinct from number", () => {
-      const { context } = makeTestContext();
-      const serializedNum = serialize(42, context);
-      const serializedBig = serialize(
-        42n as StorableValue,
-        context,
-      );
+      const serializedNum = toWireFormat(42);
+      const serializedBig = toWireFormat(42n as StorableValue);
       expect(serializedNum).not.toEqual(serializedBig);
     });
 
     it("rejects padded base64 input (ProblematicStorable)", () => {
-      const { context, runtime } = makeTestContext();
       // "Kg==" is the padded form of "Kg" (42n) -- padding is now rejected.
       const data = { "/BigInt@1": "Kg==" } as SerializedForm;
-      const result = deserialize(data, context, runtime);
+      const result = fromWireFormat(data);
       expect(result).toBeInstanceOf(ProblematicStorable);
       const prob = result as unknown as ProblematicStorable;
       expect(prob.typeTag).toBe("BigInt@1");
     });
 
     it("deserializes non-string state to ProblematicStorable", () => {
-      const { context, runtime } = makeTestContext();
       const data = { "/BigInt@1": 42 } as SerializedForm;
-      const result = deserialize(data, context, runtime);
+      const result = fromWireFormat(data);
       expect(result).toBeInstanceOf(ProblematicStorable);
       const prob = result as unknown as ProblematicStorable;
       expect(prob.typeTag).toBe("BigInt@1");
@@ -397,23 +387,20 @@ describe("serialization", () => {
     });
 
     it("deserializes null state to ProblematicStorable", () => {
-      const { context, runtime } = makeTestContext();
       const data = { "/BigInt@1": null } as SerializedForm;
-      const result = deserialize(data, context, runtime);
+      const result = fromWireFormat(data);
       expect(result).toBeInstanceOf(ProblematicStorable);
     });
 
     it("deserializes object state to ProblematicStorable", () => {
-      const { context, runtime } = makeTestContext();
       const data = { "/BigInt@1": { bad: true } } as SerializedForm;
-      const result = deserialize(data, context, runtime);
+      const result = fromWireFormat(data);
       expect(result).toBeInstanceOf(ProblematicStorable);
     });
 
     it("deserializes empty base64 string to ProblematicStorable", () => {
-      const { context, runtime } = makeTestContext();
       const data = { "/BigInt@1": "" } as SerializedForm;
-      const result = deserialize(data, context, runtime);
+      const result = fromWireFormat(data);
       expect(result).toBeInstanceOf(ProblematicStorable);
       const prob = result as unknown as ProblematicStorable;
       expect(prob.typeTag).toBe("BigInt@1");
@@ -426,9 +413,8 @@ describe("serialization", () => {
 
   describe("StorableEpochNsec", () => {
     it("serializes to /EpochNsec@1 with flat base64", () => {
-      const { context } = makeTestContext();
       const sn = new StorableEpochNsec(0n);
-      const result = serialize(sn as StorableValue, context) as Record<
+      const result = toWireFormat(sn as StorableValue) as Record<
         string,
         unknown
       >;
@@ -496,9 +482,8 @@ describe("serialization", () => {
 
   describe("StorableEpochDays", () => {
     it("serializes to /EpochDays@1 with flat base64", () => {
-      const { context } = makeTestContext();
       const sd = new StorableEpochDays(0n);
-      const result = serialize(sd as StorableValue, context) as Record<
+      const result = toWireFormat(sd as StorableValue) as Record<
         string,
         unknown
       >;
@@ -604,11 +589,9 @@ describe("serialization", () => {
 
   describe("StorableError", () => {
     it("serializes basic StorableError to /Error@1", () => {
-      const { context } = makeTestContext();
       const se = new StorableError(new Error("test"));
-      const result = serialize(
+      const result = toWireFormat(
         se as StorableValue,
-        context,
       ) as Record<string, unknown>;
       expect(Object.keys(result)).toEqual(["/Error@1"]);
       const state = result["/Error@1"] as Record<string, unknown>;
@@ -695,12 +678,10 @@ describe("serialization", () => {
     });
 
     it("wire format has name: null when name matches type (TypeError)", () => {
-      const { context } = makeTestContext();
       // TypeError: name === constructor.name === "TypeError"
       const se = new StorableError(new TypeError("type check"));
-      const result = serialize(
+      const result = toWireFormat(
         se as StorableValue,
-        context,
       ) as Record<string, unknown>;
       const state = result["/Error@1"] as Record<string, unknown>;
       expect(state.type).toBe("TypeError");
@@ -709,13 +690,11 @@ describe("serialization", () => {
     });
 
     it("wire format has explicit name when name differs from type", () => {
-      const { context } = makeTestContext();
       const err = new Error("custom");
       err.name = "MyCustomError";
       const se = new StorableError(err);
-      const result = serialize(
+      const result = toWireFormat(
         se as StorableValue,
-        context,
       ) as Record<string, unknown>;
       const state = result["/Error@1"] as Record<string, unknown>;
       expect(state.type).toBe("Error");
@@ -821,10 +800,9 @@ describe("serialization", () => {
 
   describe("sparse arrays", () => {
     it("serializes [1,,3] with /hole", () => {
-      const { context } = makeTestContext();
       // deno-lint-ignore no-sparse-arrays
       const arr = [1, , 3] as StorableValue;
-      const result = serialize(arr, context) as SerializedForm[];
+      const result = toWireFormat(arr) as SerializedForm[];
       expect(result.length).toBe(3);
       expect(result[0]).toBe(1);
       expect(result[1]).toEqual({ "/hole": 1 });
@@ -842,10 +820,9 @@ describe("serialization", () => {
     });
 
     it("serializes consecutive holes as run-length encoded", () => {
-      const { context } = makeTestContext();
       // deno-lint-ignore no-sparse-arrays
       const arr = [1, , , , 5] as StorableValue;
-      const result = serialize(arr, context) as SerializedForm[];
+      const result = toWireFormat(arr) as SerializedForm[];
       expect(result.length).toBe(3); // [1, {"/hole": 3}, 5]
       expect(result[0]).toBe(1);
       expect(result[1]).toEqual({ "/hole": 3 });
@@ -903,15 +880,11 @@ describe("serialization", () => {
     });
 
     it("serializes interleaved holes/undefined correctly", () => {
-      const { context } = makeTestContext();
       const arr = new Array(5) as StorableValue[];
       arr[0] = 1;
       arr[2] = undefined;
       arr[4] = 3;
-      const result = serialize(
-        arr as StorableValue,
-        context,
-      ) as SerializedForm[];
+      const result = toWireFormat(arr as StorableValue) as SerializedForm[];
       expect(result).toEqual([
         1,
         { "/hole": 1 },
@@ -964,9 +937,8 @@ describe("serialization", () => {
 
   describe("/object escaping", () => {
     it("wraps single-key object with /-prefixed key", () => {
-      const { context } = makeTestContext();
       const obj = { "/myKey": "val" } as unknown as StorableValue;
-      const result = serialize(obj, context);
+      const result = toWireFormat(obj);
       expect(result).toEqual({
         "/object": { "/myKey": "val" },
       });
@@ -979,9 +951,8 @@ describe("serialization", () => {
     });
 
     it("wraps {'/Link@1': 'fake'} (looks like tag but is user data)", () => {
-      const { context } = makeTestContext();
       const obj = { "/Link@1": "fake" } as unknown as StorableValue;
-      const result = serialize(obj, context);
+      const result = toWireFormat(obj);
       expect(result).toEqual({
         "/object": { "/Link@1": "fake" },
       });
@@ -994,9 +965,8 @@ describe("serialization", () => {
     });
 
     it("does not wrap multi-key objects with / keys", () => {
-      const { context } = makeTestContext();
       const obj = { a: 1, "/b": 2 } as unknown as StorableValue;
-      const result = serialize(obj, context);
+      const result = toWireFormat(obj);
       expect(result).toEqual({ a: 1, "/b": 2 });
     });
 
@@ -1014,49 +984,39 @@ describe("serialization", () => {
 
   describe("/quote handling", () => {
     it("deserializes /quote as literal (no inner deserialization)", () => {
-      const { context, runtime } = makeTestContext();
       const data = {
         "/quote": { "/Link@1": { id: "abc" } },
       } as SerializedForm;
-      const result = deserialize(data, context, runtime);
+      const result = fromWireFormat(data);
       // The inner structure is returned as-is, not reconstructed.
       const obj = result as Record<string, unknown>;
       expect(obj["/Link@1"]).toEqual({ id: "abc" });
     });
 
     it("deep-freezes /quote result objects", () => {
-      const { context, runtime } = makeTestContext();
       const data = {
         "/quote": { "/Link@1": { id: "abc" } },
       } as SerializedForm;
-      const result = deserialize(data, context, runtime) as Record<
-        string,
-        unknown
-      >;
+      const result = fromWireFormat(data) as Record<string, unknown>;
       expect(Object.isFrozen(result)).toBe(true);
       expect(Object.isFrozen(result["/Link@1"])).toBe(true);
     });
 
     it("deep-freezes /quote result arrays", () => {
-      const { context, runtime } = makeTestContext();
       const data = {
         "/quote": [1, { nested: "obj" }, [2, 3]],
       } as SerializedForm;
-      const result = deserialize(data, context, runtime) as unknown[];
+      const result = fromWireFormat(data) as unknown[];
       expect(Object.isFrozen(result)).toBe(true);
       expect(Object.isFrozen(result[1])).toBe(true);
       expect(Object.isFrozen(result[2])).toBe(true);
     });
 
     it("mutation of /quote result throws", () => {
-      const { context, runtime } = makeTestContext();
       const data = {
         "/quote": { key: "val" },
       } as SerializedForm;
-      const result = deserialize(data, context, runtime) as Record<
-        string,
-        unknown
-      >;
+      const result = fromWireFormat(data) as Record<string, unknown>;
       expect(() => {
         result.key = "changed";
       }).toThrow();
@@ -1068,40 +1028,34 @@ describe("serialization", () => {
   // --------------------------------------------------------------------------
 
   describe("unknown type tags", () => {
-    it("deserializes unknown tag to UnknownStorable", () => {
-      const { context, runtime } = makeTestContext();
+    it("decode() escapes unknown tags via /object wrapping", () => {
+      // Unknown slash-prefixed single-key objects are escaped by
+      // escapeUnknownSlashKeys in the decode path, producing a plain
+      // frozen object rather than an UnknownStorable.
       const data = {
         "/FutureType@2": { some: "data" },
       } as SerializedForm;
-      const result = deserialize(data, context, runtime);
-      expect(result).toBeInstanceOf(UnknownStorable);
-      const unknown = result as unknown as UnknownStorable;
-      expect(unknown.typeTag).toBe("FutureType@2");
+      const result = fromWireFormat(data) as Record<string, unknown>;
+      // The unknown tag is preserved as a literal key after /object unwrap.
+      expect(result["/FutureType@2"]).toEqual({ some: "data" });
+      expect(Object.isFrozen(result)).toBe(true);
     });
 
-    it("round-trips UnknownStorable through serialization", () => {
-      const { context, runtime } = makeTestContext();
-      const data = {
-        "/FutureType@2": { some: "data" },
-      } as SerializedForm;
-      const deserialized = deserialize(data, context, runtime);
-
-      // Re-serialize
-      const reserialized = serialize(
-        deserialized as StorableValue,
-        context,
-      );
-      expect(reserialized).toEqual({
+    it("encode preserves UnknownStorable tag in wire format", () => {
+      // Encoding an UnknownStorable produces the original tagged form.
+      const us = new UnknownStorable("FutureType@2", { some: "data" });
+      const wireFormat = toWireFormat(us as StorableValue);
+      expect(wireFormat).toEqual({
         "/FutureType@2": { some: "data" },
       });
     });
 
-    it("/hole outside array is treated as unknown type", () => {
-      const { context, runtime } = makeTestContext();
+    it("/hole is a known tag and passes through decode()", () => {
+      // `/hole` is in KNOWN_TAGS, so escapeUnknownSlashKeys does not wrap
+      // it. Outside an array context, it falls through to the class registry
+      // (not found) and becomes an UnknownStorable.
       const data = { "/hole": 5 } as SerializedForm;
-      const result = deserialize(data, context, runtime);
-      // Should be UnknownStorable since `hole` is not in the class registry
-      // and is encountered outside array context.
+      const result = fromWireFormat(data);
       expect(result).toBeInstanceOf(UnknownStorable);
       const unknown = result as unknown as UnknownStorable;
       expect(unknown.typeTag).toBe("hole");
@@ -1118,7 +1072,7 @@ describe("serialization", () => {
       const { context } = makeTestContext();
       const obj: Record<string, unknown> = {};
       obj.self = obj;
-      expect(() => serialize(obj as StorableValue, context)).toThrow(
+      expect(() => context.encode(obj as StorableValue)).toThrow(
         "Circular reference",
       );
     });
@@ -1127,7 +1081,7 @@ describe("serialization", () => {
       const { context } = makeTestContext();
       const arr: unknown[] = [];
       arr.push(arr);
-      expect(() => serialize(arr as StorableValue, context)).toThrow(
+      expect(() => context.encode(arr as StorableValue)).toThrow(
         "Circular reference",
       );
     });
@@ -1138,7 +1092,7 @@ describe("serialization", () => {
       const b: Record<string, unknown> = {};
       a.ref = b;
       b.ref = a;
-      expect(() => serialize(a as StorableValue, context)).toThrow(
+      expect(() => context.encode(a as StorableValue)).toThrow(
         "Circular reference",
       );
     });
@@ -1151,18 +1105,17 @@ describe("serialization", () => {
       (us as unknown as { state: StorableValue }).state = [
         us,
       ] as unknown as StorableValue;
-      expect(() => serialize(us as StorableValue, context))
+      expect(() => context.encode(us as StorableValue))
         .toThrow(
           "Circular reference",
         );
     });
 
     it("allows shared references (same object at multiple positions)", () => {
-      const { context } = makeTestContext();
       const shared = { val: 42 } as unknown as StorableValue;
       const obj = { a: shared, b: shared } as unknown as StorableValue;
       // Should not throw -- shared references are fine, only cycles are rejected.
-      const result = serialize(obj, context);
+      const result = toWireFormat(obj);
       expect(result).toEqual({ a: { val: 42 }, b: { val: 42 } });
     });
   });
@@ -1172,63 +1125,20 @@ describe("serialization", () => {
   // --------------------------------------------------------------------------
 
   describe("ProblematicStorable (lenient mode)", () => {
-    it("wraps failed reconstruction in ProblematicStorable", () => {
-      const context = new JsonEncodingContext({ lenient: true });
-      const runtime: ReconstructionContext = {
-        getCell(_ref) {
-          throw new Error("not available");
-        },
-      };
-
-      // Register a class that throws on reconstruct.
-      const ThrowingClass: StorableClass<StorableInstance> = {
-        [RECONSTRUCT](
-          _state: StorableValue,
-          _context: ReconstructionContext,
-        ): StorableInstance {
-          throw new Error("reconstruction failed");
-        },
-      };
-
-      const mockContext = {
-        ...context,
-        getClassFor(tag: string) {
-          if (tag === "TestThrow@1") return ThrowingClass;
-          return context.getClassFor(tag);
-        },
-        getTagFor: context.getTagFor.bind(context),
-        wrapTag: context.wrapTag.bind(context),
-        unwrapTag: context.unwrapTag.bind(context),
-        lenient: true,
-      };
-
-      const data = { "/TestThrow@1": "some state" } as SerializedForm;
-      const result = deserialize(data, mockContext, runtime);
-      expect(result).toBeInstanceOf(ProblematicStorable);
-      const prob = result as unknown as ProblematicStorable;
-      expect(prob.typeTag).toBe("TestThrow@1");
-      expect(prob.error).toBe("reconstruction failed");
-    });
-
-    it("round-trips ProblematicStorable", () => {
+    it("encode preserves ProblematicStorable's original tag and state", () => {
       const prob = new ProblematicStorable(
         "BadType@1",
         "original data",
         "something went wrong",
       );
-      const { context, runtime } = makeTestContext();
-      const serialized = serialize(
-        prob as StorableValue,
-        context,
+      const { context } = makeTestContext();
+      const wireFormat = JSON.parse(
+        context.encode(prob as StorableValue),
       );
-      expect(serialized).toEqual({ "/BadType@1": "original data" });
-
-      // Deserializing produces UnknownStorable (BadType@1 is not registered).
-      const deserialized = deserialize(serialized, context, runtime);
-      expect(deserialized).toBeInstanceOf(UnknownStorable);
+      expect(wireFormat).toEqual({ "/BadType@1": "original data" });
     });
 
-    it("wraps failed Error@1 reconstruction in lenient mode", () => {
+    it("lenient mode wraps failed handler reconstruction", () => {
       const context = new JsonEncodingContext({ lenient: true });
       const runtime: ReconstructionContext = {
         getCell(_ref) {
@@ -1236,37 +1146,32 @@ describe("serialization", () => {
         },
       };
 
-      // Create a mock context that overrides getClassFor to return a
-      // throwing class for Error@1.
-      const ThrowingErrorClass: StorableClass<StorableInstance> = {
-        [RECONSTRUCT](
-          _state: StorableValue,
-          _context: ReconstructionContext,
-        ): StorableInstance {
-          throw new Error("Error reconstruction failed");
-        },
-      };
-
-      const mockContext = {
-        ...context,
-        getClassFor(tag: string) {
-          if (tag === "Error@1") return ThrowingErrorClass;
-          return context.getClassFor(tag);
-        },
-        getTagFor: context.getTagFor.bind(context),
-        wrapTag: context.wrapTag.bind(context),
-        unwrapTag: context.unwrapTag.bind(context),
-        lenient: true,
-      };
-
-      const data = {
-        "/Error@1": { name: "Error", message: "test" },
-      } as SerializedForm;
-      const result = deserialize(data, mockContext, runtime);
+      // BigInt@1 with a non-string state produces ProblematicStorable
+      // in lenient mode because the handler validates the state type.
+      const data = { "/BigInt@1": 42 } as SerializedForm;
+      const result = context.decode(JSON.stringify(data), runtime);
       expect(result).toBeInstanceOf(ProblematicStorable);
       const prob = result as unknown as ProblematicStorable;
-      expect(prob.typeTag).toBe("Error@1");
-      expect(prob.error).toBe("Error reconstruction failed");
+      expect(prob.typeTag).toBe("BigInt@1");
+    });
+
+    it("lenient mode wraps failed class-registry reconstruction", () => {
+      const context = new JsonEncodingContext({ lenient: true });
+      const runtime: ReconstructionContext = {
+        getCell(_ref) {
+          throw new Error("not available");
+        },
+      };
+
+      // Map@1 always throws on RECONSTRUCT ("not yet implemented"),
+      // triggering lenient wrapping.
+      const data = {
+        "/Map@1": [["key", "value"]],
+      } as SerializedForm;
+      const result = context.decode(JSON.stringify(data), runtime);
+      expect(result).toBeInstanceOf(ProblematicStorable);
+      const prob = result as unknown as ProblematicStorable;
+      expect(prob.typeTag).toBe("Map@1");
     });
   });
 
@@ -1276,31 +1181,22 @@ describe("serialization", () => {
 
   describe("freeze guarantees", () => {
     it("deserialized arrays are frozen", () => {
-      const { context, runtime } = makeTestContext();
-      const result = deserialize(
+      const result = fromWireFormat(
         [1, 2, 3] as SerializedForm,
-        context,
-        runtime,
       ) as StorableValue[];
       expect(Object.isFrozen(result)).toBe(true);
     });
 
     it("deserialized objects are frozen", () => {
-      const { context, runtime } = makeTestContext();
-      const result = deserialize(
+      const result = fromWireFormat(
         { a: 1 } as SerializedForm,
-        context,
-        runtime,
       ) as Record<string, StorableValue>;
       expect(Object.isFrozen(result)).toBe(true);
     });
 
     it("mutation of deserialized array throws", () => {
-      const { context, runtime } = makeTestContext();
-      const result = deserialize(
+      const result = fromWireFormat(
         [1, 2, 3] as SerializedForm,
-        context,
-        runtime,
       ) as StorableValue[];
       expect(() => {
         (result as unknown as number[])[0] = 99;
@@ -1308,11 +1204,8 @@ describe("serialization", () => {
     });
 
     it("mutation of deserialized object throws", () => {
-      const { context, runtime } = makeTestContext();
-      const result = deserialize(
+      const result = fromWireFormat(
         { a: 1 } as SerializedForm,
-        context,
-        runtime,
       ) as Record<string, StorableValue>;
       expect(() => {
         (result as Record<string, unknown>).a = 99;
@@ -1320,20 +1213,16 @@ describe("serialization", () => {
     });
 
     it("nested deserialized objects are frozen", () => {
-      const { context, runtime } = makeTestContext();
-      const result = deserialize(
+      const result = fromWireFormat(
         { inner: { val: 42 } } as SerializedForm,
-        context,
-        runtime,
       ) as Record<string, Record<string, StorableValue>>;
       expect(Object.isFrozen(result)).toBe(true);
       expect(Object.isFrozen(result.inner)).toBe(true);
     });
 
     it("deserialized /object-unwrapped objects are frozen", () => {
-      const { context, runtime } = makeTestContext();
       const data = { "/object": { "/myKey": "val" } } as SerializedForm;
-      const result = deserialize(data, context, runtime) as Record<
+      const result = fromWireFormat(data) as Record<
         string,
         StorableValue
       >;
@@ -1463,93 +1352,71 @@ describe("serialization", () => {
   });
 
   // --------------------------------------------------------------------------
-  // JsonEncodingContext
+  // JsonEncodingContext public API
   // --------------------------------------------------------------------------
 
   describe("JsonEncodingContext", () => {
-    it("wrapTag produces /<tag> key", () => {
+    it("encode returns a JSON string", () => {
       const ctx = new JsonEncodingContext();
-      expect(ctx.wrapTag("Error@1", { name: "Error" })).toEqual({
-        "/Error@1": { name: "Error" },
-      });
+      const result = ctx.encode(42);
+      expect(typeof result).toBe("string");
+      expect(JSON.parse(result)).toBe(42);
     });
 
-    it("unwrapTag recognizes /<tag> key", () => {
+    it("decode parses a JSON string back to a value", () => {
       const ctx = new JsonEncodingContext();
-      const result = ctx.unwrapTag({ "/Error@1": { name: "Error" } });
-      expect(result).toEqual({
-        tag: "Error@1",
-        state: { name: "Error" },
-      });
+      const runtime: ReconstructionContext = {
+        getCell(_ref) {
+          throw new Error("not implemented");
+        },
+      };
+      const result = ctx.decode("42", runtime);
+      expect(result).toBe(42);
     });
 
-    it("unwrapTag returns null for non-tagged objects", () => {
+    it("encode/decode round-trip for tagged types", () => {
       const ctx = new JsonEncodingContext();
-      expect(ctx.unwrapTag({ a: 1, b: 2 })).toBe(null);
-      expect(ctx.unwrapTag({ notSlash: 1 })).toBe(null);
-      expect(ctx.unwrapTag(42)).toBe(null);
-      expect(ctx.unwrapTag(null)).toBe(null);
-      expect(ctx.unwrapTag("string")).toBe(null);
-      expect(ctx.unwrapTag([1, 2])).toBe(null);
-    });
-
-    it("unwrapTag returns null for multi-key objects even with / key", () => {
-      const ctx = new JsonEncodingContext();
-      expect(ctx.unwrapTag({ "/a": 1, "/b": 2 })).toBe(null);
-    });
-
-    it("getTagFor returns typeTag for UnknownStorable", () => {
-      const ctx = new JsonEncodingContext();
-      const us = new UnknownStorable("Custom@1", null);
-      expect(ctx.getTagFor(us)).toBe("Custom@1");
-    });
-
-    it("getTagFor returns typeTag for ProblematicStorable", () => {
-      const ctx = new JsonEncodingContext();
-      const ps = new ProblematicStorable("Bad@1", null, "err");
-      expect(ctx.getTagFor(ps)).toBe("Bad@1");
-    });
-
-    it("getTagFor returns typeTag for StorableError", () => {
-      const ctx = new JsonEncodingContext();
+      const runtime: ReconstructionContext = {
+        getCell(_ref) {
+          throw new Error("not implemented");
+        },
+      };
       const se = new StorableError(new Error("test"));
-      expect(ctx.getTagFor(se)).toBe("Error@1");
+      const encoded = ctx.encode(se as StorableValue);
+      const decoded = ctx.decode(encoded, runtime);
+      expect(decoded).toBeInstanceOf(StorableError);
+      expect((decoded as unknown as StorableError).error.message).toBe("test");
     });
 
-    it("getClassFor returns StorableError for Error@1", () => {
+    it("encodeToBytes/decodeFromBytes round-trip", () => {
       const ctx = new JsonEncodingContext();
-      expect(ctx.getClassFor("Error@1")).toBeDefined();
-    });
-
-    it("getClassFor returns undefined for unknown tags", () => {
-      const ctx = new JsonEncodingContext();
-      expect(ctx.getClassFor("Unknown@1")).toBeUndefined();
-    });
-
-    it("finalize produces valid JSON Uint8Array", () => {
-      const ctx = new JsonEncodingContext();
-      const bytes = ctx.finalize({ a: 1 } as SerializedForm);
-      expect(bytes).toBeInstanceOf(Uint8Array);
-      expect(JSON.parse(new TextDecoder().decode(bytes))).toEqual({
-        a: 1,
-      });
-    });
-
-    it("parse decodes Uint8Array to JsonWireValue", () => {
-      const ctx = new JsonEncodingContext();
-      const bytes = new TextEncoder().encode('{"a":1}');
-      const result = ctx.parse(bytes);
-      expect(result).toEqual({ a: 1 });
-    });
-
-    it("finalize/parse round-trip", () => {
-      const ctx = new JsonEncodingContext();
+      const runtime: ReconstructionContext = {
+        getCell(_ref) {
+          throw new Error("not implemented");
+        },
+      };
       const data = {
-        "/Error@1": { name: "Error", message: "test" },
-      } as SerializedForm;
-      const bytes = ctx.finalize(data);
-      const parsed = ctx.parse(bytes);
-      expect(parsed).toEqual(data);
+        name: "test",
+        error: new StorableError(new Error("fail")),
+      } as unknown as StorableValue;
+      const bytes = ctx.encodeToBytes(data);
+      expect(bytes).toBeInstanceOf(Uint8Array);
+      const decoded = ctx.decodeFromBytes(bytes, runtime) as Record<
+        string,
+        StorableValue
+      >;
+      expect(decoded.name).toBe("test");
+      expect(decoded.error).toBeInstanceOf(StorableError);
+    });
+
+    it("lenient defaults to false", () => {
+      const ctx = new JsonEncodingContext();
+      expect(ctx.lenient).toBe(false);
+    });
+
+    it("lenient can be set to true", () => {
+      const ctx = new JsonEncodingContext({ lenient: true });
+      expect(ctx.lenient).toBe(true);
     });
   });
 
@@ -1876,11 +1743,9 @@ describe("serialization", () => {
 
     it("wire format is unchanged (backward compatible)", () => {
       // StorableError should produce the same wire format as the old ErrorHandler.
-      const { context } = makeTestContext();
       const se = new StorableError(new TypeError("compat test"));
-      const serialized = serialize(
+      const serialized = toWireFormat(
         se as StorableValue,
-        context,
       ) as Record<string, unknown>;
       expect(Object.keys(serialized)).toEqual(["/Error@1"]);
       const state = serialized["/Error@1"] as Record<string, unknown>;

@@ -5,7 +5,6 @@ import {
   type ReconstructionContext,
   type StorableInstance,
 } from "./storable-protocol.ts";
-import type { TagCodec } from "./serialization-context.ts";
 import type { SerializedForm } from "./json-serialization-context.ts";
 import { ExplicitTagStorable } from "./explicit-tag-storable.ts";
 import { ProblematicStorable } from "./problematic-storable.ts";
@@ -20,6 +19,21 @@ import {
   fromBase64url,
   toUnpaddedBase64url,
 } from "./bigint-encoding.ts";
+
+/**
+ * Narrow interface for what type handlers need from the encoding context
+ * during tree walking. Contains only the tag-wrapping and tag-lookup methods
+ * needed by handler serialize/deserialize implementations.
+ *
+ * This is NOT a public interface -- it exists to type the `codec` parameter
+ * passed to type handlers by the internal tree-walking engine.
+ */
+export interface TypeHandlerCodec {
+  /** Wrap a tag and state into the wire format's tagged representation. */
+  wrapTag(tag: string, state: SerializedForm): SerializedForm;
+  /** Get the wire format tag for a storable instance's type. */
+  getTagFor(value: StorableInstance): string;
+}
 
 /**
  * Interface for per-type serialize/deserialize handlers. Each handler knows
@@ -45,7 +59,7 @@ export interface TypeHandler {
    */
   serialize(
     value: StorableValue,
-    codec: TagCodec<SerializedForm>,
+    codec: TypeHandlerCodec,
     recurse: (v: StorableValue) => SerializedForm,
   ): SerializedForm;
 
@@ -56,7 +70,6 @@ export interface TypeHandler {
    */
   deserialize(
     state: SerializedForm,
-    codec: TagCodec<SerializedForm>,
     runtime: ReconstructionContext,
     recurse: (v: SerializedForm) => StorableValue,
   ): StorableValue;
@@ -137,7 +150,7 @@ export const UndefinedHandler: TypeHandler = {
 
   serialize(
     _value: StorableValue,
-    codec: TagCodec<SerializedForm>,
+    codec: TypeHandlerCodec,
     _recurse: (v: StorableValue) => SerializedForm,
   ): SerializedForm {
     return codec.wrapTag(TAGS.Undefined, null);
@@ -145,7 +158,6 @@ export const UndefinedHandler: TypeHandler = {
 
   deserialize(
     _state: SerializedForm,
-    _codec: TagCodec<SerializedForm>,
     _runtime: ReconstructionContext,
     _recurse: (v: SerializedForm) => StorableValue,
   ): StorableValue {
@@ -171,7 +183,7 @@ export const BigIntHandler: TypeHandler = {
 
   serialize(
     value: StorableValue,
-    codec: TagCodec<SerializedForm>,
+    codec: TypeHandlerCodec,
     _recurse: (v: StorableValue) => SerializedForm,
   ): SerializedForm {
     const bytes = bigintToMinimalTwosComplement(value as bigint);
@@ -181,7 +193,6 @@ export const BigIntHandler: TypeHandler = {
 
   deserialize(
     state: SerializedForm,
-    _codec: TagCodec<SerializedForm>,
     _runtime: ReconstructionContext,
     _recurse: (v: SerializedForm) => StorableValue,
   ): StorableValue {
@@ -222,7 +233,7 @@ export const EpochNsecHandler: TypeHandler = {
 
   serialize(
     value: StorableValue,
-    codec: TagCodec<SerializedForm>,
+    codec: TypeHandlerCodec,
     _recurse: (v: StorableValue) => SerializedForm,
   ): SerializedForm {
     const nsec = (value as StorableEpochNsec).value;
@@ -233,7 +244,6 @@ export const EpochNsecHandler: TypeHandler = {
 
   deserialize(
     state: SerializedForm,
-    _codec: TagCodec<SerializedForm>,
     _runtime: ReconstructionContext,
     _recurse: (v: SerializedForm) => StorableValue,
   ): StorableValue {
@@ -275,7 +285,7 @@ export const EpochDaysHandler: TypeHandler = {
 
   serialize(
     value: StorableValue,
-    codec: TagCodec<SerializedForm>,
+    codec: TypeHandlerCodec,
     _recurse: (v: StorableValue) => SerializedForm,
   ): SerializedForm {
     const days = (value as StorableEpochDays).value;
@@ -286,7 +296,6 @@ export const EpochDaysHandler: TypeHandler = {
 
   deserialize(
     state: SerializedForm,
-    _codec: TagCodec<SerializedForm>,
     _runtime: ReconstructionContext,
     _recurse: (v: SerializedForm) => StorableValue,
   ): StorableValue {
@@ -331,7 +340,7 @@ export const StorableInstanceHandler: TypeHandler = {
 
   serialize(
     value: StorableValue,
-    codec: TagCodec<SerializedForm>,
+    codec: TypeHandlerCodec,
     recurse: (v: StorableValue) => SerializedForm,
   ): SerializedForm {
     const inst = value as StorableInstance;
@@ -352,7 +361,6 @@ export const StorableInstanceHandler: TypeHandler = {
 
   deserialize(
     _state: SerializedForm,
-    _codec: TagCodec<SerializedForm>,
     _runtime: ReconstructionContext,
     _recurse: (v: SerializedForm) => StorableValue,
   ): StorableValue {

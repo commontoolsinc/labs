@@ -1,5 +1,3 @@
-import type { TagCodec } from "./serialization-context.ts";
-
 /**
  * JSON-compatible wire format value. This is the intermediate tree
  * representation used during serialization tree walking -- NOT the final
@@ -20,9 +18,3 @@ export type JsonWireValue =
  * final boundary type.
  */
 export type SerializedForm = JsonWireValue;
-
-/**
- * JSON-specific tag codec. Implements the `/<Type>@<Version>` wire format,
- * parameterized as `TagCodec<JsonWireValue>`.
- */
-export type JsonTagCodec = TagCodec<JsonWireValue>;
