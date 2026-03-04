@@ -663,6 +663,7 @@ IMPORTANT:
 
   // Write summary when generation completes (or skip on error)
   const writeSummary = computed(() => {
+    if (!summaryGen) return null;
     const result = summaryGen.result;
     const pending = summaryGen.pending;
     const error = (summaryGen as any).error;
