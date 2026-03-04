@@ -128,7 +128,6 @@ export function map(
             { doNotUpdateOnPatternChange: true },
           );
           existing.lastIndex = i;
-          resultWithLog.key(i).set(existing.resultCell);
         }
         newArrayValue.push(existing.resultCell);
       } else {
@@ -153,21 +152,10 @@ export function map(
         resultCell.getSourceCell()!.setSourceCell(parentCell);
         addCancel(() => runtime.runner.stop(resultCell));
         elementRuns.set(elementKey, { resultCell, lastIndex: i });
-        resultWithLog.key(i).set(resultCell);
         newArrayValue.push(resultCell);
       }
     }
-
-    // Update result array length if it changed
-    const currentResult = resultWithLog.get();
-    if (currentResult.length > list.length) {
-      // Use getRaw() to preserve cell references. Using .get() would dereference
-      // cells to their values, losing the reference when the value is null.
-      const rawResult = resultWithLog.getRaw() ?? currentResult;
-      resultWithLog.set(rawResult.slice(0, list.length));
-    } else if (currentResult.length < list.length) {
-      resultWithLog.set(newArrayValue);
-    }
+    resultWithLog.set(newArrayValue);
 
     // NOTE: We leave prior results in elementRuns for now, so they reuse
     // prior runs when items reappear. This means elementRuns grows
