@@ -582,6 +582,7 @@ export class CommonToolsFormatter implements TypeFormatter {
 
   /**
    * Format a CFC<T, C> or Secret<T> / Confidential<T> type.
+   * Also handles user-defined aliases like `type PII<T> = CFC<T, "pii">`.
    * Generates the schema for the inner type T and attaches
    * `ifc: { classification: [C] }` to the result.
    */
@@ -613,7 +614,7 @@ export class CommonToolsFormatter implements TypeFormatter {
       classification = "secret";
     } else if (nodeName === "Confidential") {
       classification = "confidential";
-    } else if (typeArgs.length >= 2) {
+    } else if (nodeName === "CFC" && typeArgs.length >= 2) {
       // CFC<T, "secret"> — extract the string literal from the second type arg
       const classType = context.typeChecker.getTypeFromTypeNode(typeArgs[1]!);
       if (classType.isStringLiteral()) {
@@ -622,15 +623,71 @@ export class CommonToolsFormatter implements TypeFormatter {
         classification = "secret"; // fallback
       }
     } else {
-      classification = "secret"; // fallback
+      // User-defined alias (e.g., PII<T> = CFC<T, "pii">).
+      // Resolve the classification by following the alias chain to find the
+      // CFC declaration and extracting the hardcoded classification literal.
+      classification = this.resolveCFCClassificationFromAlias(
+        typeRefNode,
+        context.typeChecker,
+      ) ?? "secret"; // fallback
     }
 
     return this.applyCFCAnnotation(innerSchema, classification);
   }
 
   /**
+   * Follow the alias chain from a user-defined CFC alias to extract the
+   * classification string literal.
+   *
+   * For example, given `type PII<T> = CFC<T, "pii">` and usage `PII<string>`,
+   * this resolves through the alias declaration to find `"pii"`.
+   */
+  private resolveCFCClassificationFromAlias(
+    typeRefNode: ts.TypeReferenceNode,
+    checker: ts.TypeChecker,
+  ): string | undefined {
+    if (!ts.isIdentifier(typeRefNode.typeName)) return undefined;
+
+    const symbol = checker.getSymbolAtLocation(typeRefNode.typeName);
+    if (!symbol || !(symbol.flags & ts.SymbolFlags.TypeAlias)) return undefined;
+
+    const decl = symbol.declarations?.[0];
+    if (!decl || !ts.isTypeAliasDeclaration(decl)) return undefined;
+
+    const aliasedType = decl.type;
+    if (
+      !ts.isTypeReferenceNode(aliasedType) ||
+      !ts.isIdentifier(aliasedType.typeName)
+    ) {
+      return undefined;
+    }
+
+    const targetName = aliasedType.typeName.text;
+
+    // The alias resolves to Secret<...> or Confidential<...>
+    if (targetName === "Secret") return "secret";
+    if (targetName === "Confidential") return "confidential";
+
+    // The alias resolves to CFC<T, "classification"> — extract from second type arg
+    if (
+      targetName === "CFC" && aliasedType.typeArguments &&
+      aliasedType.typeArguments.length >= 2
+    ) {
+      const classArgNode = aliasedType.typeArguments[1]!;
+      const classType = checker.getTypeFromTypeNode(classArgNode);
+      if (classType.isStringLiteral()) {
+        return classType.value;
+      }
+    }
+
+    // Recurse: the alias might point to another alias (e.g., type MyPII<T> = PII<T>)
+    return this.resolveCFCClassificationFromAlias(aliasedType, checker);
+  }
+
+  /**
    * Extract the CFC classification from aliasSymbol metadata.
    * Used in the aliasSymbol fallback path when the type node is unavailable.
+   * Follows alias chains for user-defined CFC aliases.
    */
   private extractCFCClassification(
     aliasSymbol: ts.Symbol,
@@ -640,12 +697,40 @@ export class CommonToolsFormatter implements TypeFormatter {
     if (name === "Secret") return "secret";
     if (name === "Confidential") return "confidential";
     // CFC<T, C> — extract C from the second type argument
-    if (aliasTypeArguments.length >= 2) {
+    if (name === "CFC" && aliasTypeArguments.length >= 2) {
       const classType = aliasTypeArguments[1]!;
       if (classType.isStringLiteral()) {
         return classType.value;
       }
     }
+
+    // User-defined alias: follow the alias declaration to find the classification
+    const decl = aliasSymbol.declarations?.[0];
+    if (decl && ts.isTypeAliasDeclaration(decl)) {
+      const aliasedType = decl.type;
+      if (
+        ts.isTypeReferenceNode(aliasedType) &&
+        ts.isIdentifier(aliasedType.typeName) &&
+        aliasedType.typeArguments
+      ) {
+        const targetName = aliasedType.typeName.text;
+        if (targetName === "Secret") return "secret";
+        if (targetName === "Confidential") return "confidential";
+        if (targetName === "CFC" && aliasedType.typeArguments.length >= 2) {
+          // The second type arg in the alias declaration contains the classification
+          // e.g., type PII<T> = CFC<T, "pii"> — "pii" is a string literal node
+          const classArgNode = aliasedType.typeArguments[1]!;
+          // For alias declarations, the type arg might be a literal type node
+          if (
+            ts.isLiteralTypeNode(classArgNode) &&
+            ts.isStringLiteral(classArgNode.literal)
+          ) {
+            return classArgNode.literal.text;
+          }
+        }
+      }
+    }
+
     return "secret"; // fallback
   }
 

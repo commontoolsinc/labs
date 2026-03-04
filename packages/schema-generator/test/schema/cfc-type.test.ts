@@ -73,4 +73,75 @@ describe("Schema: CFC<T,C> / Secret<T> / Confidential<T>", () => {
     expect(result.default).toBe("");
     expect((result as any).ifc).toEqual({ classification: ["secret"] });
   });
+
+  it("CFC<T, C> works with arbitrary string literal classification", async () => {
+    const code = `
+      type CFC<T, C extends string = string> = T;
+      type T = CFC<string, "pii">;
+    `;
+    const { type, checker, typeNode } = await getTypeFromCode(code, "T");
+    const gen = createSchemaTransformerV2();
+    const result = asObjectSchema(gen.generateSchema(type, checker, typeNode));
+    expect(result.type).toBe("string");
+    expect((result as any).ifc).toEqual({ classification: ["pii"] });
+  });
+
+  it("user-defined alias type PII<T> = CFC<T, 'pii'> extracts correct classification", async () => {
+    const code = `
+      type CFC<T, C extends string = string> = T;
+      type PII<T> = CFC<T, "pii">;
+      type T = PII<string>;
+    `;
+    const { type, checker, typeNode } = await getTypeFromCode(code, "T");
+    const gen = createSchemaTransformerV2();
+    const result = asObjectSchema(gen.generateSchema(type, checker, typeNode));
+    expect(result.type).toBe("string");
+    expect((result as any).ifc).toEqual({ classification: ["pii"] });
+  });
+
+  it("user-defined alias with custom label inside object property", async () => {
+    const code = `
+      type CFC<T, C extends string = string> = T;
+      type PII<T> = CFC<T, "pii">;
+      type T = { ssn: PII<string>; name: string };
+    `;
+    const { type, checker, typeNode } = await getTypeFromCode(code, "T");
+    const gen = createSchemaTransformerV2();
+    const result = asObjectSchema(gen.generateSchema(type, checker, typeNode));
+    expect(result.type).toBe("object");
+    const props = result.properties as any;
+    expect(props.ssn.type).toBe("string");
+    expect(props.ssn.ifc).toEqual({ classification: ["pii"] });
+    expect(props.name.type).toBe("string");
+    expect(props.name.ifc).toBeUndefined();
+  });
+
+  it("chained user alias (MyPII -> PII -> CFC) resolves classification", async () => {
+    const code = `
+      type CFC<T, C extends string = string> = T;
+      type PII<T> = CFC<T, "pii">;
+      type MyPII<T> = PII<T>;
+      type T = MyPII<string>;
+    `;
+    const { type, checker, typeNode } = await getTypeFromCode(code, "T");
+    const gen = createSchemaTransformerV2();
+    const result = asObjectSchema(gen.generateSchema(type, checker, typeNode));
+    expect(result.type).toBe("string");
+    expect((result as any).ifc).toEqual({ classification: ["pii"] });
+  });
+
+  it("non-generic user alias type MyField = CFC<string, 'custom-label'>", async () => {
+    const code = `
+      type CFC<T, C extends string = string> = T;
+      type MyField = CFC<string, "custom-label">;
+      type T = { field: MyField };
+    `;
+    const { type, checker, typeNode } = await getTypeFromCode(code, "T");
+    const gen = createSchemaTransformerV2();
+    const result = asObjectSchema(gen.generateSchema(type, checker, typeNode));
+    expect(result.type).toBe("object");
+    const props = result.properties as any;
+    expect(props.field.type).toBe("string");
+    expect(props.field.ifc).toEqual({ classification: ["custom-label"] });
+  });
 });
