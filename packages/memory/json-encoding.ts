@@ -1,10 +1,16 @@
-import type { StorableClass, StorableInstance } from "./storable-protocol.ts";
+import type { StorableValue } from "./interface.ts";
+import type {
+  ReconstructionContext,
+  StorableClass,
+  StorableInstance,
+} from "./storable-protocol.ts";
 import type { SerializationContext } from "./serialization-context.ts";
 import type {
   JsonWireValue,
   SerializedForm,
 } from "./json-serialization-context.ts";
 import { ExplicitTagStorable } from "./explicit-tag-storable.ts";
+import { deserialize, serialize } from "./serialization.ts";
 import {
   StorableError,
   StorableMap,
@@ -120,4 +126,124 @@ export class JsonEncodingContext
   parse(bytes: Uint8Array): SerializedForm {
     return JSON.parse(new TextDecoder().decode(bytes)) as SerializedForm;
   }
+
+  // -------------------------------------------------------------------------
+  // Full codec: StorableValue <-> string
+  //
+  // These methods encapsulate the complete pipeline (serialize + stringify
+  // on write; parse + legacy escaping + deserialize on read) so callers
+  // work with `StorableValue` and `string` without knowing about the
+  // intermediate wire format.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Encode a storable value to a JSON string. Serializes rich types into
+   * the `/<Type>@<Version>` tagged wire format, then stringifies.
+   */
+  encodeToString(value: StorableValue): string {
+    return JSON.stringify(serialize(value, this));
+  }
+
+  /**
+   * Decode a JSON string back into a storable value. Parses the string,
+   * escapes legacy `/`-prefixed markers, then deserializes tagged forms
+   * back into rich runtime types.
+   */
+  decodeFromString(
+    json: string,
+    runtime: ReconstructionContext,
+  ): StorableValue {
+    const parsed = JSON.parse(json) as StorableValue;
+    return deserialize(
+      this.escapeUnknownSlashKeys(parsed) as unknown as SerializedForm,
+      this,
+      runtime,
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Legacy marker escaping (private)
+  //
+  // Sigil links `{ "/": ... }` and entity IDs `{ "/": "string" }` use a
+  // `/`-prefixed single key that collides with the `/<Type>@<Version>` wire
+  // format. On the write path, `serialize()` handles this correctly via
+  // `/object` escaping. On the read path, legacy data (written before the
+  // flag was enabled) lacks `/object` wrapping, so `deserialize()` would
+  // misinterpret bare `{ "/": ... }` as a tagged value with empty tag.
+  //
+  // `escapeUnknownSlashKeys` walks the parsed JSON and wraps any unknown
+  // `/`-prefixed single-key objects in `/object` so `deserialize()` handles
+  // them the same way as newly-written data.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Walk a parsed JSON tree and wrap any `/`-prefixed single-key objects
+   * whose tag is not recognized by the serialization engine. This handles
+   * legacy sigil links (`{ "/": ... }`) and entity IDs that were stored
+   * before the flag was enabled. Known tags are left for `deserialize()`.
+   *
+   * For known tags, recurses into the state value to handle nested legacy
+   * markers. For structural tags (`/object`, `/quote`), recursion is
+   * skipped because their inner values are already correctly formed.
+   */
+  private escapeUnknownSlashKeys(data: StorableValue): StorableValue {
+    if (data === null || data === undefined || typeof data !== "object") {
+      return data;
+    }
+
+    if (Array.isArray(data)) {
+      let changed = false;
+      const result = data.map((item) => {
+        const processed = this.escapeUnknownSlashKeys(item);
+        if (processed !== item) changed = true;
+        return processed;
+      });
+      return changed ? result : data;
+    }
+
+    const obj = data as Record<string, StorableValue>;
+    const keys = Object.keys(obj);
+
+    if (keys.length === 1 && keys[0].startsWith("/")) {
+      const tag = keys[0].slice(1); // strip leading "/"
+
+      // Structural tags: /object and /quote wrap values that are already
+      // in the correct wire format. Do not recurse into them.
+      if (tag === TAGS.object || tag === TAGS.quote) {
+        return data;
+      }
+
+      if (KNOWN_TAGS.has(tag)) {
+        // Known type tag (e.g., /Error@1, /BigInt@1) -- recurse into the
+        // state value to handle nested legacy markers, but leave the tag
+        // wrapper intact for deserialize().
+        const innerProcessed = this.escapeUnknownSlashKeys(obj[keys[0]]);
+        if (innerProcessed !== obj[keys[0]]) {
+          return { [keys[0]]: innerProcessed } as StorableValue;
+        }
+        return data;
+      }
+
+      // Unknown tag (e.g., bare "/" key from a legacy sigil link). Wrap
+      // in /object so deserialize() treats the inner object's keys
+      // literally. Recurse into the inner value first for nested legacy.
+      const innerProcessed = this.escapeUnknownSlashKeys(obj[keys[0]]);
+      return {
+        [`/${TAGS.object}`]: { [keys[0]]: innerProcessed },
+      } as StorableValue;
+    }
+
+    // Multi-key object -- recurse into all values.
+    let changed = false;
+    const result: Record<string, StorableValue> = {};
+    for (const key of keys) {
+      const processed = this.escapeUnknownSlashKeys(obj[key]);
+      result[key] = processed;
+      if (processed !== obj[key]) changed = true;
+    }
+    return changed ? result as StorableValue : data;
+  }
 }
+
+/** Set of all known serialization tags (without the `/` prefix). */
+const KNOWN_TAGS: ReadonlySet<string> = new Set(Object.values(TAGS));
