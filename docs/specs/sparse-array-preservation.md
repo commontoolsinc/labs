@@ -164,13 +164,25 @@ to correctly report that a path through a hole does not exist.
 
 ### Map builtin (`packages/runner/src/builtins/map.ts`)
 
-The main loop checks `initializedUpTo in list` before creating a pattern run.
-For holes, it extends `newArrayValue.length` without pushing — preserving the
-hole in the output. When the input list changes reactively:
+The identity-based reconciliation loop uses `for` + `i in list` to skip holes.
+It pre-allocates `new Array(list.length)` and uses indexed assignment instead of
+`push`, so holes are structurally preserved in the output. No pattern runs,
+identity keys, or result cells are created for hole indices. When the input list
+changes reactively:
 
 - **Value becomes hole:** The output gets a hole at that index. The pattern run
-  is kept for potential reuse if the same key reappears.
-- **Hole becomes value:** A new pattern run is created (or reused by key match).
+  is kept in `elementRuns` for potential reuse if the same key reappears.
+- **Hole becomes value:** A new pattern run is created (or reused from
+  `elementRuns` if the identity key matches a previous run).
+
+### Hashing boundary (`packages/memory/reference.ts`)
+
+The merkle-reference library cannot hash sparse array holes (it throws
+`TypeError: Unknown type undefined`). The `wrappedNodeBuilder.toTree` wrapper
+detects sparse arrays and densifies them (holes → `null`) before passing to the
+default node builder. This only affects hash computation — the actual data in
+storage remains sparse. The canonical hash path (`canonical-hash.ts`) handles
+holes natively and does not need this workaround.
 
 ## Writing new code that handles arrays
 
@@ -212,6 +224,9 @@ Test coverage verifies sparse preservation at each layer:
   returns false through holes.
 - **`packages/runner/test/experimental-options.test.ts`** — `isStorableValue`
   accepts sparse arrays regardless of the `richStorableValues` flag.
+- **`packages/runner/test/patterns-core.test.ts`** — End-to-end test: maps over
+  `[10, <hole>, 30]` and verifies output is `[20, <hole>, 60]` with holes
+  preserved through the full pipeline.
 
 These tests use the `in` operator to assert true sparseness (`1 in result`
 should be `false`), not just value equality. A regression that densifies arrays
@@ -219,9 +234,6 @@ will fail these assertions.
 
 ## Known limitations
 
-- **Merkle hashing:** The merkle-reference library does not handle sparse arrays
-  in its type system. End-to-end tests that hash sparse array output from `map`
-  are not yet possible.
 - **`rich-storable-value.ts` `HasToJSON` path:** `Object.freeze([...converted])`
   in the `HasToJSON` case would densify a sparse array returned from `toJSON()`.
   This is an edge case — `toJSON()` rarely returns sparse arrays.
