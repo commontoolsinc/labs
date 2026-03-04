@@ -218,4 +218,43 @@ describe("Pattern Runner - Core", () => {
     const value = await result.pull();
     expect(value).toMatchObjectIgnoringSymbols({ doubled: [] });
   });
+
+  it("should preserve sparse array holes through map", async () => {
+    const double = lift((x: number) => x * 2);
+
+    const doubleArray = pattern<{ values: number[] }>(
+      ({ values }) => {
+        const doubled = values.map((x) => double(x));
+        return { doubled };
+      },
+    );
+
+    // Create a sparse input array: [10, <hole>, 30]
+    // deno-lint-ignore no-sparse-arrays
+    const sparseInput = [10, , 30];
+
+    const resultCell = runtime.getCell(
+      space,
+      "should preserve sparse array holes through map",
+      {
+        type: "object",
+        properties: {
+          doubled: { type: "array", items: { type: "number" } },
+        },
+      } as const satisfies JSONSchema,
+      tx,
+    );
+    const result = runtime.run(tx, doubleArray, {
+      values: sparseInput,
+    }, resultCell);
+    tx.commit();
+
+    const value = await result.pull();
+    const doubled = (value as any).doubled;
+    expect(Array.isArray(doubled)).toBe(true);
+    expect(doubled.length).toBe(3);
+    expect(doubled[0]).toBe(20);
+    expect(1 in doubled).toBe(false); // hole preserved
+    expect(doubled[2]).toBe(60);
+  });
 });
