@@ -996,11 +996,16 @@ const getExportFilename = (prefix: string) => {
 
 const NotesImportExport = pattern<Input, Output>(
   ({ title, importMarkdown }) => {
-    // Reads — typed discovery by schema tag
-    const noteWish = wish<NotePiece>({ query: "#note", scope: ["."] });
+    // Reads — typed discovery by schema tag (headless: no picker UI needed)
+    const noteWish = wish<NotePiece>({
+      query: "#note",
+      scope: ["."],
+      headless: true,
+    });
     const notebookWish = wish<NotebookPiece>({
       query: "#notebook",
       scope: ["."],
+      headless: true,
     });
     const notes = noteWish.candidates;
     const notebooks = notebookWish.candidates;
@@ -1008,7 +1013,7 @@ const NotesImportExport = pattern<Input, Output>(
     // Writes — writable cell from default pattern
     const { allPieces } =
       wish<{ allPieces: Writable<(NotePiece | NotebookPiece)[]> }>(
-        { query: "#default" },
+        { query: "#default", headless: true },
       ).result;
 
     // Counts

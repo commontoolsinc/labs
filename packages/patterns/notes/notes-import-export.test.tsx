@@ -110,7 +110,7 @@ export default pattern(() => {
   const defaultPiece = wish<{
     allPieces: Writable<(NotePiece | NotebookPiece)[]>;
     backlinksIndex: { mentionable: Writable<(NotePiece | NotebookPiece)[]> };
-  }>({ query: "#default" }).result;
+  }>({ query: "#default", headless: true }).result;
 
   // allPieces for writes, mentionable for wish discovery
   const allPieces = defaultPiece.allPieces;
@@ -134,9 +134,11 @@ export default pattern(() => {
     mentionable.set(allPieces);
   });
 
-  // Reset to empty state
+  // Reset to empty state (re-link mentionable after clearing to ensure
+  // the cell link survives across platforms)
   const action_reset = action(() => {
     allPieces.set([]);
+    mentionable.set(allPieces);
     importMarkdown.set("");
   });
 
