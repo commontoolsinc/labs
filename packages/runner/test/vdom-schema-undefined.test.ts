@@ -151,8 +151,9 @@ Deno.test("vnodeSchema allows undefined in render-node and prop-value unions", (
     anyOfIncludesUndefined(renderNodeSchema),
     "vnodeSchema RenderNode should include type=undefined",
   );
-  assert(
-    anyOfIncludesUndefined(propsSchema.additionalProperties),
+  assertEquals(
+    propsSchema.additionalProperties,
+    { type: "unknown" },
     "vnodeSchema Props additionalProperties should include type=undefined",
   );
 });
