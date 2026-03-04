@@ -3,7 +3,7 @@ import {
   RECONSTRUCT,
   type ReconstructionContext,
 } from "./storable-protocol.ts";
-import type { SerializationContext } from "./serialization-context.ts";
+import type { TagCodec } from "./serialization-context.ts";
 import type { SerializedForm } from "./json-serialization-context.ts";
 import { deepFreeze } from "./deep-freeze.ts";
 import { UnknownStorable } from "./unknown-storable.ts";
@@ -18,12 +18,11 @@ import { TAGS } from "./type-tags.ts";
 const defaultRegistry: TypeHandlerRegistry = createDefaultRegistry();
 
 /**
- * A serialization context that can produce and consume `Uint8Array` bytes.
- * Extends the base `SerializationContext` with `finalize()` and `parse()`
- * methods for boundary crossing. `JsonEncodingContext` implements this.
+ * A tag codec that can also produce and consume `Uint8Array` bytes.
+ * Extends the base `TagCodec` with `finalize()` and `parse()` methods for
+ * byte-level boundary crossing. `JsonEncodingContext` implements this.
  */
-export interface ByteSerializationContext<WireFormat>
-  extends SerializationContext<WireFormat> {
+export interface ByteTagCodec<WireFormat> extends TagCodec<WireFormat> {
   /** Convert a wire-format tree to bytes for boundary crossing. */
   finalize(data: WireFormat): Uint8Array;
   /** Parse bytes back into a wire-format tree. */
@@ -36,8 +35,8 @@ export interface ByteSerializationContext<WireFormat>
 
 /**
  * Serialize a storable value to bytes for boundary crossing. Builds an
- * internal wire-format tree via the context, then converts to `Uint8Array`
- * via `context.finalize()`. See Section 4.5 of the formal spec.
+ * internal wire-format tree via the codec, then converts to `Uint8Array`
+ * via `codec.finalize()`. See Section 4.5 of the formal spec.
  *
  * This is the intended public API for serialization at system boundaries.
  * The tree-level `serialize()` function is also exported for internal use
@@ -45,16 +44,16 @@ export interface ByteSerializationContext<WireFormat>
  */
 export function serializeToBytes(
   value: StorableValue,
-  context: ByteSerializationContext<SerializedForm>,
+  codec: ByteTagCodec<SerializedForm>,
   registry: TypeHandlerRegistry = defaultRegistry,
 ): Uint8Array {
-  const tree = serialize(value, context, undefined, registry);
-  return context.finalize(tree);
+  const tree = serialize(value, codec, undefined, registry);
+  return codec.finalize(tree);
 }
 
 /**
  * Deserialize bytes back into rich runtime types. Parses the `Uint8Array`
- * via `context.parse()` into an internal wire-format tree, then walks it
+ * via `codec.parse()` into an internal wire-format tree, then walks it
  * to reconstruct runtime values.
  *
  * This is the intended public API for deserialization at system boundaries.
@@ -63,17 +62,18 @@ export function serializeToBytes(
  */
 export function deserializeFromBytes(
   bytes: Uint8Array,
-  context: ByteSerializationContext<SerializedForm>,
+  codec: ByteTagCodec<SerializedForm>,
   runtime: ReconstructionContext,
   registry: TypeHandlerRegistry = defaultRegistry,
 ): StorableValue {
-  const tree = context.parse(bytes);
-  return deserialize(tree, context, runtime, registry);
+  const tree = codec.parse(bytes);
+  return deserialize(tree, codec, runtime, registry);
 }
 
 /**
- * Serialize a storable value for boundary crossing. Recursively processes
- * nested values. See Section 4.5 of the formal spec.
+ * Serialize a storable value into wire format. Recursively processes nested
+ * values using the tag codec for type-tagged encoding. See Section 4.5 of
+ * the formal spec.
  *
  * Type handlers are dispatched via the `registry`. If no handler matches,
  * the value is treated as a primitive, array, or plain object.
@@ -82,7 +82,7 @@ export function deserializeFromBytes(
  */
 export function serialize(
   value: StorableValue,
-  context: SerializationContext<SerializedForm>,
+  codec: TagCodec<SerializedForm>,
   _seen?: Set<object>,
   registry: TypeHandlerRegistry = defaultRegistry,
 ): SerializedForm {
@@ -101,8 +101,8 @@ export function serialize(
 
     const result = handler.serialize(
       value,
-      context,
-      (v: StorableValue) => serialize(v, context, seen, registry),
+      codec,
+      (v: StorableValue) => serialize(v, codec, seen, registry),
     );
 
     // Remove from seen set to allow shared references.
@@ -144,10 +144,10 @@ export function serialize(
           count++;
           i++;
         }
-        result.push(context.encode(TAGS.hole, count));
+        result.push(codec.wrapTag(TAGS.hole, count));
       } else {
         result.push(
-          serialize(value[i] as StorableValue, context, seen, registry),
+          serialize(value[i] as StorableValue, codec, seen, registry),
         );
         i++;
       }
@@ -170,7 +170,7 @@ export function serialize(
       value as Record<string, StorableValue>,
     )
   ) {
-    result[key] = serialize(val, context, seen, registry);
+    result[key] = serialize(val, codec, seen, registry);
   }
 
   seen.delete(value as object);
@@ -180,7 +180,7 @@ export function serialize(
   // deserializer does not misinterpret it as a tagged type.
   const keys = Object.keys(result);
   if (keys.length === 1 && keys[0].startsWith("/")) {
-    return context.encode(TAGS.object, result) as SerializedForm;
+    return codec.wrapTag(TAGS.object, result) as SerializedForm;
   }
 
   return result as SerializedForm;
@@ -196,11 +196,11 @@ export function serialize(
  */
 export function deserialize(
   data: SerializedForm,
-  context: SerializationContext<SerializedForm>,
+  codec: TagCodec<SerializedForm>,
   runtime: ReconstructionContext,
   registry: TypeHandlerRegistry = defaultRegistry,
 ): StorableValue {
-  const decoded = context.decode(data);
+  const decoded = codec.unwrapTag(data);
   if (decoded !== null) {
     const { tag, state } = decoded;
 
@@ -211,7 +211,7 @@ export function deserialize(
       const inner = state as Record<string, SerializedForm>;
       const result: Record<string, StorableValue> = {};
       for (const [key, val] of Object.entries(inner)) {
-        result[key] = deserialize(val, context, runtime, registry);
+        result[key] = deserialize(val, codec, runtime, registry);
       }
       return Object.freeze(result);
     }
@@ -227,13 +227,13 @@ export function deserialize(
     // --- Type handler dispatch (map-based tag lookup) ---
     const handler = registry.getDeserializer(tag);
     if (handler) {
-      if (context.lenient) {
+      if (codec.lenient) {
         try {
           return handler.deserialize(
             state,
-            context,
+            codec,
             runtime,
-            (v: SerializedForm) => deserialize(v, context, runtime, registry),
+            (v: SerializedForm) => deserialize(v, codec, runtime, registry),
           );
         } catch (e: unknown) {
           return new ProblematicStorable(
@@ -245,19 +245,19 @@ export function deserialize(
       }
       return handler.deserialize(
         state,
-        context,
+        codec,
         runtime,
-        (v: SerializedForm) => deserialize(v, context, runtime, registry),
+        (v: SerializedForm) => deserialize(v, codec, runtime, registry),
       );
     }
 
     // --- Class registry fallback (for tags not in handler registry) ---
-    const cls = context.getClassFor(tag);
-    const deserializedState = deserialize(state, context, runtime, registry);
+    const cls = codec.getClassFor(tag);
+    const deserializedState = deserialize(state, codec, runtime, registry);
 
     if (cls) {
       // In lenient mode, catch reconstruction failures and wrap them.
-      if (context.lenient) {
+      if (codec.lenient) {
         try {
           return cls[RECONSTRUCT](
             deserializedState,
@@ -299,12 +299,12 @@ export function deserialize(
     // Two-pass decode: the first pass computes the logical array length so we
     // can pre-allocate with `new Array(logicalLength)`, which produces true
     // sparse holes (absent indices) rather than `undefined` entries. The second
-    // pass fills in elements. Each entry's `context.decode()` is called twice,
-    // but decode is cheap (single-key object inspection), and the alternative
+    // pass fills in elements. Each entry's `codec.unwrapTag()` is called twice,
+    // but unwrapTag is cheap (single-key object inspection), and the alternative
     // (single-pass with dynamic resizing) would require post-hoc hole creation.
     let logicalLength = 0;
     for (const entry of data) {
-      const entryDecoded = context.decode(entry);
+      const entryDecoded = codec.unwrapTag(entry);
       if (entryDecoded !== null && entryDecoded.tag === TAGS.hole) {
         logicalLength += entryDecoded.state as number;
       } else {
@@ -315,12 +315,12 @@ export function deserialize(
     const result = new Array(logicalLength);
     let targetIndex = 0;
     for (const entry of data) {
-      const entryDecoded = context.decode(entry);
+      const entryDecoded = codec.unwrapTag(entry);
       if (entryDecoded !== null && entryDecoded.tag === TAGS.hole) {
         // Skip `state` indices -- leave them absent, creating true holes.
         targetIndex += entryDecoded.state as number;
       } else {
-        result[targetIndex] = deserialize(entry, context, runtime, registry);
+        result[targetIndex] = deserialize(entry, codec, runtime, registry);
         targetIndex++;
       }
     }
@@ -330,7 +330,7 @@ export function deserialize(
   // Plain objects: recursively deserialize values, then freeze.
   const result: Record<string, StorableValue> = {};
   for (const [key, val] of Object.entries(data)) {
-    result[key] = deserialize(val, context, runtime, registry);
+    result[key] = deserialize(val, codec, runtime, registry);
   }
   return Object.freeze(result);
 }

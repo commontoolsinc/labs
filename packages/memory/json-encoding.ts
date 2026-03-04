@@ -9,6 +9,7 @@ import type {
   JsonWireValue,
   SerializedForm,
 } from "./json-serialization-context.ts";
+import type { ByteTagCodec } from "./serialization.ts";
 import { ExplicitTagStorable } from "./explicit-tag-storable.ts";
 import { deserialize, serialize } from "./serialization.ts";
 import {
@@ -21,13 +22,19 @@ import {
 import { TAGS } from "./type-tags.ts";
 
 /**
- * JSON serialization context implementing the `/<Type>@<Version>` wire format
- * from the formal spec (Section 5). Manages a static type registry for the
- * types in scope and handles encoding/decoding of tagged values.
- * See Section 5.2 of the formal spec.
+ * JSON encoding context implementing the `/<Type>@<Version>` wire format
+ * from the formal spec (Section 5).
+ *
+ * Implements two interfaces:
+ * - `SerializationContext<string>` -- the public boundary interface. `encode()`
+ *   does the full pipeline (serialize + stringify); `decode()` does parse +
+ *   legacy escaping + deserialize.
+ * - `ByteTagCodec<JsonWireValue>` -- the internal interface for tree-walking.
+ *   `wrapTag()`/`unwrapTag()` handle the `/<tag>` wire format;
+ *   `finalize()`/`parse()` convert to/from bytes.
  */
 export class JsonEncodingContext
-  implements SerializationContext<JsonWireValue> {
+  implements SerializationContext<string>, ByteTagCodec<JsonWireValue> {
   /** Tag -> class registry for known types. */
   private readonly registry = new Map<
     string,
@@ -57,6 +64,36 @@ export class JsonEncodingContext
     this.registry.set(TAGS.RegExp, StorableRegExp);
   }
 
+  // -------------------------------------------------------------------------
+  // SerializationContext<string> -- public boundary interface
+  // -------------------------------------------------------------------------
+
+  /**
+   * Encode a storable value to a JSON string. Serializes rich types into
+   * the `/<Type>@<Version>` tagged wire format, then stringifies.
+   */
+  encode(value: StorableValue): string {
+    return JSON.stringify(serialize(value, this));
+  }
+
+  /**
+   * Decode a JSON string back into a storable value. Parses the string,
+   * escapes legacy `/`-prefixed markers, then deserializes tagged forms
+   * back into rich runtime types.
+   */
+  decode(data: string, runtime: ReconstructionContext): StorableValue {
+    const parsed = JSON.parse(data) as StorableValue;
+    return deserialize(
+      this.escapeUnknownSlashKeys(parsed) as unknown as SerializedForm,
+      this,
+      runtime,
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // TagCodec<JsonWireValue> -- internal tag wrapping/unwrapping
+  // -------------------------------------------------------------------------
+
   /** Get the wire format tag for a storable instance's type. */
   getTagFor(value: StorableInstance): string {
     if (value instanceof ExplicitTagStorable) {
@@ -81,19 +118,19 @@ export class JsonEncodingContext
   }
 
   /**
-   * Encode a tag and state into the `/<tag>` wire format. Prepends `/` to the
+   * Wrap a tag and state into the `/<tag>` wire format. Prepends `/` to the
    * tag to produce the JSON key. See Section 5.2 of the formal spec.
    */
-  encode(tag: string, state: SerializedForm): SerializedForm {
+  wrapTag(tag: string, state: SerializedForm): SerializedForm {
     return { [`/${tag}`]: state } as SerializedForm;
   }
 
   /**
-   * Decode a wire representation. Detects single-key objects with `/`-prefixed
+   * Unwrap a wire representation. Detects single-key objects with `/`-prefixed
    * keys. Returns `{ tag, state }` or `null` if not a tagged value.
    * See Section 5.4 of the formal spec.
    */
-  decode(
+  unwrapTag(
     data: SerializedForm,
   ): { tag: string; state: SerializedForm } | null {
     if (
@@ -117,6 +154,10 @@ export class JsonEncodingContext
     return { tag, state };
   }
 
+  // -------------------------------------------------------------------------
+  // ByteTagCodec methods (byte-level boundary)
+  // -------------------------------------------------------------------------
+
   /** Convert a JsonWireValue tree to UTF-8-encoded JSON bytes. */
   finalize(data: SerializedForm): Uint8Array {
     return new TextEncoder().encode(JSON.stringify(data));
@@ -125,40 +166,6 @@ export class JsonEncodingContext
   /** Parse UTF-8-encoded JSON bytes back into a JsonWireValue tree. */
   parse(bytes: Uint8Array): SerializedForm {
     return JSON.parse(new TextDecoder().decode(bytes)) as SerializedForm;
-  }
-
-  // -------------------------------------------------------------------------
-  // Full codec: StorableValue <-> string
-  //
-  // These methods encapsulate the complete pipeline (serialize + stringify
-  // on write; parse + legacy escaping + deserialize on read) so callers
-  // work with `StorableValue` and `string` without knowing about the
-  // intermediate wire format.
-  // -------------------------------------------------------------------------
-
-  /**
-   * Encode a storable value to a JSON string. Serializes rich types into
-   * the `/<Type>@<Version>` tagged wire format, then stringifies.
-   */
-  encodeToString(value: StorableValue): string {
-    return JSON.stringify(serialize(value, this));
-  }
-
-  /**
-   * Decode a JSON string back into a storable value. Parses the string,
-   * escapes legacy `/`-prefixed markers, then deserializes tagged forms
-   * back into rich runtime types.
-   */
-  decodeFromString(
-    json: string,
-    runtime: ReconstructionContext,
-  ): StorableValue {
-    const parsed = JSON.parse(json) as StorableValue;
-    return deserialize(
-      this.escapeUnknownSlashKeys(parsed) as unknown as SerializedForm,
-      this,
-      runtime,
-    );
   }
 
   // -------------------------------------------------------------------------

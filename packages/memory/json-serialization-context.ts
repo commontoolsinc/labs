@@ -1,9 +1,9 @@
-import type { SerializationContext } from "./serialization-context.ts";
+import type { TagCodec } from "./serialization-context.ts";
 
 /**
- * JSON-compatible wire format value. Distinct from the existing `JSONValue` in
- * `@commontools/api` -- this type represents the wire format for the new
- * `/<Type>@<Version>` encoding. See Section 4.2 of the formal spec.
+ * JSON-compatible wire format value. This is the intermediate tree
+ * representation used during serialization tree walking -- NOT the final
+ * serialized form (which is `string`). Internal to the JSON implementation.
  */
 export type JsonWireValue =
   | null
@@ -14,14 +14,15 @@ export type JsonWireValue =
   | { [key: string]: JsonWireValue };
 
 /**
- * The wire format for the JSON serialization context. Alias for `JsonWireValue`,
- * used throughout the serialization system to make the wire format explicit.
+ * Alias for `JsonWireValue` used throughout serialization internals
+ * (tree-walking functions, type handlers). Named `SerializedForm` for
+ * historical reasons; represents the intermediate wire format, not the
+ * final boundary type.
  */
 export type SerializedForm = JsonWireValue;
 
 /**
- * JSON-specific serialization context. Implements the `/<Type>@<Version>` wire
- * format, parameterized as `SerializationContext<JsonWireValue>`.
- * See Section 4.3 of the formal spec.
+ * JSON-specific tag codec. Implements the `/<Type>@<Version>` wire format,
+ * parameterized as `TagCodec<JsonWireValue>`.
  */
-export type JsonSerializationContext = SerializationContext<JsonWireValue>;
+export type JsonTagCodec = TagCodec<JsonWireValue>;

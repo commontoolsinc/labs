@@ -1197,8 +1197,8 @@ describe("serialization", () => {
           return context.getClassFor(tag);
         },
         getTagFor: context.getTagFor.bind(context),
-        encode: context.encode.bind(context),
-        decode: context.decode.bind(context),
+        wrapTag: context.wrapTag.bind(context),
+        unwrapTag: context.unwrapTag.bind(context),
         lenient: true,
       };
 
@@ -1254,8 +1254,8 @@ describe("serialization", () => {
           return context.getClassFor(tag);
         },
         getTagFor: context.getTagFor.bind(context),
-        encode: context.encode.bind(context),
-        decode: context.decode.bind(context),
+        wrapTag: context.wrapTag.bind(context),
+        unwrapTag: context.unwrapTag.bind(context),
         lenient: true,
       };
 
@@ -1467,35 +1467,35 @@ describe("serialization", () => {
   // --------------------------------------------------------------------------
 
   describe("JsonEncodingContext", () => {
-    it("encode produces /<tag> key", () => {
+    it("wrapTag produces /<tag> key", () => {
       const ctx = new JsonEncodingContext();
-      expect(ctx.encode("Error@1", { name: "Error" })).toEqual({
+      expect(ctx.wrapTag("Error@1", { name: "Error" })).toEqual({
         "/Error@1": { name: "Error" },
       });
     });
 
-    it("decode recognizes /<tag> key", () => {
+    it("unwrapTag recognizes /<tag> key", () => {
       const ctx = new JsonEncodingContext();
-      const result = ctx.decode({ "/Error@1": { name: "Error" } });
+      const result = ctx.unwrapTag({ "/Error@1": { name: "Error" } });
       expect(result).toEqual({
         tag: "Error@1",
         state: { name: "Error" },
       });
     });
 
-    it("decode returns null for non-tagged objects", () => {
+    it("unwrapTag returns null for non-tagged objects", () => {
       const ctx = new JsonEncodingContext();
-      expect(ctx.decode({ a: 1, b: 2 })).toBe(null);
-      expect(ctx.decode({ notSlash: 1 })).toBe(null);
-      expect(ctx.decode(42)).toBe(null);
-      expect(ctx.decode(null)).toBe(null);
-      expect(ctx.decode("string")).toBe(null);
-      expect(ctx.decode([1, 2])).toBe(null);
+      expect(ctx.unwrapTag({ a: 1, b: 2 })).toBe(null);
+      expect(ctx.unwrapTag({ notSlash: 1 })).toBe(null);
+      expect(ctx.unwrapTag(42)).toBe(null);
+      expect(ctx.unwrapTag(null)).toBe(null);
+      expect(ctx.unwrapTag("string")).toBe(null);
+      expect(ctx.unwrapTag([1, 2])).toBe(null);
     });
 
-    it("decode returns null for multi-key objects even with / key", () => {
+    it("unwrapTag returns null for multi-key objects even with / key", () => {
       const ctx = new JsonEncodingContext();
-      expect(ctx.decode({ "/a": 1, "/b": 2 })).toBe(null);
+      expect(ctx.unwrapTag({ "/a": 1, "/b": 2 })).toBe(null);
     });
 
     it("getTagFor returns typeTag for UnknownStorable", () => {

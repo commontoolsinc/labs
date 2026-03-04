@@ -59,14 +59,14 @@ function configureDispatch(): void {
     // ----- Unified JSON encoding implementations -----
 
     jsonFromValue = (value: StorableValue): string => {
-      return jsonEncodingContext.encodeToString(value);
+      return jsonEncodingContext.encode(value);
     };
 
     valueFromJson = (
       json: string,
       runtime: ReconstructionContext,
     ): StorableValue => {
-      return jsonEncodingContext.decodeFromString(json, runtime);
+      return jsonEncodingContext.decode(json, runtime);
     };
   } else {
     // ----- Passthrough (flag OFF) -----
