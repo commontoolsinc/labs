@@ -107,10 +107,17 @@ export function map(
     const keyCounts = new Map<string, number>();
     const newArrayValue: any[] = [];
     for (let i = 0; i < list.length; i++) {
-      const baseKey = addressKey(list[i].getAsNormalizedFullLink());
+      const link = list[i].getAsNormalizedFullLink();
+      const baseKey = addressKey(link);
       const occurrence = keyCounts.get(baseKey) ?? 0;
       keyCounts.set(baseKey, occurrence + 1);
-      const elementKey = `${baseKey}:${occurrence}`;
+      const elementKey = JSON.stringify([
+        link.space,
+        link.id,
+        link.type,
+        link.path,
+        occurrence,
+      ]);
 
       if (elementRuns.has(elementKey)) {
         const existing = elementRuns.get(elementKey)!;
