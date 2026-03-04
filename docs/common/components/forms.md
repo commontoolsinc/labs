@@ -110,49 +110,64 @@ Common pattern combining create/edit in a modal:
 
 ```tsx
 const showModal = Writable.of(false);
-const editingIndex = Writable.of<number | null>(null);
+const editing = Writable.of<{ editing: Person | null }>({ editing: null });
 const formData = Writable.of<Person>({ name: "", email: "", role: "user" });
 
 // Open for create
 const startCreate = action(() => {
   formData.set({ name: "", email: "", role: "user" });
-  editingIndex.set(null);
+  editing.set({ editing: null });
   showModal.set(true);
 });
 
-// Open for edit - copy existing data into formData
-const startEdit = handler((_, { index, people, formData, editingIndex, showModal }) => {
-  const person = people.get()[index];
+// Open for edit - copy existing data into formData (identity-based)
+const startEdit = handler((_, { person, people, formData, editing, showModal }) => {
+  const current = people.get();
+  const index = current.findIndex((p) => equals(p, person));
+  if (index < 0) return;
+  const target = current[index];
+  if (!target) return;
   formData.set({ ...person });
-  editingIndex.set(index);
+  editing.set({ editing: person });
   showModal.set(true);
-}, { index, people, formData, editingIndex, showModal });
+}, { person, people, formData, editing, showModal });
 
 // Handle submit - read from formData cell directly (type-safe!)
 // IMPORTANT: Create a copy to avoid sharing object references
-const handleSubmit = handler((_, { formData, people, editingIndex, showModal }) => {
-  const person: Person = { ...formData.get() };  // Copy the object!
-  const idx = editingIndex.get();
-
-  if (idx !== null) {
-    // Edit mode - update existing
-    const list = people.get();
-    const updated = [...list];
-    updated[idx] = person;
-    people.set(updated);
-  } else {
+const handleSubmit = handler((_, { formData, people, editing, showModal }) => {
+  const next: Person = { ...formData.get() };  // Copy the object!
+  const target = editing.get().editing;
+  if (target === null) {
     // Create mode - add new
-    people.push(person);
+    people.push(next);
+  } else {
+    // Edit mode - update existing by identity
+    const list = people.get();
+    const index = list.findIndex((p) => equals(p, target));
+    if (index >= 0) {
+      const updated = [...list];
+      updated[index] = next;
+      people.set(updated);
+    }
   }
 
   showModal.set(false);
-  editingIndex.set(null);
-}, { formData, people, editingIndex, showModal });
+  editing.set({ editing: null });
+}, { formData, people, editing, showModal });
 ```
 
 **Important:** Always copy the object with `{ ...formData.get() }` when adding to a
 collection. The staging cell (`formData`) is reused between submissions, so pushing
 the same object reference would cause all items to share the same data.
+
+## Best Practices
+
+- Prefer identity-based updates for lists: use `equals()` to find and update/remove
+  items rather than relying on indices, which can drift when lists change.
+- Use a staging cell for create/edit flows and copy on submit to avoid shared references.
+- When using `ct-modal`, bind `$open` to a `Writable<boolean>` (not a `computed`)
+  so the modal can update state correctly.
+- Use `ct-button type="reset"` (or call `form.reset()`) to discard buffered changes.
 
 ## Creating Form-Compatible Components
 
