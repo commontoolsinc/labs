@@ -1,9 +1,10 @@
 # TS Transformers Goals
 
-**Status:** Working goals (current understanding)  
-**Date:** February 24, 2026  
-**Package:** `@commontools/ts-transformers`  
+**Status:** Working goals (current understanding)\
+**Date:** March 4, 2026\
+**Package:** `@commontools/ts-transformers`\
 **Related:**
+
 - `docs/specs/ts-transformer/ts_transformers_current_behavior_spec.md`
 - `docs/specs/ts-transformer/ts_transformers_design_deltas.md`
 
@@ -87,6 +88,9 @@ Prefer precise schemas when type information is available. When precision is not
 possible (for example, unresolved generics), degrade predictably without
 crashing transformation.
 
+Schema fidelity includes preserving meaningful optional/undefined distinctions
+(`T | undefined`) through synthetic-node schema generation paths.
+
 ## G-006 Explicit Closure Capture
 
 Eliminate hidden closure dependencies in transformed runtime-critical paths by
@@ -109,21 +113,20 @@ traceability are goals, not just parser validity.
 
 ## G-010 Nested Collection-Operator Semantics
 
-Nested contexts must preserve a clear, deterministic operator policy,
-especially for collection methods (`.map`, and in future analogously `.filter`,
-etc.).
+Nested contexts must preserve a clear, deterministic operator policy, especially
+for collection methods (`.map`, and in future analogously `.filter`, etc.).
 
 The key requirement is that rewrite policy follows the **active context at the
 operator site**, not only the outer expression.
 
 ### Collection Operator Policy Matrix
 
-| Active context at operator call | Receiver category | Goal policy |
-| --- | --- | --- |
-| Pattern context | reactive/opaque pattern-facing values | Rewrite to explicit reactive form (for `.map`, currently `mapWithPattern` + patternized callback) |
-| Pattern context | plain JS arrays/values | No reactive rewrite |
-| Compute context | cell-like values that still require reactive lifting (`Cell` / `Writable` / `Stream` / equivalents) | Rewrite |
-| Compute context | values treated as plain/auto-unwrapped in compute callbacks | Do not rewrite |
+| Active context at operator call | Receiver category                                                                                   | Goal policy                                                                                       |
+| ------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Pattern context                 | reactive/opaque pattern-facing values                                                               | Rewrite to explicit reactive form (for `.map`, currently `mapWithPattern` + patternized callback) |
+| Pattern context                 | plain JS arrays/values                                                                              | No reactive rewrite                                                                               |
+| Compute context                 | cell-like values that still require reactive lifting (`Cell` / `Writable` / `Stream` / equivalents) | Rewrite                                                                                           |
+| Compute context                 | values treated as plain/auto-unwrapped in compute callbacks                                         | Do not rewrite                                                                                    |
 
 This is the tricky case for `.map`: in pattern context we want broad rewrite
 coverage for reactive receivers, while in compute context rewrites should be
@@ -147,11 +150,11 @@ contract continuity where that matters more than local minimization.
 
 Context-specific target direction:
 
-1. Pattern boundaries: default to opaque boundary contracts (`OpaqueCell<T>`)
-   so schema/default continuity is preserved across downstream links.
+1. Pattern boundaries: default to opaque boundary contracts (`OpaqueCell<T>`) so
+   schema/default continuity is preserved across downstream links.
 2. Compute boundaries: use least-capability wrappers from observed usage:
-   read-only -> `ReadonlyCell<T>`, write-only -> `WriteonlyCell<T>`,
-   read+write -> `Cell<T>` / `Writable<T>`, pass-through-only -> `OpaqueCell<T>`.
+   read-only -> `ReadonlyCell<T>`, write-only -> `WriteonlyCell<T>`, read+write
+   -> `Cell<T>` / `Writable<T>`, pass-through-only -> `OpaqueCell<T>`.
 
 ## G-012 Path-Sensitive Type Shrinking
 
@@ -184,6 +187,12 @@ Pattern-context errors should come from the same lowerability/capability
 analysis that powers rewriting. We should avoid a separate heuristic validator
 with independent acceptance criteria.
 
+## G-015 Guard Against Common Type Inference Footguns
+
+The transformer should catch common authoring traps early when TypeScript
+inference creates unusable reactive types (for example `Cell.of([])` inferring
+`never[]`), and emit diagnostics that provide a direct fix path.
+
 ## 5. Non-Goals
 
 ## NG-001 Security Boundary
@@ -193,8 +202,8 @@ The transformer is not a trust boundary and does not make authored code
 
 ## NG-002 Full Program Verification
 
-This package is not a whole-program theorem prover or full soundness checker
-for all reactive misuse patterns.
+This package is not a whole-program theorem prover or full soundness checker for
+all reactive misuse patterns.
 
 ## NG-003 Complete Type-System Perfection
 
@@ -292,6 +301,11 @@ Capability propagation is intentionally asymmetric:
 3. Compute-context boundary signatures may widen via interprocedural summaries
    so forwarded values are typed by effective downstream usage.
 
+## C-012 Explicit Type Guidance For Empty Array Cell Factories
+
+Empty array literals passed to cell-factory `.of()` calls should require an
+explicit element type argument to avoid accidental `never[]` cell types.
+
 ## 7. Success Criteria
 
 We are meeting goals when:
@@ -313,9 +327,11 @@ We are meeting goals when:
    stable receiver-plus-`key(...)` lowered output with equivalent behavior
 10. pattern-context diagnostics in fixtures align with lowerability outcomes,
     without dependency on a separate heuristic-only validator path
-11. propagation fixtures show pattern-context local-only legality isolation
-    plus schema/default continuity, and compute-context transitive widening
-    where enabled
+11. propagation fixtures show pattern-context local-only legality isolation plus
+    schema/default continuity, and compute-context transitive widening where
+    enabled
+12. empty-array cell-factory fixtures fail with actionable diagnostics unless
+    explicit element type arguments are provided
 
 ## 8. Policy For Future Changes
 

@@ -1,9 +1,10 @@
 # TypeScript Transformers Current Behavior Specification
 
-**Status:** Implemented (current behavior)  
-**Package:** `@commontools/ts-transformers`  
-**Effective date:** February 24, 2026  
-**Scope:** Compile-time behavior implemented in `packages/ts-transformers/src` and exercised by current tests/fixtures.
+**Status:** Implemented (current behavior)\
+**Package:** `@commontools/ts-transformers`\
+**Effective date:** March 4, 2026\
+**Scope:** Compile-time behavior implemented in `packages/ts-transformers/src`
+and exercised by current tests/fixtures.
 
 ## 1. Scope And Source Of Truth
 
@@ -41,6 +42,7 @@ mutable registries:
 - `typeRegistry: WeakMap<ts.Node, ts.Type>`
 - `mapCallbackRegistry: WeakSet<ts.Node>`
 - `schemaHints: WeakMap<ts.Node, SchemaHint>`
+- `capabilitySummaryRegistry: WeakMap<ts.Node, FunctionCapabilitySummary>`
 - `diagnosticsCollector: TransformationDiagnostic[]`
 
 ## 3. Pipeline Order (Normative)
@@ -48,17 +50,20 @@ mutable registries:
 Transformers always run in this order:
 
 1. `CastValidationTransformer`
-2. `OpaqueGetValidationTransformer`
-3. `PatternContextValidationTransformer`
-4. `OpaqueRefJSXTransformer`
-5. `ComputedTransformer`
-6. `ClosureTransformer`
-7. `SchemaInjectionTransformer`
-8. `SchemaGeneratorTransformer`
+2. `EmptyArrayOfValidationTransformer`
+3. `OpaqueGetValidationTransformer`
+4. `PatternContextValidationTransformer`
+5. `OpaqueRefJSXTransformer`
+6. `ComputedTransformer`
+7. `ClosureTransformer`
+8. `CapabilityLoweringTransformer` (only when
+   `useLegacyOpaqueRefSemantics !== true`)
+9. `SchemaInjectionTransformer`
+10. `SchemaGeneratorTransformer`
 
 The order is behaviorally significant.
 
-## 4. Global Modes
+## 4. Global Modes And Legacy Flag
 
 `TransformationOptions.mode` supports:
 
@@ -68,9 +73,16 @@ The order is behaviorally significant.
 Current mode-sensitive behavior:
 
 - `OpaqueRefJSXTransformer` in `error` mode reports diagnostics instead of
-  rewriting JSX expressions that would require opaque-ref rewrites in non-safe
-  contexts.
+  rewriting JSX expressions that would require opaque-ref rewrites in
+  non-compute contexts.
 - Other transformers currently do not branch on mode.
+
+`TransformationOptions.useLegacyOpaqueRefSemantics` supports:
+
+- `false` (default): capability-first behavior enabled;
+  `CapabilityLoweringTransformer` runs and legacy heuristic checks are
+  reduced/disabled.
+- `true`: legacy OpaqueRef semantics path; capability lowering is skipped.
 
 ## 5. Call Kind Detection Contract
 
@@ -108,11 +120,27 @@ Validates `as` and angle-bracket assertions:
 - **Error** `cast-validation:forbidden-cast`
   - casts to `OpaqueRef<...>`
 - **Warning** `cast-validation:cell-cast`
-  - casts to cell-like types:
-    `Cell`, `OpaqueCell`, `Stream`, `ComparableCell`, `ReadonlyCell`,
-    `WriteonlyCell`, `Writable`, `CellTypeConstructor`
+  - casts to cell-like types: `Cell`, `OpaqueCell`, `Stream`, `ComparableCell`,
+    `ReadonlyCell`, `WriteonlyCell`, `Writable`, `CellTypeConstructor`
 
-### 6.2 Opaque `.get()` validation
+### 6.2 Empty Array Cell-Factory Validation
+
+On cell-factory calls with an empty array literal and no explicit type argument:
+
+- `Cell.of([])`, `Writable.of([])`, `OpaqueCell.of([])`, `Stream.of([])`,
+  deprecated `cell([])`, and other recognized cell factories
+- **Error** `cell-factory:empty-array`
+  - explains that `[]` infers to `never[]` and suggests
+    `Cell.of<MyType[]>([])`-style explicit type arguments.
+
+No error when:
+
+- explicit type arguments are provided
+- array literal is non-empty
+- first argument is not an array literal
+- `.of()` has no first argument
+
+### 6.3 Opaque `.get()` validation
 
 On call `receiver.get()` (no args):
 
@@ -123,7 +151,7 @@ On call `receiver.get()` (no args):
 
 No error for non-opaque kinds (e.g., writable/cell/stream).
 
-### 6.3 Pattern-context validation
+### 6.4 Pattern-context validation
 
 Enforces restricted reactive context rules.
 
@@ -133,34 +161,40 @@ Restricted contexts are callbacks of:
 - `render`
 - `.map(...)`/`.mapWithPattern(...)` callbacks detected as array-map calls
 
-Safe wrappers override restrictions:
+Compute wrappers override restrictions:
 
 - `computed`, `action`, `derive`, `lift`, `handler` callbacks
 - inline JSX `on*` handlers
 - standalone function definitions
 - JSX expressions (handled by opaque-ref JSX transformer)
 
-Diagnostics:
+Diagnostics emitted in all modes:
 
-- **Error** `pattern-context:optional-chaining`
-  - optional property access `?.` in restricted reactive context (outside JSX)
 - **Error** `pattern-context:get-call`
   - `.get()` call in restricted reactive context
-- **Error** `pattern-context:computation`
-  - binary/unary/conditional computations using opaque dependencies outside
-    wrappers
 - **Error** `pattern-context:function-creation`
-  - function creation in pattern context unless inside safe wrappers/JSX/safe
-    callbacks
+  - function creation in pattern context unless inside compute
+    wrappers/JSX/allowed callbacks
 - **Error** `pattern-context:builder-placement`
   - direct `lift()` or `handler()` inside restricted context
   - special message for immediate `lift(fn)(args)` suggesting `computed()`
-- **Error** `pattern-context:map-on-fallback`
-  - `(opaqueExpr ?? fallback).map(...)` or `(opaqueExpr || fallback).map(...)`
-    where left is reactive and right is not
 - **Error** `standalone-function:reactive-operation`
   - in standalone functions (except inline first arg to `patternTool`):
     `computed(...)`, `derive(...)`, or `.map(...)` on reactive receivers
+  - `.map(...)` diagnostic includes guidance that eager `<cell>.get().map(...)`
+    is acceptable for explicit eager mapping
+
+Additional diagnostics emitted only in legacy mode
+(`useLegacyOpaqueRefSemantics: true`):
+
+- **Error** `pattern-context:optional-chaining`
+  - optional property access `?.` in restricted reactive context (outside JSX)
+- **Error** `pattern-context:computation`
+  - binary/unary/conditional computations using opaque dependencies outside
+    wrappers
+- **Error** `pattern-context:map-on-fallback`
+  - `(opaqueExpr ?? fallback).map(...)` or `(opaqueExpr || fallback).map(...)`
+    where left is reactive and right is not
 
 ## 7. OpaqueRef JSX Rewriting
 
@@ -173,11 +207,15 @@ For each `JsxExpression`:
 - skip empty JSX expressions and event-handler attributes
 - run data-flow analysis (`createDataFlowAnalyzer`)
 - if no rewrite required and no logical binary operators (`&&`, `||`), skip
-- in safe context:
+- in compute context:
   - only semantic logical rewrites (`&&`/`||`) are considered
   - derive/computed wrapping is skipped
+- in capability-first mode (`useLegacyOpaqueRefSemantics: false`):
+  - compute-context JSX does not lower `&&` / `||`
+  - pattern-context JSX lowers `&&` / `||` deterministically
 - in `mode: "error"`:
-  - report `opaque-ref:jsx-expression` for non-safe contexts requiring rewrite
+  - report `opaque-ref:jsx-expression` for non-compute contexts requiring
+    rewrite
   - no rewrite
 
 ### 7.2 Emitter behaviors
@@ -196,16 +234,18 @@ The rewriter uses normalized data-flow dependencies and ordered emitters:
 Key rewrite rules:
 
 - `a && b`:
-  - may become `when(condition, value)` if right side is expensive (JSX or
-    reactive) or left side is opaque-typed
+  - capability-first: lowers to `when(condition, value)` only in pattern context
+  - legacy: may lower based on expensive-RHS / opaque-left heuristics
 - `a || b`:
-  - may become `unless(condition, fallback)` under same criteria
+  - capability-first: lowers to `unless(condition, fallback)` only in pattern
+    context
+  - legacy: may lower based on expensive-RHS / opaque-left heuristics
 - ternary `cond ? x : y`:
   - becomes `ifElse(cond, x, y)` with branch/predicate processing
-- non-safe contexts:
+- non-compute contexts:
   - complex reactive expressions are wrapped via `computed(() => expr)` (later
     lowered to `derive`)
-- safe contexts:
+- compute contexts:
   - no derive/computed wrappers; only child rewrites and logical conversions
 
 Synthetic calls generated by this pass register result types in `typeRegistry`
@@ -269,18 +309,20 @@ params.
 
 Transform eligibility:
 
-- call must be reactive array map (`OpaqueRef<T[]>` or cell-like array) or
-  syntactic derive result
-- inside safe wrappers, only cell/stream maps transform; opaque maps are treated
-  as auto-unwrapped and skipped
+- decision is context/receiver-policy driven:
+  - pattern context + reactive receiver origin -> transform
+  - compute context + `celllike_requires_rewrite` receiver kind -> transform
+  - compute context + `opaque_autounwrapped` receiver kind -> do not transform
 - plain array `.map()` is not transformed
+- transformed callbacks are marked in `mapCallbackRegistry` and become
+  pattern-callback contexts for downstream classification
 
 Result shape:
 
 - `receiver.map(fn[, thisArg])` ->
   `receiver.mapWithPattern(pattern(callbackSchema, resultSchema, newCallback), paramsObj[, thisArg])`
-- callback receives `{ element, index?, array?, params }` (with aliasing to
-  original names)
+- callback schema includes `{ element, index?, array? }` and adds `params` only
+  when captures exist
 - computed destructuring keys are stabilized with generated key constants and
   derive wrappers where needed
 
@@ -311,10 +353,33 @@ values:
 
 - collects module-scoped cell-like captures (including nested callback usage)
 - merges captures into `extraParams` (captures win on key conflicts)
-- extends callback object binding/type literal with capture properties
-  (added types default to `unknown` when synthesized)
+- extends callback object binding/type literal with capture properties (added
+  types default to `unknown` when synthesized)
 
 If no qualifying captures exist, call is unchanged.
+
+### 9.7 Capability lowering (capability-first mode only)
+
+`CapabilityLoweringTransformer` runs after closure transformation when
+`useLegacyOpaqueRefSemantics` is `false`.
+
+Primary behaviors:
+
+- rewrites pattern-style callback parameter destructuring to explicit input
+  bindings with `input.key(...)`-based prologues
+- lowers property/optional-navigation reads on opaque roots to `.key(...)`
+  access in pattern contexts
+- preserves terminal path methods (`get`, `set`, `update`, etc.) and rewrites
+  only the receiver path portion when needed
+- treats dynamic key access, wildcard traversals (`Object.keys/values/entries`,
+  `JSON.stringify`, spread), and optional-call forms as non-lowerable in pattern
+  context with diagnostics
+- classifies map captures as reactive vs non-reactive and avoids `.key(...)`
+  rewrites for non-reactive captures
+- extracts static destructuring defaults into capability summaries for schema
+  default application
+- registers capability summaries for transformed callbacks/builders for
+  downstream schema shrinking/wrapping
 
 ## 10. Schema Injection
 
@@ -384,6 +449,21 @@ Injects schemas for helper calls when absent:
 
 These use widened literal inference and register inferred types.
 
+### 10.7 Capability summary application
+
+When capability summaries are available, schema injection applies wrapper/path
+adjustments:
+
+- wrapper selection based on observed capability:
+  - `readonly` -> `ReadonlyCell<T>`
+  - `writeonly` -> `WriteonlyCell<T>`
+  - `writable` -> `Writable<T>`
+  - `opaque` -> `OpaqueCell<T>`
+- compute-oriented boundaries apply full path shrink + wrapper selection
+- pattern boundaries apply defaults-only mode to preserve broad shape continuity
+  while still applying extracted static defaults
+- wildcard roots disable path shrinking for affected parameters/arguments
+
 ## 11. Schema Generation
 
 `SchemaGeneratorTransformer` replaces `toSchema<T>(options?)` calls with JSON
@@ -408,6 +488,9 @@ Special path:
 
 - if resolved type is `any` and type arg node is synthetic (`pos=-1,end=-1`),
   generator uses synthetic-node generation path to recover schema fidelity.
+- synthetic union handling preserves `undefined` members (for example
+  `string | undefined` retains an explicit `undefined` branch in generated
+  schema).
 
 ## 12. Diagnostics Message Transformation (Optional Consumer Layer)
 
@@ -415,26 +498,29 @@ Diagnostic message transformers are exported separately from AST transform
 pipeline. Current built-in behavior:
 
 - `OpaqueRefErrorTransformer` rewrites TypeScript messages matching
-  `"Property 'get' does not exist on type 'OpaqueCell<...>'"` into
-  user-facing guidance about unnecessary `.get()`.
+  `"Property 'get' does not exist on type 'OpaqueCell<...>'"` into user-facing
+  guidance about unnecessary `.get()`.
 - optional `verbose` mode appends original TypeScript message.
-- `CompositeDiagnosticTransformer` returns the first matching transformer result.
+- `CompositeDiagnosticTransformer` returns the first matching transformer
+  result.
 
 ## 13. Current Known Limits (Observed)
 
-1. `.map()` on fallback expressions mixing reactive/non-reactive values is
-   rejected by validation (`pattern-context:map-on-fallback`) instead of being
-   transformed.
-2. Generic helper functions with uninstantiated type-parameter derive result
+1. Generic helper functions with uninstantiated type-parameter derive result
    types can degrade schema precision (type arguments may be intentionally
    omitted).
-3. Action and JSX inline handler callback extraction currently unwraps arrow
+2. Action and JSX inline handler callback extraction currently unwraps arrow
    functions only.
-4. One closure fixture is explicitly skipped:
-   `map-generic-type-parameter.*.skip`.
-5. Capability-based boundary shrinking can prune pattern input schema fields
-   that are not locally read in the outer pattern callback, which can reduce
-   downstream default/field continuity for nested compute/handler consumers.
+3. Optional-call forms on opaque pattern roots are non-lowerable and report
+   `pattern-context:optional-chaining` diagnostics (author must move into
+   compute wrappers).
+4. Non-static destructuring defaults, rest destructuring, and unsupported
+   computed destructuring keys in pattern callbacks remain non-lowerable and
+   produce pattern-context diagnostics.
+5. Interprocedural capability propagation applies only when a resolved callee
+   declaration is analyzable in-proc (arrow/function
+   expression/declaration/method); external/unresolved calls remain
+   conservative.
 
 ## 14. Test Coverage Snapshot
 
@@ -443,18 +529,19 @@ Primary fixture suites executed by `fixture-based.test.ts`:
 - `ast-transform`: 29 fixtures
 - `handler-schema`: 8 fixtures
 - `jsx-expressions`: 39 fixtures
-- `schema-transform`: 7 fixtures
-- `closures`: 115 active fixtures (+1 skipped fixture pair)
+- `schema-transform`: 8 fixtures
+- `closures`: 136 fixtures
 - `schema-injection`: 17 fixtures
 
-Total active fixture inputs in these suites: **215**.
+Total active fixture inputs in these suites: **237**.
 
 Additional non-fixture unit suites cover:
 
-- cast/pattern-context/opaque-get validation
+- cast/empty-array/pattern-context/opaque-get validation
 - diagnostic message transformer behavior
 - event-handler detection heuristics
 - opaque-ref analysis/normalization/runtime-style APIs
+- capability-first and policy/capability-analysis behavior
 - derive call helper and identifier utilities
 
 ## 15. Stability Statement

@@ -1,8 +1,9 @@
 # TS Transformers Design Deltas
 
-**Status:** Partially implemented (status snapshot)  
-**Date:** February 27, 2026  
-**Companion:** `docs/specs/ts-transformer/ts_transformers_current_behavior_spec.md`
+**Status:** Partially implemented (status snapshot)\
+**Date:** March 4, 2026\
+**Companion:**
+`docs/specs/ts-transformer/ts_transformers_current_behavior_spec.md`
 
 ## Purpose
 
@@ -14,7 +15,7 @@ behavior and open follow-up work.
 
 ## Delta Backlog
 
-## Implementation Snapshot (February 27, 2026)
+## Implementation Snapshot (March 4, 2026)
 
 - Landed:
   - `useLegacyOpaqueRefSemantics` option with capability-first default
@@ -25,18 +26,26 @@ behavior and open follow-up work.
   - capability analysis with path/capability shrinking at schema boundaries
   - additive wrapper support for `ReadonlyCell` / `WriteonlyCell` / `OpaqueCell`
   - static destructuring default initializer lowering to schema defaults
+  - array destructuring lowering in pattern/map callbacks
+  - wildcard classification includes `for...of` over tracked sources
+  - empty-array cell-factory validation (`cell-factory:empty-array`)
+  - schema-generator synthetic union parity for `undefined` members
+  - map capture classification hardened for reactive vs non-reactive captures
+  - pattern-boundary schema continuity alignment (defaults-only application
+    mode)
 - Partially landed:
-  - diagnostics migration (legacy codes preserved; some legacy validation remains)
+  - diagnostics migration (legacy codes preserved; some legacy validation
+    remains)
   - legacy cleanup and helper deprecation
   - compute-context interprocedural capability summaries (MVP scope)
 - Open:
   - standalone-function `.map` policy finalization
   - collection-method generalization beyond `.map` (`.filter`, etc.)
-  - pattern-boundary shrink policy alignment (preserve schema/default continuity)
+  - full diagnostics convergence onto lowerability-only checks
 
 ## D-001 Rename Context Terms (`safe` -> `compute` / `pattern`)
 
-**Current term:** `safe context` / `safe wrapper`  
+**Current term:** `safe context` / `safe wrapper`\
 **Proposed terms:**
 
 - `compute context` for callbacks where values are being computed in a wrapped
@@ -56,7 +65,7 @@ behavior and open follow-up work.
 1. User-facing docs and diagnostics stop using “safe context” terminology.
 2. Internal naming may migrate incrementally, but external language should be
    context-accurate immediately.
-3. Terminology clearly communicates *why* computation rules differ by context.
+3. Terminology clearly communicates _why_ computation rules differ by context.
 
 ## D-002 Context-Driven `&&` / `||` Lowering Policy In JSX
 
@@ -97,7 +106,7 @@ behavior and open follow-up work.
   `mapWithPattern`. If a `.map` is not rewritten, its callback parameter keeps
   ordinary compute/plain semantics.
 
-**Initial operator in scope:** `.map`  
+**Initial operator in scope:** `.map`\
 **Future analogous operators:** `.filter`, `.find`, `.some`, `.every` (subject
 to runtime contract support).
 
@@ -114,9 +123,8 @@ to runtime contract support).
 2. Pattern-context `.map` on reactive receivers is always rewritten.
 3. Compute-context `.map` rewrites only for non-auto-unwrapped cell-like
    receivers.
-4. Context evaluation uses the **active context at the operator site after
-   prior rewrites**, including synthetic compute wrappers introduced by JSX
-   rewriting.
+4. Context evaluation uses the **active context at the operator site after prior
+   rewrites**, including synthetic compute wrappers introduced by JSX rewriting.
 5. `.map` callback parameter context is conditional on transform outcome:
    rewritten `.map` -> pattern callback semantics; non-rewritten `.map` ->
    regular callback semantics.
@@ -136,16 +144,16 @@ to runtime contract support).
   - In pattern context, boundary signatures are intentionally based on
     directly-observed local usage for legality analysis, but emitted boundary
     schemas keep broad shape/default continuity.
-  - In compute context, forwarded values should eventually use
-    interprocedural summaries so helper calls contribute to required capability.
+  - In compute context, forwarded values should eventually use interprocedural
+    summaries so helper calls contribute to required capability.
 - Summarize actual usage at compute-oriented boundaries:
   - read-only -> `ReadonlyCell<T>`
   - write-only -> `WriteonlyCell<T>`
   - read+write -> `Cell<T>` / `Writable<T>`
   - pass-through only -> `OpaqueCell<T>`
 - Shrink structural types in compute context to paths actually observed as
-  read/written, with conservative fallback to broader shape on
-  unknown-dynamic operations.
+  read/written, with conservative fallback to broader shape on unknown-dynamic
+  operations.
 - Preserve broad pattern boundary shapes (including schema defaults) so links to
   downstream `compute`/`handler`/`derive` code do not lose fields that are not
   directly read in the outer pattern callback.
@@ -182,9 +190,9 @@ to runtime contract support).
 2. Boundary schemas/types for compute-oriented boundaries (`derive`, `lift`,
    `handler`, compute-like callbacks) can be shrunk to used paths when no
    wildcard operations are present.
-3. Wildcard/dynamic operations (`...obj`, `Object.keys`, `for..in`, unknown
-   dynamic keys, serialization-like full traversal) conservatively disable path
-   shrinking for affected roots.
+3. Wildcard/dynamic operations (`...obj`, `Object.keys`, `for..in`, `for..of`,
+   unknown dynamic keys, serialization-like full traversal) conservatively
+   disable path shrinking for affected roots.
 4. Capability shrink is path-sensitive across local aliasing/reassignment within
    the analyzed function scope.
 5. Opaque path navigation lowering (`prop` / optional-chain navigation ->
@@ -200,9 +208,9 @@ to runtime contract support).
     (`...rest`, computed binding keys, default initializers requiring
     undefined-check semantics) are either conservatively handled via explicit
     compute wrappers or diagnosed until modeled.
-11. Pattern-context diagnostics are emitted when an expression/use-site cannot be
-    represented under opaque/key lowering rules, rather than by separate legacy
-    heuristic checks.
+11. Pattern-context diagnostics are emitted when an expression/use-site cannot
+    be represented under opaque/key lowering rules, rather than by separate
+    legacy heuristic checks.
 12. Pattern-context legality summaries do not widen from helper-callee reads
     (`g(input) { return f(input); }` does not inherit read paths observed in
     `f`).
@@ -252,7 +260,8 @@ implicit behavior and runtime ambiguity.
 ## P-006 Minimize Rewrite Surface In Compute Context
 
 Compute contexts already encode computation intent. Prefer preserving authored
-expression structure there unless a rewrite is strictly required for correctness.
+expression structure there unless a rewrite is strictly required for
+correctness.
 
 ## P-007 Deterministic, Explainable Rules Over Heuristics
 
@@ -296,7 +305,8 @@ fields/defaults unless an explicit author opt-in narrowing model is introduced.
 ## Candidate Implementation Touchpoints
 
 - `packages/ts-transformers/src/ast/reactive-context.ts`
-- `packages/ts-transformers/src/ast/type-inference.ts` (`isReactiveArrayMapCall`)
+- `packages/ts-transformers/src/ast/type-inference.ts`
+  (`isReactiveArrayMapCall`)
 - `packages/ts-transformers/src/transformers/opaque-ref-jsx.ts`
 - `packages/ts-transformers/src/transformers/opaque-ref/emitters/binary-expression.ts`
 - `packages/ts-transformers/src/transformers/opaque-ref/emitters/conditional-expression.ts`
@@ -308,7 +318,8 @@ fields/defaults unless an explicit author opt-in narrowing model is introduced.
 - validation messaging in
   `packages/ts-transformers/src/transformers/pattern-context-validation.ts`
 - replacement/merge path for that validation in capability-lowering diagnostics
-- schema emission in `packages/ts-transformers/src/transformers/schema-injection.ts`
+- schema emission in
+  `packages/ts-transformers/src/transformers/schema-injection.ts`
 - schema generation coupling in
   `packages/ts-transformers/src/transformers/schema-generator.ts`
 - docs currently describing “safe context,” including
@@ -332,7 +343,17 @@ type ReactiveContextKind = "pattern" | "compute" | "neutral";
 interface ReactiveContextInfo {
   kind: ReactiveContextKind;
   inJsxExpression: boolean;
-  owner: "pattern" | "render" | "array-map" | "computed" | "derive" | "action" | "lift" | "handler" | "standalone" | "unknown";
+  owner:
+    | "pattern"
+    | "render"
+    | "array-map"
+    | "computed"
+    | "derive"
+    | "action"
+    | "lift"
+    | "handler"
+    | "standalone"
+    | "unknown";
 }
 ```
 
@@ -566,7 +587,8 @@ logic.
 **Status:** Landed
 
 1. Add feature gate (`capabilityDataflowV1`) and fixture split for old/new path.
-2. Add characterization tests for tricky nested cases and current boundary types.
+2. Add characterization tests for tricky nested cases and current boundary
+   types.
 
 **Exit criteria:** dual-path test harness in place with stable baseline.
 
@@ -579,7 +601,8 @@ logic.
    - results of `lift(...)` and `pattern(...)` invoked within pattern code
    - `.map` callback parameters only when that call site is selected for
      `mapWithPattern` rewrite
-2. Persist origin identity through synthetic node creation via registry metadata.
+2. Persist origin identity through synthetic node creation via registry
+   metadata.
 
 **Exit criteria:** origins are queryable at any operator/boundary site.
 
@@ -639,8 +662,8 @@ capability for covered fixtures.
 
 **Status:** Landed
 
-1. Lower `foo.bar.baz` and optional-chain path navigation to `foo.key(...)`
-   when receiver summary is `OpaqueCell`.
+1. Lower `foo.bar.baz` and optional-chain path navigation to `foo.key(...)` when
+   receiver summary is `OpaqueCell`.
 2. Ensure optional-chain navigation lowering preserves no-throw behavior.
 3. Keep optional-call excluded and diagnosed if needed.
 4. Ensure destructured parameter lowering composes with path-navigation lowering
@@ -668,13 +691,10 @@ Remaining work:
    declaration forms and cross-module behavior expectations).
 2. Add dedicated fixture matrix for interprocedural edge cases and recursion
    boundaries.
-3. Align emitted pattern boundary schema policy with continuity goals (avoid
-   local-read-based pruning of fields/defaults).
 
 **Exit criteria:** compute-context boundaries gain transitive precision across
-supported helper calls, while pattern-context legality remains local-only and
-pattern boundary schemas preserve broad continuity, without major compile-time
-regression.
+supported helper calls, while pattern-context legality remains local-only,
+without major compile-time regression.
 
 ## Phase D8: Default-On And Legacy Cleanup
 
@@ -694,14 +714,8 @@ regression.
    lowering), mirroring the proposed `&&`/`||` rule?
 2. Do we want a strict “context policy matrix” test suite that all operator
    rewrites must satisfy before merge?
-3. Should naming migration happen in one pass or with temporary aliases to avoid
-   destabilizing in-flight work?
-4. Should `contextPolicyV2` be short-lived (one release) or support a longer
-   dual-path migration window?
-5. For path shrinking, which operations should immediately force wildcard shape
+3. For path shrinking, which operations should immediately force wildcard shape
    fallback vs allow partial precision?
-6. For compute context, what interprocedural scope is required in MVP
+4. For compute context, what interprocedural scope is required in MVP
    (same-module direct calls only vs broader), given pattern-context signatures
    are intentionally direct/local?
-7. Should pattern-boundary narrowing be entirely disabled by default, with a
-   future explicit opt-in if authors want aggressive boundary minimization?
