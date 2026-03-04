@@ -22,6 +22,23 @@ const anyOfIncludesUndefined = (schema: unknown): boolean => {
   return Array.isArray(anyOf) && anyOf.some((entry) => hasUndefinedType(entry));
 };
 
+const anyOfIncludesFlag = (
+  schema: unknown,
+  flag: "asCell" | "asStream",
+): boolean => {
+  if (!schema || typeof schema !== "object" || !("anyOf" in schema)) {
+    return false;
+  }
+  const anyOf = (schema as { anyOf: unknown[] }).anyOf;
+  return Array.isArray(anyOf) &&
+    anyOf.some((entry) =>
+      !!entry &&
+      typeof entry === "object" &&
+      flag in entry &&
+      (entry as Record<string, unknown>)[flag] === true
+    );
+};
+
 const getArrayVariant = (
   schema: unknown,
 ): Record<string, unknown> | undefined => {
@@ -137,6 +154,26 @@ Deno.test("debugVDOMSchema child arrays recurse through vdomRenderNode", () => {
     childItems.asCell,
     undefined,
     "debug children items should not include asCell",
+  );
+});
+
+Deno.test("rendererVDOMSchema props allow asCell/asStream", () => {
+  const defs = rendererVDOMSchema.$defs as Record<string, unknown>;
+  const vdomNode = defs.vdomNode as {
+    properties: Record<string, unknown>;
+  };
+  const propsSchema = vdomNode.properties.props as {
+    additionalProperties?: unknown;
+  };
+  const additional = propsSchema.additionalProperties;
+
+  assert(
+    anyOfIncludesFlag(additional, "asCell"),
+    "rendererVDOMSchema props should allow asCell values",
+  );
+  assert(
+    anyOfIncludesFlag(additional, "asStream"),
+    "rendererVDOMSchema props should allow asStream values",
   );
 });
 

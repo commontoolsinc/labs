@@ -3167,6 +3167,11 @@ interface CTPromptInputAttributes<T> extends CTHTMLAttributes<T> {
   "autoResize"?: boolean;
   "pending"?: boolean;
   "voice"?: boolean;
+  "onct-send"?: EventHandler<any>;
+  "onct-stop"?: EventHandler<any>;
+  "onct-input"?: EventHandler<any>;
+  "onct-attachment-add"?: EventHandler<any>;
+  "onct-attachment-remove"?: EventHandler<any>;
 }
 
 interface CTAttachmentsBarAttributes<T> extends CTHTMLAttributes<T> {

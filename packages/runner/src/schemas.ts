@@ -41,6 +41,10 @@ export const rendererVDOMSchema = {
             }, {
               type: "boolean",
             }, {
+              asCell: true,
+            }, {
+              asStream: true,
+            }, {
               type: "null",
             }, {
               type: "undefined",

@@ -2498,6 +2498,20 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         const { ok: val, error } = this.traverseWithSchema(propDoc, propSchema);
         if (error === undefined) {
           filteredObj[propKey] = val;
+        } else if (propKey === "onct-send" || propKey.startsWith("onct-")) {
+          logger.info(
+            "traverse",
+            () => [
+              "Dropping event prop due to schema mismatch",
+              {
+                propKey,
+                valueType: typeof propValue,
+                isLink: isPrimitiveCellLink(propValue),
+                schema: propSchema,
+                error: error?.message,
+              },
+            ],
+          );
         }
       }
     }

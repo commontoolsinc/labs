@@ -803,7 +803,8 @@ export class WorkerReconciler {
       }
 
       const props = resolvedProps as Record<string, unknown>;
-      const newKeys = new Set(Object.keys(props));
+      const allKeys = Object.keys(props);
+      const newKeys = new Set(allKeys);
 
       // Remove props that no longer exist
       for (const [key, propState] of state.propSubscriptions) {
@@ -854,9 +855,9 @@ export class WorkerReconciler {
           }
           if (existingState) existingState.cancel();
 
-          const handlerId = ctx.registerHandler((event: unknown) =>
-            resolvedTarget.send(event)
-          );
+          const handlerId = ctx.registerHandler((event: unknown) => {
+            resolvedTarget.send(event);
+          });
           state.eventHandlers.set(eventType, handlerId);
           this.queueOps([{
             op: "set-event",
