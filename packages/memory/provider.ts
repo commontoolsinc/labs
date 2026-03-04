@@ -60,6 +60,7 @@ const logger = getLogger("memory-provider", {
   level: "warn",
 });
 
+const DOC_KEY_PATTERN = /([^/]+)\/([^/]+)\/(.+)/;
 const SLOW_QUERY_THRESHOLD_MS = 100;
 const SLOW_QUERY_BUFFER_SIZE = 100;
 
@@ -249,6 +250,8 @@ class MemoryProviderSession<
   // Traversal results from one subscription are reused by subsequent
   // subscriptions that traverse the same doc+path+schema combos.
   private sharedSchemaMemo = createSchemaMemo();
+  // Cached SpaceSession per space to avoid Memory.mount overhead on every commit.
+  private spaceSessionCache = new Map<MemorySpace, SpaceSession<Space>>();
 
   constructor(
     public memory: MemorySession,
@@ -735,6 +738,25 @@ class MemoryProviderSession<
     return `${fv.of}/${fv.the}`;
   }
 
+  /** Get or cache a SpaceSession, avoiding Memory.mount overhead on repeat calls. */
+  private async getSpaceSession(
+    space: MemorySpace,
+  ): Promise<SpaceSession<Space>> {
+    let session = this.spaceSessionCache.get(space);
+    if (!session) {
+      const mountResult = await Memory.mount(
+        this.memory as Memory.Memory,
+        space,
+      );
+      if (mountResult.error) {
+        throw new Error(`Failed to mount space ${space}: ${mountResult.error}`);
+      }
+      session = mountResult.ok as unknown as SpaceSession<Space>;
+      this.spaceSessionCache.set(space, session);
+    }
+    return session;
+  }
+
   private addSchemaSubscription<Space extends MemorySpace>(
     of: JobId,
     invocation: SchemaQuery<Space>,
@@ -834,15 +856,9 @@ class MemoryProviderSession<
       return [];
     }
 
-    // Get access to the space session for evaluating documents
-    const mountResult = await Memory.mount(
-      this.memory as Memory.Memory,
-      space,
-    );
-    if (mountResult.error) {
-      throw new Error(`Failed to mount space ${space}: ${mountResult.error}`);
-    }
-    const spaceSession = mountResult.ok as unknown as SpaceSession<Space>;
+    // Get access to the space session for evaluating documents.
+    // Use cached session to avoid Memory.mount async/tracing overhead per commit.
+    const spaceSession = await this.getSpaceSession(space);
     const tMount = performance.now();
 
     // Find affected docs using the shared schemaTracker (for non-wildcard)
@@ -1000,11 +1016,7 @@ class MemoryProviderSession<
         if (!staleSchemaTracker.has(docKey) && loaded.value !== undefined) {
           const details = sharedManager.getDetails(loaded.address);
           if (details) {
-            const factKey = this.formatAddress(spaceSession.subject, {
-              of: loaded.address.id,
-              the: loaded.address.type,
-            });
-            newFacts.set(factKey, {
+            newFacts.set(docKey, {
               of: loaded.address.id,
               the: loaded.address.type,
               cause: causeFromString(details.cause),
@@ -1018,21 +1030,25 @@ class MemoryProviderSession<
 
     // Also include the affected (changed) docs themselves — their data
     // may have changed even if they were already tracked.
+    // Use sharedManager.load to leverage the cache from traversal above,
+    // avoiding redundant SQLite reads vs raw selectFact.
     for (const [docKey, _schemaSelectors] of affectedDocs) {
       const address = this.parseDocKey(docKey);
       if (address === undefined) continue;
-      const fact = selectFact(spaceSession, {
+      const loaded = sharedManager.load({
+        id: address.id,
+        type: address.type,
+      });
+      if (!loaded || loaded.value === undefined) continue;
+      const details = sharedManager.getDetails(loaded.address);
+      if (!details) continue;
+      const factKey = `${spaceSession.subject}/${address.id}/${address.type}`;
+      newFacts.set(factKey, {
         of: address.id,
         the: address.type,
-      });
-      if (!fact || fact.is === undefined) continue;
-      const factKey = this.formatAddress(spaceSession.subject, fact);
-      newFacts.set(factKey, {
-        of: fact.of,
-        the: fact.the,
-        cause: causeFromString(fact.cause),
-        is: fact.is,
-        since: fact.since,
+        cause: causeFromString(details.cause),
+        is: loaded.value,
+        since: details.since,
       });
     }
 
@@ -1045,8 +1061,7 @@ class MemoryProviderSession<
   ): { space: MemorySpace; id: Memory.URI; type: Memory.MIME } | undefined {
     // Parse docKey back to space, id, and type (format is "space/id/type")
     // Note: type can contain slashes (e.g., "application/json")
-    const pattern = new RegExp("([^/]+)/([^/]+)/(.+)");
-    const match = pattern.exec(docKey);
+    const match = DOC_KEY_PATTERN.exec(docKey);
     if (match === null) {
       return undefined;
     }
