@@ -190,15 +190,13 @@ export default pattern(() => {
       // Test 2: Setup config and rule
       { action: action_setup_config },
       { assertion: assert_config_set },
-      // SKIP: Cell array proxy doesn't expose .length/properties after handler set()
       { action: action_setup_tier4_rule },
       { assertion: assert_rule_added },
 
       // Test 3: Auto-classification works for matching items
-      // SKIP: depends on rule setup above + submitItem stream
       { action: action_submit_matching_item },
-      { assertion: assert_auto_classified, skip: true },
-      { assertion: assert_stats_updated, skip: true },
+      { assertion: assert_auto_classified },
+      { assertion: assert_stats_updated },
 
       // Test 4: Non-matching items don't auto-classify
       { action: action_clear_examples },
@@ -206,8 +204,7 @@ export default pattern(() => {
       { assertion: assert_examples_still_empty_after_non_match },
 
       // Test 5: Rule metrics update after auto-classification
-      // SKIP: depends on skipped assertions above
-      { assertion: assert_rule_metrics_updated, skip: true },
+      { assertion: assert_rule_metrics_updated },
     ],
     // Expose subject for debugging when deployed as piece
     subject,
