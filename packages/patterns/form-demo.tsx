@@ -240,9 +240,7 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
             <ct-heading level={4}>People Directory</ct-heading>
             <span style="font-size: 0.875rem; color: var(--ct-color-gray-500);">
               {peopleCount}{" "}
-              {computed(() =>
-                people.get().length === 1 ? "person" : "people"
-              )}
+              {computed(() => people.get().length === 1 ? "person" : "people")}
             </span>
           </ct-hstack>
         </ct-vstack>
