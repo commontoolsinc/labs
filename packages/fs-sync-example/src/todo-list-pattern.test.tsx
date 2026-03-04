@@ -32,12 +32,12 @@ export default pattern(() => {
 
   // Create first todo via event payload
   const action_create_first = action(() => {
-    list.create.send({ description: "Buy groceries" });
+    list.create.send({ detail: { message: "Buy groceries" } });
   });
 
   // Create second todo
   const action_create_second = action(() => {
-    list.create.send({ description: "Write docs" });
+    list.create.send({ detail: { message: "Write docs" } });
   });
 
   // Toggle first todo (mark done)

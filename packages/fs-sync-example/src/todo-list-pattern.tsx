@@ -28,17 +28,14 @@ import type { Edit, FailedEdit, Todo } from "./types.ts";
 // ---------------------------------------------------------------------------
 
 const onCreate = handler<
-  { description?: string },
+  { detail: { message: string } },
   {
     todos: Writable<Todo[]>;
     edits: Writable<Edit[]>;
-    draftTitle: Writable<string>;
   }
->((event, { todos, edits, draftTitle }) => {
-  // Tests send { description }, UI reads from draftTitle cell
-  const description = (event?.description || draftTitle.get()).trim();
+>(({ detail }, { todos, edits }) => {
+  const description = detail?.message?.trim();
   if (!description) return;
-  draftTitle.set("");
 
   const pendingId = `pending-${Date.now()}-${
     Math.random().toString(36).slice(2)
@@ -107,7 +104,7 @@ interface Output {
   edits: Edit[];
   appliedEdits: Edit[];
   failedEdits: FailedEdit[];
-  create: OpaqueRef<Stream<{ description?: string }>>;
+  create: OpaqueRef<Stream<{ detail: { message: string } }>>;
   // Per-item actions wrapped in objects (safe from spurious invocation)
   actions: Array<{
     toggle: OpaqueRef<Stream<unknown>>;
@@ -120,7 +117,6 @@ interface Output {
 export default pattern<Input, Output>(
   ({ todos, edits, appliedEdits, failedEdits }) => {
     const isSyncing = computed(() => edits.get().length > 0);
-    const draftTitle = Writable.of("");
 
     return {
       [NAME]: "Todo List (fs-sync)",
@@ -150,20 +146,10 @@ export default pattern<Input, Output>(
           <ct-vscroll flex showScrollbar fadeEdges>
             <ct-vstack gap="2" style="padding: 1rem; max-width: 600px;">
               {/* Add todo */}
-              <ct-hstack gap="2" align="center">
-                <ct-input
-                  $value={draftTitle}
-                  placeholder="Add a todo..."
-                  onct-submit={onCreate({ todos, edits, draftTitle })}
-                  style={{ flex: "1" }}
-                />
-                <ct-button
-                  variant="primary"
-                  onClick={onCreate({ todos, edits, draftTitle })}
-                >
-                  Add
-                </ct-button>
-              </ct-hstack>
+              <ct-message-input
+                placeholder="Add a todo..."
+                onct-send={onCreate({ todos, edits })}
+              />
 
               {/* Empty state */}
               {ifElse(
@@ -191,6 +177,7 @@ export default pattern<Input, Output>(
                     <ct-input
                       $value={todo.description}
                       onct-submit={onUpdate({ todo, edits })}
+                      onct-blur={onUpdate({ todo, edits })}
                       style={{ flex: "1" }}
                     />
                     <span
@@ -234,7 +221,7 @@ export default pattern<Input, Output>(
       edits,
       appliedEdits,
       failedEdits,
-      create: onCreate({ todos, edits, draftTitle }),
+      create: onCreate({ todos, edits }),
       // Per-item actions wrapped in objects (safe from spurious invocation)
       actions: todos.map((todo) => ({
         toggle: onToggle({ todo, edits }),
