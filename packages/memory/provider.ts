@@ -52,6 +52,7 @@ import * as FactModule from "./fact.ts";
 import { setRevision } from "@commontools/memory/selection";
 import { getLogger } from "@commontools/utils/logger";
 import { ACL_TYPE, isACL } from "./acl.ts";
+import { COMMIT_LOG_TYPE } from "./commit.ts";
 import { createSchemaMemo, MapSet } from "@commontools/runner/traverse";
 import type { SchemaPathSelector } from "./consumer.ts";
 
@@ -233,6 +234,10 @@ class MemoryProviderSession<
     | undefined;
 
   channels: Map<InvocationURL<ContentId<Subscribe>>, Set<string>> = new Map();
+  // Reverse index: watchAddress → Set of channel IDs that watch it.
+  // Allows O(changes) commit matching instead of O(channels × changes).
+  private watchIndex: Map<string, Set<InvocationURL<ContentId<Subscribe>>>> =
+    new Map();
   schemaChannels: Map<JobId, SchemaSubscription> = new Map();
   // Mapping from fact key to since value of the last fact sent to the client
   lastRevision: Map<string, number> = new Map();
@@ -602,16 +607,22 @@ class MemoryProviderSession<
         const selector = ("select") in invocation.args
           ? invocation.args.select
           : invocation.args.selectSchema;
-        this.channels.set(
-          of,
-          new Set(
-            Subscription.channels(invocation.sub, selector),
-          ),
+        const watchAddresses = new Set(
+          Subscription.channels(invocation.sub, selector),
         );
+        this.channels.set(of, watchAddresses);
+        for (const addr of watchAddresses) {
+          let ids = this.watchIndex.get(addr);
+          if (!ids) {
+            ids = new Set();
+            this.watchIndex.set(addr, ids);
+          }
+          ids.add(of);
+        }
         return this.memory.subscribe(this);
       }
       case "/memory/query/unsubscribe": {
-        this.channels.delete(of);
+        this.removeChannel(of);
         if (this.channels.size === 0) {
           this.memory.unsubscribe(this);
         }
@@ -662,12 +673,8 @@ class MemoryProviderSession<
 
       // Send commits with revisions to commit log subscriptions
       // The client's startSynchronization() reads revisions to update its heap
-      const commitJobIds: InvocationURL<ContentId<Subscribe>>[] = [];
-      for (const [id, channels] of this.channels) {
-        if (Subscription.match(redactedData.transaction, channels)) {
-          commitJobIds.push(id);
-        }
-      }
+      // Use the reverse watchIndex for O(changes) matching instead of O(channels × changes).
+      const commitJobIds = this.findMatchingChannels(redactedData.transaction);
 
       if (commitJobIds.length > 0) {
         // The client has a subscription to the space's commit log
@@ -736,6 +743,83 @@ class MemoryProviderSession<
 
   private toKey(fv: Readonly<FactAddress>) {
     return `${fv.of}/${fv.the}`;
+  }
+
+  /**
+   * Find channels matching a transaction using the reverse watchIndex.
+   * O(changes × 4) instead of O(channels × changes × 4).
+   */
+  private findMatchingChannels(
+    transaction: Transaction<MemorySpace>,
+  ): InvocationURL<ContentId<Subscribe>>[] {
+    if (this.watchIndex.size === 0) return [];
+
+    const matched = new Set<InvocationURL<ContentId<Subscribe>>>();
+    const space = transaction.sub;
+
+    // Check commit-log watchers first
+    this.collectWatchMatches(matched, space, space, COMMIT_LOG_TYPE);
+
+    // Check each changed fact
+    for (const fact of SelectionBuilder.iterate(transaction.args.changes)) {
+      if (fact.value !== true) {
+        this.collectWatchMatches(matched, space, fact.of, fact.the);
+      }
+    }
+
+    return [...matched];
+  }
+
+  /** Look up the 4 watch address variants and add matching channel IDs. */
+  private collectWatchMatches(
+    matched: Set<InvocationURL<ContentId<Subscribe>>>,
+    space: string,
+    of: string,
+    the: string,
+  ) {
+    const ANY = Subscription.ANY;
+    // exact, wildcard-of, wildcard-the, wildcard-both
+    this.addWatchHits(
+      matched,
+      Subscription.formatAddress({ at: space, of, the }),
+    );
+    this.addWatchHits(
+      matched,
+      Subscription.formatAddress({ at: space, of: ANY, the }),
+    );
+    this.addWatchHits(
+      matched,
+      Subscription.formatAddress({ at: space, of, the: ANY }),
+    );
+    this.addWatchHits(
+      matched,
+      Subscription.formatAddress({ at: space, of: ANY, the: ANY }),
+    );
+  }
+
+  private addWatchHits(
+    matched: Set<InvocationURL<ContentId<Subscribe>>>,
+    addr: string,
+  ) {
+    const ids = this.watchIndex.get(addr);
+    if (ids) {
+      for (const id of ids) matched.add(id);
+    }
+  }
+
+  /** Remove a channel and clean up its entries in the watchIndex. */
+  private removeChannel(id: InvocationURL<ContentId<Subscribe>>) {
+    const addresses = this.channels.get(id);
+    if (addresses) {
+      for (const addr of addresses) {
+        const ids = this.watchIndex.get(addr);
+        if (ids) {
+          ids.delete(id);
+          if (ids.size === 0) this.watchIndex.delete(addr);
+        }
+      }
+      this.channels.delete(id);
+    }
   }
 
   /** Get or cache a SpaceSession, avoiding Memory.mount overhead on repeat calls. */
