@@ -128,8 +128,8 @@ export function map(
             { doNotUpdateOnPatternChange: true },
           );
           existing.lastIndex = i;
+          resultWithLog.key(i).set(existing.resultCell);
         }
-        resultWithLog.key(i).set(existing.resultCell);
         newArrayValue.push(existing.resultCell);
       } else {
         const resultCell = runtime.getCell(
