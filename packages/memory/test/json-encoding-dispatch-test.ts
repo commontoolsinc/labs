@@ -185,6 +185,139 @@ describe("json-encoding-dispatch", () => {
   });
 
   // --------------------------------------------------------------------------
+  // Legacy marker passthrough (flag ON)
+  // --------------------------------------------------------------------------
+
+  describe("legacy marker passthrough (flag ON)", () => {
+    it("sigil link round-trips through encode -> stringify -> parse -> decode", () => {
+      setJsonEncodingConfig(true);
+      const sigilLink = {
+        "/": { "link@1": { id: "of:bafyabc", path: [], space: "did:key:z1" } },
+      } as StorableValue;
+      const encoded = encodeJsonValue(sigilLink);
+      const json = JSON.stringify(encoded);
+      const parsed = JSON.parse(json) as StorableValue;
+      const decoded = decodeJsonValue(parsed, mockRuntime);
+      expect(decoded).toEqual(sigilLink);
+    });
+
+    it("nested sigil link within object round-trips", () => {
+      setJsonEncodingConfig(true);
+      const value = {
+        name: "test",
+        ref: { "/": { "link@1": { id: "of:bafyabc", path: [] } } },
+      } as StorableValue;
+      const encoded = encodeJsonValue(value);
+      const json = JSON.stringify(encoded);
+      const parsed = JSON.parse(json) as StorableValue;
+      const decoded = decodeJsonValue(parsed, mockRuntime);
+      expect((decoded as Record<string, unknown>).name).toBe("test");
+      expect((decoded as Record<string, unknown>).ref).toEqual(
+        { "/": { "link@1": { id: "of:bafyabc", path: [] } } },
+      );
+    });
+
+    it("entity ID { '/': 'string' } round-trips", () => {
+      setJsonEncodingConfig(true);
+      const entityId = { "/": "bafyabc123" } as StorableValue;
+      const encoded = encodeJsonValue(entityId);
+      const json = JSON.stringify(encoded);
+      const parsed = JSON.parse(json) as StorableValue;
+      const decoded = decodeJsonValue(parsed, mockRuntime);
+      expect(decoded).toEqual(entityId);
+    });
+
+    it("$stream marker passes through unchanged", () => {
+      setJsonEncodingConfig(true);
+      const value = { $stream: true } as StorableValue;
+      const encoded = encodeJsonValue(value);
+      const json = JSON.stringify(encoded);
+      const parsed = JSON.parse(json) as StorableValue;
+      const decoded = decodeJsonValue(parsed, mockRuntime);
+      expect(decoded).toEqual({ $stream: true });
+    });
+
+    it("@Error marker passes through unchanged", () => {
+      setJsonEncodingConfig(true);
+      const value = {
+        "@Error": { name: "TypeError", message: "oops", stack: "" },
+      } as StorableValue;
+      const encoded = encodeJsonValue(value);
+      const json = JSON.stringify(encoded);
+      const parsed = JSON.parse(json) as StorableValue;
+      const decoded = decodeJsonValue(parsed, mockRuntime);
+      expect(decoded).toEqual({
+        "@Error": { name: "TypeError", message: "oops", stack: "" },
+      });
+    });
+
+    it("$alias marker passes through unchanged", () => {
+      setJsonEncodingConfig(true);
+      const value = {
+        $alias: { path: ["value", "name"], cell: { "/": "bafyabc" } },
+      } as StorableValue;
+      const encoded = encodeJsonValue(value);
+      const json = JSON.stringify(encoded);
+      const parsed = JSON.parse(json) as StorableValue;
+      const decoded = decodeJsonValue(parsed, mockRuntime);
+      expect(decoded).toEqual({
+        $alias: { path: ["value", "name"], cell: { "/": "bafyabc" } },
+      });
+    });
+
+    it("legacy sigil link decodes correctly (no /object wrapping)", () => {
+      setJsonEncodingConfig(true);
+      // Simulate legacy data: JSON.parse of data written without the flag.
+      const legacyData = {
+        "/": { "link@1": { id: "of:bafyabc", path: [] } },
+      } as StorableValue;
+      const decoded = decodeJsonValue(legacyData, mockRuntime);
+      expect(decoded).toEqual(legacyData);
+    });
+
+    it("legacy entity ID decodes correctly", () => {
+      setJsonEncodingConfig(true);
+      const legacyData = { "/": "bafyabc123" } as StorableValue;
+      const decoded = decodeJsonValue(legacyData, mockRuntime);
+      expect(decoded).toEqual(legacyData);
+    });
+
+    it("mixed value with rich types and sigil links round-trips", () => {
+      setJsonEncodingConfig(true);
+      const value = {
+        count: 42n,
+        ref: { "/": { "link@1": { id: "of:bafyabc", path: [] } } },
+        items: [1, { "/": "bafyxyz" }, undefined],
+      } as StorableValue;
+      const encoded = encodeJsonValue(value);
+      const json = JSON.stringify(encoded);
+      const parsed = JSON.parse(json) as StorableValue;
+      const decoded = decodeJsonValue(parsed, mockRuntime);
+      const result = decoded as Record<string, unknown>;
+      expect(result.count).toBe(42n);
+      expect(result.ref).toEqual(
+        { "/": { "link@1": { id: "of:bafyabc", path: [] } } },
+      );
+      expect((result.items as unknown[])[0]).toBe(1);
+      expect((result.items as unknown[])[1]).toEqual({ "/": "bafyxyz" });
+      expect((result.items as unknown[])[2]).toBe(undefined);
+    });
+
+    it("sigil link inside array round-trips", () => {
+      setJsonEncodingConfig(true);
+      const value = [
+        { "/": { "link@1": { id: "of:bafyabc", path: [] } } },
+        { "/": { "link@1": { id: "of:bafydef", path: ["x"] } } },
+      ] as StorableValue;
+      const encoded = encodeJsonValue(value);
+      const json = JSON.stringify(encoded);
+      const parsed = JSON.parse(json) as StorableValue;
+      const decoded = decodeJsonValue(parsed, mockRuntime);
+      expect(decoded).toEqual(value);
+    });
+  });
+
+  // --------------------------------------------------------------------------
   // Flag OFF behavior (explicit)
   // --------------------------------------------------------------------------
 

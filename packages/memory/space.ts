@@ -68,7 +68,23 @@ export type {
 } from "./space-schema.ts";
 import { StorableDatum, StorableValue } from "./interface.ts";
 import { isObject } from "../utils/src/types.ts";
+import { decodeJsonValue, encodeJsonValue } from "./json-encoding-dispatch.ts";
+import type { ReconstructionContext } from "./storable-protocol.ts";
 export type * from "./interface.ts";
+
+/**
+ * Minimal reconstruction context for decoding values at the storage boundary.
+ * Step 0 only handles types that don't require runtime context (undefined,
+ * bigint, sparse arrays, etc.), so `getCell` is unimplemented. Future steps
+ * that add Cell serialization will need to supply a real context.
+ */
+const storageReconstructionContext: ReconstructionContext = {
+  getCell() {
+    throw new Error(
+      "getCell is not available at the storage boundary (step 0)",
+    );
+  },
+};
 
 export const PREPARE = `
 BEGIN TRANSACTION;
@@ -548,7 +564,10 @@ const recall = <Space extends MemorySpace>(
     };
 
     if (row.is) {
-      revision.is = JSON.parse(row.is);
+      revision.is = decodeJsonValue(
+        JSON.parse(row.is),
+        storageReconstructionContext,
+      );
     }
 
     return revision;
@@ -627,7 +646,10 @@ const getFact = <Space extends MemorySpace>(
     since: row.since,
   };
   if (row.is) {
-    revision.is = JSON.parse(row.is);
+    revision.is = decodeJsonValue(
+      JSON.parse(row.is),
+      storageReconstructionContext,
+    );
   }
   return revision;
 };
@@ -685,7 +707,12 @@ const toFact = function (row: StateRow): SelectedFact {
     cause: row.cause
       ? row.cause as CauseString
       : unclaimedRef(row as FactAddress).toString() as CauseString,
-    is: row.is ? JSON.parse(row.is) as StorableDatum : undefined,
+    is: row.is
+      ? decodeJsonValue(
+        JSON.parse(row.is),
+        storageReconstructionContext,
+      ) as StorableDatum
+      : undefined,
     since: row.since,
   };
 };
@@ -757,7 +784,7 @@ const importDatum = <Space extends MemorySpace>(
     );
     stmt.run({
       this: is,
-      source: JSON.stringify(datum),
+      source: JSON.stringify(encodeJsonValue(datum)),
     });
 
     return is;
