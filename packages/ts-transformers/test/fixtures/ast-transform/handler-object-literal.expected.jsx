@@ -47,12 +47,15 @@ export default pattern((state) => {
     type: "object",
     properties: {
         onClick1: {
+            type: "unknown",
             asStream: true
         },
         onClick2: {
+            type: "unknown",
             asStream: true
         },
         onClick3: {
+            type: "unknown",
             asStream: true
         }
     },
