@@ -21,6 +21,10 @@ import {
   resetCanonicalHashConfig,
   setCanonicalHashConfig,
 } from "@commontools/memory/reference";
+import {
+  resetJsonEncodingConfig,
+  setJsonEncodingConfig,
+} from "@commontools/memory/json-encoding-dispatch";
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
 import type {
   ChangeGroup,
@@ -199,6 +203,7 @@ export class Runtime {
     // Propagate experimental flags to the memory layer's ambient config.
     setExperimentalStorableConfig(this.experimental);
     setCanonicalHashConfig(this.experimental.canonicalHashing);
+    setJsonEncodingConfig(this.experimental.unifiedJsonEncoding);
     this.id = options.storageManager.id;
     this.apiUrl = new URL(options.apiUrl);
     this.staticCache = isDeno()
@@ -298,6 +303,7 @@ export class Runtime {
     // Reset experimental storable config to defaults
     resetExperimentalStorableConfig();
     resetCanonicalHashConfig();
+    resetJsonEncodingConfig();
 
     // Clear the current runtime reference
     // Removed setCurrentRuntime call - no longer using singleton pattern
