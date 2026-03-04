@@ -161,6 +161,19 @@ Detection occurs in `applyShrinkAndWrap` (schema-injection.ts) and in the
 completes, `validateShrinkCoverage` compares requested top-level path heads
 against what was materialized in the shrunk result.
 
+Path extraction (`extractAccessPath` in capability-analysis.ts) sees through
+type assertions (`as any`, `as T`, angle-bracket casts) at every level of
+property/element access chains. For example `(state as any).foo` resolves to a
+read of `state.foo` because `unwrapExpression` is applied after each step up the
+access chain. This means `as any` single casts do not hide property accesses
+from capability analysis.
+
+When interprocedural analysis is enabled (compute-context builders like `lift`,
+`derive`, `handler`), read paths discovered in helper function bodies propagate
+back to the caller's parameter summary. This means a `lift` callback that
+delegates to a local helper which reads `(x as any).foo` will trigger shrink
+validation on the caller's parameter type.
+
 Guards that skip validation:
 
 - wildcard parameters (full-shape access, shrinking is disabled)

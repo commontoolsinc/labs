@@ -67,6 +67,58 @@ Deno.test("Schema Shrink Validation", async (t) => {
   );
 
   await t.step(
+    "errors on interprocedural unknown-type access in lift callback",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { lift } from "commontools";',
+        "",
+        "const helper = (x: unknown) => (x as any).foo;",
+        "",
+        "const fn = lift((state: unknown) => helper(state));",
+      ].join("\n");
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const shrinkErrors = errors.filter(
+        (e) => e.type === "schema:unknown-type-access",
+      );
+      assertGreater(
+        shrinkErrors.length,
+        0,
+        "Expected schema:unknown-type-access from interprocedural lift",
+      );
+    },
+  );
+
+  await t.step(
+    "errors on interprocedural path-not-in-type via as-any cast in lift callback",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { lift } from "commontools";',
+        "",
+        "const helper = (x: { a: string }) => (x as any).b;",
+        "",
+        "const fn = lift((state: { a: string }) => helper(state));",
+      ].join("\n");
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const shrinkErrors = errors.filter(
+        (e) => e.type === "schema:path-not-in-type",
+      );
+      assertGreater(
+        shrinkErrors.length,
+        0,
+        "Expected schema:path-not-in-type from interprocedural as-any cast",
+      );
+    },
+  );
+
+  await t.step(
     "no diagnostic when declared type matches all accessed paths",
     async () => {
       const source = [

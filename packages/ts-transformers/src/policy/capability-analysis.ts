@@ -123,7 +123,7 @@ function extractAccessPath(expr: ts.Expression): AccessPathInfo | undefined {
     if (ts.isPropertyAccessExpression(current)) {
       path.unshift(current.name.text);
       optional ||= !!current.questionDotToken;
-      current = current.expression;
+      current = unwrapExpression(current.expression);
       continue;
     }
 
@@ -134,7 +134,7 @@ function extractAccessPath(expr: ts.Expression): AccessPathInfo | undefined {
       } else {
         dynamic = true;
       }
-      current = current.expression;
+      current = unwrapExpression(current.expression);
       continue;
     }
 

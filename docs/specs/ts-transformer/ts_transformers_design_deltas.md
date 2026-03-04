@@ -253,8 +253,10 @@ to runtime contract support).
   accesses
 - `schema:path-not-in-type` — concrete type missing accessed properties
 
-**Test coverage:** `test/schema-shrink-validation.test.ts` with 3 cases:
-unknown-type error, missing-property error, valid-no-error.
+**Test coverage:** `test/schema-shrink-validation.test.ts` with 5 cases:
+unknown-type error, missing-property error, valid-no-error, interprocedural
+unknown-type access in lift callback, interprocedural path-not-in-type via
+as-any cast in lift callback.
 
 **Rationale:**
 
