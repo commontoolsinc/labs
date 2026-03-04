@@ -111,6 +111,7 @@ export default pattern(({ state }) => {
             asOpaque: true
         },
         increment: {
+            type: "unknown",
             asStream: true
         }
     },

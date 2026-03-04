@@ -711,15 +711,17 @@ export class SchemaGenerator implements ISchemaGenerator {
         return { type: "boolean" };
       case ts.SyntaxKind.NullKeyword:
         return { type: "null" };
+      // undefined and unknown aren't normally part of JSON Schema, but we
+      // include them with special handling.
       case ts.SyntaxKind.UndefinedKeyword:
-        // undefined isn't normally part of JSON Schema, but we include it as a special case
         return { type: "undefined" };
+      case ts.SyntaxKind.UnknownKeyword:
+        return { type: "unknown" };
       case ts.SyntaxKind.NeverKeyword:
         // Reject all values (never type can never occur)
         return false as SchemaDefinition;
       case ts.SyntaxKind.VoidKeyword:
       case ts.SyntaxKind.AnyKeyword:
-      case ts.SyntaxKind.UnknownKeyword:
         // Accept any value
         return true as SchemaDefinition;
     }

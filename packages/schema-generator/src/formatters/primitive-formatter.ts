@@ -103,6 +103,10 @@ export class PrimitiveFormatter implements TypeFormatter {
       // undefined isn't normally part of JSON Schema, but we include it
       return { type: "undefined" };
     }
+    if (flags & ts.TypeFlags.Unknown) {
+      // unknown isn't normally part of JSON Schema, but we include it
+      return { type: "unknown" };
+    }
     if (flags & ts.TypeFlags.Void) {
       // void: return true to indicate "accept any value"
       // void functions don't return meaningful values, so schema validation is permissive
@@ -115,11 +119,6 @@ export class PrimitiveFormatter implements TypeFormatter {
     }
     if (flags & ts.TypeFlags.Any) {
       // any: return true to indicate "allow any value"
-      return true;
-    }
-    if (flags & ts.TypeFlags.Unknown) {
-      // unknown: return true to indicate "accept any value"
-      // Type safety is enforced at compile time via TypeScript narrowing
       return true;
     }
 

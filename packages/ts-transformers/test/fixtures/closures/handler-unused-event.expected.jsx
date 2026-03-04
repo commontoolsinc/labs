@@ -8,7 +8,9 @@ export default pattern((state) => {
         [UI]: (<button type="button" onClick={__ctHelpers.handler({
             type: "object",
             properties: {
-                detail: true
+                detail: {
+                    type: "unknown"
+                }
             },
             required: ["detail"]
         } as const satisfies __ctHelpers.JSONSchema, {
