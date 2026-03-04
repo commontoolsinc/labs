@@ -16,6 +16,16 @@ const mockRuntime: ReconstructionContext = {
   },
 };
 
+/** Encode then decode a value through the current dispatch configuration. */
+function roundTrip(value: StorableValue): StorableValue {
+  return valueFromJson(jsonFromValue(value), mockRuntime);
+}
+
+/** Assert that encoding a value produces the expected JSON wire format. */
+function expectWireFormat(value: StorableValue, expected: unknown): void {
+  expect(JSON.parse(jsonFromValue(value))).toEqual(expected);
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -57,8 +67,7 @@ describe("json-encoding-dispatch", () => {
 
     it("round-trip preserves objects", () => {
       const original = { a: 1, b: [2, 3] } as StorableValue;
-      const restored = valueFromJson(jsonFromValue(original), mockRuntime);
-      expect(restored).toEqual(original);
+      expect(roundTrip(original)).toEqual(original);
     });
   });
 
@@ -69,26 +78,22 @@ describe("json-encoding-dispatch", () => {
   describe("flag ON: rich type encoding", () => {
     it("round-trip preserves undefined", () => {
       setJsonEncodingConfig(true);
-      const json = jsonFromValue(undefined);
-      expect(valueFromJson(json, mockRuntime)).toBe(undefined);
+      expect(roundTrip(undefined)).toBe(undefined);
     });
 
     it("round-trip preserves bigint", () => {
       setJsonEncodingConfig(true);
-      const json = jsonFromValue(42n as StorableValue);
-      expect(valueFromJson(json, mockRuntime)).toBe(42n);
+      expect(roundTrip(42n as StorableValue)).toBe(42n);
     });
 
     it("jsonFromValue encodes undefined to tagged JSON", () => {
       setJsonEncodingConfig(true);
-      const json = jsonFromValue(undefined);
-      expect(JSON.parse(json)).toEqual({ "/Undefined@1": null });
+      expectWireFormat(undefined, { "/Undefined@1": null });
     });
 
     it("jsonFromValue encodes bigint to tagged JSON", () => {
       setJsonEncodingConfig(true);
-      const json = jsonFromValue(42n as StorableValue);
-      expect(JSON.parse(json)).toEqual({ "/BigInt@1": "Kg" });
+      expectWireFormat(42n as StorableValue, { "/BigInt@1": "Kg" });
     });
 
     it("valueFromJson decodes tagged undefined", () => {
@@ -106,20 +111,18 @@ describe("json-encoding-dispatch", () => {
     it("round-trip preserves plain objects", () => {
       setJsonEncodingConfig(true);
       const value = { a: 1, b: "two" } as StorableValue;
-      const restored = valueFromJson(jsonFromValue(value), mockRuntime);
-      expect(restored).toEqual({ a: 1, b: "two" });
+      expect(roundTrip(value)).toEqual({ a: 1, b: "two" });
     });
 
     it("round-trip preserves arrays", () => {
       setJsonEncodingConfig(true);
       const value = [1, "two", null] as StorableValue;
-      const restored = valueFromJson(jsonFromValue(value), mockRuntime);
-      expect(restored).toEqual([1, "two", null]);
+      expect(roundTrip(value)).toEqual([1, "two", null]);
     });
 
     it("round-trip preserves null", () => {
       setJsonEncodingConfig(true);
-      expect(valueFromJson(jsonFromValue(null), mockRuntime)).toBe(null);
+      expect(roundTrip(null)).toBe(null);
     });
 
     it("JSON-safe primitives stringify normally", () => {
@@ -139,22 +142,19 @@ describe("json-encoding-dispatch", () => {
     it("round-trip preserves object with slash-prefixed key", () => {
       setJsonEncodingConfig(true);
       const value = { "/foo": "bar" } as StorableValue;
-      const restored = valueFromJson(jsonFromValue(value), mockRuntime);
-      expect(restored).toEqual({ "/foo": "bar" });
+      expect(roundTrip(value)).toEqual({ "/foo": "bar" });
     });
 
     it("decoded objects are frozen", () => {
       setJsonEncodingConfig(true);
       const value = { a: 1, b: "two" } as StorableValue;
-      const decoded = valueFromJson(jsonFromValue(value), mockRuntime);
-      expect(Object.isFrozen(decoded)).toBe(true);
+      expect(Object.isFrozen(roundTrip(value))).toBe(true);
     });
 
     it("decoded arrays are frozen", () => {
       setJsonEncodingConfig(true);
       const value = [1, 2, 3] as StorableValue;
-      const decoded = valueFromJson(jsonFromValue(value), mockRuntime);
-      expect(Object.isFrozen(decoded)).toBe(true);
+      expect(Object.isFrozen(roundTrip(value))).toBe(true);
     });
 
     it("round-trip preserves nested object with special types", () => {
@@ -164,10 +164,7 @@ describe("json-encoding-dispatch", () => {
         count: 42n,
         missing: undefined,
       } as StorableValue;
-      const decoded = valueFromJson(
-        jsonFromValue(value),
-        mockRuntime,
-      ) as Record<string, unknown>;
+      const decoded = roundTrip(value) as Record<string, unknown>;
       expect(decoded.name).toBe("test");
       expect(decoded.count).toBe(42n);
       expect(decoded.missing).toBe(undefined);
@@ -184,8 +181,7 @@ describe("json-encoding-dispatch", () => {
       const sigilLink = {
         "/": { "link@1": { id: "of:bafyabc", path: [], space: "did:key:z1" } },
       } as StorableValue;
-      const decoded = valueFromJson(jsonFromValue(sigilLink), mockRuntime);
-      expect(decoded).toEqual(sigilLink);
+      expect(roundTrip(sigilLink)).toEqual(sigilLink);
     });
 
     it("nested sigil link within object round-trips", () => {
@@ -194,10 +190,7 @@ describe("json-encoding-dispatch", () => {
         name: "test",
         ref: { "/": { "link@1": { id: "of:bafyabc", path: [] } } },
       } as StorableValue;
-      const decoded = valueFromJson(
-        jsonFromValue(value),
-        mockRuntime,
-      ) as Record<string, unknown>;
+      const decoded = roundTrip(value) as Record<string, unknown>;
       expect(decoded.name).toBe("test");
       expect(decoded.ref).toEqual(
         { "/": { "link@1": { id: "of:bafyabc", path: [] } } },
@@ -207,15 +200,13 @@ describe("json-encoding-dispatch", () => {
     it("entity ID { '/': 'string' } round-trips", () => {
       setJsonEncodingConfig(true);
       const entityId = { "/": "bafyabc123" } as StorableValue;
-      const decoded = valueFromJson(jsonFromValue(entityId), mockRuntime);
-      expect(decoded).toEqual(entityId);
+      expect(roundTrip(entityId)).toEqual(entityId);
     });
 
     it("$stream marker passes through unchanged", () => {
       setJsonEncodingConfig(true);
       const value = { $stream: true } as StorableValue;
-      const decoded = valueFromJson(jsonFromValue(value), mockRuntime);
-      expect(decoded).toEqual({ $stream: true });
+      expect(roundTrip(value)).toEqual({ $stream: true });
     });
 
     it("@Error marker passes through unchanged", () => {
@@ -223,8 +214,7 @@ describe("json-encoding-dispatch", () => {
       const value = {
         "@Error": { name: "TypeError", message: "oops", stack: "" },
       } as StorableValue;
-      const decoded = valueFromJson(jsonFromValue(value), mockRuntime);
-      expect(decoded).toEqual({
+      expect(roundTrip(value)).toEqual({
         "@Error": { name: "TypeError", message: "oops", stack: "" },
       });
     });
@@ -234,8 +224,7 @@ describe("json-encoding-dispatch", () => {
       const value = {
         $alias: { path: ["value", "name"], cell: { "/": "bafyabc" } },
       } as StorableValue;
-      const decoded = valueFromJson(jsonFromValue(value), mockRuntime);
-      expect(decoded).toEqual({
+      expect(roundTrip(value)).toEqual({
         $alias: { path: ["value", "name"], cell: { "/": "bafyabc" } },
       });
     });
@@ -264,10 +253,7 @@ describe("json-encoding-dispatch", () => {
         ref: { "/": { "link@1": { id: "of:bafyabc", path: [] } } },
         items: [1, { "/": "bafyxyz" }, undefined],
       } as StorableValue;
-      const decoded = valueFromJson(
-        jsonFromValue(value),
-        mockRuntime,
-      ) as Record<string, unknown>;
+      const decoded = roundTrip(value) as Record<string, unknown>;
       expect(decoded.count).toBe(42n);
       expect(decoded.ref).toEqual(
         { "/": { "link@1": { id: "of:bafyabc", path: [] } } },
@@ -283,8 +269,7 @@ describe("json-encoding-dispatch", () => {
         { "/": { "link@1": { id: "of:bafyabc", path: [] } } },
         { "/": { "link@1": { id: "of:bafydef", path: ["x"] } } },
       ] as StorableValue;
-      const decoded = valueFromJson(jsonFromValue(value), mockRuntime);
-      expect(decoded).toEqual(value);
+      expect(roundTrip(value)).toEqual(value);
     });
   });
 
@@ -312,9 +297,7 @@ describe("json-encoding-dispatch", () => {
   describe("config lifecycle", () => {
     it("setJsonEncodingConfig(true) enables dispatch", () => {
       setJsonEncodingConfig(true);
-      // undefined should be serialized to tagged form.
-      const json = jsonFromValue(undefined);
-      expect(JSON.parse(json)).toEqual({ "/Undefined@1": null });
+      expectWireFormat(undefined, { "/Undefined@1": null });
     });
 
     it("resetJsonEncodingConfig() restores passthrough", () => {
@@ -328,9 +311,7 @@ describe("json-encoding-dispatch", () => {
     it("multiple set/reset cycles work correctly", () => {
       // Cycle 1: ON
       setJsonEncodingConfig(true);
-      expect(JSON.parse(jsonFromValue(undefined))).toEqual(
-        { "/Undefined@1": null },
-      );
+      expectWireFormat(undefined, { "/Undefined@1": null });
 
       // Cycle 1: OFF
       resetJsonEncodingConfig();
@@ -338,9 +319,7 @@ describe("json-encoding-dispatch", () => {
 
       // Cycle 2: ON
       setJsonEncodingConfig(true);
-      expect(JSON.parse(jsonFromValue(undefined))).toEqual(
-        { "/Undefined@1": null },
-      );
+      expectWireFormat(undefined, { "/Undefined@1": null });
 
       // Cycle 2: OFF
       resetJsonEncodingConfig();
