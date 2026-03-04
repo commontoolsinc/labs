@@ -208,7 +208,5 @@ export default pattern(() => {
     ],
     // Expose subject for debugging when deployed as piece
     subject,
-    // Cell proxy limitations cause scheduler errors in headless runner
-    allowRuntimeErrors: true,
   };
 });
