@@ -62,10 +62,10 @@ const showRefineInput = handler<unknown, { showRefine: Writable<boolean> }>(
 );
 
 const setQuestion = handler<
-  { question: string; options: string[] },
+  { question: string; options?: string[] },
   { pendingQuestion: Writable<{ question: string; options: string[] } | null> }
 >(({ question, options }, { pendingQuestion }) => {
-  pendingQuestion.set({ question, options });
+  pendingQuestion.set({ question, options: options ?? [] });
 });
 
 const onQuestionAnswer = handler<
@@ -138,17 +138,19 @@ Strategy:
 3. If nothing exists, check listPatternIndex for patterns that could help
 4. Use fetchAndRunPattern to instantiate a pattern, optionally with existing data as context
 5. Call presentResult with the final cell link
-6. If the request is ambiguous, has multiple valid interpretations, or you need user preferences, call askUserQuestion with a clear question and 2-4 options. After calling it, STOP and do not call any other tools — the user's answer will arrive as the next message.
+6. If the request is ambiguous, has multiple valid interpretations, or you need user preferences, call askUserQuestion with a clear question and optionally 2-4 suggested options (the user can always type a free-form response). After calling it, STOP and do not call any other tools — the user's answer will arrive as the next message.
 
 Use the user context above to personalize your suggestions when relevant.`;
   });
 
   const messages = Writable.of<BuiltInLLMMessage[]>([]);
   const showRefine = Writable.of(false);
-  const pendingQuestion = Writable.of<{
-    question: string;
-    options: string[];
-  } | null>(null);
+  const pendingQuestion = Writable.of<
+    {
+      question: string;
+      options: string[];
+    } | null
+  >(null);
   const hasPendingQuestion = computed(() => pendingQuestion.get() != null);
 
   const {
@@ -170,7 +172,7 @@ Use the user context above to personalize your suggestions when relevant.`;
       askUserQuestion: {
         handler: setQuestion({ pendingQuestion }),
         description:
-          "Ask the user a clarifying question with 2-4 multiple-choice options. After calling, STOP and wait for the user's answer in the next message. Input: { question: string, options: string[] }",
+          "Ask the user a clarifying question. Options are optional — if provided (2-4 strings), they appear as quick-select buttons alongside a free-text input. If omitted, only a text input is shown. After calling, STOP and wait for the user's answer. Input: { question: string, options?: string[] }",
       },
     },
     model: "anthropic:claude-sonnet-4-5",
