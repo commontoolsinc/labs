@@ -2,10 +2,10 @@ import type { StorableValue } from "./interface.ts";
 import {
   RECONSTRUCT,
   type ReconstructionContext,
+  type SerializationContext,
   type StorableClass,
   type StorableInstance,
 } from "./storable-protocol.ts";
-import type { SerializationContext } from "./serialization-context.ts";
 import { ExplicitTagStorable } from "./explicit-tag-storable.ts";
 import { deepFreeze } from "./deep-freeze.ts";
 import { UnknownStorable } from "./unknown-storable.ts";

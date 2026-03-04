@@ -45,7 +45,6 @@
     "./schema": "./schema.ts",
     "./storable-value": "./storable-value.ts",
     "./storable-protocol": "./storable-protocol.ts",
-    "./serialization-context": "./serialization-context.ts",
     "./type-tags": "./type-tags.ts",
     "./json-encoding": "./json-encoding.ts",
     "./json-encoding-dispatch": "./json-encoding-dispatch.ts",
