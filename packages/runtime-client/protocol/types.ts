@@ -2,6 +2,7 @@ import type {
   JSONSchema,
   JSONValue,
   NormalizedFullLink,
+  SchedulerDiagnosisResult,
   SchedulerGraphSnapshot,
 } from "@commontools/runner/shared";
 import type { DID, KeyPairRaw } from "@commontools/identity";
@@ -42,6 +43,7 @@ export enum RequestType {
   SetLoggerEnabled = "runtime:setLoggerEnabled",
   SetTelemetryEnabled = "runtime:setTelemetryEnabled",
   ResetLoggerBaselines = "runtime:resetLoggerBaselines",
+  DetectNonIdempotent = "runtime:detectNonIdempotent",
 
   // Page operations (main -> worker)
   GetSpaceRootPattern = "pattern:getSpaceRoot",
@@ -206,6 +208,15 @@ export interface SetTelemetryEnabledRequest extends BaseRequest {
 
 export interface ResetLoggerBaselinesRequest extends BaseRequest {
   type: RequestType.ResetLoggerBaselines;
+}
+
+export interface DetectNonIdempotentRequest extends BaseRequest {
+  type: RequestType.DetectNonIdempotent;
+  durationMs?: number;
+}
+
+export interface DetectNonIdempotentResponse {
+  result: SchedulerDiagnosisResult;
 }
 
 // Logger count types for IPC (matches @commontools/utils/logger types)
@@ -421,7 +432,8 @@ export type IPCClientRequest =
   | PageSyncedRequest
   | VDomEventRequest
   | VDomMountRequest
-  | VDomUnmountRequest;
+  | VDomUnmountRequest
+  | DetectNonIdempotentRequest;
 
 export type NullResponse = null;
 
@@ -538,7 +550,8 @@ export type RemoteResponse =
   | GraphSnapshotResponse
   | LoggerCountsResponse
   | PageResponse
-  | VDomMountResponse;
+  | VDomMountResponse
+  | DetectNonIdempotentResponse;
 
 export type IPCRemoteNotification =
   | CellUpdateNotification
@@ -662,6 +675,11 @@ export type Commands = {
   [RequestType.RecreateSpaceRootPattern]: {
     request: RecreateSpaceRootPatternRequest;
     response: PageResponse;
+  };
+  // Diagnosis requests
+  [RequestType.DetectNonIdempotent]: {
+    request: DetectNonIdempotentRequest;
+    response: DetectNonIdempotentResponse;
   };
   // VDOM requests
   [RequestType.VDomEvent]: {

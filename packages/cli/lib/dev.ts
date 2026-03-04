@@ -39,7 +39,8 @@ export async function process(
     : options.output
     ? basename(options.output)
     : undefined;
-  const engine = new Engine(await createRuntime());
+  const runtime = await createRuntime();
+  const engine = new Engine(runtime);
   const program = await engine.resolve(
     new FileSystemProgramResolver(options.main, options.rootPath),
   );

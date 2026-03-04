@@ -22,7 +22,13 @@ export type EntityId = {
  */
 export function createRef(
   source: Record<string | number | symbol, any> = {},
-  cause: any = crypto.randomUUID(),
+  cause: any = (() => {
+    console.error(
+      "[createRef] NO CAUSE — falling back to randomUUID",
+      new Error().stack,
+    );
+    return crypto.randomUUID();
+  })(),
 ): EntityId {
   const seen = new Set<any>();
 
@@ -48,7 +54,17 @@ export function createRef(
       obj = obj.toJSON() ?? obj;
     }
 
-    if (isOpaqueRef(obj)) return obj.export().value ?? crypto.randomUUID();
+    if (isOpaqueRef(obj)) {
+      const val = obj.export().value;
+      if (val == null) {
+        console.error(
+          "[createRef] OpaqueRef has no value — falling back to randomUUID",
+          new Error().stack,
+        );
+        return crypto.randomUUID();
+      }
+      return val;
+    }
 
     if (isCellResultForDereferencing(obj)) {
       // It'll traverse this and call .toJSON on the doc in the reference.
@@ -56,8 +72,17 @@ export function createRef(
     }
 
     // If referencing other docs, return their ids (or random as fallback).
-    if (isCell(obj)) return obj.entityId ?? crypto.randomUUID();
-    else if (Array.isArray(obj)) return obj.map(traverse);
+    if (isCell(obj)) {
+      const id = obj.entityId;
+      if (id == null) {
+        console.error(
+          "[createRef] Cell has no entityId — falling back to randomUUID",
+          new Error().stack,
+        );
+        return crypto.randomUUID();
+      }
+      return id;
+    } else if (Array.isArray(obj)) return obj.map(traverse);
     else if (isRecord(obj)) {
       return Object.fromEntries(
         Object.entries(obj).map(([key, value]) => [key, traverse(value)]),

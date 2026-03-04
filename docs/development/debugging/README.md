@@ -23,6 +23,7 @@ Quick error reference and debugging workflows. For detailed explanations, see li
 | "Cannot access cell via closure" | Using lift() with closure | Pass all reactive deps as params to lift() ([@reactivity](../../common/concepts/reactivity.md)) |
 | CLI `get` returns stale computed values | `piece set` doesn't trigger recompute | Run `piece step` after `set` to trigger re-evaluation ([cli-debugging](cli-debugging.md#stale-computed-values-after-piece-set)) |
 | "handler() should be defined at module scope" | handler() inside pattern body | Move handler() outside pattern ([gotchas/handler-inside-pattern](gotchas/handler-inside-pattern.md)) |
+| UI churning, high CPU, never settles | Non-idempotent computed or action cycle | Run `await commontools.detectNonIdempotent()` ([non-idempotent-detection](non-idempotent-detection.md)) |
 | "Function creation is not allowed in pattern context" | Helper function inside pattern | Move function to module scope ([gotchas/handler-inside-pattern](gotchas/handler-inside-pattern.md)) |
 | "lift() should not be immediately invoked inside a pattern" | `lift(...)(args)` inside pattern | Use `computed()` instead, or define lift() at module scope ([gotchas/handler-inside-pattern](gotchas/handler-inside-pattern.md)) |
 | Click handler does nothing, ID lookup fails silently | Using custom `id` property for lookups | Use `equals()` for identity, not custom IDs ([gotchas/custom-id-property-pitfall](gotchas/custom-id-property-pitfall.md)) |
@@ -60,6 +61,10 @@ These issues compile without errors but fail at runtime.
 - [Logger System](logger-system.md) - Structured logging, levels, counts, timing, flags
 - [Console Commands](console-commands.md) - `globalThis.commontools.*` browser console reference
 - [VDOM Debug Helpers](vdom-debug.md) - `commontools.vdom.*` VDOM tree inspection
+
+### Diagnosis
+
+- [Non-Idempotent Detection](non-idempotent-detection.md) - Detect non-settling computations, cycles, and non-idempotent actions
 
 ### Workflows
 
