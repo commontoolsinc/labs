@@ -505,13 +505,14 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
     const notebookWish = wish<NotebookPiece>({
       query: "#notebook",
       scope: ["."],
+      headless: true,
     });
     // Notebooks discovered via wish scope (replaces allPieces emoji filtering)
     const notebooks = notebookWish.candidates;
 
     // Still need allPieces for write operations (push new notes/notebooks)
     const { allPieces } = wish<{ allPieces: Writable<NotePiece[]> }>(
-      { query: "#default" },
+      { query: "#default", headless: true },
     ).result;
 
     // Use computed() for proper reactive tracking of notes.length

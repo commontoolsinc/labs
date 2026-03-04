@@ -70,7 +70,11 @@ export default pattern<NoteMdInput, NoteMdOutput>(
     });
 
     // Type-based discovery for notes via mentionable list
-    const noteWish = wish<NotePiece>({ query: "#note", scope: ["."] });
+    const noteWish = wish<NotePiece>({
+      query: "#note",
+      scope: ["."],
+      headless: true,
+    });
 
     // Use sourceNoteRef directly if provided, otherwise fall back to equality lookup
     const sourceNote = computed(() => {
