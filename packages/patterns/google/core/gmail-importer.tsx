@@ -1,6 +1,7 @@
 /// <cts-enable />
 import {
   computed,
+  Confidential,
   Default,
   derive,
   getPatternEnvironment,
@@ -10,6 +11,7 @@ import {
   pattern,
   patternTool,
   PatternToolResult as _PatternToolResult,
+  Secret,
   str,
   Stream,
   UI,
@@ -22,10 +24,6 @@ import {
   createGoogleAuth,
   type ScopeKey,
 } from "./util/google-auth-manager.tsx";
-
-type CFC<T, C extends string> = T;
-type Secret<T> = CFC<T, "secret">;
-type Confidential<T> = CFC<T, "confidential">;
 
 /**
  * Writable cell with sync method.

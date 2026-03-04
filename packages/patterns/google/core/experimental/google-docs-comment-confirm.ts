@@ -14,14 +14,11 @@
  * Future trust policies can grant trust to this file independently
  * to assert "this action was user-approved".
  */
-import { Default, handler, Writable } from "commontools";
+import { Default, handler, Secret, Writable } from "commontools";
 
 // =============================================================================
 // Types - Exported for orchestrator
 // =============================================================================
-
-type CFC<T, C extends string> = T;
-type Secret<T> = CFC<T, "secret">;
 
 export type Auth = {
   token: Default<Secret<string>, "">;

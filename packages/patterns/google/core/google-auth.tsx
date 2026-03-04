@@ -6,6 +6,7 @@ import {
   handler,
   NAME,
   pattern,
+  Secret,
   Stream,
   UI,
   Writable,
@@ -19,9 +20,6 @@ const DEBUG_AUTH = false;
 function authDebugLog(...args: unknown[]) {
   if (DEBUG_AUTH) console.log("[google-auth]", ...args);
 }
-
-type CFC<T, C extends string> = T;
-type Secret<T> = CFC<T, "secret">;
 
 // Scope mapping for Google APIs
 const SCOPE_MAP = {

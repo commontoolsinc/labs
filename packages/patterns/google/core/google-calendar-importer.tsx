@@ -1,6 +1,7 @@
 /// <cts-enable />
 import {
   computed,
+  Confidential,
   Default,
   derive,
   getPatternEnvironment,
@@ -9,6 +10,7 @@ import {
   NAME,
   pattern,
   patternTool,
+  Secret,
   str,
   UI,
   Writable,
@@ -17,10 +19,6 @@ import {
   createGoogleAuth,
   type ScopeKey,
 } from "./util/google-auth-manager.tsx";
-
-type CFC<T, C extends string> = T;
-type Secret<T> = CFC<T, "secret">;
-type Confidential<T> = CFC<T, "confidential">;
 
 // This is used by the various Google tokens created with tokenToAuthData
 export type Auth = {

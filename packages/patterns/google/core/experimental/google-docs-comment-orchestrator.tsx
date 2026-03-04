@@ -9,6 +9,7 @@ import {
   ifElse,
   NAME,
   pattern,
+  Secret,
   UI,
   Writable,
 } from "commontools";
@@ -96,9 +97,6 @@ interface GoogleComment {
 // =============================================================================
 // Types - Auth (from google-auth pattern)
 // =============================================================================
-
-type CFC<T, C extends string> = T;
-type Secret<T> = CFC<T, "secret">;
 
 type Auth = {
   token: Default<Secret<string>, "">;

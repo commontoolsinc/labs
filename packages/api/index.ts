@@ -1726,6 +1726,14 @@ export type Default<T, V extends T = T> =
   | (T & { readonly [DEFAULT_MARKER]: T })
   | T;
 
+// Contextual Flow Control (CFC) phantom types.
+// These are identity type aliases — `CFC<T, C>` erases to plain `T` at runtime.
+// The schema generator reads the `C` classification literal and emits
+// `ifc: { classification: [C] }` in the generated JSON schema.
+export type CFC<T, C extends string = string> = T;
+export type Secret<T> = CFC<T, "secret">;
+export type Confidential<T> = CFC<T, "confidential">;
+
 /** Detect if T is `any` (used to avoid false positives in brand detection). */
 type IsAny<T> = 0 extends 1 & T ? true : false;
 

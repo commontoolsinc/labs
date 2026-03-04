@@ -60,10 +60,27 @@ export function isOptionalSymbol(symbol: ts.Symbol): boolean {
  */
 export function isDefaultAliasSymbol(symbol: ts.Symbol | undefined): boolean {
   if (!symbol || symbol.getName() !== "Default") return false;
+  return isCommonToolsApiSymbol(symbol);
+}
+
+/**
+ * Returns true if `symbol` is one of the CFC type aliases (`CFC`, `Secret`,
+ * `Confidential`) from `@commontools/api`.
+ */
+export function isCFCAliasSymbol(symbol: ts.Symbol | undefined): boolean {
+  if (!symbol) return false;
+  const name = symbol.getName();
+  if (name !== "CFC" && name !== "Secret" && name !== "Confidential") {
+    return false;
+  }
+  return isCommonToolsApiSymbol(symbol);
+}
+
+function isCommonToolsApiSymbol(symbol: ts.Symbol): boolean {
   const decl = symbol.declarations?.[0];
   if (!decl) return false;
   const fileName = decl.getSourceFile().fileName;
-  // The canonical Default<T,V> is declared in @commontools/api (packages/api/index.ts).
+  // The canonical types are declared in @commontools/api (packages/api/index.ts).
   // Cover both workspace-resolved paths (".../packages/api/index.ts") and any
   // future npm-published form ("@commontools/api").
   // Also accept "commontools.d.ts" which is the filename used in test environments

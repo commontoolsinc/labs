@@ -5,7 +5,10 @@ import {
   getCellWrapperInfo,
   isCellBrand,
 } from "../typescript/cell-brand.ts";
-import { isDefaultAliasSymbol } from "../typescript/property-optionality.ts";
+import {
+  isCFCAliasSymbol,
+  isDefaultAliasSymbol,
+} from "../typescript/property-optionality.ts";
 import type {
   GenerationContext,
   SchemaDefinition,
@@ -36,12 +39,12 @@ export class CommonToolsFormatter implements TypeFormatter {
   }
 
   supportsType(type: ts.Type, context: GenerationContext): boolean {
-    // Check via typeNode for Default (erased at type-level)
+    // Check via typeNode for Default or CFC (erased at type-level)
     const wrapperViaNode = detectWrapperViaNode(
       context.typeNode,
       context.typeChecker,
     );
-    if (wrapperViaNode === "Default") {
+    if (wrapperViaNode === "Default" || wrapperViaNode === "CFC") {
       return true;
     }
 
@@ -49,6 +52,11 @@ export class CommonToolsFormatter implements TypeFormatter {
     // typeToTypeNode expands Default<T,V> to its branded union representation, losing the
     // "Default" type node. The type object itself still carries aliasSymbol = Default.
     if (isDefaultAliasSymbol((type as TypeWithInternals).aliasSymbol)) {
+      return true;
+    }
+
+    // Fallback: check via aliasSymbol for CFC<T,C> when typeToTypeNode lost the node.
+    if (isCFCAliasSymbol((type as TypeWithInternals).aliasSymbol)) {
       return true;
     }
 
@@ -105,6 +113,17 @@ export class CommonToolsFormatter implements TypeFormatter {
       ? resolveWrapperNode(n, context.typeChecker)
       : undefined;
 
+    // Handle CFC via node (direct or alias like Secret<T>)
+    if (resolvedWrapper?.kind === "CFC") {
+      const nodeForCFC = n && ts.isTypeReferenceNode(n) && n.typeArguments
+        ? n
+        : resolvedWrapper.node;
+
+      if (nodeForCFC && ts.isTypeReferenceNode(nodeForCFC)) {
+        return this.formatCFCType(nodeForCFC, context);
+      }
+    }
+
     // Handle Default via node (direct or alias)
     if (resolvedWrapper?.kind === "Default") {
       // For Default, we need the node with concrete type arguments.
@@ -119,11 +138,30 @@ export class CommonToolsFormatter implements TypeFormatter {
       }
     }
 
+    // Fallback: handle CFC<T,C> detected via aliasSymbol when no type node is available.
+    const typeWithAlias = type as TypeWithInternals;
+    if (
+      isCFCAliasSymbol(typeWithAlias.aliasSymbol) &&
+      typeWithAlias.aliasTypeArguments &&
+      typeWithAlias.aliasTypeArguments.length >= 1
+    ) {
+      const innerType = typeWithAlias.aliasTypeArguments[0]!;
+      const innerSchema = this.schemaGenerator.formatChildType(
+        innerType,
+        context,
+        undefined,
+      );
+      const classification = this.extractCFCClassification(
+        typeWithAlias.aliasSymbol!,
+        typeWithAlias.aliasTypeArguments,
+      );
+      return this.applyCFCAnnotation(innerSchema, classification);
+    }
+
     // Fallback: handle Default<T> detected via aliasSymbol when no type node is available.
     // When typeToTypeNode expands Default<T,V), the node no longer says "Default" but
     // the type object still carries aliasSymbol. Extract T from aliasTypeArguments[0]
     // and V from aliasTypeArguments[1] so the default value is preserved in the schema.
-    const typeWithAlias = type as TypeWithInternals;
     if (
       isDefaultAliasSymbol(typeWithAlias.aliasSymbol) &&
       typeWithAlias.aliasTypeArguments &&
@@ -462,7 +500,7 @@ export class CommonToolsFormatter implements TypeFormatter {
     originalNode: ts.TypeNode | undefined,
     resolvedWrapper:
       | {
-        kind: "Default" | WrapperKind;
+        kind: "Default" | "CFC" | WrapperKind;
         node: ts.TypeReferenceNode;
       }
       | undefined,
@@ -540,6 +578,91 @@ export class CommonToolsFormatter implements TypeFormatter {
     }
 
     return valueSchema;
+  }
+
+  /**
+   * Format a CFC<T, C> or Secret<T> / Confidential<T> type.
+   * Generates the schema for the inner type T and attaches
+   * `ifc: { classification: [C] }` to the result.
+   */
+  private formatCFCType(
+    typeRefNode: ts.TypeReferenceNode,
+    context: GenerationContext,
+  ): SchemaDefinition {
+    const nodeName = ts.isIdentifier(typeRefNode.typeName)
+      ? typeRefNode.typeName.text
+      : "";
+    const typeArgs = typeRefNode.typeArguments;
+
+    // Secret<T> and Confidential<T> have 1 type arg; CFC<T,C> has 2
+    if (!typeArgs || typeArgs.length < 1) {
+      throw new Error(`${nodeName}<T> requires at least 1 type argument`);
+    }
+
+    const innerTypeNode = typeArgs[0]!;
+    const innerType = context.typeChecker.getTypeFromTypeNode(innerTypeNode);
+    const innerSchema = this.schemaGenerator.formatChildType(
+      innerType,
+      context,
+      innerTypeNode,
+    );
+
+    // Determine classification from the wrapper name or second type argument
+    let classification: string;
+    if (nodeName === "Secret") {
+      classification = "secret";
+    } else if (nodeName === "Confidential") {
+      classification = "confidential";
+    } else if (typeArgs.length >= 2) {
+      // CFC<T, "secret"> — extract the string literal from the second type arg
+      const classType = context.typeChecker.getTypeFromTypeNode(typeArgs[1]!);
+      if (classType.isStringLiteral()) {
+        classification = classType.value;
+      } else {
+        classification = "secret"; // fallback
+      }
+    } else {
+      classification = "secret"; // fallback
+    }
+
+    return this.applyCFCAnnotation(innerSchema, classification);
+  }
+
+  /**
+   * Extract the CFC classification from aliasSymbol metadata.
+   * Used in the aliasSymbol fallback path when the type node is unavailable.
+   */
+  private extractCFCClassification(
+    aliasSymbol: ts.Symbol,
+    aliasTypeArguments: readonly ts.Type[],
+  ): string {
+    const name = aliasSymbol.getName();
+    if (name === "Secret") return "secret";
+    if (name === "Confidential") return "confidential";
+    // CFC<T, C> — extract C from the second type argument
+    if (aliasTypeArguments.length >= 2) {
+      const classType = aliasTypeArguments[1]!;
+      if (classType.isStringLiteral()) {
+        return classType.value;
+      }
+    }
+    return "secret"; // fallback
+  }
+
+  /**
+   * Attach `ifc: { classification: [value] }` to a schema definition.
+   */
+  private applyCFCAnnotation(
+    schema: SchemaDefinition,
+    classification: string,
+  ): SchemaDefinition {
+    if (typeof schema === "boolean") {
+      return schema;
+    }
+    (schema as Record<string, unknown>).ifc = {
+      classification: [classification],
+    };
+    return schema;
   }
 
   private extractDefaultValueFromNode(
