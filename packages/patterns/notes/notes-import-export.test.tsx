@@ -128,10 +128,15 @@ export default pattern(() => {
   // Setup Actions - create initial state for different test scenarios
   // ==========================================================================
 
+  // Link mentionable directly to allPieces so wish() can discover
+  // everything in allPieces without needing a real BacklinksIndex
+  const action_link_mentionable = action(() => {
+    mentionable.set(allPieces);
+  });
+
   // Reset to empty state
   const action_reset = action(() => {
     allPieces.set([]);
-    mentionable.set([]);
     importMarkdown.set("");
   });
 
@@ -142,7 +147,6 @@ export default pattern(() => {
       content: "This note already exists",
     });
     allPieces.push(note);
-    mentionable.push(note);
   });
 
   // Create an existing notebook
@@ -152,7 +156,6 @@ export default pattern(() => {
       notes: [],
     });
     allPieces.push(notebook);
-    mentionable.push(notebook);
   });
 
   // Set up import markdown with a fresh note (no duplicates)
@@ -232,7 +235,6 @@ export default pattern(() => {
       content: "Second note content",
     });
     allPieces.push(note);
-    mentionable.push(note);
   });
 
   // Create a second existing notebook for multi-notebook selection tests
@@ -242,7 +244,6 @@ export default pattern(() => {
       notes: [],
     });
     allPieces.push(notebook);
-    mentionable.push(notebook);
   });
 
   // Set up import markdown with nested notebooks (parent containing child references)
@@ -575,6 +576,9 @@ export default pattern(() => {
 
   return {
     tests: [
+      // === Setup: link mentionable to allPieces ===
+      { action: action_link_mentionable },
+
       // === Initial state tests ===
       { assertion: assert_initial_no_notes },
       { assertion: assert_initial_no_notebooks },
@@ -583,8 +587,7 @@ export default pattern(() => {
 
       // === Create note action test ===
       { action: action_create_note },
-      // SKIP: noteCount from wish requires BacklinksIndex to propagate allPieces → mentionable
-      { assertion: assert_note_created, skip: true },
+      { assertion: assert_note_created },
       { action: action_reset },
 
       // === Test 1: Import fresh note (no duplicates) ===
@@ -596,8 +599,7 @@ export default pattern(() => {
       { assertion: assert_no_debug_error },
       { assertion: assert_no_duplicate_modal },
       { assertion: assert_import_complete },
-      // SKIP: imported pieces go to allPieces but test has no BacklinksIndex to update mentionable
-      { assertion: assert_two_notes_after_fresh_import, skip: true },
+      { assertion: assert_two_notes_after_fresh_import },
       { action: action_reset },
 
       // === Test 2: Import fresh notebook (no duplicates) ===
@@ -607,8 +609,7 @@ export default pattern(() => {
       { action: action_analyze_import },
       { assertion: assert_no_duplicate_modal },
       { assertion: assert_import_complete },
-      // SKIP: imported pieces go to allPieces but test has no BacklinksIndex to update mentionable
-      { assertion: assert_two_notebooks_after_fresh_import, skip: true },
+      { assertion: assert_two_notebooks_after_fresh_import },
       { action: action_reset },
 
       // === Test 3: Duplicate note detection ===
@@ -655,8 +656,7 @@ export default pattern(() => {
       { assertion: assert_skip_debug_state },
       { assertion: assert_duplicates_cleared },
       { assertion: assert_duplicate_modal_closed },
-      // SKIP: imported pieces go to allPieces but test has no BacklinksIndex to update mentionable
-      { assertion: assert_fresh_items_imported, skip: true },
+      { assertion: assert_fresh_items_imported },
       { action: action_reset },
 
       // === Test 7: Import as copies - imports everything ===
@@ -669,8 +669,7 @@ export default pattern(() => {
       { assertion: assert_copies_debug_state },
       { assertion: assert_duplicates_cleared },
       { assertion: assert_duplicate_modal_closed },
-      // SKIP: imported pieces go to allPieces but test has no BacklinksIndex to update mentionable
-      { assertion: assert_all_items_imported, skip: true },
+      { assertion: assert_all_items_imported },
       { action: action_reset },
 
       // === Test 8: Cancel import preserves state ===

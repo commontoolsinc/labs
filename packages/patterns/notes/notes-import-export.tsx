@@ -606,9 +606,9 @@ function performImport(
     }
   }
 
-  // Batch push all items
-  if (newItems.length > 0) {
-    allPieces.set([...allPieces.get(), ...newItems]);
+  // Push all items individually to preserve cell identity
+  for (const item of newItems) {
+    allPieces.push(item);
   }
 
   // Phase 3: Resolve mentions
