@@ -211,7 +211,7 @@ describe("debounce and throttling", () => {
     expect(runCount).toBe(0);
   });
 
-  it("should auto-debounce slow actions after threshold runs", async () => {
+  it("should not auto-debounce actions that haven't exceeded threshold", async () => {
     const cell = runtime.getCell<number>(
       space,
       "auto-debounce-test",
@@ -222,24 +222,22 @@ describe("debounce and throttling", () => {
     await tx.commit();
     tx = runtime.edit();
 
-    // Create a slow action (simulated with artificial delay tracking)
     const action: Action = (actionTx) => {
-      // We can't easily make this actually slow in tests,
-      // so we'll manually set the stats to simulate slow execution
       const val = cell.withTx(actionTx).get();
       cell.withTx(actionTx).send(val + 1);
     };
 
-    // Subscribe (auto-debounce is enabled by default)
     runtime.scheduler.subscribe(action, { reads: [], writes: [] }, {});
     await cell.pull();
 
-    // Initially no debounce
+    // Fast actions should not get auto-debounced — requires >50ms avg after 3+ runs
     expect(runtime.scheduler.getDebounce(action)).toBeUndefined();
 
-    // The auto-debounce requires the action to be slow (>50ms avg after 3 runs)
-    // In unit tests we can't easily simulate slow execution time,
-    // so we mainly verify the infrastructure is in place
+    // Verify stats are being tracked
+    const stats = runtime.scheduler.getActionStats(action);
+    expect(stats).toBeDefined();
+    expect(stats!.runCount).toBeGreaterThanOrEqual(1);
+    expect(stats!.averageTime).toBeLessThan(50);
   });
 
   it("should not auto-debounce fast actions", async () => {
@@ -340,15 +338,11 @@ describe("debounce and throttling", () => {
     expect(result.get()).toBe(2);
   });
 
-  it("should track run counts per execute cycle for cycle-aware debounce", async () => {
-    // The cycle-aware debounce mechanism tracks how many times each action
-    // runs within a single execute() call. If an action runs 3+ times and
-    // the execute() took >100ms, adaptive debounce is applied.
-    //
-    // Note: The scheduler actively prevents cycles, so effects typically
-    // only run once per execute(). This test verifies the tracking mechanism
-    // exists and works when multiple runs DO occur through separate execute()
-    // cycles triggered by sequential input changes.
+  it("should track execution stats for effects across input changes", async () => {
+    // Verifies that the scheduler tracks action stats (runCount, timing)
+    // correctly when an effect runs across multiple execute() cycles.
+    // The scheduler prevents in-execute cycles by design, so each
+    // execute() typically runs an effect once.
 
     const input = runtime.getCell<number>(
       space,
@@ -369,17 +363,14 @@ describe("debounce and throttling", () => {
 
     let runCount = 0;
 
-    // A slow effect that we'll trigger multiple times
-    const slowEffect: Action = async (actionTx) => {
+    const effect: Action = (actionTx) => {
       runCount++;
       const val = input.withTx(actionTx).get() ?? 0;
-      // Add delay to make execution slow enough to potentially trigger cycle debounce
-      await new Promise((resolve) => setTimeout(resolve, 40));
       output.withTx(actionTx).send(val * 2);
     };
 
     runtime.scheduler.subscribe(
-      slowEffect,
+      effect,
       (depTx) => {
         input.withTx(depTx).get();
       },
@@ -390,12 +381,22 @@ describe("debounce and throttling", () => {
     await output.pull();
     await runtime.idle();
 
-    // Should have run at least once
-    expect(runCount).toBeGreaterThanOrEqual(1);
+    expect(runCount).toBe(1);
+    expect(output.get()).toBe(0); // 0 * 2
 
-    // The action runs across multiple execute() cycles, not within one
-    // So cycle-aware debounce (which tracks runs within one execute) won't trigger
-    // This is expected - the scheduler prevents in-execute cycles by design
+    // Trigger a second run via input change
+    input.withTx(tx).send(5);
+    await tx.commit();
+    tx = runtime.edit();
+    await output.pull();
+
+    expect(runCount).toBe(2);
+    expect(output.get()).toBe(10); // 5 * 2
+
+    // Verify stats are tracked
+    const stats = runtime.scheduler.getActionStats(effect);
+    expect(stats).toBeDefined();
+    expect(stats!.runCount).toBe(2);
   });
 
   it("should not apply cycle-aware debounce to fast executes", async () => {

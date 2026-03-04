@@ -555,16 +555,15 @@ describe("pull mode with references", () => {
     await storageManager?.close();
   });
 
-  it("should propagate dirtiness through references (nested lift scenario)", async () => {
+  it("should propagate dirtiness through chained actions (nested lift scenario)", async () => {
     // This test reproduces the nested lift pattern where:
     // - Inner lift reads source, writes to innerOutput
-    // - outerInput cell contains a REFERENCE to innerOutput
-    // - Outer lift reads outerInput (following ref to innerOutput), writes to outerOutput
+    // - Outer lift reads innerOutput, writes to outerOutput
     // - Effect reads outerOutput
     //
     // When source changes:
-    // 1. Inner lift is marked dirty
-    // 2. Outer lift should be marked dirty because it reads (via reference) what inner writes
+    // 1. Inner lift is marked dirty and re-runs
+    // 2. Outer lift should be marked dirty because it reads what inner writes
     // 3. Effect should run and see updated value
 
     const source = runtime.getCell<string[]>(
@@ -582,16 +581,6 @@ describe("pull mode with references", () => {
       tx,
     );
     innerOutput.set(undefined);
-
-    // This cell holds a REFERENCE to innerOutput (simulating how lift passes results)
-    const outerInput = runtime.getCell<string | undefined>(
-      space,
-      "nested-ref-outer-input",
-      undefined,
-      tx,
-    );
-    // Set it to be a reference pointing to innerOutput
-    outerInput.set(undefined);
 
     const outerOutput = runtime.getCell<string>(
       space,
@@ -624,8 +613,7 @@ describe("pull mode with references", () => {
       innerOutput.withTx(actionTx).send(firstItem);
     };
 
-    // Outer lift: (name, firstItem) => name || firstItem || "default"
-    // For this test, we'll read innerOutput directly to simulate following the reference
+    // Outer lift: reads innerOutput, falls back to "default"
     const outerLift: Action = (actionTx) => {
       outerRuns++;
       const firstItem = innerOutput.withTx(actionTx).get();
