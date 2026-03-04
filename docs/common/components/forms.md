@@ -91,17 +91,46 @@ const formData = Writable.of({ name: "", email: "" });
 
 ### Edit Mode
 
-Bind fields to an existing cell. On submit, values are flushed to the cell:
+Bind fields to a pointer (`Writable<Person>`) instead of using indices. On submit,
+values are flushed to the bound cell:
 
 ```tsx
-const existingPerson = people.key(selectedIndex);
+export const EditPerson = pattern<{ person: Writable<Person> }, { [UI]: VNode }>(
+  ({ person }) => ({
+    [UI]: (
+      <ct-form onct-submit={closeModal}>
+        <ct-input name="name" $value={person.key("name")} required />
+        <ct-input name="email" $value={person.key("email")} type="email" />
+        <ct-button type="submit">Save</ct-button>
+        <ct-button type="reset">Cancel</ct-button>
+      </ct-form>
+    ),
+  }),
+);
+```
 
-<ct-form onct-submit={closeModal}>
-  <ct-input name="name" $value={existingPerson.key("name")} required />
-  <ct-input name="email" $value={existingPerson.key("email")} type="email" />
-  <ct-button type="submit">Save</ct-button>
-  <ct-button type="reset">Cancel</ct-button>
-</ct-form>;
+When choosing which item to edit from a list, store the pointer and use
+`equals()` for identity-based updates:
+
+```tsx
+const editing = Writable.of<{ editing: Person | null }>({ editing: null });
+
+const startEdit = handler((_, { person, editing }) => {
+  editing.set({ editing: person });
+}, { person, editing });
+
+const handleSubmit = handler((_, { formData, people, editing }) => {
+  const next = { ...formData.get() };
+  const target = editing.get().editing;
+  if (target === null) return;
+  const list = people.get();
+  const index = list.findIndex((p) => equals(p, target));
+  if (index >= 0) {
+    const updated = [...list];
+    updated[index] = next;
+    people.set(updated);
+  }
+}, { formData, people, editing });
 ```
 
 ### Modal Form Pattern
