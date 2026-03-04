@@ -102,6 +102,7 @@ export {
   type ModuleFactory,
   NAME,
   type NodeFactory,
+  OAuth2TokenSchema,
   type Opaque,
   type OpaqueRef,
   type Pattern,
