@@ -361,8 +361,22 @@ export class CTButton extends BaseElement {
         return;
       }
 
-      // For non-button types, let the browser handle it
-      if (this.type !== "button") {
+      // For submit/reset types, we need to manually find the ancestor ct-form
+      // because the native button in our shadow DOM can't find forms across
+      // shadow DOM boundaries
+      if (this.type === "submit" || this.type === "reset") {
+        const ctForm = this.closest("ct-form") as
+          | (Element & { submit(): void; reset(): void })
+          | null;
+        if (ctForm) {
+          e.preventDefault(); // Prevent native form lookup (which would fail)
+          if (this.type === "submit") {
+            ctForm.submit();
+          } else {
+            ctForm.reset();
+          }
+        }
+        // If no ct-form found, let native behavior try (might work with light DOM forms)
         return;
       }
     }
