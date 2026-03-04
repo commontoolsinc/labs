@@ -151,7 +151,42 @@ On call `receiver.get()` (no args):
 
 No error for non-opaque kinds (e.g., writable/cell/stream).
 
-### 6.4 Pattern-context validation
+### 6.4 Schema shrink validation
+
+Validates that property paths detected by capability analysis can actually
+resolve against the declared parameter type during schema shrinking.
+
+Detection occurs in `applyShrinkAndWrap` (schema-injection.ts) and in the
+`defaults_only` branch of `applyCapabilitySummaryToArgument`. After shrinking
+completes, `validateShrinkCoverage` compares requested top-level path heads
+against what was materialized in the shrunk result.
+
+Guards that skip validation:
+
+- wildcard parameters (full-shape access, shrinking is disabled)
+- parameters with no read/write paths
+- synthetic parameters injected by the pipeline (`__ct_pattern_input`,
+  `__param0`, etc. — names starting with `__`)
+- `never`-typed parameters (bottom type, vacuously valid)
+- paths whose head is `"key"` (reactive proxy accessor injected by
+  `CapabilityLoweringTransformer`)
+
+Diagnostics:
+
+- **Error** `schema:unknown-type-access`
+  - parameter is typed as `unknown` or `any` but the code accesses properties
+  - message lists the accessed property heads and instructs the author to replace
+    `unknown` with a concrete type
+- **Error** `schema:path-not-in-type`
+  - parameter has a concrete type but one or more accessed properties are not
+    present in that type
+  - message lists missing properties and the declared type text, instructs the
+    author to add them
+
+When `shrunk` is `undefined` (as in `defaults_only` mode where full shrinking is
+skipped), validation falls back to inspecting the base type node directly.
+
+### 6.5 Pattern-context validation
 
 Enforces restricted reactive context rules.
 
@@ -463,6 +498,8 @@ adjustments:
 - pattern boundaries apply defaults-only mode to preserve broad shape continuity
   while still applying extracted static defaults
 - wildcard roots disable path shrinking for affected parameters/arguments
+- after shrinking, `validateShrinkCoverage` checks that all requested property
+  paths were materialized (see §6.4); unresolvable paths produce hard errors
 
 ## 11. Schema Generation
 
@@ -537,7 +574,7 @@ Total active fixture inputs in these suites: **237**.
 
 Additional non-fixture unit suites cover:
 
-- cast/empty-array/pattern-context/opaque-get validation
+- cast/empty-array/pattern-context/opaque-get/schema-shrink validation
 - diagnostic message transformer behavior
 - event-handler detection heuristics
 - opaque-ref analysis/normalization/runtime-style APIs

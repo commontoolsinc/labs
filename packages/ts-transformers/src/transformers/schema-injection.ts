@@ -714,6 +714,111 @@ function findCapabilitySummaryForParameter(
 }
 
 /**
+ * Collects the set of top-level property names from a shrunk TypeNode.
+ * Returns an empty set if the node is undefined or not a type literal.
+ */
+function collectMaterializedHeads(
+  node: ts.TypeNode | undefined,
+): Set<string> {
+  const heads = new Set<string>();
+  if (!node || !ts.isTypeLiteralNode(node)) return heads;
+  for (const member of node.members) {
+    if (ts.isPropertySignature(member) && member.name) {
+      const name = getPropertyNameText(member.name);
+      if (name) heads.add(name);
+    }
+  }
+  return heads;
+}
+
+/**
+ * After shrinking, validates that the requested property paths were actually
+ * materialised. Reports a diagnostic when the base type is too narrow or
+ * `unknown`/`any` and property accesses cannot resolve.
+ */
+function validateShrinkCoverage(
+  paramSummary: CapabilityParamSummary,
+  baseTypeNode: ts.TypeNode,
+  baseType: ts.Type | undefined,
+  paths: readonly (readonly string[])[],
+  shrunk: ts.TypeNode | undefined,
+  context: TransformationContext,
+  fnNode: ts.Node,
+): void {
+  if (paramSummary.wildcard || paths.length === 0) return;
+
+  // Skip validation for synthetic parameters injected by the transformer
+  // pipeline (e.g. ClosureTransformer's __ct_ parameters or __param indices).
+  // These are internal implementation details, not user-authored types.
+  if (paramSummary.name.startsWith("__")) return;
+
+  // Collect requested top-level property names, filtering out the reactive
+  // proxy accessor method "key" which is injected by the capability-lowering
+  // transformer and is not a user-authored property.
+  const requestedHeads = new Set<string>();
+  for (const p of paths) {
+    if (p.length > 0 && p[0] !== undefined && p[0] !== "key") {
+      requestedHeads.add(p[0]);
+    }
+  }
+  if (requestedHeads.size === 0) return;
+
+  // Skip validation for `never` — it is a bottom type where property access
+  // is vacuously valid. This avoids false positives on synthetic parameters
+  // injected by earlier transformers (e.g. ClosureTransformer).
+  if (
+    baseTypeNode.kind === ts.SyntaxKind.NeverKeyword ||
+    (baseType !== undefined && (baseType.flags & ts.TypeFlags.Never) !== 0)
+  ) {
+    return;
+  }
+
+  // Case 1: unknown/any base type — every path is unresolvable
+  const isUnknownBase = baseTypeNode.kind === ts.SyntaxKind.UnknownKeyword ||
+    baseTypeNode.kind === ts.SyntaxKind.AnyKeyword ||
+    (baseType !== undefined && isAnyOrUnknownType(baseType));
+
+  if (isUnknownBase) {
+    const pathList = [...requestedHeads].map((h) => `'.${h}'`).join(", ");
+    context.reportDiagnostic({
+      severity: "error",
+      type: "schema:unknown-type-access",
+      message:
+        `Parameter '${paramSummary.name}' is typed as 'unknown' but the ` +
+        `code accesses ${pathList}. The type must declare all properties ` +
+        `the code may read. Replace 'unknown' with a concrete type that ` +
+        `includes these properties.`,
+      node: fnNode,
+    });
+    return;
+  }
+
+  // Case 2: concrete type but some paths didn't resolve.
+  // Check the shrunk result if available; otherwise fall back to the base
+  // type node itself (covers defaults_only mode where shrinking is skipped).
+  const shrunkHeads = collectMaterializedHeads(shrunk);
+  const materializedHeads = shrunkHeads.size > 0
+    ? shrunkHeads
+    : collectMaterializedHeads(baseTypeNode);
+  const missing = [...requestedHeads].filter(
+    (h) => !materializedHeads.has(h),
+  );
+  if (missing.length === 0) return;
+
+  const missingList = missing.map((h) => `'.${h}'`).join(", ");
+  const typeText = printTypeNode(baseTypeNode, context.sourceFile);
+  context.reportDiagnostic({
+    severity: "error",
+    type: "schema:path-not-in-type",
+    message: `Parameter '${paramSummary.name}' accesses ${missingList} but ` +
+      `type '${typeText}' does not include ` +
+      `${missing.length === 1 ? "it" : "them"}. Add the missing ` +
+      `${missing.length === 1 ? "property" : "properties"} to the type.`,
+    node: fnNode,
+  });
+}
+
+/**
  * Shared implementation for applying capability summary shrinking and wrapping
  * to a type node. Both `applyCapabilitySummaryToArgument` and
  * `applyCapabilitySummaryToParameter` delegate here after resolving their
@@ -727,6 +832,8 @@ function applyShrinkAndWrap(
   checker: ts.TypeChecker,
   sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
+  context?: TransformationContext,
+  fnNode?: ts.Node,
 ): ts.TypeNode {
   const paths = uniquePaths([
     ...paramSummary.readPaths,
@@ -775,6 +882,17 @@ function applyShrinkAndWrap(
         );
       }
     }
+    if (context && fnNode) {
+      validateShrinkCoverage(
+        paramSummary,
+        baseTypeNode,
+        baseType,
+        paths,
+        shrunk,
+        context,
+        fnNode,
+      );
+    }
     if (shrunk) {
       next = shrunk;
     }
@@ -806,6 +924,8 @@ function applyCapabilitySummaryToArgument(
   factory: ts.NodeFactory,
   capabilityRegistry?: CapabilitySummaryRegistry,
   mode: CapabilitySummaryApplicationMode = "full",
+  context?: TransformationContext,
+  fnNode?: ts.Node,
 ): ts.TypeNode | undefined {
   if (!argumentNode) return argumentNode;
 
@@ -826,6 +946,24 @@ function applyCapabilitySummaryToArgument(
     : argumentType;
 
   if (mode === "defaults_only") {
+    // Validate that the base type can support the accessed paths even though
+    // shrinking is skipped in defaults_only mode.
+    if (context && fnNode) {
+      const paths = uniquePaths([
+        ...paramSummary.readPaths,
+        ...paramSummary.writePaths,
+      ]);
+      validateShrinkCoverage(
+        paramSummary,
+        baseTypeNode,
+        baseType,
+        paths,
+        undefined,
+        context,
+        fnNode ?? fn,
+      );
+    }
+
     const fallbackPaths = buildDefaultsOnlyFallbackPaths(
       baseType,
       paramSummary.defaults,
@@ -856,6 +994,8 @@ function applyCapabilitySummaryToArgument(
     checker,
     sourceFile,
     factory,
+    context,
+    fnNode ?? fn,
   );
 }
 
@@ -868,6 +1008,8 @@ function applyCapabilitySummaryToParameter(
   sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
   capabilityRegistry?: CapabilitySummaryRegistry,
+  context?: TransformationContext,
+  fnNode?: ts.Node,
 ): ts.TypeNode | undefined {
   if (!parameterNode) return parameterNode;
 
@@ -904,6 +1046,8 @@ function applyCapabilitySummaryToParameter(
     checker,
     sourceFile,
     factory,
+    context,
+    fnNode ?? fn,
   );
 }
 
@@ -916,6 +1060,7 @@ function collectFunctionSchemaTypeNodes(
   typeRegistry?: TypeRegistry,
   capabilityRegistry?: CapabilitySummaryRegistry,
   argumentCapabilityMode: CapabilitySummaryApplicationMode = "full",
+  context?: TransformationContext,
 ): {
   argument?: ts.TypeNode;
   argumentType?: ts.Type; // Store the Type for registry
@@ -976,6 +1121,8 @@ function collectFunctionSchemaTypeNodes(
     factory,
     capabilityRegistry,
     argumentCapabilityMode,
+    context,
+    fn,
   );
   if (
     argumentNode && originalArgumentNode &&
@@ -1444,6 +1591,7 @@ function handlePatternSchemaInjection(
       typeRegistry,
       capabilityRegistry,
       argumentCapabilityMode,
+      context,
     );
     if (!inferred.result) {
       reportAnyResultSchema(context, node);
@@ -1477,6 +1625,7 @@ function handlePatternSchemaInjection(
         typeRegistry,
         capabilityRegistry,
         argumentCapabilityMode,
+        context,
       );
       if (!inferred.result) {
         reportAnyResultSchema(context, node);
@@ -1509,6 +1658,7 @@ function handlePatternSchemaInjection(
         typeRegistry,
         capabilityRegistry,
         argumentCapabilityMode,
+        context,
       );
 
       inputTypeNode = inferred.argument ??
@@ -1542,6 +1692,8 @@ function handlePatternSchemaInjection(
     factory,
     capabilityRegistry,
     argumentCapabilityMode,
+    context,
+    builderFunction,
   ) ?? inputTypeNode;
   if (inputTypeNode !== originalInputTypeNode) {
     // Capability lowering produced a synthetic wrapped/shrunk node.
@@ -1635,6 +1787,8 @@ export class SchemaInjectionTransformer extends Transformer {
               sourceFile,
               factory,
               capabilityRegistry,
+              context,
+              handlerFn,
             ) ?? eventType;
 
             stateTypeNode = applyCapabilitySummaryToParameter(
@@ -1646,6 +1800,8 @@ export class SchemaInjectionTransformer extends Transformer {
               sourceFile,
               factory,
               capabilityRegistry,
+              context,
+              handlerFn,
             ) ?? stateType;
           }
 
@@ -1687,6 +1843,8 @@ export class SchemaInjectionTransformer extends Transformer {
               undefined,
               typeRegistry,
               capabilityRegistry,
+              "full",
+              context,
             );
 
             // Event type: use inferred or fallback to never/unknown refinement
@@ -1701,6 +1859,8 @@ export class SchemaInjectionTransformer extends Transformer {
               sourceFile,
               factory,
               capabilityRegistry,
+              context,
+              handlerFn,
             ) ?? eventTypeBase;
 
             // State type: use helper for second parameter
@@ -1724,6 +1884,8 @@ export class SchemaInjectionTransformer extends Transformer {
               sourceFile,
               factory,
               capabilityRegistry,
+              context,
+              handlerFn,
             ) ?? stateTypeBase;
 
             // Always transform - generate schemas regardless of parameter presence
@@ -1807,6 +1969,9 @@ export class SchemaInjectionTransformer extends Transformer {
               sourceFile,
               factory,
               capabilityRegistry,
+              "full",
+              context,
+              deriveCallback,
             );
             if (transformedArgumentType) {
               argumentTypeNode = transformedArgumentType;
@@ -1863,6 +2028,8 @@ export class SchemaInjectionTransformer extends Transformer {
               argumentType,
               typeRegistry,
               capabilityRegistry,
+              "full",
+              context,
             );
             // Use inferred type or fallback to never/unknown refinement
             argNode = inferred.argument ??
@@ -1879,6 +2046,8 @@ export class SchemaInjectionTransformer extends Transformer {
             undefined,
             typeRegistry,
             capabilityRegistry,
+            "full",
+            context,
           );
 
           // Always transform - use unknown for missing types
@@ -1950,6 +2119,9 @@ export class SchemaInjectionTransformer extends Transformer {
               sourceFile,
               factory,
               capabilityRegistry,
+              "full",
+              context,
+              liftCallback,
             );
             if (transformedArgumentType) {
               argumentTypeNode = transformedArgumentType;
@@ -1992,6 +2164,9 @@ export class SchemaInjectionTransformer extends Transformer {
             sourceFile,
             factory,
             capabilityRegistry,
+            "full",
+            context,
+            liftCallback,
           );
           if (transformedArgumentType) {
             argumentTypeNode = transformedArgumentType;
@@ -2013,6 +2188,8 @@ export class SchemaInjectionTransformer extends Transformer {
             fallbackArgType,
             typeRegistry,
             capabilityRegistry,
+            "full",
+            context,
           );
           const resultTypeNode = inferred.result ??
             factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
@@ -2045,6 +2222,8 @@ export class SchemaInjectionTransformer extends Transformer {
             undefined,
             typeRegistry,
             capabilityRegistry,
+            "full",
+            context,
           );
 
           // For argument: use inferred type or apply never/unknown refinement

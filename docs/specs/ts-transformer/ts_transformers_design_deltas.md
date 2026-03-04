@@ -33,6 +33,8 @@ behavior and open follow-up work.
   - map capture classification hardened for reactive vs non-reactive captures
   - pattern-boundary schema continuity alignment (defaults-only application
     mode)
+  - schema shrink coverage validation (`schema:unknown-type-access`,
+    `schema:path-not-in-type`)
 - Partially landed:
   - diagnostics migration (legacy codes preserved; some legacy validation
     remains)
@@ -218,6 +220,53 @@ to runtime contract support).
     shrinking to local reads.
 14. Compute-context boundary summaries are allowed to widen from helper-callee
     reads/writes when interprocedural summaries are enabled.
+15. Schema shrink validation: unresolvable property paths produce hard errors
+    rather than silently falling back to broader schemas (see D-005).
+
+## D-005 Validate Schema Shrink Coverage
+
+**Status:** Landed
+
+**Policy target:**
+
+- When capability analysis detects property reads/writes and schema shrinking
+  narrows the declared type, validate that all accessed top-level property
+  heads are actually present in the result.
+- If the declared type is `unknown`/`any`, every property access is
+  unresolvable → hard error.
+- If the declared type is concrete but missing accessed properties → hard error
+  naming the missing paths.
+
+**Implementation:**
+
+- `validateShrinkCoverage()` in `schema-injection.ts` runs after every shrink
+  operation (both `applyShrinkAndWrap` and the `defaults_only` branch).
+- `TransformationContext` and `fnNode` are threaded through
+  `applyCapabilitySummaryToArgument`, `applyCapabilitySummaryToParameter`,
+  `collectFunctionSchemaTypeNodes`, and `applyShrinkAndWrap`.
+- Guards skip synthetic parameters (`__`-prefixed names), `never`-typed
+  parameters, wildcard parameters, and the reactive proxy `"key"` head.
+
+**Diagnostic codes:**
+
+- `schema:unknown-type-access` — parameter typed `unknown`/`any` with property
+  accesses
+- `schema:path-not-in-type` — concrete type missing accessed properties
+
+**Test coverage:** `test/schema-shrink-validation.test.ts` with 3 cases:
+unknown-type error, missing-property error, valid-no-error.
+
+**Rationale:**
+
+- Silent fallback to unshrunk schemas hides type mismatches that surface as
+  runtime surprises. A compile-time error forces authors to declare the
+  properties their code actually uses.
+
+**Goals touched:** G-004, G-005, G-016\
+**Invariants touched:** C-007 (conservative fallback now produces an error
+instead of silently degrading)\
+**Non-goal check:** Does not attempt full type soundness (NG-002); validates
+only top-level path heads, not deep path resolution.
 
 ## Principles
 
@@ -643,9 +692,12 @@ logic.
    - `OpaqueCell` / `ReadonlyCell` / `WriteonlyCell` / `Cell`
    - used path tree + wildcard flags
 2. Wire summaries into schema/type emission in schema-injection/generator path.
+3. Validate shrink coverage: `validateShrinkCoverage` reports hard errors when
+   accessed properties are missing from the declared type (D-005).
 
 **Exit criteria:** emitted boundary type/schema changes match expected least
-capability for covered fixtures.
+capability for covered fixtures. Unresolvable property paths during shrinking
+produce hard errors rather than silently degrading.
 
 ## Phase D5: Policy Integration For Operator Rewrites
 
