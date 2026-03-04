@@ -2154,7 +2154,7 @@ Each suggestion should have:
                             <ct-input
                               value={getFieldValue(entry)}
                               placeholder={computed(() =>
-                                `Enter ${getFieldKey(entry)}`
+                                `Enter ${entry.key}`
                               )}
                               style="flex: 1;"
                               onct-input={updateFieldHandler({

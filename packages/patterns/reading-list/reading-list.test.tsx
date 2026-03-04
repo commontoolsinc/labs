@@ -294,27 +294,25 @@ export default pattern(() => {
       { assertion: assert_initial_filter_all },
       { assertion: assert_initial_filtered_empty },
 
-      // SKIP: ReadingList composes ReadingItemDetail sub-pieces. The headless
-      // runner can't fully resolve sub-piece properties or streams, and pushing
-      // multiple sub-pieces causes count assertions to fail after the first add.
-      // All steps below are skipped until the test runner supports sub-piece
-      // composition. Initial state assertions above still pass.
-
-      { action: action_add_article, skip: true },
-      { assertion: assert_has_one, skip: true },
-      { assertion: assert_first_is_article, skip: true },
-      { action: action_add_book, skip: true },
-      { assertion: assert_has_two, skip: true },
-      { assertion: assert_second_is_book, skip: true },
-      { action: action_add_paper, skip: true },
-      { assertion: assert_has_three, skip: true },
-      { action: action_add_video, skip: true },
-      { assertion: assert_has_four, skip: true },
-      { assertion: assert_video_has_empty_author, skip: true },
-      { action: action_add_empty, skip: true },
-      { assertion: assert_still_four, skip: true },
-      { action: action_add_whitespace, skip: true },
-      { assertion: assert_still_four, skip: true },
+      { action: action_add_article },
+      { assertion: assert_has_one },
+      { assertion: assert_first_is_article },
+      { action: action_add_book },
+      { assertion: assert_has_two },
+      { assertion: assert_second_is_book },
+      { action: action_add_paper },
+      { assertion: assert_has_three },
+      { action: action_add_video },
+      { assertion: assert_has_four },
+      { assertion: assert_video_has_empty_author },
+      { action: action_add_empty },
+      { assertion: assert_still_four },
+      { action: action_add_whitespace },
+      { assertion: assert_still_four },
+      // SKIP: Sub-piece property mutations (status, rating, notes) and filtered
+      // views fail intermittently on CI (GitHub Actions). Passes 100% locally
+      // including with compiled binary + parallel execution. Likely a timing
+      // issue specific to CI runner environments. See PR #2955.
       { action: action_set_first_reading, skip: true },
       { assertion: assert_first_is_reading, skip: true },
       { action: action_set_second_finished, skip: true },
