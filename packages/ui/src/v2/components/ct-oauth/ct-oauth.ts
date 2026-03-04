@@ -226,14 +226,7 @@ export class CTOauth extends BaseElement {
             : ""}
         </div>
 
-        ${this.authResult
-          ? html`
-            <div class="auth-result">
-              <h3>Authentication Result</h3>
-              <pre>${JSON.stringify(this.authResult, null, 2)}</pre>
-            </div>
-          `
-          : ""}
+        ${"" /* Auth result is persisted to the auth cell; no need to display raw JSON */}
       </div>
     `;
   }

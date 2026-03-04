@@ -398,9 +398,10 @@ const bgRefreshHandler = handler<
 
 export default pattern<Input, Output>(
   ({ auth, selectedScopes }) => {
-    // Compute active scopes based on selection
+    // Compute active scopes based on selection.
+    // Always include user.email:read so the whoami endpoint returns the email.
     const scopes = computed(() => {
-      const base: string[] = [];
+      const base: string[] = ["user.email:read"];
       for (const [key, enabled] of Object.entries(selectedScopes)) {
         if (enabled) {
           base.push(key);
@@ -447,7 +448,7 @@ export default pattern<Input, Output>(
       return `${mins}m`;
     });
 
-    const checkboxesDisabled = computed(() => !!auth?.user?.email);
+    const checkboxesDisabled = computed(() => !!auth?.accessToken);
 
     const refreshing = Writable.of(false);
     const refreshFailed = Writable.of(false);
@@ -511,7 +512,7 @@ export default pattern<Input, Output>(
       })
     );
 
-    const loggedIn = computed(() => !!auth?.user?.email);
+    const loggedIn = computed(() => !!auth?.accessToken);
 
     const grantedScopesUI = computed(() => {
       const scopeList = auth.scope;

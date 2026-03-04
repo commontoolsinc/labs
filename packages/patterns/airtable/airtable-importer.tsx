@@ -141,7 +141,7 @@ const fetchRecords = handler<
 });
 
 const onSelectBase = handler<
-  { baseId: string },
+  { target: { dataset: { baseId: string } } },
   {
     selectedBaseId: Writable<string>;
     selectedTableId: Writable<string>;
@@ -149,20 +149,24 @@ const onSelectBase = handler<
     records: Writable<AirtableRecordData[]>;
   }
 >((event, { selectedBaseId, selectedTableId, tables, records }) => {
-  selectedBaseId.set(event.baseId);
+  const baseId = event.target.dataset.baseId;
+  if (!baseId) return;
+  selectedBaseId.set(baseId);
   selectedTableId.set("");
   tables.set([]);
   records.set([]);
 });
 
 const onSelectTable = handler<
-  { tableId: string },
+  { target: { dataset: { tableId: string } } },
   {
     selectedTableId: Writable<string>;
     records: Writable<AirtableRecordData[]>;
   }
 >((event, { selectedTableId, records }) => {
-  selectedTableId.set(event.tableId);
+  const tableId = event.target.dataset.tableId;
+  if (!tableId) return;
+  selectedTableId.set(tableId);
   records.set([]);
 });
 
@@ -310,42 +314,16 @@ export default pattern<Input, Output>(
       ))
     );
 
-    const headerRowUI = computed(() =>
-      (columnHeaders as string[]).map((h) => (
-        <th
-          style={{
-            padding: "8px 12px",
-            textAlign: "left",
-            borderBottom: "2px solid #e0e0e0",
-            fontWeight: "600",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {h}
-        </th>
-      ))
-    );
-
-    const bodyRowsUI = computed(() =>
-      (records.get() as AirtableRecordData[]).map((rec) => (
-        <tr>
-          {(columnHeaders as string[]).map((h) => (
-            <td
-              style={{
-                padding: "8px 12px",
-                borderBottom: "1px solid #f0f0f0",
-                maxWidth: "300px",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {formatCellValue(rec.fields[h])}
-            </td>
-          ))}
-        </tr>
-      ))
-    );
+    // Precompute table rows as plain data (avoid nested JSX .map() in computed)
+    const tableRows = computed(() => {
+      const recs = records.get() as AirtableRecordData[];
+      const hdrs = columnHeaders as string[];
+      return recs.map((rec) => ({
+        cells: (hdrs as string[]).map((col) =>
+          formatCellValue(rec.fields[col])
+        ),
+      }));
+    });
 
     const hasError = computed(() => !!(error.get() as string));
 
@@ -577,11 +555,42 @@ export default pattern<Input, Output>(
                                 top: "0",
                               }}
                             >
-                              {headerRowUI}
+                              {(columnHeaders as string[]).map((col) => (
+                                <th
+                                  style={{
+                                    padding: "8px 12px",
+                                    textAlign: "left",
+                                    borderBottom: "2px solid #e0e0e0",
+                                    fontWeight: "600",
+                                    whiteSpace: "nowrap",
+                                  }}
+                                >
+                                  {col}
+                                </th>
+                              ))}
                             </tr>
                           </thead>
                           <tbody>
-                            {bodyRowsUI}
+                            {(tableRows as { cells: string[] }[]).map(
+                              (row) => (
+                                <tr>
+                                  {row.cells.map((cell) => (
+                                    <td
+                                      style={{
+                                        padding: "8px 12px",
+                                        borderBottom: "1px solid #f0f0f0",
+                                        maxWidth: "300px",
+                                        overflow: "hidden",
+                                        textOverflow: "ellipsis",
+                                        whiteSpace: "nowrap",
+                                      }}
+                                    >
+                                      {cell}
+                                    </td>
+                                  ))}
+                                </tr>
+                              ),
+                            )}
                           </tbody>
                         </table>
                       </div>

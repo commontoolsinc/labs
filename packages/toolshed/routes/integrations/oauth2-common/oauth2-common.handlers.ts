@@ -28,6 +28,54 @@ import {
   tokenToGenericAuthData,
 } from "./oauth2-common.utils.ts";
 
+/**
+ * Server-side state store for OAuth2 flows.
+ *
+ * Some providers (e.g. Airtable) impose strict limits on the `state` parameter
+ * length. Our authCellId includes the full JSON schema, which can exceed 2KB.
+ * Instead of encoding the full state in the URL, we store it server-side keyed
+ * by a short random token and pass only the token as `state`.
+ *
+ * Entries expire after 10 minutes to prevent memory leaks.
+ */
+const STATE_STORE = new Map<
+  string,
+  {
+    data: {
+      authCellId: string;
+      integrationPieceId: string;
+      codeVerifier: string;
+      scopes?: string[];
+    };
+    expiresAt: number;
+  }
+>();
+const STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+function storeState(data: {
+  authCellId: string;
+  integrationPieceId: string;
+  codeVerifier: string;
+  scopes?: string[];
+}): string {
+  // Purge expired entries
+  const now = Date.now();
+  for (const [key, entry] of STATE_STORE) {
+    if (entry.expiresAt < now) STATE_STORE.delete(key);
+  }
+  const key = crypto.randomUUID();
+  STATE_STORE.set(key, { data, expiresAt: now + STATE_TTL_MS });
+  return key;
+}
+
+function retrieveState(key: string) {
+  const entry = STATE_STORE.get(key);
+  if (!entry) return null;
+  STATE_STORE.delete(key); // one-time use
+  if (entry.expiresAt < Date.now()) return null;
+  return entry.data;
+}
+
 const EMPTY_OAUTH2_DATA: Record<string, unknown> = {
   accessToken: "",
   tokenType: "",
@@ -78,15 +126,15 @@ export function createOAuth2Handlers(
         scope: scopeString,
       });
 
-      const statePayload = btoa(JSON.stringify({
+      const stateKey = storeState({
         authCellId: payload.authCellId,
         integrationPieceId: payload.integrationPieceId,
         codeVerifier,
         scopes: payload.scopes,
-      }));
+      });
 
       const authUrl = new URL(uri.toString());
-      authUrl.searchParams.set("state", statePayload);
+      authUrl.searchParams.set("state", stateKey);
 
       // Apply provider-specific extra params (e.g. access_type=offline)
       if (config.extraAuthParams) {
@@ -132,19 +180,30 @@ export function createOAuth2Handlers(
         return createCallbackResponse({ success: false, error: errorMsg });
       }
 
+      // Try server-side state store first (short UUID key),
+      // fall back to legacy base64-encoded state for backward compat.
       let decodedState: {
         authCellId: string;
         integrationPieceId: string;
         codeVerifier: string;
         scopes?: string[];
-      };
+      } | null = retrieveState(state);
 
-      try {
-        decodedState = JSON.parse(atob(state));
-      } catch (_error) {
+      if (!decodedState) {
+        try {
+          decodedState = JSON.parse(atob(state));
+        } catch (_error) {
+          return createCallbackResponse({
+            success: false,
+            error: "Invalid or expired state parameter",
+          });
+        }
+      }
+
+      if (!decodedState) {
         return createCallbackResponse({
           success: false,
-          error: "Invalid state parameter format",
+          error: "Invalid or expired state parameter",
         });
       }
 
