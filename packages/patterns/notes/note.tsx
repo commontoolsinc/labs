@@ -160,10 +160,9 @@ const Note = pattern<NoteInput, NoteOutput>(
     const allNotesPiece = allNotesWish.result;
 
     // Still need allPieces for write operations (push new notes, push backlinks)
-    const { allPieces } =
-      wish<{ allPieces: Writable<MinimalPiece[]> }>(
-        { query: "#default", headless: true },
-      ).result;
+    const { allPieces } = wish<{ allPieces: Writable<MinimalPiece[]> }>(
+      { query: "#default", headless: true },
+    ).result;
     const mentionable = wish<Default<MentionablePiece[], []>>(
       { query: "#mentionable", headless: true },
     ).result;
