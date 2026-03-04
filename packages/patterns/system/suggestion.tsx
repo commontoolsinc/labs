@@ -109,8 +109,9 @@ export default pattern<
   // --- LLM state (freeform query path) ---
   const profile = wish<string>({ query: "#profile" });
 
-  const mentionable =
-    wish<MentionablePiece[]>({ query: "#mentionable" }).result;
+  const mentionable = wish<MentionablePiece[]>({
+    query: "#mentionable",
+  }).result;
   const recentPieces = wish<MentionablePiece[]>({ query: "#recent" }).result;
   const { entries: summaryEntries } = wish<{
     entries: SummaryIndexEntry[];
@@ -144,9 +145,11 @@ Use the user context above to personalize your suggestions when relevant.`;
 
   const messages = Writable.of<BuiltInLLMMessage[]>([]);
   const showRefine = Writable.of(false);
-  const pendingQuestion = Writable.of<
-    { question: string; options: string[] } | null
-  >(null);
+  const pendingQuestion = Writable.of<{
+    question: string;
+    options: string[];
+  } | null>(null);
+  const hasPendingQuestion = computed(() => pendingQuestion.get() != null);
 
   const {
     addMessage,
@@ -214,16 +217,14 @@ Use the user context above to personalize your suggestions when relevant.`;
         pending={pending}
         onct-refine={showRefineInput({ showRefine })}
       />
-      {ifElse(
-        computed(() => pendingQuestion.get() !== null),
-        <ct-question
-          question={computed(() => pendingQuestion.get()?.question ?? "")}
-          options={computed(() => pendingQuestion.get()?.options ?? [])}
-          allow-custom
-          onct-answer={onQuestionAnswer({ addMessage, pendingQuestion })}
-        />,
-        undefined,
-      )}
+
+      <ct-question
+        question={computed(() => pendingQuestion.get()?.question ?? "")}
+        options={computed(() => pendingQuestion.get()?.options ?? [])}
+        allow-custom
+        style={computed(() => (hasPendingQuestion ? "" : "display:none"))}
+        onct-answer={onQuestionAnswer({ addMessage, pendingQuestion })}
+      />
       <ct-prompt-input
         placeholder="Refine suggestion..."
         pending={pending}
