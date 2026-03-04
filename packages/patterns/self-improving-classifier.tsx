@@ -36,14 +36,14 @@ import {
 type Tier = 0 | 1 | 2 | 3 | 4;
 
 /** Input to classify - generic key-value structure */
-interface ClassifiableInput {
+export interface ClassifiableInput {
   id: string;
   receivedAt: number;
   fields: Record<string, string>;
 }
 
 /** Full audit trail for labeled examples */
-interface LabeledExample {
+export interface LabeledExample {
   input: ClassifiableInput;
   label: boolean;
   decidedBy: "user" | "auto" | "suggestion-accepted";
@@ -57,7 +57,7 @@ interface LabeledExample {
 }
 
 /** A regex-based classification rule */
-interface ClassificationRule {
+export interface ClassificationRule {
   id: string;
   name: string;
   targetField: string;
@@ -112,7 +112,7 @@ export interface RuleSuggestion {
 }
 
 /** Classification result for an item */
-interface ClassificationResult {
+export interface ClassificationResult {
   inputId: string;
   classification: boolean;
   confidence: number;
@@ -122,7 +122,7 @@ interface ClassificationResult {
 }
 
 /** Pending item awaiting user confirmation */
-interface PendingClassification {
+export interface PendingClassification {
   input: ClassifiableInput;
   result: ClassificationResult;
 }
