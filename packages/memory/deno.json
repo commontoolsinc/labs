@@ -50,7 +50,6 @@
     "./json-serialization-context": "./json-serialization-context.ts",
     "./json-encoding": "./json-encoding.ts",
     "./json-encoding-dispatch": "./json-encoding-dispatch.ts",
-    "./serialization": "./serialization.ts",
     "./type-handlers": "./type-handlers.ts",
     "./explicit-tag-storable": "./explicit-tag-storable.ts",
     "./unknown-storable": "./unknown-storable.ts",
