@@ -47,6 +47,8 @@ If you are developing patterns, use Claude Skills (pattern-dev) to do the work.
   troubleshooting
 - `docs/common/capabilities/llm.md` - Using generateText and generateObject for
   LLM integration
+- `docs/common/conventions/adding-pieces.md` - How to add pieces (use addPiece
+  handler, not allPieces.push)
 
 **Reference:**
 

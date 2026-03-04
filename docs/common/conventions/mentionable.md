@@ -38,7 +38,9 @@ return {
 
 **Notes:**
 - Exported mentionables appear in autocomplete but NOT in the sidebar piece list
-- Use this instead of writing to `allPieces` directly
+- This is for mentionables within your pattern's own scope — to add pieces to the
+  global piece list, use the `addPiece` handler via `wish("#default")`.
+  See [Adding Pieces](adding-pieces.md).
 
 ## Wishing for Mentionables
 
