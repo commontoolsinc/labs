@@ -2,12 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { JsonEncodingContext } from "../json-encoding.ts";
 import type { ReconstructionContext } from "../storable-protocol.ts";
-import {
-  DECONSTRUCT,
-  isStorableInstance,
-  RECONSTRUCT,
-} from "../storable-protocol.ts";
-import type { StorableClass, StorableInstance } from "../storable-protocol.ts";
+import { DECONSTRUCT, isStorableInstance } from "../storable-protocol.ts";
 import type { StorableValue } from "../interface.ts";
 import type { JsonWireValue } from "../json-type-handlers.ts";
 import { UnknownStorable } from "../unknown-storable.ts";
