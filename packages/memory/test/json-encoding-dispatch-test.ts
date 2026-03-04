@@ -137,6 +137,54 @@ describe("json-encoding-dispatch", () => {
   });
 
   // --------------------------------------------------------------------------
+  // Edge cases (flag ON)
+  // --------------------------------------------------------------------------
+
+  describe("edge cases (flag ON)", () => {
+    it("round-trip preserves object with slash-prefixed key", () => {
+      setJsonEncodingConfig(true);
+      // Objects with a single key starting with "/" must be escaped via
+      // TAGS.object to avoid misinterpretation as a tagged type.
+      const value = { "/foo": "bar" } as StorableValue;
+      const encoded = encodeJsonValue(value);
+      // Should be wrapped in /object escaping (TAGS.object = "object").
+      expect(encoded).toEqual({ "/object": { "/foo": "bar" } });
+      const decoded = decodeJsonValue(encoded, mockRuntime);
+      expect(decoded).toEqual({ "/foo": "bar" });
+    });
+
+    it("decoded objects are frozen", () => {
+      setJsonEncodingConfig(true);
+      const value = { a: 1, b: "two" } as StorableValue;
+      const encoded = encodeJsonValue(value);
+      const decoded = decodeJsonValue(encoded, mockRuntime);
+      expect(Object.isFrozen(decoded)).toBe(true);
+    });
+
+    it("decoded arrays are frozen", () => {
+      setJsonEncodingConfig(true);
+      const value = [1, 2, 3] as StorableValue;
+      const encoded = encodeJsonValue(value);
+      const decoded = decodeJsonValue(encoded, mockRuntime);
+      expect(Object.isFrozen(decoded)).toBe(true);
+    });
+
+    it("round-trip preserves nested object with special types", () => {
+      setJsonEncodingConfig(true);
+      const value = {
+        name: "test",
+        count: 42n,
+        missing: undefined,
+      } as StorableValue;
+      const encoded = encodeJsonValue(value);
+      const decoded = decodeJsonValue(encoded, mockRuntime);
+      expect((decoded as Record<string, unknown>).name).toBe("test");
+      expect((decoded as Record<string, unknown>).count).toBe(42n);
+      expect((decoded as Record<string, unknown>).missing).toBe(undefined);
+    });
+  });
+
+  // --------------------------------------------------------------------------
   // Flag OFF behavior (explicit)
   // --------------------------------------------------------------------------
 
