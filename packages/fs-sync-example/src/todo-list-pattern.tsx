@@ -186,7 +186,7 @@ export default pattern<Input, Output>(
                   <ct-hstack gap="2" align="center">
                     <ct-checkbox
                       checked={todo.done}
-                      onChange={onToggle({ todo, edits })}
+                      onct-change={onToggle({ todo, edits })}
                     />
                     <ct-input
                       $value={todo.description}
