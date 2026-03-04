@@ -174,10 +174,17 @@ back to the caller's parameter summary. This means a `lift` callback that
 delegates to a local helper which reads `(x as any).foo` will trigger shrink
 validation on the caller's parameter type.
 
+When a wildcard parameter (one passed to an opaque/unanalyzable function like
+`console.log`) is typed `unknown`, validation emits `schema:unknown-type-access`
+because the generated schema cannot express what data to fetch. This does not
+apply to `any`-typed parameters (which fetch everything at runtime) or to
+concrete types (which already describe the expected shape).
+
 Guards that skip validation:
 
-- wildcard parameters (full-shape access, shrinking is disabled)
-- parameters with no read/write paths
+- wildcard parameters with a non-`unknown` base type (full-shape access,
+  shrinking is disabled)
+- parameters with no read/write paths and no wildcard flag
 - synthetic parameters injected by the pipeline (`__ct_pattern_input`,
   `__param0`, etc. — names starting with `__`)
 - `never`-typed parameters (bottom type, vacuously valid)

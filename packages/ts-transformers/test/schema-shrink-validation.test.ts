@@ -119,6 +119,109 @@ Deno.test("Schema Shrink Validation", async (t) => {
   );
 
   await t.step(
+    "errors when unknown parameter is passed to opaque function in lift",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { lift } from "commontools";',
+        "",
+        "const fn = lift((state: unknown) => console.log(state));",
+      ].join("\n");
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const shrinkErrors = errors.filter(
+        (e) => e.type === "schema:unknown-type-access",
+      );
+      assertGreater(
+        shrinkErrors.length,
+        0,
+        "Expected schema:unknown-type-access for unknown param passed to opaque function",
+      );
+    },
+  );
+
+  await t.step(
+    "no error when any parameter is passed to opaque function in lift",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { lift } from "commontools";',
+        "",
+        "const fn = lift((state: any) => console.log(state));",
+      ].join("\n");
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const shrinkErrors = errors.filter(
+        (e) => e.type === "schema:unknown-type-access",
+      );
+      assertEquals(
+        shrinkErrors.length,
+        0,
+        `Expected no schema:unknown-type-access for 'any' but got: ${
+          shrinkErrors.map((e) => e.message).join("; ")
+        }`,
+      );
+    },
+  );
+
+  await t.step(
+    "no error when concrete type is passed to opaque function in lift",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { lift } from "commontools";',
+        "",
+        "const fn = lift((state: { a: string }) => console.log(state));",
+      ].join("\n");
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const shrinkErrors = errors.filter(
+        (e) => e.type === "schema:unknown-type-access",
+      );
+      assertEquals(
+        shrinkErrors.length,
+        0,
+        `Expected no errors for concrete type but got: ${
+          shrinkErrors.map((e) => e.message).join("; ")
+        }`,
+      );
+    },
+  );
+
+  await t.step(
+    "errors when unknown parameter is passed to opaque function in pattern",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { pattern } from "commontools";',
+        "",
+        "export default pattern((state: unknown) => {",
+        "  console.log(state);",
+        "  return {};",
+        "});",
+      ].join("\n");
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const shrinkErrors = errors.filter(
+        (e) => e.type === "schema:unknown-type-access",
+      );
+      assertGreater(
+        shrinkErrors.length,
+        0,
+        "Expected schema:unknown-type-access for unknown param in pattern passed to opaque function",
+      );
+    },
+  );
+
+  await t.step(
     "no diagnostic when declared type matches all accessed paths",
     async () => {
       const source = [

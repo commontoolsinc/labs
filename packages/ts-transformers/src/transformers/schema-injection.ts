@@ -745,7 +745,31 @@ function validateShrinkCoverage(
   context: TransformationContext,
   fnNode: ts.Node,
 ): void {
-  if (paramSummary.wildcard || paths.length === 0) return;
+  if (paths.length === 0 && !paramSummary.wildcard) return;
+
+  // For wildcard parameters with no explicit property paths, check if
+  // the base type is `unknown` — passing an unknown-typed value to an
+  // opaque function (like console.log) will not produce useful data at
+  // runtime because the schema cannot express what to fetch.
+  if (paramSummary.wildcard) {
+    if (paramSummary.name.startsWith("__")) return;
+    const isUnknownBase = baseTypeNode.kind === ts.SyntaxKind.UnknownKeyword ||
+      (baseType !== undefined &&
+        (baseType.flags & ts.TypeFlags.Unknown) !== 0);
+    if (isUnknownBase) {
+      context.reportDiagnostic({
+        severity: "error",
+        type: "schema:unknown-type-access",
+        message:
+          `Parameter '${paramSummary.name}' is typed as 'unknown' but is ` +
+          `passed to a function the compiler cannot analyze. The generated ` +
+          `schema cannot express what data to fetch. Replace 'unknown' with ` +
+          `a concrete type that describes the expected shape.`,
+        node: fnNode,
+      });
+    }
+    return; // wildcard params still skip path-level validation
+  }
 
   // Skip validation for synthetic parameters injected by the transformer
   // pipeline (e.g. ClosureTransformer's __ct_ parameters or __param indices).
@@ -841,9 +865,9 @@ function applyShrinkAndWrap(
   ]);
 
   let next = baseTypeNode;
+  let shrunk: ts.TypeNode | undefined;
   if (!paramSummary.wildcard && paths.length > 0) {
     const preferTypeDriven = !!baseType && isSyntheticTypeNode(baseTypeNode);
-    let shrunk: ts.TypeNode | undefined;
     if (preferTypeDriven) {
       // Synthetic inferred nodes can lose property precision in node-only mode.
       const typeDriven = buildShrunkTypeNodeFromType(
@@ -882,20 +906,20 @@ function applyShrinkAndWrap(
         );
       }
     }
-    if (context && fnNode) {
-      validateShrinkCoverage(
-        paramSummary,
-        baseTypeNode,
-        baseType,
-        paths,
-        shrunk,
-        context,
-        fnNode,
-      );
-    }
     if (shrunk) {
       next = shrunk;
     }
+  }
+  if (context && fnNode) {
+    validateShrinkCoverage(
+      paramSummary,
+      baseTypeNode,
+      baseType,
+      paths,
+      shrunk,
+      context,
+      fnNode,
+    );
   }
 
   next = applyCapabilityDefaultsToTypeNode(

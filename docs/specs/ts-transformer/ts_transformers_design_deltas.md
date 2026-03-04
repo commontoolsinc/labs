@@ -245,7 +245,11 @@ to runtime contract support).
   `applyCapabilitySummaryToArgument`, `applyCapabilitySummaryToParameter`,
   `collectFunctionSchemaTypeNodes`, and `applyShrinkAndWrap`.
 - Guards skip synthetic parameters (`__`-prefixed names), `never`-typed
-  parameters, wildcard parameters, and the reactive proxy `"key"` head.
+  parameters, non-`unknown` wildcard parameters, and the reactive proxy `"key"`
+  head.
+- Wildcard parameters typed `unknown` now produce `schema:unknown-type-access`
+  because the generated schema cannot express what to fetch. `any`-typed and
+  concrete-typed wildcard parameters are not affected.
 
 **Diagnostic codes:**
 
@@ -253,10 +257,11 @@ to runtime contract support).
   accesses
 - `schema:path-not-in-type` — concrete type missing accessed properties
 
-**Test coverage:** `test/schema-shrink-validation.test.ts` with 5 cases:
+**Test coverage:** `test/schema-shrink-validation.test.ts` with 9 cases:
 unknown-type error, missing-property error, valid-no-error, interprocedural
 unknown-type access in lift callback, interprocedural path-not-in-type via
-as-any cast in lift callback.
+as-any cast in lift callback, wildcard unknown in lift, wildcard any in lift
+(no error), wildcard concrete in lift (no error), wildcard unknown in pattern.
 
 **Rationale:**
 
