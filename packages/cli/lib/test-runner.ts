@@ -31,6 +31,7 @@ import type {
   Cell,
   ErrorWithContext,
   Pattern,
+  SettleStats,
   Stream,
 } from "@commontools/runner";
 import type { OpaqueRef } from "@commontools/api";
@@ -130,6 +131,30 @@ function fmtMs(ms: number): string {
   if (ms >= 10) return `${Math.round(ms)}ms`;
   if (ms >= 1) return `${ms.toFixed(1)}ms`;
   return `${ms.toFixed(2)}ms`;
+}
+
+function printSettleStats(stats: SettleStats | null): void {
+  if (!stats || stats.iterations.length <= 1) return;
+  console.log(
+    `           Settle: ${stats.iterations.length} iterations, ${fmtMs(stats.totalDurationMs)}, ${stats.initialSeedCount} initial seeds, settled=${stats.settledEarly}`,
+  );
+  for (let i = 0; i < stats.iterations.length; i++) {
+    const iter = stats.iterations[i];
+    const effects = iter.actions.filter((a) => a.type === "effect").length;
+    const comps = iter.actions.filter((a) => a.type === "computation").length;
+    console.log(
+      `             iter ${i}: workSet=${iter.workSetSize} order=${iter.orderSize} (${effects}E ${comps}C), ran=${iter.actionsRun}, newSubs=${iter.newSubscriptions}, ${fmtMs(iter.durationMs)}`,
+    );
+    // Show which actions are in the workSet (truncated)
+    if (iter.actions.length > 0 && iter.workSetSize <= 40) {
+      for (const a of iter.actions) {
+        const tag = a.type === "effect" ? "E" : "C";
+        // Shorten action ID for readability
+        const shortId = a.id.length > 70 ? a.id.slice(0, 67) + "..." : a.id;
+        console.log(`               [${tag}] ${shortId}`);
+      }
+    }
+  }
 }
 
 function getGlobalLogCounts(): {
@@ -331,6 +356,132 @@ function printLoggerStats(
 }
 
 /**
+ * Print a table of scheduler action stats, sorted by total time descending.
+ * Mirrors the table view in the shell's SchedulerGraphView debug UI.
+ *
+ * Stats are keyed by action ID (source location), so multiple action instances
+ * from the same source share the same stats. We deduplicate by ID and count
+ * how many live nodes share each ID.
+ */
+function printActionStatsTable(runtime: Runtime): void {
+  const snapshot = runtime.scheduler.getGraphSnapshot();
+  const nodes = snapshot.nodes.filter((n) => n.stats && n.stats.runCount > 0);
+  if (nodes.length === 0) return;
+
+  // Deduplicate by id since stats are shared across instances with same source.
+  // Count how many live nodes share each id.
+  const seen = new Map<
+    string,
+    {
+      stats: NonNullable<(typeof nodes)[0]["stats"]>;
+      type: string;
+      instances: number;
+      childIds: Set<string>;
+      preview?: string;
+    }
+  >();
+
+  for (const node of nodes) {
+    if (!node.stats) continue;
+    const existing = seen.get(node.id);
+    if (existing) {
+      existing.instances++;
+    } else {
+      seen.set(node.id, {
+        stats: node.stats,
+        type: node.type,
+        instances: 1,
+        childIds: new Set(),
+        preview: node.preview,
+      });
+    }
+  }
+
+  // Track parent-child: aggregate children into parents
+  for (const node of nodes) {
+    if (node.parentId && seen.has(node.parentId) && seen.has(node.id)) {
+      seen.get(node.parentId)!.childIds.add(node.id);
+    }
+  }
+
+  // Build rows: only top-level (not a child of another visible node)
+  const allChildIds = new Set<string>();
+  for (const entry of seen.values()) {
+    for (const cid of entry.childIds) allChildIds.add(cid);
+  }
+
+  const rows: {
+    id: string;
+    type: string;
+    instances: number;
+    runs: number;
+    totalMs: number;
+    avgMs: number;
+    lastMs: number;
+    childCount: number;
+    preview?: string;
+  }[] = [];
+
+  for (const [id, entry] of seen) {
+    if (allChildIds.has(id)) continue;
+    let totalMs = entry.stats.totalTime;
+    let runs = entry.stats.runCount;
+    for (const cid of entry.childIds) {
+      const child = seen.get(cid);
+      if (child) {
+        totalMs += child.stats.totalTime;
+        runs += child.stats.runCount;
+      }
+    }
+    rows.push({
+      id,
+      type: entry.type,
+      instances: entry.instances,
+      runs,
+      totalMs,
+      avgMs: runs > 0 ? totalMs / runs : 0,
+      lastMs: entry.stats.lastRunTime,
+      childCount: entry.childIds.size,
+      preview: entry.preview,
+    });
+  }
+
+  rows.sort((a, b) => b.totalMs - a.totalMs);
+
+  // Print table
+  console.log(`\n  ⚡ Action Stats (top 20 by total time):`);
+  console.log(
+    `    ${"Action".padEnd(55)} ${"Runs".padStart(5)} ${"Total".padStart(9)} ${"Avg".padStart(9)} ${"Last".padStart(9)}`,
+  );
+  console.log(`    ${"─".repeat(90)}`);
+
+  for (const row of rows.slice(0, 20)) {
+    const suffix = [
+      row.instances > 1 ? `${row.instances}x` : "",
+      row.childCount > 0 ? `+${row.childCount}ch` : "",
+    ].filter(Boolean).join(" ");
+    // Use first line of preview if available, otherwise the action id
+    const base = row.preview
+      ? row.preview.split("\n")[0].trim().slice(0, 40)
+      : row.id;
+    const label = suffix ? `${base} (${suffix})` : base;
+    const truncated = label.length > 54
+      ? "…" + label.slice(label.length - 53)
+      : label;
+    console.log(
+      `    ${truncated.padEnd(55)} ${String(row.runs).padStart(5)} ${fmtMs(row.totalMs).padStart(9)} ${fmtMs(row.avgMs).padStart(9)} ${fmtMs(row.lastMs).padStart(9)}`,
+    );
+  }
+
+  const totalRuns = rows.reduce((s, r) => s + r.runs, 0);
+  const totalTimeMs = rows.reduce((s, r) => s + r.totalMs, 0);
+  console.log(`    ${"─".repeat(90)}`);
+  console.log(
+    `    ${"TOTAL".padEnd(55)} ${String(totalRuns).padStart(5)} ${fmtMs(totalTimeMs).padStart(9)}`,
+  );
+}
+
+/**
  * Run a single test pattern file.
  */
 export async function runTestPattern(
@@ -475,6 +626,7 @@ export async function runTestPattern(
     if (options.verbose) {
       console.log(`  Found ${testsValue.length} test steps`);
       printLoggerStats(performance.now() - startTime, false, "Setup");
+      printSettleStats(runtime.scheduler.getSettleStats());
       resetAllCountBaselines();
       resetAllTimingBaselines();
     }
@@ -550,6 +702,18 @@ export async function runTestPattern(
           console.log(`  → Running ${actionName}...`);
         }
 
+        // Snapshot action stats before running (for delta tracking)
+        const statsThreshold = options.statsThreshold ?? 5000;
+        let preRunCounts: Map<string, number> | undefined;
+        if (options.verbose) {
+          preRunCounts = new Map();
+          for (const node of runtime.scheduler.getGraphSnapshot().nodes) {
+            if (node.stats) {
+              preRunCounts.set(node.id, node.stats.runCount);
+            }
+          }
+        }
+
         // Get the action stream via .key()
         const actionStream = testsCell.key(i).key(
           "action",
@@ -575,6 +739,127 @@ export async function runTestPattern(
             error: err instanceof Error ? err.message : String(err),
             durationMs: performance.now() - itemStart,
           });
+        }
+
+        // Print per-action run deltas for slow actions
+        if (
+          options.verbose && preRunCounts &&
+          (performance.now() - itemStart > statsThreshold ||
+            statsThreshold === 0)
+        ) {
+          const postSnapshot = runtime.scheduler.getGraphSnapshot();
+          const deltas: { id: string; preview?: string; delta: number }[] = [];
+          const seen = new Set<string>();
+          for (const node of postSnapshot.nodes) {
+            if (!node.stats || seen.has(node.id)) continue;
+            seen.add(node.id);
+            const pre = preRunCounts.get(node.id) ?? 0;
+            const delta = node.stats.runCount - pre;
+            if (delta > 0) {
+              deltas.push({
+                id: node.id,
+                preview: node.preview,
+                delta,
+              });
+            }
+          }
+          if (deltas.length > 0) {
+            deltas.sort((a, b) => b.delta - a.delta);
+            const totalDelta = deltas.reduce((s, d) => s + d.delta, 0);
+            console.log(
+              `    ⟳ ${totalDelta} scheduler runs across ${deltas.length} actions:`,
+            );
+            // Build reads/writes lookup from post-snapshot
+            const nodeInfo = new Map<
+              string,
+              { reads?: string[]; writes?: string[] }
+            >();
+            for (const node of postSnapshot.nodes) {
+              if (!nodeInfo.has(node.id)) {
+                nodeInfo.set(node.id, {
+                  reads: node.reads,
+                  writes: node.writes,
+                });
+              }
+            }
+            // Helper to shorten cell paths: did:key:z6Mk.../of:baedrei.../value/foo → …rei.../value/foo
+            const shortenPath = (r: string): string => {
+              // Format: did:key:.../of:baedrei.../path/parts
+              const ofIdx = r.indexOf("/of:");
+              if (ofIdx < 0) return r.length > 40 ? "…" + r.slice(-39) : r;
+              const afterOf = r.slice(ofIdx + 4);
+              const slashIdx = afterOf.indexOf("/");
+              if (slashIdx < 0) return "…" + afterOf.slice(-20);
+              const entityId = afterOf.slice(0, slashIdx);
+              const path = afterOf.slice(slashIdx);
+              const shortEntity = entityId.length > 10
+                ? entityId.slice(0, 8) + "…"
+                : entityId;
+              return shortEntity + path;
+            };
+            // Collect all entity IDs read by re-triggered actions
+            const entityReadCounts = new Map<string, number>();
+            for (const d of deltas) {
+              const info = nodeInfo.get(d.id);
+              if (info?.reads) {
+                for (const r of info.reads) {
+                  // Extract entity: everything between /of: and the next /
+                  const ofIdx = r.indexOf("/of:");
+                  if (ofIdx < 0) continue;
+                  const afterOf = r.slice(ofIdx + 4);
+                  const slashIdx = afterOf.indexOf("/");
+                  const entity = slashIdx < 0 ? afterOf : afterOf.slice(0, slashIdx);
+                  const path = slashIdx < 0 ? "" : afterOf.slice(slashIdx);
+                  const key = entity.slice(0, 8) + "…" + path;
+                  entityReadCounts.set(
+                    key,
+                    (entityReadCounts.get(key) ?? 0) + d.delta,
+                  );
+                }
+              }
+            }
+
+            for (const d of deltas.slice(0, 10)) {
+              const label = d.preview
+                ? d.preview.split("\n")[0].trim().slice(0, 50)
+                : d.id;
+              const info = nodeInfo.get(d.id);
+              const reads = info?.reads;
+              const writes = info?.writes;
+              // Show non-schema reads (skip the first entry which is typically the schema query)
+              const nonSchemaReads = reads?.filter((r) =>
+                !r.includes("%22query%22")
+              ) ?? [];
+              const rStr = nonSchemaReads.length > 0
+                ? ` r:[${nonSchemaReads.slice(0, 3).map(shortenPath).join(", ")}${nonSchemaReads.length > 3 ? ` +${nonSchemaReads.length - 3}` : ""}]`
+                : reads && reads.length > 0
+                ? ` r:[schema-query +${reads.length - 1}]`
+                : "";
+              const wStr = writes && writes.length > 0
+                ? ` w:[${writes.slice(0, 2).map(shortenPath).join(", ")}${writes.length > 2 ? ` +${writes.length - 2}` : ""}]`
+                : "";
+              console.log(
+                `      ${String(d.delta).padStart(4)}× ${label}${rStr}${wStr}`,
+              );
+            }
+
+            // Show top read entities across all re-triggered actions
+            const topReads = [...entityReadCounts.entries()]
+              .filter(([k]) => !k.includes("%22query%22"))
+              .sort((a, b) => b[1] - a[1]);
+            if (topReads.length > 0) {
+              console.log(`    📖 Most-read entities:`);
+              for (const [entity, count] of topReads.slice(0, 5)) {
+                console.log(`      ${String(count).padStart(4)}× ${entity}`);
+              }
+            }
+            if (deltas.length > 10) {
+              const rest = deltas.slice(10).reduce((s, d) => s + d.delta, 0);
+              console.log(
+                `      ${String(rest).padStart(4)}× (${deltas.length - 10} more actions)`,
+              );
+            }
+          }
         }
       } else {
         // It's an assertion - check the boolean value
@@ -631,8 +916,14 @@ export async function runTestPattern(
             true,
             `${stepLabel} took ${fmtMs(stepDuration)}`,
           );
+          printSettleStats(runtime.scheduler.getSettleStats());
         }
       }
+    }
+
+    // Print action stats table (sorted by total time, like the shell debug UI)
+    if (options.verbose) {
+      printActionStatsTable(runtime);
     }
 
     // Collect idempotency violations detected during normal execution
