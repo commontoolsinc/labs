@@ -515,6 +515,10 @@ adjustments:
   - `writable` -> `Writable<T>`
   - `opaque` -> `OpaqueCell<T>`
 - compute-oriented boundaries apply full path shrink + wrapper selection
+- type aliases and interfaces (TypeReferenceNodes) are resolved to their
+  declaration members and shrunk in-place, preserving source-level type
+  annotations (Date formats, enum literals, `$ref`/`$defs`). When all members
+  are retained the original TypeReference is kept for schema fidelity.
 - pattern boundaries apply defaults-only mode to preserve broad shape continuity
   while still applying extracted static defaults
 - wildcard roots disable path shrinking for affected parameters/arguments

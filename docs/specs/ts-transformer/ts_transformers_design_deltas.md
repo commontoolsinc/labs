@@ -250,6 +250,13 @@ to runtime contract support).
 - Wildcard parameters typed `unknown` now produce `schema:unknown-type-access`
   because the generated schema cannot express what to fetch. `any`-typed and
   concrete-typed wildcard parameters are not affected.
+- `buildShrunkTypeNodeFromTypeNode` resolves non-Cell TypeReferences (type
+  aliases, interfaces) to their declaration members via
+  `resolveTypeReferenceMembers`, then shrinks those members directly using
+  `shrinkTypeLiteralMembers`. This preserves source-level TypeNodes (Date
+  formats, enum literals, `$ref`/`$defs`) that would be lost by the
+  type-driven fallback. When no members are removed, the original
+  TypeReference is kept intact to preserve schema references.
 
 **Diagnostic codes:**
 
