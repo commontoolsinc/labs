@@ -222,6 +222,38 @@ Deno.test("Schema Shrink Validation", async (t) => {
   );
 
   await t.step(
+    "no error when handler parameter type is a type alias",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { handler } from "commontools";',
+        "",
+        "type Req = { item: string };",
+        "",
+        "export const h = handler<Req, {}>(",
+        "  (args) => { console.log(args.item); },",
+        ");",
+      ].join("\n");
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const shrinkErrors = errors.filter(
+        (e) =>
+          e.type === "schema:unknown-type-access" ||
+          e.type === "schema:path-not-in-type",
+      );
+      assertEquals(
+        shrinkErrors.length,
+        0,
+        `Expected no shrink errors for type alias but got: ${
+          shrinkErrors.map((e) => e.message).join("; ")
+        }`,
+      );
+    },
+  );
+
+  await t.step(
     "no diagnostic when declared type matches all accessed paths",
     async () => {
       const source = [

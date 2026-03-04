@@ -820,10 +820,18 @@ function validateShrinkCoverage(
   // Case 2: concrete type but some paths didn't resolve.
   // Check the shrunk result if available; otherwise fall back to the base
   // type node itself (covers defaults_only mode where shrinking is skipped).
+  // When neither yields heads (e.g. the base node is a TypeReference alias),
+  // fall back to the resolved ts.Type's apparent properties.
   const shrunkHeads = collectMaterializedHeads(shrunk);
   const materializedHeads = shrunkHeads.size > 0
     ? shrunkHeads
     : collectMaterializedHeads(baseTypeNode);
+  if (materializedHeads.size === 0 && baseType !== undefined) {
+    const props = baseType.getApparentProperties();
+    for (const prop of props) {
+      materializedHeads.add(prop.name);
+    }
+  }
   const missing = [...requestedHeads].filter(
     (h) => !materializedHeads.has(h),
   );
