@@ -5,41 +5,14 @@
  * - Legacy: merkle-reference tree builder with primitive LRU + WeakMap caching
  * - Canonical: `canonicalHash()` single-pass incremental SHA-256
  *
- * Uses `setCanonicalHashConfig()` / `resetCanonicalHashConfig()` to switch
- * between paths, same pattern as the unit tests.
+ * Uses `setCanonicalHashConfig()` with `BenchContext.start()` to exclude
+ * config setup from timing.
  *
  * Run with: deno bench --allow-read --allow-write --allow-net --allow-ffi --allow-env --no-check test/hashing-bench.ts
  */
 
-import {
-  type DefinedReferent,
-  refer,
-  resetCanonicalHashConfig,
-  setCanonicalHashConfig,
-} from "../reference.ts";
+import { refer, setCanonicalHashConfig } from "../reference.ts";
 import { canonicalHash } from "../canonical-hash.ts";
-
-// ---------------------------------------------------------------------------
-// Helpers: configure refer() for legacy vs. canonical
-// ---------------------------------------------------------------------------
-
-function legacyRefer<T extends DefinedReferent>(source: T): unknown {
-  setCanonicalHashConfig(false);
-  try {
-    return refer(source);
-  } finally {
-    resetCanonicalHashConfig();
-  }
-}
-
-function canonicalRefer<T extends DefinedReferent>(source: T): unknown {
-  setCanonicalHashConfig(true);
-  try {
-    return refer(source);
-  } finally {
-    resetCanonicalHashConfig();
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Pre-generated test data
@@ -116,8 +89,10 @@ const assertion16KB = {
 
 // Warm up both paths to avoid measuring JIT compilation
 for (let i = 0; i < 20; i++) {
-  legacyRefer(smallObject);
-  canonicalRefer(smallObject);
+  setCanonicalHashConfig(false);
+  refer(smallObject);
+  setCanonicalHashConfig(true);
+  refer(smallObject);
 }
 
 // ==========================================================================
@@ -128,16 +103,22 @@ Deno.bench({
   name: "legacy refer() - small object (5 keys, cached)",
   group: "small-object",
   baseline: true,
-  fn() {
-    legacyRefer(smallObject);
+  fn(b) {
+    setCanonicalHashConfig(false);
+    b.start();
+    refer(smallObject);
+    b.end();
   },
 });
 
 Deno.bench({
   name: "canonical refer() - small object (5 keys)",
   group: "small-object",
-  fn() {
-    canonicalRefer(smallObject);
+  fn(b) {
+    setCanonicalHashConfig(true);
+    b.start();
+    refer(smallObject);
+    b.end();
   },
 });
 
@@ -145,16 +126,22 @@ Deno.bench({
   name: "legacy refer() - medium object (15 keys, 2-level, cached)",
   group: "medium-object",
   baseline: true,
-  fn() {
-    legacyRefer(mediumObject);
+  fn(b) {
+    setCanonicalHashConfig(false);
+    b.start();
+    refer(mediumObject);
+    b.end();
   },
 });
 
 Deno.bench({
   name: "canonical refer() - medium object (15 keys, 2-level)",
   group: "medium-object",
-  fn() {
-    canonicalRefer(mediumObject);
+  fn(b) {
+    setCanonicalHashConfig(true);
+    b.start();
+    refer(mediumObject);
+    b.end();
   },
 });
 
@@ -162,16 +149,22 @@ Deno.bench({
   name: "legacy refer() - large tree (~364 nodes, cached)",
   group: "large-tree",
   baseline: true,
-  fn() {
-    legacyRefer(largeNestedTree);
+  fn(b) {
+    setCanonicalHashConfig(false);
+    b.start();
+    refer(largeNestedTree);
+    b.end();
   },
 });
 
 Deno.bench({
   name: "canonical refer() - large tree (~364 nodes)",
   group: "large-tree",
-  fn() {
-    canonicalRefer(largeNestedTree);
+  fn(b) {
+    setCanonicalHashConfig(true);
+    b.start();
+    refer(largeNestedTree);
+    b.end();
   },
 });
 
@@ -179,16 +172,22 @@ Deno.bench({
   name: "legacy refer() - small array (5 elements, cached)",
   group: "small-array",
   baseline: true,
-  fn() {
-    legacyRefer(smallArray);
+  fn(b) {
+    setCanonicalHashConfig(false);
+    b.start();
+    refer(smallArray);
+    b.end();
   },
 });
 
 Deno.bench({
   name: "canonical refer() - small array (5 elements)",
   group: "small-array",
-  fn() {
-    canonicalRefer(smallArray);
+  fn(b) {
+    setCanonicalHashConfig(true);
+    b.start();
+    refer(smallArray);
+    b.end();
   },
 });
 
@@ -196,16 +195,22 @@ Deno.bench({
   name: "legacy refer() - large array (200 objects, cached)",
   group: "large-array",
   baseline: true,
-  fn() {
-    legacyRefer(largeArray);
+  fn(b) {
+    setCanonicalHashConfig(false);
+    b.start();
+    refer(largeArray);
+    b.end();
   },
 });
 
 Deno.bench({
   name: "canonical refer() - large array (200 objects)",
   group: "large-array",
-  fn() {
-    canonicalRefer(largeArray);
+  fn(b) {
+    setCanonicalHashConfig(true);
+    b.start();
+    refer(largeArray);
+    b.end();
   },
 });
 
@@ -213,16 +218,22 @@ Deno.bench({
   name: "legacy refer() - repeated subtrees (50 items, 1 shared, cached)",
   group: "repeated-subtrees",
   baseline: true,
-  fn() {
-    legacyRefer(repeatedSubtrees);
+  fn(b) {
+    setCanonicalHashConfig(false);
+    b.start();
+    refer(repeatedSubtrees);
+    b.end();
   },
 });
 
 Deno.bench({
   name: "canonical refer() - repeated subtrees (50 items, 1 shared)",
   group: "repeated-subtrees",
-  fn() {
-    canonicalRefer(repeatedSubtrees);
+  fn(b) {
+    setCanonicalHashConfig(true);
+    b.start();
+    refer(repeatedSubtrees);
+    b.end();
   },
 });
 
@@ -230,16 +241,22 @@ Deno.bench({
   name: "legacy refer() - unclaimed {the, of} (cached)",
   group: "unclaimed",
   baseline: true,
-  fn() {
-    legacyRefer(unclaimedFact);
+  fn(b) {
+    setCanonicalHashConfig(false);
+    b.start();
+    refer(unclaimedFact);
+    b.end();
   },
 });
 
 Deno.bench({
   name: "canonical refer() - unclaimed {the, of}",
   group: "unclaimed",
-  fn() {
-    canonicalRefer(unclaimedFact);
+  fn(b) {
+    setCanonicalHashConfig(true);
+    b.start();
+    refer(unclaimedFact);
+    b.end();
   },
 });
 
@@ -247,16 +264,22 @@ Deno.bench({
   name: "legacy refer() - 16KB assertion (cached)",
   group: "assertion-16kb",
   baseline: true,
-  fn() {
-    legacyRefer(assertion16KB);
+  fn(b) {
+    setCanonicalHashConfig(false);
+    b.start();
+    refer(assertion16KB);
+    b.end();
   },
 });
 
 Deno.bench({
   name: "canonical refer() - 16KB assertion",
   group: "assertion-16kb",
-  fn() {
-    canonicalRefer(assertion16KB);
+  fn(b) {
+    setCanonicalHashConfig(true);
+    b.start();
+    refer(assertion16KB);
+    b.end();
   },
 });
 
@@ -299,8 +322,9 @@ Deno.bench({
   baseline: true,
   fn(b) {
     const data = freshSmallObject();
+    setCanonicalHashConfig(false);
     b.start();
-    legacyRefer(data);
+    refer(data);
     b.end();
   },
 });
@@ -310,8 +334,9 @@ Deno.bench({
   group: "small-object-fresh",
   fn(b) {
     const data = freshSmallObject();
+    setCanonicalHashConfig(true);
     b.start();
-    canonicalRefer(data);
+    refer(data);
     b.end();
   },
 });
@@ -322,8 +347,9 @@ Deno.bench({
   baseline: true,
   fn(b) {
     const data = freshMediumObject();
+    setCanonicalHashConfig(false);
     b.start();
-    legacyRefer(data);
+    refer(data);
     b.end();
   },
 });
@@ -333,8 +359,9 @@ Deno.bench({
   group: "medium-object-fresh",
   fn(b) {
     const data = freshMediumObject();
+    setCanonicalHashConfig(true);
     b.start();
-    canonicalRefer(data);
+    refer(data);
     b.end();
   },
 });
@@ -345,8 +372,9 @@ Deno.bench({
   baseline: true,
   fn(b) {
     const data = freshUnclaimedFact();
+    setCanonicalHashConfig(false);
     b.start();
-    legacyRefer(data);
+    refer(data);
     b.end();
   },
 });
@@ -356,8 +384,9 @@ Deno.bench({
   group: "unclaimed-fresh",
   fn(b) {
     const data = freshUnclaimedFact();
+    setCanonicalHashConfig(true);
     b.start();
-    canonicalRefer(data);
+    refer(data);
     b.end();
   },
 });
@@ -368,8 +397,9 @@ Deno.bench({
   baseline: true,
   fn(b) {
     const data = freshAssertion16KB();
+    setCanonicalHashConfig(false);
     b.start();
-    legacyRefer(data);
+    refer(data);
     b.end();
   },
 });
@@ -379,8 +409,9 @@ Deno.bench({
   group: "assertion-16kb-fresh",
   fn(b) {
     const data = freshAssertion16KB();
+    setCanonicalHashConfig(true);
     b.start();
-    canonicalRefer(data);
+    refer(data);
     b.end();
   },
 });
