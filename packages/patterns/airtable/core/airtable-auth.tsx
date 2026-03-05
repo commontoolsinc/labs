@@ -4,6 +4,7 @@ import {
   Default,
   getPatternEnvironment,
   handler,
+  ifElse,
   NAME,
   pattern,
   Secret,
@@ -455,77 +456,60 @@ export default pattern<Input, Output>(
 
     const scopesDisplay = computed(() => scopes.join(", "));
 
-    // Compact user chip
-    const userChip = computed(() => {
-      if (!auth?.user?.email) {
-        return (
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <span
-              style={{
-                width: "24px",
-                height: "24px",
-                borderRadius: "50%",
-                backgroundColor: "#e5e7eb",
-                display: "inline-block",
-              }}
-            />
-            <span style={{ color: "#6b7280" }}>Not signed in</span>
-          </div>
-        );
-      }
-      return (
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <span
-            style={{
-              width: "24px",
-              height: "24px",
-              borderRadius: "50%",
-              backgroundColor: "#18BFFF",
-              display: "inline-block",
-            }}
-          />
-          <div>
-            <div style={{ fontWeight: 500, fontSize: "14px" }}>
-              {auth.user.name || auth.user.email}
-            </div>
-            {auth.user.name && (
-              <div style={{ fontSize: "12px", color: "#6b7280" }}>
-                {auth.user.email}
-              </div>
-            )}
-          </div>
-        </div>
-      );
-    });
+    const hasEmail = computed(() => !!auth?.user?.email);
+    const hasUserName = computed(() => !!auth?.user?.name);
 
-    // Preview for picker
-    const previewUI = computed(() =>
-      createPreviewUI(auth, {
-        "data.records:read": selectedScopes["data.records:read"],
-        "data.records:write": selectedScopes["data.records:write"],
-        "data.recordComments:read": selectedScopes["data.recordComments:read"],
-        "data.recordComments:write":
-          selectedScopes["data.recordComments:write"],
-        "schema.bases:read": selectedScopes["schema.bases:read"],
-        "schema.bases:write": selectedScopes["schema.bases:write"],
-        "webhook:manage": selectedScopes["webhook:manage"],
-      })
-    );
+    // Data-only computed for previewUI — resolves reactive values to plain scalars
+    const previewState = computed(() => {
+      const email = auth?.user?.email || "";
+      const name = auth?.user?.name || "";
+      const isAuthenticated = !!email;
+      const now = Date.now();
+      const expiresAt = auth?.expiresAt || 0;
+      const isExpired = isAuthenticated && expiresAt > 0 && expiresAt < now;
+      const isWarning = isAuthenticated && !isExpired && expiresAt > 0 &&
+        expiresAt - now < 10 * 60 * 1000;
+      const status: AuthStatus = !isAuthenticated
+        ? "needs-login"
+        : isExpired
+        ? "expired"
+        : isWarning
+        ? "warning"
+        : "ready";
+      const scopeSummary = isAuthenticated
+        ? getScopeSummary(auth?.scope || [])
+        : getSelectedScopeSummary({
+          "data.records:read": !!selectedScopes["data.records:read"],
+          "data.records:write": !!selectedScopes["data.records:write"],
+          "data.recordComments:read":
+            !!selectedScopes["data.recordComments:read"],
+          "data.recordComments:write":
+            !!selectedScopes["data.recordComments:write"],
+          "schema.bases:read": !!selectedScopes["schema.bases:read"],
+          "schema.bases:write": !!selectedScopes["schema.bases:write"],
+          "webhook:manage": !!selectedScopes["webhook:manage"],
+        });
+      const initial = (name || email || "?")[0]?.toUpperCase() || "";
+      const bgColor = STATUS_CONFIG[status].bg;
+      const dotColor = STATUS_CONFIG[status].dot;
+      return {
+        email,
+        name,
+        isAuthenticated,
+        bgColor,
+        dotColor,
+        scopeSummary,
+        initial,
+      };
+    });
 
     const loggedIn = computed(() => !!auth?.accessToken);
 
-    const grantedScopesUI = computed(() => {
-      const scopeList = auth.scope;
-      if (!scopeList || scopeList.length === 0) {
-        return <ul style={{ margin: "8px 0 0 0", paddingLeft: "20px" }} />;
-      }
-      const friendlyScopes = scopeList.map(
+    // Data-only computed for granted scopes — JSX rendered inline in UI section
+    const grantedScopesList = computed(() => {
+      const scopeList: string[] = auth?.scope || [];
+      return scopeList.map(
         (s: string) => SCOPE_MAP[s as keyof typeof SCOPE_MAP] || s,
-      ) as string[];
-      return (
-        <ul style={{ margin: "8px 0 0 0", paddingLeft: "20px" }}>
-          {friendlyScopes.map((scope) => <li>{scope}</li>)}
-        </ul>
       );
     });
 
@@ -758,7 +742,9 @@ export default pattern<Input, Output>(
                 }}
               >
                 <strong>Granted Scopes:</strong>
-                {grantedScopesUI}
+                <ul style={{ margin: "8px 0 0 0", paddingLeft: "20px" }}>
+                  {grantedScopesList.map((scope) => <li>{scope}</li>)}
+                </ul>
               </div>
             )}
 
@@ -841,8 +827,124 @@ export default pattern<Input, Output>(
       auth,
       scopes,
       selectedScopes,
-      userChip,
-      previewUI,
+      userChip: ifElse(
+        hasEmail,
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <span
+            style={{
+              width: "24px",
+              height: "24px",
+              borderRadius: "50%",
+              backgroundColor: "#18BFFF",
+              display: "inline-block",
+            }}
+          />
+          <div>
+            <div style={{ fontWeight: 500, fontSize: "14px" }}>
+              {ifElse(hasUserName, auth.user.name, auth.user.email)}
+            </div>
+            {ifElse(
+              hasUserName,
+              <div style={{ fontSize: "12px", color: "#6b7280" }}>
+                {auth.user.email}
+              </div>,
+              null,
+            )}
+          </div>
+        </div>,
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <span
+            style={{
+              width: "24px",
+              height: "24px",
+              borderRadius: "50%",
+              backgroundColor: "#e5e7eb",
+              display: "inline-block",
+            }}
+          />
+          <span style={{ color: "#6b7280" }}>Not signed in</span>
+        </div>,
+      ),
+      previewUI: (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "12px",
+            padding: "12px 16px",
+            backgroundColor: previewState.bgColor,
+            borderRadius: "8px",
+          }}
+        >
+          <div style={{ position: "relative", flexShrink: 0 }}>
+            <div
+              style={{
+                width: "36px",
+                height: "36px",
+                borderRadius: "50%",
+                backgroundColor: previewState.isAuthenticated
+                  ? "#18BFFF"
+                  : "#e5e7eb",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              {ifElse(
+                previewState.isAuthenticated,
+                <span
+                  style={{
+                    color: "white",
+                    fontSize: "14px",
+                    fontWeight: "600",
+                  }}
+                >
+                  {previewState.initial}
+                </span>,
+                null,
+              )}
+            </div>
+            <div
+              style={{
+                position: "absolute",
+                bottom: "-2px",
+                right: "-2px",
+                width: "12px",
+                height: "12px",
+                borderRadius: "50%",
+                backgroundColor: previewState.dotColor,
+                border: "2px solid white",
+              }}
+            />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 500, fontSize: "14px" }}>
+              {ifElse(
+                previewState.isAuthenticated,
+                <span>{previewState.name || previewState.email}</span>,
+                <span>Sign in required</span>,
+              )}
+            </div>
+            {ifElse(
+              previewState.isAuthenticated && !!previewState.name &&
+                !!previewState.email,
+              <div style={{ fontSize: "12px", color: "#6b7280" }}>
+                {previewState.email}
+              </div>,
+              null,
+            )}
+            {ifElse(
+              !!previewState.scopeSummary,
+              <div
+                style={{ fontSize: "12px", color: "#6b7280", marginTop: "2px" }}
+              >
+                {previewState.scopeSummary}
+              </div>,
+              null,
+            )}
+          </div>
+        </div>
+      ),
       refreshToken: refreshTokenHandler({ auth }),
       bgUpdater: bgRefreshHandler({ auth }),
     };

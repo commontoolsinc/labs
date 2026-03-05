@@ -40,7 +40,6 @@ const EMPTY_GOOGLE_AUTH_DATA = {
 
 export const GoogleDescriptor: ProviderDescriptor = {
   name: "google",
-  brandColor: "#4285F4",
   clientId: env.GOOGLE_CLIENT_ID,
   clientSecret: env.GOOGLE_CLIENT_SECRET,
   authorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth",

@@ -59,6 +59,9 @@ export class CTOauth extends BaseElement {
   declare loginEndpoint: string;
   declare tokenField: string;
 
+  private _pollIntervalId: ReturnType<typeof setInterval> | null = null;
+  private _boundMessageListener: ((event: MessageEvent) => void) | null = null;
+
   constructor() {
     super();
     this.authStatus = "";
@@ -69,6 +72,22 @@ export class CTOauth extends BaseElement {
     this.brandColor = "#4285f4";
     this.loginEndpoint = "";
     this.tokenField = "accessToken";
+  }
+
+  private _cleanup() {
+    if (this._pollIntervalId !== null) {
+      clearInterval(this._pollIntervalId);
+      this._pollIntervalId = null;
+    }
+    if (this._boundMessageListener) {
+      globalThis.removeEventListener("message", this._boundMessageListener);
+      this._boundMessageListener = null;
+    }
+  }
+
+  override disconnectedCallback() {
+    super.disconnectedCallback();
+    this._cleanup();
   }
 
   private getAccessToken(): string | undefined {
@@ -110,6 +129,9 @@ export class CTOauth extends BaseElement {
       const resp = await response.json();
       this.authStatus = "Opening OAuth window...";
 
+      // Clean up any previous listener/interval before creating new ones
+      this._cleanup();
+
       const messageListener = (event: MessageEvent) => {
         if (event.origin !== globalThis.location.origin) return;
 
@@ -121,10 +143,11 @@ export class CTOauth extends BaseElement {
               event.data.result.error || "Unknown error"
             }`;
           this.isLoading = false;
-          globalThis.removeEventListener("message", messageListener);
+          this._cleanup();
         }
       };
 
+      this._boundMessageListener = messageListener;
       globalThis.addEventListener("message", messageListener);
 
       const authWindow = globalThis.open(
@@ -134,15 +157,14 @@ export class CTOauth extends BaseElement {
       );
 
       if (authWindow) {
-        const checkWindowClosed = setInterval(() => {
+        this._pollIntervalId = setInterval(() => {
           if (authWindow.closed) {
-            clearInterval(checkWindowClosed);
             if (!this.authResult) {
               this.authStatus =
                 "OAuth window closed. Authentication may not have completed.";
               this.isLoading = false;
             }
-            globalThis.removeEventListener("message", messageListener);
+            this._cleanup();
           }
         }, 500);
       }

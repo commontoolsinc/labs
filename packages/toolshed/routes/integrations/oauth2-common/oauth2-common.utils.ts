@@ -164,21 +164,6 @@ export async function persistTokens(
   }
 }
 
-export async function getTokensFromAuthCell(
-  authCellDocLink: string,
-  schema: JSONSchema,
-) {
-  try {
-    const authCell = await getAuthCell(authCellDocLink, schema);
-    if (!authCell) throw new Error("Auth cell not found");
-    const tokenData = authCell.get();
-    if (!tokenData) throw new Error("No token data found in auth cell");
-    return tokenData as Record<string, unknown>;
-  } catch (error) {
-    throw new Error(`Error getting tokens: ${error}`);
-  }
-}
-
 export async function clearAuthData(
   authCellDocLink: string,
   schema: JSONSchema,

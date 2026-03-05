@@ -72,9 +72,6 @@ export interface ProviderDescriptor {
   /** Lowercase slug used in URL paths: /api/integrations/{name}-oauth/... */
   name: string;
 
-  /** Optional hex brand color for future UI use (e.g. "#FF3366"). */
-  brandColor?: string;
-
   /** Authorization endpoint. If omitted, resolved via metadataUrl discovery. */
   authorizationEndpoint?: string;
 

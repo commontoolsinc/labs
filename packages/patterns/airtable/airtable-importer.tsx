@@ -265,53 +265,19 @@ export default pattern<Input, Output>(
     const hasBaseSelected = computed(() => !!selectedBaseId);
     const hasTableSelected = computed(() => !!selectedTableId);
 
-    // Pre-compute base/table lists for JSX
-    const baseListUI = computed(() =>
-      bases.get().map((base) => (
-        <button
-          type="button"
-          onClick={boundSelectBase}
-          data-base-id={base.id}
-          style={{
-            padding: "10px 14px",
-            backgroundColor: selectedBaseId === base.id ? "#e0f2fe" : "white",
-            border: selectedBaseId === base.id
-              ? "1px solid #18BFFF"
-              : "1px solid #e0e0e0",
-            borderRadius: "6px",
-            cursor: "pointer",
-            textAlign: "left",
-            fontSize: "14px",
-            fontWeight: selectedBaseId === base.id ? "600" : "normal",
-          }}
-        >
-          {base.name}
-        </button>
-      ))
+    // Data-only computed for base/table lists — JSX rendered inline in UI section
+    const baseList = computed(() =>
+      bases.get().map((base) => ({
+        id: base.id,
+        name: base.name,
+      }))
     );
 
-    const tableListUI = computed(() =>
-      tables.get().map((table) => (
-        <button
-          type="button"
-          onClick={boundSelectTable}
-          data-table-id={table.id}
-          style={{
-            padding: "10px 14px",
-            backgroundColor: selectedTableId === table.id ? "#e0f2fe" : "white",
-            border: selectedTableId === table.id
-              ? "1px solid #18BFFF"
-              : "1px solid #e0e0e0",
-            borderRadius: "6px",
-            cursor: "pointer",
-            textAlign: "left",
-            fontSize: "14px",
-            fontWeight: selectedTableId === table.id ? "600" : "normal",
-          }}
-        >
-          {table.name}
-        </button>
-      ))
+    const tableList = computed(() =>
+      tables.get().map((table) => ({
+        id: table.id,
+        name: table.name,
+      }))
     );
 
     // Precompute table rows as plain data (avoid nested JSX .map() in computed)
@@ -407,7 +373,31 @@ export default pattern<Input, Output>(
                       gap: "4px",
                     }}
                   >
-                    {baseListUI}
+                    {baseList.map((base) => (
+                      <button
+                        type="button"
+                        onClick={boundSelectBase}
+                        data-base-id={base.id}
+                        style={{
+                          padding: "10px 14px",
+                          backgroundColor: selectedBaseId === base.id
+                            ? "#e0f2fe"
+                            : "white",
+                          border: selectedBaseId === base.id
+                            ? "1px solid #18BFFF"
+                            : "1px solid #e0e0e0",
+                          borderRadius: "6px",
+                          cursor: "pointer",
+                          textAlign: "left",
+                          fontSize: "14px",
+                          fontWeight: selectedBaseId === base.id
+                            ? "600"
+                            : "normal",
+                        }}
+                      >
+                        {base.name}
+                      </button>
+                    ))}
                   </div>,
                   <p style={{ color: "#666", fontSize: "14px", margin: "0" }}>
                     Click "Load Bases" to see your Airtable bases.
@@ -465,7 +455,31 @@ export default pattern<Input, Output>(
                         gap: "4px",
                       }}
                     >
-                      {tableListUI}
+                      {tableList.map((table) => (
+                        <button
+                          type="button"
+                          onClick={boundSelectTable}
+                          data-table-id={table.id}
+                          style={{
+                            padding: "10px 14px",
+                            backgroundColor: selectedTableId === table.id
+                              ? "#e0f2fe"
+                              : "white",
+                            border: selectedTableId === table.id
+                              ? "1px solid #18BFFF"
+                              : "1px solid #e0e0e0",
+                            borderRadius: "6px",
+                            cursor: "pointer",
+                            textAlign: "left",
+                            fontSize: "14px",
+                            fontWeight: selectedTableId === table.id
+                              ? "600"
+                              : "normal",
+                          }}
+                        >
+                          {table.name}
+                        </button>
+                      ))}
                     </div>,
                     <p
                       style={{ color: "#666", fontSize: "14px", margin: "0" }}

@@ -30,13 +30,37 @@ import {
 } from "./oauth2-common.utils.ts";
 
 /**
+ * Strip the `schema` field from a serialised cell-link JSON string.
+ *
+ * The frontend sends the full CellRef (including the JSON Schema) inside
+ * `authCellId`.  The schema is large and redundant here – the callback
+ * handler already receives the correct schema from the provider descriptor's
+ * `authSchema` option.  Removing it keeps the OAuth `state` parameter small
+ * enough for providers with strict URL-length limits (e.g. Airtable).
+ *
+ * This is safe because `getAuthCell()` falls back to `cell.asSchema(schema)`
+ * using the separately-provided schema when the link itself has none.
+ */
+function stripSchemaFromCellId(authCellId: string): string {
+  try {
+    const parsed = JSON.parse(authCellId);
+    if (parsed && typeof parsed === "object" && "schema" in parsed) {
+      const { schema: _, ...rest } = parsed;
+      return JSON.stringify(rest);
+    }
+    return authCellId;
+  } catch {
+    return authCellId;
+  }
+}
+
+/**
  * Encode OAuth2 state as a base64 string for the `state` query parameter.
  *
- * Uses short field names to keep the encoded value compact. A typical encoded
- * state is ~400-500 bytes of base64, well within any provider's URL length
- * limits. This avoids the need for any server-side state store, which would
- * break when multiple server instances sit behind a load balancer (login hits
- * instance A, callback hits instance B).
+ * Uses short field names and strips the bulky JSON Schema from the cell
+ * reference to keep the encoded value compact (~200-400 bytes of base64).
+ * This is fully stateless – no server-side store required – so it works
+ * correctly when multiple server instances sit behind a load balancer.
  */
 function encodeOAuthState(data: {
   authCellId: string;
@@ -45,9 +69,10 @@ function encodeOAuthState(data: {
   scopes?: string[];
 }): string {
   // Single-letter keys to minimise payload:
-  // a = authCellId, p = integrationPieceId, v = codeVerifier, s = scopes
+  // a = authCellId (schema-stripped), p = integrationPieceId,
+  // v = codeVerifier, s = scopes
   const compact: Record<string, unknown> = {
-    a: data.authCellId,
+    a: stripSchemaFromCellId(data.authCellId),
     p: data.integrationPieceId,
     v: data.codeVerifier,
   };

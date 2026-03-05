@@ -25,7 +25,6 @@ import type { ProviderDescriptor } from "../oauth2-common/oauth2-common.types.ts
 
 export const AirtableDescriptor: ProviderDescriptor = {
   name: "airtable",
-  brandColor: "#18BFFF",
   clientId: env.AIRTABLE_CLIENT_ID,
   clientSecret: env.AIRTABLE_CLIENT_SECRET,
   authorizationEndpoint: "https://airtable.com/oauth2/v1/authorize",

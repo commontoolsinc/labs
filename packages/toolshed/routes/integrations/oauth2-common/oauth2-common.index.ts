@@ -23,7 +23,6 @@ export {
   fetchUserInfo,
   getAuthCell,
   getBaseUrl,
-  getTokensFromAuthCell,
   persistTokens,
   tokenToGenericAuthData,
 } from "./oauth2-common.utils.ts";
