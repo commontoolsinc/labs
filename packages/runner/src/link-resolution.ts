@@ -80,7 +80,7 @@ export function resolveLink(
     }
 
     // Detect cycles.
-    const key = JSON.stringify([link.space, link.id, link.path]);
+    const key = link.space + "\0" + link.id + "\0" + link.path.join("\0");
     if (seen.has(key)) {
       logger.error(
         "link-res-error",

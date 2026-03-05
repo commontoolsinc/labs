@@ -209,7 +209,8 @@ export function areNormalizedLinksSame(
  * areNormalizedLinksSame.
  */
 export function addressKey(addr: IMemorySpaceAddress): string {
-  return JSON.stringify([addr.space, addr.id, addr.type, addr.path]);
+  return addr.space + "\0" + addr.id + "\0" + addr.type + "\0" +
+    addr.path.join("\0");
 }
 
 /**

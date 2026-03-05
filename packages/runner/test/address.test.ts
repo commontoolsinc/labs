@@ -14,7 +14,7 @@ describe("Address Module", () => {
 
       const result = Address.toString(address);
 
-      expect(result).toBe("/user:1/application/json/[]");
+      expect(result).toBe("/user:1/application/json/");
     });
 
     it("should convert address with single path element to string", () => {
@@ -26,7 +26,7 @@ describe("Address Module", () => {
 
       const result = Address.toString(address);
 
-      expect(result).toBe('/user:1/application/json/["profile"]');
+      expect(result).toBe("/user:1/application/json/profile");
     });
 
     it("should convert address with nested path to string", () => {
@@ -39,7 +39,7 @@ describe("Address Module", () => {
       const result = Address.toString(address);
 
       expect(result).toBe(
-        '/user:1/application/json/["profile","settings","theme"]',
+        "/user:1/application/json/profile\0settings\0theme",
       );
     });
 
@@ -52,7 +52,7 @@ describe("Address Module", () => {
 
       const result = Address.toString(address);
 
-      expect(result).toBe('/array:1/application/json/["items","0","name"]');
+      expect(result).toBe("/array:1/application/json/items\0" + "0\0name");
     });
 
     it("should handle address with special characters in id", () => {
@@ -65,7 +65,7 @@ describe("Address Module", () => {
       const result = Address.toString(address);
 
       expect(result).toBe(
-        '/user:special-chars_123/application/json/["data"]',
+        "/user:special-chars_123/application/json/data",
       );
     });
 
@@ -78,7 +78,7 @@ describe("Address Module", () => {
 
       const result = Address.toString(address);
 
-      expect(result).toBe('/document:1/text/plain/["metadata","title"]');
+      expect(result).toBe("/document:1/text/plain/metadata\0title");
     });
   });
 
@@ -600,7 +600,7 @@ describe("Address Module", () => {
         path: [],
       } as const;
 
-      expect(Address.toString(address1)).toBe("/user:1/application/json/[]");
+      expect(Address.toString(address1)).toBe("/user:1/application/json/");
       expect(Address.includes(address1, address2)).toBe(true);
       expect(Address.intersects(address1, address2)).toBe(true);
     });
@@ -615,7 +615,7 @@ describe("Address Module", () => {
       const result = Address.toString(address);
 
       expect(result).toBe(
-        '/namespace:complex-id-with-dashes_and_underscores.123/application/vnd.api+json/["data","attributes","nested-property"]',
+        "/namespace:complex-id-with-dashes_and_underscores.123/application/vnd.api+json/data\0attributes\0nested-property",
       );
     });
 

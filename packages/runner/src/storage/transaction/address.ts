@@ -1,6 +1,6 @@
 import type { IMemoryAddress } from "../interface.ts";
 export const toString = (address: IMemoryAddress) =>
-  `/${address.id}/${address.type}/${JSON.stringify(address.path)}`;
+  `/${address.id}/${address.type}/${address.path.join("\0")}`;
 
 /**
  * Returns true if `candidate` address references location within the

@@ -7,11 +7,16 @@ import type { URI } from "./sigil-types.ts";
  */
 export function toURI(value: unknown): URI {
   if (isRecord(value)) {
-    // Converts EntityId to JSON
-    const parsed = JSON.parse(JSON.stringify(value)) as { "/": string };
-
-    // Handle EntityId object
-    if (typeof parsed["/"] === "string") return `of:${parsed["/"]}`;
+    // Handle EntityId object — use toJSON() if available for proper string conversion,
+    // otherwise fall back to direct "/" access
+    const asAny = value as { toJSON?: () => { "/": string }; "/": unknown };
+    if (typeof asAny.toJSON === "function") {
+      const json = asAny.toJSON();
+      if (typeof json["/"] === "string") return `of:${json["/"]}`;
+    } else {
+      const slash = asAny["/"];
+      if (typeof slash === "string") return `of:${slash}`;
+    }
   } else if (typeof value === "string") {
     // Already has prefix with colon
     if (value.includes(":")) {
