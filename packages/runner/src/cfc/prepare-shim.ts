@@ -2,9 +2,11 @@ import { hasWriteActivity } from "./canonical-activity.ts";
 import { prepareBoundaryCommit } from "./prepare-engine.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { computeCfcActivityDigest } from "./activity-digest.ts";
+import type { CfcImplementationIdentity } from "./implementation-identity.ts";
 
 export interface PrepareCfcCommitIfNeededOptions {
   readonly enforceBoundary?: boolean;
+  readonly implementationIdentity?: CfcImplementationIdentity;
 }
 
 export function isCommitBearingAttempt(
@@ -28,5 +30,7 @@ export async function prepareCfcCommitIfNeeded(
     tx.markCfcPrepared(digest);
     return;
   }
-  await prepareBoundaryCommit(tx);
+  await prepareBoundaryCommit(tx, {
+    implementationIdentity: options.implementationIdentity,
+  });
 }

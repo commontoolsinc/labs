@@ -19,6 +19,7 @@ import type {
   BuiltInGenerateTextParams,
 } from "@commontools/api";
 import { llmDialog } from "./llm-dialog.ts";
+import { markBuiltinModule } from "../cfc/implementation-identity.ts";
 
 /**
  * Register all built-in modules with a runtime's module registry
@@ -26,39 +27,72 @@ import { llmDialog } from "./llm-dialog.ts";
 export function registerBuiltins(runtime: Runtime) {
   const moduleRegistry = runtime.moduleRegistry;
 
-  moduleRegistry.addModuleByRef("map", raw(map));
-  moduleRegistry.addModuleByRef("filter", raw(filter));
-  moduleRegistry.addModuleByRef("flatMap", raw(flatMap));
-  moduleRegistry.addModuleByRef("fetchData", raw(fetchData));
-  moduleRegistry.addModuleByRef("fetchProgram", raw(fetchProgram));
-  moduleRegistry.addModuleByRef("streamData", raw(streamData));
-  moduleRegistry.addModuleByRef("llm", raw(llm));
-  moduleRegistry.addModuleByRef("llmDialog", raw(llmDialog));
-  moduleRegistry.addModuleByRef("ifElse", raw(ifElse));
-  moduleRegistry.addModuleByRef("when", raw(when));
-  moduleRegistry.addModuleByRef("unless", raw(unless));
-  moduleRegistry.addModuleByRef("compileAndRun", raw(compileAndRun));
+  moduleRegistry.addModuleByRef("map", markBuiltinModule(raw(map), "map"));
+  moduleRegistry.addModuleByRef(
+    "filter",
+    markBuiltinModule(raw(filter), "filter"),
+  );
+  moduleRegistry.addModuleByRef(
+    "flatMap",
+    markBuiltinModule(raw(flatMap), "flatMap"),
+  );
+  moduleRegistry.addModuleByRef(
+    "fetchData",
+    markBuiltinModule(raw(fetchData), "fetchData"),
+  );
+  moduleRegistry.addModuleByRef(
+    "fetchProgram",
+    markBuiltinModule(raw(fetchProgram), "fetchProgram"),
+  );
+  moduleRegistry.addModuleByRef(
+    "streamData",
+    markBuiltinModule(raw(streamData), "streamData"),
+  );
+  moduleRegistry.addModuleByRef("llm", markBuiltinModule(raw(llm), "llm"));
+  moduleRegistry.addModuleByRef(
+    "llmDialog",
+    markBuiltinModule(raw(llmDialog), "llmDialog"),
+  );
+  moduleRegistry.addModuleByRef(
+    "ifElse",
+    markBuiltinModule(raw(ifElse), "ifElse"),
+  );
+  moduleRegistry.addModuleByRef("when", markBuiltinModule(raw(when), "when"));
+  moduleRegistry.addModuleByRef(
+    "unless",
+    markBuiltinModule(raw(unless), "unless"),
+  );
+  moduleRegistry.addModuleByRef(
+    "compileAndRun",
+    markBuiltinModule(raw(compileAndRun), "compileAndRun"),
+  );
   moduleRegistry.addModuleByRef(
     "generateObject",
-    raw<BuiltInGenerateObjectParams, {
-      pending: Cell<boolean>;
-      result: Cell<Record<string, unknown> | undefined>;
-      partial: Cell<string | undefined>;
-      requestHash: Cell<string | undefined>;
-    }>(generateObject),
+    markBuiltinModule(
+      raw<BuiltInGenerateObjectParams, {
+        pending: Cell<boolean>;
+        result: Cell<Record<string, unknown> | undefined>;
+        partial: Cell<string | undefined>;
+        requestHash: Cell<string | undefined>;
+      }>(generateObject),
+      "generateObject",
+    ),
   );
   moduleRegistry.addModuleByRef(
     "generateText",
-    raw<BuiltInGenerateTextParams, {
-      pending: Cell<boolean>;
-      result: Cell<string | undefined>;
-      partial: Cell<string | undefined>;
-      requestHash: Cell<string | undefined>;
-    }>(generateText),
+    markBuiltinModule(
+      raw<BuiltInGenerateTextParams, {
+        pending: Cell<boolean>;
+        result: Cell<string | undefined>;
+        partial: Cell<string | undefined>;
+        requestHash: Cell<string | undefined>;
+      }>(generateText),
+      "generateText",
+    ),
   );
   moduleRegistry.addModuleByRef(
     "navigateTo",
-    raw(navigateTo),
+    markBuiltinModule(raw(navigateTo), "navigateTo"),
   );
-  moduleRegistry.addModuleByRef("wish", raw(wish));
+  moduleRegistry.addModuleByRef("wish", markBuiltinModule(raw(wish), "wish"));
 }

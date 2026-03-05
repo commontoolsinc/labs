@@ -30,6 +30,13 @@ effects and deterministic schema binding.
 - [x] Handler side effects are commit-gated: queue first, flush after success.
 - [x] Retry semantics stay at CAS/conflict level in spec (implementation can map
       concrete errors internally).
+- [-] Causal-ID storage and direct hash-addressed CAS remain parallel paths
+      with independent IFC checks; neither path may bypass the other's access
+      rules.
+- [x] Less-restrictive schema flow-precision claims are advisory unless the
+      executing implementation identity (`CodeHash` or `Builtin(name)`) is
+      trusted for concept
+      `https://commonfabric.org/cfc/concepts/flow-taint-precision`.
 
 ### 0.2 Phase-1 Schema Policy (Explicit)
 
@@ -73,6 +80,8 @@ effects and deterministic schema binding.
 - [x] Define `internalVerifierRead` metadata marker key and semantics.
 - [x] Define `AttemptedWrite` canonical shape used by verifier.
 - [x] Define `PreparedDigestInput` and stable hash strategy.
+- [x] Define implementation-identity derivation for trust gates:
+      `CodeHash` for code modules and `Builtin(name)` for runtime built-ins.
 
 ### 1.3 Invariants (Must Hold)
 
@@ -90,6 +99,17 @@ effects and deterministic schema binding.
       labels), not ambient control-integrity context alone.
 - [x] Multi-atom confidentiality preconditions default to clause-local matching;
       cross-clause matching must be explicit.
+- [x] When a schema flow-precision claim would be less restrictive than
+      conservative propagation, runtime must trust-gate by
+      `https://commonfabric.org/cfc/concepts/flow-taint-precision` and
+      otherwise fail closed to conservative labels.
+- [x] Map-like precision claims must be validated for both
+      `KeyLocalShapePreserved` and `KeyLocalWriteDependency` before reduced
+      tainting is accepted.
+- [-] Direct CAS reads must be label-gated (`hash + expectedLabel` + caller
+      readability), not hash-knowledge gated.
+- [-] Direct CAS miss outcomes (absent hash, label mismatch, unreadable label)
+      must be externally indistinguishable.
 
 ## 2. Transaction Model Extensions
 
@@ -164,6 +184,9 @@ Primary files:
       canonical reads, attempted writes, internal flags.
 - [x] Exclude unstable fields (timestamps/non-deterministic IDs unless needed).
 - [x] Use stable serialization before hashing.
+- [ ] Include tx identity scope in digest input used for flow-precision trust
+      decisions (`CodeHash` / `Builtin(name)` identity + trust-evaluation
+      principal scope).
 
 ### 3.5 Acceptance Criteria
 
@@ -236,6 +259,23 @@ Primary files:
 - [x] Preserve no-op attempted writes in policy evaluation.
 - [x] Support final-per-path view for rules that depend on final attempted
       value.
+- [x] Evaluate `flowPrecisionClaim` annotations and derive both `L_claim` and
+      conservative `L_default` for each affected output path.
+- [x] If `L_claim` is less restrictive than `L_default`, require trust for
+      concept `https://commonfabric.org/cfc/concepts/flow-taint-precision` on
+      executing implementation identity (`CodeHash` or `Builtin(name)`);
+      otherwise use `L_default`.
+- [x] Validate map-like claim semantics (`KeyLocalShapePreserved`,
+      `KeyLocalWriteDependency`) before applying claim-derived precision.
+- [x] Treat missing/unknown implementation identity as untrusted and fall back
+      to conservative labels (fail closed for trust-sensitive claims).
+- [x] Implement flow-precision evaluation in
+      `packages/runner/src/cfc/prepare-engine.ts` by extending
+      `verifyOutputTransitionsForAttempt` to compute default/claimed labels
+      before write-label persistence.
+- [x] Add explicit claim parser/validator helper under
+      `packages/runner/src/cfc/` (for example `flow-precision.ts`) so schema
+      decoding and verification checks stay separate from policy evaluation.
 
 ### 5.3 State-Dependent Preconditions (7.5.3)
 
@@ -267,6 +307,10 @@ Primary files:
       (`anywhere`) matching.
 - [x] Return explicit non-convergence signal from bounded policy fixpoint
       evaluation and reject boundary attempt on that signal.
+- [x] Apply trusted flow-precision gate:
+      less-restrictive claim labels require trust in concept
+      `https://commonfabric.org/cfc/concepts/flow-taint-precision`; untrusted
+      paths fail closed to conservative labels.
 
 ### 5.7 Acceptance Criteria
 
@@ -306,6 +350,25 @@ Primary file:
 - [x] Test: retryable failure causes fresh attempt and re-prepare.
 - [x] Test: non-retryable failure does not loop.
 - [x] Test: prepare-gate failure surfaces clear error.
+
+### 6.5 Implementation Identity Plumbing (Flow-Precision Trust)
+
+- [x] Extend scheduler/action metadata with execution identity and thread it
+      into `commitWithCfcPrepare` and `prepareCfcCommitIfNeeded`.
+- [x] In `packages/runner/src/runner.ts`, annotate wrapped actions/handlers
+      with stable CFC implementation identity:
+      code modules as `CodeHash(<hash>)`, built-ins as `Builtin(<moduleRef>)`.
+- [x] Preserve builtin identity even for `module.type === "ref"` by carrying
+      the registry ref through node instantiation metadata.
+- [ ] Extend `PrepareBoundaryCommitOptions` in
+      `packages/runner/src/cfc/prepare-engine.ts` to accept identity + trust
+      evaluator callback, so trust checks are deterministic and testable.
+- [x] Add trust concept constant in runner CFC internals for
+      `https://commonfabric.org/cfc/concepts/flow-taint-precision` and use it
+      in both enforcement code and tests.
+- [ ] Add helper in `packages/runner/src/cfc/` for deriving identity strings
+      from wrapped action metadata so prepare and tests share identical
+      `CodeHash(...)` / `Builtin(...)` encoding rules.
 
 ## 7. Commit-Gated Side Effects (Event Outbox)
 
@@ -462,6 +525,19 @@ Primary test location:
 - [x] `cfc-policy-preconf-target-clause-default.test.ts`
 - [x] `cfc-policy-preconf-anywhere-opt-in.test.ts`
 - [x] `cfc-exchange-ambient-pci-token-not-sufficient.test.ts`
+- [x] `cfc-flow-precision.test.ts` covers untrusted less-restrictive fallback
+      to conservative flow.
+- [x] `cfc-flow-precision.test.ts` covers trusted builtin less-restrictive
+      claims using claimed precision.
+- [x] `cfc-flow-precision.test.ts` covers not-less-restrictive claims without
+      trust.
+- [ ] Add explicit missing-`KeyLocalShapePreserved` regression coverage.
+- [x] `cfc-flow-precision.test.ts` covers malformed/missing
+      `KeyLocalWriteDependency` fallback.
+- [x] `cfc-scheduler-prepare-shim.test.ts` covers builtin identity propagation
+      through scheduler prepare.
+- [x] `cfc-flow-precision.test.ts` covers untrusted custom builtin-name
+      overrides falling back conservative.
 
 ### 11.5 Side-Effect Gating Tests
 
@@ -486,6 +562,16 @@ Primary test location:
 - [x] Run existing scheduler/transaction regression tests.
 - [x] Run existing CFC-related tests.
 - [x] Add a smoke benchmark around prepare overhead in reactive loops.
+
+### 11.9 Direct CAS + Dual-Path Safety Tests (Deferred)
+
+- [-] `cfc-cas-write-appends-effective-label-binding.test.ts`
+- [-] `cfc-cas-write-failed-boundary-check-does-not-append-binding.test.ts`
+- [-] `cfc-cas-read-requires-expected-label-match.test.ts`
+- [-] `cfc-cas-read-unreadable-binding-returns-not-found.test.ts`
+- [-] `cfc-cas-read-absent-vs-unreadable-indistinguishable.test.ts`
+- [-] `cfc-cas-low-write-does-not-overwrite-stronger-binding.test.ts`
+- [-] `cfc-causal-and-cas-no-bypass.test.ts`
 
 ## 12. Rollout and Guardrails
 
@@ -534,6 +620,21 @@ Primary docs:
 - [x] Confirm bounded fixpoint evaluation rejects on non-convergence.
 - [x] Confirm runner tests cover guard-false, ambient-token-smuggling, and
       cross-clause-mixing attack shapes.
+- [x] Confirm flow-precision claims are trust-gated by concept
+      `https://commonfabric.org/cfc/concepts/flow-taint-precision` with
+      conservative fallback when untrusted.
+- [x] Confirm map-like claims enforce `KeyLocalShapePreserved` and
+      `KeyLocalWriteDependency` before reducing taint.
+- [x] Confirm builtin modules can make trusted flow-precision claims via
+      `Builtin(name)` identity and share the same trust gate semantics as
+      `CodeHash`.
+- [-] Confirm direct CAS writes append boundary-computed effective labels only.
+- [-] Confirm direct CAS reads require exact `expectedLabel` match plus
+      principal readability.
+- [-] Confirm direct CAS miss normalization for absent hash vs label mismatch vs
+      unreadable binding.
+- [-] Confirm parallel causal/CAS stores do not bypass one another's access
+      control rules.
 
 ## 14. Execution Order (Recommended)
 
@@ -545,9 +646,68 @@ Primary docs:
 - [x] Step F: complete Section 8 and 9 (schema hash plumbing + verifier marker).
 - [x] Step G: complete Section 10 (legacy cleanup).
 - [x] Step H: complete Section 11 (full test matrix).
-- [x] Step I: complete Section 12 and 13 (rollout/docs).
+- [x] Step I: complete Section 12 and 13 (rollout/docs) for baseline CFC work.
+- [ ] Step J: complete flow-precision additions in Sections 1, 3, 5, 6, 11,
+      and 13.
+- [-] Step K: complete Section 15 (direct CAS + dual-path safety).
+- [ ] Step L: re-run Section 12 and 13 cross-check after Step J/K.
 
-## 15. Open Items Tracked Separately
+## 15. Direct CAS + Dual-Path Safety (Chapter 17, Deferred)
+
+Primary files:
+
+- `packages/runner/src/storage/interface.ts`
+- `packages/runner/src/storage/extended-storage-transaction.ts`
+- `packages/runner/src/cfc/`
+- `packages/runner/src/storage/`
+
+### 15.1 Direct CAS Write Path
+
+- [-] Add write contract for direct CAS that accepts payload bytes plus proposed
+      label context.
+- [-] Route direct CAS writes through trusted boundary evaluation to compute
+      effective write label (caller-provided label is request, not authority).
+- [-] Canonicalize + hash payload bytes before storage.
+- [-] Persist immutable payload by hash and append (never overwrite)
+      `LabelBinding{label: effectiveLabel}`.
+- [-] On IFC/policy rejection, fail write without appending label binding.
+
+### 15.2 Direct CAS Read Path
+
+- [-] Add read contract that requires `blobHash` and `expectedLabel`.
+- [-] Return bytes only when a stored binding exactly matches `expectedLabel`
+      and caller principal can access that label.
+- [-] Return normalized not-found for all non-authorized/non-matching cases.
+
+### 15.3 Miss Indistinguishability and Side-Channel Hygiene
+
+- [-] Normalize external status code/class across absent hash, label mismatch,
+      and unreadable label.
+- [-] Normalize response body shape across miss cases.
+- [-] Normalize timing envelope within configured bounds for miss cases.
+- [-] Keep internal diagnostics reasoned, but do not leak miss cause via
+      external API/log surface.
+
+### 15.4 Parallel-Store Non-Bypass Rules
+
+- [-] Enforce that causal-ID reads/writes continue to use causal-path
+      authorization rules only.
+- [-] Enforce that direct CAS reads/writes continue to use hash+label-binding
+      rules only.
+- [-] Prevent implicit fallback from one path into the other for authorization
+      decisions.
+- [-] Ensure low-trust writes to an existing hash only add low-trust bindings
+      and cannot overwrite/remove stronger bindings.
+
+### 15.5 Acceptance Criteria
+
+- [-] Unit tests from Section 11.9 pass for direct CAS and dual-path cases.
+- [-] Existing causal-ID behavior is unchanged by enabling direct CAS path.
+
+## 16. Open Items Tracked Separately
 
 - [ ] Broader runner TODO: handlers and transaction lifecycle behavior when
       transactions are later aborted (tracked independently from CFC project).
+- [ ] Runtime-trust domain enforcement phase:
+      attestation evidence ingestion, principal-scoped trust-set evaluation,
+      and domain-confinement policy checks (device-locked vs CC-locked data).

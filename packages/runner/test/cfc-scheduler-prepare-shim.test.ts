@@ -5,7 +5,10 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
+import { deriveImplementationIdentity } from "../src/cfc/implementation-identity.ts";
+import { recordCfcWriteSchemaContext } from "../src/cfc/schema-context.ts";
 import { computeCfcSchemaHash } from "../src/cfc/schema-hash.ts";
+import { FLOW_TAINT_PRECISION_CONCEPT } from "../src/cfc/trust-lattice.ts";
 
 const signer = await Identity.fromPassphrase("cfc scheduler prepare shim test");
 const space = signer.did();
@@ -46,6 +49,21 @@ const maxConfidentialInputSchema = {
   ifc: {
     classification: ["secret"],
     ...maxConfidentialityIfc,
+  },
+} as const satisfies JSONSchema;
+
+const flowPrecisionNumberSchema = {
+  type: "number",
+  ifc: {
+    classification: ["confidential"],
+    flowPrecisionClaim: {
+      concept: FLOW_TAINT_PRECISION_CONCEPT,
+      sourceCollection: "/",
+      claims: [
+        { type: "KeyLocalShapePreserved" },
+        { type: "KeyLocalWriteDependency" },
+      ],
+    },
   },
 } as const satisfies JSONSchema;
 
@@ -101,6 +119,82 @@ describe("CFC scheduler prepare shim", () => {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     expect(output.get()).toBe(2);
+  });
+
+  it("passes builtin identity through scheduler prepare for trusted flow precision claims", async () => {
+    let tx = runtime.edit();
+    const sourceCell = runtime.getCell<number[]>(
+      space,
+      "cfc-prepare-flow-source",
+      undefined,
+      tx,
+    );
+    const targetCell = runtime.getCell<number[]>(
+      space,
+      "cfc-prepare-flow-target",
+      undefined,
+      tx,
+    );
+    sourceCell.set([11, 22]);
+    targetCell.set([0, 0]);
+    await tx.commit();
+
+    tx = runtime.edit();
+    tx.writeOrThrow({
+      space,
+      id: sourceCell.getAsNormalizedFullLink().id,
+      type: "application/json",
+      path: ["cfc", "labels"],
+    }, {
+      "/0": { classification: ["secret"] },
+      "/1": { classification: ["confidential"] },
+    });
+    await tx.commit();
+    await sourceCell.pull();
+
+    const mapIdentity = deriveImplementationIdentity(
+      runtime.moduleRegistry.getModule("map"),
+    );
+    const action = Object.assign((actionTx: IExtendedStorageTransaction) => {
+      actionTx.readValueOrThrow({
+        space,
+        id: sourceCell.getAsNormalizedFullLink().id,
+        type: "application/json",
+        path: ["0"],
+      });
+      const value = actionTx.readValueOrThrow({
+        space,
+        id: sourceCell.getAsNormalizedFullLink().id,
+        type: "application/json",
+        path: ["1"],
+      });
+      actionTx.writeOrThrow({
+        space,
+        id: targetCell.getAsNormalizedFullLink().id,
+        type: "application/json",
+        path: ["value", "1"],
+      }, value);
+      recordCfcWriteSchemaContext(actionTx, {
+        space,
+        id: targetCell.getAsNormalizedFullLink().id,
+        type: "application/json",
+        path: ["1"],
+      }, flowPrecisionNumberSchema);
+      actionTx.markCfcRelevant("ifc-write-schema");
+    }, {
+      cfcImplementationIdentity: mapIdentity,
+    });
+
+    await runtime.scheduler.run(action);
+    for (let attempt = 0; attempt < 20; attempt++) {
+      await targetCell.pull();
+      if (targetCell.get()?.[1] === 22) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    expect(targetCell.get()).toEqual([0, 22]);
   });
 
   it("commits event handler path with IFC-relevant read/write via prepare shim", async () => {

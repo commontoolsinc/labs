@@ -1250,6 +1250,15 @@ export type JSONSchemaObj = {
       readonly lengthPreserved?: boolean;
       readonly predicate?: string;
     };
+    readonly flowPrecisionClaim?: {
+      readonly concept?: string;
+      readonly sourceCollection?: string;
+      readonly claims?: readonly {
+        readonly type?:
+          | "KeyLocalShapePreserved"
+          | "KeyLocalWriteDependency";
+      }[];
+    };
     readonly recomposeProjections?: {
       readonly from?: string;
       readonly baseIntegrityType?: string;

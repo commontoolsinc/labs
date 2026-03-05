@@ -63,6 +63,7 @@ import { FunctionCache } from "./function-cache.ts";
 import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
 import "./builtins/index.ts";
 import { isCellResult } from "./query-result-proxy.ts";
+import { deriveImplementationIdentity } from "./cfc/implementation-identity.ts";
 
 const logger = getLogger("runner", { enabled: true, level: "warn" });
 
@@ -1212,6 +1213,8 @@ export class Runner {
       }
     }
 
+    const cfcImplementationIdentity = deriveImplementationIdentity(module);
+
     if (streamLink) {
       // Register as event handler for the stream
       const handler = (tx: IExtendedStorageTransaction, event: any) => {
@@ -1405,6 +1408,7 @@ export class Runner {
         writes,
         module,
         pattern,
+        cfcImplementationIdentity,
       });
 
       // Create callback to populate dependencies for pull mode scheduling.
@@ -1666,6 +1670,7 @@ export class Runner {
         writes,
         module,
         pattern,
+        cfcImplementationIdentity,
       });
 
       // Create populateDependencies callback to discover what cells the action reads
@@ -1785,6 +1790,7 @@ export class Runner {
     const builtinPopulateDependencies = isRawBuiltinResult(builtinResult)
       ? builtinResult.populateDependencies
       : undefined;
+    const cfcImplementationIdentity = deriveImplementationIdentity(module);
 
     // Name the raw action for debugging - use implementation name or fallback to "raw"
     const impl = module.implementation as (...args: unknown[]) => Action;
@@ -1794,6 +1800,13 @@ export class Runner {
       configurable: true,
     });
     (action as Action & { src?: string }).src = rawName;
+    (
+      action as Action & {
+        cfcImplementationIdentity?: ReturnType<
+          typeof deriveImplementationIdentity
+        >;
+      }
+    ).cfcImplementationIdentity = cfcImplementationIdentity;
 
     // Create populateDependencies callback.
     // If builtin provides custom reads, use that; otherwise read all inputs.

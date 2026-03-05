@@ -42,6 +42,8 @@ import {
   cfcLabelsAddress,
   normalizePersistedLabels,
 } from "./shared.ts";
+import type { CfcImplementationIdentity } from "./implementation-identity.ts";
+import { selectFlowPrecisionConsumedReads } from "./flow-precision.ts";
 
 type EntityAddress = Pick<IMemorySpaceAddress, "space" | "id" | "type">;
 
@@ -51,6 +53,7 @@ export interface PrepareBoundaryCommitOptions {
     expectedSchemaHash: string,
     actualSchemaHash: string,
   ) => boolean;
+  readonly implementationIdentity?: CfcImplementationIdentity;
 }
 
 function CfcPrepareSchemaUnavailableError(
@@ -1919,16 +1922,13 @@ function verifyOutputTransitionsForAttempt(
   tx: IExtendedStorageTransaction,
   consumedReadLabels: readonly ConsumedReadWithEffectiveLabel[],
   canonical: CanonicalBoundaryActivity,
+  options: PrepareBoundaryCommitOptions = {},
   rootSchemaByEntity?: ReadonlyMap<string, JSONSchema>,
 ): void {
   if (canonical.attemptedWrites.length === 0) {
     return;
   }
   const cfc = new ContextualFlowControl();
-  const minClassification = strongestConsumedClassification(
-    consumedReadLabels,
-    cfc,
-  );
 
   for (const write of canonical.finalAttemptedWrites) {
     const entity: EntityAddress = {
@@ -1955,6 +1955,16 @@ function verifyOutputTransitionsForAttempt(
       rootSchema,
       fromCanonicalPath(write.path),
     );
+    const effectiveConsumedReadLabels = selectFlowPrecisionConsumedReads(
+      rootSchema,
+      write.path,
+      consumedReadLabels,
+      options.implementationIdentity,
+    ).consumedReadLabels;
+    const minClassification = strongestConsumedClassification(
+      effectiveConsumedReadLabels,
+      cfc,
+    );
     const actualClassification = effectiveWriteClassification(
       rootSchema,
       schemaAtWritePath,
@@ -1972,7 +1982,7 @@ function verifyOutputTransitionsForAttempt(
         entity,
         write.path,
         schemaAtWritePath,
-        consumedReadLabels,
+        effectiveConsumedReadLabels,
         actualClassification,
         cfc,
       );
@@ -2236,6 +2246,7 @@ export async function prepareBoundaryCommit(
     tx,
     consumedReadLabels,
     canonical,
+    options,
     preparedRootSchemasByEntity,
   );
 

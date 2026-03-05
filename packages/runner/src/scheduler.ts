@@ -55,6 +55,7 @@ import {
   isCommitBearingAttempt,
   prepareCfcCommitIfNeeded,
 } from "./cfc/prepare-shim.ts";
+import type { CfcImplementationIdentity } from "./cfc/implementation-identity.ts";
 import { isCfcCommitError, toCfcRejectLog } from "./cfc/rejection-log.ts";
 import { markCfcHandlerTransaction } from "./cfc/handler-transaction.ts";
 import type {
@@ -83,6 +84,7 @@ export interface TelemetryAnnotations {
   module: Module;
   reads: NormalizedFullLink[];
   writes: NormalizedFullLink[];
+  cfcImplementationIdentity?: CfcImplementationIdentity;
 }
 
 export type Action = (tx: IExtendedStorageTransaction) => any;
@@ -912,6 +914,7 @@ export class Scheduler {
           const commitPromise = commitWithCfcPrepare(
             tx,
             this.runtime.experimental.cfcBoundaryEnforcement,
+            getAnnotatedImplementationIdentity(action),
           );
           logger.timeEnd("scheduler", "run", "commit");
           commitPromise.then(({ error }) => {
@@ -2778,6 +2781,7 @@ export class Scheduler {
             const { error: commitError } = await commitWithCfcPrepare(
               tx,
               this.runtime.experimental.cfcBoundaryEnforcement,
+              getAnnotatedImplementationIdentity(handler),
             );
             // If the transaction failed, and we have retries left, queue the
             // event again at the beginning of the queue. This isn't guaranteed
@@ -3492,9 +3496,17 @@ function shouldRetryCommitError(error: CommitError): boolean {
   return !isCfcCommitError(error);
 }
 
+function getAnnotatedImplementationIdentity(
+  action: Action | EventHandler,
+): CfcImplementationIdentity | undefined {
+  const annotated = action as Partial<TelemetryAnnotations>;
+  return annotated.cfcImplementationIdentity;
+}
+
 function commitWithCfcPrepare(
   tx: IExtendedStorageTransaction,
   enforceBoundary: boolean,
+  implementationIdentity?: CfcImplementationIdentity,
 ): Promise<Result<Unit, CommitError>> {
   if (tx.status().status !== "ready") {
     return tx.commit();
@@ -3506,6 +3518,7 @@ function commitWithCfcPrepare(
 
   return prepareCfcCommitIfNeeded(tx, {
     enforceBoundary,
+    implementationIdentity,
   })
     .then(() => tx.commit())
     .catch((error) => {
