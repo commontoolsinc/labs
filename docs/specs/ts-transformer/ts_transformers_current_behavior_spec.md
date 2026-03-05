@@ -261,6 +261,35 @@ Additional diagnostics emitted only in legacy mode
   - `(opaqueExpr ?? fallback).map(...)` or `(opaqueExpr || fallback).map(...)`
     where left is reactive and right is not
 
+### 6.6 Pattern any-result-schema validation
+
+When `pattern()` is called with zero or one type parameters and the result
+schema must be inferred, the transformer checks whether the callback's return
+type resolves to `any` or `unknown`. If it does, the inferred result schema
+would degenerate to `{ type: "object" }` (schema-less), which causes runtime
+proxy-depth crashes.
+
+The check runs in `collectFunctionSchemaTypeNodes` via `inferReturnType` +
+`isAnyOrUnknownType`. This catches cases where the callback directly returns an
+`any`-typed expression (e.g., the result of an untyped fetch or `as any` cast).
+
+This does not target callbacks whose return type has concrete structure — even
+if individual properties are OpaqueCell-wrapped (e.g., `{ name: OpaqueCell<string> & string }` from a destructured passthrough), the return type is not
+`any` and a usable result schema can be generated.
+
+Suppressed when:
+
+- two or more type parameters are provided (explicit Output type takes
+  precedence)
+- the callback returns a concrete (non-any, non-unknown) type
+
+Diagnostics:
+
+- **Error** `pattern:any-result-schema`
+  - pattern callback return type resolves to `any` or `unknown`
+  - message instructs adding an explicit Output type parameter:
+    `pattern<Input, Output>(...)`
+
 ## 7. OpaqueRef JSX Rewriting
 
 `OpaqueRefJSXTransformer` runs only when helper import is present.
@@ -472,6 +501,10 @@ Cases:
   - if 2 schema args already present: unchanged
   - if 1 schema arg present: treated as input schema, infer result schema
   - if none: infer both
+
+When inferring the result schema (0 or 1 type args), emits
+`pattern:any-result-schema` if the callback return type resolves to `any` or
+`unknown` (see §6.6).
 
 ### 10.3 `handler(...)`
 
