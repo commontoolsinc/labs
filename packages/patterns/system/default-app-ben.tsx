@@ -14,10 +14,6 @@ import {
 
 import { default as Note } from "../notes/note.tsx";
 
-// Simple random ID generator (crypto.randomUUID not available in pattern env)
-const generateId = () =>
-  `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
-
 // Maximum number of recent pieces to track
 const MAX_RECENT_CHARMS = 10;
 
@@ -128,7 +124,6 @@ const menuNewNote = handler<void, { menuOpen: Writable<boolean> }>(
       Note({
         title: "New Note",
         content: "",
-        noteId: generateId(),
       }),
     );
   },
@@ -184,7 +179,7 @@ const menuAllNotebooks = handler<
   if (existing) {
     return navigateTo(existing);
   }
-  return navigateTo(NotesImportExport({ importMarkdown: "", allPieces }));
+  return navigateTo(NotesImportExport({ importMarkdown: "" }));
 });
 
 // Handler: Add piece to allPieces if not already present
