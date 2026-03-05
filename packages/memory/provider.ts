@@ -259,8 +259,11 @@ class MemoryProviderSession<
   private spaceSessionCache = new Map<MemorySpace, SpaceSession<Space>>();
   // Accumulated doc keys per space for debounced schema matching
   private pendingSchemaChanges = new Map<MemorySpace, Set<string>>();
-  // Whether a schema flush microtask is already scheduled
+  // Whether a schema flush is already scheduled
   private schemaFlushScheduled = false;
+  // Incremented on write start, decremented on write end. Used to detect
+  // whether the stream pipe has pulled another message during a flush yield.
+  private writeGeneration = 0;
 
   constructor(
     public memory: MemorySession,
@@ -294,10 +297,17 @@ class MemoryProviderSession<
       UCAN<ConsumerCommandInvocation<MemoryProtocol>>
     >({
       write: async (command) => {
+        this.writeGeneration++;
         try {
           await this.invoke(
             command as UCAN<ConsumerCommandInvocation<Protocol>>,
           );
+          // After invoke completes, try to flush pending schema changes.
+          // The flush yields a microtask to let the stream pipe pull another
+          // message first. If another write arrives (writeGeneration changes),
+          // the flush defers — batching all buffered messages into one
+          // schema traversal.
+          await this.maybeFlushSchemaChanges();
         } catch (error) {
           logger.error(
             "stream-error",
@@ -711,10 +721,12 @@ class MemoryProviderSession<
           });
         }
       }
-
-      // Schedule deferred schema traversal for discovering linked docs
-      this.scheduleSchemaFlush();
     }
+    // Schedule a microtask flush for cross-session notifications (when
+    // commit() is called from another session's transact, not our own
+    // write callback). The write callback's maybeFlushSchemaChanges
+    // provides additional batching for our own writes.
+    this.scheduleSchemaFlush();
     logger.timeEnd("commit");
     return { ok: {} };
   }
@@ -1003,7 +1015,7 @@ class MemoryProviderSession<
   }
 
   /**
-   * Schedule a microtask to flush accumulated schema changes.
+   * Schedule a microtask flush for cross-session commit notifications.
    */
   private scheduleSchemaFlush(): void {
     if (this.schemaFlushScheduled) return;
@@ -1013,11 +1025,31 @@ class MemoryProviderSession<
   }
 
   /**
+   * Yield one microtask to let the stream pipe pull the next message.
+   * If another write arrives (writeGeneration changes), defer the flush
+   * to batch with the next message. Otherwise flush now.
+   */
+  private async maybeFlushSchemaChanges(): Promise<void> {
+    if (this.pendingSchemaChanges.size === 0) return;
+    const gen = this.writeGeneration;
+    // Yield to let the pipe pull the next buffered chunk
+    await Promise.resolve();
+    if (this.writeGeneration !== gen) {
+      // Another write arrived — it will call maybeFlush after its invoke
+      return;
+    }
+    await this.flushSchemaChanges();
+  }
+
+  /**
    * Flush accumulated schema changes: run schema matching once for all
    * coalesced commits and send revisions to active commit-log subscribers.
    */
   private async flushSchemaChanges(): Promise<void> {
     this.schemaFlushScheduled = false;
+
+    // Guard against flush after session disposal
+    if (!this.controller) return;
 
     // Snapshot and clear pending changes
     const pending = this.pendingSchemaChanges;
@@ -1027,67 +1059,77 @@ class MemoryProviderSession<
 
     logger.timeStart("schema-flush");
 
-    for (const [space, changedDocs] of pending) {
-      if (changedDocs.size === 0) continue;
-      if (this.schemaChannels.size === 0) continue;
+    try {
+      for (const [space, changedDocs] of pending) {
+        if (changedDocs.size === 0) continue;
+        if (this.schemaChannels.size === 0) continue;
 
-      const spaceSession = await this.getSpaceSession(space);
+        const spaceSession = await this.getSpaceSession(space);
 
-      // Find affected docs using the shared schemaTracker (for non-wildcard)
-      const sharedAffectedDocs = new Map<string, Set<SchemaPathSelector>>();
-      for (const docKey of changedDocs) {
-        const existingSelectors = this.sharedSchemaTracker.get(docKey);
-        if (existingSelectors !== undefined) {
-          sharedAffectedDocs.set(docKey, new Set(existingSelectors));
+        // Find affected docs using the shared schemaTracker (for non-wildcard)
+        const sharedAffectedDocs = new Map<string, Set<SchemaPathSelector>>();
+        for (const docKey of changedDocs) {
+          const existingSelectors = this.sharedSchemaTracker.get(docKey);
+          if (existingSelectors !== undefined) {
+            sharedAffectedDocs.set(docKey, new Set(existingSelectors));
+          }
         }
-      }
 
-      // Process shared affected docs
-      const { newFacts } = this.processIncrementalUpdate(
-        spaceSession,
-        sharedAffectedDocs,
-      );
+        // Process shared affected docs
+        const { newFacts } = this.processIncrementalUpdate(
+          spaceSession,
+          sharedAffectedDocs,
+        );
 
-      // Add facts from wildcard subscriptions
-      for (const [_jobId, subscription] of this.schemaChannels) {
-        if (subscription.isWildcardQuery) {
-          const wildcardDocs = this.findAffectedDocsForWildcard(
-            changedDocs,
-            subscription.invocation,
-          );
-          if (wildcardDocs.size > 0) {
-            const wildcardResult = this.processIncrementalUpdate(
-              spaceSession,
-              wildcardDocs,
+        // Add facts from wildcard subscriptions
+        for (const [_jobId, subscription] of this.schemaChannels) {
+          if (subscription.isWildcardQuery) {
+            const wildcardDocs = this.findAffectedDocsForWildcard(
+              changedDocs,
+              subscription.invocation,
             );
-            for (const [key, fact] of wildcardResult.newFacts) {
-              newFacts.set(key, fact);
+            if (wildcardDocs.size > 0) {
+              const wildcardResult = this.processIncrementalUpdate(
+                spaceSession,
+                wildcardDocs,
+              );
+              for (const [key, fact] of wildcardResult.newFacts) {
+                newFacts.set(key, fact);
+              }
             }
           }
         }
+
+        const revisions = this.filterKnownFacts([...newFacts.values()]);
+        if (revisions.length === 0) continue;
+
+        // Send revisions to all commit-log channels for this space.
+        // Uses an empty commit payload — the consumer handles this as a
+        // revision-only delivery (no commit parsing needed).
+        const commitJobIds = this.findCommitLogChannels(space);
+        if (commitJobIds.length === 0) continue;
+
+        const revisionCommit: EnhancedCommit<MemorySpace> = {
+          commit: {} as Commit<MemorySpace>,
+          revisions,
+        };
+
+        for (const id of commitJobIds) {
+          this.perform({
+            the: "task/effect",
+            of: id,
+            is: revisionCommit,
+          });
+        }
       }
-
-      const revisions = this.filterKnownFacts([...newFacts.values()]);
-      if (revisions.length === 0) continue;
-
-      // Send revisions to all commit-log channels for this space.
-      // Uses an empty commit payload — the consumer handles this as a
-      // revision-only delivery (no commit parsing needed).
-      const commitJobIds = this.findCommitLogChannels(space);
-      if (commitJobIds.length === 0) continue;
-
-      const revisionCommit: EnhancedCommit<MemorySpace> = {
-        commit: {} as Commit<MemorySpace>,
-        revisions,
-      };
-
-      for (const id of commitJobIds) {
-        this.perform({
-          the: "task/effect",
-          of: id,
-          is: revisionCommit,
-        });
-      }
+    } catch (error) {
+      // The flush fires from a setTimeout and may race with session
+      // teardown or store closure. Log and discard — the revisions are
+      // best-effort; direct revisions were already sent with the commit.
+      logger.warn(
+        "schema-flush-error",
+        () => ["Deferred schema flush failed:", error],
+      );
     }
 
     logger.timeEnd("schema-flush");
