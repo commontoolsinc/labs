@@ -363,7 +363,7 @@ ${notesXml}
               }}
             >
               {/* Column 1: Calendar + Entries */}
-              <div style={{ flex: "1", minWidth: "0" }}>
+              <div style={{ width: "320px", flexShrink: "0" }}>
                 <ct-vstack gap="4">
                   {/* Go to Today */}
                   <ct-button
