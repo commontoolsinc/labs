@@ -5,7 +5,7 @@
  * - Legacy: merkle-reference tree builder with primitive LRU + WeakMap caching
  * - Canonical: `canonicalHash()` single-pass incremental SHA-256
  *
- * Run with: deno bench --allow-read --allow-write --allow-net --allow-ffi --allow-env --no-check test/hashing_bench.ts
+ * Run with: deno bench --allow-read --allow-write --allow-net --allow-ffi --allow-env --no-check test/hashing-bench.ts
  */
 
 import * as Reference from "merkle-reference";

@@ -978,3 +978,71 @@ Deno.test("canonicalHash", async (t) => {
     assertEquals(Object.isFrozen(result), true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Caching behavior
+// ---------------------------------------------------------------------------
+
+Deno.test("canonicalHash caching", async (t) => {
+  await t.step("null returns consistent result", () => {
+    const a = canonicalHashRaw(null);
+    const b = canonicalHashRaw(null);
+    assertEquals(a, b);
+  });
+
+  await t.step("undefined returns consistent result", () => {
+    const a = canonicalHashRaw(undefined);
+    const b = canonicalHashRaw(undefined);
+    assertEquals(a, b);
+  });
+
+  await t.step("primitive string cache returns same hash", () => {
+    const a = canonicalHashRaw("hello");
+    const b = canonicalHashRaw("hello");
+    assertEquals(a.hash, b.hash);
+  });
+
+  await t.step("primitive number cache returns same hash", () => {
+    const a = canonicalHashRaw(42);
+    const b = canonicalHashRaw(42);
+    assertEquals(a.hash, b.hash);
+  });
+
+  await t.step("primitive boolean cache returns same hash", () => {
+    const a = canonicalHashRaw(true);
+    const b = canonicalHashRaw(true);
+    assertEquals(a.hash, b.hash);
+  });
+
+  await t.step("primitive bigint cache returns same hash", () => {
+    const a = canonicalHashRaw(123n);
+    const b = canonicalHashRaw(123n);
+    assertEquals(a.hash, b.hash);
+  });
+
+  await t.step("deep-frozen object cache returns same hash", () => {
+    const obj = Object.freeze({ a: 1, b: Object.freeze({ c: 2 }) });
+    const a = canonicalHashRaw(obj);
+    const b = canonicalHashRaw(obj);
+    assertEquals(a.hash, b.hash);
+  });
+
+  await t.step("mutable object is not cached (recomputed each time)", () => {
+    const obj = { a: 1 };
+    const a = canonicalHashRaw(obj);
+    // Mutate
+    obj.a = 2;
+    const b = canonicalHashRaw(obj);
+    // Hashes should differ because the object changed
+    assertNotEquals(hex(a.hash), hex(b.hash));
+  });
+
+  await t.step(
+    "different primitives with same type produce different hashes",
+    () => {
+      const a = canonicalHashRaw("hello");
+      const b = canonicalHashRaw("world");
+      assertNotEquals(hex(a.hash), hex(b.hash));
+    },
+  );
+});
