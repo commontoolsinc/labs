@@ -1,18 +1,15 @@
 import * as __ctHelpers from "commontools";
 import { pattern, UI } from "commontools";
 interface Item {
-    id: number;
-    price: number;
+    name: string;
     active: boolean;
 }
 interface State {
     items: Item[];
-    taxRate: number;
 }
 export default pattern((state) => {
     return {
-        [UI]: (<div>
-        {/* Method chain: filter then map, both with captures */}
+        [UI]: (<ul>
         {state.items.filterWithPattern(__ctHelpers.pattern(({ element: item, params: {} }) => item.active, {
                 type: "object",
                 properties: {
@@ -29,60 +26,21 @@ export default pattern((state) => {
                     Item: {
                         type: "object",
                         properties: {
-                            id: {
-                                type: "number"
-                            },
-                            price: {
-                                type: "number"
+                            name: {
+                                type: "string"
                             },
                             active: {
                                 type: "boolean"
                             }
                         },
-                        required: ["id", "price", "active"]
+                        required: ["name", "active"]
                     }
                 }
             } as const satisfies __ctHelpers.JSONSchema, {
                 type: "boolean",
                 asOpaque: true
-            } as const satisfies __ctHelpers.JSONSchema), {}).map((item) => (<div>
-              Total: {__ctHelpers.derive({
-                type: "object",
-                properties: {
-                    item: {
-                        type: "object",
-                        properties: {
-                            price: {
-                                type: "number",
-                                asOpaque: true
-                            }
-                        },
-                        required: ["price"]
-                    },
-                    state: {
-                        type: "object",
-                        properties: {
-                            taxRate: {
-                                type: "number",
-                                asOpaque: true
-                            }
-                        },
-                        required: ["taxRate"]
-                    }
-                },
-                required: ["item", "state"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "number"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                item: {
-                    price: item.price
-                },
-                state: {
-                    taxRate: state.taxRate
-                }
-            }, ({ item, state }) => item.price * (1 + state.taxRate))}
-            </div>))}
-      </div>),
+            } as const satisfies __ctHelpers.JSONSchema), {}).map((item) => (<li>{item.name}</li>))}
+      </ul>),
     };
 }, {
     type: "object",
@@ -92,27 +50,21 @@ export default pattern((state) => {
             items: {
                 $ref: "#/$defs/Item"
             }
-        },
-        taxRate: {
-            type: "number"
         }
     },
-    required: ["items", "taxRate"],
+    required: ["items"],
     $defs: {
         Item: {
             type: "object",
             properties: {
-                id: {
-                    type: "number"
-                },
-                price: {
-                    type: "number"
+                name: {
+                    type: "string"
                 },
                 active: {
                     type: "boolean"
                 }
             },
-            required: ["id", "price", "active"]
+            required: ["name", "active"]
         }
     }
 } as const satisfies __ctHelpers.JSONSchema, {

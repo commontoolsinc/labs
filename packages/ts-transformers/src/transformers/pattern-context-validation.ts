@@ -399,7 +399,11 @@ export class PatternContextValidationTransformer extends Transformer {
     checker: ts.TypeChecker,
   ): void {
     if (!ts.isPropertyAccessExpression(node.expression)) return;
-    if (node.expression.name.text !== "map") return;
+    const methodName = node.expression.name.text;
+    if (
+      methodName !== "map" && methodName !== "filter" &&
+      methodName !== "flatMap"
+    ) return;
 
     let target: ts.Expression = node.expression.expression;
 

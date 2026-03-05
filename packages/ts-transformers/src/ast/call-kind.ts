@@ -63,6 +63,15 @@ const OPAQUE_REF_OWNER_NAMES = new Set([
   "OpaqueRef",
 ]);
 
+const ARRAY_METHOD_NAMES = new Set([
+  "map",
+  "mapWithPattern",
+  "filter",
+  "filterWithPattern",
+  "flatMap",
+  "flatMapWithPattern",
+]);
+
 const CELL_LIKE_CLASSES = new Set([
   "Cell",
   "Writable", // Alias for Cell that better expresses write-access semantics
@@ -163,7 +172,7 @@ function resolveExpressionKind(
 
   if (ts.isPropertyAccessExpression(target)) {
     const name = target.name.text;
-    if (name === "map" || name === "mapWithPattern") {
+    if (ARRAY_METHOD_NAMES.has(name)) {
       return { kind: "array-map" };
     }
     if (name === "derive") {
@@ -339,7 +348,7 @@ function resolveSymbolKind(
     return { kind: "builder", symbol: resolved, builderName: name };
   }
 
-  if (name === "map" || name === "mapWithPattern") {
+  if (ARRAY_METHOD_NAMES.has(name)) {
     return { kind: "array-map", symbol: resolved };
   }
 
@@ -402,7 +411,7 @@ function detectCellMethodFromDeclaration(
 
 function isArrayMapDeclaration(declaration: ts.Declaration): boolean {
   if (!hasIdentifierName(declaration)) return false;
-  if (declaration.name.text !== "map") return false;
+  if (!ARRAY_METHOD_NAMES.has(declaration.name.text)) return false;
 
   const owner = findOwnerName(declaration);
   if (!owner) return false;
@@ -411,10 +420,7 @@ function isArrayMapDeclaration(declaration: ts.Declaration): boolean {
 
 function isOpaqueRefMapDeclaration(declaration: ts.Declaration): boolean {
   if (!hasIdentifierName(declaration)) return false;
-  if (
-    declaration.name.text !== "map" &&
-    declaration.name.text !== "mapWithPattern"
-  ) return false;
+  if (!ARRAY_METHOD_NAMES.has(declaration.name.text)) return false;
 
   const owner = findOwnerName(declaration);
   if (!owner) return false;

@@ -134,43 +134,98 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.items,
                 threshold: state.threshold
-            } }, ({ state }) => state.items.filter((x) => x > state.threshold).length)}
+            } }, ({ state }) => state.items.filterWithPattern(__ctHelpers.pattern(({ element: x, params: { state } }) => x > state.threshold, {
+            type: "object",
+            properties: {
+                element: {
+                    type: "number"
+                },
+                params: {
+                    type: "object",
+                    properties: {
+                        state: {
+                            type: "object",
+                            properties: {
+                                threshold: {
+                                    type: "number",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["threshold"]
+                        }
+                    },
+                    required: ["state"]
+                }
+            },
+            required: ["element", "params"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema), {
+            state: {
+                threshold: state.threshold
+            }
+        }).length)}
         </p>
 
         {/* Filter then map */}
         <ul>
-          {__ctHelpers.derive({
+          {state.items.filterWithPattern(__ctHelpers.pattern(({ element: x, params: { state } }) => __ctHelpers.derive({
             type: "object",
             properties: {
+                x: {
+                    type: "number",
+                    asOpaque: true
+                },
                 state: {
                     type: "object",
                     properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                type: "number"
-                            },
-                            asOpaque: true
-                        },
                         threshold: {
                             type: "number",
                             asOpaque: true
                         }
                     },
-                    required: ["items", "threshold"]
+                    required: ["threshold"]
                 }
             },
-            required: ["state"]
+            required: ["x", "state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: "array",
-            items: {
-                type: "number",
-                asOpaque: true
-            }
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
-                items: state.items,
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, {
+            x: x,
+            state: {
                 threshold: state.threshold
-            } }, ({ state }) => state.items.filter((x) => x > state.threshold)).mapWithPattern(__ctHelpers.pattern(({ element: x, params: { state } }) => (<li>Value: {__ctHelpers.derive({
+            }
+        }, ({ x, state }) => x > state.threshold), {
+            type: "object",
+            properties: {
+                element: {
+                    type: "number"
+                },
+                params: {
+                    type: "object",
+                    properties: {
+                        state: {
+                            type: "object",
+                            properties: {
+                                threshold: {
+                                    type: "number",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["threshold"]
+                        }
+                    },
+                    required: ["state"]
+                }
+            },
+            required: ["element", "params"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema), {
+            state: {
+                threshold: state.threshold
+            }
+        }).map((x) => (<li>Value: {__ctHelpers.derive({
             type: "object",
             properties: {
                 x: {
@@ -196,57 +251,7 @@ export default pattern((state) => {
             state: {
                 factor: state.factor
             }
-        }, ({ x, state }) => x * state.factor)}</li>), {
-            type: "object",
-            properties: {
-                element: {
-                    type: "number",
-                    asOpaque: true
-                },
-                params: {
-                    type: "object",
-                    properties: {
-                        state: {
-                            type: "object",
-                            properties: {
-                                factor: {
-                                    type: "number",
-                                    asOpaque: true
-                                }
-                            },
-                            required: ["factor"]
-                        }
-                    },
-                    required: ["state"]
-                }
-            },
-            required: ["element", "params"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    type: "object",
-                    properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
-                }],
-            $defs: {
-                UIRenderable: {
-                    type: "object",
-                    properties: {
-                        $UI: {
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }
-                    },
-                    required: ["$UI"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema), {
-            state: {
-                factor: state.factor
-            }
-        })}
+        }, ({ x, state }) => x * state.factor)}</li>))}
         </ul>
 
         {/* Multiple filters */}
@@ -284,7 +289,37 @@ export default pattern((state) => {
                 items: state.items,
                 start: state.start,
                 end: state.end
-            } }, ({ state }) => state.items.filter((x) => x > state.start).filter((x) => x < state.end).length)}
+            } }, ({ state }) => state.items.filterWithPattern(__ctHelpers.pattern(({ element: x, params: { state } }) => x > state.start, {
+            type: "object",
+            properties: {
+                element: {
+                    type: "number"
+                },
+                params: {
+                    type: "object",
+                    properties: {
+                        state: {
+                            type: "object",
+                            properties: {
+                                start: {
+                                    type: "number",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["start"]
+                        }
+                    },
+                    required: ["state"]
+                }
+            },
+            required: ["element", "params"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema), {
+            state: {
+                start: state.start
+            }
+        }).filter((x) => x < state.end).length)}
         </p>
 
         <h3>Methods with Reactive Arguments</h3>
@@ -355,7 +390,37 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 names: state.names,
                 prefix: state.prefix
-            } }, ({ state }) => state.names.filter((n) => n.startsWith(state.prefix)).join(", "))}
+            } }, ({ state }) => state.names.filterWithPattern(__ctHelpers.pattern(({ element: n, params: { state } }) => n.startsWith(state.prefix), {
+            type: "object",
+            properties: {
+                element: {
+                    type: "string"
+                },
+                params: {
+                    type: "object",
+                    properties: {
+                        state: {
+                            type: "object",
+                            properties: {
+                                prefix: {
+                                    type: "string",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["prefix"]
+                        }
+                    },
+                    required: ["state"]
+                }
+            },
+            required: ["element", "params"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema), {
+            state: {
+                prefix: state.prefix
+            }
+        }).join(", "))}
         </p>
 
         {/* Array find with reactive predicate */}
@@ -649,7 +714,49 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 users: state.users,
                 minAge: state.minAge
-            } }, ({ state }) => state.users.filter((u) => u.age >= state.minAge && u.active).length)}
+            } }, ({ state }) => state.users.filterWithPattern(__ctHelpers.pattern(({ element: u, params: { state } }) => u.age >= state.minAge && u.active, {
+            type: "object",
+            properties: {
+                element: {
+                    type: "object",
+                    properties: {
+                        name: {
+                            type: "string"
+                        },
+                        age: {
+                            type: "number"
+                        },
+                        active: {
+                            type: "boolean"
+                        }
+                    },
+                    required: ["name", "age", "active"]
+                },
+                params: {
+                    type: "object",
+                    properties: {
+                        state: {
+                            type: "object",
+                            properties: {
+                                minAge: {
+                                    type: "number",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["minAge"]
+                        }
+                    },
+                    required: ["state"]
+                }
+            },
+            required: ["element", "params"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema), {
+            state: {
+                minAge: state.minAge
+            }
+        }).length)}
         </p>
 
         {/* Map with conditional logic */}

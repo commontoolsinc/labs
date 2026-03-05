@@ -39,6 +39,7 @@ export {
   isAnyOrUnknownType,
   isDeriveCall,
   isReactiveArrayMapCall,
+  isReactiveArrayMethodCall,
   registerSyntheticCallType,
   typeToSchemaTypeNode,
   typeToTypeNode,

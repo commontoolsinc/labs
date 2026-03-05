@@ -10,9 +10,17 @@ import {
   isDeriveCall,
   isFunctionLikeExpression,
   isInsideSafeCallbackWrapper,
-  isReactiveArrayMapCall,
+  isReactiveArrayMethodCall,
   registerSyntheticCallType,
 } from "../../ast/mod.ts";
+
+/** Maps array method names to their WithPattern compiler target names. */
+const METHOD_TO_WITH_PATTERN: Record<string, string> = {
+  map: "mapWithPattern",
+  filter: "filterWithPattern",
+  flatMap: "flatMapWithPattern",
+};
+
 import { buildHierarchicalParamsValue } from "../../utils/capture-tree.ts";
 import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
 import {
@@ -31,7 +39,7 @@ export class MapStrategy implements ClosureTransformationStrategy {
     node: ts.Node,
     context: TransformationContext,
   ): boolean {
-    return ts.isCallExpression(node) && isOpaqueRefArrayMapCall(
+    return ts.isCallExpression(node) && isReactiveArrayMethodCall(
       node,
       context.checker,
       context.options.typeRegistry,
@@ -57,11 +65,10 @@ export class MapStrategy implements ClosureTransformationStrategy {
 }
 
 /**
- * Checks if this is an OpaqueRef<T[]> or Cell<T[]> map call.
- * Only transforms map calls on reactive arrays (OpaqueRef/Cell), not plain arrays.
+ * Checks if this is an OpaqueRef<T[]> or Cell<T[]> array method call.
+ * Only transforms calls on reactive arrays (OpaqueRef/Cell), not plain arrays.
  *
- * @deprecated Use isReactiveArrayMapCall from ast/mod.ts instead.
- * This is kept for backwards compatibility but delegates to the shared implementation.
+ * @deprecated Use isReactiveArrayMethodCall from ast/mod.ts instead.
  */
 export function isOpaqueRefArrayMapCall(
   node: ts.CallExpression,
@@ -69,7 +76,7 @@ export function isOpaqueRefArrayMapCall(
   typeRegistry?: WeakMap<ts.Node, ts.Type>,
   logger?: (message: string) => void,
 ): boolean {
-  return isReactiveArrayMapCall(node, checker, typeRegistry, logger);
+  return isReactiveArrayMethodCall(node, checker, typeRegistry, logger);
 }
 
 /**
@@ -330,9 +337,16 @@ function createPatternCallWithParams(
     ts.isExpression,
   ) ?? mapCall.expression.expression;
 
+  // Determine which WithPattern method to emit based on the original method name
+  const originalMethodName = ts.isPropertyAccessExpression(mapCall.expression)
+    ? mapCall.expression.name.text
+    : "map";
+  const withPatternName = METHOD_TO_WITH_PATTERN[originalMethodName] ??
+    "mapWithPattern";
+
   const mapWithPatternAccess = factory.createPropertyAccessExpression(
     visitedArrayExpr,
-    factory.createIdentifier("mapWithPattern"),
+    factory.createIdentifier(withPatternName),
   );
 
   const args: ts.Expression[] = [patternCall, paramsObject];

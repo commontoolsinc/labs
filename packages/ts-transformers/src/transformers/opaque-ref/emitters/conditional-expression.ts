@@ -3,7 +3,7 @@ import ts from "typescript";
 import type { Emitter } from "../types.ts";
 import { createIfElseCall } from "../../builtins/ifelse.ts";
 import {
-  isReactiveArrayMapCall,
+  isReactiveArrayMethodCall,
   registerSyntheticCallType,
   selectDataFlowsReferencedIn,
 } from "../../../ast/mod.ts";
@@ -42,7 +42,7 @@ function processBranch(
     unwrappedExpr = unwrappedExpr.expression;
   }
   const isReactiveMap = ts.isCallExpression(unwrappedExpr) &&
-    isReactiveArrayMapCall(
+    isReactiveArrayMethodCall(
       unwrappedExpr,
       context.checker,
       context.options.typeRegistry,
