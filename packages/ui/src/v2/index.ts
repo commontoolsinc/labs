@@ -28,6 +28,7 @@ export * from "./components/ct-aspect-ratio/index.ts";
 export * from "./components/ct-audio-visualizer/index.ts";
 export * from "./components/ct-badge/index.ts";
 export * from "./components/ct-button/index.ts";
+export * from "./components/ct-calendar/index.ts";
 export * from "./components/ct-canvas/index.ts";
 export * from "./components/ct-card/index.ts";
 export * from "./components/ct-chart/index.ts";
