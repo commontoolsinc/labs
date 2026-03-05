@@ -600,7 +600,10 @@ export interface IEquatable {
  * OpaqueRef<T[]> (which is an intersection of OpaqueCell<T[]> & Array<…>).
  * The runtime methods exist on Cell and are intercepted by the proxy; they
  * just don't have type declarations here until the compiler transform
- * (Phase 3) resolves the ambiguity.
+ * (Phase 3) resolves the ambiguity. This means pattern authors won't get
+ * autocomplete for .filter()/.flatMap() — they'll see Array.prototype
+ * signatures instead. The proxy intercepts correctly at runtime, but
+ * TypeScript won't type-check the reactive return type.
  */
 export interface IDerivable<T> {
   map<S>(
@@ -633,7 +636,7 @@ export interface IDerivable<T> {
   ): OpaqueRef<(T extends Array<infer U> ? U : T)[]>;
   flatMapWithPattern<S>(
     this: IsThisObject,
-    op: PatternFactory<T extends Array<infer U> ? U : T, S>,
+    op: PatternFactory<T extends Array<infer U> ? U : T, S[]>,
     params: Record<string, any>,
   ): OpaqueRef<S[]>;
 }

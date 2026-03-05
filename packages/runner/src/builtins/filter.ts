@@ -1,8 +1,8 @@
-import { type JSONSchema, type Pattern } from "../builder/types.ts";
+import type { JSONSchema, Pattern } from "../builder/types.ts";
 
-import { type Cell } from "../cell.ts";
-import { type Action } from "../scheduler.ts";
-import { type AddCancel } from "../cancel.ts";
+import type { Cell } from "../cell.ts";
+import type { Action } from "../scheduler.ts";
+import type { AddCancel } from "../cancel.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 

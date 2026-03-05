@@ -831,4 +831,77 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     expect(runCount).toBe(2);
     expect(result.key("flat").get()).toEqual([1, 10, 3, 30]);
   });
+
+  // ── WithPattern variant tests ───────────────────────────────────────
+
+  it("should filter with a pre-defined pattern (filterWithPattern)", async () => {
+    // The WithPattern variants receive { element, index, array, params } at
+    // runtime (same as map). The PatternFactory type doesn't fully capture
+    // this shape — see IDerivable note in api/index.ts.
+    const isEvenPattern = pattern<{ element: number }>(({ element }) => {
+      return lift(
+        { type: "number" } as const satisfies JSONSchema,
+        { type: "boolean" } as const satisfies JSONSchema,
+        (x: number) => x % 2 === 0,
+      )(element);
+    });
+
+    const outerPattern = pattern<{ values: number[] }>(({ values }) => {
+      return {
+        values,
+        // deno-lint-ignore no-explicit-any
+        evens: values.filterWithPattern(isEvenPattern as any, {}),
+      };
+    });
+
+    const resultCell = runtime.getCell<{ values: number[]; evens: number[] }>(
+      space,
+      "filterWithPattern-basic",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, outerPattern, {
+      values: [1, 2, 3, 4, 5],
+    }, resultCell);
+    tx.commit();
+
+    await result.pull();
+    expect(result.key("evens").get()).toEqual([2, 4]);
+  });
+
+  it("should flatMap with a pre-defined pattern (flatMapWithPattern)", async () => {
+    // Same type gap as filterWithPattern — see comment above.
+    const duplicatePattern = pattern<{ element: number }>(({ element }) => {
+      return lift(
+        { type: "number" } as const satisfies JSONSchema,
+        {
+          type: "array",
+          items: { type: "number" },
+        } as const satisfies JSONSchema,
+        (x: number) => [x, x * 10],
+      )(element);
+    });
+
+    const outerPattern = pattern<{ values: number[] }>(({ values }) => {
+      return {
+        values,
+        // deno-lint-ignore no-explicit-any
+        flat: values.flatMapWithPattern(duplicatePattern as any, {}),
+      };
+    });
+
+    const resultCell = runtime.getCell<{ values: number[]; flat: number[] }>(
+      space,
+      "flatMapWithPattern-basic",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, outerPattern, {
+      values: [1, 2, 3],
+    }, resultCell);
+    tx.commit();
+
+    await result.pull();
+    expect(result.key("flat").get()).toEqual([1, 10, 2, 20, 3, 30]);
+  });
 });

@@ -1580,7 +1580,7 @@ export class CellImpl<T extends StorableValue>
    */
   flatMapWithPattern<S>(
     this: IsThisObject,
-    op: PatternFactory<T extends Array<infer U> ? U : T, S>,
+    op: PatternFactory<T extends Array<infer U> ? U : T, S[]>,
     params: Record<string, any>,
   ): OpaqueRef<S[]> {
     if (!flatMapFactory) {
