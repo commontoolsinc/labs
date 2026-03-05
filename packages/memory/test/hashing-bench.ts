@@ -17,6 +17,7 @@ import {
   setCanonicalHashConfig,
 } from "../reference.ts";
 import { canonicalHash } from "../canonical-hash.ts";
+import { deepFreeze } from "../deep-freeze.ts";
 
 // ---------------------------------------------------------------------------
 // Pre-generated test data
@@ -459,5 +460,350 @@ Deno.bench({
   group: "sparse-array",
   fn() {
     canonicalHash(sparseArray);
+  },
+});
+
+// ==========================================================================
+// Deep-frozen same-object benchmarks (WeakMap cache should activate)
+// ==========================================================================
+
+const frozenSmallFlat = deepFreeze({
+  name: "Alice",
+  age: 30,
+  active: true,
+  score: 95.5,
+  tag: null,
+});
+
+const frozenNested = deepFreeze({
+  user: { name: "Alice", prefs: { theme: "dark", lang: "en" } },
+  scores: { math: 95, science: 88, history: 72 },
+  meta: { created: "2026-01-01", version: 3 },
+});
+
+const frozenArray = deepFreeze([1, "hello", true, null, 42.5, {
+  nested: "val",
+}]);
+
+const frozenObjectWithArrays = deepFreeze({
+  ids: [1, 2, 3, 4, 5],
+  tags: ["alpha", "beta", "gamma"],
+  matrix: [[1, 2], [3, 4], [5, 6]],
+  label: "container",
+});
+
+const frozenLargeTree = deepFreeze(makeLargeNestedTree(6, 3));
+
+// Warm up frozen-object path
+for (let i = 0; i < 20; i++) {
+  setCanonicalHashConfig(true);
+  refer(frozenSmallFlat);
+  refer(frozenLargeTree);
+  resetCanonicalHashConfig();
+}
+
+Deno.bench({
+  name: "legacy refer() - frozen small flat (5 keys, cached)",
+  group: "frozen-small-flat",
+  baseline: true,
+  fn(b) {
+    setCanonicalHashConfig(false);
+    b.start();
+    refer(frozenSmallFlat);
+    b.end();
+    resetCanonicalHashConfig();
+  },
+});
+
+Deno.bench({
+  name: "canonical refer() - frozen small flat (5 keys, WeakMap cached)",
+  group: "frozen-small-flat",
+  fn(b) {
+    setCanonicalHashConfig(true);
+    b.start();
+    refer(frozenSmallFlat);
+    b.end();
+    resetCanonicalHashConfig();
+  },
+});
+
+Deno.bench({
+  name: "legacy refer() - frozen nested (3-level, cached)",
+  group: "frozen-nested",
+  baseline: true,
+  fn(b) {
+    setCanonicalHashConfig(false);
+    b.start();
+    refer(frozenNested);
+    b.end();
+    resetCanonicalHashConfig();
+  },
+});
+
+Deno.bench({
+  name: "canonical refer() - frozen nested (3-level, WeakMap cached)",
+  group: "frozen-nested",
+  fn(b) {
+    setCanonicalHashConfig(true);
+    b.start();
+    refer(frozenNested);
+    b.end();
+    resetCanonicalHashConfig();
+  },
+});
+
+Deno.bench({
+  name: "legacy refer() - frozen array (6 elements, cached)",
+  group: "frozen-array",
+  baseline: true,
+  fn(b) {
+    setCanonicalHashConfig(false);
+    b.start();
+    refer(frozenArray);
+    b.end();
+    resetCanonicalHashConfig();
+  },
+});
+
+Deno.bench({
+  name: "canonical refer() - frozen array (6 elements, WeakMap cached)",
+  group: "frozen-array",
+  fn(b) {
+    setCanonicalHashConfig(true);
+    b.start();
+    refer(frozenArray);
+    b.end();
+    resetCanonicalHashConfig();
+  },
+});
+
+Deno.bench({
+  name: "legacy refer() - frozen object+arrays (cached)",
+  group: "frozen-obj-arrays",
+  baseline: true,
+  fn(b) {
+    setCanonicalHashConfig(false);
+    b.start();
+    refer(frozenObjectWithArrays);
+    b.end();
+    resetCanonicalHashConfig();
+  },
+});
+
+Deno.bench({
+  name: "canonical refer() - frozen object+arrays (WeakMap cached)",
+  group: "frozen-obj-arrays",
+  fn(b) {
+    setCanonicalHashConfig(true);
+    b.start();
+    refer(frozenObjectWithArrays);
+    b.end();
+    resetCanonicalHashConfig();
+  },
+});
+
+Deno.bench({
+  name: "legacy refer() - frozen large tree (~364 nodes, cached)",
+  group: "frozen-large-tree",
+  baseline: true,
+  fn(b) {
+    setCanonicalHashConfig(false);
+    b.start();
+    refer(frozenLargeTree);
+    b.end();
+    resetCanonicalHashConfig();
+  },
+});
+
+Deno.bench({
+  name: "canonical refer() - frozen large tree (~364 nodes, WeakMap cached)",
+  group: "frozen-large-tree",
+  fn(b) {
+    setCanonicalHashConfig(true);
+    b.start();
+    refer(frozenLargeTree);
+    b.end();
+    resetCanonicalHashConfig();
+  },
+});
+
+// ==========================================================================
+// Deep-frozen fresh-object benchmarks (freeze + hash each iteration)
+// ==========================================================================
+
+Deno.bench({
+  name: "legacy refer() - frozen small flat (fresh)",
+  group: "frozen-small-flat-fresh",
+  baseline: true,
+  fn(b) {
+    const data = deepFreeze({
+      name: "Alice",
+      age: 30,
+      active: true,
+      score: 95.5,
+      tag: null,
+    });
+    setCanonicalHashConfig(false);
+    b.start();
+    refer(data);
+    b.end();
+    resetCanonicalHashConfig();
+  },
+});
+
+Deno.bench({
+  name: "canonical refer() - frozen small flat (fresh)",
+  group: "frozen-small-flat-fresh",
+  fn(b) {
+    const data = deepFreeze({
+      name: "Alice",
+      age: 30,
+      active: true,
+      score: 95.5,
+      tag: null,
+    });
+    setCanonicalHashConfig(true);
+    b.start();
+    refer(data);
+    b.end();
+    resetCanonicalHashConfig();
+  },
+});
+
+Deno.bench({
+  name: "legacy refer() - frozen nested (fresh)",
+  group: "frozen-nested-fresh",
+  baseline: true,
+  fn(b) {
+    const data = deepFreeze({
+      user: { name: "Alice", prefs: { theme: "dark", lang: "en" } },
+      scores: { math: 95, science: 88, history: 72 },
+      meta: { created: "2026-01-01", version: 3 },
+    });
+    setCanonicalHashConfig(false);
+    b.start();
+    refer(data);
+    b.end();
+    resetCanonicalHashConfig();
+  },
+});
+
+Deno.bench({
+  name: "canonical refer() - frozen nested (fresh)",
+  group: "frozen-nested-fresh",
+  fn(b) {
+    const data = deepFreeze({
+      user: { name: "Alice", prefs: { theme: "dark", lang: "en" } },
+      scores: { math: 95, science: 88, history: 72 },
+      meta: { created: "2026-01-01", version: 3 },
+    });
+    setCanonicalHashConfig(true);
+    b.start();
+    refer(data);
+    b.end();
+    resetCanonicalHashConfig();
+  },
+});
+
+Deno.bench({
+  name: "legacy refer() - frozen large tree (fresh)",
+  group: "frozen-large-tree-fresh",
+  baseline: true,
+  fn(b) {
+    const data = deepFreeze(makeLargeNestedTree(6, 3));
+    setCanonicalHashConfig(false);
+    b.start();
+    refer(data);
+    b.end();
+    resetCanonicalHashConfig();
+  },
+});
+
+Deno.bench({
+  name: "canonical refer() - frozen large tree (fresh)",
+  group: "frozen-large-tree-fresh",
+  fn(b) {
+    const data = deepFreeze(makeLargeNestedTree(6, 3));
+    setCanonicalHashConfig(true);
+    b.start();
+    refer(data);
+    b.end();
+    resetCanonicalHashConfig();
+  },
+});
+
+// ==========================================================================
+// {the, of} unclaimed-fact pattern benchmarks
+// ==========================================================================
+
+const frozenTheOf = Object.freeze({
+  the: "application/json" as const,
+  of: "did:key:z6Mktest1234567890" as const,
+});
+
+// Warm up
+for (let i = 0; i < 20; i++) {
+  setCanonicalHashConfig(true);
+  refer(frozenTheOf);
+  setCanonicalHashConfig(false);
+  refer(frozenTheOf);
+}
+resetCanonicalHashConfig();
+
+Deno.bench({
+  name: "legacy refer() - frozen {the, of} (cached)",
+  group: "frozen-the-of",
+  baseline: true,
+  fn(b) {
+    setCanonicalHashConfig(false);
+    b.start();
+    refer(frozenTheOf);
+    b.end();
+    resetCanonicalHashConfig();
+  },
+});
+
+Deno.bench({
+  name: "canonical refer() - frozen {the, of} (WeakMap cached)",
+  group: "frozen-the-of",
+  fn(b) {
+    setCanonicalHashConfig(true);
+    b.start();
+    refer(frozenTheOf);
+    b.end();
+    resetCanonicalHashConfig();
+  },
+});
+
+Deno.bench({
+  name: "legacy refer() - frozen {the, of} (fresh)",
+  group: "frozen-the-of-fresh",
+  baseline: true,
+  fn(b) {
+    const data = Object.freeze({
+      the: "application/json",
+      of: "did:key:z6Mktest1234567890",
+    });
+    setCanonicalHashConfig(false);
+    b.start();
+    refer(data);
+    b.end();
+    resetCanonicalHashConfig();
+  },
+});
+
+Deno.bench({
+  name: "canonical refer() - frozen {the, of} (fresh)",
+  group: "frozen-the-of-fresh",
+  fn(b) {
+    const data = Object.freeze({
+      the: "application/json",
+      of: "did:key:z6Mktest1234567890",
+    });
+    setCanonicalHashConfig(true);
+    b.start();
+    refer(data);
+    b.end();
+    resetCanonicalHashConfig();
   },
 });
