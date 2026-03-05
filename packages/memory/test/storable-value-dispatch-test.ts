@@ -8,6 +8,7 @@ import {
 } from "../storable-value-dispatch.ts";
 import type { StorableValue } from "../interface.ts";
 import { StorableError } from "../storable-native-instances.ts";
+import { toDeepStorableValue } from "../storable-value.ts";
 
 /** Encode then decode a value through the current dispatch configuration. */
 function roundTrip(value: StorableValue): StorableValue {
@@ -42,6 +43,22 @@ describe("storable-value-dispatch", () => {
     it("round-trip preserves object identity", () => {
       const value = { a: 1, b: [2, 3] } as StorableValue;
       expect(roundTrip(value)).toBe(value);
+    });
+
+    it("toDeepStorableValue + toStorable chain converts Error (legacy path)", () => {
+      // Simulates the setRaw() pipeline: toDeepStorableValue handles legacy
+      // Error conversion even when the dispatch flag is OFF.
+      const error = new Error("legacy error");
+      const stored = toStorable(
+        toDeepStorableValue(error as unknown as StorableValue),
+      );
+      // Legacy path converts Error to a plain object with @Error key.
+      expect(stored).not.toBeInstanceOf(Error);
+      const obj = stored as Record<string, unknown>;
+      expect(obj["@Error"]).toBeDefined();
+      expect((obj["@Error"] as Record<string, unknown>).message).toBe(
+        "legacy error",
+      );
     });
 
     it("primitives pass through", () => {
