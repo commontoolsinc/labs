@@ -25,6 +25,7 @@ import {
   wish,
   Writable,
 } from "commontools";
+import type { NodeFactory, Opaque } from "commontools";
 
 import type { AuthInfo, AuthState, TokenExpiryWarning } from "./auth-types.ts";
 import type { AuthManagerDescriptor } from "./auth-manager-descriptor.ts";
@@ -120,10 +121,9 @@ const attemptRefresh = handler<
  * @param descriptor - Provider-specific configuration
  * @param AuthPattern - The provider's auth pattern function (for creating new instances)
  */
-export function createAuthManager(
+export function createAuthManager<T, R>(
   descriptor: AuthManagerDescriptor,
-  // deno-lint-ignore no-explicit-any
-  AuthPattern: (...args: any[]) => any,
+  AuthPattern: NodeFactory<T, R>,
 ) {
   function debugLog(enabled: boolean, ...args: unknown[]) {
     if (enabled) console.log(`[${descriptor.displayName}Auth]`, ...args);
@@ -308,7 +308,7 @@ export function createAuthManager(
           AuthPattern({
             selectedScopes: selected,
             auth: emptyAuth,
-          }),
+          } as unknown as Opaque<T>),
         );
       });
 
