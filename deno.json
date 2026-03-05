@@ -20,6 +20,7 @@
     "./packages/llm",
     "./packages/memory",
     "./packages/patterns",
+    "./packages/patterns/auth",
     "./packages/runner",
     "./packages/runtime-client",
     "./packages/seeder",

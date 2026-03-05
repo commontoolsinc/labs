@@ -2,7 +2,6 @@
 import {
   computed,
   Default,
-  getPatternEnvironment,
   handler,
   ifElse,
   NAME,
@@ -13,14 +12,18 @@ import {
   Writable,
 } from "commontools";
 
-const env = getPatternEnvironment();
-
-// Debug logging
-const DEBUG_AUTH = false;
-
-function authDebugLog(...args: unknown[]) {
-  if (DEBUG_AUTH) console.log("[airtable-auth]", ...args);
-}
+import { createRefreshFunction } from "../../auth/auth-refresh.ts";
+import {
+  REFRESH_THRESHOLD_MS,
+  startReactiveClock,
+} from "../../auth/auth-reactive.ts";
+import type { AuthStatus } from "../../auth/auth-types.ts";
+import {
+  formatTokenExpiry,
+  getScopeSummary as getScopeSummaryGeneric,
+  getSelectedScopeSummary,
+  STATUS_CONFIG,
+} from "../../auth/auth-ui-helpers.tsx";
 
 // Airtable scope descriptions
 const SCOPE_MAP = {
@@ -46,43 +49,8 @@ const SCOPE_SHORT_NAMES: Record<string, string> = {
 
 /** Get scope summary from granted scope strings */
 export function getScopeSummary(grantedScopes: string[]): string {
-  const names = new Set<string>();
-  for (const scope of grantedScopes) {
-    const name = SCOPE_SHORT_NAMES[scope];
-    if (name) names.add(name);
-  }
-  const arr = Array.from(names);
-  if (arr.length === 0) return "";
-  if (arr.length <= 3) return arr.join(", ");
-  return `${arr.slice(0, 2).join(", ")} +${arr.length - 2} more`;
+  return getScopeSummaryGeneric(grantedScopes, SCOPE_SHORT_NAMES);
 }
-
-/** Get scope summary from selected scope flags */
-function getSelectedScopeSummary(
-  selectedScopes: Record<string, boolean>,
-): string {
-  const names = new Set<string>();
-  for (const [key, enabled] of Object.entries(selectedScopes)) {
-    if (enabled) {
-      const name = SCOPE_SHORT_NAMES[key];
-      if (name) names.add(name);
-    }
-  }
-  const arr = Array.from(names);
-  if (arr.length === 0) return "";
-  if (arr.length <= 3) return arr.join(", ");
-  return `${arr.slice(0, 2).join(", ")} +${arr.length - 2} more`;
-}
-
-// Status indicator configuration
-const STATUS_CONFIG = {
-  ready: { dot: "#22c55e", bg: "#f0fdf4" },
-  warning: { dot: "#eab308", bg: "#fefce8" },
-  expired: { dot: "#ef4444", bg: "#fef2f2" },
-  "needs-login": { dot: "#9ca3af", bg: "#f9fafb" },
-} as const;
-
-type AuthStatus = keyof typeof STATUS_CONFIG;
 
 /**
  * Helper to create preview UI for picker display.
@@ -111,7 +79,7 @@ export function createPreviewUI(
 
   const scopeSummary = isAuthenticated
     ? getScopeSummary(auth?.scope || [])
-    : getSelectedScopeSummary(selectedScopes);
+    : getSelectedScopeSummary(selectedScopes, SCOPE_SHORT_NAMES);
 
   return (
     <div
@@ -250,58 +218,10 @@ interface Output {
   bgUpdater: Stream<Record<string, never>>;
 }
 
-/**
- * Shared token refresh logic. Calls the server refresh endpoint.
- * Guarded against concurrent invocations.
- */
-let refreshInProgress = false;
-
-async function refreshAuthToken(
-  authCell: Writable<AirtableAuth>,
-): Promise<boolean> {
-  if (refreshInProgress) return false;
-  refreshInProgress = true;
-
-  try {
-    const currentAuth = authCell.get();
-    const refreshToken = currentAuth?.refreshToken;
-
-    if (!refreshToken) {
-      throw new Error("No refresh token available");
-    }
-
-    const res = await fetch(
-      new URL("/api/integrations/airtable-oauth/refresh", env.apiUrl),
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refreshToken }),
-      },
-    );
-
-    if (!res.ok) {
-      const errorText = await res.text();
-      const error = new Error(
-        `Token refresh failed: ${res.status} ${errorText}`,
-      ) as Error & { status: number };
-      error.status = res.status;
-      throw error;
-    }
-
-    const json = await res.json();
-    if (!json.tokenInfo) {
-      throw new Error("Invalid refresh response: no tokenInfo");
-    }
-
-    authCell.update({
-      ...json.tokenInfo,
-      user: currentAuth.user,
-    });
-    return true;
-  } finally {
-    refreshInProgress = false;
-  }
-}
+// Create guarded refresh function for Airtable OAuth
+const refreshAuthToken = createRefreshFunction(
+  "/api/integrations/airtable-oauth/refresh",
+);
 
 // Handler for refreshing tokens from UI button
 const handleRefresh = handler<
@@ -327,30 +247,15 @@ const handleRefresh = handler<
   },
 );
 
-/**
- * Handler for refreshing tokens from other pieces.
- * Runs in airtable-auth's transaction context.
- */
+// Handler for refreshing tokens from other pieces
 const refreshTokenHandler = handler<
   Record<string, never>,
   { auth: Writable<AirtableAuth> }
 >(async (_event, { auth }) => {
-  authDebugLog("refreshTokenHandler called");
   await refreshAuthToken(auth);
-  authDebugLog("Token refreshed successfully");
 });
 
-// Reactive clock for token expiry
-function startReactiveClock(cell: Writable<number>): void {
-  setInterval(() => cell.set(Date.now()), 30_000);
-}
-
-const REFRESH_THRESHOLD_MS = 10 * 60 * 1000;
-
-/**
- * Background updater handler for proactive token refresh.
- * Called by background-charm-service every ~60 seconds.
- */
+// Background updater handler for proactive token refresh
 const bgRefreshHandler = handler<
   Record<string, never>,
   { auth: Writable<AirtableAuth> }
@@ -365,7 +270,9 @@ const bgRefreshHandler = handler<
     const timeRemaining = expiresAt - Date.now();
     if (timeRemaining > REFRESH_THRESHOLD_MS) return;
 
-    console.log("[airtable-auth bgUpdater] Token expiring soon, refreshing...");
+    console.log(
+      "[airtable-auth bgUpdater] Token expiring soon, refreshing...",
+    );
 
     try {
       await refreshAuthToken(auth);
@@ -435,19 +342,9 @@ export default pattern<Input, Output>(
       return auth.expiresAt < now.get();
     });
 
-    const tokenExpiryDisplay = computed(() => {
-      if (!auth?.expiresAt || auth.expiresAt === 0) return null;
-      const currentTime = now.get();
-      const remaining = auth.expiresAt - currentTime;
-      if (remaining <= 0) return "Expired";
-
-      const minutes = Math.floor(remaining / (60 * 1000));
-      const hours = Math.floor(minutes / 60);
-      const mins = minutes % 60;
-
-      if (hours > 0) return `${hours}h ${mins}m`;
-      return `${mins}m`;
-    });
+    const tokenExpiryDisplay = computed(() =>
+      formatTokenExpiry(auth?.expiresAt || 0, now.get())
+    );
 
     const checkboxesDisabled = computed(() => !!auth?.accessToken);
 
@@ -488,7 +385,7 @@ export default pattern<Input, Output>(
           "schema.bases:read": !!selectedScopes["schema.bases:read"],
           "schema.bases:write": !!selectedScopes["schema.bases:write"],
           "webhook:manage": !!selectedScopes["webhook:manage"],
-        });
+        }, SCOPE_SHORT_NAMES);
       const initial = (name || email || "?")[0]?.toUpperCase() || "";
       const bgColor = STATUS_CONFIG[status].bg;
       const dotColor = STATUS_CONFIG[status].dot;
@@ -505,7 +402,7 @@ export default pattern<Input, Output>(
 
     const loggedIn = computed(() => !!auth?.accessToken);
 
-    // Data-only computed for granted scopes — JSX rendered inline in UI section
+    // Data-only computed for granted scopes
     const grantedScopesList = computed(() => {
       const scopeList: string[] = auth?.scope || [];
       return scopeList.map(
@@ -936,7 +833,11 @@ export default pattern<Input, Output>(
             {ifElse(
               !!previewState.scopeSummary,
               <div
-                style={{ fontSize: "12px", color: "#6b7280", marginTop: "2px" }}
+                style={{
+                  fontSize: "12px",
+                  color: "#6b7280",
+                  marginTop: "2px",
+                }}
               >
                 {previewState.scopeSummary}
               </div>,

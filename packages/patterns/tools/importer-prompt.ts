@@ -60,8 +60,8 @@ const AIRTABLE_AUTH_SOURCE = `/// <cts-enable />
 import {
   computed,
   Default,
-  getPatternEnvironment,
   handler,
+  ifElse,
   NAME,
   pattern,
   Secret,
@@ -70,14 +70,18 @@ import {
   Writable,
 } from "commontools";
 
-const env = getPatternEnvironment();
-
-// Debug logging
-const DEBUG_AUTH = false;
-
-function authDebugLog(...args: unknown[]) {
-  if (DEBUG_AUTH) console.log("[airtable-auth]", ...args);
-}
+import { createRefreshFunction } from "../../auth/auth-refresh.ts";
+import {
+  REFRESH_THRESHOLD_MS,
+  startReactiveClock,
+} from "../../auth/auth-reactive.ts";
+import type { AuthStatus } from "../../auth/auth-types.ts";
+import {
+  formatTokenExpiry,
+  getSelectedScopeSummary,
+  getScopeSummary as getScopeSummaryGeneric,
+  STATUS_CONFIG,
+} from "../../auth/auth-ui-helpers.tsx";
 
 // Airtable scope descriptions
 const SCOPE_MAP = {
@@ -103,43 +107,8 @@ const SCOPE_SHORT_NAMES: Record<string, string> = {
 
 /** Get scope summary from granted scope strings */
 export function getScopeSummary(grantedScopes: string[]): string {
-  const names = new Set<string>();
-  for (const scope of grantedScopes) {
-    const name = SCOPE_SHORT_NAMES[scope];
-    if (name) names.add(name);
-  }
-  const arr = Array.from(names);
-  if (arr.length === 0) return "";
-  if (arr.length <= 3) return arr.join(", ");
-  return \`\${arr.slice(0, 2).join(", ")} +\${arr.length - 2} more\`;
+  return getScopeSummaryGeneric(grantedScopes, SCOPE_SHORT_NAMES);
 }
-
-/** Get scope summary from selected scope flags */
-function getSelectedScopeSummary(
-  selectedScopes: Record<string, boolean>,
-): string {
-  const names = new Set<string>();
-  for (const [key, enabled] of Object.entries(selectedScopes)) {
-    if (enabled) {
-      const name = SCOPE_SHORT_NAMES[key];
-      if (name) names.add(name);
-    }
-  }
-  const arr = Array.from(names);
-  if (arr.length === 0) return "";
-  if (arr.length <= 3) return arr.join(", ");
-  return \`\${arr.slice(0, 2).join(", ")} +\${arr.length - 2} more\`;
-}
-
-// Status indicator configuration
-const STATUS_CONFIG = {
-  ready: { dot: "#22c55e", bg: "#f0fdf4" },
-  warning: { dot: "#eab308", bg: "#fefce8" },
-  expired: { dot: "#ef4444", bg: "#fef2f2" },
-  "needs-login": { dot: "#9ca3af", bg: "#f9fafb" },
-} as const;
-
-type AuthStatus = keyof typeof STATUS_CONFIG;
 
 /**
  * Helper to create preview UI for picker display.
@@ -168,7 +137,7 @@ export function createPreviewUI(
 
   const scopeSummary = isAuthenticated
     ? getScopeSummary(auth?.scope || [])
-    : getSelectedScopeSummary(selectedScopes);
+    : getSelectedScopeSummary(selectedScopes, SCOPE_SHORT_NAMES);
 
   return (
     <div
@@ -241,10 +210,10 @@ export function createPreviewUI(
 /**
  * Airtable OAuth token data.
  *
- * Uses \\\`accessToken\\\` field (OAuth2TokenSchema convention).
+ * Uses \`accessToken\` field (OAuth2TokenSchema convention).
  *
  * CRITICAL: When consuming from another pattern, DO NOT use derive()!
- * Use direct property access: \\\`airtableAuthPiece.auth\\\`
+ * Use direct property access: \`airtableAuthPiece.auth\`
  */
 export type AirtableAuth = {
   accessToken: Default<Secret<string>, "">;
@@ -307,58 +276,10 @@ interface Output {
   bgUpdater: Stream<Record<string, never>>;
 }
 
-/**
- * Shared token refresh logic. Calls the server refresh endpoint.
- * Guarded against concurrent invocations.
- */
-let refreshInProgress = false;
-
-async function refreshAuthToken(
-  authCell: Writable<AirtableAuth>,
-): Promise<boolean> {
-  if (refreshInProgress) return false;
-  refreshInProgress = true;
-
-  try {
-    const currentAuth = authCell.get();
-    const refreshToken = currentAuth?.refreshToken;
-
-    if (!refreshToken) {
-      throw new Error("No refresh token available");
-    }
-
-    const res = await fetch(
-      new URL("/api/integrations/airtable-oauth/refresh", env.apiUrl),
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refreshToken }),
-      },
-    );
-
-    if (!res.ok) {
-      const errorText = await res.text();
-      const error = new Error(
-        \\\`Token refresh failed: \\\${res.status} \\\${errorText}\\\`,
-      ) as Error & { status: number };
-      error.status = res.status;
-      throw error;
-    }
-
-    const json = await res.json();
-    if (!json.tokenInfo) {
-      throw new Error("Invalid refresh response: no tokenInfo");
-    }
-
-    authCell.update({
-      ...json.tokenInfo,
-      user: currentAuth.user,
-    });
-    return true;
-  } finally {
-    refreshInProgress = false;
-  }
-}
+// Create guarded refresh function for Airtable OAuth
+const refreshAuthToken = createRefreshFunction(
+  "/api/integrations/airtable-oauth/refresh",
+);
 
 // Handler for refreshing tokens from UI button
 const handleRefresh = handler<
@@ -384,30 +305,15 @@ const handleRefresh = handler<
   },
 );
 
-/**
- * Handler for refreshing tokens from other pieces.
- * Runs in airtable-auth's transaction context.
- */
+// Handler for refreshing tokens from other pieces
 const refreshTokenHandler = handler<
   Record<string, never>,
   { auth: Writable<AirtableAuth> }
 >(async (_event, { auth }) => {
-  authDebugLog("refreshTokenHandler called");
   await refreshAuthToken(auth);
-  authDebugLog("Token refreshed successfully");
 });
 
-// Reactive clock for token expiry
-function startReactiveClock(cell: Writable<number>): void {
-  setInterval(() => cell.set(Date.now()), 30_000);
-}
-
-const REFRESH_THRESHOLD_MS = 10 * 60 * 1000;
-
-/**
- * Background updater handler for proactive token refresh.
- * Called by background-charm-service every ~60 seconds.
- */
+// Background updater handler for proactive token refresh
 const bgRefreshHandler = handler<
   Record<string, never>,
   { auth: Writable<AirtableAuth> }
@@ -422,7 +328,9 @@ const bgRefreshHandler = handler<
     const timeRemaining = expiresAt - Date.now();
     if (timeRemaining > REFRESH_THRESHOLD_MS) return;
 
-    console.log("[airtable-auth bgUpdater] Token expiring soon, refreshing...");
+    console.log(
+      "[airtable-auth bgUpdater] Token expiring soon, refreshing...",
+    );
 
     try {
       await refreshAuthToken(auth);
@@ -492,19 +400,9 @@ export default pattern<Input, Output>(
       return auth.expiresAt < now.get();
     });
 
-    const tokenExpiryDisplay = computed(() => {
-      if (!auth?.expiresAt || auth.expiresAt === 0) return null;
-      const currentTime = now.get();
-      const remaining = auth.expiresAt - currentTime;
-      if (remaining <= 0) return "Expired";
-
-      const minutes = Math.floor(remaining / (60 * 1000));
-      const hours = Math.floor(minutes / 60);
-      const mins = minutes % 60;
-
-      if (hours > 0) return \\\`\\\${hours}h \\\${mins}m\\\`;
-      return \\\`\\\${mins}m\\\`;
-    });
+    const tokenExpiryDisplay = computed(() =>
+      formatTokenExpiry(auth?.expiresAt || 0, now.get())
+    );
 
     const checkboxesDisabled = computed(() => !!auth?.accessToken);
 
@@ -513,84 +411,67 @@ export default pattern<Input, Output>(
 
     const scopesDisplay = computed(() => scopes.join(", "));
 
-    // Compact user chip
-    const userChip = computed(() => {
-      if (!auth?.user?.email) {
-        return (
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <span
-              style={{
-                width: "24px",
-                height: "24px",
-                borderRadius: "50%",
-                backgroundColor: "#e5e7eb",
-                display: "inline-block",
-              }}
-            />
-            <span style={{ color: "#6b7280" }}>Not signed in</span>
-          </div>
-        );
-      }
-      return (
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <span
-            style={{
-              width: "24px",
-              height: "24px",
-              borderRadius: "50%",
-              backgroundColor: "#18BFFF",
-              display: "inline-block",
-            }}
-          />
-          <div>
-            <div style={{ fontWeight: 500, fontSize: "14px" }}>
-              {auth.user.name || auth.user.email}
-            </div>
-            {auth.user.name && (
-              <div style={{ fontSize: "12px", color: "#6b7280" }}>
-                {auth.user.email}
-              </div>
-            )}
-          </div>
-        </div>
-      );
-    });
+    const hasEmail = computed(() => !!auth?.user?.email);
+    const hasUserName = computed(() => !!auth?.user?.name);
 
-    // Preview for picker
-    const previewUI = computed(() =>
-      createPreviewUI(auth, {
-        "data.records:read": selectedScopes["data.records:read"],
-        "data.records:write": selectedScopes["data.records:write"],
-        "data.recordComments:read": selectedScopes["data.recordComments:read"],
-        "data.recordComments:write":
-          selectedScopes["data.recordComments:write"],
-        "schema.bases:read": selectedScopes["schema.bases:read"],
-        "schema.bases:write": selectedScopes["schema.bases:write"],
-        "webhook:manage": selectedScopes["webhook:manage"],
-      })
-    );
+    // Data-only computed for previewUI — resolves reactive values to plain scalars
+    const previewState = computed(() => {
+      const email = auth?.user?.email || "";
+      const name = auth?.user?.name || "";
+      const isAuthenticated = !!email;
+      const now = Date.now();
+      const expiresAt = auth?.expiresAt || 0;
+      const isExpired = isAuthenticated && expiresAt > 0 && expiresAt < now;
+      const isWarning = isAuthenticated && !isExpired && expiresAt > 0 &&
+        expiresAt - now < 10 * 60 * 1000;
+      const status: AuthStatus = !isAuthenticated
+        ? "needs-login"
+        : isExpired
+        ? "expired"
+        : isWarning
+        ? "warning"
+        : "ready";
+      const scopeSummary = isAuthenticated
+        ? getScopeSummary(auth?.scope || [])
+        : getSelectedScopeSummary({
+          "data.records:read": !!selectedScopes["data.records:read"],
+          "data.records:write": !!selectedScopes["data.records:write"],
+          "data.recordComments:read":
+            !!selectedScopes["data.recordComments:read"],
+          "data.recordComments:write":
+            !!selectedScopes["data.recordComments:write"],
+          "schema.bases:read": !!selectedScopes["schema.bases:read"],
+          "schema.bases:write": !!selectedScopes["schema.bases:write"],
+          "webhook:manage": !!selectedScopes["webhook:manage"],
+        }, SCOPE_SHORT_NAMES);
+      const initial = (name || email || "?")[0]?.toUpperCase() || "";
+      const bgColor = STATUS_CONFIG[status].bg;
+      const dotColor = STATUS_CONFIG[status].dot;
+      return {
+        email,
+        name,
+        isAuthenticated,
+        bgColor,
+        dotColor,
+        scopeSummary,
+        initial,
+      };
+    });
 
     const loggedIn = computed(() => !!auth?.accessToken);
 
-    const grantedScopesUI = computed(() => {
-      const scopeList = auth.scope;
-      if (!scopeList || scopeList.length === 0) {
-        return <ul style={{ margin: "8px 0 0 0", paddingLeft: "20px" }} />;
-      }
-      const friendlyScopes = scopeList.map(
+    // Data-only computed for granted scopes
+    const grantedScopesList = computed(() => {
+      const scopeList: string[] = auth?.scope || [];
+      return scopeList.map(
         (s: string) => SCOPE_MAP[s as keyof typeof SCOPE_MAP] || s,
-      ) as string[];
-      return (
-        <ul style={{ margin: "8px 0 0 0", paddingLeft: "20px" }}>
-          {friendlyScopes.map((scope) => <li>{scope}</li>)}
-        </ul>
       );
     });
 
     return {
       [NAME]: computed(() => {
         if (loggedIn) {
-          return \\\`Airtable Auth (\\\${auth.user.email})\\\`;
+          return \`Airtable Auth (\${auth.user.email})\`;
         }
         return "Airtable Auth";
       }),
@@ -816,7 +697,9 @@ export default pattern<Input, Output>(
                 }}
               >
                 <strong>Granted Scopes:</strong>
-                {grantedScopesUI}
+                <ul style={{ margin: "8px 0 0 0", paddingLeft: "20px" }}>
+                  {grantedScopesList.map((scope) => <li>{scope}</li>)}
+                </ul>
               </div>
             )}
 
@@ -899,13 +782,134 @@ export default pattern<Input, Output>(
       auth,
       scopes,
       selectedScopes,
-      userChip,
-      previewUI,
+      userChip: ifElse(
+        hasEmail,
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <span
+            style={{
+              width: "24px",
+              height: "24px",
+              borderRadius: "50%",
+              backgroundColor: "#18BFFF",
+              display: "inline-block",
+            }}
+          />
+          <div>
+            <div style={{ fontWeight: 500, fontSize: "14px" }}>
+              {ifElse(hasUserName, auth.user.name, auth.user.email)}
+            </div>
+            {ifElse(
+              hasUserName,
+              <div style={{ fontSize: "12px", color: "#6b7280" }}>
+                {auth.user.email}
+              </div>,
+              null,
+            )}
+          </div>
+        </div>,
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <span
+            style={{
+              width: "24px",
+              height: "24px",
+              borderRadius: "50%",
+              backgroundColor: "#e5e7eb",
+              display: "inline-block",
+            }}
+          />
+          <span style={{ color: "#6b7280" }}>Not signed in</span>
+        </div>,
+      ),
+      previewUI: (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "12px",
+            padding: "12px 16px",
+            backgroundColor: previewState.bgColor,
+            borderRadius: "8px",
+          }}
+        >
+          <div style={{ position: "relative", flexShrink: 0 }}>
+            <div
+              style={{
+                width: "36px",
+                height: "36px",
+                borderRadius: "50%",
+                backgroundColor: previewState.isAuthenticated
+                  ? "#18BFFF"
+                  : "#e5e7eb",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              {ifElse(
+                previewState.isAuthenticated,
+                <span
+                  style={{
+                    color: "white",
+                    fontSize: "14px",
+                    fontWeight: "600",
+                  }}
+                >
+                  {previewState.initial}
+                </span>,
+                null,
+              )}
+            </div>
+            <div
+              style={{
+                position: "absolute",
+                bottom: "-2px",
+                right: "-2px",
+                width: "12px",
+                height: "12px",
+                borderRadius: "50%",
+                backgroundColor: previewState.dotColor,
+                border: "2px solid white",
+              }}
+            />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 500, fontSize: "14px" }}>
+              {ifElse(
+                previewState.isAuthenticated,
+                <span>{previewState.name || previewState.email}</span>,
+                <span>Sign in required</span>,
+              )}
+            </div>
+            {ifElse(
+              previewState.isAuthenticated && !!previewState.name &&
+                !!previewState.email,
+              <div style={{ fontSize: "12px", color: "#6b7280" }}>
+                {previewState.email}
+              </div>,
+              null,
+            )}
+            {ifElse(
+              !!previewState.scopeSummary,
+              <div
+                style={{
+                  fontSize: "12px",
+                  color: "#6b7280",
+                  marginTop: "2px",
+                }}
+              >
+                {previewState.scopeSummary}
+              </div>,
+              null,
+            )}
+          </div>
+        </div>
+      ),
       refreshToken: refreshTokenHandler({ auth }),
       bgUpdater: bgRefreshHandler({ auth }),
     };
   },
-);`;
+);
+`;
 
 // Read from: packages/patterns/airtable/core/util/airtable-auth-manager.tsx
 const AIRTABLE_AUTH_MANAGER_SOURCE = `/// <cts-enable />
@@ -919,7 +923,7 @@ const AIRTABLE_AUTH_MANAGER_SOURCE = `/// <cts-enable />
  * - Pre-composed UI components for consistent UX
  *
  * Usage:
- * \\\`\\\`\\\`typescript
+ * \`\`\`typescript
  * const { auth, fullUI, isReady } = AirtableAuthManager({
  *   requiredScopes: ["data.records:read", "schema.bases:read"],
  * });
@@ -928,31 +932,20 @@ const AIRTABLE_AUTH_MANAGER_SOURCE = `/// <cts-enable />
  * // Use auth.accessToken for API calls
  *
  * return { [UI]: <div>{fullUI}</div> };
- * \\\`\\\`\\\`
+ * \`\`\`
  */
 
-import {
-  action,
-  computed,
-  Default,
-  handler,
-  ifElse,
-  navigateTo,
-  pattern,
-  UI,
-  wish,
-  Writable,
-} from "commontools";
+import { createAuthManager } from "../../../auth/create-auth-manager.tsx";
+import type { AuthManagerDescriptor } from "../../../auth/auth-manager-descriptor.ts";
+import AirtableAuth from "../airtable-auth.tsx";
 
-import AirtableAuth, {
-  type AirtableAuth as AirtableAuthType,
-} from "../airtable-auth.tsx";
-
-export type { AirtableAuthType };
-
-// =============================================================================
-// TYPES & CONSTANTS
-// =============================================================================
+// Re-export shared types for consumers
+export type { AuthInfo, AuthState, TokenExpiryWarning } from "../../../auth/auth-types.ts";
+export type {
+  AuthManagerInput as AirtableAuthManagerInput,
+  AuthManagerOutput as AirtableAuthManagerOutput,
+} from "../../../auth/create-auth-manager.tsx";
+export type { AirtableAuth as AirtableAuthType } from "../airtable-auth.tsx";
 
 /** Airtable scope keys */
 export type ScopeKey =
@@ -975,769 +968,25 @@ export const SCOPE_DESCRIPTIONS: Record<ScopeKey, string> = {
   "webhook:manage": "Manage webhooks",
 };
 
-/** Auth state enumeration */
-export type AuthState =
-  | "loading"
-  | "needs-login"
-  | "missing-scopes"
-  | "token-expired"
-  | "ready";
-
-export type TokenExpiryWarning = "ok" | "warning" | "expired";
-
-export interface AuthInfo {
-  state: AuthState;
-  auth: AirtableAuthType | null;
-  authCell: unknown;
-  email: string;
-  hasRequiredScopes: boolean;
-  grantedScopes: string[];
-  missingScopes: ScopeKey[];
-  tokenExpiresAt: number | null;
-  isTokenExpired: boolean;
-  tokenTimeRemaining: number | null;
-  tokenExpiryWarning: TokenExpiryWarning;
-  tokenExpiryDisplay: string;
-  statusDotColor: string;
-  statusText: string;
-  piece: unknown;
-  userChip: unknown;
-}
-
-export interface AirtableAuthManagerInput {
-  requiredScopes?: Default<ScopeKey[], []>;
-  debugMode?: Default<boolean, false>;
-}
-
-export interface AirtableAuthManagerOutput {
-  auth: AirtableAuthType | null;
-  authInfo: AuthInfo;
-  isReady: boolean;
-  currentEmail: string;
-  currentState: AuthState;
-  pickerUI: any;
-  statusUI: any;
-  fullUI: any;
-}
-
-interface AirtableAuthPiece {
-  auth?: AirtableAuthType;
-  scopes?: string[];
-  selectedScopes?: Record<ScopeKey, boolean>;
-  userChip?: unknown;
-  refreshToken?: unknown;
-}
-
-// Status colors
-const STATUS_COLORS: Record<AuthState, string> = {
-  loading: "var(--ct-color-yellow-500, #eab308)",
-  "needs-login": "var(--ct-color-red-500, #ef4444)",
-  "missing-scopes": "var(--ct-color-orange-500, #f97316)",
-  "token-expired": "var(--ct-color-red-500, #ef4444)",
-  ready: "var(--ct-color-green-500, #22c55e)",
+const AirtableAuthManagerDescriptor: AuthManagerDescriptor = {
+  name: "airtable",
+  displayName: "Airtable",
+  brandColor: "#18BFFF",
+  wishTag: "#airtableAuth",
+  tokenField: "accessToken",
+  refreshEndpoint: "/api/integrations/airtable-oauth/refresh",
+  scopeDescriptions: SCOPE_DESCRIPTIONS,
+  scopeKeysAreLiteral: true,
+  hasAvatarSupport: false,
 };
 
-const STATUS_MESSAGES: Record<AuthState, string> = {
-  loading: "Loading auth...",
-  "needs-login": "Please sign in to your Airtable",
-  "missing-scopes": "Additional permissions needed",
-  "token-expired": "Session expired - click Refresh Session",
-  ready: "Connected",
-};
-
-const TOKEN_WARNING_THRESHOLD_MS = 10 * 60 * 1000;
-
-function formatTimeRemaining(ms: number | null): string {
-  if (ms === null) return "";
-  if (ms <= 0) return "Expired";
-
-  const minutes = Math.floor(ms / 60000);
-  const hours = Math.floor(minutes / 60);
-
-  if (hours > 0) {
-    const remainingMins = minutes % 60;
-    return remainingMins > 0 ? \\\`\\\${hours}h \\\${remainingMins}m\\\` : \\\`\\\${hours}h\\\`;
-  }
-  if (minutes > 0) return \\\`\\\${minutes} min\\\`;
-  return "< 1 min";
-}
-
-function debugLog(enabled: boolean, ...args: unknown[]) {
-  if (enabled) console.log("[AirtableAuth]", ...args);
-}
-
-function startReactiveClock(cell: Writable<number>): void {
-  setInterval(() => cell.set(Date.now()), 30_000);
-}
-
-// =============================================================================
-// MODULE-SCOPE HANDLERS
-// =============================================================================
-
-const REFRESH_FAILURE_TIMEOUT_MS = 15_000;
-
-const attemptRefresh = handler<
-  unknown,
-  {
-    refreshStream: any;
-    refreshing: Writable<boolean>;
-    refreshFailed: Writable<boolean>;
-    refreshStartedAt: Writable<number>;
-  }
->((_event, { refreshStream, refreshing, refreshFailed, refreshStartedAt }) => {
-  if (!refreshStream?.send) {
-    refreshFailed.set(true);
-    return;
-  }
-  refreshing.set(true);
-  refreshFailed.set(false);
-  refreshStartedAt.set(Date.now());
-
-  refreshStream.send({});
-
-  setTimeout(() => {
-    if (refreshing.get()) {
-      refreshing.set(false);
-      refreshFailed.set(true);
-    }
-  }, REFRESH_FAILURE_TIMEOUT_MS);
-});
-
-// =============================================================================
-// MAIN PATTERN
-// =============================================================================
-
-export const AirtableAuthManager = pattern<
-  AirtableAuthManagerInput,
-  AirtableAuthManagerOutput
->(
-  ({ requiredScopes, debugMode }) => {
-    const wishResult = wish<AirtableAuthPiece>({
-      query: "#airtableAuth",
-      scope: [".", "~"],
-    });
-
-    const auth = wishResult.result.auth;
-
-    // Small focused computeds
-    const hasAuth = computed(() => !!auth);
-    const hasToken = computed(() => !!auth?.accessToken);
-    const hasEmail = computed(() => !!auth?.user?.email);
-
-    const now = Writable.of(Date.now());
-    startReactiveClock(now);
-
-    const isTokenExpired = computed(() => {
-      const expiresAt = auth?.expiresAt ?? 0;
-      const value = expiresAt > 0 && expiresAt < now.get();
-      debugLog(debugMode as boolean, "isTokenExpired:", value);
-      return value;
-    });
-
-    const tokenTimeRemaining = computed((): number | null => {
-      const expiresAt = auth?.expiresAt ?? 0;
-      if (!expiresAt) return null;
-      return expiresAt - now.get();
-    });
-
-    const tokenExpiryWarning = computed((): TokenExpiryWarning => {
-      const tr = tokenTimeRemaining as number | null;
-      if (tr === null) return "ok";
-      if (tr < 0) return "expired";
-      if (tr < TOKEN_WARNING_THRESHOLD_MS) return "warning";
-      return "ok";
-    });
-
-    const tokenExpiryDisplay = computed(() =>
-      formatTimeRemaining(tokenTimeRemaining as number | null)
-    );
-
-    // Scope verification
-    const missingScopes = computed((): ScopeKey[] => {
-      const granted: string[] = (auth?.scope ?? []) as string[];
-      const value = (requiredScopes as ScopeKey[]).filter(
-        (key) => !granted.includes(key),
-      );
-      debugLog(debugMode as boolean, "missingScopes:", value);
-      return value;
-    });
-    const hasRequiredScopes = computed(
-      () => (missingScopes as ScopeKey[]).length === 0,
-    );
-
-    // Picker UI - NOT inside computed
-    const pickerUI = wishResult[UI];
-
-    // State machine
-    const currentState = computed((): AuthState => {
-      let value: AuthState;
-      if (!hasAuth) value = "loading";
-      else if (!hasToken || !hasEmail) value = "needs-login";
-      else if (!hasRequiredScopes) value = "missing-scopes";
-      else if (isTokenExpired) value = "token-expired";
-      else value = "ready";
-      debugLog(debugMode as boolean, "state:", value);
-      return value;
-    });
-
-    const isReady = computed(() => {
-      const value = hasToken && hasEmail && !isTokenExpired &&
-        hasRequiredScopes;
-      debugLog(debugMode as boolean, "isReady:", value);
-      return value;
-    });
-    const currentEmail = computed(() => auth?.user?.email ?? "");
-
-    // Refresh state
-    const refreshStream = wishResult.result.refreshToken;
-    const refreshing = Writable.of(false);
-    const refreshFailed = Writable.of(false);
-    const refreshStartedAt = Writable.of(0);
-
-    // Reactive watcher for refresh completion
-    computed(() => {
-      if (!refreshing.get()) return;
-      const expiresAt = auth?.expiresAt ?? 0;
-      if (expiresAt > now.get()) {
-        refreshing.set(false);
-        refreshFailed.set(false);
-      }
-    });
-
-    const isRefreshing = computed(() => refreshing.get() === true);
-    const hasRefreshFailed = computed(() => refreshFailed.get() === true);
-
-    const statusDotColor = computed(
-      () => STATUS_COLORS[currentState as AuthState] ?? STATUS_COLORS.loading,
-    );
-
-    const statusText = computed(() => {
-      const state = currentState as AuthState;
-      if (state === "ready") return \\\`Signed in as \\\${currentEmail}\\\`;
-      if (state === "missing-scopes") {
-        const names = (missingScopes as ScopeKey[])
-          .map((k) => SCOPE_DESCRIPTIONS[k])
-          .join(", ");
-        return \\\`Missing: \\\${names}\\\`;
-      }
-      return STATUS_MESSAGES[state];
-    });
-
-    const authInfo = computed((): AuthInfo => ({
-      state: currentState as AuthState,
-      auth: auth ?? null,
-      authCell: auth,
-      email: currentEmail ?? "",
-      hasRequiredScopes: hasRequiredScopes as boolean,
-      grantedScopes: ((auth?.scope ?? []) as string[]).slice(),
-      missingScopes: Array.from(missingScopes as ScopeKey[]),
-      tokenExpiresAt: auth?.expiresAt ?? null,
-      isTokenExpired: isTokenExpired as boolean,
-      tokenTimeRemaining: tokenTimeRemaining as number | null,
-      tokenExpiryWarning: tokenExpiryWarning as TokenExpiryWarning,
-      tokenExpiryDisplay: tokenExpiryDisplay ?? "",
-      statusDotColor: statusDotColor ?? STATUS_COLORS.loading,
-      statusText: statusText ?? "",
-      piece: wishResult.result ?? null,
-      userChip: wishResult.result?.userChip ?? null,
-    }));
-
-    // Actions
-    const createAuth = action(() => {
-      const selected: Record<ScopeKey, boolean> = {
-        "data.records:read": false,
-        "data.records:write": false,
-        "data.recordComments:read": false,
-        "data.recordComments:write": false,
-        "schema.bases:read": false,
-        "schema.bases:write": false,
-        "webhook:manage": false,
-      };
-      for (const scope of requiredScopes as ScopeKey[]) {
-        if (scope in selected) selected[scope] = true;
-      }
-      return navigateTo(
-        AirtableAuth({
-          selectedScopes: selected,
-          auth: {
-            accessToken: "",
-            tokenType: "",
-            scope: [],
-            expiresIn: 0,
-            expiresAt: 0,
-            refreshToken: "",
-            user: { email: "", name: "", picture: "" },
-          },
-        }),
-      );
-    });
-
-    const reauthenticate = action(() => navigateTo(wishResult.result));
-
-    // ========================================================================
-    // UI COMPONENTS
-    // ========================================================================
-
-    const statusBgColor = computed(() => {
-      if (currentState !== "ready") return "#fef3c7";
-      if (tokenExpiryWarning === "warning") return "#fef3c7";
-      return "#d1fae5";
-    });
-    const showAvatar = computed(() => currentState === "ready");
-    const showExpiryInStatus = computed(
-      () => currentState === "ready" && !!tokenExpiryDisplay,
-    );
-    const expiryHintColor = computed(
-      () => (tokenExpiryWarning === "warning" ? "#b45309" : "#666"),
-    );
-    const expiryHintWeight = computed(
-      () => (tokenExpiryWarning === "warning" ? "500" : "normal"),
-    );
-
-    const statusUI = (
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "8px",
-          padding: "8px 12px",
-          borderRadius: "6px",
-          backgroundColor: statusBgColor,
-          fontSize: "14px",
-        }}
-      >
-        {ifElse(
-          showAvatar,
-          <span
-            style={{
-              width: "10px",
-              height: "10px",
-              borderRadius: "50%",
-              backgroundColor: "#18BFFF",
-            }}
-          />,
-          <span
-            style={{
-              width: "10px",
-              height: "10px",
-              borderRadius: "50%",
-              backgroundColor: statusDotColor,
-            }}
-          />,
-        )}
-        <span>{statusText}</span>
-        {ifElse(
-          showExpiryInStatus,
-          <span
-            style={{
-              marginLeft: "4px",
-              fontSize: "12px",
-              color: expiryHintColor,
-              fontWeight: expiryHintWeight,
-            }}
-          >
-            * {tokenExpiryDisplay}
-          </span>,
-          null,
-        )}
-      </div>
-    );
-
-    // State boolean computeds for fullUI
-    const isNeedsLogin = computed(() => currentState === "needs-login");
-    const isMissingScopes = computed(() => currentState === "missing-scopes");
-    const isTokenExpiredState = computed(
-      () => currentState === "token-expired",
-    );
-    const isReadyState = computed(() => currentState === "ready");
-
-    const scopesList = computed(() =>
-      (requiredScopes as ScopeKey[]).map((k) => SCOPE_DESCRIPTIONS[k]).join(
-        ", ",
-      )
-    );
-    const missingScopesList = computed(() =>
-      (missingScopes as ScopeKey[]).map((k) => SCOPE_DESCRIPTIONS[k]).join(
-        ", ",
-      )
-    );
-
-    const manageButtonStyle = {
-      padding: "6px 12px",
-      backgroundColor: "transparent",
-      color: "#4b5563",
-      border: "1px solid #d1d5db",
-      borderRadius: "4px",
-      cursor: "pointer",
-      fontSize: "13px",
-    };
-    const altButtonStyle = {
-      padding: "6px 12px",
-      backgroundColor: "transparent",
-      color: "#18BFFF",
-      border: "1px solid #18BFFF",
-      borderRadius: "4px",
-      cursor: "pointer",
-      fontSize: "13px",
-    };
-    const actionRowStyle = {
-      padding: "12px 16px",
-      backgroundColor: "#f9fafb",
-      display: "flex",
-      gap: "12px",
-      alignItems: "center",
-    };
-
-    // Loading UI
-    const loadingUI = (
-      <div
-        style={{
-          padding: "16px",
-          backgroundColor: "#f3f4f6",
-          borderRadius: "8px",
-          border: "1px solid #d1d5db",
-        }}
-      >
-        <h4 style={{ margin: "0 0 8px 0", color: "#374151" }}>
-          Connect Your Airtable Account
-        </h4>
-        <p style={{ margin: "0 0 12px 0", fontSize: "14px", color: "#4b5563" }}>
-          To use this feature, connect an Airtable account with these
-          permissions: {scopesList}
-        </p>
-        {pickerUI}
-        <button
-          type="button"
-          onClick={createAuth}
-          style={{
-            padding: "10px 20px",
-            backgroundColor: "#18BFFF",
-            color: "white",
-            border: "none",
-            borderRadius: "6px",
-            cursor: "pointer",
-            fontWeight: "500",
-            fontSize: "14px",
-          }}
-        >
-          Connect Airtable Account
-        </button>
-      </div>
-    );
-
-    // Needs login UI
-    const needsLoginUI = (
-      <div
-        style={{
-          borderRadius: "8px",
-          border: "1px solid #ef4444",
-          overflow: "hidden",
-        }}
-      >
-        <div
-          style={{
-            padding: "12px 16px",
-            backgroundColor: "#fee2e2",
-            borderBottom: "1px solid #ef4444",
-          }}
-        >
-          <h4
-            style={{ margin: "0 0 4px 0", color: "#dc2626", fontSize: "14px" }}
-          >
-            Sign In Required
-          </h4>
-          <div style={{ margin: "0", fontSize: "13px", color: "#4b5563" }}>
-            Please sign in with your Airtable account to continue.
-          </div>
-        </div>
-        {pickerUI}
-        <div style={actionRowStyle}>
-          <button
-            type="button"
-            onClick={reauthenticate}
-            style={manageButtonStyle}
-          >
-            Manage this account
-          </button>
-          <button type="button" onClick={createAuth} style={altButtonStyle}>
-            + Use different account
-          </button>
-        </div>
-      </div>
-    );
-
-    // Missing scopes UI
-    const missingScopesUI = (
-      <div
-        style={{
-          borderRadius: "8px",
-          border: "1px solid #f97316",
-          overflow: "hidden",
-        }}
-      >
-        <div
-          style={{
-            padding: "12px 16px",
-            backgroundColor: "#ffedd5",
-            borderBottom: "1px solid #f97316",
-          }}
-        >
-          <h4
-            style={{ margin: "0 0 4px 0", color: "#c2410c", fontSize: "14px" }}
-          >
-            Additional Permissions Needed
-          </h4>
-          <div style={{ margin: "0", fontSize: "13px", color: "#4b5563" }}>
-            Connected as <strong>{currentEmail}</strong>, but missing:{" "}
-            {missingScopesList}
-          </div>
-        </div>
-        {pickerUI}
-        <div style={actionRowStyle}>
-          <button
-            type="button"
-            onClick={reauthenticate}
-            style={manageButtonStyle}
-          >
-            Manage this account
-          </button>
-          <button type="button" onClick={createAuth} style={altButtonStyle}>
-            + Use different account
-          </button>
-        </div>
-      </div>
-    );
-
-    // Token expired UI
-    const tokenExpiredUI = (
-      <div
-        style={{
-          borderRadius: "8px",
-          border: "1px solid #ef4444",
-          overflow: "hidden",
-        }}
-      >
-        <div
-          style={{
-            padding: "12px 16px",
-            backgroundColor: "#fee2e2",
-            borderBottom: "1px solid #ef4444",
-          }}
-        >
-          <h4
-            style={{ margin: "0 0 4px 0", color: "#dc2626", fontSize: "14px" }}
-          >
-            Session Expired
-          </h4>
-          <div style={{ margin: "0", fontSize: "13px", color: "#4b5563" }}>
-            Your Airtable session has expired.
-          </div>
-          <div
-            style={{
-              marginTop: "12px",
-              display: "flex",
-              gap: "8px",
-              alignItems: "center",
-            }}
-          >
-            <button
-              type="button"
-              onClick={attemptRefresh({
-                refreshStream,
-                refreshing,
-                refreshFailed,
-                refreshStartedAt,
-              })}
-              disabled={isRefreshing}
-              style={{
-                padding: "8px 16px",
-                backgroundColor: "#3b82f6",
-                color: "white",
-                border: "none",
-                borderRadius: "6px",
-                cursor: "pointer",
-                fontWeight: "500",
-                fontSize: "14px",
-              }}
-            >
-              {ifElse(isRefreshing, "Refreshing...", "Refresh Session")}
-            </button>
-            {ifElse(
-              hasRefreshFailed,
-              <span style={{ fontSize: "13px", color: "#dc2626" }}>
-                Refresh failed -- try signing in again below.
-              </span>,
-              null,
-            )}
-          </div>
-        </div>
-        {pickerUI}
-        <div style={actionRowStyle}>
-          <button
-            type="button"
-            onClick={reauthenticate}
-            style={manageButtonStyle}
-          >
-            Manage this account
-          </button>
-          <button type="button" onClick={createAuth} style={altButtonStyle}>
-            + Use different account
-          </button>
-        </div>
-      </div>
-    );
-
-    // Ready UI
-    const showTokenWarning = computed(() => tokenExpiryWarning === "warning");
-    const readyBorderRadius = computed(() =>
-      tokenExpiryWarning === "warning" ? "8px 8px 0 0" : "8px"
-    );
-    const readyBorderBottom = computed(() =>
-      tokenExpiryWarning === "warning" ? "none" : "1px solid #10b981"
-    );
-    const showExpiryInReady = computed(() => !!tokenExpiryDisplay);
-
-    const readyUI = (
-      <div>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-            padding: "12px 16px",
-            backgroundColor: "#d1fae5",
-            borderRadius: readyBorderRadius,
-            border: "1px solid #10b981",
-            borderBottom: readyBorderBottom,
-          }}
-        >
-          {wishResult.result?.userChip as any}
-          <div
-            style={{
-              marginLeft: "auto",
-              display: "flex",
-              alignItems: "center",
-              gap: "12px",
-            }}
-          >
-            {ifElse(
-              showExpiryInReady,
-              <span style={{ fontSize: "12px", color: "#059669" }}>
-                {tokenExpiryDisplay}
-              </span>,
-              null,
-            )}
-            <button
-              type="button"
-              onClick={reauthenticate}
-              style={{
-                background: "none",
-                border: "none",
-                color: "#047857",
-                cursor: "pointer",
-                fontSize: "12px",
-                padding: "2px 6px",
-                borderRadius: "4px",
-              }}
-            >
-              Switch
-            </button>
-            <button
-              type="button"
-              onClick={createAuth}
-              style={{
-                background: "none",
-                border: "none",
-                color: "#047857",
-                cursor: "pointer",
-                fontSize: "12px",
-                padding: "2px 6px",
-                borderRadius: "4px",
-              }}
-            >
-              + Add
-            </button>
-          </div>
-        </div>
-        {ifElse(
-          showTokenWarning,
-          <div
-            style={{
-              padding: "8px 16px",
-              backgroundColor: "#fef3c7",
-              borderRadius: "0 0 8px 8px",
-              border: "1px solid #f59e0b",
-              borderTop: "none",
-              fontSize: "13px",
-              color: "#b45309",
-            }}
-          >
-            Token expires soon. You may need to re-authenticate shortly.
-          </div>,
-          null,
-        )}
-      </div>
-    );
-
-    // Refreshing UI
-    const refreshingUI = (
-      <div
-        style={{
-          padding: "12px 16px",
-          backgroundColor: "#fef3c7",
-          borderRadius: "8px",
-          border: "1px solid #f59e0b",
-          display: "flex",
-          alignItems: "center",
-          gap: "8px",
-          fontSize: "14px",
-          color: "#b45309",
-        }}
-      >
-        <style>
-          {"@keyframes ct-auth-spin { to { transform: rotate(360deg); } }"}
-        </style>
-        <span
-          style={{
-            display: "inline-block",
-            width: "14px",
-            height: "14px",
-            border: "2px solid #f59e0b",
-            borderTop: "2px solid transparent",
-            borderRadius: "50%",
-            animation: "ct-auth-spin 1s linear infinite",
-          }}
-        />
-        Refreshing session...
-      </div>
-    );
-
-    // Compose fullUI via chained ifElse
-    const loginOrLoad = ifElse(isNeedsLogin, needsLoginUI, loadingUI);
-    const scopesOrPrev = ifElse(isMissingScopes, missingScopesUI, loginOrLoad);
-    const expiredOrPrev = ifElse(
-      isTokenExpiredState,
-      tokenExpiredUI,
-      scopesOrPrev,
-    );
-    const refreshOrPrev = ifElse(isRefreshing, refreshingUI, expiredOrPrev);
-    const fullUI = ifElse(isReadyState, readyUI, refreshOrPrev);
-
-    return {
-      auth: computed(() => auth ?? null),
-      authInfo,
-      isReady,
-      currentEmail,
-      currentState,
-      pickerUI,
-      statusUI,
-      fullUI,
-      [UI]: fullUI,
-    };
-  },
+export const AirtableAuthManager = createAuthManager(
+  AirtableAuthManagerDescriptor,
+  AirtableAuth,
 );
 
-export default AirtableAuthManager;`;
+export default AirtableAuthManager;
+`;
 
 // Read from: packages/patterns/airtable/core/util/airtable-client.ts
 const AIRTABLE_CLIENT_SOURCE = `/**
@@ -2991,7 +2240,8 @@ file in a fenced code block with the file path as a comment on the first line.
 ## File 1: \`packages/patterns/${providerName}/core/${providerName}-auth.tsx\`
 
 A thin auth pattern that wraps the \`<ct-oauth>\` component. Follow the Airtable
-auth reference exactly, adapting for ${providerLabel}:
+auth reference exactly, adapting for ${providerLabel}. Uses shared utilities
+from \`../../auth/\` (auth-refresh, auth-reactive, auth-types, auth-ui-helpers):
 
 - First line: \`/// <cts-enable />\`
 - Export a type \`${pascalName}Auth\` with fields:
@@ -3022,16 +2272,17 @@ ${
 
 ## File 2: \`packages/patterns/${providerName}/core/util/${providerName}-auth-manager.tsx\`
 
-Auth manager utility pattern. Follow the Airtable auth manager reference:
+Auth manager utility pattern. Uses the shared \`createAuthManager()\` factory — follow the Airtable auth manager reference exactly:
 
 - First line: \`/// <cts-enable />\`
-- Import the auth pattern: \`import ${pascalName}Auth, { type ${pascalName}Auth as ${pascalName}AuthType } from "../${providerName}-auth.tsx";\`
-- Use \`wish<${pascalName}AuthPiece>({ query: "${hashTag}", scope: [".", "~"] })\` to discover auth
-- Implement the full state machine: loading -> needs-login -> missing-scopes -> token-expired -> ready
-- Extract \`pickerUI = wishResult[UI]\` OUTSIDE of any computed()
-- Provide \`fullUI\` via chained \`ifElse()\` calls
-- Export \`${pascalName}AuthManager\` as both named and default export
-- Use brand color \`${brandColor}\` for buttons and status indicators
+- Import \`createAuthManager\` from \`"../../../auth/create-auth-manager.tsx"\`
+- Import \`AuthManagerDescriptor\` type from \`"../../../auth/auth-manager-descriptor.ts"\`
+- Import the auth pattern: \`import ${pascalName}Auth from "../${providerName}-auth.tsx";\`
+- Re-export shared types: \`AuthInfo\`, \`AuthState\`, \`TokenExpiryWarning\`, \`AuthManagerInput\`, \`AuthManagerOutput\`
+- Re-export the auth type from the auth pattern
+- Define a descriptor object with: name, displayName, brandColor (\`${brandColor}\`), wishTag (\`"${hashTag}"\`), tokenField, refreshEndpoint, scopeDescriptions, scopeKeysAreLiteral (true for Airtable-style, where scope keys ARE scope strings), hasAvatarSupport
+- Call \`createAuthManager(descriptor, ${pascalName}Auth)\` and export result as both named and default
+- This file should be ~50-70 lines total
 
 ## File 3: \`packages/patterns/${providerName}/core/util/${providerName}-client.ts\`
 

@@ -2,7 +2,6 @@
 import {
   computed,
   Default,
-  getPatternEnvironment,
   handler,
   NAME,
   pattern,
@@ -12,14 +11,18 @@ import {
   Writable,
 } from "commontools";
 
-const env = getPatternEnvironment();
-
-// Debug logging - set to true when debugging token refresh issues
-const DEBUG_AUTH = false;
-
-function authDebugLog(...args: unknown[]) {
-  if (DEBUG_AUTH) console.log("[google-auth]", ...args);
-}
+import { createRefreshFunction } from "../../auth/auth-refresh.ts";
+import {
+  REFRESH_THRESHOLD_MS,
+  startReactiveClock,
+} from "../../auth/auth-reactive.ts";
+import type { AuthStatus } from "../../auth/auth-types.ts";
+import {
+  formatTokenExpiry,
+  getScopeSummary,
+  getSelectedScopeSummary,
+  STATUS_CONFIG,
+} from "../../auth/auth-ui-helpers.tsx";
 
 // Scope mapping for Google APIs
 const SCOPE_MAP = {
@@ -68,46 +71,6 @@ const SCOPE_KEY_SHORT_NAMES: Record<string, string> = {
   contacts: "Contacts",
 };
 
-/** Get scope summary from granted scope URLs - exported for wrapper patterns */
-export function getScopeSummary(grantedScopes: string[]): string {
-  const names = new Set<string>();
-  for (const scope of grantedScopes) {
-    const name = SCOPE_SHORT_NAMES[scope];
-    if (name) names.add(name);
-  }
-  const arr = Array.from(names);
-  if (arr.length === 0) return "";
-  if (arr.length <= 3) return arr.join(", ");
-  return `${arr.slice(0, 2).join(", ")} +${arr.length - 2} more`;
-}
-
-/** Get scope summary from configured scope flags (for unauthenticated preview) */
-function getConfiguredScopeSummary(
-  selectedScopes: Record<string, boolean>,
-): string {
-  const names = new Set<string>();
-  for (const [key, enabled] of Object.entries(selectedScopes)) {
-    if (enabled) {
-      const name = SCOPE_KEY_SHORT_NAMES[key];
-      if (name) names.add(name);
-    }
-  }
-  const arr = Array.from(names);
-  if (arr.length === 0) return "";
-  if (arr.length <= 3) return arr.join(", ");
-  return `${arr.slice(0, 2).join(", ")} +${arr.length - 2} more`;
-}
-
-// Status indicator configuration
-const STATUS_CONFIG = {
-  ready: { dot: "#22c55e", bg: "#f0fdf4" },
-  warning: { dot: "#eab308", bg: "#fefce8" },
-  expired: { dot: "#ef4444", bg: "#fef2f2" },
-  "needs-login": { dot: "#9ca3af", bg: "#f9fafb" },
-} as const;
-
-type AuthStatus = keyof typeof STATUS_CONFIG;
-
 /**
  * Helper to create preview UI for picker display.
  * Exported for use by wrapper patterns (google-auth-personal, google-auth-work).
@@ -122,7 +85,6 @@ export function createPreviewUI(
   const name = auth?.user?.name;
   const isAuthenticated = !!email;
 
-  // Status detection
   const now = Date.now();
   const expiresAt = auth?.expiresAt || 0;
   const isExpired = isAuthenticated && expiresAt > 0 && expiresAt < now;
@@ -137,10 +99,9 @@ export function createPreviewUI(
     ? "warning"
     : "ready";
 
-  // Show configured scopes when not logged in, granted when logged in
   const scopeSummary = isAuthenticated
-    ? getScopeSummary(auth?.scope || [])
-    : getConfiguredScopeSummary(selectedScopes);
+    ? getScopeSummary(auth?.scope || [], SCOPE_SHORT_NAMES)
+    : getSelectedScopeSummary(selectedScopes, SCOPE_KEY_SHORT_NAMES);
 
   return (
     <div
@@ -244,26 +205,7 @@ export function createPreviewUI(
  * Auth data structure for Google OAuth tokens.
  *
  * ⚠️ CRITICAL: When consuming this auth from another pattern, DO NOT use derive()!
- *
- * The framework automatically refreshes expired tokens by writing to this cell.
- * If you derive() the auth, it becomes read-only and token refresh silently fails.
- *
- * ❌ WRONG - creates read-only projection, token refresh fails silently:
- * ```typescript
- * const auth = derive(googleAuthPiece, (piece) => piece?.auth);
- * ```
- *
- * ✅ CORRECT - maintains writable cell reference:
- * ```typescript
- * const auth = googleAuthPiece.auth;  // Property access, not derive
- * ```
- *
- * ✅ ALSO CORRECT - use ifElse for conditional auth sources:
- * ```typescript
- * const auth = ifElse(hasDirectAuth, directAuth, wishedPiece.auth);
- * ```
- *
- * See: community-docs/superstitions/2025-12-03-derive-creates-readonly-cells-use-property-access.md
+ * Use direct property access: `googleAuthPiece.auth`
  */
 export type Auth = {
   token: Default<Secret<string>, "">;
@@ -324,87 +266,18 @@ interface Output {
   previewUI: unknown;
   /**
    * Refresh the OAuth token. Call this from other pieces when the token expires.
-   *
-   * This handler runs in google-auth's transaction context, so it can write to
-   * the auth cell even when called from another piece's handler.
-   *
-   * Usage from consuming piece:
-   * ```typescript
-   * await new Promise<void>((resolve, reject) => {
-   *   authPiece.refreshToken.send({}, (tx) => {
-   *     const status = tx.status();
-   *     if (status.status === "done") resolve();
-   *     else reject(status.error);
-   *   });
-   * });
-   * ```
    */
   refreshToken: Stream<Record<string, never>>;
   /** Background updater for proactive token refresh via background-charm-service */
   bgUpdater: Stream<Record<string, never>>;
 }
 
-/**
- * Shared token refresh logic. Calls the server refresh endpoint and updates
- * the auth cell with new token data. Throws on failure.
- *
- * Guarded against concurrent invocations — if a refresh is already in progress,
- * subsequent calls return silently (no-op, no error). Callers that need to know
- * whether a refresh actually happened should watch the auth cell reactively.
- */
-let refreshInProgress = false;
+// Create guarded refresh function for Google OAuth
+const refreshAuthToken = createRefreshFunction(
+  "/api/integrations/google-oauth/refresh",
+);
 
-async function refreshAuthToken(
-  authCell: Writable<Auth>,
-): Promise<boolean> {
-  if (refreshInProgress) return false;
-  refreshInProgress = true;
-
-  try {
-    const currentAuth = authCell.get();
-    const refreshToken = currentAuth?.refreshToken;
-
-    if (!refreshToken) {
-      throw new Error("No refresh token available");
-    }
-
-    const res = await fetch(
-      new URL("/api/integrations/google-oauth/refresh", env.apiUrl),
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refreshToken }),
-      },
-    );
-
-    if (!res.ok) {
-      const errorText = await res.text();
-      const error = new Error(
-        `Token refresh failed: ${res.status} ${errorText}`,
-      ) as Error & { status: number };
-      error.status = res.status;
-      throw error;
-    }
-
-    const json = await res.json();
-    if (!json.tokenInfo) {
-      throw new Error("Invalid refresh response: no tokenInfo");
-    }
-
-    authCell.update({
-      ...json.tokenInfo,
-      user: currentAuth.user,
-    });
-    return true;
-  } finally {
-    refreshInProgress = false;
-  }
-}
-
-// Handler for refreshing OAuth tokens from UI button.
-// Must be at module scope (sandbox rule) and uses handler() (not action()) because
-// the auth cell is typed as OpaqueCell in pattern context — handler bindings allow
-// explicit Writable<Auth> typing which matches the runtime type.
+// Handler for refreshing OAuth tokens from UI button
 const handleRefresh = handler<
   unknown,
   {
@@ -419,11 +292,7 @@ const handleRefresh = handler<
     try {
       const didRefresh = await refreshAuthToken(auth);
       refreshing.set(false);
-      if (!didRefresh) {
-        // Another refresh was already in-flight; don't claim success or failure.
-        // The UI will update reactively when the other refresh completes.
-        return;
-      }
+      if (!didRefresh) return;
       refreshFailed.set(false);
     } catch {
       refreshing.set(false);
@@ -433,7 +302,6 @@ const handleRefresh = handler<
 );
 
 // Helper function to get friendly scope name
-// Must be at module scope, not inside pattern
 const getScopeFriendlyName = (scope: string): string => {
   const friendly = Object.entries(SCOPE_MAP).find(
     ([, url]) => url === scope,
@@ -443,55 +311,15 @@ const getScopeFriendlyName = (scope: string): string => {
     : scope;
 };
 
-/**
- * Handler for refreshing OAuth tokens.
- *
- * This runs in google-auth's transaction context, allowing it to write to the
- * auth cell even when called from another piece. This solves the cross-piece
- * write isolation issue where a consuming piece's handler cannot write to
- * cells owned by a different piece's DID.
- *
- * The handler reads the current refreshToken from the auth cell, calls the
- * server refresh endpoint, and updates the auth cell with the new token.
- */
+// Handler for refreshing tokens from other pieces (cross-piece calling)
 const refreshTokenHandler = handler<
   Record<string, never>,
   { auth: Writable<Auth> }
 >(async (_event, { auth }) => {
-  authDebugLog("refreshTokenHandler called");
-  authDebugLog(
-    "Current token (first 20 chars):",
-    auth.get()?.token?.slice(0, 20),
-  );
-  authDebugLog("Has refreshToken:", !!auth.get()?.refreshToken);
-
   await refreshAuthToken(auth);
-
-  authDebugLog("Token refreshed successfully");
-  authDebugLog(
-    "New token (first 20 chars):",
-    auth.get()?.token?.slice(0, 20),
-  );
 });
 
-// TODO(CT-1163): Replace with wish("#now:30000") when reactive time wish is available.
-// Date.now() is non-idiomatic (will be blocked in future sandbox versions).
-// This setInterval workaround makes time-dependent computeds reactive.
-// Interval is intentionally never cleared — pattern lifecycle matches page lifecycle.
-function startReactiveClock(cell: Writable<number>): void {
-  setInterval(() => cell.set(Date.now()), 30_000);
-}
-
-// Threshold: refresh when less than 10 minutes remain
-const REFRESH_THRESHOLD_MS = 10 * 60 * 1000;
-
-/**
- * Background updater handler for proactive token refresh.
- *
- * When google-auth is registered with background-charm-service, this handler
- * is called every ~60 seconds. It checks if the token is about to expire
- * (< 10 min remaining) and refreshes it proactively, preventing expiry.
- */
+// Background updater handler for proactive token refresh
 const bgRefreshHandler = handler<
   Record<string, never>,
   { auth: Writable<Auth> }
@@ -504,7 +332,7 @@ const bgRefreshHandler = handler<
     if (expiresAt <= 0) return;
 
     const timeRemaining = expiresAt - Date.now();
-    if (timeRemaining > REFRESH_THRESHOLD_MS) return; // Still fresh, skip
+    if (timeRemaining > REFRESH_THRESHOLD_MS) return;
 
     console.log("[google-auth bgUpdater] Token expiring soon, refreshing...");
 
@@ -514,9 +342,6 @@ const bgRefreshHandler = handler<
     } catch (e) {
       const status = (e as { status?: number }).status;
       const msg = e instanceof Error ? e.message : String(e);
-      // Permanent failures (revoked token, invalid grant) — clear auth entirely
-      // so the UI shows "not authenticated" instead of silently retrying forever.
-      // 400 = invalid_grant, 401 = invalid credentials, 403 = token revoked
       if (status === 400 || status === 401 || status === 403) {
         console.error(
           "[google-auth bgUpdater] Permanent refresh failure, clearing auth:",
@@ -532,7 +357,6 @@ const bgRefreshHandler = handler<
           user: { email: "", name: "", picture: "" },
         });
       } else {
-        // Transient failure (network, 5xx) — log and retry next cycle
         console.error(
           "[google-auth bgUpdater] Transient refresh failure:",
           msg,
@@ -555,7 +379,6 @@ export default pattern<Input, Output>(
       return base;
     });
 
-    // Track if any scope is selected (needed to enable auth)
     const hasSelectedScopes = computed(() =>
       Object.values(selectedScopes).some(Boolean)
     );
@@ -576,39 +399,21 @@ export default pattern<Input, Output>(
     const now = Writable.of(Date.now());
     startReactiveClock(now);
 
-    // Check if token is expired (need refresh)
     const isTokenExpired = computed(() => {
       if (!auth?.token || !auth?.expiresAt) return false;
       return auth.expiresAt < now.get();
     });
 
-    // Format time remaining until token expiry
-    const tokenExpiryDisplay = computed(() => {
-      if (!auth?.expiresAt || auth.expiresAt === 0) return null;
-      const currentTime = now.get();
-      const remaining = auth.expiresAt - currentTime;
-      if (remaining <= 0) return "Expired";
-
-      const minutes = Math.floor(remaining / (60 * 1000));
-      const hours = Math.floor(minutes / 60);
-      const mins = minutes % 60;
-
-      if (hours > 0) {
-        return `${hours}h ${mins}m`;
-      }
-      return `${mins}m`;
-    });
+    const tokenExpiryDisplay = computed(() =>
+      formatTokenExpiry(auth?.expiresAt || 0, now.get())
+    );
 
     // PERFORMANCE FIX: Pre-compute disabled state (same for all checkboxes)
-    // Avoids creating computed() inside .map() loop
-    // See: community-docs/superstitions/2025-12-16-expensive-computation-inside-map-jsx.md
     const checkboxesDisabled = computed(() => !!auth?.user?.email);
 
-    // UI feedback state for token refresh
     const refreshing = Writable.of(false);
     const refreshFailed = Writable.of(false);
 
-    // Pre-compute the scopes string for display
     const scopesDisplay = computed(() => scopes.join(", "));
 
     // Compact user chip for display in other patterns
@@ -772,7 +577,6 @@ export default pattern<Input, Output>(
             <div
               style={{ display: "flex", flexDirection: "column", gap: "10px" }}
             >
-              {/* PERFORMANCE FIX: Reference pre-computed cells, no computed() inside .map() */}
               {Object.entries(SCOPE_DESCRIPTIONS).map(([key, description]) => (
                 <label
                   style={{
@@ -1005,9 +809,7 @@ export default pattern<Input, Output>(
       selectedScopes,
       userChip,
       previewUI,
-      // Export the refresh handler for cross-piece calling
       refreshToken: refreshTokenHandler({ auth }),
-      // Background updater for proactive token refresh via background-charm-service
       bgUpdater: bgRefreshHandler({ auth }),
     };
   },
