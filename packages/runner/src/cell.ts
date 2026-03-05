@@ -1476,6 +1476,7 @@ export class CellImpl<T extends StorableValue>
    * reduction when any element changes.
    */
   reduce<S>(
+    this: IsThisObject,
     fn: (
       accumulator: S,
       element: T extends Array<infer U> ? U : T,

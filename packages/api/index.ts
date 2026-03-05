@@ -611,6 +611,7 @@ export interface IDerivable<T> {
     params: Record<string, any>,
   ): OpaqueRef<S[]>;
   reduce<S>(
+    this: IsThisObject,
     fn: (
       accumulator: S,
       element: T extends Array<infer U> ? U : T,
