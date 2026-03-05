@@ -141,16 +141,15 @@ const fetchRecords = handler<
 });
 
 const onSelectBase = handler<
-  { target: { dataset: { baseId: string } } },
+  unknown,
   {
+    baseId: string;
     selectedBaseId: Writable<string>;
     selectedTableId: Writable<string>;
     tables: Writable<TableInfo[]>;
     records: Writable<AirtableRecordData[]>;
   }
->((event, { selectedBaseId, selectedTableId, tables, records }) => {
-  const baseId = event.target.dataset.baseId;
-  if (!baseId) return;
+>((_event, { baseId, selectedBaseId, selectedTableId, tables, records }) => {
   selectedBaseId.set(baseId);
   selectedTableId.set("");
   tables.set([]);
@@ -158,14 +157,13 @@ const onSelectBase = handler<
 });
 
 const onSelectTable = handler<
-  { target: { dataset: { tableId: string } } },
+  unknown,
   {
+    tableId: string;
     selectedTableId: Writable<string>;
     records: Writable<AirtableRecordData[]>;
   }
->((event, { selectedTableId, records }) => {
-  const tableId = event.target.dataset.tableId;
-  if (!tableId) return;
+>((_event, { tableId, selectedTableId, records }) => {
   selectedTableId.set(tableId);
   records.set([]);
 });
@@ -238,16 +236,8 @@ export default pattern<Input, Output>(
       error,
     });
 
-    const boundSelectBase = onSelectBase({
-      selectedBaseId,
-      selectedTableId,
-      tables,
-      records,
-    });
-    const boundSelectTable = onSelectTable({
-      selectedTableId,
-      records,
-    });
+    // NOTE: onSelectBase/onSelectTable are bound per-item in .map() below
+    // (idiomatic CTS: bind the ID into the handler context)
 
     // Column headers extracted from records
     const columnHeaders = computed(() => {
@@ -376,8 +366,13 @@ export default pattern<Input, Output>(
                     {baseList.map((base) => (
                       <button
                         type="button"
-                        onClick={boundSelectBase}
-                        data-base-id={base.id}
+                        onClick={onSelectBase({
+                          baseId: base.id,
+                          selectedBaseId,
+                          selectedTableId,
+                          tables,
+                          records,
+                        })}
                         style={{
                           padding: "10px 14px",
                           backgroundColor: selectedBaseId === base.id
@@ -458,8 +453,11 @@ export default pattern<Input, Output>(
                       {tableList.map((table) => (
                         <button
                           type="button"
-                          onClick={boundSelectTable}
-                          data-table-id={table.id}
+                          onClick={onSelectTable({
+                            tableId: table.id,
+                            selectedTableId,
+                            records,
+                          })}
                           style={{
                             padding: "10px 14px",
                             backgroundColor: selectedTableId === table.id
