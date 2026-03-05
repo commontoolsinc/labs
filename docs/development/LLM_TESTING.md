@@ -69,9 +69,7 @@ Mock responses are **one-time use** — they're consumed when matched.
 | `packages/llm/src/client.test.ts` | Guard behavior, mock mode API |
 | `packages/toolshed/routes/ai/llm/generateText.test.ts` | JSON mode config, response cleaning |
 | `packages/toolshed/routes/ai/llm/generateObject.test.ts` | Model resolution, error paths |
-| `packages/runner/test/generate-text.test.ts` | generateText through runtime |
-| `packages/runner/test/generate-object-tools.test.ts` | generateObject with tool calling |
-| `packages/runner/test/llm-pattern-smoke.test.ts` | Representative pattern smoke tests |
+| `packages/runner/test/llm-pattern-smoke.test.ts` | generateText, generateObject, and tool-calling through runtime |
 
 ## Running tests
 
