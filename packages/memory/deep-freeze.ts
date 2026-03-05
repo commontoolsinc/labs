@@ -87,16 +87,14 @@ export function deepFreeze<T>(value: T): T {
     for (let i = 0; i < value.length; i++) {
       if (i in value) deepFreeze(value[i]);
     }
-    if (!alreadyFrozen) Object.freeze(value);
-    deepFrozenCache.set(value, true);
-    return value;
+  } else {
+    const obj = value as Record<string, unknown>;
+    for (const key of Object.keys(obj)) {
+      deepFreeze(obj[key]);
+    }
   }
 
-  const obj = value as Record<string, unknown>;
-  for (const key of Object.keys(obj)) {
-    deepFreeze(obj[key]);
-  }
-  if (!alreadyFrozen) Object.freeze(obj);
+  if (!alreadyFrozen) Object.freeze(value);
   deepFrozenCache.set(value as object, true);
   return value;
 }
