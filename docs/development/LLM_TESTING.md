@@ -13,9 +13,8 @@ LLM-powered patterns have test coverage at three layers:
 
 `packages/llm/src/client.ts` includes `isTestEnvironment()` which detects:
 
-- `Deno.test` being a function (any `deno test` run)
 - `CI=true` (CI runners)
-- `ENV=test` (toolshed test config)
+- `ENV=test` (set by `deno task test` in llm, runner, and toolshed packages)
 
 The guard throws before any `fetch` call when running in a test environment
 without mock mode enabled:

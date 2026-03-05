@@ -14,11 +14,6 @@ type PartialCallback = (text: string) => void;
  * Checks CI runners, toolshed test config, and deno test runner.
  */
 function isTestEnvironment(): boolean {
-  // Check if Deno.test is defined (always true inside `deno test`)
-  if (typeof (globalThis as any).Deno?.test === "function") {
-    return true;
-  }
-  // Check env vars (may throw without --allow-env)
   try {
     return Deno?.env?.get?.("CI") === "true" ||
       Deno?.env?.get?.("ENV") === "test";
