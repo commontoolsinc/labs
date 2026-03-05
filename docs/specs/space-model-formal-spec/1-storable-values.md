@@ -1402,9 +1402,13 @@ The dispatch is configured by `setJsonEncodingConfig(enabled)` /
 `resetJsonEncodingConfig()`, called from the `Runtime` constructor and
 `Runtime.dispose()` respectively:
 
-- **Flag OFF (default):** `jsonFromValue` = `JSON.stringify`,
-  `valueFromJson` = `JSON.parse`. This is the legacy path — the storage layer
-  sees plain JSON values with no tagged types.
+- **Flag OFF (default):** `jsonFromValue` wraps `JSON.stringify` with a
+  defensive guard that throws if the result is `undefined` — this can happen
+  when the input is `undefined` (a first-class `StorableValue` per Section
+  1.3), since `JSON.stringify(undefined)` returns `undefined` rather than a
+  string. The guard ensures `jsonFromValue` always returns a `string` as its
+  type signature promises. `valueFromJson` = `JSON.parse`. This is the legacy
+  path — the storage layer sees plain JSON values with no tagged types.
 - **Flag ON:** `jsonFromValue` routes through `JsonEncodingContext.encode()`,
   `valueFromJson` routes through `JsonEncodingContext.decode()`. Rich types
   are preserved across the storage boundary.
