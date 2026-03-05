@@ -10,12 +10,14 @@
  * Gated behind `ExperimentalOptions.canonicalHashing`.
  */
 import { createHasher, type IncrementalHasher } from "./hash-impl.ts";
+import { isDeepFrozen } from "./deep-freeze.ts";
 import { StorableContentId } from "./storable-content-id.ts";
 import { StorableUint8Array } from "./storable-native-instances.ts";
 import { DECONSTRUCT, isStorableInstance } from "./storable-protocol.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./type-tags.ts";
 import { encodeULEB128 } from "@commontools/leb128";
 import { bigintToMinimalTwosComplement } from "./bigint-encoding.ts";
+import { LRUCache } from "@commontools/utils/cache";
 
 // ---------------------------------------------------------------------------
 // Type tag bytes (Section 2 of the byte-level spec)
@@ -295,6 +297,47 @@ function feedPlainObject(
 }
 
 // ---------------------------------------------------------------------------
+// Uncached hash computation
+// ---------------------------------------------------------------------------
+
+/** Compute the hash of a value without consulting or populating any cache. */
+function computeHash(value: unknown): StorableContentId {
+  const hasher = createHasher();
+  feedValue(hasher, value);
+  return new StorableContentId(hasher.digest(), "fid1");
+}
+
+// ---------------------------------------------------------------------------
+// Caches
+// ---------------------------------------------------------------------------
+
+/** Pre-computed constant hashes (these values never change). */
+const NULL_HASH = computeHash(null);
+const UNDEFINED_HASH = computeHash(undefined);
+const TRUE_HASH = computeHash(true);
+const FALSE_HASH = computeHash(false);
+
+/**
+ * LRU cache for primitive value hashes. Primitives (strings, numbers,
+ * bigints) can't be WeakMap keys, so they use a bounded cache.
+ * The legacy `merkle-reference` uses a 50K-entry LRU with a reported 97%+
+ * hit rate -- we match that sizing.
+ */
+const primitiveHashCache = new LRUCache<
+  string | number | bigint,
+  StorableContentId
+>({
+  capacity: 50_000,
+});
+
+/**
+ * WeakMap cache for deep-frozen object hashes. Deep-frozen objects are
+ * immutable, so their hash is stable and safe to cache by identity.
+ * Mutable objects are always recomputed.
+ */
+const frozenObjectHashCache = new WeakMap<object, StorableContentId>();
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -303,9 +346,41 @@ function feedPlainObject(
  * `StorableContentId` with algorithm tag `fid1` (fabric ID, v1).
  * The caller (`refer()`) extracts the raw digest via `.hash` for
  * `Reference.fromDigest()`.
+ *
+ * Caches results for primitives (LRU) and deep-frozen objects (WeakMap).
  */
 export function canonicalHash(value: unknown): StorableContentId {
-  const hasher = createHasher();
-  feedValue(hasher, value);
-  return new StorableContentId(hasher.digest(), "fid1");
+  switch (typeof value) {
+    case "boolean":
+      return value ? TRUE_HASH : FALSE_HASH;
+
+    case "string":
+    case "number":
+    case "bigint": {
+      const cached = primitiveHashCache.get(value);
+      if (cached !== undefined) return cached;
+      const result = computeHash(value);
+      primitiveHashCache.put(value, result);
+      return result;
+    }
+
+    case "undefined":
+      return UNDEFINED_HASH;
+
+    case "object": {
+      if (value === null) return NULL_HASH;
+      if (isDeepFrozen(value)) {
+        const obj = value as object;
+        const cached = frozenObjectHashCache.get(obj);
+        if (cached !== undefined) return cached;
+        const result = computeHash(value);
+        frozenObjectHashCache.set(obj, result);
+        return result;
+      }
+      return computeHash(value);
+    }
+
+    default:
+      return computeHash(value);
+  }
 }
