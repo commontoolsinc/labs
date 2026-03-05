@@ -32,6 +32,12 @@ const toLocalISODate = (d: Date): string => {
 
 const getTodayDate = (): string => toLocalISODate(new Date());
 
+const journalTitle = (dateStr: string): string => {
+  const d = new Date(dateStr + "T00:00:00");
+  const dayOfWeek = d.toLocaleDateString("en-US", { weekday: "long" });
+  return `${dateStr} - ${dayOfWeek}`;
+};
+
 const DEFAULT_TEMPLATE = `# {{date}} - {{dayOfWeek}}
 
 ## Tasks
@@ -74,15 +80,13 @@ const handleCalendarChange = handler<
   // Check if a note already exists for this date
   const all = entries.get();
   for (const entry of all) {
-    if (entry?.title?.startsWith(dateStr)) {
+    if (entry?.title === journalTitle(dateStr)) {
       return navigateTo(entry as any);
     }
   }
 
   // Create a new daily note
-  const d = new Date(dateStr + "T00:00:00");
-  const dayOfWeek = d.toLocaleDateString("en-US", { weekday: "long" });
-  const noteTitle = `${dateStr} - ${dayOfWeek}`;
+  const noteTitle = journalTitle(dateStr);
   const t = template.get();
   const content = applyTemplate(t || DEFAULT_TEMPLATE, dateStr);
   const note = Note({
@@ -111,7 +115,7 @@ const handleGoToToday = handler<
 
   const all = entries.get();
   for (const entry of all) {
-    if (entry?.title?.startsWith(dateStr)) {
+    if (entry?.title === journalTitle(dateStr)) {
       return navigateTo(entry as any);
     }
   }
