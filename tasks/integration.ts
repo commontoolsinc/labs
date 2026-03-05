@@ -146,7 +146,7 @@ async function runPatternTests(
     return true;
   }
 
-  const concurrency = 1;
+  const concurrency = 5;
   console.log(
     `Found ${testFiles.length} pattern test(s), running ${concurrency} at a time`,
   );
