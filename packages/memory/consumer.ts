@@ -42,6 +42,7 @@ import type {
   Selector,
   Signer,
   StorableDatum,
+  StorableValue,
   Transaction,
   TransactionResult,
   UCAN,
@@ -62,6 +63,8 @@ import * as Subscription from "./subscription.ts";
 import { toStringStream } from "./ucan.ts";
 import { fromStringStream } from "./receipt.ts";
 import * as Settings from "./settings.ts";
+import { jsonFromValue, valueFromJson } from "./json-encoding-dispatch.ts";
+import type { ReconstructionContext } from "./storable-protocol.ts";
 export * from "./interface.ts";
 import { toRevision } from "./commit.ts";
 import { getLogger } from "@commontools/utils/logger";
@@ -70,6 +73,15 @@ const logger = getLogger("memory-consumer", {
   enabled: true,
   level: "info",
 });
+
+/** Minimal reconstruction context for the consumer deep-clone path. */
+const consumerReconstructionContext: ReconstructionContext = {
+  getCell() {
+    throw new globalThis.Error(
+      "getCell is not available in the consumer invocation clone path",
+    );
+  },
+};
 
 export const connect = ({
   address,
@@ -584,8 +596,15 @@ class ConsumerInvocation<Ability extends string, Protocol extends Proto> {
   }
 
   constructor(source: ConsumerInvocationFor<Ability, Protocol>) {
-    // JSON.parse(JSON.stringify) is used to strip `undefined` values and ensure consistent serialization
-    this.source = JSON.parse(JSON.stringify(source));
+    // Deep-clone the source to ensure consistent serialization.
+    // Uses the encoding-aware path so `undefined` and sparse arrays
+    // are preserved when unified JSON encoding is enabled.
+    this.source = valueFromJson(
+      jsonFromValue(
+        source as StorableValue,
+      ),
+      consumerReconstructionContext,
+    ) as ConsumerInvocationFor<Ability, Protocol>;
     this.#reference = refer(this.source);
     let receive;
     this.promise = new Promise<ConsumerResultFor<Ability, Protocol>>(
