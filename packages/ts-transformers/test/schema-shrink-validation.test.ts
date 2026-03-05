@@ -532,11 +532,11 @@ Deno.test("Schema Shrink Validation", async (t) => {
   );
 
   await t.step(
-    "handler<E | undefined, T> and inline form both produce valid schemas (KNOWN DIVERGENCE)",
+    "handler<E | undefined, T> preserves | undefined in both forms",
     async () => {
-      // Known divergence: type-arg form preserves top-level anyOf union,
-      // inline form shrinks to just the object (stripping undefined).
-      // Both produce valid, error-free schemas — just structured differently.
+      // Both forms preserve `| undefined` in the event schema.
+      // Remaining divergence: optional property encoding differs
+      // (type-arg: {type:"number"}, inline: {anyOf:[{type:"number"},{type:"undefined"}]}).
       const sourceTypeArgs = [
         "/// <cts-enable />",
         'import { type Cell, handler } from "commontools";',
@@ -575,20 +575,20 @@ Deno.test("Schema Shrink Validation", async (t) => {
           fmtErrors(rInline.diagnostics)
         }`,
       );
-      // Both generate schemas (state schema should match at minimum)
       const schemasTA = extractSchemas(rTA.output);
       const schemasInline = extractSchemas(rInline.output);
-      assertGreater(
-        schemasTA.length,
-        0,
-        "type-arg form should produce schemas",
+      // Both event schemas should contain "undefined" (not stripped)
+      assertEquals(
+        schemasTA[0]!.includes('"undefined"'),
+        true,
+        "type-arg event schema should preserve undefined",
       );
-      assertGreater(
-        schemasInline.length,
-        0,
-        "inline form should produce schemas",
+      assertEquals(
+        schemasInline[0]!.includes('"undefined"'),
+        true,
+        "inline event schema should preserve undefined",
       );
-      // State schemas (second schema) should match
+      // State schemas (second schema) should match exactly
       assertEquals(
         schemasTA[1],
         schemasInline[1],
@@ -598,9 +598,8 @@ Deno.test("Schema Shrink Validation", async (t) => {
   );
 
   await t.step(
-    "handler<TypeAlias | undefined, TypeAlias> and inline form both produce valid schemas (KNOWN DIVERGENCE)",
+    "handler<TypeAlias | undefined, TypeAlias> preserves | undefined in both forms",
     async () => {
-      // Same divergence as above: union handling differs between type-arg and inline paths.
       const sourceTypeArgs = [
         "/// <cts-enable />",
         'import { type Cell, handler } from "commontools";',
@@ -645,17 +644,18 @@ Deno.test("Schema Shrink Validation", async (t) => {
       );
       const schemasTA = extractSchemas(rTA.output);
       const schemasInline = extractSchemas(rInline.output);
-      assertGreater(
-        schemasTA.length,
-        0,
-        "type-arg form should produce schemas",
+      // Both event schemas should contain "undefined" (not stripped)
+      assertEquals(
+        schemasTA[0]!.includes('"undefined"'),
+        true,
+        "type-arg event schema should preserve undefined",
       );
-      assertGreater(
-        schemasInline.length,
-        0,
-        "inline form should produce schemas",
+      assertEquals(
+        schemasInline[0]!.includes('"undefined"'),
+        true,
+        "inline event schema should preserve undefined",
       );
-      // State schemas (second schema) should match
+      // State schemas (second schema) should match exactly
       assertEquals(
         schemasTA[1],
         schemasInline[1],
@@ -710,10 +710,9 @@ Deno.test("Schema Shrink Validation", async (t) => {
   );
 
   await t.step(
-    "lift<T | undefined, R> and inline form both produce valid schemas (KNOWN DIVERGENCE)",
+    "lift<T | undefined, R> preserves | undefined in both forms",
     async () => {
-      // Known divergence: type-arg form preserves top-level anyOf union,
-      // inline form shrinks to just the object (stripping undefined).
+      // Both forms now preserve `| undefined` in the input schema.
       const sourceTypeArgs = [
         "/// <cts-enable />",
         'import { lift } from "commontools";',
@@ -750,17 +749,18 @@ Deno.test("Schema Shrink Validation", async (t) => {
       );
       const schemasTA = extractSchemas(rTA.output);
       const schemasInline = extractSchemas(rInline.output);
-      assertGreater(
-        schemasTA.length,
-        0,
-        "type-arg form should produce schemas",
+      // Both input schemas should contain "undefined" (not stripped)
+      assertEquals(
+        schemasTA[0]!.includes('"undefined"'),
+        true,
+        "type-arg input schema should preserve undefined",
       );
-      assertGreater(
-        schemasInline.length,
-        0,
-        "inline form should produce schemas",
+      assertEquals(
+        schemasInline[0]!.includes('"undefined"'),
+        true,
+        "inline input schema should preserve undefined",
       );
-      // Result schemas (second schema) should match
+      // Result schemas (second schema) should match exactly
       assertEquals(
         schemasTA[1],
         schemasInline[1],

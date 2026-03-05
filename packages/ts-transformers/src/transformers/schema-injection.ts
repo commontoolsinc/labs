@@ -194,16 +194,38 @@ function buildShrunkTypeNodeFromType(
   // shrinking logic can resolve properties on the non-nullish part. This runs
   // after the direct-access check above so leaf types like `string | undefined`
   // are returned as-is when they have an empty-path access.
+  // After shrinking, re-wrap with the nullish members to preserve the union
+  // semantics (e.g. `foo?.bar` means `undefined` is still a valid value for foo).
   if ((type.flags & ts.TypeFlags.Union) !== 0) {
     const nonNullable = checker.getNonNullableType(type);
     if (nonNullable !== type) {
-      return buildShrunkTypeNodeFromType(
+      const shrunkInner = buildShrunkTypeNodeFromType(
         nonNullable,
         paths,
         checker,
         sourceFile,
         factory,
       );
+      if (!shrunkInner) return undefined;
+      // Collect the nullish members to re-append
+      const nullishMembers: ts.TypeNode[] = [];
+      if (type.isUnion()) {
+        for (const constituent of type.types) {
+          if (
+            constituent.flags &
+            (ts.TypeFlags.Undefined | ts.TypeFlags.Null | ts.TypeFlags.Void)
+          ) {
+            const node = checker.typeToTypeNode(
+              constituent,
+              sourceFile,
+              typeToNodeFlags,
+            );
+            if (node) nullishMembers.push(node);
+          }
+        }
+      }
+      if (nullishMembers.length === 0) return shrunkInner;
+      return factory.createUnionTypeNode([shrunkInner, ...nullishMembers]);
     }
   }
 
