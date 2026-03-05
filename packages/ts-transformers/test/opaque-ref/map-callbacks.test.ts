@@ -1,5 +1,5 @@
 import { describe, it } from "@std/testing/bdd";
-import { assertStringIncludes } from "@std/assert";
+import { assert, assertStringIncludes } from "@std/assert";
 import { StaticCacheFS } from "@commontools/static";
 
 import { transformSource } from "../utils.ts";
@@ -70,6 +70,31 @@ export default pattern<Record<string, never>>((_) => {
 });
 `;
 
+const DESTRUCTURE_ALIAS_SOURCE = `/// <cts-enable />
+import { pattern, UI } from "commontools";
+
+interface Spot {
+  spotNumber: string;
+}
+
+interface State {
+  spots: Spot[];
+}
+
+export default pattern<State>((state) => {
+  return {
+    [UI]: (
+      <ul>
+        {state.spots.map((spot) => {
+          const { spotNumber: sn } = spot;
+          return <li>{sn}</li>;
+        })}
+      </ul>
+    ),
+  };
+});
+`;
+
 describe("OpaqueRef map callbacks", () => {
   it("transforms wish<Default<Array<T>, []>>().result.map() to mapWithPattern", async () => {
     const output = await transformSource(WISH_DEFAULT_ARRAY_SOURCE, {
@@ -80,6 +105,25 @@ describe("OpaqueRef map callbacks", () => {
     assertStringIncludes(output, "mapWithPattern(");
     // The outer items capture should appear in params
     assertStringIncludes(output, "items: items");
+  });
+
+  it("does not capture destructuring property keys as variables (alias bug)", async () => {
+    const output = await transformSource(DESTRUCTURE_ALIAS_SOURCE, {
+      types: { "commontools.d.ts": commontools },
+    });
+
+    // The map callback should NOT capture "spotNumber" as a variable.
+    // "spotNumber" in `{ spotNumber: sn }` is a property key, not a variable reference.
+    // If the bug were present, the output would contain `params: { spotNumber }` which
+    // causes ReferenceError at runtime (spotNumber is an action param, not a free var).
+    assertStringIncludes(output, "params: {}");
+
+    // The map's params object must be empty — no spurious capture
+    const mapSection = output.slice(output.indexOf("mapWithPattern"));
+    assert(
+      !mapSection.includes("spotNumber: spotNumber"),
+      "should not capture destructuring property key 'spotNumber' as a variable",
+    );
   });
 
   it("derives map callback parameters and unary negations", async () => {
