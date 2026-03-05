@@ -952,7 +952,7 @@ the **wrapper type**, not the raw native type. For example,
 The system follows an **immutable-forward** design:
 
 - **Plain objects and arrays** are frozen (`Object.freeze()`) upon
-  reconstruction. This applies to all `deserialize()` output paths, including
+  reconstruction. This applies to all deserialization output paths, including
   `/quote` (Section 5.6) — the freeze is a property of the deserialization
   boundary, not of whether type-tag reconstruction occurred.
 - **`StorableInstance`s** should ideally be frozen as well — this is the north
@@ -1131,349 +1131,214 @@ they don't own the wire format. A **serialization context** owns the mapping
 between classes and wire format tags, and handles format-specific
 encoding/decoding.
 
-### 4.2 SerializedForm
+### 4.2 Wire Format Types
 
-Each serialization context defines a `SerializedForm` — the type of values in
-its wire format. For the JSON context, this is:
+The JSON encoding context uses an intermediate tree representation during
+serialization and deserialization. This type is internal to the JSON
+implementation — it is not part of the public boundary interface.
 
 ```typescript
-// file: packages/common/serialization-context.ts
-
-/** JSON-compatible wire format value. */
-type JsonWireValue = null | boolean | number | string | JsonWireValue[] | { [key: string]: JsonWireValue };
+// file: packages/memory/json-type-handlers.ts
 
 /**
- * The wire format for the JSON serialization context. Other contexts (e.g.,
- * CBOR) would define their own `SerializedForm`.
+ * JSON-compatible wire format value. This is the intermediate tree
+ * representation used during serialization tree walking -- NOT the final
+ * serialized form (which is `string`). Internal to the JSON implementation.
  */
-type SerializedForm = JsonWireValue;
+type JsonWireValue = null | boolean | number | string | JsonWireValue[] | { [key: string]: JsonWireValue };
 ```
 
-### 4.3 Interface
+### 4.3 Public Boundary Interface
+
+The public interface for serialization contexts is parameterized by the
+boundary type — `string` for JSON contexts, `Uint8Array` for binary contexts.
+External callers use only `encode()` and `decode()`; all internal machinery
+(tag wrapping, tree walking, type handler dispatch) is private to the context
+implementation.
 
 ```typescript
-// file: packages/common/serialization-context.ts
+// file: packages/memory/storable-protocol.ts
 
 /**
- * Maps between runtime types and wire format representations. Each boundary
- * in the system uses a serialization context appropriate to its format.
+ * Public boundary interface for serialization contexts. Encodes storable
+ * values into a serialized form and decodes them back. The type parameter
+ * `SerializedForm` is the boundary type: `string` for JSON contexts,
+ * `Uint8Array` for binary contexts.
+ *
+ * This is the only interface external callers need. Internal tree-walking
+ * machinery is private to the context implementation.
  */
-export interface SerializationContext {
-  /** Get the wire format tag for a storable instance's type. */
-  getTagFor(value: StorableInstance): string;
+export interface SerializationContext<SerializedForm = unknown> {
+  /** Whether failed reconstructions produce `ProblematicStorable` instead of
+   *  throwing. @default false */
+  readonly lenient: boolean;
 
-  /** Get the class that can reconstruct instances for a given tag. */
-  getClassFor(tag: string): StorableClass<StorableInstance> | undefined;
+  /** Encode a storable value into serialized form for boundary crossing. */
+  encode(value: StorableValue): SerializedForm;
 
-  /** Encode a tag and state into the format's wire representation. */
-  encode(tag: string, state: SerializedForm): SerializedForm;
-
-  /** Decode a wire representation into tag and state, or `null` if not a tagged value. */
-  decode(data: SerializedForm): { tag: string; state: SerializedForm } | null;
+  /** Decode a serialized form back into a storable value. */
+  decode(data: SerializedForm, runtime: ReconstructionContext): StorableValue;
 }
 ```
+
+The JSON encoding context implements `SerializationContext<string>`:
+
+- `encode(value)` serializes a `StorableValue` into the `/<Type>@<Version>`
+  tagged wire format, then stringifies the result.
+- `decode(data, runtime)` parses a JSON string, then deserializes tagged forms
+  back into rich runtime types.
+
+> **Previous design.** The earlier spec described `SerializationContext` as a
+> lower-level interface with `getTagFor()`, `getClassFor()`, `encode(tag,
+> state)`, and `decode(data)` methods — essentially exposing the tag
+> wrapping/unwrapping mechanics as the public API. The current design pushes all
+> of that machinery inside the context class, leaving only the clean
+> `encode(value) -> SerializedForm` / `decode(data, runtime) -> StorableValue`
+> boundary. This better reflects the principle that the context owns the full
+> pipeline, not just the tag encoding step.
 
 ### 4.4 Serialization Flow
 
 ```
-Serialize:   instance.[DECONSTRUCT]() -> state -> context.encode(tag, state) -> wire
-Deserialize: wire -> context.decode() -> { tag, state } -> Class[RECONSTRUCT](state) -> instance
+Encode:  value -> context.encode(value) -> serialized form (e.g., JSON string)
+Decode:  serialized form -> context.decode(data, runtime) -> StorableValue
 ```
 
-The recursive descent is handled by top-level `serialize()` and `deserialize()`
-functions, not by the context or by individual types. See Section 4.5.
+Internally, the JSON encoding context's `encode()` method calls a private
+`serialize()` to walk the `StorableValue` tree and produce a `JsonWireValue`
+tree, then stringifies it. The `decode()` method parses the JSON string, then
+calls a private `deserialize()` to walk the `JsonWireValue` tree and
+reconstruct rich runtime types. The recursive descent and type dispatch are
+entirely internal to the context.
 
-### 4.5 Top-Level Serialize/Deserialize
+### 4.5 Type Handlers and Internal Tree Walking
 
-> **Export style:** Following the JS standard convention of capitalized namespace
-> objects (cf. `Temporal`, `Atomics`), the `serialize()` and `deserialize()`
-> functions should be exported as methods on a namespace object — e.g.,
-> `DataModel.serialize()` or `Serialization.serialize()`. The exact name is an
-> implementation decision.
+The serialization and deserialization logic is implemented as private methods
+on `JsonEncodingContext`. The context dispatches per-type logic to **type
+handlers** — small objects that know how to serialize values of a specific type
+and how to deserialize them from a specific tag.
 
 ```typescript
-// file: packages/common/serialization.ts
-
-import { DECONSTRUCT, RECONSTRUCT, isStorableInstance } from './storable-protocol';
-import type { SerializationContext, SerializedForm } from './serialization-context';
-import { UnknownStorable } from './unknown-storable';
-import { ProblematicStorable } from './problematic-storable';
+// file: packages/memory/json-type-handlers.ts
 
 /**
- * Serialize a storable value for boundary crossing. Recursively processes
- * nested values.
+ * Narrow interface for what type handlers need from the encoding context
+ * during tree walking. Contains only the tag-wrapping and tag-lookup methods
+ * needed by handler serialize/deserialize implementations.
  *
- * The input is `StorableValue`, which belongs to the middle layer of the
- * three-layer architecture. Raw native JS objects (`Error`, `Map`, etc.)
- * never reach this function — they are wrapped into `StorableInstance`
- * wrappers by the conversion layer (Section 8) before serialization.
+ * This is NOT a public interface -- it exists to type the `codec` parameter
+ * passed to type handlers by the internal tree-walking engine.
  */
-export function serialize(
-  value: StorableValue,
-  context: SerializationContext,
-): SerializedForm {
-  // --- StorableInstance ---
-  // This arm handles all storable instances uniformly: user-defined types
-  // (Cell, Stream), system types (UnknownStorable, ProblematicStorable),
-  // and native object wrappers (StorableError, StorableMap, StorableSet,
-  // StorableUint8Array).
-  if (isStorableInstance(value)) {
-    const state = value[DECONSTRUCT]();
-    const tag = context.getTagFor(value);
-    const serializedState = serialize(state, context); // recursive
-    return context.encode(tag, serializedState);
-  }
-
-  // --- `bigint` ---
-  // A primitive that rides through `StorableValue` without wrapping (like
-  // `undefined`). Needs a dedicated handler since JSON has no native bigint.
-  // The state is the unpadded base64url (RFC 4648, Section 5) encoding of
-  // the value's minimal two's complement representation in big-endian byte
-  // order — the same byte format used by the canonical hash (Section 6.4).
-  if (typeof value === 'bigint') {
-    return context.encode('BigInt@1', base64urlEncode(bigintToTwosComplement(value)));
-  }
-
-  // --- StorableEpochNsec ---
-  // Direct StorableDatum member (not a StorableInstance). Encoded as flat
-  // base64url of the underlying bigint's minimal two's complement
-  // representation, same byte format as BigInt@1.
-  if (value instanceof StorableEpochNsec) {
-    return context.encode('EpochNsec@1', base64urlEncode(bigintToTwosComplement(value.value)));
-  }
-
-  // --- StorableEpochDays ---
-  // Direct StorableDatum member (not a StorableInstance). Same encoding as
-  // StorableEpochNsec but with a distinct wire tag.
-  if (value instanceof StorableEpochDays) {
-    return context.encode('EpochDays@1', base64urlEncode(bigintToTwosComplement(value.value)));
-  }
-
-  // --- StorableContentId ---
-  // Direct StorableDatum member (not a StorableInstance). Encoded as a
-  // two-element array: `[algorithmTag, base64urlhash]`. The base64url
-  // encoding uses the URL-safe alphabet (`A-Za-z0-9-_`) with no padding,
-  // matching the stringification format.
-  if (value instanceof StorableContentId) {
-    return context.encode('ContentId@1', [value.algorithmTag, base64urlEncodeUnpadded(value.hash)]);
-  }
-
-  // --- `undefined` ---
-  // Serialized as a tagged type. Per Section 1.3, `undefined` always uses its
-  // dedicated tagged representation regardless of context.
-  if (value === undefined) {
-    return context.encode('Undefined@1', null);
-  }
-
-  // --- Primitives ---
-  if (value === null || typeof value === 'boolean'
-      || typeof value === 'number' || typeof value === 'string') {
-    // Primitives pass through to the wire format directly.
-    return value as SerializedForm;
-  }
-
-  // --- Arrays ---
-  // Sparse arrays are supported: runs of consecutive holes (absent indices)
-  // are serialized as a single `hole` entry whose state is the run length
-  // (a positive integer). This is distinct from explicit `undefined`
-  // (serialized as `Undefined@1`). See Section 1.5.
-  if (Array.isArray(value)) {
-    const result: SerializedForm[] = [];
-    let i = 0;
-    while (i < value.length) {
-      if (!(i in value)) {
-        // Count consecutive holes starting at index `i`.
-        let count = 0;
-        while (i < value.length && !(i in value)) {
-          count++;
-          i++;
-        }
-        result.push(context.encode('hole', count));
-      } else {
-        result.push(serialize(value[i], context));
-        i++;
-      }
-    }
-    return result as SerializedForm;
-  }
-
-  // --- Plain objects ---
-  // All enumerable own properties are serialized, including those whose value
-  // is `undefined` (which serializes as `Undefined@1` per Section 1.3).
-  const result: Record<string, SerializedForm> = {};
-  for (const [key, val] of Object.entries(value as Record<string, StorableValue>)) {
-    result[key] = serialize(val, context);
-  }
-
-  // Apply `/object` escaping per Section 5.6: if the result has exactly one
-  // key and that key starts with `/`, wrap in `{ "/object": ... }` so the
-  // deserializer does not misinterpret it as a tagged type.
-  const keys = Object.keys(result);
-  if (keys.length === 1 && keys[0].startsWith('/')) {
-    return { '/object': result } as SerializedForm;
-  }
-
-  return result;
+interface TypeHandlerCodec {
+  /** Wrap a tag and state into the wire format's tagged representation. */
+  wrapTag(tag: string, state: JsonWireValue): JsonWireValue;
+  /** Get the wire format tag for a storable instance's type. */
+  getTagFor(value: StorableInstance): string;
 }
 
 /**
- * Deserialize a wire-format value back into rich runtime types. Requires
- * a `ReconstructionContext` for reconstituting types that need runtime
- * context (e.g., `Cell` interning).
- *
- * The output is `StorableValue`. Native object types (Error, Map, etc.)
- * are reconstructed as their wrapper classes (`StorableError`, `StorableMap`,
- * etc.) via the standard `StorableInstance` class registry path. Callers who
- * need the underlying native objects use `nativeValueFromStorableValue()`
- * (Section 8) as a separate step.
+ * Interface for per-type serialize/deserialize handlers. Each handler knows
+ * how to serialize values of its type and how to deserialize them from a
+ * specific tag. Handlers are registered in a `TypeHandlerRegistry`.
  */
-export function deserialize(
-  data: SerializedForm,
-  context: SerializationContext,
-  runtime: ReconstructionContext,
-): StorableValue {
-  const decoded = context.decode(data);
-  if (decoded !== null) {
-    const { tag, state } = decoded;
+interface TypeHandler {
+  /** The wire format tag this handler deserializes from (e.g. `"BigInt@1"`). */
+  readonly tag: string;
 
-    // `/object` unwrapping (Section 5.6): strip the wrapper and take the
-    // inner object's keys literally; inner values go through normal
-    // deserialization.
-    if (tag === 'object') {
-      const inner = state as Record<string, SerializedForm>;
-      const result: Record<string, StorableValue> = {};
-      for (const [key, val] of Object.entries(inner)) {
-        result[key] = deserialize(val, context, runtime);
-      }
-      return Object.freeze(result);
-    }
+  /** Returns `true` if this handler can serialize the given value. */
+  canSerialize(value: StorableValue): boolean;
 
-    // `/quote` literal handling (Section 5.6): return the inner value with
-    // no deserialization of nested special forms. Deep-freeze arrays and
-    // plain objects to uphold the immutability guarantee (Section 2.9).
-    if (tag === 'quote') {
-      return deepFreeze(state as StorableValue);
-    }
+  /**
+   * Serialize the value. Only called after `canSerialize` returned `true`.
+   * The handler is responsible for tag wrapping via `codec.wrapTag()` and
+   * for recursively serializing nested values via the `recurse` callback.
+   */
+  serialize(
+    value: StorableValue,
+    codec: TypeHandlerCodec,
+    recurse: (v: StorableValue) => JsonWireValue,
+  ): JsonWireValue;
 
-    // `Undefined@1`: stateless type whose reconstruction produces the JS
-    // value `undefined`.
-    if (tag === 'Undefined@1') {
-      return undefined;
-    }
-
-    // `BigInt@1`: validate and reconstruct a `bigint` primitive.
-    // The state is unpadded base64url of minimal two's complement big-endian
-    // bytes. Deserialization cannot assume type safety from the wire — the
-    // state must be validated before use. See Section 5.3 deserialization
-    // validation note.
-    if (tag === 'BigInt@1') {
-      if (typeof state !== 'string') {
-        return new ProblematicStorable('BigInt@1', state as StorableValue,
-          'BigInt@1 state must be a string');
-      }
-      try {
-        const bytes = base64urlDecode(state);
-        return twosComplementToBigint(bytes);
-      } catch {
-        return new ProblematicStorable('BigInt@1', state as StorableValue,
-          'BigInt@1 state is not valid base64url or not a valid integer representation');
-      }
-    }
-
-    // `hole` is not valid outside of array deserialization; if encountered
-    // at top level or in an object, treat as an unknown type for safety.
-    // (Array deserialization handles `hole` inline — see below.)
-
-    const cls = context.getClassFor(tag);
-    const deserializedState = deserialize(state, context, runtime); // recursive
-    if (cls) {
-      return cls[RECONSTRUCT](deserializedState, runtime);
-    }
-    // Unknown type: preserve for round-tripping via `UnknownStorable`.
-    return UnknownStorable[RECONSTRUCT](
-      { type: tag, state: deserializedState },
-      runtime,
-    );
-  }
-
-  // Primitives pass through.
-  if (data === null || typeof data === 'boolean'
-      || typeof data === 'number' || typeof data === 'string') {
-    return data;
-  }
-
-  // Arrays: recursively deserialize elements. `hole` entries use
-  // run-length encoding — the state is a positive integer indicating how
-  // many consecutive holes to skip. Those indices are left absent in the
-  // result array, creating true holes.
-  if (Array.isArray(data)) {
-    // First pass: compute the logical length (sum of run lengths for
-    // `hole` entries plus one for each non-hole entry).
-    let logicalLength = 0;
-    for (const entry of data) {
-      const entryDecoded = context.decode(entry);
-      if (entryDecoded !== null && entryDecoded.tag === 'hole') {
-        logicalLength += entryDecoded.state as number;
-      } else {
-        logicalLength++;
-      }
-    }
-
-    const result = new Array(logicalLength);
-    let targetIndex = 0;
-    for (const entry of data) {
-      const entryDecoded = context.decode(entry);
-      if (entryDecoded !== null && entryDecoded.tag === 'hole') {
-        // Skip `state` indices — leave them absent, creating true holes.
-        targetIndex += entryDecoded.state as number;
-      } else {
-        result[targetIndex] = deserialize(entry, context, runtime);
-        targetIndex++;
-      }
-    }
-    return Object.freeze(result);
-  }
-
-  // Plain objects: recursively deserialize values, then freeze.
-  const result: Record<string, StorableValue> = {};
-  for (const [key, val] of Object.entries(data)) {
-    result[key] = deserialize(val, context, runtime);
-  }
-  return Object.freeze(result);
-}
-
-/**
- * Recursively freeze all plain objects and arrays in a value tree.
- * Used by `/quote` deserialization to uphold the immutability guarantee
- * (Section 2.9) on values that skip type-tag interpretation.
- */
-function deepFreeze(value: StorableValue): StorableValue {
-  if (value === null || typeof value !== 'object') {
-    return value;
-  }
-  if (Array.isArray(value)) {
-    for (let i = 0; i < value.length; i++) {
-      if (i in value) {
-        deepFreeze(value[i]);
-      }
-    }
-    return Object.freeze(value);
-  }
-  for (const val of Object.values(value)) {
-    deepFreeze(val as StorableValue);
-  }
-  return Object.freeze(value);
+  /**
+   * Deserialize a value from its wire format state. The state has already
+   * been unwrapped (tag stripped) but inner values have NOT been recursively
+   * deserialized -- the handler must call `recurse` on nested values.
+   */
+  deserialize(
+    state: JsonWireValue,
+    runtime: ReconstructionContext,
+    recurse: (v: JsonWireValue) => StorableValue,
+  ): StorableValue;
 }
 ```
 
-> **Implementation guidance: serialization context class registry.** The
-> serialization context must register the native object wrapper classes so
-> that `getClassFor('Error@1')` returns `StorableError`,
-> `getClassFor('Map@1')` returns `StorableMap`, and so on. For tag resolution
-> (`getTagFor`), the context can check for a `typeTag` property on the
-> instance — the same pattern used by `UnknownStorable` and
-> `ProblematicStorable`. This avoids `instanceof` cascades and scales cleanly
-> as new wrapper types are added.
+The built-in type handlers are:
+
+| Handler | Tag | Serializes | Notes |
+|---------|-----|------------|-------|
+| `EpochNsecHandler` | `EpochNsec@1` | `StorableEpochNsec` | Direct `StorableDatum` member; matched by `instanceof`. |
+| `EpochDaysHandler` | `EpochDays@1` | `StorableEpochDays` | Direct `StorableDatum` member; matched by `instanceof`. |
+| `StorableInstanceHandler` | _(empty)_ | `StorableInstance` | Generic handler for all `StorableInstance` values. Uses `[DECONSTRUCT]` and the codec's tag methods. No tag for deserialization — individual instance types are deserialized via the class registry. |
+| `BigIntHandler` | `BigInt@1` | `bigint` | Encodes as unpadded base64url of minimal two's complement big-endian bytes. |
+| `UndefinedHandler` | `Undefined@1` | `undefined` | Stateless; state is `null`. |
+
+Handler registration order matters for serialization: `EpochNsec` and
+`EpochDays` are checked first (they are direct `StorableDatum` members matched
+by `instanceof` and must be found before the generic `StorableInstanceHandler`),
+then `StorableInstance` (generic protocol types via `isStorableInstance`), then
+`bigint` and `undefined`. Primitives, arrays, and plain objects are handled as
+fallthrough after no handler matches.
+
+#### Private `serialize()` method
+
+The context's private `serialize()` method walks the `StorableValue` tree:
+
+1. **Type handler dispatch** — scans the handler registry; if a handler
+   matches, delegates to it (with a `recurse` callback for nested values).
+2. **Primitives** — `null`, `boolean`, `number`, `string` pass through to
+   `JsonWireValue` directly.
+3. **Arrays** — serialized element-by-element; sparse arrays use run-length
+   encoded `hole` entries (Section 1.5).
+4. **Plain objects** — serialized key-by-key; `/object` escaping applied per
+   Section 5.6.
+
+Circular references are detected via a `Set<object>` tracked during the walk.
+
+#### Private `deserialize()` method
+
+The context's private `deserialize()` method walks the `JsonWireValue` tree:
+
+1. **Tag unwrapping** — checks for single-key objects with `/`-prefixed keys.
+2. **Structural escapes** — handles `/object` (Section 5.6) and `/quote`
+   (Section 5.6).
+3. **Type handler dispatch** — looks up the tag in the registry; if found,
+   delegates to the handler's `deserialize()`. When the context is in lenient
+   mode, handler exceptions produce `ProblematicStorable` (Section 3.5).
+4. **Class registry fallback** — for tags not handled by type handlers (e.g.,
+   `Error@1`, `Map@1`, `Set@1`, `Bytes@1`, `RegExp@1`), the context looks up
+   the `StorableClass` in its class registry, recursively deserializes the
+   state, and calls `[RECONSTRUCT]`. Unknown tags produce `UnknownStorable`.
+5. **Primitives** — pass through.
+6. **Arrays** — recursively deserialized; `hole` entries reconstructed as true
+   holes (absent indices).
+7. **Plain objects** — recursively deserialized; output frozen.
+
+> **Implementation guidance: class registry.** The `JsonEncodingContext`
+> constructor registers native wrapper classes for deserialization:
+> `StorableError`, `StorableMap`, `StorableSet`, `StorableUint8Array`,
+> `StorableRegExp`. For tag resolution (`getTagFor`), the context checks for
+> a `typeTag` property on the instance — the same pattern used by
+> `UnknownStorable` and `ProblematicStorable`. `ExplicitTagStorable` instances
+> use their preserved `typeTag` directly. This avoids `instanceof` cascades
+> and scales cleanly as new wrapper types are added.
+
+> **Previous design.** The earlier spec presented `serialize()` and
+> `deserialize()` as standalone top-level functions that received the
+> `SerializationContext` as a parameter. The current design moves these into
+> private methods on `JsonEncodingContext`, keeping the public API clean
+> (`encode()`/`decode()` only) and allowing the context to encapsulate its
+> internal state (registry, codec view, lenient mode) without threading it
+> through every recursive call.
 
 ### 4.6 Separation of Concerns
 
@@ -1505,6 +1370,107 @@ version requirements.
 > calls `convertCellsToLinks` in a web worker context. Threading serialization
 > options to this call site requires worker-initialization-time configuration,
 > since the reconciler does not have direct access to a `Runtime` instance.
+
+### 4.8 JSON Encoding Dispatch
+
+The storage boundary in `space.ts` routes through flag-gated dispatch functions
+that bridge between the storage layer (JSON strings) and the runtime layer
+(`StorableValue`). These functions live in a dedicated dispatch module
+(`packages/memory/json-encoding-dispatch.ts`) and are reassigned at runtime
+based on whether unified JSON encoding is enabled.
+
+```typescript
+// file: packages/memory/json-encoding-dispatch.ts
+
+/**
+ * Encode a storable value to a JSON string. When unified JSON encoding is
+ * ON, serializes rich types (bigint, undefined, Map, etc.) into the
+ * `/<Type>@<Version>` tagged wire format and stringifies. When OFF,
+ * equivalent to `JSON.stringify(value)`.
+ */
+let jsonFromValue: (value: StorableValue) => string;
+
+/**
+ * Decode a JSON string back into a storable value. When unified JSON
+ * encoding is ON, parses the string and deserializes tagged forms back
+ * into rich runtime types. When OFF, equivalent to `JSON.parse(json)`.
+ */
+let valueFromJson: (json: string, runtime: ReconstructionContext) => StorableValue;
+```
+
+The dispatch is configured by `setJsonEncodingConfig(enabled)` /
+`resetJsonEncodingConfig()`, called from the `Runtime` constructor and
+`Runtime.dispose()` respectively:
+
+- **Flag OFF (default):** `jsonFromValue` = `JSON.stringify`,
+  `valueFromJson` = `JSON.parse`. This is the legacy path — the storage layer
+  sees plain JSON values with no tagged types.
+- **Flag ON:** `jsonFromValue` routes through `JsonEncodingContext.encode()`,
+  `valueFromJson` routes through `JsonEncodingContext.decode()`. Rich types
+  are preserved across the storage boundary.
+
+The dispatch module creates a single stateless `JsonEncodingContext` instance at
+module load time and reuses it for all encode/decode operations.
+
+In `space.ts`, the dispatch functions replace direct `JSON.stringify` /
+`JSON.parse` calls at three sites:
+
+- **Write path:** `jsonFromValue(datum)` replaces `JSON.stringify(datum)` in
+  `importDatum()`.
+- **Read path:** `valueFromJson(json, context)` replaces `JSON.parse(json)` at
+  `recall()`, `getFact()`, and `toFact()`.
+
+### 4.9 Storable Value Dispatch
+
+The native-to-storable value boundary is managed by a similar flag-gated
+dispatch module (`packages/memory/storable-value-dispatch.ts`). This module
+provides `toStorable()` / `fromStorable()` functions that bridge the left layer
+(JS wild west) and the middle layer (`StorableValue`) at the `Cell` read/write
+boundary.
+
+```typescript
+// file: packages/memory/storable-value-dispatch.ts
+
+/**
+ * Convert a native JS value to storable form. When the flag is ON,
+ * wraps native types (Error, Date, RegExp, etc.) into storable wrappers
+ * and deep-freezes. When OFF, performs legacy deep conversion via
+ * `toDeepStorableValue`.
+ */
+let toStorable: (value: StorableValue) => StorableValue;
+
+/**
+ * Convert a storable value back to native form. When the flag is ON,
+ * unwraps storable wrappers (StorableError, StorableMap, etc.) back to
+ * native JS types. When OFF, identity passthrough.
+ */
+let fromStorable: (value: StorableValue) => StorableValue;
+```
+
+The dispatch is configured by `setStorableValueConfig(enabled)` /
+`resetStorableValueConfig()`, called from the `Runtime` constructor and
+`Runtime.dispose()` respectively:
+
+- **Flag OFF (default):** `toStorable` routes through `toDeepStorableValue`
+  (the legacy conversion function). `fromStorable` is an identity passthrough.
+- **Flag ON:** `toStorable` routes through `toDeepRichStorableValue` (which
+  wraps native objects into `StorableInstance` wrappers per Section 8.2).
+  `fromStorable` routes through `deepNativeValueFromStorableValue` (which
+  unwraps `StorableInstance` wrappers back to native JS types per Section 8.5).
+
+In the `Cell` implementation:
+
+- **Read path:** `Cell.getRaw()` calls `fromStorable(value)` to unwrap
+  storable wrappers before returning values to the JS wild west.
+- **Write path:** `Cell.setRaw()` calls `toStorable(value)` to wrap native
+  types into storable form before storing.
+
+> **Config lifecycle.** Both dispatch modules (`json-encoding-dispatch` and
+> `storable-value-dispatch`) follow the same lifecycle pattern: the `Runtime`
+> constructor calls the `set*Config()` function to activate the dispatch based
+> on `ExperimentalOptions`, and `Runtime.dispose()` calls `reset*Config()` to
+> restore defaults. This prevents flag leakage between runtime instances or
+> test runs.
 
 ---
 
@@ -1542,13 +1508,13 @@ round-trip correctly.
 > to `Bytes@1`, `BigInt@1`, `EpochNsec@1`, and `EpochDays@1` state values.
 
 ```typescript
-// file: packages/common/json-encoding.ts (illustrative -- tag-to-format map)
+// file: packages/memory/json-type-handlers.ts (illustrative -- tag-to-format map)
 
 /**
  * Standard JSON encodings for all built-in special types.
  *
  * In each case, the tag string (e.g. `"Link@1"`) is passed to the context's
- * `encode()` method, which prepends `/` to produce the JSON key
+ * internal `wrapTag()` method, which prepends `/` to produce the JSON key
  * (e.g. `"/Link@1"`).
  */
 
@@ -1702,8 +1668,8 @@ Deserializes to: `{ "/Link@1": { "id": "..." } }` — the inner structure is
 **Freeze guarantee.** Although `/quote` skips type-tag interpretation, the
 result is still deep-frozen (arrays and plain objects within the quoted value
 are frozen via `Object.freeze()`). The immutability guarantee (Section 2.9)
-is a property of `deserialize()` output, not of whether reconstruction
-occurred. A caller receiving a value from `deserialize()` can always assume
+is a property of deserialization output, not of whether reconstruction
+occurred. A caller receiving a value from the context's `decode()` can always assume
 it is immutable, regardless of whether it came from a `/quote` path, a
 reconstructed type, or a plain literal.
 
@@ -1722,14 +1688,21 @@ Use cases:
 
 ### 5.7 Serialization Context Responsibilities
 
-The JSON serialization context's `encode()` and `decode()` methods generate and
-parse `/<Type>@<Version>` keys. The context is also responsible for:
+The JSON encoding context's internal `wrapTag()` / `unwrapTag()` methods
+generate and parse `/<Type>@<Version>` keys. The context is also responsible
+for:
 
-- Wrapping unknown types using the `typeTag` preserved in `UnknownStorable`.
+- Re-wrapping unknown types using the `typeTag` preserved in
+  `UnknownStorable` and `ExplicitTagStorable`.
+- Managing the class registry for deserialization of known `StorableInstance`
+  types (e.g., `StorableError`, `StorableMap`, `StorableSet`, `StorableRegExp`,
+  `StorableUint8Array`).
+- Providing a narrow `TypeHandlerCodec` view to type handlers during tree
+  walking, exposing only `wrapTag()` and `getTagFor()`.
 
-Note: `/object` escaping (Section 5.6) is applied directly by `serialize()`
-in its plain-objects path, not by the context, since it is structural escaping
-rather than type encoding.
+Note: `/object` escaping (Section 5.6) is applied directly by the context's
+private `serialize()` method in its plain-objects path, since it is structural
+escaping rather than type encoding.
 
 ### 5.8 Unknown Type Handling
 
