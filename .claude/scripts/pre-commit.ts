@@ -68,16 +68,12 @@ if (files.length === 0) Deno.exit(0);
 
 // --- Run checks ---
 
-// Resolve the git repo root so all paths and commands are absolute.
-const repoRoot = (await git("rev-parse", "--show-toplevel"))[0] ?? Deno.cwd();
-
 async function run(
   label: string,
   args: string[],
 ): Promise<string | null> {
   const result = await new Deno.Command("deno", {
     args,
-    cwd: repoRoot,
     stdout: "piped",
     stderr: "piped",
   }).output();
@@ -119,7 +115,7 @@ const errors = [
   ...(await Promise.all([
     run("Lint errors", ["lint", ...files]),
     tsFiles.length > 0
-      ? run("Type check failed", ["task", "check"])
+      ? run("Type check failed", ["check", ...tsFiles])
       : null,
   ])),
 ].filter(Boolean);
