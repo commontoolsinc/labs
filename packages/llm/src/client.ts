@@ -9,12 +9,45 @@ import {
 
 type PartialCallback = (text: string) => void;
 
-let llmApiUrl = typeof globalThis.location !== "undefined"
-  ? globalThis.location.protocol + "//" + globalThis.location.host +
-    "/api/ai/llm"
-  : Deno?.env.get("API_URL")
-  ? new URL("/api/ai/llm", Deno.env.get("API_URL")).toString()
-  : "//api/ai/llm";
+/**
+ * Detect if we're running in a test environment.
+ * Checks CI runners, toolshed test config, and deno test runner.
+ */
+function isTestEnvironment(): boolean {
+  // Check if Deno.test is defined (always true inside `deno test`)
+  if (typeof (globalThis as any).Deno?.test === "function") {
+    return true;
+  }
+  // Check env vars (may throw without --allow-env)
+  try {
+    return Deno?.env?.get?.("CI") === "true" ||
+      Deno?.env?.get?.("ENV") === "test";
+  } catch {
+    return false;
+  }
+}
+
+const TEST_GUARD_MESSAGE =
+  "LLMClient: live LLM calls are blocked in test environments. " +
+  "Use enableMockMode() and addMockResponse() to set up mocks.";
+
+function getInitialLLMUrl(): string {
+  if (typeof globalThis.location !== "undefined") {
+    return globalThis.location.protocol + "//" + globalThis.location.host +
+      "/api/ai/llm";
+  }
+  try {
+    const apiUrl = Deno?.env?.get?.("API_URL");
+    if (apiUrl) {
+      return new URL("/api/ai/llm", apiUrl).toString();
+    }
+  } catch {
+    // Permission denied or Deno not available — fall through
+  }
+  return "//api/ai/llm";
+}
+
+let llmApiUrl = getInitialLLMUrl();
 
 export const setLLMUrl = (toolshedUrl: string) => {
   llmApiUrl = new URL("/api/ai/llm", toolshedUrl).toString();
@@ -231,6 +264,11 @@ export class LLMClient {
       );
     }
 
+    // Guard: block live calls in test environments
+    if (isTestEnvironment()) {
+      throw new Error(TEST_GUARD_MESSAGE);
+    }
+
     const response = await fetch(llmApiUrl + "/generateObject", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -312,6 +350,11 @@ export class LLMClient {
       throw new Error(
         "Mock mode enabled but no matching mock response found for sendRequest",
       );
+    }
+
+    // Guard: block live calls in test environments
+    if (isTestEnvironment()) {
+      throw new Error(TEST_GUARD_MESSAGE);
     }
 
     const response = await fetch(llmApiUrl, {
