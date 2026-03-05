@@ -308,7 +308,7 @@ export function createAuthManager<T, R>(
           AuthPattern({
             selectedScopes: selected,
             auth: emptyAuth,
-          } as unknown as Opaque<T>),
+          } as Opaque<T>),
         );
       });
 
