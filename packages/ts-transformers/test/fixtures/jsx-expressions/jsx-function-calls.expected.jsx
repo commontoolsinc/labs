@@ -406,7 +406,8 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
+            type: "number",
+            asOpaque: true
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 values: state.values
             } }, ({ state }) => state.values.reduce((a, b) => a + b, 0))}</p>
