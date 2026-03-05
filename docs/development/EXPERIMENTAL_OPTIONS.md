@@ -131,12 +131,23 @@ service.
 
 ## Verifying Flags Are Working
 
+### Check the logs
+
+When any experimental flags are enabled, the `Runtime` constructor logs them on
+startup. Look for a line like:
+
+```
+Experimental flags enabled: richStorableValues, unifiedJsonEncoding, canonicalHashing
+```
+
+- **Server-side (toolshed):** Check `packages/toolshed/local-dev-toolshed.log`.
+- **Client-side (shell):** Check the browser's developer console (the message
+  comes from the Web Worker that hosts the runtime).
+
 ### Check the build output
 
-After building the shell with flags enabled, the values are baked into the
-bundle. You can verify by inspecting the `EXPERIMENTAL` export from
-`src/lib/env.ts` in the browser console or by adding a temporary
-`console.log(EXPERIMENTAL)` to the shell code.
+You can also inspect the `EXPERIMENTAL` export from `src/lib/env.ts` in the
+browser console to see the flag values baked into the shell build.
 
 ### Run the experimental options tests
 
