@@ -68,8 +68,10 @@ async function getFilesToCommit(): Promise<string[]> {
   // Start with files already staged from prior `git add` calls
   const files = await git("diff", "--cached", "--name-only", "--diff-filter=d");
 
-  // Add any files from a `git add <paths>` in this command (not yet staged)
-  const addMatch = cmd.match(/\bgit\s+add\s+(.+?)(?:\s*&&|$)/);
+  // Add any files from a `git add <paths>` in this command (not yet staged).
+  // Only search before `git commit` to avoid false-matching inside commit messages.
+  const preCommit = cmd.split(/\bgit\s+commit\b/)[0] ?? "";
+  const addMatch = preCommit.match(/\bgit\s+add\s+(.+?)(?:\s*&&|$)/);
   if (addMatch) {
     for (const arg of addMatch[1].trim().split(/\s+/)) {
       if (!arg.startsWith("-")) files.push(arg);
