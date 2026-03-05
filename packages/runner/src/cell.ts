@@ -6,9 +6,12 @@ import {
 } from "@commontools/utils/types";
 import {
   isArrayIndexPropertyName,
-  toDeepStorableValue,
   toStorableValue,
 } from "@commontools/memory/storable-value";
+import {
+  fromStorable,
+  toStorable,
+} from "@commontools/memory/storable-value-dispatch";
 import type { MemorySpace, StorableValue } from "@commontools/memory/interface";
 import { getTopFrame, pattern } from "./builder/pattern.ts";
 import { createNodeFactory } from "./builder/module.ts";
@@ -1165,10 +1168,11 @@ export class CellImpl<T extends StorableValue>
 
     const tx = this.runtime.readTx(this.tx);
     // Resolve all links ON THE WAY to the target, but don't resolve the final link
-    return tx.readValueOrThrow(
+    const value = tx.readValueOrThrow(
       resolveLink(this.runtime, tx, this.link, "top"),
       options,
-    ) as
+    );
+    return fromStorable(value as StorableValue) as
       | Immutable<T>
       | undefined;
   }
@@ -1180,7 +1184,7 @@ export class CellImpl<T extends StorableValue>
     // retry on conflict.
     if (!this.synced) this.sync();
 
-    value = toDeepStorableValue(value);
+    value = toStorable(value);
     this.tx.writeValueOrThrow(this.link, findAndInlineDataURILinks(value));
   }
 
