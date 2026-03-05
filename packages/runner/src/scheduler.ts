@@ -132,6 +132,24 @@ export const markReadAsPotentialWrite: Metadata = {
 export type SpaceAndURI = `${MemorySpace}/${URI}`;
 export type SpaceURIAndType = `${MemorySpace}/${URI}/${MediaType}`;
 
+/** Per-iteration stats captured during the settle loop. */
+export interface SettleIterationStats {
+  workSetSize: number;
+  orderSize: number;
+  actionsRun: number;
+  /** Action IDs in the work set (truncated to top entries) */
+  actions: { id: string; type: "effect" | "computation" }[];
+  durationMs: number;
+}
+
+/** Stats for the entire settle loop of one execute() call. */
+export interface SettleStats {
+  iterations: SettleIterationStats[];
+  totalDurationMs: number;
+  settledEarly: boolean;
+  initialSeedCount: number;
+}
+
 const MAX_ITERATIONS_PER_RUN = 100;
 const DEFAULT_RETRIES_FOR_EVENTS = 5;
 const MAX_RETRIES_FOR_REACTIVE = 10;
@@ -252,6 +270,10 @@ export class Scheduler {
   private scheduledFirstTime = new Set<Action>();
   // Filter stats for diagnostics
   private filterStats = { filtered: 0, executed: 0 };
+
+  // Settle stats for performance analysis (opt-in via enableSettleStats())
+  private collectSettleStats = false;
+  private lastSettleStats: SettleStats | null = null;
 
   // Parent-child action tracking for proper execution ordering
   // When a child action is created during parent execution, parent must run first
@@ -2102,6 +2124,21 @@ export class Scheduler {
     this.filterStats = { filtered: 0, executed: 0 };
   }
 
+  /**
+   * Enables collection of per-iteration settle stats during execute().
+   * Call this once before running patterns to opt in to the overhead.
+   */
+  enableSettleStats(): void {
+    this.collectSettleStats = true;
+  }
+
+  /**
+   * Returns settle stats from the last execute() call, or null if not enabled/collected.
+   */
+  getSettleStats(): SettleStats | null {
+    return this.lastSettleStats;
+  }
+
   // ============================================================
   // Non-settling detection API
   // ============================================================
@@ -2744,8 +2781,14 @@ export class Scheduler {
     const earlyIterationComputations = new Set<Action>(); // Track computations in first N iterations
     let lastWorkSet: Set<Action> = new Set();
     let settledEarly = false;
+    const settleIterStats: SettleIterationStats[] | undefined =
+      this.collectSettleStats ? [] : undefined;
+    const settleStartTime = this.collectSettleStats ? performance.now() : 0;
 
     for (let settleIter = 0; settleIter < maxSettleIterations; settleIter++) {
+      const iterStart = settleIterStats ? performance.now() : 0;
+      let iterActionsRun = 0;
+
       // Process any newly subscribed actions from previous iteration.
       // This sets up their dependencies so collectDirtyDependencies can find them.
       if (this.pullMode && this.pendingDependencyCollection.size > 0) {
@@ -2812,6 +2855,10 @@ export class Scheduler {
         }
       }
       lastWorkSet = workSet;
+
+      // Snapshot workSet size before topo sort (in push mode, workSet === this.pending
+      // which gets mutated during execution)
+      const iterWorkSetSize = workSet.size;
 
       const order = topologicalSort(
         workSet,
@@ -2894,6 +2941,7 @@ export class Scheduler {
         this.unsubscribe(fn);
 
         this.filterStats.executed++;
+        iterActionsRun++;
         this.loopCounter.set(fn, (this.loopCounter.get(fn) || 0) + 1);
         // Track runs for cycle-aware debounce
         this.runsThisExecute.set(fn, (this.runsThisExecute.get(fn) ?? 0) + 1);
@@ -2910,7 +2958,39 @@ export class Scheduler {
           await this.run(fn);
         }
       }
+
+      // Capture per-iteration settle stats (only when enabled)
+      if (settleIterStats) {
+        const iterActions: { id: string; type: "effect" | "computation" }[] =
+          [];
+        // Use `order` (stable array) instead of `workSet` which may be mutated in push mode
+        for (const fn of order) {
+          iterActions.push({
+            id: this.getActionId(fn),
+            type: this.effects.has(fn) ? "effect" : "computation",
+          });
+          if (iterActions.length >= 30) break; // Cap to avoid huge arrays
+        }
+        settleIterStats.push({
+          workSetSize: iterWorkSetSize,
+          orderSize: order.length,
+          actionsRun: iterActionsRun,
+          actions: iterActions,
+          durationMs: performance.now() - iterStart,
+        });
+      }
     }
+
+    // Store settle stats for external access (only when enabled)
+    if (settleIterStats) {
+      this.lastSettleStats = {
+        iterations: settleIterStats,
+        totalDurationMs: performance.now() - settleStartTime,
+        settledEarly,
+        initialSeedCount: initialSeeds.size,
+      };
+    }
+
     logger.timeEnd("scheduler", "execute", "settle");
 
     // If we hit max iterations without settling, break the cycle:
