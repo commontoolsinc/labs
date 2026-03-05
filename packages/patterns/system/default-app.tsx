@@ -188,7 +188,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
       if (piece.isHidden) return false;
       const name = piece?.[NAME];
       return typeof name === "string" && name.length > 0;
-    }),
+    })
   );
 
   const index = BacklinksIndex({ allPieces });
@@ -342,8 +342,8 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                   {visiblePieces.map((piece) => {
                     const isNotebook = computed(() => {
                       const name = piece?.[NAME];
-                      const result =
-                        typeof name === "string" && name.startsWith("📓");
+                      const result = typeof name === "string" &&
+                        name.startsWith("📓");
                       return result;
                     });
 
