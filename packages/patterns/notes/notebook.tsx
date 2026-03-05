@@ -18,7 +18,6 @@ import {
 
 import Note from "./note.tsx";
 import {
-  generateId,
   getPieceName,
   type MentionablePiece,
   type MinimalPiece,
@@ -35,7 +34,12 @@ import {
  */
 const removeFromAllNotebooks = (
   notebooks: Writable<NotebookPiece[]>,
-  itemsToRemove: NotePiece[],
+  itemsToRemove: (
+    | NotePiece
+    | NotebookPiece
+    | Writable<NotePiece>
+    | Writable<NotebookPiece>
+  )[],
   skipIndex?: number,
 ): void => {
   const notebooksList = notebooks.get();
@@ -46,7 +50,7 @@ const removeFromAllNotebooks = (
     const nbNotes = nbNotesCell.get() ?? [];
 
     const filtered = nbNotes.filter(
-      (n: any) => !itemsToRemove.some((item) => equals(n, item as any)),
+      (n) => !itemsToRemove.some((item) => equals(n, item)),
     );
     if (filtered.length !== nbNotes.length) {
       nbNotesCell.set(filtered);
@@ -103,7 +107,7 @@ const removeFromNotebook = handler<
   { note: Writable<NotePiece>; notes: Writable<NotePiece[]> }
 >((_, { note, notes }) => {
   const notebookNotes = notes.get();
-  const index = notebookNotes.findIndex((n: any) => equals(n, note));
+  const index = notebookNotes.findIndex((n) => equals(n, note));
   if (index !== -1) {
     const copy = [...notebookNotes];
     copy.splice(index, 1);
@@ -117,7 +121,7 @@ const removeFromNotebook = handler<
 // This MOVES the dropped notebook - removes from all other notebooks, adds here
 // Supports multi-item drag: if dragged item is in selection, moves ALL selected items
 const handleDropOntoCurrentNotebook = handler<
-  { detail: { sourceCell: Writable<unknown> } },
+  { detail: { sourceCell: Writable<NotePiece | NotebookPiece> } },
   {
     notes: Writable<NotePiece[]>;
     notebooks: Writable<NotebookPiece[]>;
@@ -129,43 +133,43 @@ const handleDropOntoCurrentNotebook = handler<
   const selected = selectedNoteIndices.get();
 
   // Check if dragged item is in the selection
-  const draggedIndex = notesList.findIndex((n: any) => equals(sourceCell, n));
+  const draggedIndex = notesList.findIndex((n) => equals(sourceCell, n));
   const isDraggedInSelection = draggedIndex >= 0 &&
     selected.includes(draggedIndex);
 
   if (isDraggedInSelection && selected.length > 1) {
     // Multi-item move
-    const itemsToMove = selected.map((idx) => notesList[idx]).filter(Boolean);
+    const itemsToMove = selected.map((idx) => notes.key(idx));
 
     // Remove from all notebooks
     removeFromAllNotebooks(notebooks, itemsToMove);
 
     // Add all to this notebook (deduplicated)
     for (const item of itemsToMove) {
-      if (!notesList.some((n) => equals(item as any, n as any))) {
-        notes.push(item as any);
-        (item as any).key?.("isHidden")?.set?.(true);
+      if (!notesList.some((n) => equals(item, n))) {
+        notes.push(item);
+        item.key("isHidden").set(true);
       }
     }
     selectedNoteIndices.set([]);
   } else {
     // Single-item move
-    if (notesList.some((n) => equals(sourceCell, n as any))) return;
+    if (notesList.some((n) => equals(sourceCell, n))) return;
 
-    removeFromAllNotebooks(notebooks, [sourceCell as any]);
+    removeFromAllNotebooks(notebooks, [sourceCell]);
     sourceCell.key("isHidden").set(true);
-    notes.push(sourceCell as any);
+    notes.push(sourceCell);
   }
 });
 
 // Handler for dropping any item onto a notebook - moves from current notebook to target
 // Supports multi-item drag: if dragged item is in selection, moves ALL selected items
 const handleDropOntoNotebook = handler<
-  { detail: { sourceCell: Writable<unknown> } },
+  { detail: { sourceCell: Writable<NotePiece> } },
   {
     targetNotebook: Writable<{
       title?: string;
-      notes?: unknown[];
+      notes?: NotePiece[];
       isNotebook?: boolean;
     }>;
     currentNotes: Writable<NotePiece[]>;
@@ -179,31 +183,33 @@ const handleDropOntoNotebook = handler<
   if (!targetNotebook.key("isNotebook").get()) return;
 
   const targetNotesCell = targetNotebook.key("notes");
-  const targetNotesList = (targetNotesCell.get() as unknown[]) ?? [];
+  const targetNotesList = targetNotesCell.get() ?? [];
   const currentList = currentNotes.get();
   const selected = selectedNoteIndices.get();
 
   // Check if dragged item is in the selection
-  const draggedIndex = currentList.findIndex((n: any) => equals(sourceCell, n));
+  const draggedIndex = currentList.findIndex((n) => equals(sourceCell, n));
   const isDraggedInSelection = draggedIndex >= 0 &&
     selected.includes(draggedIndex);
 
   if (isDraggedInSelection && selected.length > 1) {
     // Multi-item move
-    const itemsToMove = selected.map((idx) => currentList[idx]).filter(Boolean);
+    const itemsToMove = selected.map((idx) => currentNotes.key(idx)).filter(
+      Boolean,
+    );
 
     // Add all to target (deduplicated)
     for (const item of itemsToMove) {
-      if (!targetNotesList.some((n) => equals(item as any, n as any))) {
+      if (!targetNotesList.some((n) => equals(item, n))) {
         targetNotesCell.push(item);
-        (item as any).key?.("isHidden")?.set?.(true);
+        item.key("isHidden").set(true);
       }
     }
 
     // Find target notebook index to skip it during removal
     const notebooksList = notebooks.get();
     const targetIndex = notebooksList.findIndex(
-      (nb: any) => equals(nb, targetNotebook),
+      (nb) => equals(nb, targetNotebook),
     );
 
     // Remove from all notebooks except target
@@ -212,18 +218,16 @@ const handleDropOntoNotebook = handler<
     // Remove from current notebook
     currentNotes.set(
       currentList.filter(
-        (n: any) => !itemsToMove.some((item) => equals(n, item as any)),
+        (n) => !itemsToMove.some((item) => equals(n, item)),
       ),
     );
     selectedNoteIndices.set([]);
   } else {
     // Single-item move
-    if (targetNotesList.some((n) => equals(sourceCell, n as any))) return;
+    if (targetNotesList.some((n) => equals(sourceCell, n))) return;
 
     // Remove from current notebook if present
-    const indexInCurrent = currentList.findIndex((n: any) =>
-      equals(sourceCell, n)
-    );
+    const indexInCurrent = currentList.findIndex((n) => equals(sourceCell, n));
     if (indexInCurrent !== -1) {
       const copy = [...currentList];
       copy.splice(indexInCurrent, 1);
@@ -247,7 +251,7 @@ const handleBacklinkClick = handler<
 // Must be module-scope handler because it's used in .map() with per-iteration child bindings
 const navigateToChild = handler<
   void,
-  { child: Writable<any>; self: any }
+  { child: Writable<NotePiece | NotebookPiece>; self: NotebookPiece }
 >(
   (_, { child, self }) => {
     child.key("parentNotebook").set(self);
@@ -275,14 +279,14 @@ const deleteSelectedNotes = handler<
   // Remove from this notebook's notes array
   notes.set(
     notesList.filter(
-      (n: any) => !itemsToDelete.some((item) => equals(n, item as any)),
+      (n) => !itemsToDelete.some((item) => equals(n, item)),
     ),
   );
 
   // Remove from allPieces (permanent delete)
   allPieces.set(
     allPieces.get().filter(
-      (piece: any) => !itemsToDelete.some((item) => equals(piece, item as any)),
+      (piece) => !itemsToDelete.some((item) => equals(piece, item)),
     ),
   );
 
@@ -387,9 +391,7 @@ const moveSelectedToNotebook = handler<
 
   // Add to target notebook
   const targetNotebookNotes = notebooks.key(nbIndex).key("notes");
-  (targetNotebookNotes as Writable<NotePiece[] | undefined>).push(
-    ...notesToMove,
-  );
+  targetNotebookNotes.push(...notesToMove);
 
   // Remove from all notebooks except target
   removeFromAllNotebooks(notebooks, notesToMove, nbIndex);
@@ -397,7 +399,7 @@ const moveSelectedToNotebook = handler<
   // Remove from this notebook
   notes.set(
     notesList.filter(
-      (n: any) => !notesToMove.some((item) => equals(n, item as any)),
+      (n) => !notesToMove.some((item) => equals(n, item)),
     ),
   );
 
@@ -450,7 +452,7 @@ const createNotebookFromPrompt = handler<
     // Remove from this notebook, then add new notebook
     notes.set([
       ...notesList.filter(
-        (n: any) => !selectedItems.some((item) => equals(n, item as any)),
+        (n) => !selectedItems.some((item) => equals(n, item)),
       ),
       newNotebook,
     ]);
@@ -503,13 +505,14 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
     const notebookWish = wish<NotebookPiece>({
       query: "#notebook",
       scope: ["."],
+      headless: true,
     });
     // Notebooks discovered via wish scope (replaces allPieces emoji filtering)
     const notebooks = notebookWish.candidates;
 
     // Still need allPieces for write operations (push new notes/notebooks)
     const { allPieces } = wish<{ allPieces: Writable<NotePiece[]> }>(
-      { query: "#default" },
+      { query: "#default", headless: true },
     ).result;
 
     // Use computed() for proper reactive tracking of notes.length
@@ -519,7 +522,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
     const summary = computed(() => {
       const notesList = notes.get() ?? [];
       return notesList
-        .map((note: any) => note?.summary ?? note?.[NAME] ?? "")
+        .map((note) => note?.summary ?? note?.[NAME] ?? "")
         .filter((s: string) => s.length > 0)
         .join(" | ");
     });
@@ -583,9 +586,10 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
       selectedMoveNotebook.set("");
     });
 
+    // TODO(seefeld,mathpirate): We need some better way to find the "All Notes" notebook.
     const goToAllNotesAction = action(() => {
       const pieces = allPieces.get();
-      const existing = pieces.find((piece: any) => {
+      const existing = pieces.find((piece) => {
         const name = piece?.[NAME];
         return typeof name === "string" && name.startsWith("All Notes");
       });
@@ -623,16 +627,24 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
 
     // LLM-callable: Create a single note in this notebook
     const createNoteStreamAction = action(
-      ({ title: noteTitle, content }: { title: string; content: string }) => {
+      (
+        { title: noteTitle, content, navigate }: {
+          title: string;
+          content: string;
+          navigate?: boolean;
+        },
+      ) => {
         const newNote = Note({
           title: noteTitle,
           content,
           isHidden: true,
-          noteId: generateId(),
           parentNotebook: self,
         });
-        allPieces.push(newNote as any);
+        allPieces.push(newNote);
         notes.push(newNote);
+        if (navigate) {
+          navigateTo(newNote);
+        }
         return newNote;
       },
     );
@@ -650,7 +662,6 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
             title: data.title,
             content: data.content,
             isHidden: true,
-            noteId: generateId(),
             parentNotebook: self,
           }));
         }
@@ -681,7 +692,6 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
               title: data.title,
               content: data.content,
               isHidden: true,
-              noteId: generateId(),
             }));
           }
         }
@@ -703,10 +713,9 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
         title: noteTitle,
         content: "",
         isHidden: true,
-        noteId: generateId(),
         parentNotebook: self,
       });
-      allPieces.push(newNote as any);
+      allPieces.push(newNote);
       notes.push(newNote);
 
       // Close modal and navigate (unless "Create Another" was previously used)
@@ -725,10 +734,9 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
         title: noteTitle,
         content: "",
         isHidden: true,
-        noteId: generateId(),
         parentNotebook: self,
       });
-      allPieces.push(newNote as any);
+      allPieces.push(newNote);
       notes.push(newNote);
 
       // Keep modal open for "Create Another"
@@ -780,13 +788,12 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
         const original = notes.key(idx);
         if (original) {
           const newNote = Note({
-            title: ((original as any).title ?? "Note") + " (Copy)",
-            content: (original as any).content ?? "",
+            title: (original.get().title ?? "Note") + " (Copy)",
+            content: (original.get().content ?? ""),
             isHidden: true,
-            noteId: generateId(),
             parentNotebook: self, // Set parent for back navigation
           });
-          allPieces.push(newNote as any);
+          allPieces.push(newNote);
           notes.push(newNote);
         }
       }
@@ -805,17 +812,17 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
 
       // Find parent notebooks (notebooks that contain this notebook in their notes)
       // For now, skip parent detection as it requires accessing notes arrays of other pieces
-      const parents: any[] = [];
+      const parents: NotebookPiece[] = [];
       // Note: Parent detection requires deeper integration with piece introspection
 
       // Find child notebooks (notebooks in our notes list)
       const notesList = notes.get() ?? [];
       const childNames = (Array.isArray(notesList) ? notesList : [])
-        .filter((n: any) => n?.isNotebook === true)
-        .map((n: any) => getPieceName(n))
-        .filter((t: any) => t.length > 0);
+        .filter((n) => n?.isNotebook === true)
+        .map((n) => getPieceName(n))
+        .filter((t) => t.length > 0);
 
-      const children: any[] = [];
+      const children: (NotePiece | NotebookPiece)[] = [];
       for (let i = 0; i < nbCount; i++) {
         const nb = notebooks[i];
         const nbName = getPieceName(nb);
@@ -870,7 +877,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
     // Computed items for ct-select dropdowns (notebooks + "New Notebook...")
     // ct-select has proper bidirectional DOM sync, unlike native <select>
     const notebookSelectItems = computed(() => [
-      ...notebooks.map((nb: any, idx: number) => ({
+      ...notebooks.map((nb, idx: number) => ({
         label: nb?.[NAME] ?? "Untitled",
         value: String(idx),
       })),
@@ -913,7 +920,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
     // All Notes button display - search allPieces by name (matches default-app approach)
     const allNotesButtonDisplay = computed(() => {
       const pieces = allPieces.get();
-      const exists = pieces.some((piece: any) => {
+      const exists = pieces.some((piece) => {
         const name = piece?.[NAME];
         return typeof name === "string" && name.startsWith("All Notes");
       });
@@ -1171,7 +1178,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                               <ct-drop-zone
                                 accept="note,notebook"
                                 onct-drop={handleDropOntoNotebook({
-                                  targetNotebook: note as any,
+                                  targetNotebook: self,
                                   currentNotes: notes,
                                   selectedNoteIndices,
                                   notebooks,
@@ -1187,7 +1194,8 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                                   >
                                     <ct-cell-context $cell={note}>
                                       <ct-chip
-                                        label={note?.[NAME] ?? note?.title ??
+                                        label={note?.[NAME] ??
+                                          note?.title ??
                                           "Untitled"}
                                         interactive
                                       />

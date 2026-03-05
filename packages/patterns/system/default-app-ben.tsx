@@ -14,10 +14,6 @@ import {
 
 import { default as Note } from "../notes/note.tsx";
 
-// Simple random ID generator (crypto.randomUUID not available in pattern env)
-const generateId = () =>
-  `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
-
 // Maximum number of recent pieces to track
 const MAX_RECENT_CHARMS = 10;
 
@@ -32,6 +28,7 @@ import QuickCapture from "./quick-capture.tsx";
 import OmniboxFAB from "./omnibox-fab.tsx";
 import DoList from "../do-list/do-list.tsx";
 import Notebook from "../notes/notebook.tsx";
+import DailyJournal from "../notes/daily-journal.tsx";
 import NotesImportExport from "../notes/notes-import-export.tsx";
 import PieceGrid from "./piece-grid.tsx";
 
@@ -127,7 +124,6 @@ const menuNewNote = handler<void, { menuOpen: Writable<boolean> }>(
       Note({
         title: "New Note",
         content: "",
-        noteId: generateId(),
       }),
     );
   },
@@ -150,6 +146,20 @@ const menuQuickCapture = handler<
   return navigateTo(quickCapture);
 });
 
+// Menu: Daily Journal (singleton)
+const menuDailyJournal = handler<
+  void,
+  { menuOpen: Writable<boolean>; allPieces: Writable<MinimalPiece[]> }
+>((_, { menuOpen, allPieces }) => {
+  menuOpen.set(false);
+  const pieces = allPieces.get();
+  const existing = pieces.find((piece: any) => piece?.isJournal === true);
+  if (existing) {
+    return navigateTo(existing as any);
+  }
+  return navigateTo(DailyJournal({ title: "Daily Journal" }));
+});
+
 // Helper to find existing All Notes piece
 const findAllNotebooksPiece = (allPieces: Writable<MinimalPiece[]>) => {
   const pieces = allPieces.get();
@@ -169,7 +179,7 @@ const menuAllNotebooks = handler<
   if (existing) {
     return navigateTo(existing);
   }
-  return navigateTo(NotesImportExport({ importMarkdown: "", allPieces }));
+  return navigateTo(NotesImportExport({ importMarkdown: "" }));
 });
 
 // Handler: Add piece to allPieces if not already present
@@ -415,6 +425,13 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                 style={{ justifyContent: "flex-start" }}
               >
                 {"\u00A0\u00A0"}⚡ Quick Capture
+              </ct-button>
+              <ct-button
+                variant="ghost"
+                onClick={menuDailyJournal({ menuOpen, allPieces })}
+                style={{ justifyContent: "flex-start" }}
+              >
+                {"\u00A0\u00A0"}📅 Daily Journal
               </ct-button>
               <div
                 style={{

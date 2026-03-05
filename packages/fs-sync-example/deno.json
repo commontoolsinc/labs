@@ -1,0 +1,12 @@
+{
+  "name": "@commontools/fs-sync-example",
+  "tasks": {
+    "test": "echo 'Pattern tests require ct test runner. Use: deno task ct test'"
+  },
+  "exports": {
+    ".": "./src/daemon.ts",
+    "./types": "./src/types.ts",
+    "./markdown": "./src/markdown.ts",
+    "./pattern": "./src/todo-list-pattern.tsx"
+  }
+}

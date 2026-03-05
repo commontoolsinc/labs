@@ -11,18 +11,13 @@ import {
   Writable,
 } from "commontools";
 
-import { default as Note } from "../notes/note.tsx";
-
-// Simple random ID generator (crypto.randomUUID not available in pattern env)
-const generateId = () =>
-  `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
+import { default as Note, type NotePiece } from "../notes/note.tsx";
 
 // Maximum number of recent pieces to track
 const MAX_RECENT_CHARMS = 10;
 
 import BacklinksIndex, { type MentionablePiece } from "./backlinks-index.tsx";
 import SummaryIndex from "./summary-index.tsx";
-import OmniboxFAB from "./omnibox-fab.tsx";
 import Notebook from "../notes/notebook.tsx";
 import NotesImportExport from "../notes/notes-import-export.tsx";
 import PieceGrid from "./piece-grid.tsx";
@@ -41,7 +36,6 @@ interface PiecesListOutput {
     mentionable: MentionablePiece[];
   };
   sidebarUI: unknown;
-  fabUI: unknown;
 }
 
 const _visit = handler<
@@ -77,15 +71,15 @@ const removePiece = handler<
 
 // Handler for dropping a note onto a notebook row
 const dropOntoNotebook = handler<
-  { detail: { sourceCell: Writable<unknown> } },
-  { notebook: Writable<{ notes?: unknown[] }> }
+  { detail: { sourceCell: Writable<NotePiece> } },
+  { notebook: Writable<{ notes?: NotePiece[] }> }
 >((event, { notebook }) => {
   const sourceCell = event.detail.sourceCell;
   const notesCell = notebook.key("notes");
   const notesList = notesCell.get() ?? [];
 
   // Prevent duplicates using Writable.equals
-  const alreadyExists = notesList.some((n) => equals(sourceCell, n as any));
+  const alreadyExists = notesList.some((n) => equals(sourceCell, n));
   if (alreadyExists) return;
 
   // Hide from Patterns list
@@ -94,12 +88,6 @@ const dropOntoNotebook = handler<
   // Add to notebook - push cell reference, not value, to maintain piece identity
   notesCell.push(sourceCell);
 });
-
-const toggleFab = handler<any, { fabExpanded: Writable<boolean> }>(
-  (_, { fabExpanded }) => {
-    fabExpanded.set(!fabExpanded.get());
-  },
-);
 
 // Toggle dropdown menu
 const toggleMenu = handler<void, { menuOpen: Writable<boolean> }>(
@@ -119,7 +107,6 @@ const menuNewNote = handler<void, { menuOpen: Writable<boolean> }>(
       Note({
         title: "New Note",
         content: "",
-        noteId: generateId(),
       }),
     );
   },
@@ -152,7 +139,7 @@ const menuAllNotebooks = handler<
   if (existing) {
     return navigateTo(existing);
   }
-  return navigateTo(NotesImportExport({ importMarkdown: "", allPieces }));
+  return navigateTo(NotesImportExport({ importMarkdown: "" }));
 });
 
 // Handler: Add piece to allPieces if not already present
@@ -202,12 +189,6 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
   const index = BacklinksIndex({ allPieces });
   const summaryIdx = SummaryIndex({});
 
-  const fab = OmniboxFAB({
-    mentionable: index.mentionable,
-    extraTools: {},
-    extraSystemPrompt: "",
-  });
-
   const gridView = PieceGrid({ pieces: visiblePieces });
   const recentGridView = PieceGrid({ pieces: recentPieces });
 
@@ -218,19 +199,6 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
     [NAME]: computed(() => `Space Home (${visiblePieces.length})`),
     [UI]: (
       <ct-screen>
-        <ct-keybind
-          code="KeyO"
-          meta
-          preventDefault
-          onct-keybind={toggleFab({ fabExpanded: fab.fabExpanded })}
-        />
-        <ct-keybind
-          code="KeyO"
-          ctrl
-          preventDefault
-          onct-keybind={toggleFab({ fabExpanded: fab.fabExpanded })}
-        />
-
         <ct-toolbar slot="header" sticky>
           <div slot="start">
             <h2 style={{ margin: 0, fontSize: "20px" }}>Patterns</h2>
@@ -418,8 +386,6 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
       </ct-screen>
     ),
     sidebarUI: undefined,
-    fabUI: fab[UI],
-
     // Exported data
     allPieces,
     recentPieces,
@@ -427,6 +393,5 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
     // Exported handlers (bound to state cells for external callers)
     addPiece: addPiece({ allPieces }),
     trackRecent: trackRecent({ recentPieces }),
-    pinToChat: fab.pinToChat,
   };
 });

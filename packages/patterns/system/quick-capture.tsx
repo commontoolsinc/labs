@@ -16,7 +16,6 @@ import {
 } from "commontools";
 import Note from "../notes/note.tsx";
 import Notebook from "../notes/notebook.tsx";
-import { generateId } from "../notes/schemas.tsx";
 import { listMentionable, listRecent } from "./common-tools.tsx";
 import {
   searchPattern as summarySearchPattern,
@@ -98,7 +97,6 @@ const createNoteHandler = handler<
   const note = Note({
     title,
     content,
-    noteId: generateId(),
   });
   allPieces.push(note as any);
   return note;
@@ -112,7 +110,6 @@ const createNotebookHandler = handler<
     Note({
       title: data.title,
       content: data.content,
-      noteId: generateId(),
     })
   );
   const notebook = Notebook({ title, notes });
