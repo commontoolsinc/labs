@@ -225,7 +225,10 @@ async function main() {
 
   console.log(`→ Calling Claude API (claude-sonnet-4-20250514)...`);
 
-  // Call Anthropic Messages API directly via fetch (no SDK dependency)
+  // We call the Anthropic Messages API via raw fetch instead of the SDK to
+  // avoid adding @anthropic-ai/sdk as a dependency to the root workspace.
+  // This tool only makes a single non-streaming messages.create call, so
+  // the SDK's retries/streaming/typing aren't needed.
   let message: {
     content: { type: string; text?: string }[];
     stop_reason: string;
