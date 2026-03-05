@@ -5,13 +5,17 @@
  * - Legacy: merkle-reference tree builder with primitive LRU + WeakMap caching
  * - Canonical: `canonicalHash()` single-pass incremental SHA-256
  *
- * Uses `setCanonicalHashConfig()` with `BenchContext.start()` to exclude
- * config setup from timing.
+ * Uses `setCanonicalHashConfig()` with `BenchContext.start()`/`b.end()` to
+ * exclude config setup and teardown from timing.
  *
  * Run with: deno bench --allow-read --allow-write --allow-net --allow-ffi --allow-env --no-check test/hashing-bench.ts
  */
 
-import { refer, setCanonicalHashConfig } from "../reference.ts";
+import {
+  refer,
+  resetCanonicalHashConfig,
+  setCanonicalHashConfig,
+} from "../reference.ts";
 import { canonicalHash } from "../canonical-hash.ts";
 
 // ---------------------------------------------------------------------------
@@ -94,6 +98,7 @@ for (let i = 0; i < 20; i++) {
   setCanonicalHashConfig(true);
   refer(smallObject);
 }
+resetCanonicalHashConfig();
 
 // ==========================================================================
 // Same-object benchmarks (measures cache effectiveness)
@@ -108,6 +113,7 @@ Deno.bench({
     b.start();
     refer(smallObject);
     b.end();
+    resetCanonicalHashConfig();
   },
 });
 
@@ -119,6 +125,7 @@ Deno.bench({
     b.start();
     refer(smallObject);
     b.end();
+    resetCanonicalHashConfig();
   },
 });
 
@@ -131,6 +138,7 @@ Deno.bench({
     b.start();
     refer(mediumObject);
     b.end();
+    resetCanonicalHashConfig();
   },
 });
 
@@ -142,6 +150,7 @@ Deno.bench({
     b.start();
     refer(mediumObject);
     b.end();
+    resetCanonicalHashConfig();
   },
 });
 
@@ -154,6 +163,7 @@ Deno.bench({
     b.start();
     refer(largeNestedTree);
     b.end();
+    resetCanonicalHashConfig();
   },
 });
 
@@ -165,6 +175,7 @@ Deno.bench({
     b.start();
     refer(largeNestedTree);
     b.end();
+    resetCanonicalHashConfig();
   },
 });
 
@@ -177,6 +188,7 @@ Deno.bench({
     b.start();
     refer(smallArray);
     b.end();
+    resetCanonicalHashConfig();
   },
 });
 
@@ -188,6 +200,7 @@ Deno.bench({
     b.start();
     refer(smallArray);
     b.end();
+    resetCanonicalHashConfig();
   },
 });
 
@@ -200,6 +213,7 @@ Deno.bench({
     b.start();
     refer(largeArray);
     b.end();
+    resetCanonicalHashConfig();
   },
 });
 
@@ -211,6 +225,7 @@ Deno.bench({
     b.start();
     refer(largeArray);
     b.end();
+    resetCanonicalHashConfig();
   },
 });
 
@@ -223,6 +238,7 @@ Deno.bench({
     b.start();
     refer(repeatedSubtrees);
     b.end();
+    resetCanonicalHashConfig();
   },
 });
 
@@ -234,6 +250,7 @@ Deno.bench({
     b.start();
     refer(repeatedSubtrees);
     b.end();
+    resetCanonicalHashConfig();
   },
 });
 
@@ -246,6 +263,7 @@ Deno.bench({
     b.start();
     refer(unclaimedFact);
     b.end();
+    resetCanonicalHashConfig();
   },
 });
 
@@ -257,6 +275,7 @@ Deno.bench({
     b.start();
     refer(unclaimedFact);
     b.end();
+    resetCanonicalHashConfig();
   },
 });
 
@@ -269,6 +288,7 @@ Deno.bench({
     b.start();
     refer(assertion16KB);
     b.end();
+    resetCanonicalHashConfig();
   },
 });
 
@@ -280,6 +300,7 @@ Deno.bench({
     b.start();
     refer(assertion16KB);
     b.end();
+    resetCanonicalHashConfig();
   },
 });
 
@@ -326,6 +347,7 @@ Deno.bench({
     b.start();
     refer(data);
     b.end();
+    resetCanonicalHashConfig();
   },
 });
 
@@ -338,6 +360,7 @@ Deno.bench({
     b.start();
     refer(data);
     b.end();
+    resetCanonicalHashConfig();
   },
 });
 
@@ -351,6 +374,7 @@ Deno.bench({
     b.start();
     refer(data);
     b.end();
+    resetCanonicalHashConfig();
   },
 });
 
@@ -363,6 +387,7 @@ Deno.bench({
     b.start();
     refer(data);
     b.end();
+    resetCanonicalHashConfig();
   },
 });
 
@@ -376,6 +401,7 @@ Deno.bench({
     b.start();
     refer(data);
     b.end();
+    resetCanonicalHashConfig();
   },
 });
 
@@ -388,6 +414,7 @@ Deno.bench({
     b.start();
     refer(data);
     b.end();
+    resetCanonicalHashConfig();
   },
 });
 
@@ -401,6 +428,7 @@ Deno.bench({
     b.start();
     refer(data);
     b.end();
+    resetCanonicalHashConfig();
   },
 });
 
@@ -413,6 +441,7 @@ Deno.bench({
     b.start();
     refer(data);
     b.end();
+    resetCanonicalHashConfig();
   },
 });
 
