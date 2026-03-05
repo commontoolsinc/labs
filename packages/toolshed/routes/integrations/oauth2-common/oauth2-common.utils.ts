@@ -112,9 +112,13 @@ export async function fetchUserInfo(
   mapper?: (raw: Record<string, unknown>) => UserInfo,
 ): Promise<UserInfo> {
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10_000);
     const response = await fetch(endpoint, {
       headers: { Authorization: `Bearer ${accessToken}` },
+      signal: controller.signal,
     });
+    clearTimeout(timeoutId);
     if (!response.ok) {
       throw new Error(`Failed to fetch user info: ${response.status}`);
     }
@@ -211,7 +215,12 @@ export function createCallbackResponse(
   result: Record<string, unknown>,
 ): Response {
   return new Response(generateCallbackHtml(result), {
-    headers: { "Content-Type": "text/html" },
+    headers: {
+      "Content-Type": "text/html",
+      "Content-Security-Policy":
+        "default-src 'none'; script-src 'unsafe-inline'",
+      "X-Content-Type-Options": "nosniff",
+    },
   });
 }
 

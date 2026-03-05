@@ -54,7 +54,6 @@ export async function generateObject(
     const { object } = await generateObjectCore({
       model: modelConfig.model,
       messages,
-      mode: "json",
       schema: jsonSchema(params.schema, {
         validate: (value: unknown) => {
           if (!validator(value)) {

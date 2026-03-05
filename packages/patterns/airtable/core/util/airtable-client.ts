@@ -139,8 +139,9 @@ export class AirtableClient {
 
         if (response.status === 429) {
           const retryAfter = response.headers.get("Retry-After");
-          const waitMs = retryAfter
-            ? parseInt(retryAfter) * 1000
+          const parsed = retryAfter ? parseInt(retryAfter, 10) : NaN;
+          const waitMs = !isNaN(parsed)
+            ? parsed * 1000
             : this.delay * (attempt + 1);
           debugLog(
             this.debugMode,
