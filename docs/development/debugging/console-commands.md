@@ -252,14 +252,14 @@ const cancel = commontools.subscribeToCell()
 // Console: [debug] cell update [2025-08-10T...]: { $NAME: "My Piece", ... }
 
 // Subscribe to a specific path (e.g. a variant prop deep in the vdom)
-const cancel = commontools.subscribeToCell({
+const cancelVariant = commontools.subscribeToCell({
   path: ["children", "1", "children", "0", "props", "variant"]
 })
 
 // Click buttons, observe updates...
 
 // Clean up
-cancel()
+cancelVariant()
 ```
 
 ### Agent-Browser Usage
