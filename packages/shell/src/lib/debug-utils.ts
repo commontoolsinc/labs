@@ -8,7 +8,7 @@
  */
 
 import { CellHandle } from "@commontools/runtime-client";
-import type { RuntimeClient, CellRef } from "@commontools/runtime-client";
+import type { CellRef, RuntimeClient } from "@commontools/runtime-client";
 import type { DID } from "@commontools/identity";
 
 interface DebugCellOptions {
@@ -21,7 +21,7 @@ interface DebugCellOptions {
 }
 
 function getDefaultDid(): string {
-  const segments = window.location.pathname.split("/");
+  const segments = globalThis.location.pathname.split("/");
   // URL format: /<spaceName>/<pieceId>
   return segments[2] ?? "";
 }
@@ -58,7 +58,9 @@ export function createDebugUtils(
 
     const did = options?.did ?? getDefaultDid();
     if (!did) {
-      console.error("[debug] No piece DID — navigate to a piece first or pass { did }");
+      console.error(
+        "[debug] No piece DID — navigate to a piece first or pass { did }",
+      );
       return undefined;
     }
 
@@ -72,12 +74,16 @@ export function createDebugUtils(
     return value;
   }
 
-  async function readArgumentCell(options?: DebugCellOptions): Promise<unknown> {
+  function readArgumentCell(
+    options?: DebugCellOptions,
+  ): Promise<unknown> {
     const path = ["argument", ...(options?.path ?? [])];
     return readCell({ ...options, path });
   }
 
-  function subscribeToCell(options?: DebugCellOptions): (() => void) | undefined {
+  function subscribeToCell(
+    options?: DebugCellOptions,
+  ): (() => void) | undefined {
     const rt = getRt();
     if (!rt) {
       console.error("[debug] No runtime available");
@@ -92,7 +98,9 @@ export function createDebugUtils(
 
     const did = options?.did ?? getDefaultDid();
     if (!did) {
-      console.error("[debug] No piece DID — navigate to a piece first or pass { did }");
+      console.error(
+        "[debug] No piece DID — navigate to a piece first or pass { did }",
+      );
       return undefined;
     }
 
