@@ -24,6 +24,21 @@ try {
   Deno.exit(0);
 }
 
+// Resolve the repo root so all paths are consistent, even when CWD is a
+// subdirectory (e.g. packages/runner/).  Without this, git returns paths
+// relative to the repo root while deno resolves them relative to CWD,
+// doubling the prefix (packages/runner/packages/runner/...).
+const repoRoot = new TextDecoder()
+  .decode(
+    (await new Deno.Command("git", {
+      args: ["rev-parse", "--show-toplevel"],
+      stdout: "piped",
+      stderr: "piped",
+    }).output()).stdout,
+  )
+  .trim();
+if (!repoRoot) Deno.exit(0);
+
 if (!/\bgit\s+commit\b/.test(cmd) || /--no-verify/.test(cmd)) {
   Deno.exit(0);
 }
@@ -33,6 +48,7 @@ if (!/\bgit\s+commit\b/.test(cmd) || /--no-verify/.test(cmd)) {
 async function git(...args: string[]): Promise<string[]> {
   const { stdout } = await new Deno.Command("git", {
     args,
+    cwd: repoRoot,
     stdout: "piped",
     stderr: "piped",
   }).output();
@@ -52,11 +68,34 @@ async function getFilesToCommit(): Promise<string[]> {
   // Start with files already staged from prior `git add` calls
   const files = await git("diff", "--cached", "--name-only", "--diff-filter=d");
 
-  // Add any files from a `git add <paths>` in this command (not yet staged)
+  // Add any files from a `git add <paths>` in this command (not yet staged).
+  // Paths are relative to the effective CWD — which may differ from the hook's
+  // CWD if the command contains a `cd`.  Resolve them to repo-root-relative.
   const addMatch = cmd.match(/\bgit\s+add\s+(.+?)(?:\s*&&|$)/);
   if (addMatch) {
+    // Only look for `cd` before the git commit portion — not inside the
+    // commit message where words like "cd in" could false-match.
+    const preCommit = cmd.split(/\bgit\s+commit\b/)[0] ?? "";
+    const cdMatch = preCommit.match(/\bcd\s+(\S+)/);
+    let effectiveCwd = Deno.cwd();
+    if (cdMatch) {
+      const target = cdMatch[1];
+      effectiveCwd = target.startsWith("/")
+        ? target
+        : `${effectiveCwd}/${target}`;
+    }
     for (const arg of addMatch[1].trim().split(/\s+/)) {
-      if (!arg.startsWith("-")) files.push(arg);
+      if (!arg.startsWith("-")) {
+        // Resolve arg relative to effectiveCwd, then make repo-root-relative
+        const abs = arg.startsWith("/") ? arg : `${effectiveCwd}/${arg}`;
+        // Normalize (remove . and ..) via URL resolution trick
+        const normalized = new URL(abs, "file:///").pathname;
+        if (normalized.startsWith(repoRoot + "/")) {
+          files.push(normalized.slice(repoRoot.length + 1));
+        } else {
+          files.push(arg); // fallback: use as-is
+        }
+      }
     }
   }
 
@@ -74,6 +113,7 @@ async function run(
 ): Promise<string | null> {
   const result = await new Deno.Command("deno", {
     args,
+    cwd: repoRoot,
     stdout: "piped",
     stderr: "piped",
   }).output();
@@ -102,6 +142,7 @@ const fmtErr = await run("Formatting failed", ["fmt", ...files]);
 if (safeToRestage.length > 0) {
   await new Deno.Command("git", {
     args: ["add", ...safeToRestage],
+    cwd: repoRoot,
     stdout: "piped",
     stderr: "piped",
   }).output();
