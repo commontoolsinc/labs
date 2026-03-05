@@ -74,7 +74,7 @@ const handleCalendarChange = handler<
   // Check if a note already exists for this date
   const all = entries.get();
   for (const entry of all) {
-    if (entry?.noteId === `journal-${dateStr}`) {
+    if (entry?.title?.startsWith(dateStr)) {
       return navigateTo(entry as any);
     }
   }
@@ -88,7 +88,6 @@ const handleCalendarChange = handler<
   const note = Note({
     title: noteTitle,
     content,
-    noteId: `journal-${dateStr}`,
   });
   entries.push(note as any);
   addPiece.send({ piece: note as any });
@@ -112,7 +111,7 @@ const handleGoToToday = handler<
 
   const all = entries.get();
   for (const entry of all) {
-    if (entry?.noteId === `journal-${dateStr}`) {
+    if (entry?.title?.startsWith(dateStr)) {
       return navigateTo(entry as any);
     }
   }
@@ -125,7 +124,6 @@ const handleGoToToday = handler<
   const note = Note({
     title: noteTitle,
     content,
-    noteId: `journal-${dateStr}`,
   });
   entries.push(note as any);
   addPiece.send({ piece: note as any });
@@ -194,9 +192,9 @@ export default pattern<DailyJournalInput, DailyJournalOutput>(
     const datesWithNotes = computed(() => {
       const dates: string[] = [];
       for (const entry of entries.get()) {
-        if (entry?.noteId) {
-          const dateStr = (entry.noteId as string).replace("journal-", "");
-          if (dateStr) dates.push(dateStr);
+        const t = entry?.title;
+        if (t && /^\d{4}-\d{2}-\d{2}/.test(t)) {
+          dates.push(t.slice(0, 10));
         }
       }
       return dates;
@@ -208,7 +206,7 @@ export default pattern<DailyJournalInput, DailyJournalOutput>(
       for (const entry of entries.get()) {
         if (entry) arr.push(entry);
       }
-      return arr.sort((a, b) => (b.noteId ?? "").localeCompare(a.noteId ?? ""));
+      return arr.sort((a, b) => (b.title ?? "").localeCompare(a.title ?? ""));
     });
 
     // Short summary for search/LLM
@@ -216,7 +214,7 @@ export default pattern<DailyJournalInput, DailyJournalOutput>(
       const count = entries.get().length;
       const sorted = sortedEntries;
       const latest = sorted.length > 0
-        ? (sorted[0].noteId ?? "").replace("journal-", "")
+        ? (sorted[0].title ?? "").slice(0, 10) || "none"
         : "none";
       return `Daily Journal — ${count} entries, last: ${latest}`;
     });
@@ -249,8 +247,9 @@ export default pattern<DailyJournalInput, DailyJournalOutput>(
 
       const recent: string[] = [];
       for (const entry of entries.get()) {
-        if (!entry?.noteId) continue;
-        const dateStr = (entry.noteId as string).replace("journal-", "");
+        const t = entry?.title;
+        if (!t || !/^\d{4}-\d{2}-\d{2}/.test(t)) continue;
+        const dateStr = t.slice(0, 10);
         if (dateStr >= cutoff) {
           const noteTitle = entry.title ?? dateStr;
           const noteContent = entry.content ?? "";
