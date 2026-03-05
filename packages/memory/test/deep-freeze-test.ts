@@ -29,6 +29,10 @@ Deno.test("isDeepFrozen: bigint returns true", () => {
   assertEquals(isDeepFrozen(42n), true);
 });
 
+Deno.test("isDeepFrozen: symbol returns true", () => {
+  assertEquals(isDeepFrozen(Symbol("test")), true);
+});
+
 // ---------------------------------------------------------------------------
 // isDeepFrozen -- objects
 // ---------------------------------------------------------------------------
@@ -54,6 +58,16 @@ Deno.test("isDeepFrozen: frozen object with unfrozen child returns false", () =>
 Deno.test("isDeepFrozen: deep-frozen nested object returns true", () => {
   const obj = deepFreeze({ a: 1, child: { b: 2, inner: { c: 3 } } });
   assertEquals(isDeepFrozen(obj), true);
+});
+
+Deno.test("isDeepFrozen: frozen object with frozen array child returns true", () => {
+  const obj = Object.freeze({ a: 1, items: Object.freeze([1, 2, 3]) });
+  assertEquals(isDeepFrozen(obj), true);
+});
+
+Deno.test("isDeepFrozen: frozen object with unfrozen array child returns false", () => {
+  const obj = Object.freeze({ a: 1, items: [1, 2, 3] });
+  assertEquals(isDeepFrozen(obj), false);
 });
 
 // ---------------------------------------------------------------------------
@@ -139,4 +153,52 @@ Deno.test("isDeepFrozen: returns true after object is frozen (no stale negative 
   assertEquals(isDeepFrozen(obj), false); // unfrozen
   deepFreeze(obj);
   assertEquals(isDeepFrozen(obj), true); // now frozen -- must not return stale false
+});
+
+Deno.test("isDeepFrozen: cached object skips property traversal", () => {
+  // Verify caching actually works by wrapping a frozen object in a Proxy
+  // that counts property accesses. First call should access properties;
+  // second call should hit the cache and skip traversal.
+  const inner = Object.freeze({ x: 1, y: 2 });
+  let accessCount = 0;
+  const proxy = new Proxy(inner, {
+    get(target, prop, receiver) {
+      accessCount++;
+      return Reflect.get(target, prop, receiver);
+    },
+  });
+  // Freeze the proxy itself (Proxy forwards Object.freeze to target).
+  Object.freeze(proxy);
+
+  // First call: traverses properties.
+  assertEquals(isDeepFrozen(proxy), true);
+  const firstCallAccesses = accessCount;
+
+  // Second call: should hit cache -- no additional property accesses.
+  accessCount = 0;
+  assertEquals(isDeepFrozen(proxy), true);
+  assertEquals(accessCount, 0, "cached check should not access any properties");
+
+  // Sanity: first call did access properties.
+  assertEquals(firstCallAccesses > 0, true, "first call should traverse");
+});
+
+Deno.test("isDeepFrozen: cached array skips element traversal", () => {
+  const inner = Object.freeze([1, 2, 3]);
+  let accessCount = 0;
+  const proxy = new Proxy(inner, {
+    get(target, prop, receiver) {
+      accessCount++;
+      return Reflect.get(target, prop, receiver);
+    },
+  });
+  Object.freeze(proxy);
+
+  assertEquals(isDeepFrozen(proxy), true);
+  const firstCallAccesses = accessCount;
+
+  accessCount = 0;
+  assertEquals(isDeepFrozen(proxy), true);
+  assertEquals(accessCount, 0, "cached check should not access any properties");
+  assertEquals(firstCallAccesses > 0, true, "first call should traverse");
 });

@@ -1,4 +1,9 @@
-import { assertEquals, assertNotEquals, assertThrows } from "@std/assert";
+import {
+  assertEquals,
+  assertNotEquals,
+  assertStrictEquals,
+  assertThrows,
+} from "@std/assert";
 import { canonicalHash as canonicalHashRaw } from "../canonical-hash.ts";
 import { StorableContentId } from "../storable-content-id.ts";
 import {
@@ -984,47 +989,53 @@ Deno.test("canonicalHash", async (t) => {
 // ---------------------------------------------------------------------------
 
 Deno.test("canonicalHash caching", async (t) => {
-  await t.step("null returns consistent result", () => {
+  await t.step("null returns same object (precomputed constant)", () => {
     const a = canonicalHashRaw(null);
     const b = canonicalHashRaw(null);
-    assertEquals(a, b);
+    assertStrictEquals(a, b);
   });
 
-  await t.step("undefined returns consistent result", () => {
+  await t.step("undefined returns same object (precomputed constant)", () => {
     const a = canonicalHashRaw(undefined);
     const b = canonicalHashRaw(undefined);
-    assertEquals(a, b);
+    assertStrictEquals(a, b);
   });
 
-  await t.step("primitive string cache returns same hash", () => {
-    const a = canonicalHashRaw("hello");
-    const b = canonicalHashRaw("hello");
-    assertEquals(a.hash, b.hash);
-  });
-
-  await t.step("primitive number cache returns same hash", () => {
-    const a = canonicalHashRaw(42);
-    const b = canonicalHashRaw(42);
-    assertEquals(a.hash, b.hash);
-  });
-
-  await t.step("primitive boolean cache returns same hash", () => {
+  await t.step("true returns same object (precomputed constant)", () => {
     const a = canonicalHashRaw(true);
     const b = canonicalHashRaw(true);
-    assertEquals(a.hash, b.hash);
+    assertStrictEquals(a, b);
   });
 
-  await t.step("primitive bigint cache returns same hash", () => {
-    const a = canonicalHashRaw(123n);
-    const b = canonicalHashRaw(123n);
-    assertEquals(a.hash, b.hash);
+  await t.step("false returns same object (precomputed constant)", () => {
+    const a = canonicalHashRaw(false);
+    const b = canonicalHashRaw(false);
+    assertStrictEquals(a, b);
   });
 
-  await t.step("deep-frozen object cache returns same hash", () => {
+  await t.step("primitive string cache returns same object", () => {
+    const a = canonicalHashRaw("cache-test-string");
+    const b = canonicalHashRaw("cache-test-string");
+    assertStrictEquals(a, b);
+  });
+
+  await t.step("primitive number cache returns same object", () => {
+    const a = canonicalHashRaw(98765);
+    const b = canonicalHashRaw(98765);
+    assertStrictEquals(a, b);
+  });
+
+  await t.step("primitive bigint cache returns same object", () => {
+    const a = canonicalHashRaw(99887766n);
+    const b = canonicalHashRaw(99887766n);
+    assertStrictEquals(a, b);
+  });
+
+  await t.step("deep-frozen object cache returns same object", () => {
     const obj = Object.freeze({ a: 1, b: Object.freeze({ c: 2 }) });
     const a = canonicalHashRaw(obj);
     const b = canonicalHashRaw(obj);
-    assertEquals(a.hash, b.hash);
+    assertStrictEquals(a, b);
   });
 
   await t.step("mutable object is not cached (recomputed each time)", () => {

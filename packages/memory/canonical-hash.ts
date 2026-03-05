@@ -297,30 +297,34 @@ function feedPlainObject(
 }
 
 // ---------------------------------------------------------------------------
+// Uncached hash computation
+// ---------------------------------------------------------------------------
+
+/** Compute the hash of a value without consulting or populating any cache. */
+function computeHash(value: unknown): StorableContentId {
+  const hasher = createHasher();
+  feedValue(hasher, value);
+  return new StorableContentId(hasher.digest(), "fid1");
+}
+
+// ---------------------------------------------------------------------------
 // Caches
 // ---------------------------------------------------------------------------
 
-/** Pre-computed hashes for null and undefined (their hashes never change). */
-const NULL_HASH = (() => {
-  const h = createHasher();
-  h.update(TAG_NULL_BYTES);
-  return new StorableContentId(h.digest(), "fid1");
-})();
-
-const UNDEFINED_HASH = (() => {
-  const h = createHasher();
-  h.update(TAG_UNDEFINED_BYTES);
-  return new StorableContentId(h.digest(), "fid1");
-})();
+/** Pre-computed constant hashes (these values never change). */
+const NULL_HASH = computeHash(null);
+const UNDEFINED_HASH = computeHash(undefined);
+const TRUE_HASH = computeHash(true);
+const FALSE_HASH = computeHash(false);
 
 /**
  * LRU cache for primitive value hashes. Primitives (strings, numbers,
- * booleans, bigints) can't be WeakMap keys, so they use a bounded cache.
+ * bigints) can't be WeakMap keys, so they use a bounded cache.
  * The legacy `merkle-reference` uses a 50K-entry LRU with a reported 97%+
  * hit rate -- we match that sizing.
  */
 const primitiveHashCache = new LRUCache<
-  string | number | boolean | bigint,
+  string | number | bigint,
   StorableContentId
 >({
   capacity: 50_000,
@@ -346,44 +350,39 @@ const frozenObjectHashCache = new WeakMap<object, StorableContentId>();
  * Caches results for primitives (LRU) and deep-frozen objects (WeakMap).
  */
 export function canonicalHash(value: unknown): StorableContentId {
-  // Fast paths for null/undefined constants.
-  if (value === null) return NULL_HASH;
-  if (value === undefined) return UNDEFINED_HASH;
+  switch (typeof value) {
+    case "boolean":
+      return value ? TRUE_HASH : FALSE_HASH;
 
-  const t = typeof value;
-
-  // Primitive LRU cache (strings, numbers, booleans, bigints).
-  if (t === "string" || t === "number" || t === "boolean" || t === "bigint") {
-    const cached = primitiveHashCache.get(
-      value as string | number | boolean | bigint,
-    );
-    if (cached !== undefined) return cached;
-    const hasher = createHasher();
-    feedValue(hasher, value);
-    const result = new StorableContentId(hasher.digest(), "fid1");
-    primitiveHashCache.put(
-      value as string | number | boolean | bigint,
-      result,
-    );
-    return result;
-  }
-
-  // Object path: check WeakMap cache for deep-frozen objects.
-  if (t === "object" && value !== null) {
-    const obj = value as object;
-    if (isDeepFrozen(value)) {
-      const cached = frozenObjectHashCache.get(obj);
+    case "string":
+    case "number":
+    case "bigint": {
+      const cached = primitiveHashCache.get(
+        value as string | number | bigint,
+      );
       if (cached !== undefined) return cached;
-      const hasher = createHasher();
-      feedValue(hasher, value);
-      const result = new StorableContentId(hasher.digest(), "fid1");
-      frozenObjectHashCache.set(obj, result);
+      const result = computeHash(value);
+      primitiveHashCache.put(value as string | number | bigint, result);
       return result;
     }
-  }
 
-  // Fallback: compute without caching.
-  const hasher = createHasher();
-  feedValue(hasher, value);
-  return new StorableContentId(hasher.digest(), "fid1");
+    case "undefined":
+      return UNDEFINED_HASH;
+
+    case "object": {
+      if (value === null) return NULL_HASH;
+      if (isDeepFrozen(value)) {
+        const obj = value as object;
+        const cached = frozenObjectHashCache.get(obj);
+        if (cached !== undefined) return cached;
+        const result = computeHash(value);
+        frozenObjectHashCache.set(obj, result);
+        return result;
+      }
+      return computeHash(value);
+    }
+
+    default:
+      return computeHash(value);
+  }
 }

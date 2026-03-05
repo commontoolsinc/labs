@@ -24,8 +24,7 @@ const deepFrozenCache = new WeakMap<object, true>();
  * Handles circular references and sparse arrays.
  */
 export function isDeepFrozen(value: unknown): boolean {
-  if (value === null || value === undefined) return true;
-  if (typeof value !== "object") return true; // primitives
+  if (value === null || typeof value !== "object") return true;
 
   return isDeepFrozenObject(value as object, new Set<object>());
 }
@@ -51,7 +50,7 @@ function isDeepFrozenObject(obj: object, inProgress: Set<object>): boolean {
     for (let i = 0; i < obj.length; i++) {
       if (!(i in obj)) continue; // sparse hole
       const el = obj[i];
-      if (el !== null && el !== undefined && typeof el === "object") {
+      if (el !== null && typeof el === "object") {
         if (!isDeepFrozenObject(el as object, inProgress)) {
           result = false;
           break;
@@ -61,7 +60,7 @@ function isDeepFrozenObject(obj: object, inProgress: Set<object>): boolean {
     }
   } else {
     for (const v of Object.values(obj)) {
-      if (v !== null && v !== undefined && typeof v === "object") {
+      if (v !== null && typeof v === "object") {
         if (!isDeepFrozenObject(v as object, inProgress)) {
           result = false;
           break;

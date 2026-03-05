@@ -5,48 +5,40 @@
  * - Legacy: merkle-reference tree builder with primitive LRU + WeakMap caching
  * - Canonical: `canonicalHash()` single-pass incremental SHA-256
  *
+ * Uses `setCanonicalHashConfig()` / `resetCanonicalHashConfig()` to switch
+ * between paths, same pattern as the unit tests.
+ *
  * Run with: deno bench --allow-read --allow-write --allow-net --allow-ffi --allow-env --no-check test/hashing-bench.ts
  */
 
-import * as Reference from "merkle-reference";
+import {
+  type DefinedReferent,
+  refer,
+  resetCanonicalHashConfig,
+  setCanonicalHashConfig,
+} from "../reference.ts";
 import { canonicalHash } from "../canonical-hash.ts";
-import { sha256 } from "../hash-impl.ts";
-import { LRUCache } from "@commontools/utils/cache";
 
 // ---------------------------------------------------------------------------
-// Re-create the legacy refer() path exactly as in reference.ts
-// (We can't use the module-level `refer` directly because it's flag-gated
-// and we want to benchmark both paths side by side.)
+// Helpers: configure refer() for legacy vs. canonical
 // ---------------------------------------------------------------------------
 
-const defaultNodeBuilder = Reference.Tree.createBuilder(Reference.sha256)
-  .nodeBuilder;
+function legacyRefer<T extends DefinedReferent>(source: T): unknown {
+  setCanonicalHashConfig(false);
+  try {
+    return refer(source);
+  } finally {
+    resetCanonicalHashConfig();
+  }
+}
 
-type TreeBuilder = ReturnType<typeof Reference.Tree.createBuilder>;
-type Node = ReturnType<typeof defaultNodeBuilder.toTree>;
-
-const primitiveCache = new LRUCache<unknown, Node>({ capacity: 50_000 });
-
-const isPrimitive = (value: unknown): boolean =>
-  value === null || typeof value !== "object";
-
-const wrappedNodeBuilder = {
-  toTree(source: unknown, builder: TreeBuilder) {
-    if (isPrimitive(source)) {
-      const cached = primitiveCache.get(source);
-      if (cached) return cached;
-      const node = defaultNodeBuilder.toTree(source, builder);
-      primitiveCache.put(source, node);
-      return node;
-    }
-    return defaultNodeBuilder.toTree(source, builder);
-  },
-};
-
-const treeBuilder = Reference.Tree.createBuilder(sha256, wrappedNodeBuilder);
-
-function legacyRefer(source: unknown): unknown {
-  return treeBuilder.refer(source);
+function canonicalRefer<T extends DefinedReferent>(source: T): unknown {
+  setCanonicalHashConfig(true);
+  try {
+    return refer(source);
+  } finally {
+    resetCanonicalHashConfig();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -122,7 +114,7 @@ const assertion16KB = {
 // Warm up both paths to avoid measuring JIT compilation
 for (let i = 0; i < 20; i++) {
   legacyRefer(smallObject);
-  canonicalHash(smallObject);
+  canonicalRefer(smallObject);
 }
 
 // ==========================================================================
@@ -139,10 +131,10 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "canonicalHash() - small object (5 keys)",
+  name: "canonical refer() - small object (5 keys)",
   group: "small-object",
   fn() {
-    canonicalHash(smallObject);
+    canonicalRefer(smallObject);
   },
 });
 
@@ -156,10 +148,10 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "canonicalHash() - medium object (15 keys, 2-level)",
+  name: "canonical refer() - medium object (15 keys, 2-level)",
   group: "medium-object",
   fn() {
-    canonicalHash(mediumObject);
+    canonicalRefer(mediumObject);
   },
 });
 
@@ -173,10 +165,10 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "canonicalHash() - large tree (~364 nodes)",
+  name: "canonical refer() - large tree (~364 nodes)",
   group: "large-tree",
   fn() {
-    canonicalHash(largeNestedTree);
+    canonicalRefer(largeNestedTree);
   },
 });
 
@@ -190,10 +182,10 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "canonicalHash() - small array (5 elements)",
+  name: "canonical refer() - small array (5 elements)",
   group: "small-array",
   fn() {
-    canonicalHash(smallArray);
+    canonicalRefer(smallArray);
   },
 });
 
@@ -207,10 +199,10 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "canonicalHash() - large array (200 objects)",
+  name: "canonical refer() - large array (200 objects)",
   group: "large-array",
   fn() {
-    canonicalHash(largeArray);
+    canonicalRefer(largeArray);
   },
 });
 
@@ -224,10 +216,10 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "canonicalHash() - repeated subtrees (50 items, 1 shared)",
+  name: "canonical refer() - repeated subtrees (50 items, 1 shared)",
   group: "repeated-subtrees",
   fn() {
-    canonicalHash(repeatedSubtrees);
+    canonicalRefer(repeatedSubtrees);
   },
 });
 
@@ -241,10 +233,10 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "canonicalHash() - unclaimed {the, of}",
+  name: "canonical refer() - unclaimed {the, of}",
   group: "unclaimed",
   fn() {
-    canonicalHash(unclaimedFact);
+    canonicalRefer(unclaimedFact);
   },
 });
 
@@ -258,10 +250,10 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "canonicalHash() - 16KB assertion",
+  name: "canonical refer() - 16KB assertion",
   group: "assertion-16kb",
   fn() {
-    canonicalHash(assertion16KB);
+    canonicalRefer(assertion16KB);
   },
 });
 
@@ -311,12 +303,12 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "canonicalHash() - small object (5 keys, fresh)",
+  name: "canonical refer() - small object (5 keys, fresh)",
   group: "small-object-fresh",
   fn(b) {
     const data = freshSmallObject();
     b.start();
-    canonicalHash(data);
+    canonicalRefer(data);
     b.end();
   },
 });
@@ -334,12 +326,12 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "canonicalHash() - medium object (15 keys, fresh)",
+  name: "canonical refer() - medium object (15 keys, fresh)",
   group: "medium-object-fresh",
   fn(b) {
     const data = freshMediumObject();
     b.start();
-    canonicalHash(data);
+    canonicalRefer(data);
     b.end();
   },
 });
@@ -357,12 +349,12 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "canonicalHash() - unclaimed {the, of} (fresh)",
+  name: "canonical refer() - unclaimed {the, of} (fresh)",
   group: "unclaimed-fresh",
   fn(b) {
     const data = freshUnclaimedFact();
     b.start();
-    canonicalHash(data);
+    canonicalRefer(data);
     b.end();
   },
 });
@@ -380,12 +372,12 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "canonicalHash() - 16KB assertion (fresh)",
+  name: "canonical refer() - 16KB assertion (fresh)",
   group: "assertion-16kb-fresh",
   fn(b) {
     const data = freshAssertion16KB();
     b.start();
-    canonicalHash(data);
+    canonicalRefer(data);
     b.end();
   },
 });
