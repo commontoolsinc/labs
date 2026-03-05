@@ -33,7 +33,7 @@ describe("CT-1173: array push via query-result-proxy", () => {
   });
 
   afterEach(async () => {
-    tx.commit();
+    await tx.commit();
     await runtime?.dispose();
     await storageManager?.close();
   });

@@ -4,10 +4,6 @@ import { computed, NAME, pattern, UI, Writable } from "commontools";
 import Counter from "../counter/counter.tsx";
 import Note from "../notes/note.tsx";
 
-// Simple random ID generator (crypto.randomUUID not available in pattern env)
-const generateId = () =>
-  `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
-
 type Input = Record<string, never>;
 
 type Result = {
@@ -22,7 +18,6 @@ export default pattern<Input, Result>(
     const counterA = Counter({ value: 10 });
     const counterB = Note({
       content: "This is item B (a Note)",
-      noteId: generateId(),
     });
     const counterC = Counter({ value: 30 });
 

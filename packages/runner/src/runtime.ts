@@ -4,6 +4,7 @@ import {
   StaticCacheHTTP,
 } from "@commontools/static";
 import { RuntimeTelemetry } from "@commontools/runner";
+import type { NonIdempotentReport } from "./telemetry.ts";
 import type {
   AnyCell,
   JSONSchema,
@@ -21,6 +22,14 @@ import {
   resetCanonicalHashConfig,
   setCanonicalHashConfig,
 } from "@commontools/memory/reference";
+import {
+  resetJsonEncodingConfig,
+  setJsonEncodingConfig,
+} from "@commontools/memory/json-encoding-dispatch";
+import {
+  resetStorableValueConfig,
+  setStorableValueConfig,
+} from "@commontools/memory/storable-value-dispatch";
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
 import type {
   ChangeGroup,
@@ -199,6 +208,8 @@ export class Runtime {
     // Propagate experimental flags to the memory layer's ambient config.
     setExperimentalStorableConfig(this.experimental);
     setCanonicalHashConfig(this.experimental.canonicalHashing);
+    setJsonEncodingConfig(this.experimental.unifiedJsonEncoding);
+    setStorableValueConfig(this.experimental.richStorableValues);
     this.id = options.storageManager.id;
     this.apiUrl = new URL(options.apiUrl);
     this.staticCache = isDeno()
@@ -263,7 +274,36 @@ export class Runtime {
   }
 
   /**
-   * Clean up resources and cancel all operations
+   * Proactively checks all computations for idempotency by force-dirtying
+   * and re-executing them, then comparing write snapshots.
+   */
+  runIdempotencyCheck() {
+    return this.scheduler.runIdempotencyCheck();
+  }
+
+  /**
+   * Enables inline idempotency checking: every computation that runs through
+   * the scheduler's run() will automatically get a second synchronous run
+   * for comparison.
+   */
+  enableIdempotencyCheck(): void {
+    this.scheduler.enableIdempotencyCheck();
+  }
+
+  /**
+   * Returns violations collected while inline idempotency check mode is enabled.
+   */
+  getIdempotencyViolations(): NonIdempotentReport[] {
+    return this.scheduler.getIdempotencyViolations();
+  }
+
+  /**
+   * Clean up resources and cancel all operations.
+   *
+   * NOTE: This does not wait for in-flight transactions to settle.
+   * Any unawaited tx.commit() calls will be canceled when
+   * storageManager.close() tears down storage sessions. Callers
+   * should await all pending commits before calling dispose().
    */
   async dispose(): Promise<void> {
     // Stop all running docs
@@ -293,6 +333,8 @@ export class Runtime {
     // Reset experimental storable config to defaults
     resetExperimentalStorableConfig();
     resetCanonicalHashConfig();
+    resetJsonEncodingConfig();
+    resetStorableValueConfig();
 
     // Clear the current runtime reference
     // Removed setCurrentRuntime call - no longer using singleton pattern

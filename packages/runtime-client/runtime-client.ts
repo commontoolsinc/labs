@@ -9,6 +9,7 @@ import type { DID, Identity } from "@commontools/identity";
 import type {
   JSONSchema,
   RuntimeTelemetryMarkerResult,
+  SchedulerDiagnosisResult,
   SchedulerGraphSnapshot,
 } from "@commontools/runner/shared";
 import { Program } from "@commontools/js-compiler/interface";
@@ -304,6 +305,17 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     await this.#conn.request<RequestType.ResetLoggerBaselines>({
       type: RequestType.ResetLoggerBaselines,
     });
+  }
+
+  /**
+   * Run non-idempotent computation detection.
+   * Returns a report of non-idempotent actions found.
+   */
+  async detectNonIdempotent(): Promise<SchedulerDiagnosisResult> {
+    const res = await this.#conn.request<RequestType.DetectNonIdempotent>({
+      type: RequestType.DetectNonIdempotent,
+    });
+    return res.result;
   }
 
   async dispose(): Promise<void> {

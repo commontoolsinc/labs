@@ -1092,7 +1092,8 @@ export type JSONSchemaTypes =
   | "number"
   | "boolean"
   | "null"
-  | "undefined"; // undefined is a non-standard addition
+  | "undefined" // undefined is a non-standard addition
+  | "unknown"; // unknown is a non-standard addition
 
 // See https://json-schema.org/draft/2020-12/json-schema-core
 // See https://json-schema.org/draft/2020-12/json-schema-validation
@@ -1659,6 +1660,12 @@ export type WishParams = {
    * Default (undefined) = favorites only for backward compatibility.
    */
   scope?: (DID | "~" | ".")[];
+  /**
+   * When true, skip the suggestion/picker UI pattern (suggestion.tsx).
+   * Multiple candidates are returned as-is without disambiguation.
+   * Use this for programmatic discovery where no user interaction is needed.
+   */
+  headless?: boolean;
 };
 
 export type WishState<T> = {

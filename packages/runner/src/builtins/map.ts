@@ -1,4 +1,5 @@
 import { type JSONSchema, type Pattern } from "../builder/types.ts";
+
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import { type AddCancel } from "../cancel.ts";
@@ -15,17 +16,15 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
  *
  * The goal is to keep the output array current without recomputing too much.
  *
- * Approach:
- * 1. Create a doc to store the result.
- * 2. Create a handler to update the result doc when the input doc changes.
- * 3. Create a handler to update the result doc when the op doc changes.
- * 4. Create a handler to update the result doc when the params doc changes (closure mode).
- * 5. For each value in the input doc, create a handler to update the result
- *    doc when the value changes.
+ * Elements are tracked by the normalized link address of their cell (via
+ * `getAsNormalizedFullLink()`). The `asSchema` traverse with `asCell: true`
+ * already resolves cell links to target entities, so:
  *
- * TODO: Optimization depends on javascript objects and not lookslike objects.
- * We should make sure updates to arrays don't unnecessarily re-ify objects
- * and/or change the comparision here.
+ * - Cell links: `list[i]` resolves to a cell pointing at the target entity.
+ *   Its normalized link is stable across position changes, enabling reuse.
+ * - Inline values: `list[i]` resolves to a cell pointing at the array position.
+ *   Its normalized link includes the positional index, so identity = position.
+ *   Shifted inline values get new runs (acceptable trade-off).
  *
  * @param list - A doc containing an array of values to map over.
  * @param op - A pattern to apply to each value.
@@ -44,13 +43,15 @@ export function map(
   parentCell: Cell<any>,
   runtime: Runtime, // Runtime will be injected by the registration function
 ): Action {
-  // Tracks up to where in the source array we've handled entries. Right now we
-  // start at zero, even though in principle the result doc above could have
-  // been pre-initalized from storage, so that we `run` each pattern. Once that
-  // is automated on rehyrdation, we can change this to measure the difference
-  // between the source list and the result list.
-  let initializedUpTo = 0;
   let result: Cell<any[]> | undefined;
+
+  // Identity-based tracking: maps element address key → { resultCell, lastIndex }
+  // for reuse across position changes. We pass list[i] directly each time, so
+  // there's no need to store the element cell separately.
+  const elementRuns = new Map<
+    string,
+    { resultCell: Cell<any>; lastIndex: number }
+  >();
 
   return (tx: IExtendedStorageTransaction) => {
     if (!result) {
@@ -73,8 +74,8 @@ export function map(
       {
         type: "object",
         properties: {
-          // type=null is a hack to not load the actual entries here
-          list: { type: "array", items: { asCell: true, type: "null" } },
+          // type: "unknown" is ignored by the asCell code path (no type validation)
+          list: { type: "array", items: { asCell: true, type: "unknown" } },
           op: { asCell: true },
         },
         required: ["op"],
@@ -94,9 +95,7 @@ export function map(
     // distinguish empty inputs from undefined inputs?
     if (list === undefined) {
       resultWithLog.set([]);
-      // Reset progress so that once the list becomes defined again we
-      // recompute from the beginning.
-      initializedUpTo = 0;
+      elementRuns.clear();
       return;
     }
 
@@ -104,64 +103,69 @@ export function map(
       throw new Error("map currently only supports arrays");
     }
 
-    const newArrayValue = resultWithLog.get().slice(0, initializedUpTo);
-    // If we rollback a change to result cell, and that causes it to be
-    // shorter, we need to re-initialize some cells.
-    if (initializedUpTo > newArrayValue.length) {
-      initializedUpTo = newArrayValue.length;
+    const keyCounts = new Map<string, number>();
+    const newArrayValue = new Array<any>(list.length);
+    for (let i = 0; i < list.length; i++) {
+      // Skip sparse holes — don't create pattern runs for them
+      if (!(i in list)) continue;
+
+      const { space: s, id, type, path } = list[i].getAsNormalizedFullLink();
+      const dedupKey = JSON.stringify([s, id, type, path]);
+      const occurrence = keyCounts.get(dedupKey) ?? 0;
+      keyCounts.set(dedupKey, occurrence + 1);
+      const elementKey = JSON.stringify([s, id, type, path, occurrence]);
+
+      if (elementRuns.has(elementKey)) {
+        const existing = elementRuns.get(elementKey)!;
+        if (existing.lastIndex !== i) {
+          runtime.runner.run(
+            tx,
+            opPattern,
+            {
+              element: list[i],
+              index: i,
+              array: inputsCell.key("list"),
+              params: inputsCell.key("params"),
+            },
+            existing.resultCell,
+            { doNotUpdateOnPatternChange: true },
+          );
+          existing.lastIndex = i;
+        }
+        newArrayValue[i] = existing.resultCell;
+      } else {
+        const resultCell = runtime.getCell(
+          parentCell.space,
+          { result, elementKey },
+          undefined,
+          tx,
+        );
+        runtime.runner.run(
+          tx,
+          opPattern,
+          {
+            element: list[i],
+            index: i,
+            array: inputsCell.key("list"),
+            params: inputsCell.key("params"),
+          },
+          resultCell,
+          { doNotUpdateOnPatternChange: true },
+        );
+        resultCell.getSourceCell()!.setSourceCell(parentCell);
+        addCancel(() => runtime.runner.stop(resultCell));
+        elementRuns.set(elementKey, { resultCell, lastIndex: i });
+        newArrayValue[i] = resultCell;
+      }
     }
-    // Add values that have been appended
-    while (initializedUpTo < list.length) {
-      const resultCell = runtime.getCell(
-        parentCell.space,
-        { result, index: initializedUpTo },
-        undefined,
-        tx,
-      );
-      // Determine which mode we're in based on presence of params
-      const patternInputs = {
-        element: inputsCell.key("list").key(initializedUpTo),
-        index: initializedUpTo,
-        array: inputsCell.key("list"),
-        params: inputsCell.key("params"),
-      };
+    resultWithLog.set(newArrayValue);
 
-      runtime.runner.run(
-        tx,
-        opPattern,
-        patternInputs,
-        resultCell,
-        { doNotUpdateOnPatternChange: true },
-      );
-      resultCell.getSourceCell()!.setSourceCell(parentCell);
-      // Add cancel from runtime's runner
-      addCancel(() => runtime.runner.stop(resultCell));
-
-      // Send the result value to the result cell
-      resultWithLog.key(initializedUpTo).set(resultCell);
-      newArrayValue.push(resultCell);
-
-      initializedUpTo++;
-    }
-
-    // Shorten the result if the list got shorter
-    const currentResult = resultWithLog.get();
-    if (currentResult.length > list.length) {
-      // Use getRaw() to preserve cell references. Using .get() would dereference
-      // cells to their values, losing the reference when the value is null.
-      const rawResult = resultWithLog.getRaw() ?? currentResult;
-      resultWithLog.set(rawResult.slice(0, list.length));
-      initializedUpTo = list.length;
-    } else if (resultWithLog.get().length < list.length) {
-      resultWithLog.set(newArrayValue);
-    }
-
-    // NOTE: We leave prior results in the list for now, so they reuse prior
-    // runs when items reappear
-    //
-    // Remove values that are no longer in the input sourceRefToResult =
-    // sourceRefToResult.filter(({ ref }) => seen.find((seenValue) =>
-    // isEqualCellReferences(seenValue, ref))
-    //);
+    // NOTE: We leave prior results in elementRuns for now, so they reuse
+    // prior runs when items reappear. This means elementRuns grows
+    // unboundedly when elements are removed — the runner is stopped via
+    // addCancel when the parent is disposed, but the Map entries (and their
+    // resultCell references) are not pruned. TODO: Consider pruning entries
+    // not present in the current list if this becomes a problem for
+    // long-lived maps with high element churn.
   };
 }

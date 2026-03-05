@@ -114,6 +114,38 @@ describe("PatternManager program persistence", () => {
   });
 });
 
+describe("PatternManager.loadPattern error handling", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+  });
+
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("throws descriptive error for missing pattern, not TypeError", async () => {
+    const bogusId = "nonexistent-pattern-id";
+    try {
+      await runtime.patternManager.loadPattern(bogusId, space);
+      throw new Error("should have thrown");
+    } catch (err) {
+      // Should throw the descriptive "has no stored source" error,
+      // NOT a TypeError about reading properties of undefined
+      expect(err).toBeInstanceOf(Error);
+      expect((err as Error).message).not.toMatch(/Cannot read properties/);
+      expect((err as Error).message).toContain("has no stored source");
+    }
+  });
+});
+
 describe("PatternManager.compileOrGetPattern", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;

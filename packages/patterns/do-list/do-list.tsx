@@ -68,6 +68,7 @@ interface DoListOutput {
       attachments?: Writable<any>[];
     }>
   >;
+  archiveCompleted: OpaqueRef<Stream<unknown>>;
 }
 
 // ===== Module-scope Handlers =====
@@ -249,6 +250,13 @@ const removeAttachment = handler<
   }
 });
 
+const archiveCompletedHandler = handler<
+  unknown,
+  { items: Writable<DoItem[]> }
+>((_, { items }) => {
+  items.set(items.get().filter((i) => !i.done));
+});
+
 // ===== Sub-pattern for item rendering =====
 
 const DoItemCard = pattern<
@@ -327,12 +335,39 @@ const DoItemCard = pattern<
   };
 });
 
+const CompletedItemCard = pattern<
+  {
+    item: DoItem;
+  },
+  { [UI]: VNode; [NAME]: string; summary: string }
+>(({ item }) => {
+  return {
+    [NAME]: computed(() => item.title),
+    summary: computed(() => item.title),
+    [UI]: (
+      <ct-card
+        style={`margin-left: ${(item.indent ?? 0) * 24}px; opacity: 0.7;`}
+      >
+        <ct-hstack gap="2" align="center">
+          <ct-checkbox $checked={item.done} />
+          <span style="text-decoration: line-through; flex: 1; color: var(--ct-color-gray-500);">
+            {item.title}
+          </span>
+        </ct-hstack>
+      </ct-card>
+    ),
+  };
+});
+
 // ===== Pattern =====
 
 export default pattern<DoListInput, DoListOutput>(({ items }) => {
   // Computed values
   const itemCount = computed(() => items.get().length);
-  const hasNoItems = computed(() => items.get().length === 0);
+  const activeItems = computed(() => items.get().filter((i) => !i.done));
+  const completedItems = computed(() => items.get().filter((i) => i.done));
+  const hasCompleted = computed(() => completedItems.length > 0);
+  const hasNoItems = computed(() => activeItems.length === 0);
 
   const summary = computed(() => {
     return items.get()
@@ -347,10 +382,15 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
   const addItems = addItemsHandler({ items });
   const removeItemByTitle = removeItemByTitleHandler({ items });
   const updateItemByTitle = updateItemByTitleHandler({ items });
+  const archiveCompleted = archiveCompletedHandler({ items });
 
   // Map items to sub-pattern instances once — reused for UI and mentionable
-  const itemCards = items.map((item) => (
+  const itemCards = activeItems.map((item: DoItem) => (
     <DoItemCard item={item} removeItem={removeItem} items={items} />
+  ));
+
+  const completedCards = completedItems.map((item: DoItem) => (
+    <CompletedItemCard item={item} />
   ));
 
   // Compact UI - embeddable widget without ct-screen wrapper
@@ -367,6 +407,21 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
           )
           : null}
       </ct-vstack>
+
+      {ifElse(
+        hasCompleted,
+        <ct-hstack justify="end" style="padding: 0 0.5rem;">
+          <ct-button
+            variant="ghost"
+            size="sm"
+            style="font-size: 0.8rem; color: var(--ct-color-gray-500);"
+            onClick={() => archiveCompleted.send({})}
+          >
+            Archive completed
+          </ct-button>
+        </ct-hstack>,
+        null,
+      )}
 
       <ct-message-input
         placeholder="Add an item..."
@@ -388,7 +443,7 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
           <ct-hstack justify="between" align="center">
             <ct-heading level={4}>Do List</ct-heading>
             <span style="font-size: 0.875rem; color: var(--ct-color-gray-500);">
-              {itemCount} items
+              {computed(() => activeItems.length)} items
             </span>
           </ct-hstack>
         </ct-vstack>
@@ -404,6 +459,29 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
                 </div>
               )
               : null}
+
+            {ifElse(
+              hasCompleted,
+              <details style="margin-top: 1rem;">
+                <summary style="cursor: pointer; font-size: 0.875rem; color: var(--ct-color-gray-500); padding: 0.5rem 0;">
+                  Completed ({computed(() => completedItems.length)})
+                </summary>
+                <ct-vstack gap="2" style="padding-top: 0.5rem;">
+                  {completedCards}
+                  <ct-hstack justify="end">
+                    <ct-button
+                      variant="ghost"
+                      size="sm"
+                      style="font-size: 0.8rem; color: var(--ct-color-gray-500);"
+                      onClick={() => archiveCompleted.send({})}
+                    >
+                      Archive all
+                    </ct-button>
+                  </ct-hstack>
+                </ct-vstack>
+              </details>,
+              null,
+            )}
           </ct-vstack>
         </ct-vscroll>
 
@@ -433,5 +511,6 @@ export default pattern<DoListInput, DoListOutput>(({ items }) => {
     addItems,
     removeItemByTitle,
     updateItemByTitle,
+    archiveCompleted,
   };
 });

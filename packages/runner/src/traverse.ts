@@ -63,6 +63,14 @@ interface IMemorySpaceAttestation {
   readonly address: IMemorySpaceAddress;
   readonly value?: StorableDatum;
 }
+
+// Only false is falsy
+const enum TypeValidity {
+  False = 0,
+  True = 1,
+  Unknown = 2,
+}
+
 /**
  * A data structure that maps keys to sets of values, allowing multiple values
  * to be associated with a single key without duplication.
@@ -102,7 +110,7 @@ function internSet(
   cache.set(key, value);
 }
 
-function stableStringify(value: unknown): string {
+export function stableStringify(value: unknown): string {
   if (value === null) return "n";
   if (value === undefined) return "u";
   const t = typeof value;
@@ -513,7 +521,7 @@ class StandardObjectCreator implements IObjectCreator<StorableDatum> {
     _link: NormalizedFullLink,
     value: StorableDatum | undefined,
   ): StorableDatum {
-    return value === undefined ? null : value;
+    return value;
   }
 }
 
@@ -595,7 +603,9 @@ export abstract class BaseObjectTraverser {
   protected dagMemo = new Map<string, Immutable<StorableValue>>();
   traverseDAGCalls = 0;
   getDocAtPathCalls = 0;
-  abstract traverse(doc: IMemorySpaceAttestation): Immutable<StorableValue>;
+  abstract traverse(
+    doc: IMemorySpaceAttestation,
+  ): TraverseResult<Immutable<StorableValue>>;
   /**
    * Attempt to traverse the document as a directed acyclic graph.
    * This is the simplest form of traversal, where we include everything.
@@ -643,12 +653,12 @@ export abstract class BaseObjectTraverser {
     } else if (isPrimitive(doc.value)) {
       return doc.value;
     } else if (Array.isArray(doc.value)) {
-      const newValue: Immutable<StorableValue>[] = [];
+      const newValue = new Array<Immutable<StorableValue>>(doc.value.length);
       using t = this.tracker.include(doc.value, true, newValue, doc);
       if (t === null) {
         return this.tracker.getExisting(doc.value, true);
       }
-      const entries = doc.value.map((item, index) => {
+      doc.value.forEach((item, index) => {
         const itemDefault =
           isObject(defaultValue) && Array.isArray(defaultValue) &&
             index < defaultValue.length
@@ -687,15 +697,11 @@ export abstract class BaseObjectTraverser {
             );
           }
         }
-        return this.traverseDAG(docItem, itemDefault, arrayElementLink);
-      });
-      // We copy the contents of our result into newValue so that if we have a
-      // cycle, we can return newValue before we actually finish populating it.
-      for (const v of entries) {
+        const v = this.traverseDAG(docItem, itemDefault, arrayElementLink);
         // Use null for missing/undefined elements (consistent with other value
         // transforms in this system, e.g. toJSON and toStorableValue)
-        newValue.push(v === undefined ? null : v as StorableDatum);
-      }
+        newValue[index] = v === undefined ? null : v as StorableDatum;
+      });
       // Our link is based on the last link in the chain and not the first.
       const newLink = getNormalizedLink(doc.address, true);
       const arrayResult = this.objectCreator.createObject(newLink, newValue);
@@ -1718,7 +1724,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
   override traverse(
     doc: IMemorySpaceAttestation,
     link?: NormalizedFullLink,
-  ): Immutable<StorableValue> {
+  ): TraverseResult<Immutable<StorableValue>> {
     // Reset per-traverse stats (but NOT the shared memo)
     this.traverseWithSchemaCalls = 0;
     this.traversePointerCalls = 0;
@@ -1744,11 +1750,12 @@ export class SchemaObjectTraverser<V extends StorableDatum>
 
     logger.timeStart("traverse");
     this.schemaTracker.add(getTrackerKey(doc.address), this.selector);
-    const { ok: val, error } = this.traverseWithSelector(
+    const rv = this.traverseWithSelector(
       doc,
       this.selector,
       link,
     );
+    const { error } = rv;
     const elapsed = logger.timeEnd("traverse") ?? 0;
     if (elapsed > 100) {
       // Find top visited docs
@@ -1789,7 +1796,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         this.getDebugValue(doc),
       ]);
     }
-    return val;
+    return rv;
   }
 
   // Traverse the specified doc with the selector.
@@ -1946,7 +1953,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
           if (ContextualFlowControl.isFalseSchema(optionSchema)) {
             continue;
           }
-          if (!canBranchMatch(optionSchema, doc.value)) {
+          if (!canBranchMatch(optionSchema, doc.value, restSchema)) {
             this.anyOfFastRejects++;
             continue;
           }
@@ -2140,35 +2147,45 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         ? { ok: this.traversePrimitive(doc, schemaObj) }
         : { error: new Error("Invalid type") };
     } else if (Array.isArray(doc.value)) {
-      if (this.isValidType(schemaObj, "array")) {
-        const newValue: Immutable<StorableValue>[] = [];
-        // Our link is based on the last link in the chain and not the first.
-        const newLink = link ?? getNormalizedLink(
-          doc.address,
-          schemaObj,
-        );
-        using t = this.tracker.include(doc.value, schema, newValue, doc);
-        if (t === null) {
-          // newValue will be converted to a createObject result by the
-          // function that added it to the tracker, so don't do that here
-          return { ok: this.tracker.getExisting(doc.value, schema) };
-        }
-        const entries = this.traverseArrayWithSchema(doc, schemaObj, newLink);
-        if (!Array.isArray(entries)) {
-          return { error: new Error("Invalid array") };
-        }
-        for (const item of entries) {
-          newValue.push(item);
-        }
-        return { ok: this.objectCreator.createObject(newLink, newValue) };
+      const valid = this.isValidType(schemaObj, "array");
+      if (valid === TypeValidity.False) {
+        return { error: new Error("Invalid type") };
       }
-      return { error: new Error("Invalid type") };
+
+      const newValue: Immutable<StorableValue>[] = [];
+      // Our link is based on the last link in the chain and not the first.
+      const newLink = link ?? getNormalizedLink(
+        doc.address,
+        schemaObj,
+      );
+      using t = this.tracker.include(doc.value, schema, newValue, doc);
+      if (t === null) {
+        // newValue will be converted to a createObject result by the
+        // function that added it to the tracker, so don't do that here
+        return { ok: this.tracker.getExisting(doc.value, schema) };
+      }
+      if (valid === TypeValidity.Unknown) {
+        return { ok: this.objectCreator.createObject(newLink, undefined) };
+      }
+      const entries = this.traverseArrayWithSchema(doc, schemaObj, newLink);
+      if (!Array.isArray(entries)) {
+        return { error: new Error("Invalid array") };
+      }
+      entries.forEach((item, i) => {
+        newValue[i] = item;
+      });
+      newValue.length = entries.length;
+      return { ok: this.objectCreator.createObject(newLink, newValue) };
     } else if (isObject(doc.value)) {
       if (isPrimitiveCellLink(doc.value)) {
         // When traversing a pointer, use the unresolved schema, so we have
         // the same values in the schema tracker.
         return this.traversePointerWithSchema(doc, schema, link);
-      } else if (this.isValidType(schemaObj, "object")) {
+      } else {
+        const valid = this.isValidType(schemaObj, "object");
+        if (valid === TypeValidity.False) {
+          return { error: new Error("Invalid type") };
+        }
         const newValue: Record<string, Immutable<StorableValue>> = {};
         // Our link is based on the last link in the chain and not the first.
         const newLink = link ?? getNormalizedLink(doc.address, schemaObj);
@@ -2177,6 +2194,9 @@ export class SchemaObjectTraverser<V extends StorableDatum>
           // newValue will be converted to a createObject result by the
           // function that added it to the tracker, so don't do that here
           return { ok: this.tracker.getExisting(doc.value, schemaObj) };
+        }
+        if (valid === TypeValidity.Unknown) {
+          return { ok: this.objectCreator.createObject(newLink, undefined) };
         }
         const entries = this.traverseObjectWithSchema(doc, schemaObj, newLink);
         if (entries === undefined || entries === null) {
@@ -2198,68 +2218,137 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     return { error: new Error("Unexpected type for doc value") };
   }
 
+  /**
+   * Check whether the javascript type of the value matches the schema type
+   *
+   * This is a pruning method, and is not the full test, so don't reject early
+   *
+   * @param schema
+   * @param valueType
+   * @returns TypeValidity.True if the value type matches the schema type,
+   *  TypeValidity.False if it doesn't, and TypeValidity.Unknown if we match
+   *  the "unknown" type.
+   */
   private isValidType(
     schema: JSONSchema,
     valueType: string,
-  ): boolean {
+  ): TypeValidity {
     if (ContextualFlowControl.isTrueSchema(schema)) {
-      return true;
+      return TypeValidity.True;
     } else if (ContextualFlowControl.isFalseSchema(schema)) {
-      return false;
+      return TypeValidity.False;
     }
     const schemaObj = schema as JSONSchemaObj;
     // Check the top level type flag
+    let typeValidity: TypeValidity.True | TypeValidity.Unknown | undefined;
     if ("type" in schemaObj) {
       if (Array.isArray(schemaObj["type"])) {
-        if (!schemaObj["type"].includes(valueType)) {
-          return false;
+        const types = schemaObj["type"];
+        // type unknown matches anything
+        if (types.includes("unknown")) {
+          typeValidity = TypeValidity.Unknown;
+        } else if (!types.includes(valueType)) {
+          return TypeValidity.False;
         }
       } else if (isString(schemaObj["type"])) {
-        if (schemaObj["type"] !== valueType) {
-          return false;
+        const type = schemaObj["type"];
+        // type unknown matches anything
+        if (type === "unknown") {
+          typeValidity = TypeValidity.Unknown;
+        } else if (type !== valueType) {
+          return TypeValidity.False;
         }
       } else {
         // invalid schema type
-        return false;
+        throw new Error("Invalid schema type");
       }
     }
+    // Limited allOf handling
+    let allOfValidity: TypeValidity.True | TypeValidity.Unknown | undefined;
     if (schemaObj.allOf) {
-      // Special limited allOf handling here
+      // unknown & T => T
+      let match: TypeValidity.True | TypeValidity.Unknown | undefined;
       for (const option of schemaObj.allOf) {
-        if (!this.isValidType(option, valueType)) {
-          return false;
+        const valid = this.isValidType(option, valueType);
+        // ignore undefined result (unknown type), but if any option returns
+        // false, the whole thing is false
+        if (valid === TypeValidity.False) {
+          return TypeValidity.False;
+        } else if (valid === TypeValidity.True) {
+          match = TypeValidity.True;
+        } else if (valid === TypeValidity.Unknown && match === undefined) {
+          match = TypeValidity.Unknown;
         }
       }
+      allOfValidity = match ?? TypeValidity.True;
     }
+    // Limited anyOf handling
+    let anyOfValidity: TypeValidity.True | TypeValidity.Unknown | undefined;
     if (schemaObj.anyOf) {
-      let validOptions = false;
-      // Special limited anyOf handling here
+      // unknown | T => unknown
+      let match: TypeValidity.True | TypeValidity.Unknown | undefined;
       for (const option of schemaObj.anyOf) {
-        if (this.isValidType(option, valueType)) {
-          validOptions = true;
+        if (ContextualFlowControl.isTrueSchema(option)) {
+          // unknown | any => any
+          match = TypeValidity.True;
           break;
         }
-      }
-      if (!validOptions) {
-        return false;
-      }
-    }
-    if (schemaObj.oneOf) {
-      let validOptions = 0;
-      // Special limited oneOf handling here
-      for (const option of schemaObj.oneOf) {
-        if (this.isValidType(option, valueType)) {
-          validOptions++;
-          if (validOptions > 1) {
-            return false;
-          }
+        const valid = this.isValidType(option, valueType);
+        if (valid === TypeValidity.False) {
+          continue;
+        } else if (match !== TypeValidity.Unknown) {
+          match = valid;
         }
       }
-      if (validOptions !== 1) {
-        return false;
+      if (match === undefined) {
+        return TypeValidity.False;
+      } else {
+        anyOfValidity = match;
       }
     }
-    return true;
+    // Limited oneOf handling
+    // This is handled the same as anyOf here
+    let oneOfValidity: TypeValidity.True | TypeValidity.Unknown | undefined;
+    if (schemaObj.oneOf) {
+      let match: TypeValidity.True | TypeValidity.Unknown | undefined;
+      for (const option of schemaObj.oneOf) {
+        if (ContextualFlowControl.isTrueSchema(option)) {
+          // unknown | any => any
+          match = TypeValidity.True;
+          break;
+        }
+        const valid = this.isValidType(option, valueType);
+        if (valid === TypeValidity.False) {
+          continue;
+        } else if (match !== TypeValidity.Unknown) {
+          // this may be more than one, but we don't know that the rest of
+          // the validation will pass, so don't reject.
+          match = valid;
+        }
+      }
+      if (match === undefined) {
+        return TypeValidity.False;
+      } else {
+        oneOfValidity = match;
+      }
+    }
+    // We can't rule out a matched type based on the logical `not` clause,
+    // so we don't deal with that here.
+    // We have four sources of validity, which are all and-ed together.
+    // Since unknown disappears in type intersections, any true will win.
+    const validities = [
+      typeValidity,
+      allOfValidity,
+      anyOfValidity,
+      oneOfValidity,
+    ];
+    if (
+      validities.some((x) => x === TypeValidity.True) ||
+      validities.every((x) => x === undefined)
+    ) {
+      return TypeValidity.True;
+    }
+    return TypeValidity.Unknown;
   }
 
   /**
@@ -2278,10 +2367,11 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     _link?: NormalizedFullLink,
   ): Immutable<StorableValue>[] | undefined {
     this.traverseArrayCalls++;
-    const arrayObj: Immutable<StorableValue>[] = [];
-    for (
-      const [index, item] of (doc.value as Immutable<StorableDatum>[]).entries()
-    ) {
+    const docArray = doc.value as Immutable<StorableDatum>[];
+    const arrayObj = new Array<Immutable<StorableValue>>(docArray.length);
+    for (let index = 0; index < docArray.length; index++) {
+      if (!(index in docArray)) continue; // preserve sparse holes
+      const item = docArray[index];
       const itemSchema = this.cfc.schemaAtPath(schema, [index.toString()]);
       let curDoc: IMemorySpaceAttestation = {
         address: {
@@ -2393,7 +2483,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
           ? getNextCellLink(curDoc, curSelector.schema!)
           : getNormalizedLink(curDoc.address, curSelector.schema);
         const val = this.objectCreator.createObject(cellLink, undefined);
-        arrayObj.push(val);
+        arrayObj[index] = val;
       } else {
         // We want those links to point directly at the linked cells, instead
         // of using our path (e.g. ["items", "0"]), so don't pass in a
@@ -2406,9 +2496,9 @@ export class SchemaObjectTraverser<V extends StorableDatum>
           // If our item doesn't match our schema, we may be able to use
           // undefined or null if those are valid according to our schema.
           if (this.isValidType(curSelector.schema!, "undefined")) {
-            arrayObj.push(undefined);
+            arrayObj[index] = undefined;
           } else if (this.isValidType(curSelector.schema!, "null")) {
-            arrayObj.push(null);
+            arrayObj[index] = null;
           } else {
             // this array is invalid; one or more items do not match the schema
             logger.info(
@@ -2418,7 +2508,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
             return undefined;
           }
         } else {
-          arrayObj.push(val);
+          arrayObj[index] = val;
         }
       }
     }
@@ -2771,6 +2861,7 @@ function mergeSchemaOption(
 export function canBranchMatch(
   branch: JSONSchema,
   value: unknown,
+  outerSchema?: JSONSchemaObj,
 ): boolean {
   // Boolean schemas: true matches everything, false matches nothing
   if (!isObject(branch)) return branch !== false;
@@ -2785,10 +2876,17 @@ export function canBranchMatch(
     return true;
   }
 
-  // Resolve top-level $ref if present
+  // Resolve top-level $ref if present. When an outerSchema is provided (e.g.
+  // the restSchema from anyOf destructuring), merge first so that $defs are
+  // available for resolution. mergeSchemaOption is cached, so the later merge
+  // in the traversal loop will hit the cache.
   let resolved: JSONSchema | undefined = branch;
   if ("$ref" in branch) {
-    resolved = ContextualFlowControl.resolveSchemaRefs(branch);
+    const toResolve = outerSchema
+      ? mergeSchemaOption(outerSchema, branch)
+      : branch;
+    if (!isObject(toResolve)) return toResolve !== false;
+    resolved = ContextualFlowControl.resolveSchemaRefs(toResolve);
     if (resolved === undefined || !isObject(resolved)) return true;
   }
 

@@ -19,7 +19,7 @@ export default pattern(() => {
   const note = Note({
     title: "Test Note",
     content: "Line one\nLine two\nLine three",
-    noteId: "test-note-123",
+
     isHidden: false,
   });
 
@@ -38,7 +38,7 @@ export default pattern(() => {
   const noteWithParent = Note({
     title: "Child Note",
     content: "I belong to a notebook",
-    noteId: "child-note-1",
+
     isHidden: true,
     parentNotebook: notebookA,
   });
@@ -47,7 +47,7 @@ export default pattern(() => {
   const noteInNotebookB = Note({
     title: "Note in B",
     content: "I belong to notebook B",
-    noteId: "child-note-2",
+
     isHidden: true,
     parentNotebook: notebookB,
   });
@@ -56,7 +56,7 @@ export default pattern(() => {
   const noteNoParent = Note({
     title: "Orphan Note",
     content: "I have no notebook",
-    noteId: "orphan-note-1",
+
     isHidden: false,
   });
 
@@ -132,9 +132,6 @@ export default pattern(() => {
   const assert_initial_title = computed(() => note.title === "Test Note");
   const assert_initial_content = computed(
     () => note.content === "Line one\nLine two\nLine three",
-  );
-  const assert_initial_note_id = computed(
-    () => note.noteId === "test-note-123",
   );
   const assert_initial_not_hidden = computed(() => note.isHidden === false);
   const assert_initial_no_parent = computed(
@@ -253,14 +250,12 @@ export default pattern(() => {
 
   // After creating new note, original note should be unchanged
   const assert_note_unchanged_after_create = computed(
-    () => note.title === "Test Note" && note.noteId === "test-note-123",
+    () => note.title === "Test Note",
   );
 
   // After creating new note from parented note, original should be unchanged
   const assert_parented_note_unchanged = computed(
-    () =>
-      noteWithParent.title === "Child Note" &&
-      noteWithParent.noteId === "child-note-1",
+    () => noteWithParent.title === "Child Note",
   );
 
   // ==========================================================================
@@ -272,7 +267,6 @@ export default pattern(() => {
       { assertion: assert_name },
       { assertion: assert_initial_title },
       { assertion: assert_initial_content },
-      { assertion: assert_initial_note_id },
       { assertion: assert_initial_not_hidden },
       { assertion: assert_initial_no_parent },
       { assertion: assert_initial_empty_backlinks },

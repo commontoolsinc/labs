@@ -61,6 +61,27 @@ const showRefineInput = handler<unknown, { showRefine: Writable<boolean> }>(
   },
 );
 
+const setQuestion = handler<
+  { question: string; options?: string[] },
+  { pendingQuestion: Writable<{ question: string; options: string[] } | null> }
+>(({ question, options }, { pendingQuestion }) => {
+  pendingQuestion.set({ question, options: options ?? [] });
+});
+
+const onQuestionAnswer = handler<
+  { detail: { answer: string } },
+  {
+    addMessage: Stream<BuiltInLLMMessage>;
+    pendingQuestion: Writable<{ question: string; options: string[] } | null>;
+  }
+>(({ detail }, { addMessage, pendingQuestion }) => {
+  pendingQuestion.set(null);
+  addMessage.send({
+    role: "user",
+    content: [{ type: "text" as const, text: detail.answer }],
+  });
+});
+
 export default pattern<
   {
     situation: string;
@@ -88,8 +109,9 @@ export default pattern<
   // --- LLM state (freeform query path) ---
   const profile = wish<string>({ query: "#profile" });
 
-  const mentionable =
-    wish<MentionablePiece[]>({ query: "#mentionable" }).result;
+  const mentionable = wish<MentionablePiece[]>({
+    query: "#mentionable",
+  }).result;
   const recentPieces = wish<MentionablePiece[]>({ query: "#recent" }).result;
   const { entries: summaryEntries } = wish<{
     entries: SummaryIndexEntry[];
@@ -111,17 +133,25 @@ export default pattern<
 Your textual responses are invisible to the user — they can only see the presented result.
 
 Strategy:
-1. First, search the space for existing relevant content using searchSpace
-2. If you find something useful, call presentResult with it directly
-3. If nothing exists, check listPatternIndex for patterns that could help
-4. Use fetchAndRunPattern to instantiate a pattern, optionally with existing data as context
-5. Call presentResult with the final cell link
+1. If the request is ambiguous or you need user preferences, call askUserQuestion first. After calling it, STOP — the user's answer will arrive as the next message. Then resume from step 2 with that context.
+2. Call listPatternIndex to see what patterns are available — do this on almost every request.
+3. Search the space for existing relevant content using searchSpace.
+4. Decide: if an existing cell matches what the user needs, presentResult with it. Otherwise, use fetchAndRunPattern to instantiate a pattern from the index, optionally with existing data as context, then presentResult with the resulting cell link.
+
+The final result you present is almost always either an existing cell or a pattern instantiated from the index. Always gather the information you need (pattern index, search results, user clarification) before presenting a result.
 
 Use the user context above to personalize your suggestions when relevant.`;
   });
 
   const messages = Writable.of<BuiltInLLMMessage[]>([]);
   const showRefine = Writable.of(false);
+  const pendingQuestion = Writable.of<
+    {
+      question: string;
+      options: string[];
+    } | null
+  >(null);
+  const hasPendingQuestion = computed(() => pendingQuestion.get() != null);
 
   const {
     addMessage,
@@ -139,6 +169,11 @@ Use the user context above to personalize your suggestions when relevant.`;
       }),
       listMentionable: patternTool(listMentionable, { mentionable }),
       listRecent: patternTool(listRecent, { recentPieces }),
+      askUserQuestion: {
+        handler: setQuestion({ pendingQuestion }),
+        description:
+          "Ask the user a clarifying question. Options are optional — if provided (2-4 strings), they appear as quick-select buttons alongside a free-text input. If omitted, only a text input is shown. After calling, STOP and wait for the user's answer. Input: { question: string, options?: string[] }",
+      },
     },
     model: "anthropic:claude-sonnet-4-5",
     context,
@@ -183,6 +218,14 @@ Use the user context above to personalize your suggestions when relevant.`;
         $messages={messages}
         pending={pending}
         onct-refine={showRefineInput({ showRefine })}
+      />
+
+      <ct-question
+        question={computed(() => pendingQuestion.get()?.question ?? "")}
+        options={computed(() => pendingQuestion.get()?.options ?? [])}
+        allow-custom
+        style={computed(() => (hasPendingQuestion ? "" : "display:none"))}
+        onct-answer={onQuestionAnswer({ addMessage, pendingQuestion })}
       />
       <ct-prompt-input
         placeholder="Refine suggestion..."

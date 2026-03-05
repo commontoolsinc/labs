@@ -42,7 +42,7 @@ describe("data-updating", () => {
   });
 
   afterEach(async () => {
-    tx.commit();
+    await tx.commit();
     await runtime?.dispose();
     await storageManager?.close();
   });
@@ -1172,6 +1172,80 @@ describe("data-updating", () => {
     expect(destinationCell.get()).toEqual({ value: 42 });
   });
 
+  describe("sparse array handling in normalizeAndDiff", () => {
+    it("hole→hole: no changes emitted", () => {
+      const testCell = runtime.getCell<{ arr: number[] }>(
+        space,
+        "sparse hole-to-hole",
+        undefined,
+        tx,
+      );
+      // deno-lint-ignore no-explicit-any
+      const sparse: any[] = new Array(3);
+      sparse[0] = 1;
+      sparse[2] = 3;
+      testCell.set({ arr: sparse });
+
+      const current = testCell.key("arr").getAsNormalizedFullLink();
+      // Same sparse array as new value
+      // deno-lint-ignore no-explicit-any
+      const newSparse: any[] = new Array(3);
+      newSparse[0] = 1;
+      newSparse[2] = 3;
+      const changes = normalizeAndDiff(runtime, tx, current, newSparse);
+      // No changes expected (hole→hole at index 1, same values at 0 and 2)
+      expect(changes.length).toBe(0);
+    });
+
+    it("value→hole: emits delete for the index", () => {
+      const testCell = runtime.getCell<{ arr: number[] }>(
+        space,
+        "sparse value-to-hole",
+        undefined,
+        tx,
+      );
+      testCell.set({ arr: [1, 2, 3] });
+
+      const current = testCell.key("arr").getAsNormalizedFullLink();
+      // New value has a hole at index 1
+      // deno-lint-ignore no-explicit-any
+      const newSparse: any[] = new Array(3);
+      newSparse[0] = 1;
+      newSparse[2] = 3;
+      const changes = normalizeAndDiff(runtime, tx, current, newSparse);
+      // Should emit a delete for index 1
+      const deleteChange = changes.find((c) =>
+        c.location.path[c.location.path.length - 1] === "1"
+      );
+      expect(deleteChange).toBeDefined();
+      expect(deleteChange!.value).toBe(undefined);
+    });
+
+    it("hole→value: emits set for the index", () => {
+      const testCell = runtime.getCell<{ arr: number[] }>(
+        space,
+        "sparse hole-to-value",
+        undefined,
+        tx,
+      );
+      // deno-lint-ignore no-explicit-any
+      const sparse: any[] = new Array(3);
+      sparse[0] = 1;
+      sparse[2] = 3;
+      testCell.set({ arr: sparse });
+
+      const current = testCell.key("arr").getAsNormalizedFullLink();
+      // New value fills the hole at index 1
+      const changes = normalizeAndDiff(runtime, tx, current, [1, 2, 3]);
+      // Should emit a set for index 1
+      const setChange = changes.find((c) =>
+        c.location.path[c.location.path.length - 1] === "1"
+      );
+      expect(setChange).toBeDefined();
+      expect(setChange!.value).toBe(2);
+    });
+  });
+
   describe("addCommonIDfromObjectID", () => {
     it("should handle arrays", () => {
       const obj = { items: [{ id: "item1", name: "First Item" }] };
@@ -1469,6 +1543,41 @@ describe("compactChangeSet", () => {
       // Should still compact to just the parent
       expect(result).toHaveLength(1);
       expect(result[0].location.path).toEqual(["foo"]);
+    });
+  });
+
+  describe("sparse array hasPath", () => {
+    it("should NOT subsume child at sparse hole index", () => {
+      // Parent writes sparse array [1, <hole>, 3]
+      // deno-lint-ignore no-explicit-any
+      const sparse: any[] = new Array(3);
+      sparse[0] = 1;
+      sparse[2] = 3;
+      const changes: ChangeSet = [
+        makeChange(["items"], sparse),
+        makeChange(["items", "1"], 99), // index 1 is a hole in the parent
+      ];
+      const result = compactChangeSet(changes);
+      // Child at index "1" should NOT be subsumed because it's a hole in parent
+      expect(result).toHaveLength(2);
+      expect(result[0].location.path).toEqual(["items"]);
+      expect(result[1].location.path).toEqual(["items", "1"]);
+    });
+
+    it("should subsume child at populated sparse index", () => {
+      // Parent writes sparse array [1, <hole>, 3]
+      // deno-lint-ignore no-explicit-any
+      const sparse: any[] = new Array(3);
+      sparse[0] = 1;
+      sparse[2] = 3;
+      const changes: ChangeSet = [
+        makeChange(["items"], sparse),
+        makeChange(["items", "0"], 1), // index 0 exists in parent
+      ];
+      const result = compactChangeSet(changes);
+      // Child at index "0" should be subsumed because it exists in parent
+      expect(result).toHaveLength(1);
+      expect(result[0].location.path).toEqual(["items"]);
     });
   });
 });

@@ -64,9 +64,9 @@ export default pattern<CalendarInput, CalendarOutput>(({ events }) => {
   const sortedEvents = computed((): EventPiece[] => {
     const all = events.get();
     if (!Array.isArray(all)) return [];
-    return [...all].sort((a, b) => {
-      const aDate = a.date;
-      const bDate = b.date;
+    return [...all].filter((e) => e).sort((a, b) => {
+      const aDate = a.date ?? "";
+      const bDate = b.date ?? "";
       if (aDate !== bDate) return aDate.localeCompare(bDate);
       return (a.time || "").localeCompare(b.time || "");
     });

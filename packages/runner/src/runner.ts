@@ -64,7 +64,7 @@ import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
 import "./builtins/index.ts";
 import { isCellResult } from "./query-result-proxy.ts";
 
-const logger = getLogger("runner", { enabled: true, level: "info" });
+const logger = getLogger("runner", { enabled: true, level: "warn" });
 
 export class Runner {
   readonly cancels = new Map<`${MemorySpace}/${URI}`, Cancel>();
@@ -481,7 +481,7 @@ export class Runner {
             // Async load for pattern change after initial start.
             // Errors are logged here since there's no caller to propagate to.
             this.runtime.patternManager
-              .loadPattern(newPatternId, resultCell.space)
+              .loadPattern(newPatternId, processCell.space)
               .then((loaded) => {
                 if (currentPatternId !== newPatternId) return;
 
@@ -627,7 +627,7 @@ export class Runner {
     if (!pattern) {
       return this.runtime.patternManager.loadPattern(
         patternId,
-        resultCell.space,
+        processCell.space,
       )
         .then((loaded) => {
           if (loaded) {

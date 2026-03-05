@@ -6,9 +6,12 @@ import {
 } from "@commontools/utils/types";
 import {
   isArrayIndexPropertyName,
-  toDeepStorableValue,
   toStorableValue,
 } from "@commontools/memory/storable-value";
+import {
+  fromStorable,
+  toStorable,
+} from "@commontools/memory/storable-value-dispatch";
 import type { MemorySpace, StorableValue } from "@commontools/memory/interface";
 import { getTopFrame, pattern } from "./builder/pattern.ts";
 import { createNodeFactory } from "./builder/module.ts";
@@ -95,7 +98,7 @@ import { getLogger } from "@commontools/utils/logger";
 import { ensureNotRenderThread } from "@commontools/utils/env";
 ensureNotRenderThread();
 
-const logger = getLogger("cell");
+const logger = getLogger("cell", { level: "warn" });
 
 type SinkOptions = {
   changeGroup?: ChangeGroup;
@@ -842,12 +845,19 @@ export class CellImpl<T extends StorableValue>
         : [];
     }
 
-    // Append the new values to the array.
+    // Append the new values to the array, preserving sparse holes in the original.
+    const combined = new Array(array.length + value.length);
+    array.forEach((v, i) => {
+      combined[i] = v;
+    });
+    for (let i = 0; i < value.length; i++) {
+      combined[array.length + i] = value[i];
+    }
     diffAndUpdate(
       this.runtime,
       this.tx,
       resolvedLink,
-      recursivelyAddIDIfNeeded([...array, ...value], this._frame),
+      recursivelyAddIDIfNeeded(combined, this._frame),
       cause,
     );
   }
@@ -1087,9 +1097,6 @@ export class CellImpl<T extends StorableValue>
   sync(): Promise<Cell<T>> | Cell<T> {
     this.synced = true;
     logger.info("sync", this.link);
-    if (this.link.id.startsWith("data:")) {
-      return this as unknown as Cell<T>;
-    }
     return this.runtime.storageManager.syncCell<T>(this as unknown as Cell<T>);
   }
 
@@ -1161,10 +1168,11 @@ export class CellImpl<T extends StorableValue>
 
     const tx = this.runtime.readTx(this.tx);
     // Resolve all links ON THE WAY to the target, but don't resolve the final link
-    return tx.readValueOrThrow(
+    const value = tx.readValueOrThrow(
       resolveLink(this.runtime, tx, this.link, "top"),
       options,
-    ) as
+    );
+    return fromStorable(value as StorableValue) as
       | Immutable<T>
       | undefined;
   }
@@ -1176,7 +1184,7 @@ export class CellImpl<T extends StorableValue>
     // retry on conflict.
     if (!this.synced) this.sync();
 
-    value = toDeepStorableValue(value);
+    value = toStorable(value);
     this.tx.writeValueOrThrow(this.link, findAndInlineDataURILinks(value));
   }
 
@@ -1789,22 +1797,22 @@ export function recursivelyAddIDIfNeeded<T>(
   }
 
   if (Array.isArray(value)) {
-    const result: unknown[] = [];
+    const result = new Array<unknown>(value.length);
 
     // Set before traversing, otherwise we'll infinite recurse.
     seen.set(value, result);
 
-    result.push(...value.map((v) => {
-      const value = recursivelyAddIDIfNeeded(v, frame, seen);
+    value.forEach((el, i) => {
+      const v = recursivelyAddIDIfNeeded(el, frame, seen);
       // For objects on arrays only: Add ID if not already present.
       if (
-        isObject(value) && !isCellLink(value) && !(ID in value)
+        isObject(v) && !isCellLink(v) && !(ID in v)
       ) {
-        return { [ID]: frame.generatedIdCounter++, ...value };
+        result[i] = { [ID]: frame.generatedIdCounter++, ...v };
       } else {
-        return value;
+        result[i] = v;
       }
-    }));
+    });
     return result as T;
   } else {
     // At this point we know `value` is a non-array record (we returned early

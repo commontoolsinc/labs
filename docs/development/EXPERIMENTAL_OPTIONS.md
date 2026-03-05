@@ -41,7 +41,8 @@ The same env vars work for all entry points:
   `felt.config.ts` defines, read from globals in `src/lib/env.ts`.
 - **Background charm service** (`packages/background-charm-service`): parsed in
   `src/env.ts` and threaded to worker processes via IPC.
-- **CLI script** (`scripts/main.ts`): read directly from `Deno.env`.
+- **CT CLI** (`packages/cli`): the `ct` CLI reads experimental flags from the
+  environment when constructing its `Runtime` instance.
 
 **Important:** Because the shell uses build-time injection, toggling flags for
 the browser requires rebuilding the shell. Server-side flags take effect

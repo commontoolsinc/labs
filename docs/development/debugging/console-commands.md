@@ -143,6 +143,32 @@ await commontools.rt.setLoggerEnabled(true)            // enable all
 await commontools.rt.setLoggerEnabled(false, "runner") // disable one
 ```
 
+## Non-Idempotent Detection
+
+Diagnose non-settling scheduler behavior and find non-idempotent actions. See
+[Non-Idempotent Detection](non-idempotent-detection.md) for a full guide.
+
+```javascript
+// Run diagnosis for 5 seconds (default), prints table + returns result
+await commontools.detectNonIdempotent()
+
+// Custom duration
+await commontools.detectNonIdempotent(10000)
+
+// Inspect the result
+const result = await commontools.detectNonIdempotent(3000)
+result.nonIdempotent   // actions with differing outputs for same inputs
+result.cycles          // causal cycles (A -> B -> A)
+result.busyTime        // ms the scheduler was busy during the window
+result.duration        // total wall-clock duration of the diagnosis
+```
+
+The same functionality is available via `RuntimeClient`:
+
+```javascript
+await commontools.rt.detectNonIdempotent(5000)
+```
+
 ## VDOM Debug Helpers
 
 Inspect the VDOM tree structure and applicator state. See
@@ -202,3 +228,5 @@ commontools.vdom.registry
 | `commontools.vdom.stats()` | Node/listener counts per renderer |
 | `commontools.vdom.nodeForId(id, el?)` | Look up DOM node by ID |
 | `commontools.vdom.registry` | Raw active renders registry |
+| `commontools.detectNonIdempotent(ms?)` | Run non-idempotent diagnosis (default 5s) |
+| `commontools.rt.detectNonIdempotent(ms?)` | Same, via RuntimeClient IPC |

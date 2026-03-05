@@ -14,7 +14,12 @@ export type { NormalizedLink } from "./link-types.ts";
 export type { SigilLink, URI } from "./sigil-types.ts";
 export { createRef, type EntityId, getEntityId } from "./create-ref.ts";
 export type { CellResult as QueryResult } from "./query-result-proxy.ts";
-export type { Action, ErrorWithContext, ReactivityLog } from "./scheduler.ts";
+export type {
+  Action,
+  ErrorWithContext,
+  ReactivityLog,
+  SettleStats,
+} from "./scheduler.ts";
 export * as StorageInspector from "./storage/inspector.ts";
 export { StorageTelemetry } from "./storage/telemetry.ts";
 export type {
