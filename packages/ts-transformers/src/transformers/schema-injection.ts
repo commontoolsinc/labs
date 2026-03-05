@@ -1027,10 +1027,22 @@ function validateShrinkCoverage(
     return;
   }
 
-  // Case 1: unknown/any base type — every path is unresolvable
-  const isUnknownBase = baseTypeNode.kind === ts.SyntaxKind.UnknownKeyword ||
+  // Skip validation for `any` — it is a top type where all property accesses
+  // are valid. The runtime fetches all data for `any`-typed parameters, so
+  // every key is reachable. This differs from `unknown` which cannot express
+  // what to fetch.
+  if (
     baseTypeNode.kind === ts.SyntaxKind.AnyKeyword ||
-    (baseType !== undefined && isAnyOrUnknownType(baseType));
+    (baseType !== undefined && (baseType.flags & ts.TypeFlags.Any) !== 0)
+  ) {
+    return;
+  }
+
+  // Case 1: unknown base type — every path is unresolvable
+  const isUnknownBase = baseTypeNode.kind === ts.SyntaxKind.UnknownKeyword ||
+    (baseType !== undefined &&
+      (baseType.flags & (ts.TypeFlags.Unknown | ts.TypeFlags.TypeParameter)) !==
+        0);
 
   if (isUnknownBase) {
     const pathList = [...requestedHeads].map((h) => `'.${h}'`).join(", ");
