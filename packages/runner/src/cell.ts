@@ -6,7 +6,6 @@ import {
 } from "@commontools/utils/types";
 import {
   isArrayIndexPropertyName,
-  toDeepStorableValue,
   toStorableValue,
 } from "@commontools/memory/storable-value";
 import {
@@ -1185,7 +1184,7 @@ export class CellImpl<T extends StorableValue>
     // retry on conflict.
     if (!this.synced) this.sync();
 
-    value = toStorable(toDeepStorableValue(value));
+    value = toStorable(value);
     this.tx.writeValueOrThrow(this.link, findAndInlineDataURILinks(value));
   }
 

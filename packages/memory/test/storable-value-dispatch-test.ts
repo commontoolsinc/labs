@@ -8,7 +8,6 @@ import {
 } from "../storable-value-dispatch.ts";
 import type { StorableValue } from "../interface.ts";
 import { StorableError } from "../storable-native-instances.ts";
-import { toDeepStorableValue } from "../storable-value.ts";
 
 /** Encode then decode a value through the current dispatch configuration. */
 function roundTrip(value: StorableValue): StorableValue {
@@ -30,9 +29,11 @@ describe("storable-value-dispatch", () => {
   // --------------------------------------------------------------------------
 
   describe("default state (flag OFF)", () => {
-    it("toStorable is identity passthrough", () => {
+    it("toStorable performs legacy deep conversion", () => {
       const value = { hello: "world" } as StorableValue;
-      expect(toStorable(value)).toBe(value);
+      // toDeepStorableValue returns a new frozen copy for objects.
+      const stored = toStorable(value);
+      expect(stored).toEqual({ hello: "world" });
     });
 
     it("fromStorable is identity passthrough", () => {
@@ -40,19 +41,11 @@ describe("storable-value-dispatch", () => {
       expect(fromStorable(value)).toBe(value);
     });
 
-    it("round-trip preserves object identity", () => {
-      const value = { a: 1, b: [2, 3] } as StorableValue;
-      expect(roundTrip(value)).toBe(value);
-    });
-
-    it("toDeepStorableValue + toStorable chain converts Error (legacy path)", () => {
-      // Simulates the setRaw() pipeline: toDeepStorableValue handles legacy
-      // Error conversion even when the dispatch flag is OFF.
+    it("toStorable converts Error via legacy path", () => {
+      // toStorable now subsumes toDeepStorableValue, so Error conversion
+      // happens directly without needing an explicit toDeepStorableValue call.
       const error = new Error("legacy error");
-      const stored = toStorable(
-        toDeepStorableValue(error as unknown as StorableValue),
-      );
-      // Legacy path converts Error to a plain object with @Error key.
+      const stored = toStorable(error as unknown as StorableValue);
       expect(stored).not.toBeInstanceOf(Error);
       const obj = stored as Record<string, unknown>;
       expect(obj["@Error"]).toBeDefined();
@@ -153,44 +146,54 @@ describe("storable-value-dispatch", () => {
       expect(stored).toBeInstanceOf(StorableError);
     });
 
-    it("resetStorableValueConfig() restores passthrough", () => {
+    it("resetStorableValueConfig() restores legacy conversion", () => {
       setStorableValueConfig(true);
       resetStorableValueConfig();
-      const value = { a: 1 } as StorableValue;
-      expect(toStorable(value)).toBe(value);
+      const error = new Error("reset test");
+      const stored = toStorable(error as unknown as StorableValue);
+      // Back to legacy path: Error becomes @Error object, not StorableError.
+      expect(stored).not.toBeInstanceOf(StorableError);
+      const obj = stored as Record<string, unknown>;
+      expect(obj["@Error"]).toBeDefined();
     });
 
     it("multiple set/reset cycles work correctly", () => {
-      // Cycle 1: ON
+      // Cycle 1: ON — rich conversion
       setStorableValueConfig(true);
       const error1 = new Error("test1");
       expect(toStorable(error1 as unknown as StorableValue)).toBeInstanceOf(
         StorableError,
       );
 
-      // Cycle 1: OFF
+      // Cycle 1: OFF — legacy conversion
       resetStorableValueConfig();
-      const value1 = { a: 1 } as StorableValue;
-      expect(toStorable(value1)).toBe(value1);
+      const error1b = new Error("test1b");
+      const stored1 = toStorable(error1b as unknown as StorableValue);
+      expect(stored1).not.toBeInstanceOf(StorableError);
+      expect((stored1 as Record<string, unknown>)["@Error"]).toBeDefined();
 
-      // Cycle 2: ON
+      // Cycle 2: ON — rich conversion
       setStorableValueConfig(true);
       const error2 = new Error("test2");
       expect(toStorable(error2 as unknown as StorableValue)).toBeInstanceOf(
         StorableError,
       );
 
-      // Cycle 2: OFF
+      // Cycle 2: OFF — legacy conversion
       resetStorableValueConfig();
-      const value2 = { b: 2 } as StorableValue;
-      expect(toStorable(value2)).toBe(value2);
+      const error2b = new Error("test2b");
+      const stored2 = toStorable(error2b as unknown as StorableValue);
+      expect(stored2).not.toBeInstanceOf(StorableError);
+      expect((stored2 as Record<string, unknown>)["@Error"]).toBeDefined();
     });
 
-    it("setStorableValueConfig(false) after true restores passthrough", () => {
+    it("setStorableValueConfig(false) after true restores legacy conversion", () => {
       setStorableValueConfig(true);
       setStorableValueConfig(false);
-      const value = { a: 1 } as StorableValue;
-      expect(toStorable(value)).toBe(value);
+      const error = new Error("toggle test");
+      const stored = toStorable(error as unknown as StorableValue);
+      expect(stored).not.toBeInstanceOf(StorableError);
+      expect((stored as Record<string, unknown>)["@Error"]).toBeDefined();
     });
   });
 });

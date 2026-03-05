@@ -1,20 +1,23 @@
 import type { StorableValue } from "./interface.ts";
 import { toDeepRichStorableValue } from "./rich-storable-value.ts";
 import { deepNativeValueFromStorableValue } from "./storable-native-instances.ts";
+import { toDeepStorableValue } from "./storable-value.ts";
 
 // ---------------------------------------------------------------------------
 // Flag-dispatched public API
 //
 // These two symbols are reassigned by `configureDispatch()` whenever the
-// storable value conversion flag changes. When OFF (default), both are
-// identity passthroughs. When ON, they route through the rich storable
+// storable value conversion flag changes. When OFF (default), `toStorable`
+// routes through `toDeepStorableValue` (legacy conversion) and `fromStorable`
+// is an identity passthrough. When ON, they route through the rich storable
 // value conversion functions.
 // ---------------------------------------------------------------------------
 
 /**
  * Convert a native JS value to storable form. When the flag is ON,
  * wraps native types (Error, Date, RegExp, etc.) into storable wrappers
- * and deep-freezes. When OFF, identity passthrough.
+ * and deep-freezes. When OFF, performs legacy deep conversion via
+ * `toDeepStorableValue`.
  */
 export let toStorable: (value: StorableValue) => StorableValue;
 
@@ -53,10 +56,10 @@ function configureDispatch(): void {
       return deepNativeValueFromStorableValue(value) as StorableValue;
     };
   } else {
-    // ----- Passthrough (flag OFF) -----
+    // ----- Legacy conversion (flag OFF) -----
 
     toStorable = (value: StorableValue): StorableValue => {
-      return value;
+      return toDeepStorableValue(value);
     };
 
     fromStorable = (value: StorableValue): StorableValue => {
@@ -86,7 +89,7 @@ export function resetStorableValueConfig(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Initialize dispatch to passthrough mode at module load.
+// Initialize dispatch to legacy conversion mode at module load.
 // ---------------------------------------------------------------------------
 
 configureDispatch();
