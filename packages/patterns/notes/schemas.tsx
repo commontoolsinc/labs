@@ -66,6 +66,17 @@ export interface NotebookCell {
   isHidden?: boolean;
 }
 
+/**
+ * A daily journal's core data shape.
+ */
+export interface DailyJournalPiece {
+  [NAME]?: string;
+  title?: string;
+  entries?: NotePiece[];
+  isJournal?: boolean;
+  isHidden?: boolean;
+}
+
 // ===== Input Types =====
 
 export interface NoteInput {
