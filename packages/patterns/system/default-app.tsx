@@ -22,7 +22,6 @@ const MAX_RECENT_CHARMS = 10;
 
 import BacklinksIndex, { type MentionablePiece } from "./backlinks-index.tsx";
 import SummaryIndex from "./summary-index.tsx";
-import OmniboxFAB from "./omnibox-fab.tsx";
 import Notebook from "../notes/notebook.tsx";
 import NotesImportExport from "../notes/notes-import-export.tsx";
 import PieceGrid from "./piece-grid.tsx";
@@ -41,7 +40,6 @@ interface PiecesListOutput {
     mentionable: MentionablePiece[];
   };
   sidebarUI: unknown;
-  fabUI: unknown;
 }
 
 const _visit = handler<
@@ -94,12 +92,6 @@ const dropOntoNotebook = handler<
   // Add to notebook - push cell reference, not value, to maintain piece identity
   notesCell.push(sourceCell);
 });
-
-const toggleFab = handler<any, { fabExpanded: Writable<boolean> }>(
-  (_, { fabExpanded }) => {
-    fabExpanded.set(!fabExpanded.get());
-  },
-);
 
 // Toggle dropdown menu
 const toggleMenu = handler<void, { menuOpen: Writable<boolean> }>(
@@ -202,12 +194,6 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
   const index = BacklinksIndex({ allPieces });
   const summaryIdx = SummaryIndex({});
 
-  const fab = OmniboxFAB({
-    mentionable: index.mentionable,
-    extraTools: {},
-    extraSystemPrompt: "",
-  });
-
   const gridView = PieceGrid({ pieces: visiblePieces });
   const recentGridView = PieceGrid({ pieces: recentPieces });
 
@@ -218,19 +204,6 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
     [NAME]: computed(() => `Space Home (${visiblePieces.length})`),
     [UI]: (
       <ct-screen>
-        <ct-keybind
-          code="KeyO"
-          meta
-          preventDefault
-          onct-keybind={toggleFab({ fabExpanded: fab.fabExpanded })}
-        />
-        <ct-keybind
-          code="KeyO"
-          ctrl
-          preventDefault
-          onct-keybind={toggleFab({ fabExpanded: fab.fabExpanded })}
-        />
-
         <ct-toolbar slot="header" sticky>
           <div slot="start">
             <h2 style={{ margin: 0, fontSize: "20px" }}>Patterns</h2>
@@ -418,8 +391,6 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
       </ct-screen>
     ),
     sidebarUI: undefined,
-    fabUI: fab[UI],
-
     // Exported data
     allPieces,
     recentPieces,
@@ -427,6 +398,5 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
     // Exported handlers (bound to state cells for external callers)
     addPiece: addPiece({ allPieces }),
     trackRecent: trackRecent({ recentPieces }),
-    pinToChat: fab.pinToChat,
   };
 });
