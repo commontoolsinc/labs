@@ -136,14 +136,18 @@ function fmtMs(ms: number): string {
 function printSettleStats(stats: SettleStats | null): void {
   if (!stats || stats.iterations.length <= 1) return;
   console.log(
-    `           Settle: ${stats.iterations.length} iterations, ${fmtMs(stats.totalDurationMs)}, ${stats.initialSeedCount} initial seeds, settled=${stats.settledEarly}`,
+    `           Settle: ${stats.iterations.length} iterations, ${
+      fmtMs(stats.totalDurationMs)
+    }, ${stats.initialSeedCount} initial seeds, settled=${stats.settledEarly}`,
   );
   for (let i = 0; i < stats.iterations.length; i++) {
     const iter = stats.iterations[i];
     const effects = iter.actions.filter((a) => a.type === "effect").length;
     const comps = iter.actions.filter((a) => a.type === "computation").length;
     console.log(
-      `             iter ${i}: workSet=${iter.workSetSize} order=${iter.orderSize} (${effects}E ${comps}C), ran=${iter.actionsRun}, newSubs=${iter.newSubscriptions}, ${fmtMs(iter.durationMs)}`,
+      `             iter ${i}: workSet=${iter.workSetSize} order=${iter.orderSize} (${effects}E ${comps}C), ran=${iter.actionsRun}, ${
+        fmtMs(iter.durationMs)
+      }`,
     );
     // Show which actions are in the workSet (truncated)
     if (iter.actions.length > 0 && iter.workSetSize <= 40) {
@@ -451,7 +455,9 @@ function printActionStatsTable(runtime: Runtime): void {
   // Print table
   console.log(`\n  ⚡ Action Stats (top 20 by total time):`);
   console.log(
-    `    ${"Action".padEnd(55)} ${"Runs".padStart(5)} ${"Total".padStart(9)} ${"Avg".padStart(9)} ${"Last".padStart(9)}`,
+    `    ${"Action".padEnd(55)} ${"Runs".padStart(5)} ${"Total".padStart(9)} ${
+      "Avg".padStart(9)
+    } ${"Last".padStart(9)}`,
   );
   console.log(`    ${"─".repeat(90)}`);
 
@@ -469,7 +475,9 @@ function printActionStatsTable(runtime: Runtime): void {
       ? "…" + label.slice(label.length - 53)
       : label;
     console.log(
-      `    ${truncated.padEnd(55)} ${String(row.runs).padStart(5)} ${fmtMs(row.totalMs).padStart(9)} ${fmtMs(row.avgMs).padStart(9)} ${fmtMs(row.lastMs).padStart(9)}`,
+      `    ${truncated.padEnd(55)} ${String(row.runs).padStart(5)} ${
+        fmtMs(row.totalMs).padStart(9)
+      } ${fmtMs(row.avgMs).padStart(9)} ${fmtMs(row.lastMs).padStart(9)}`,
     );
   }
 
@@ -477,7 +485,9 @@ function printActionStatsTable(runtime: Runtime): void {
   const totalTimeMs = rows.reduce((s, r) => s + r.totalMs, 0);
   console.log(`    ${"─".repeat(90)}`);
   console.log(
-    `    ${"TOTAL".padEnd(55)} ${String(totalRuns).padStart(5)} ${fmtMs(totalTimeMs).padStart(9)}`,
+    `    ${"TOTAL".padEnd(55)} ${String(totalRuns).padStart(5)} ${
+      fmtMs(totalTimeMs).padStart(9)
+    }`,
   );
 }
 
@@ -524,6 +534,9 @@ export async function runTestPattern(
     },
   });
   runtime.enableIdempotencyCheck();
+  if (options.verbose) {
+    runtime.scheduler.enableSettleStats();
+  }
   const engine = new Engine(runtime);
 
   // Track sink subscription for cleanup
@@ -808,7 +821,9 @@ export async function runTestPattern(
                   if (ofIdx < 0) continue;
                   const afterOf = r.slice(ofIdx + 4);
                   const slashIdx = afterOf.indexOf("/");
-                  const entity = slashIdx < 0 ? afterOf : afterOf.slice(0, slashIdx);
+                  const entity = slashIdx < 0
+                    ? afterOf
+                    : afterOf.slice(0, slashIdx);
                   const path = slashIdx < 0 ? "" : afterOf.slice(slashIdx);
                   const key = entity.slice(0, 8) + "…" + path;
                   entityReadCounts.set(
@@ -831,12 +846,20 @@ export async function runTestPattern(
                 !r.includes("%22query%22")
               ) ?? [];
               const rStr = nonSchemaReads.length > 0
-                ? ` r:[${nonSchemaReads.slice(0, 3).map(shortenPath).join(", ")}${nonSchemaReads.length > 3 ? ` +${nonSchemaReads.length - 3}` : ""}]`
+                ? ` r:[${
+                  nonSchemaReads.slice(0, 3).map(shortenPath).join(", ")
+                }${
+                  nonSchemaReads.length > 3
+                    ? ` +${nonSchemaReads.length - 3}`
+                    : ""
+                }]`
                 : reads && reads.length > 0
                 ? ` r:[schema-query +${reads.length - 1}]`
                 : "";
               const wStr = writes && writes.length > 0
-                ? ` w:[${writes.slice(0, 2).map(shortenPath).join(", ")}${writes.length > 2 ? ` +${writes.length - 2}` : ""}]`
+                ? ` w:[${writes.slice(0, 2).map(shortenPath).join(", ")}${
+                  writes.length > 2 ? ` +${writes.length - 2}` : ""
+                }]`
                 : "";
               console.log(
                 `      ${String(d.delta).padStart(4)}× ${label}${rStr}${wStr}`,
@@ -856,7 +879,9 @@ export async function runTestPattern(
             if (deltas.length > 10) {
               const rest = deltas.slice(10).reduce((s, d) => s + d.delta, 0);
               console.log(
-                `      ${String(rest).padStart(4)}× (${deltas.length - 10} more actions)`,
+                `      ${String(rest).padStart(4)}× (${
+                  deltas.length - 10
+                } more actions)`,
               );
             }
           }
