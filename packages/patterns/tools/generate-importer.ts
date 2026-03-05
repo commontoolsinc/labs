@@ -32,7 +32,7 @@ import {
 } from "./openapi-to-provider.ts";
 import { extractAPI } from "./openapi-extract.ts";
 import { generateImporterPrompt } from "./importer-prompt.ts";
-import type { ExtractedAPI as PromptExtractedAPI } from "./importer-prompt.ts";
+import { toPascalCase } from "./openapi-utils.ts";
 
 // ---------------------------------------------------------------------------
 // CLI
@@ -148,20 +148,14 @@ async function main() {
   console.log(`→ Extracting API info...`);
   const api = extractAPI(spec);
   console.log(`  Found ${api.endpoints.length} endpoints`);
-
-  // Adapt the extracted API to the prompt module's expected shape
-  const promptAPI: PromptExtractedAPI = {
-    baseUrl: api.baseUrl,
-    endpoints: api.endpoints.map((ep) => ({
-      method: ep.method,
-      path: ep.path,
-      summary: ep.summary,
-      description: ep.description,
-      responseSchema: ep.responseSchema,
-      pathParameters: ep.parameters.filter((p) => p.in === "path"),
-      queryParameters: ep.parameters.filter((p) => p.in === "query"),
-    })),
-  };
+  if (api.pagination) {
+    console.log(
+      `  Pagination: ${api.pagination.style}` +
+        (api.pagination.requestParam
+          ? ` (param: ${api.pagination.requestParam})`
+          : ""),
+    );
+  }
 
   // -------------------------------------------------------------------------
   // 4. Generate prompt
@@ -170,13 +164,38 @@ async function main() {
   const prompt = generateImporterPrompt({
     providerName,
     brandColor,
-    api: promptAPI,
+    api,
     providerConfig,
   });
   console.log(`  Prompt length: ${prompt.length} characters`);
 
   // -------------------------------------------------------------------------
-  // 5. Handle --dry-run / --prompt-only
+  // 5. Check prompt size limits
+  // -------------------------------------------------------------------------
+  if (prompt.length > 400_000) {
+    console.error(
+      `Error: Prompt is ${prompt.length.toLocaleString()} characters (~${
+        Math.round(prompt.length / 4)
+          .toLocaleString()
+      } tokens), which exceeds the 400K character limit.\n` +
+        "The spec is too large. Reduce it by filtering endpoints or removing\n" +
+        "unused schemas before re-running.",
+    );
+    Deno.exit(1);
+  }
+  if (prompt.length > 100_000) {
+    console.warn(
+      `\n⚠ WARNING: Prompt is ${prompt.length.toLocaleString()} characters (~${
+        Math.round(prompt.length / 4)
+          .toLocaleString()
+      } tokens).\n` +
+        "  Large prompts may produce lower quality results or hit token limits.\n" +
+        "  Consider using --dry-run to inspect the prompt, or reducing the spec.\n",
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // 6. Handle --dry-run / --prompt-only
   // -------------------------------------------------------------------------
   if (dryRun) {
     console.log("\n--- DRY RUN: Prompt follows ---\n");
@@ -193,7 +212,7 @@ async function main() {
   }
 
   // -------------------------------------------------------------------------
-  // 6. Call Claude API
+  // 7. Call Claude API
   // -------------------------------------------------------------------------
   const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
   if (!apiKey) {
@@ -207,24 +226,45 @@ async function main() {
   console.log(`→ Calling Claude API (claude-sonnet-4-20250514)...`);
 
   // Dynamic import so the tool doesn't fail at load time if the SDK isn't cached
-  const { default: Anthropic } = await import("npm:@anthropic-ai/sdk@^0.39.0");
+  const { default: Anthropic } = await import("@anthropic-ai/sdk");
   const client = new Anthropic({ apiKey });
 
-  const message = await client.messages.create({
-    model: "claude-sonnet-4-20250514",
-    max_tokens: 16384,
-    messages: [
-      {
-        role: "user",
-        content: prompt,
-      },
-    ],
-  });
+  // deno-lint-ignore no-explicit-any
+  let message: any;
+  try {
+    message = await client.messages.create({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 64000,
+      messages: [
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+    });
+  } catch (err) {
+    console.error(
+      "Error: Claude API call failed.\n" +
+        `  ${(err as Error).message}\n` +
+        "Check your ANTHROPIC_API_KEY and network connection, or use --dry-run / --prompt-only.",
+    );
+    Deno.exit(1);
+  }
+
+  if (message.stop_reason === "max_tokens") {
+    console.warn(
+      "\n⚠ WARNING: Claude's response was truncated (hit max_tokens limit).\n" +
+        "  The generated files may be incomplete. Consider reducing the spec\n" +
+        "  (e.g. filter endpoints) or splitting the generation into multiple runs.\n",
+    );
+  }
 
   // Extract text from the response
   const responseText = message.content
-    .filter((block) => block.type === "text")
-    .map((block) => "text" in block ? block.text : "")
+    .filter((block: { type: string }) => block.type === "text")
+    .map((block: { type: string; text?: string }) =>
+      "text" in block ? block.text : ""
+    )
     .join("\n");
 
   console.log(
@@ -234,7 +274,7 @@ async function main() {
   );
 
   // -------------------------------------------------------------------------
-  // 7. Parse response into files
+  // 8. Parse response into files
   // -------------------------------------------------------------------------
   console.log(`→ Parsing generated files...`);
   const files = parseGeneratedFiles(responseText, providerName);
@@ -253,13 +293,13 @@ async function main() {
   }
 
   // -------------------------------------------------------------------------
-  // 8. Generate descriptor source (server-side)
+  // 9. Generate descriptor source (server-side)
   // -------------------------------------------------------------------------
   const descriptorSource = generateDescriptorSource(providerConfig);
   files.set(`${providerName}.descriptor.ts`, descriptorSource);
 
   // -------------------------------------------------------------------------
-  // 9. Write output files
+  // 10. Write output files
   // -------------------------------------------------------------------------
   console.log(`→ Writing ${files.size} files to ${outputDir}/...`);
   await Deno.mkdir(outputDir, { recursive: true });
@@ -278,12 +318,9 @@ async function main() {
   }
 
   // -------------------------------------------------------------------------
-  // 10. Summary
+  // 11. Summary
   // -------------------------------------------------------------------------
-  const pascal = providerName
-    .split(/[-_]/)
-    .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
-    .join("");
+  const pascal = toPascalCase(providerName);
 
   console.log(`
 Done! Generated ${files.size} files for the "${providerName}" importer.
@@ -325,8 +362,10 @@ function parseGeneratedFiles(
 ): Map<string, string> {
   const files = new Map<string, string>();
 
-  // Match fenced code blocks: ```lang or ```lang:filename
-  const blockRegex = /```(?:typescript|tsx?|ts)(?::([^\n]+))?\n([\s\S]*?)```/g;
+  // Match fenced code blocks: ```lang or ```lang:filename (case-insensitive),
+  // also handles bare ``` blocks as a fallback
+  const blockRegex =
+    /```(?:typescript|tsx?|ts)?(?::([^\n]+))?\n([\s\S]*?)```/gi;
   let match: RegExpExecArray | null;
 
   while ((match = blockRegex.exec(response)) !== null) {
@@ -340,7 +379,7 @@ function parseGeneratedFiles(
     if (!filename) {
       const firstLine = code.split("\n")[0]?.trim() ?? "";
       const commentMatch = firstLine.match(
-        /^\/\/\s*((?:util\/)?[\w-]+\.(?:tsx?|ts))/,
+        /^\/\/\s*((?:[\w-]+\/)*[\w-]+\.tsx?)/,
       );
       if (commentMatch) {
         filename = commentMatch[1];
@@ -350,13 +389,13 @@ function parseGeneratedFiles(
     if (!filename) continue;
 
     // Normalize: strip leading path components that duplicate the provider name
-    filename = filename.replace(/^.*?(?=(?:util\/)?[\w-]+\.tsx?$)/, "");
+    filename = filename.replace(/^.*?(?=(?:[\w-]+\/)*[\w-]+\.tsx?$)/, "");
 
     // If the code block had a filename comment as the first line, strip it
     // from the content to avoid duplication
     let content = code;
     const firstLine = content.split("\n")[0]?.trim() ?? "";
-    if (firstLine.match(/^\/\/\s*(?:util\/)?[\w-]+\.(?:tsx?|ts)\s*$/)) {
+    if (firstLine.match(/^\/\/\s*(?:[\w-]+\/)*[\w-]+\.tsx?\s*$/)) {
       content = content.split("\n").slice(1).join("\n");
     }
 

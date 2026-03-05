@@ -1974,6 +1974,7 @@
       "jsr:@std/http@1",
       "jsr:@std/path@1",
       "jsr:@std/testing@1",
+      "npm:@anthropic-ai/sdk@0.39",
       "npm:dagre@~0.8.5",
       "npm:hash-wasm@^4.11.0",
       "npm:lit@^3.3.0",

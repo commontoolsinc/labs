@@ -15,6 +15,8 @@
  * @module
  */
 
+import { toPascalCase } from "./openapi-utils.ts";
+
 /** Extracted OAuth2 / auth configuration from an OpenAPI spec. */
 export interface ExtractedProviderConfig {
   name: string;
@@ -219,10 +221,7 @@ export function generateDescriptorSource(
   config: ExtractedProviderConfig,
 ): string {
   const envPrefix = config.name.toUpperCase().replace(/[^A-Z0-9]/g, "_");
-  const pascalName = config.name
-    .split(/[-_]/)
-    .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
-    .join("");
+  const pascalName = toPascalCase(config.name);
 
   const lines: string[] = [];
 
