@@ -11,7 +11,8 @@ LLM-powered patterns have test coverage at three layers:
 
 ## Test-environment guard
 
-`packages/llm/src/client.ts` includes `isTestEnvironment()` which detects:
+`packages/llm/src/client.ts` includes a test-environment check (evaluated once
+at module load) which detects:
 
 - `CI=true` (CI runners)
 - `ENV=test` (set by `deno task test` in llm, runner, and toolshed packages)
