@@ -440,4 +440,282 @@ Deno.test("Schema Shrink Validation", async (t) => {
       );
     },
   );
+
+  // =========================================================================
+  // handler<E, T>(...) type-arg form vs handler((e: E, t: T) => ...) inline
+  // =========================================================================
+
+  await t.step(
+    "handler<E, T> with type args produces same schema as inline param types",
+    async () => {
+      // Type-arg form
+      const sourceTypeArgs = [
+        "/// <cts-enable />",
+        'import { type Cell, handler } from "commontools";',
+        "",
+        "export const h = handler<{ amount: number }, { total: Cell<number> }>(",
+        "  (event, ctx) => { ctx.total.set(event.amount); },",
+        ");",
+      ].join("\n");
+      // Inline form
+      const sourceInline = [
+        "/// <cts-enable />",
+        'import { type Cell, handler } from "commontools";',
+        "",
+        "const h = handler(",
+        "  (event: { amount: number }, ctx: { total: Cell<number> }) => {",
+        "    ctx.total.set(event.amount);",
+        "  },",
+        ");",
+      ].join("\n");
+      const resultTypeArgs = await validateSource(sourceTypeArgs, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const resultInline = await validateSource(sourceInline, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errorsTA = getErrors(resultTypeArgs.diagnostics).filter(
+        (e) =>
+          e.type === "schema:unknown-type-access" ||
+          e.type === "schema:path-not-in-type",
+      );
+      const errorsInline = getErrors(resultInline.diagnostics).filter(
+        (e) =>
+          e.type === "schema:unknown-type-access" ||
+          e.type === "schema:path-not-in-type",
+      );
+      assertEquals(
+        errorsTA.length,
+        0,
+        `handler<E,T> form should have no shrink errors but got: ${
+          errorsTA.map((e) => e.message).join("; ")
+        }`,
+      );
+      assertEquals(
+        errorsInline.length,
+        0,
+        `handler inline form should have no shrink errors but got: ${
+          errorsInline.map((e) => e.message).join("; ")
+        }`,
+      );
+    },
+  );
+
+  await t.step(
+    "handler<E | undefined, T> with union type arg has no false positives",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { type Cell, handler } from "commontools";',
+        "",
+        "export const h = handler<{ amount?: number } | undefined, { total: Cell<number> }>(",
+        "  (event, ctx) => { ctx.total.set(event?.amount ?? 0); },",
+        ");",
+      ].join("\n");
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics).filter(
+        (e) =>
+          e.type === "schema:unknown-type-access" ||
+          e.type === "schema:path-not-in-type",
+      );
+      assertEquals(
+        errors.length,
+        0,
+        `Expected no shrink errors for handler<E | undefined, T> but got: ${
+          errors.map((e) => e.message).join("; ")
+        }`,
+      );
+    },
+  );
+
+  await t.step(
+    "handler<E, T> with type alias args has no false positives",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { type Cell, handler } from "commontools";',
+        "",
+        "interface ScaleEvent { servings?: number; delta?: number }",
+        "interface ScaleState { desiredServings: Cell<number> }",
+        "",
+        "export const h = handler<ScaleEvent | undefined, ScaleState>(",
+        "  (event, ctx) => { ctx.desiredServings.set(event?.servings ?? 1); },",
+        ");",
+      ].join("\n");
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics).filter(
+        (e) =>
+          e.type === "schema:unknown-type-access" ||
+          e.type === "schema:path-not-in-type",
+      );
+      assertEquals(
+        errors.length,
+        0,
+        `Expected no shrink errors for handler<TypeAlias | undefined, TypeAlias> but got: ${
+          errors.map((e) => e.message).join("; ")
+        }`,
+      );
+    },
+  );
+
+  // =========================================================================
+  // lift<T, R>(...) type-arg form vs lift((x: T) => R) inline
+  // =========================================================================
+
+  await t.step(
+    "lift<T, R> with type args produces no shrink errors",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { lift } from "commontools";',
+        "",
+        "const fn = lift<{ count: number }, string>(",
+        "  (state) => `count: ${state.count}`,",
+        ");",
+      ].join("\n");
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics).filter(
+        (e) =>
+          e.type === "schema:unknown-type-access" ||
+          e.type === "schema:path-not-in-type",
+      );
+      assertEquals(
+        errors.length,
+        0,
+        `Expected no shrink errors for lift<T, R> but got: ${
+          errors.map((e) => e.message).join("; ")
+        }`,
+      );
+    },
+  );
+
+  await t.step(
+    "lift<T | undefined, R> with union type arg has no false positives",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { lift } from "commontools";',
+        "",
+        "const fn = lift<{ count: number } | undefined, number>(",
+        "  (state) => state?.count ?? 0,",
+        ");",
+      ].join("\n");
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics).filter(
+        (e) =>
+          e.type === "schema:unknown-type-access" ||
+          e.type === "schema:path-not-in-type",
+      );
+      assertEquals(
+        errors.length,
+        0,
+        `Expected no shrink errors for lift<T | undefined, R> but got: ${
+          errors.map((e) => e.message).join("; ")
+        }`,
+      );
+    },
+  );
+
+  await t.step(
+    "lift<T, R> with type alias arg has no false positives",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { lift } from "commontools";',
+        "",
+        "interface Item { name: string; price: number }",
+        "",
+        "const fn = lift<Item, string>(",
+        "  (item) => `${item.name}: $${item.price}`,",
+        ");",
+      ].join("\n");
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics).filter(
+        (e) =>
+          e.type === "schema:unknown-type-access" ||
+          e.type === "schema:path-not-in-type",
+      );
+      assertEquals(
+        errors.length,
+        0,
+        `Expected no shrink errors for lift<TypeAlias, R> but got: ${
+          errors.map((e) => e.message).join("; ")
+        }`,
+      );
+    },
+  );
+
+  // =========================================================================
+  // pattern<T>(...) type-arg form
+  // =========================================================================
+
+  await t.step(
+    "pattern<T> with type arg produces no shrink errors",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { pattern } from "commontools";',
+        "",
+        "export default pattern<{ name: string; count: number }>(({ name, count }) => {",
+        "  return { name, count };",
+        "});",
+      ].join("\n");
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics).filter(
+        (e) =>
+          e.type === "schema:unknown-type-access" ||
+          e.type === "schema:path-not-in-type",
+      );
+      assertEquals(
+        errors.length,
+        0,
+        `Expected no shrink errors for pattern<T> but got: ${
+          errors.map((e) => e.message).join("; ")
+        }`,
+      );
+    },
+  );
+
+  await t.step(
+    "pattern<T> with type alias arg produces no shrink errors",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { pattern } from "commontools";',
+        "",
+        "interface Args { name: string; count: number }",
+        "",
+        "export default pattern<Args>(({ name, count }) => {",
+        "  return { name, count };",
+        "});",
+      ].join("\n");
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics).filter(
+        (e) =>
+          e.type === "schema:unknown-type-access" ||
+          e.type === "schema:path-not-in-type",
+      );
+      assertEquals(
+        errors.length,
+        0,
+        `Expected no shrink errors for pattern<TypeAlias> but got: ${
+          errors.map((e) => e.message).join("; ")
+        }`,
+      );
+    },
+  );
 });
