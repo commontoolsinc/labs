@@ -119,7 +119,12 @@ describe("OpaqueRef map callbacks", () => {
     assertStringIncludes(output, "params: {}");
 
     // The map's params object must be empty — no spurious capture
-    const mapSection = output.slice(output.indexOf("mapWithPattern"));
+    const mapStart = output.indexOf("mapWithPattern(");
+    assert(
+      mapStart !== -1,
+      "expected map() to be transformed to mapWithPattern",
+    );
+    const mapSection = output.slice(mapStart);
     assert(
       !mapSection.includes("spotNumber: spotNumber"),
       "should not capture destructuring property key 'spotNumber' as a variable",
