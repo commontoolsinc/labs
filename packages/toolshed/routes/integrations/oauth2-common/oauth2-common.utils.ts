@@ -218,7 +218,7 @@ export function createCallbackResponse(
     headers: {
       "Content-Type": "text/html",
       "Content-Security-Policy":
-        "default-src 'none'; script-src 'unsafe-inline'",
+        "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'",
       "X-Content-Type-Options": "nosniff",
     },
   });

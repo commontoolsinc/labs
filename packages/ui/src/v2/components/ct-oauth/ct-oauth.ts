@@ -99,6 +99,7 @@ export class CTOauth extends BaseElement {
   }
 
   async handleClick() {
+    if (this.isLoading) return;
     this.isLoading = true;
     this.authStatus = "Initiating OAuth flow...";
     this.authResult = null;
@@ -157,18 +158,24 @@ export class CTOauth extends BaseElement {
         "width=800,height=800,left=200,top=200",
       );
 
-      if (authWindow) {
-        this._pollIntervalId = setInterval(() => {
-          if (authWindow.closed) {
-            if (!this.authResult) {
-              this.authStatus =
-                "OAuth window closed. Authentication may not have completed.";
-              this.isLoading = false;
-            }
-            this._cleanup();
-          }
-        }, 500);
+      if (!authWindow) {
+        this.authStatus =
+          "Popup blocked by browser. Please allow popups and try again.";
+        this.isLoading = false;
+        this._cleanup();
+        return;
       }
+
+      this._pollIntervalId = setInterval(() => {
+        if (authWindow.closed) {
+          if (!this.authResult) {
+            this.authStatus =
+              "OAuth window closed. Authentication may not have completed.";
+            this.isLoading = false;
+          }
+          this._cleanup();
+        }
+      }, 500);
     } catch (error: unknown) {
       console.error("OAuth error:", error);
       this.authStatus = `Error: ${
