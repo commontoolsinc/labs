@@ -675,6 +675,9 @@ export abstract class BaseObjectTraverser {
       this.objectCreator.recordPathRead?.(doc.address);
       return doc.value;
     } else if (Array.isArray(doc.value)) {
+      // Record a read at the array level so that element changes trigger
+      // re-execution.
+      this.objectCreator.recordPathRead?.(doc.address);
       const newValue = new Array<Immutable<StorableValue>>(doc.value.length);
       using t = this.tracker.include(doc.value, true, newValue, doc);
       if (t === null) {
@@ -697,6 +700,9 @@ export abstract class BaseObjectTraverser {
         // strangeness with setting item at 0 to item at 1
         let arrayElementLink = itemLink;
         if (isPrimitiveCellLink(item)) {
+          // Record a read at the array element path so that link changes
+          // (pointing to a different entity) trigger re-execution.
+          this.objectCreator.recordPathRead?.(docItem.address);
           const [redirDoc, redirSelector] = this.getDocAtPath(
             docItem,
             [],
@@ -737,6 +743,9 @@ export abstract class BaseObjectTraverser {
     } else if (isRecord(doc.value)) {
       // First, see if we need special handling
       if (isPrimitiveCellLink(doc.value)) {
+        // Record a read at the link path so that link changes trigger
+        // re-execution.
+        this.objectCreator.recordPathRead?.(doc.address);
         // FIXME(@ubik2): A cell link with a schema should go back into traverseSchema behavior
         // Check if target doc is already tracked BEFORE calling getAtPath,
         // since getAtPath/followPointer will add it to schemaTracker
@@ -783,6 +792,9 @@ export abstract class BaseObjectTraverser {
         const [valueDoc, _] = this.getDocAtPath(redirDoc, [], DefaultSelector);
         return this.traverseDAG(valueDoc, defaultValue, itemLink);
       } else {
+        // Record a read at the object level so that property changes trigger
+        // re-execution.
+        this.objectCreator.recordPathRead?.(doc.address);
         const newValue: Record<string, Immutable<StorableValue>> = {};
         using t = this.tracker.include(doc.value, true, newValue, doc);
         if (t === null) {
@@ -2399,6 +2411,9 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     _link?: NormalizedFullLink,
   ): Immutable<StorableValue>[] | undefined {
     this.traverseArrayCalls++;
+    // Record a read at the array level so that changes to the array
+    // (including element replacements) trigger re-execution.
+    this.objectCreator.recordPathRead?.(doc.address);
     const docArray = doc.value as Immutable<StorableDatum>[];
     const arrayObj = new Array<Immutable<StorableValue>>(docArray.length);
     for (let index = 0; index < docArray.length; index++) {
@@ -2440,6 +2455,9 @@ export class SchemaObjectTraverser<V extends StorableDatum>
       // let createdDataURI = false;
       // const maybeLink = parseLink(item, arrayLink);
       if (isPrimitiveCellLink(item)) {
+        // Record a read at the array element path so that link changes
+        // (pointing to a different entity) trigger re-execution.
+        this.objectCreator.recordPathRead?.(curDoc.address);
         const [redirDoc, selector] = this.getDocAtPath(
           curDoc,
           [],
@@ -2572,6 +2590,9 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     _link?: NormalizedFullLink,
   ): Record<string, Immutable<StorableValue>> | undefined {
     this.traverseObjectCalls++;
+    // Record a read at the object level so that property additions/removals
+    // trigger re-execution.
+    this.objectCreator.recordPathRead?.(doc.address);
     const filteredObj: Record<string, Immutable<StorableValue>> = {};
     for (const [propKey, propValue] of Object.entries(doc.value!)) {
       // We'll use marker schemas to detect some places where we want special

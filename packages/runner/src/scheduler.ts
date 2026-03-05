@@ -734,13 +734,6 @@ export class Scheduler {
       `Reads: ${reads.length}`,
     ]);
 
-    for (const [spaceAndURI, pathsWithValues] of pathsWithValuesByEntity) {
-      logger.debug("schedule-resubscribe-path", () => [
-        `Registered action for ${spaceAndURI}`,
-        `Paths: ${pathsWithValues.map((p) => p.join("/")).join(", ")}`,
-      ]);
-    }
-
     this.setCancelForEntities(action, entities);
 
     // In pull mode: When an effect resubscribes, check if any non-throttled dirty
@@ -1137,10 +1130,6 @@ export class Scheduler {
                 change.after,
                 change.address.path,
               );
-
-              logger.debug("schedule-change-trigger", () => [
-                `Change #${changeIndex} triggered ${triggeredActions.length} actions`,
-              ]);
 
               for (const action of triggeredActions) {
                 // Causal edge tracking for diagnosis

@@ -21,6 +21,7 @@ import {
 } from "./query-result-proxy.ts";
 import { toCell } from "./back-to-cell.ts";
 
+import { ignoreReadForScheduling } from "./scheduler.ts";
 import {
   combineSchema,
   IObjectCreator,
@@ -457,7 +458,7 @@ export function validateAndTransform(
   const address = { space, id, type, path: ["value", ...path] };
   const doc = {
     address,
-    value: tx!.readValueOrThrow(ref),
+    value: tx!.readValueOrThrow(ref, { meta: ignoreReadForScheduling }),
   };
   // If we have a ref with a schema, use that; otherwise, use the link's schema
   const selector = {
