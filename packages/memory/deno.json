@@ -44,6 +44,7 @@
     "./rich-storable-value": "./rich-storable-value.ts",
     "./schema": "./schema.ts",
     "./storable-value": "./storable-value.ts",
+    "./storable-value-dispatch": "./storable-value-dispatch.ts",
     "./storable-protocol": "./storable-protocol.ts",
     "./type-tags": "./type-tags.ts",
     "./json-encoding": "./json-encoding.ts",
