@@ -4,8 +4,8 @@
  * recursively frozen.
  *
  * Already-frozen objects are still recursed into (their children may not be
- * frozen). A WeakMap cache could enable safe short-circuiting in the future,
- * but for now correctness requires the full walk.
+ * frozen). After freezing, the result is recorded in the `isDeepFrozen` cache
+ * so subsequent checks return immediately.
  *
  * Handles sparse arrays correctly (only visits populated indices).
  */
@@ -88,6 +88,7 @@ export function deepFreeze<T>(value: T): T {
       if (i in value) deepFreeze(value[i]);
     }
     if (!alreadyFrozen) Object.freeze(value);
+    deepFrozenCache.set(value, true);
     return value;
   }
 
@@ -96,5 +97,6 @@ export function deepFreeze<T>(value: T): T {
     deepFreeze(obj[key]);
   }
   if (!alreadyFrozen) Object.freeze(obj);
+  deepFrozenCache.set(value as object, true);
   return value;
 }
