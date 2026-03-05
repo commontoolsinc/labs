@@ -64,6 +64,73 @@ const logger = getLogger("memory-provider", {
 const DOC_KEY_PATTERN = /([^/]+)\/([^/]+)\/(.+)/;
 const SLOW_QUERY_THRESHOLD_MS = 100;
 const SLOW_QUERY_BUFFER_SIZE = 100;
+const SCHEMA_FLUSH_LOG_INTERVAL_MS = 60_000;
+
+/** Tracks schema flush statistics across all sessions. */
+const schemaFlushStats = {
+  /** Total flushes triggered (all sources) */
+  flushes: 0,
+  /** Flushes where batching deferred at least one commit */
+  batched: 0,
+  /** Flushes triggered synchronously before returning a ConflictError */
+  conflictFlushes: 0,
+  /** Total commits accumulated across all flushes */
+  totalCommitsAccumulated: 0,
+  /** Distribution of batch sizes (commits per flush) */
+  batchSizes: new Map<number, number>(),
+  /** Total elapsed ms across all flushes */
+  totalFlushMs: 0,
+
+  record(commitCount: number, isConflict: boolean, elapsedMs: number) {
+    this.flushes++;
+    this.totalCommitsAccumulated += commitCount;
+    this.totalFlushMs += elapsedMs;
+    if (commitCount > 1) this.batched++;
+    if (isConflict) this.conflictFlushes++;
+    const bucket = commitCount >= 10 ? 10 : commitCount;
+    this.batchSizes.set(bucket, (this.batchSizes.get(bucket) ?? 0) + 1);
+  },
+
+  report(): string[] {
+    if (this.flushes === 0) return [];
+    const avg = (this.totalCommitsAccumulated / this.flushes).toFixed(1);
+    const avgMs = (this.totalFlushMs / this.flushes).toFixed(1);
+    const dist = [...this.batchSizes.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([size, count]) => `${size === 10 ? "10+" : size}:${count}`)
+      .join(" ");
+    return [
+      `flushes=${this.flushes}`,
+      `batched=${this.batched}`,
+      `conflictFlushes=${this.conflictFlushes}`,
+      `avgBatch=${avg}`,
+      `avgMs=${avgMs}`,
+      `dist=[${dist}]`,
+    ];
+  },
+
+  reset() {
+    this.flushes = 0;
+    this.batched = 0;
+    this.conflictFlushes = 0;
+    this.totalCommitsAccumulated = 0;
+    this.batchSizes.clear();
+    this.totalFlushMs = 0;
+  },
+};
+
+let lastSchemaFlushReport = 0;
+
+function maybeReportSchemaFlushStats() {
+  const now = Date.now();
+  if (now - lastSchemaFlushReport < SCHEMA_FLUSH_LOG_INTERVAL_MS) return;
+  lastSchemaFlushReport = now;
+  const lines = schemaFlushStats.report();
+  if (lines.length > 0) {
+    logger.info("schema-flush-stats", () => lines);
+    schemaFlushStats.reset();
+  }
+}
 
 export interface SlowQuery {
   timestamp: number;
@@ -601,7 +668,7 @@ class MemoryProviderSession<
             (result.error as { name?: string }).name === "ConflictError" &&
             this.pendingSchemaChanges.size > 0
           ) {
-            await this.flushSchemaChanges();
+            await this.flushSchemaChanges(/* isConflict */ true);
           }
           logger.warn(
             "transact-error",
@@ -1045,7 +1112,9 @@ class MemoryProviderSession<
    * Flush accumulated schema changes: run schema matching once for all
    * coalesced commits and send revisions to active commit-log subscribers.
    */
-  private async flushSchemaChanges(): Promise<void> {
+  private async flushSchemaChanges(
+    isConflict = false,
+  ): Promise<void> {
     this.schemaFlushScheduled = false;
 
     // Guard against flush after session disposal
@@ -1056,6 +1125,11 @@ class MemoryProviderSession<
     this.pendingSchemaChanges = new Map();
 
     if (pending.size === 0) return;
+
+    // Count total accumulated doc keys across all spaces
+    let commitCount = 0;
+    for (const docs of pending.values()) commitCount += docs.size;
+    const t0 = performance.now();
 
     logger.timeStart("schema-flush");
 
@@ -1133,6 +1207,8 @@ class MemoryProviderSession<
     }
 
     logger.timeEnd("schema-flush");
+    schemaFlushStats.record(commitCount, isConflict, performance.now() - t0);
+    maybeReportSchemaFlushStats();
   }
 
   /**
