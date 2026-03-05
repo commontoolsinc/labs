@@ -14,6 +14,7 @@ import {
   addMockResponse,
   clearMockResponses,
   enableMockMode,
+  resetMockMode,
 } from "@commontools/llm/client";
 import type { BuiltInLLMMessage } from "@commontools/api";
 import { createBuilder } from "../src/builder/factory.ts";
@@ -24,8 +25,6 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
-
-enableMockMode();
 
 describe("LLM pattern smoke tests", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -41,6 +40,7 @@ describe("LLM pattern smoke tests", () => {
   let dummyPattern: any;
 
   beforeEach(() => {
+    enableMockMode();
     clearMockResponses();
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
@@ -55,6 +55,7 @@ describe("LLM pattern smoke tests", () => {
   });
 
   afterEach(async () => {
+    resetMockMode();
     await tx.commit();
     await runtime.idle();
     await runtime?.dispose();
