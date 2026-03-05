@@ -357,12 +357,10 @@ export function canonicalHash(value: unknown): StorableContentId {
     case "string":
     case "number":
     case "bigint": {
-      const cached = primitiveHashCache.get(
-        value as string | number | bigint,
-      );
+      const cached = primitiveHashCache.get(value);
       if (cached !== undefined) return cached;
       const result = computeHash(value);
-      primitiveHashCache.put(value as string | number | bigint, result);
+      primitiveHashCache.put(value, result);
       return result;
     }
 
