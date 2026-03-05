@@ -33,20 +33,8 @@ import { isArrayIndexPropertyName } from "@commontools/memory/storable-value";
 
 const logger = getLogger("extended-storage-transaction", {
   enabled: false,
-  level: "debug",
+  level: "error",
 });
-
-const logResult = (
-  kind: string,
-  result: Result<any, any>,
-  ...args: unknown[]
-) => {
-  if (result.error) {
-    logger.error("storage-error", `${kind} Error`, result.error, ...args);
-  } else {
-    logger.info("storage", `${kind} Success`, result.ok, ...args);
-  }
-};
 
 export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   private commitCallbacks = new Set<
@@ -71,9 +59,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     address: IMemorySpaceAddress,
     options?: IReadOptions,
   ): Result<IAttestation, ReadError> {
-    const result = this.tx.read(address, options);
-    logResult("read", result, address, options);
-    return result;
+    return this.tx.read(address, options);
   }
 
   readOrThrow(
@@ -81,7 +67,6 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     options?: IReadOptions,
   ): StorableValue {
     const readResult = this.tx.read(address, options);
-    logResult("readOrThrow, initial", readResult, address, options);
     if (
       readResult.error &&
       readResult.error.name !== "NotFoundError" &&
@@ -114,9 +99,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     address: IMemorySpaceAddress,
     value: any,
   ): Result<IAttestation, WriteError | WriterError> {
-    const result = this.tx.write(address, value);
-    logResult("write", result, address, value);
-    return result;
+    return this.tx.write(address, value);
   }
 
   writeOrThrow(
@@ -124,7 +107,6 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     value: StorableValue,
   ): void {
     const writeResult = this.tx.write(address, value);
-    logResult("writeOrThrow, initial", writeResult, address, value);
     if (
       writeResult.error &&
       (writeResult.error.name === "NotFoundError")
@@ -176,12 +158,6 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       nextValue[lastKey] = value as StorableDatum;
       const parentAddress = { ...address, path: lastExistingPath };
       const writeResultRetry = this.tx.write(parentAddress, valueObj);
-      logResult(
-        "writeOrThrow, retry",
-        writeResultRetry,
-        parentAddress,
-        valueObj,
-      );
       if (writeResultRetry.error) {
         throw toThrowable(writeResultRetry.error);
       }
