@@ -40,7 +40,9 @@ export function createRef(
     // Primitives use value equality in Set, so repeated strings like
     // "primary" would be incorrectly deduplicated, causing hash collisions
     // for patterns that differ only in the position of repeated values.
-    if (obj !== null && (typeof obj === "object" || typeof obj === "function")) {
+    if (
+      obj !== null && (typeof obj === "object" || typeof obj === "function")
+    ) {
       if (seen.has(obj)) return null;
       seen.add(obj);
     }
