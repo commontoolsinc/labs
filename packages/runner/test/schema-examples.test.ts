@@ -395,12 +395,15 @@ describe("Schema - Examples", () => {
         path: ["current"],
         type: "application/json",
       });
-      expect(reads).toContainEqual({
-        space,
-        id: toURI(initialEntityId),
-        path: ["foo"],
-        type: "application/json",
-      });
+      // The initial entity is read via followPointer at the "foo" sub-path.
+      // Per-path reads also emit fine-grained reads at consumed sub-paths,
+      // but sortAndCompactPaths compacts them under the "foo" prefix.
+      expect(
+        reads.some((r) =>
+          r.id === toURI(initialEntityId) &&
+          r.path[0] === "foo"
+        ),
+      ).toBe(true);
 
       // Then update it
       initial.withTx(tx).set({ foo: { label: "first - update" } });

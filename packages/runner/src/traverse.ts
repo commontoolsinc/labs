@@ -491,6 +491,11 @@ export interface IObjectCreator<T> {
     link: NormalizedFullLink,
     value: (T | undefined)[] | Record<string, (T | undefined)> | T | undefined,
   ): T;
+
+  // Record a fine-grained read at a specific sub-path for scheduling.
+  // Used to emit per-path pseudo reads when document-level reads are
+  // non-scheduling.
+  recordPathRead?(address: IMemorySpaceAddress): void;
 }
 
 /**
@@ -661,11 +666,13 @@ export abstract class BaseObjectTraverser {
       // Otherwise, return undefined
       // doc.path can be [] here, so we can't just normalize the link, which
       // would trim "value". This does impact the back to cell symbols.
+      this.objectCreator.recordPathRead?.(doc.address);
       return this.objectCreator.applyDefault(
         doc.address,
         defaultValue,
       );
     } else if (isPrimitive(doc.value)) {
+      this.objectCreator.recordPathRead?.(doc.address);
       return doc.value;
     } else if (Array.isArray(doc.value)) {
       const newValue = new Array<Immutable<StorableValue>>(doc.value.length);
@@ -1860,11 +1867,14 @@ export class SchemaObjectTraverser<V extends StorableDatum>
           // In the future, getAtPath could be altered to convey whether we
           // found a valid undefined node, and we can handle this better, but
           // right now there's no way for that to happen.
+          this.objectCreator.recordPathRead?.(nextDoc.address);
           return { error: new Error("Encountered link to undefined value") };
         } else {
-          return this.isValidType(nextSelector.schema, "undefined")
-            ? { ok: this.traversePrimitive(nextDoc, nextSelector.schema) }
-            : { error: new Error("Encountered link to undefined value") };
+          if (this.isValidType(nextSelector.schema, "undefined")) {
+            return { ok: this.traversePrimitive(nextDoc, nextSelector.schema) };
+          }
+          this.objectCreator.recordPathRead?.(nextDoc.address);
+          return { error: new Error("Encountered link to undefined value") };
         }
       }
       if (!deepEqual(nextDoc.address.path, nextSelector!.path)) {
@@ -2116,6 +2126,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
       !SchemaObjectTraverser.asCellOrStream(resolved)
     ) {
       // This value rejects all objects - just return
+      this.objectCreator.recordPathRead?.(doc.address);
       return { error: new Error("Schema is false") };
     } else if (!isObject(resolved)) {
       logger.warn(
@@ -2129,33 +2140,49 @@ export class SchemaObjectTraverser<V extends StorableDatum>
       // If we have a default, annotate it and return it
       // Otherwise, return undefined
       const defaultValue = this.applyDefault(doc, resolved);
-      return (defaultValue !== undefined)
-        ? { ok: defaultValue }
-        : this.isValidType(schemaObj, "undefined")
-        ? { ok: this.traversePrimitive(doc, schemaObj) }
-        : { error: new Error("Invalid type") };
+      if (defaultValue !== undefined) return { ok: defaultValue };
+      if (this.isValidType(schemaObj, "undefined")) {
+        return { ok: this.traversePrimitive(doc, schemaObj) };
+      }
+      this.objectCreator.recordPathRead?.(doc.address);
+      return { error: new Error("Invalid type") };
     } else if (doc.value === null) {
-      return this.isValidType(schemaObj, "null")
-        ? { ok: this.traversePrimitive(doc, schemaObj) }
-        : { error: new Error("Invalid type") };
+      if (this.isValidType(schemaObj, "null")) {
+        return { ok: this.traversePrimitive(doc, schemaObj) };
+      }
+      this.objectCreator.recordPathRead?.(doc.address);
+      return { error: new Error("Invalid type") };
     } else if (isString(doc.value)) {
-      return this.isValidType(schemaObj, "string")
-        ? { ok: this.traversePrimitive(doc, schemaObj) }
-        : { error: new Error("Invalid type") };
+      if (this.isValidType(schemaObj, "string")) {
+        return { ok: this.traversePrimitive(doc, schemaObj) };
+      }
+      this.objectCreator.recordPathRead?.(doc.address);
+      return { error: new Error("Invalid type") };
     } else if (isNumber(doc.value)) {
-      return this.isValidType(schemaObj, "number")
-        ? { ok: this.traversePrimitive(doc, schemaObj) }
-        : { error: new Error("Invalid type") };
+      if (this.isValidType(schemaObj, "number")) {
+        return { ok: this.traversePrimitive(doc, schemaObj) };
+      }
+      this.objectCreator.recordPathRead?.(doc.address);
+      return { error: new Error("Invalid type") };
     } else if (isBoolean(doc.value)) {
-      return this.isValidType(schemaObj, "boolean")
-        ? { ok: this.traversePrimitive(doc, schemaObj) }
-        : { error: new Error("Invalid type") };
+      if (this.isValidType(schemaObj, "boolean")) {
+        return { ok: this.traversePrimitive(doc, schemaObj) };
+      }
+      this.objectCreator.recordPathRead?.(doc.address);
+      return { error: new Error("Invalid type") };
     } else if (Array.isArray(doc.value)) {
       const valid = this.isValidType(schemaObj, "array");
       if (valid === TypeValidity.False) {
+        this.objectCreator.recordPathRead?.(doc.address);
         return { error: new Error("Invalid type") };
       }
 
+      // Record a read at the array's length so structural changes (e.g.
+      // push/splice) trigger re-execution.
+      this.objectCreator.recordPathRead?.({
+        ...doc.address,
+        path: [...doc.address.path, "length"],
+      });
       const newValue: Immutable<StorableValue>[] = [];
       // Our link is based on the last link in the chain and not the first.
       const newLink = link ?? getNormalizedLink(
@@ -2188,6 +2215,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
       } else {
         const valid = this.isValidType(schemaObj, "object");
         if (valid === TypeValidity.False) {
+          this.objectCreator.recordPathRead?.(doc.address);
           return { error: new Error("Invalid type") };
         }
         const newValue: Record<string, Immutable<StorableValue>> = {};
@@ -2483,6 +2511,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         // link if available.
         // If we have a value instead of a link, create a link to the element
         // We don't traverse and validate, since this is an asCell boundary.
+        this.objectCreator.recordPathRead?.(curDoc.address);
         const cellLink = isPrimitiveCellLink(curDoc.value)
           ? getNextCellLink(curDoc, curSelector.schema!)
           : getNormalizedLink(curDoc.address, curSelector.schema);
@@ -2584,6 +2613,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
       ) {
         // If we have a value instead of a link, create a link to the value
         // We don't traverse and validate, since this is an asCell boundary.
+        this.objectCreator.recordPathRead?.(propAddress);
         const cellLink = getNormalizedLink(propAddress, propSchema);
         const val = this.objectCreator.createObject(cellLink, undefined);
         filteredObj[propKey] = val;
@@ -2643,6 +2673,19 @@ export class SchemaObjectTraverser<V extends StorableDatum>
       }
     }
 
+    // Record reads for schema-declared properties absent from the data,
+    // so that adding them later triggers re-execution.
+    if (isObject(schema) && schema.properties) {
+      for (const propKey of Object.keys(schema.properties)) {
+        if (propKey in (doc.value as Record<string, unknown>)) continue;
+        if (propKey in filteredObj) continue; // already handled via defaults
+        this.objectCreator.recordPathRead?.({
+          ...doc.address,
+          path: [...doc.address.path, propKey],
+        });
+      }
+    }
+
     // Check that all required fields are present
     if (isObject(schema) && "required" in schema) {
       const required = schema["required"] as string[];
@@ -2658,6 +2701,10 @@ export class SchemaObjectTraverser<V extends StorableDatum>
               "with schema",
               schema,
             ]);
+            this.objectCreator.recordPathRead?.({
+              ...doc.address,
+              path: [...doc.address.path, requiredProperty],
+            });
             return undefined;
           }
         }
@@ -2675,6 +2722,9 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     link?: NormalizedFullLink,
   ): TraverseResult<Immutable<StorableValue>> {
     this.traversePointerCalls++;
+    // Record a read at the pointer location so that when the pointer
+    // target changes, re-execution is triggered.
+    this.objectCreator.recordPathRead?.(doc.address);
     const selector = { path: doc.address.path, schema };
     const [redirDoc, redirSelector] = this.getDocAtPath(
       doc,
@@ -2699,11 +2749,14 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         // If we don't have a schema, we don't allow undefined
         // If we have a schema with asCell, we can't create a cell for this,
         // since we can't follow all the write-redirect links.
+        this.objectCreator.recordPathRead?.(redirDoc.address);
         return { error: new Error("Encountered link to undefined value") };
       } else {
-        return this.isValidType(redirSelector.schema, "undefined")
-          ? { ok: this.traversePrimitive(redirDoc, redirSelector.schema) }
-          : { error: new Error("Encountered link to undefined value") };
+        if (this.isValidType(redirSelector.schema, "undefined")) {
+          return { ok: this.traversePrimitive(redirDoc, redirSelector.schema) };
+        }
+        this.objectCreator.recordPathRead?.(redirDoc.address);
+        return { error: new Error("Encountered link to undefined value") };
       }
     }
     // For the runtime, where we don't traverse cells, we just want
@@ -2723,6 +2776,9 @@ export class SchemaObjectTraverser<V extends StorableDatum>
       // For my cell link, redirDoc currently points to the last redirect
       // target, but we want cell properties to be based on the link value at
       // that location, so we effectively follow one more link if available.
+      // Record a read at the resolved pointer target so changes to the
+      // linked document trigger re-execution.
+      this.objectCreator.recordPathRead?.(redirDoc.address);
       const cellLink = getNextCellLink(redirDoc, combinedSchema);
       logger.debug(
         "traverse",
@@ -2749,6 +2805,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     doc: IMemorySpaceAttestation,
     schema: JSONSchema,
   ): Immutable<StorableValue> {
+    this.objectCreator.recordPathRead?.(doc.address);
     if (SchemaObjectTraverser.asCellOrStream(schema)) {
       return this.objectCreator.createObject(
         getNormalizedLink(doc.address, schema),

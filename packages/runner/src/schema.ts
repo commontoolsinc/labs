@@ -8,7 +8,10 @@ import type { JSONValue } from "@commontools/api";
 import { type StorableDatum } from "@commontools/memory/interface";
 import { createCell, isCell } from "./cell.ts";
 import { readMaybeLink, resolveLink } from "./link-resolution.ts";
-import { type IExtendedStorageTransaction } from "./storage/interface.ts";
+import {
+  type IExtendedStorageTransaction,
+  type IMemorySpaceAddress,
+} from "./storage/interface.ts";
 import { getTransactionForChildCells } from "./storage/extended-storage-transaction.ts";
 import { type Runtime } from "./runtime.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
@@ -17,6 +20,7 @@ import {
   isCellResultForDereferencing,
 } from "./query-result-proxy.ts";
 import { toCell } from "./back-to-cell.ts";
+
 import {
   combineSchema,
   IObjectCreator,
@@ -451,7 +455,10 @@ export function validateAndTransform(
   // Link paths don't include value, but doc address should
   const { space, id, type, path } = ref;
   const address = { space, id, type, path: ["value", ...path] };
-  const doc = { address, value: tx!.readValueOrThrow(ref) };
+  const doc = {
+    address,
+    value: tx!.readValueOrThrow(ref),
+  };
   // If we have a ref with a schema, use that; otherwise, use the link's schema
   const selector = {
     path: doc.address.path,
@@ -482,6 +489,13 @@ class TransformObjectCreator
     private tx: IExtendedStorageTransaction,
     private synced: boolean,
   ) {
+  }
+
+  recordPathRead(address: IMemorySpaceAddress): void {
+    // Normal (scheduling) read at the specific sub-path.
+    // The data is already loaded in the tx, so this is just recording the
+    // dependency.
+    this.tx.read(address);
   }
 
   mergeMatches<T>(
