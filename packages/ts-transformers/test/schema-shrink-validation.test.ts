@@ -3,6 +3,43 @@ import { validateSource } from "./utils.ts";
 import type { TransformationDiagnostic } from "../src/mod.ts";
 import { COMMONTOOLS_TYPES } from "./commontools-test-types.ts";
 
+/**
+ * Extracts JSON schema literals from transformed output.
+ * Schemas appear as `{ type: "object", ... } as const satisfies __ctHelpers.JSONSchema`
+ * Returns them in order of appearance.
+ */
+function extractSchemas(output: string): string[] {
+  const schemas: string[] = [];
+  const marker = "as const satisfies __ctHelpers.JSONSchema";
+  let searchFrom = 0;
+  while (true) {
+    const markerIdx = output.indexOf(marker, searchFrom);
+    if (markerIdx === -1) break;
+    // Walk backwards from marker to find matching opening brace
+    let depth = 0;
+    let start = markerIdx - 1;
+    // Skip whitespace before marker
+    while (start >= 0 && /\s/.test(output[start]!)) start--;
+    // Now we should be at a closing brace or end of object literal
+    if (output[start] !== "}") {
+      searchFrom = markerIdx + marker.length;
+      continue;
+    }
+    depth = 1;
+    start--;
+    while (start >= 0 && depth > 0) {
+      if (output[start] === "}") depth++;
+      else if (output[start] === "{") depth--;
+      start--;
+    }
+    start++; // back to the opening brace
+    const schemaText = output.slice(start, markerIdx).trim();
+    schemas.push(schemaText);
+    searchFrom = markerIdx + marker.length;
+  }
+  return schemas;
+}
+
 function getErrors(diagnostics: readonly TransformationDiagnostic[]) {
   return diagnostics.filter((d) => d.severity === "error");
 }
@@ -442,13 +479,12 @@ Deno.test("Schema Shrink Validation", async (t) => {
   );
 
   // =========================================================================
-  // handler<E, T>(...) type-arg form vs handler((e: E, t: T) => ...) inline
+  // Type-arg form vs inline form: schemas must be identical
   // =========================================================================
 
   await t.step(
-    "handler<E, T> with type args produces same schema as inline param types",
+    "handler<E, T> generates same schemas as handler((e: E, t: T) => ...)",
     async () => {
-      // Type-arg form
       const sourceTypeArgs = [
         "/// <cts-enable />",
         'import { type Cell, handler } from "commontools";',
@@ -457,54 +493,51 @@ Deno.test("Schema Shrink Validation", async (t) => {
         "  (event, ctx) => { ctx.total.set(event.amount); },",
         ");",
       ].join("\n");
-      // Inline form
       const sourceInline = [
         "/// <cts-enable />",
         'import { type Cell, handler } from "commontools";',
         "",
-        "const h = handler(",
+        "export const h = handler(",
         "  (event: { amount: number }, ctx: { total: Cell<number> }) => {",
         "    ctx.total.set(event.amount);",
         "  },",
         ");",
       ].join("\n");
-      const resultTypeArgs = await validateSource(sourceTypeArgs, {
+      const rTA = await validateSource(sourceTypeArgs, {
         types: COMMONTOOLS_TYPES,
       });
-      const resultInline = await validateSource(sourceInline, {
+      const rInline = await validateSource(sourceInline, {
         types: COMMONTOOLS_TYPES,
       });
-      const errorsTA = getErrors(resultTypeArgs.diagnostics).filter(
-        (e) =>
-          e.type === "schema:unknown-type-access" ||
-          e.type === "schema:path-not-in-type",
-      );
-      const errorsInline = getErrors(resultInline.diagnostics).filter(
-        (e) =>
-          e.type === "schema:unknown-type-access" ||
-          e.type === "schema:path-not-in-type",
+      assertEquals(
+        getShrinkErrors(rTA.diagnostics).length,
+        0,
+        `handler<E,T> form had shrink errors: ${fmtErrors(rTA.diagnostics)}`,
       );
       assertEquals(
-        errorsTA.length,
+        getShrinkErrors(rInline.diagnostics).length,
         0,
-        `handler<E,T> form should have no shrink errors but got: ${
-          errorsTA.map((e) => e.message).join("; ")
+        `handler inline form had shrink errors: ${
+          fmtErrors(rInline.diagnostics)
         }`,
       );
+      const schemasTA = extractSchemas(rTA.output);
+      const schemasInline = extractSchemas(rInline.output);
       assertEquals(
-        errorsInline.length,
-        0,
-        `handler inline form should have no shrink errors but got: ${
-          errorsInline.map((e) => e.message).join("; ")
-        }`,
+        schemasTA,
+        schemasInline,
+        "handler schemas should be identical between type-arg and inline forms",
       );
     },
   );
 
   await t.step(
-    "handler<E | undefined, T> with union type arg has no false positives",
+    "handler<E | undefined, T> and inline form both produce valid schemas (KNOWN DIVERGENCE)",
     async () => {
-      const source = [
+      // Known divergence: type-arg form preserves top-level anyOf union,
+      // inline form shrinks to just the object (stripping undefined).
+      // Both produce valid, error-free schemas — just structured differently.
+      const sourceTypeArgs = [
         "/// <cts-enable />",
         'import { type Cell, handler } from "commontools";',
         "",
@@ -512,28 +545,63 @@ Deno.test("Schema Shrink Validation", async (t) => {
         "  (event, ctx) => { ctx.total.set(event?.amount ?? 0); },",
         ");",
       ].join("\n");
-      const { diagnostics } = await validateSource(source, {
+      const sourceInline = [
+        "/// <cts-enable />",
+        'import { type Cell, handler } from "commontools";',
+        "",
+        "export const h = handler(",
+        "  (event: { amount?: number } | undefined, ctx: { total: Cell<number> }) => {",
+        "    ctx.total.set(event?.amount ?? 0);",
+        "  },",
+        ");",
+      ].join("\n");
+      const rTA = await validateSource(sourceTypeArgs, {
         types: COMMONTOOLS_TYPES,
       });
-      const errors = getErrors(diagnostics).filter(
-        (e) =>
-          e.type === "schema:unknown-type-access" ||
-          e.type === "schema:path-not-in-type",
+      const rInline = await validateSource(sourceInline, {
+        types: COMMONTOOLS_TYPES,
+      });
+      assertEquals(
+        getShrinkErrors(rTA.diagnostics).length,
+        0,
+        `handler<E|undefined,T> had shrink errors: ${
+          fmtErrors(rTA.diagnostics)
+        }`,
       );
       assertEquals(
-        errors.length,
+        getShrinkErrors(rInline.diagnostics).length,
         0,
-        `Expected no shrink errors for handler<E | undefined, T> but got: ${
-          errors.map((e) => e.message).join("; ")
+        `handler inline union form had shrink errors: ${
+          fmtErrors(rInline.diagnostics)
         }`,
+      );
+      // Both generate schemas (state schema should match at minimum)
+      const schemasTA = extractSchemas(rTA.output);
+      const schemasInline = extractSchemas(rInline.output);
+      assertGreater(
+        schemasTA.length,
+        0,
+        "type-arg form should produce schemas",
+      );
+      assertGreater(
+        schemasInline.length,
+        0,
+        "inline form should produce schemas",
+      );
+      // State schemas (second schema) should match
+      assertEquals(
+        schemasTA[1],
+        schemasInline[1],
+        "handler state schemas should be identical between type-arg and inline forms",
       );
     },
   );
 
   await t.step(
-    "handler<E, T> with type alias args has no false positives",
+    "handler<TypeAlias | undefined, TypeAlias> and inline form both produce valid schemas (KNOWN DIVERGENCE)",
     async () => {
-      const source = [
+      // Same divergence as above: union handling differs between type-arg and inline paths.
+      const sourceTypeArgs = [
         "/// <cts-enable />",
         'import { type Cell, handler } from "commontools";',
         "",
@@ -544,32 +612,62 @@ Deno.test("Schema Shrink Validation", async (t) => {
         "  (event, ctx) => { ctx.desiredServings.set(event?.servings ?? 1); },",
         ");",
       ].join("\n");
-      const { diagnostics } = await validateSource(source, {
+      const sourceInline = [
+        "/// <cts-enable />",
+        'import { type Cell, handler } from "commontools";',
+        "",
+        "interface ScaleEvent { servings?: number; delta?: number }",
+        "interface ScaleState { desiredServings: Cell<number> }",
+        "",
+        "export const h = handler(",
+        "  (event: ScaleEvent | undefined, ctx: ScaleState) => {",
+        "    ctx.desiredServings.set(event?.servings ?? 1);",
+        "  },",
+        ");",
+      ].join("\n");
+      const rTA = await validateSource(sourceTypeArgs, {
         types: COMMONTOOLS_TYPES,
       });
-      const errors = getErrors(diagnostics).filter(
-        (e) =>
-          e.type === "schema:unknown-type-access" ||
-          e.type === "schema:path-not-in-type",
+      const rInline = await validateSource(sourceInline, {
+        types: COMMONTOOLS_TYPES,
+      });
+      assertEquals(
+        getShrinkErrors(rTA.diagnostics).length,
+        0,
+        `handler<TypeAlias> had shrink errors: ${fmtErrors(rTA.diagnostics)}`,
       );
       assertEquals(
-        errors.length,
+        getShrinkErrors(rInline.diagnostics).length,
         0,
-        `Expected no shrink errors for handler<TypeAlias | undefined, TypeAlias> but got: ${
-          errors.map((e) => e.message).join("; ")
+        `handler inline alias form had shrink errors: ${
+          fmtErrors(rInline.diagnostics)
         }`,
+      );
+      const schemasTA = extractSchemas(rTA.output);
+      const schemasInline = extractSchemas(rInline.output);
+      assertGreater(
+        schemasTA.length,
+        0,
+        "type-arg form should produce schemas",
+      );
+      assertGreater(
+        schemasInline.length,
+        0,
+        "inline form should produce schemas",
+      );
+      // State schemas (second schema) should match
+      assertEquals(
+        schemasTA[1],
+        schemasInline[1],
+        "handler state schemas should be identical between type-arg and inline forms",
       );
     },
   );
 
-  // =========================================================================
-  // lift<T, R>(...) type-arg form vs lift((x: T) => R) inline
-  // =========================================================================
-
   await t.step(
-    "lift<T, R> with type args produces no shrink errors",
+    "lift<T, R> generates same schemas as lift((x: T): R => ...)",
     async () => {
-      const source = [
+      const sourceTypeArgs = [
         "/// <cts-enable />",
         'import { lift } from "commontools";',
         "",
@@ -577,28 +675,46 @@ Deno.test("Schema Shrink Validation", async (t) => {
         "  (state) => `count: ${state.count}`,",
         ");",
       ].join("\n");
-      const { diagnostics } = await validateSource(source, {
+      const sourceInline = [
+        "/// <cts-enable />",
+        'import { lift } from "commontools";',
+        "",
+        "const fn = lift(",
+        "  (state: { count: number }): string => `count: ${state.count}`,",
+        ");",
+      ].join("\n");
+      const rTA = await validateSource(sourceTypeArgs, {
         types: COMMONTOOLS_TYPES,
       });
-      const errors = getErrors(diagnostics).filter(
-        (e) =>
-          e.type === "schema:unknown-type-access" ||
-          e.type === "schema:path-not-in-type",
+      const rInline = await validateSource(sourceInline, {
+        types: COMMONTOOLS_TYPES,
+      });
+      assertEquals(
+        getShrinkErrors(rTA.diagnostics).length,
+        0,
+        `lift<T,R> had shrink errors: ${fmtErrors(rTA.diagnostics)}`,
       );
       assertEquals(
-        errors.length,
+        getShrinkErrors(rInline.diagnostics).length,
         0,
-        `Expected no shrink errors for lift<T, R> but got: ${
-          errors.map((e) => e.message).join("; ")
-        }`,
+        `lift inline had shrink errors: ${fmtErrors(rInline.diagnostics)}`,
+      );
+      const schemasTA = extractSchemas(rTA.output);
+      const schemasInline = extractSchemas(rInline.output);
+      assertEquals(
+        schemasTA,
+        schemasInline,
+        "lift schemas should be identical between type-arg and inline forms",
       );
     },
   );
 
   await t.step(
-    "lift<T | undefined, R> with union type arg has no false positives",
+    "lift<T | undefined, R> and inline form both produce valid schemas (KNOWN DIVERGENCE)",
     async () => {
-      const source = [
+      // Known divergence: type-arg form preserves top-level anyOf union,
+      // inline form shrinks to just the object (stripping undefined).
+      const sourceTypeArgs = [
         "/// <cts-enable />",
         'import { lift } from "commontools";',
         "",
@@ -606,28 +722,57 @@ Deno.test("Schema Shrink Validation", async (t) => {
         "  (state) => state?.count ?? 0,",
         ");",
       ].join("\n");
-      const { diagnostics } = await validateSource(source, {
+      const sourceInline = [
+        "/// <cts-enable />",
+        'import { lift } from "commontools";',
+        "",
+        "const fn = lift(",
+        "  (state: { count: number } | undefined): number => state?.count ?? 0,",
+        ");",
+      ].join("\n");
+      const rTA = await validateSource(sourceTypeArgs, {
         types: COMMONTOOLS_TYPES,
       });
-      const errors = getErrors(diagnostics).filter(
-        (e) =>
-          e.type === "schema:unknown-type-access" ||
-          e.type === "schema:path-not-in-type",
+      const rInline = await validateSource(sourceInline, {
+        types: COMMONTOOLS_TYPES,
+      });
+      assertEquals(
+        getShrinkErrors(rTA.diagnostics).length,
+        0,
+        `lift<T|undefined,R> had shrink errors: ${fmtErrors(rTA.diagnostics)}`,
       );
       assertEquals(
-        errors.length,
+        getShrinkErrors(rInline.diagnostics).length,
         0,
-        `Expected no shrink errors for lift<T | undefined, R> but got: ${
-          errors.map((e) => e.message).join("; ")
+        `lift inline union had shrink errors: ${
+          fmtErrors(rInline.diagnostics)
         }`,
+      );
+      const schemasTA = extractSchemas(rTA.output);
+      const schemasInline = extractSchemas(rInline.output);
+      assertGreater(
+        schemasTA.length,
+        0,
+        "type-arg form should produce schemas",
+      );
+      assertGreater(
+        schemasInline.length,
+        0,
+        "inline form should produce schemas",
+      );
+      // Result schemas (second schema) should match
+      assertEquals(
+        schemasTA[1],
+        schemasInline[1],
+        "lift result schemas should be identical between type-arg and inline forms",
       );
     },
   );
 
   await t.step(
-    "lift<T, R> with type alias arg has no false positives",
+    "lift<TypeAlias, R> generates same schemas as lift with inline alias",
     async () => {
-      const source = [
+      const sourceTypeArgs = [
         "/// <cts-enable />",
         'import { lift } from "commontools";',
         "",
@@ -637,32 +782,51 @@ Deno.test("Schema Shrink Validation", async (t) => {
         "  (item) => `${item.name}: $${item.price}`,",
         ");",
       ].join("\n");
-      const { diagnostics } = await validateSource(source, {
+      const sourceInline = [
+        "/// <cts-enable />",
+        'import { lift } from "commontools";',
+        "",
+        "interface Item { name: string; price: number }",
+        "",
+        "const fn = lift(",
+        "  (item: Item): string => `${item.name}: $${item.price}`,",
+        ");",
+      ].join("\n");
+      const rTA = await validateSource(sourceTypeArgs, {
         types: COMMONTOOLS_TYPES,
       });
-      const errors = getErrors(diagnostics).filter(
-        (e) =>
-          e.type === "schema:unknown-type-access" ||
-          e.type === "schema:path-not-in-type",
+      const rInline = await validateSource(sourceInline, {
+        types: COMMONTOOLS_TYPES,
+      });
+      assertEquals(
+        getShrinkErrors(rTA.diagnostics).length,
+        0,
+        `lift<TypeAlias> had shrink errors: ${fmtErrors(rTA.diagnostics)}`,
       );
       assertEquals(
-        errors.length,
+        getShrinkErrors(rInline.diagnostics).length,
         0,
-        `Expected no shrink errors for lift<TypeAlias, R> but got: ${
-          errors.map((e) => e.message).join("; ")
+        `lift inline alias had shrink errors: ${
+          fmtErrors(rInline.diagnostics)
         }`,
+      );
+      const schemasTA = extractSchemas(rTA.output);
+      const schemasInline = extractSchemas(rInline.output);
+      assertEquals(
+        schemasTA,
+        schemasInline,
+        "lift type-alias schemas should be identical between type-arg and inline forms",
       );
     },
   );
 
-  // =========================================================================
-  // pattern<T>(...) type-arg form
-  // =========================================================================
-
   await t.step(
-    "pattern<T> with type arg produces no shrink errors",
+    "pattern<T> and inline form both produce valid schemas (KNOWN DIVERGENCE)",
     async () => {
-      const source = [
+      // Known divergence: pattern<T> produces both argument and result schemas
+      // (result schema has asOpaque on each property), while inline form produces
+      // only the argument schema. This needs more changes to reconcile.
+      const sourceTypeArgs = [
         "/// <cts-enable />",
         'import { pattern } from "commontools";',
         "",
@@ -670,28 +834,56 @@ Deno.test("Schema Shrink Validation", async (t) => {
         "  return { name, count };",
         "});",
       ].join("\n");
-      const { diagnostics } = await validateSource(source, {
+      const sourceInline = [
+        "/// <cts-enable />",
+        'import { pattern } from "commontools";',
+        "",
+        "export default pattern(({ name, count }: { name: string; count: number }) => {",
+        "  return { name, count };",
+        "});",
+      ].join("\n");
+      const rTA = await validateSource(sourceTypeArgs, {
         types: COMMONTOOLS_TYPES,
       });
-      const errors = getErrors(diagnostics).filter(
-        (e) =>
-          e.type === "schema:unknown-type-access" ||
-          e.type === "schema:path-not-in-type",
+      const rInline = await validateSource(sourceInline, {
+        types: COMMONTOOLS_TYPES,
+      });
+      assertEquals(
+        getShrinkErrors(rTA.diagnostics).length,
+        0,
+        `pattern<T> had shrink errors: ${fmtErrors(rTA.diagnostics)}`,
       );
       assertEquals(
-        errors.length,
+        getShrinkErrors(rInline.diagnostics).length,
         0,
-        `Expected no shrink errors for pattern<T> but got: ${
-          errors.map((e) => e.message).join("; ")
-        }`,
+        `pattern inline had shrink errors: ${fmtErrors(rInline.diagnostics)}`,
+      );
+      const schemasTA = extractSchemas(rTA.output);
+      const schemasInline = extractSchemas(rInline.output);
+      assertGreater(
+        schemasTA.length,
+        0,
+        "type-arg form should produce schemas",
+      );
+      assertGreater(
+        schemasInline.length,
+        0,
+        "inline form should produce schemas",
+      );
+      // Argument schemas (first schema) should match
+      assertEquals(
+        schemasTA[0],
+        schemasInline[0],
+        "pattern argument schemas should be identical between type-arg and inline forms",
       );
     },
   );
 
   await t.step(
-    "pattern<T> with type alias arg produces no shrink errors",
+    "pattern<TypeAlias> and inline form both produce valid schemas (KNOWN DIVERGENCE)",
     async () => {
-      const source = [
+      // Same divergence as above.
+      const sourceTypeArgs = [
         "/// <cts-enable />",
         'import { pattern } from "commontools";',
         "",
@@ -701,21 +893,67 @@ Deno.test("Schema Shrink Validation", async (t) => {
         "  return { name, count };",
         "});",
       ].join("\n");
-      const { diagnostics } = await validateSource(source, {
+      const sourceInline = [
+        "/// <cts-enable />",
+        'import { pattern } from "commontools";',
+        "",
+        "interface Args { name: string; count: number }",
+        "",
+        "export default pattern(({ name, count }: Args) => {",
+        "  return { name, count };",
+        "});",
+      ].join("\n");
+      const rTA = await validateSource(sourceTypeArgs, {
         types: COMMONTOOLS_TYPES,
       });
-      const errors = getErrors(diagnostics).filter(
-        (e) =>
-          e.type === "schema:unknown-type-access" ||
-          e.type === "schema:path-not-in-type",
+      const rInline = await validateSource(sourceInline, {
+        types: COMMONTOOLS_TYPES,
+      });
+      assertEquals(
+        getShrinkErrors(rTA.diagnostics).length,
+        0,
+        `pattern<TypeAlias> had shrink errors: ${fmtErrors(rTA.diagnostics)}`,
       );
       assertEquals(
-        errors.length,
+        getShrinkErrors(rInline.diagnostics).length,
         0,
-        `Expected no shrink errors for pattern<TypeAlias> but got: ${
-          errors.map((e) => e.message).join("; ")
+        `pattern inline alias had shrink errors: ${
+          fmtErrors(rInline.diagnostics)
         }`,
+      );
+      const schemasTA = extractSchemas(rTA.output);
+      const schemasInline = extractSchemas(rInline.output);
+      assertGreater(
+        schemasTA.length,
+        0,
+        "type-arg form should produce schemas",
+      );
+      assertGreater(
+        schemasInline.length,
+        0,
+        "inline form should produce schemas",
+      );
+      // Argument schemas (first schema) should match
+      assertEquals(
+        schemasTA[0],
+        schemasInline[0],
+        "pattern argument schemas should be identical between type-arg and inline forms",
       );
     },
   );
 });
+
+function getShrinkErrors(
+  diagnostics: readonly TransformationDiagnostic[],
+): TransformationDiagnostic[] {
+  return diagnostics.filter(
+    (d) =>
+      d.severity === "error" &&
+      (d.type === "schema:unknown-type-access" ||
+        d.type === "schema:path-not-in-type"),
+  );
+}
+
+function fmtErrors(diagnostics: readonly TransformationDiagnostic[]): string {
+  return getShrinkErrors(diagnostics).map((e) => e.message).join("; ");
+}
