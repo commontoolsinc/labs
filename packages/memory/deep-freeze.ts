@@ -10,10 +10,11 @@
  * Handles sparse arrays correctly (only visits populated indices).
  */
 /**
- * WeakMap cache of deep-frozen check results. Once an object is confirmed
- * deep-frozen, subsequent checks return `true` immediately.
+ * WeakMap cache of confirmed deep-frozen objects. Only `true` results are
+ * cached -- `false` is never stored, because a currently-unfrozen object
+ * may be frozen later and must not be permanently marked as non-frozen.
  */
-const deepFrozenCache = new WeakMap<object, boolean>();
+const deepFrozenCache = new WeakMap<object, true>();
 
 /**
  * Returns `true` if the value is deeply frozen: either a primitive, or a
@@ -33,11 +34,9 @@ export function isDeepFrozen(value: unknown): boolean {
  * Internal recursive deep-frozen check with cycle detection.
  */
 function isDeepFrozenObject(obj: object, inProgress: Set<object>): boolean {
-  const cached = deepFrozenCache.get(obj);
-  if (cached !== undefined) return cached;
+  if (deepFrozenCache.has(obj)) return true;
 
   if (!Object.isFrozen(obj)) {
-    deepFrozenCache.set(obj, false);
     return false;
   }
 
@@ -72,7 +71,9 @@ function isDeepFrozenObject(obj: object, inProgress: Set<object>): boolean {
   }
 
   inProgress.delete(obj);
-  deepFrozenCache.set(obj, result);
+  if (result) {
+    deepFrozenCache.set(obj, true);
+  }
   return result;
 }
 

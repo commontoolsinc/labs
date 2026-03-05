@@ -131,3 +131,12 @@ Deno.test("isDeepFrozen: repeated calls return same result (cache hit)", () => {
   assertEquals(isDeepFrozen(obj), true); // should hit cache
   assertEquals(isDeepFrozen(obj), true); // should hit cache again
 });
+
+Deno.test("isDeepFrozen: returns true after object is frozen (no stale negative cache)", () => {
+  // Regression test: isDeepFrozen must not cache `false` results, because
+  // an object that is unfrozen now may be deep-frozen later.
+  const obj = { a: 1, b: { c: 2 } };
+  assertEquals(isDeepFrozen(obj), false); // unfrozen
+  deepFreeze(obj);
+  assertEquals(isDeepFrozen(obj), true); // now frozen -- must not return stale false
+});
