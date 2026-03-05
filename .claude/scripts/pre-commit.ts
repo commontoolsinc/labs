@@ -24,6 +24,10 @@ try {
   Deno.exit(0);
 }
 
+if (!/\bgit\s+commit\b/.test(cmd) || /--no-verify/.test(cmd)) {
+  Deno.exit(0);
+}
+
 // Resolve the repo root so all paths are consistent, even when CWD is a
 // subdirectory (e.g. packages/runner/).  Without this, git returns paths
 // relative to the repo root while deno resolves them relative to CWD,
@@ -38,10 +42,6 @@ const repoRoot = new TextDecoder()
   )
   .trim();
 if (!repoRoot) Deno.exit(0);
-
-if (!/\bgit\s+commit\b/.test(cmd) || /--no-verify/.test(cmd)) {
-  Deno.exit(0);
-}
 
 // --- Determine which files will be committed ---
 
@@ -71,11 +71,11 @@ async function getFilesToCommit(): Promise<string[]> {
   // Add any files from a `git add <paths>` in this command (not yet staged).
   // Paths are relative to the effective CWD — which may differ from the hook's
   // CWD if the command contains a `cd`.  Resolve them to repo-root-relative.
-  const addMatch = cmd.match(/\bgit\s+add\s+(.+?)(?:\s*&&|$)/);
+  // Only search the portion before `git commit` to avoid false-matching
+  // content inside commit messages.
+  const preCommit = cmd.split(/\bgit\s+commit\b/)[0] ?? "";
+  const addMatch = preCommit.match(/\bgit\s+add\s+(.+?)(?:\s*&&|$)/);
   if (addMatch) {
-    // Only look for `cd` before the git commit portion — not inside the
-    // commit message where words like "cd in" could false-match.
-    const preCommit = cmd.split(/\bgit\s+commit\b/)[0] ?? "";
     const cdMatch = preCommit.match(/\bcd\s+(\S+)/);
     let effectiveCwd = Deno.cwd();
     if (cdMatch) {
