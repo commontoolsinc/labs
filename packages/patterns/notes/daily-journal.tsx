@@ -23,10 +23,14 @@ import { type MentionablePiece, type NotePiece } from "./schemas.tsx";
 
 // ===== Pure utility functions =====
 
-const getTodayDate = (): string => {
-  const now = new Date();
-  return now.toISOString().split("T")[0];
+const toLocalISODate = (d: Date): string => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 };
+
+const getTodayDate = (): string => toLocalISODate(new Date());
 
 const DEFAULT_TEMPLATE = `# {{date}} - {{dayOfWeek}}
 
@@ -241,7 +245,7 @@ export default pattern<DailyJournalInput, DailyJournalOutput>(
       const today = new Date();
       const sevenDaysAgo = new Date(today);
       sevenDaysAgo.setDate(today.getDate() - 7);
-      const cutoff = sevenDaysAgo.toISOString().split("T")[0];
+      const cutoff = toLocalISODate(sevenDaysAgo);
 
       const recent: string[] = [];
       for (const entry of entries.get()) {
