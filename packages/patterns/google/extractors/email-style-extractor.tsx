@@ -140,13 +140,6 @@ const triggerReanalyze = handler<
   reanalyzeFlag.set(Date.now());
 });
 
-const updateWorkEmail = handler<
-  { target: { value: string } },
-  { workEmail: Writable<string> }
->(({ target }, { workEmail }) => {
-  workEmail.set(target.value);
-});
-
 // =============================================================================
 // PATTERN
 // =============================================================================
@@ -314,451 +307,117 @@ Write as if the user wrote it themselves, matching their natural voice.`;
           <div slot="header">
             <ct-heading level={3}>Email Style Extractor</ct-heading>
           </div>
-
           <ct-vscroll flex showScrollbar>
             <ct-vstack padding="6" gap="4">
-              {/* Auth */}
               {authUI}
-
-              {/* Work email input */}
               {ifElse(
                 isReady,
                 <div
                   style={{
-                    padding: "12px 16px",
-                    backgroundColor: "#f9fafb",
-                    borderRadius: "8px",
-                    border: "1px solid #e5e7eb",
+                    padding: "8px",
+                    backgroundColor: "#d1fae5",
+                    borderRadius: "6px",
                   }}
                 >
-                  <label
-                    style={{
-                      display: "block",
-                      fontSize: "13px",
-                      fontWeight: "600",
-                      color: "#374151",
-                      marginBottom: "6px",
-                    }}
-                  >
-                    Work email to exclude (optional)
-                  </label>
-                  <input
-                    type="email"
-                    value={workEmail}
-                    onChange={updateWorkEmail({ workEmail })}
-                    placeholder="you@company.com"
-                    style={{
-                      width: "100%",
-                      padding: "8px 12px",
-                      borderRadius: "6px",
-                      border: "1px solid #d1d5db",
-                      fontSize: "13px",
-                    }}
-                  />
-                  <div
-                    style={{
-                      fontSize: "11px",
-                      color: "#9ca3af",
-                      marginTop: "4px",
-                    }}
-                  >
-                    Exclude work emails to focus on personal writing style
-                  </div>
+                  Auth ready. Emails: {derive(extractor.emailCount, (c) =>
+                    c > 0 ? `${c} fetched` : "Fetching...")}
                 </div>,
-                null,
-              )}
-
-              {/* Analysis status */}
-              {ifElse(
-                isReady,
                 <div
                   style={{
-                    padding: "12px 16px",
-                    backgroundColor: "#f9fafb",
-                    borderRadius: "8px",
-                    border: "1px solid #e5e7eb",
+                    padding: "8px",
+                    backgroundColor: "#fecaca",
+                    borderRadius: "6px",
                   }}
                 >
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "8px",
-                      marginBottom: "8px",
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontSize: "13px",
-                        color: "#6b7280",
-                      }}
-                    >
-                      {derive(extractor.emailCount, (c) =>
-                        c > 0
-                          ? `${c} sent emails fetched`
-                          : "Fetching sent emails...")}
-                    </span>
-                    <span
-                      style={{
-                        fontSize: "13px",
-                        color: "#6b7280",
-                        marginLeft: "auto",
-                      }}
-                    >
-                      {ifElse(
-                        isAnalyzing,
-                        <span style={{ color: "#6366f1" }}>
-                          Analyzing style...
-                        </span>,
-                        derive(analyzedAt, (ts) =>
-                          ts
-                            ? `Last analyzed: ${new Date(ts).toLocaleString()}`
-                            : ""),
-                      )}
-                    </span>
-                  </div>
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: "8px",
-                    }}
-                  >
-                    <button
-                      type="button"
-                      onClick={extractor.refresh}
-                      style={{
-                        padding: "6px 12px",
-                        backgroundColor: "#10b981",
-                        color: "white",
-                        border: "none",
-                        borderRadius: "6px",
-                        cursor: "pointer",
-                        fontSize: "13px",
-                        fontWeight: "500",
-                      }}
-                    >
-                      Refresh Emails
-                    </button>
-                    <button
-                      type="button"
-                      onClick={triggerReanalyze({ reanalyzeFlag })}
-                      style={{
-                        padding: "6px 12px",
-                        backgroundColor: "#6366f1",
-                        color: "white",
-                        border: "none",
-                        borderRadius: "6px",
-                        cursor: "pointer",
-                        fontSize: "13px",
-                        fontWeight: "500",
-                      }}
-                    >
-                      Re-analyze Style
-                    </button>
-                  </div>
+                  Waiting for Google auth...
                 </div>,
-                null,
               )}
-
-              {/* Not enough emails warning */}
               {ifElse(
-                derive(
-                  { count: extractor.emailCount, ready: isReady },
-                  ({ count, ready }) =>
-                    ready && count > 0 && count < 5,
-                ),
+                isAnalyzing,
                 <div
                   style={{
-                    padding: "12px 16px",
-                    backgroundColor: "#fef3c7",
-                    borderRadius: "8px",
-                    border: "1px solid #f59e0b",
-                    fontSize: "13px",
-                    color: "#b45309",
+                    padding: "8px",
+                    backgroundColor: "#e0e7ff",
+                    borderRadius: "6px",
                   }}
                 >
-                  Need at least 5 sent emails for style analysis. Found{" "}
-                  {extractor.emailCount}.
+                  Analyzing style...
                 </div>,
-                null,
+                <div />,
               )}
-
-              {/* Extracted style card */}
               {ifElse(
                 hasStyle,
                 <div
                   style={{
-                    padding: "16px",
-                    backgroundColor: "#ffffff",
-                    borderRadius: "8px",
+                    padding: "12px",
+                    backgroundColor: "#fff",
                     border: "1px solid #e5e7eb",
+                    borderRadius: "8px",
                   }}
                 >
-                  <div
-                    style={{
-                      fontWeight: "600",
-                      fontSize: "15px",
-                      color: "#111827",
-                      marginBottom: "12px",
-                    }}
-                  >
+                  <div style={{ fontWeight: "600", marginBottom: "8px" }}>
                     Your Writing Style
                   </div>
-
-                  {/* Summary */}
-                  <div
-                    style={{
-                      padding: "10px 14px",
-                      backgroundColor: "#eff6ff",
-                      borderRadius: "6px",
-                      fontSize: "13px",
-                      color: "#1d4ed8",
-                      marginBottom: "12px",
-                      lineHeight: "1.5",
-                    }}
-                  >
+                  <div style={{ marginBottom: "6px" }}>
                     {derive(style, (s) =>
                       s?.summary || "")}
                   </div>
-
-                  {/* Style details grid */}
+                  <div style={{ fontSize: "12px", color: "#6b7280" }}>
+                    Tone: {derive(style, (s) =>
+                      s?.overallTone || "")} | Formality: {derive(style, (s) =>
+                        s?.formalityLevel || "")}
+                  </div>
                   <div
                     style={{
-                      display: "grid",
-                      gridTemplateColumns: "1fr 1fr",
-                      gap: "10px",
-                    }}
-                  >
-                    {/* Tone */}
-                    <div style={{ fontSize: "12px" }}>
-                      <div
-                        style={{
-                          fontWeight: "600",
-                          color: "#6b7280",
-                          marginBottom: "2px",
-                        }}
-                      >
-                        Tone
-                      </div>
-                      <div style={{ color: "#111827" }}>
-                        {derive(style, (s) =>
-                          s?.overallTone || "")}
-                      </div>
-                    </div>
-
-                    {/* Formality */}
-                    <div style={{ fontSize: "12px" }}>
-                      <div
-                        style={{
-                          fontWeight: "600",
-                          color: "#6b7280",
-                          marginBottom: "2px",
-                        }}
-                      >
-                        Formality
-                      </div>
-                      <div style={{ color: "#111827" }}>
-                        {derive(style, (s) =>
-                          s?.formalityLevel || "")}
-                      </div>
-                    </div>
-
-                    {/* Sentence style */}
-                    <div style={{ fontSize: "12px" }}>
-                      <div
-                        style={{
-                          fontWeight: "600",
-                          color: "#6b7280",
-                          marginBottom: "2px",
-                        }}
-                      >
-                        Sentence Style
-                      </div>
-                      <div style={{ color: "#111827" }}>
-                        {derive(style, (s) =>
-                          s?.sentenceStyle || "")}
-                      </div>
-                    </div>
-
-                    {/* Punctuation */}
-                    <div style={{ fontSize: "12px" }}>
-                      <div
-                        style={{
-                          fontWeight: "600",
-                          color: "#6b7280",
-                          marginBottom: "2px",
-                        }}
-                      >
-                        Punctuation
-                      </div>
-                      <div style={{ color: "#111827" }}>
-                        {derive(style, (s) => s?.punctuationHabits || "")}
-                      </div>
-                    </div>
-
-                    {/* Vocabulary */}
-                    <div style={{ fontSize: "12px" }}>
-                      <div
-                        style={{
-                          fontWeight: "600",
-                          color: "#6b7280",
-                          marginBottom: "2px",
-                        }}
-                      >
-                        Vocabulary
-                      </div>
-                      <div style={{ color: "#111827" }}>
-                        {derive(style, (s) => s?.vocabularyNotes || "")}
-                      </div>
-                    </div>
-
-                    {/* Signature */}
-                    <div style={{ fontSize: "12px" }}>
-                      <div
-                        style={{
-                          fontWeight: "600",
-                          color: "#6b7280",
-                          marginBottom: "2px",
-                        }}
-                      >
-                        Signature
-                      </div>
-                      <div style={{ color: "#111827" }}>
-                        {derive(
-                          savedStyle,
-                          (s: EmailStyle | null) =>
-                            s?.signatureBlock || "(none)",
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Greetings & Closings */}
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "1fr 1fr",
-                      gap: "10px",
-                      marginTop: "12px",
-                    }}
-                  >
-                    <div style={{ fontSize: "12px" }}>
-                      <div
-                        style={{
-                          fontWeight: "600",
-                          color: "#6b7280",
-                          marginBottom: "4px",
-                        }}
-                      >
-                        Greetings
-                      </div>
-                      {derive(style, (s) =>
-                        (s?.greetingPatterns || []).map((g, i) => (
-                          <span
-                            key={i}
-                            style={{
-                              display: "inline-block",
-                              padding: "2px 8px",
-                              backgroundColor: "#dbeafe",
-                              color: "#1d4ed8",
-                              borderRadius: "12px",
-                              fontSize: "11px",
-                              marginRight: "4px",
-                              marginBottom: "4px",
-                            }}
-                          >
-                            {g}
-                          </span>
-                        )))}
-                    </div>
-                    <div style={{ fontSize: "12px" }}>
-                      <div
-                        style={{
-                          fontWeight: "600",
-                          color: "#6b7280",
-                          marginBottom: "4px",
-                        }}
-                      >
-                        Closings
-                      </div>
-                      {derive(style, (s) =>
-                        (s?.closingPatterns || []).map((c, i) => (
-                          <span
-                            key={i}
-                            style={{
-                              display: "inline-block",
-                              padding: "2px 8px",
-                              backgroundColor: "#d1fae5",
-                              color: "#059669",
-                              borderRadius: "12px",
-                              fontSize: "11px",
-                              marginRight: "4px",
-                              marginBottom: "4px",
-                            }}
-                          >
-                            {c}
-                          </span>
-                        )))}
-                    </div>
-                  </div>
-
-                  {/* Example phrases */}
-                  <div style={{ marginTop: "12px" }}>
-                    <div
-                      style={{
-                        fontWeight: "600",
-                        color: "#6b7280",
-                        fontSize: "12px",
-                        marginBottom: "4px",
-                      }}
-                    >
-                      Example Phrases
-                    </div>
-                    {derive(style, (s) =>
-                      (s?.examplePhrases || []).map((phrase, i) => (
-                        <div
-                          key={i}
-                          style={{
-                            padding: "6px 10px",
-                            backgroundColor: "#f3f4f6",
-                            borderRadius: "4px",
-                            fontSize: "12px",
-                            color: "#374151",
-                            marginBottom: "4px",
-                            fontStyle: "italic",
-                          }}
-                        >
-                          "{phrase}"
-                        </div>
-                      )))}
-                  </div>
-
-                  {/* Metadata */}
-                  <div
-                    style={{
-                      marginTop: "12px",
-                      paddingTop: "10px",
-                      borderTop: "1px solid #e5e7eb",
                       fontSize: "11px",
                       color: "#9ca3af",
-                      display: "flex",
-                      gap: "16px",
+                      marginTop: "8px",
                     }}
                   >
-                    <span>
-                      {derive(
-                        analyzedCount,
-                        (c) =>
-                          `${c} emails analyzed`,
-                      )}
-                    </span>
-                    <span>
-                      {derive(analyzedAt, (ts) =>
-                        ts ? `Last: ${new Date(ts).toLocaleString()}` : "")}
-                    </span>
+                    {derive(analyzedCount, (c) => `${c} emails analyzed`)}{" "}
+                    {derive(analyzedAt, (ts) =>
+                      ts ? `| Last: ${new Date(ts).toLocaleString()}` : "")}
                   </div>
                 </div>,
-                null,
+                <div style={{ padding: "8px", color: "#6b7280" }}>
+                  No style extracted yet
+                </div>,
+              )}
+              {ifElse(
+                isReady,
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <button
+                    type="button"
+                    onClick={extractor.refresh}
+                    style={{
+                      padding: "6px 12px",
+                      backgroundColor: "#10b981",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "6px",
+                      cursor: "pointer",
+                      fontSize: "13px",
+                    }}
+                  >
+                    Refresh Emails
+                  </button>
+                  <button
+                    type="button"
+                    onClick={triggerReanalyze({ reanalyzeFlag })}
+                    style={{
+                      padding: "6px 12px",
+                      backgroundColor: "#6366f1",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "6px",
+                      cursor: "pointer",
+                      fontSize: "13px",
+                    }}
+                  >
+                    Re-analyze
+                  </button>
+                </div>,
+                <div />,
               )}
             </ct-vstack>
           </ct-vscroll>
