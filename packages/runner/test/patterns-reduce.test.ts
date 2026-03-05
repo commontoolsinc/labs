@@ -207,16 +207,14 @@ describe("Pattern Runner - Reduce", () => {
     expect((value as any).total).toBe(9); // 1 + 3 + 5
   });
 
-  it("should chain with map", async () => {
+  it("should chain map then reduce", async () => {
     const double = lift((x: number) => x * 2);
 
     const sumDoubledPattern = pattern<{ values: number[] }>(
       ({ values }) => {
-        const doubled = values.map((x) => double(x));
-        const total = doubled.reduce(
-          (acc: number, x: number) => acc + x,
-          0,
-        );
+        const total = values
+          .map((x) => double(x))
+          .reduce((acc: number, x: number) => acc + x, 0);
         return { total };
       },
     );
@@ -237,6 +235,6 @@ describe("Pattern Runner - Reduce", () => {
     tx.commit();
 
     const value = await result.pull();
-    expect((value as any).total).toBe(12); // (1+2+3)*2
+    expect((value as any).total).toBe(12); // 1*2 + 2*2 + 3*2
   });
 });
