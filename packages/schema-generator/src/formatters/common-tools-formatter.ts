@@ -744,10 +744,7 @@ export class CommonToolsFormatter implements TypeFormatter {
     if (typeof schema === "boolean") {
       return schema;
     }
-    (schema as Record<string, unknown>).ifc = {
-      classification: [classification],
-    };
-    return schema;
+    return { ...schema, ifc: { classification: [classification] } };
   }
 
   private extractDefaultValueFromNode(

@@ -273,7 +273,7 @@ export default pattern<Input, Output>(
     // Precompute table rows as plain data (avoid nested JSX .map() in computed)
     const tableRows = computed(() => {
       const recs = records.get();
-      const hdrs = columnHeaders;
+      const hdrs = columnHeaders as string[];
       return recs.map((rec) => ({
         cells: hdrs.map((col) => formatCellValue(rec.fields[col])),
       }));

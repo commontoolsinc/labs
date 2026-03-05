@@ -177,7 +177,7 @@ export function createAuthManager<T, R>(
       });
 
       const tokenExpiryWarning = computed((): TokenExpiryWarning => {
-        const tr = tokenTimeRemaining as number | null;
+        const tr = tokenTimeRemaining;
         if (tr === null) return "ok";
         if (tr < 0) return "expired";
         if (tr < TOKEN_EXPIRY_THRESHOLD_MS) return "warning";
@@ -185,7 +185,7 @@ export function createAuthManager<T, R>(
       });
 
       const tokenExpiryDisplay = computed(() =>
-        formatTimeRemaining(tokenTimeRemaining as number | null)
+        formatTimeRemaining(tokenTimeRemaining)
       );
 
       // Scope verification
@@ -201,7 +201,7 @@ export function createAuthManager<T, R>(
         return value;
       });
       const hasRequiredScopes = computed(
-        () => (missingScopes as string[]).length === 0,
+        () => missingScopes.length === 0,
       );
 
       // Picker UI - NOT inside computed (wishResult[UI] crashes reactive graph)
@@ -230,6 +230,7 @@ export function createAuthManager<T, R>(
       // Refresh state
       const refreshStream = wishResult.result.refreshToken;
       const refreshing = Writable.of(false);
+      const isRefreshing = computed(() => refreshing.get());
       const refreshFailed = Writable.of(false);
       const refreshStartedAt = Writable.of(0);
 
@@ -264,17 +265,17 @@ export function createAuthManager<T, R>(
 
       // Assemble authInfo
       const authInfo = computed((): AuthInfo => ({
-        state: currentState as AuthState,
+        state: currentState,
         auth: auth ?? null,
         authCell: auth,
         email: currentEmail ?? "",
-        hasRequiredScopes: hasRequiredScopes as boolean,
+        hasRequiredScopes,
         grantedScopes: (auth?.scope ?? []) as string[],
-        missingScopes: missingScopes as string[],
+        missingScopes,
         tokenExpiresAt: auth?.expiresAt ?? null,
-        isTokenExpired: isTokenExpired as boolean,
-        tokenTimeRemaining: tokenTimeRemaining as number | null,
-        tokenExpiryWarning: tokenExpiryWarning as TokenExpiryWarning,
+        isTokenExpired,
+        tokenTimeRemaining,
+        tokenExpiryWarning,
         tokenExpiryDisplay: tokenExpiryDisplay ?? "",
         statusDotColor: statusDotColor ?? STATUS_COLORS.loading,
         statusText: statusText ?? "",
@@ -404,7 +405,7 @@ export function createAuthManager<T, R>(
           .join(", ")
       );
       const missingScopesList = computed(() =>
-        (missingScopes as string[])
+        missingScopes
           .map((k) => descriptor.scopes[k]?.description ?? k)
           .join(", ")
       );
@@ -626,7 +627,7 @@ export function createAuthManager<T, R>(
                   fontSize: "14px",
                 }}
               >
-                {ifElse(refreshing, "Refreshing...", "Refresh Session")}
+                {ifElse(isRefreshing, "Refreshing...", "Refresh Session")}
               </button>
               {ifElse(
                 refreshFailed,
@@ -777,7 +778,7 @@ export function createAuthManager<T, R>(
         tokenExpiredUI,
         scopesOrPrev,
       );
-      const refreshOrPrev = ifElse(refreshing, refreshingUI, expiredOrPrev);
+      const refreshOrPrev = ifElse(isRefreshing, refreshingUI, expiredOrPrev);
       const fullUI = ifElse(isReadyState, readyUI, refreshOrPrev);
 
       // ====================================================================

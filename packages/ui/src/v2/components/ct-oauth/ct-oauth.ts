@@ -119,6 +119,7 @@ export class CTOauth extends BaseElement {
     try {
       const response = await fetch(this.loginEndpoint, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
 
@@ -344,43 +345,9 @@ export class CTOauth extends BaseElement {
           --ct-theme-border-radius,
           var(--ct-border-radius-md, 0.375rem)
         );
-        background-color: #e8f0fe;
-        color: #1a73e8;
+        background-color: var(--ct-oauth-status-bg, #f0f4f8);
+        color: var(--ct-oauth-status-color, #333);
         font-size: 0.9rem;
-      }
-
-      .auth-result {
-        background-color: var(
-          --ct-theme-color-surface-hover,
-          var(--ct-color-gray-50, #f9fafb)
-        );
-        padding: var(--ct-theme-spacing-normal, 1rem);
-        border-radius: var(
-          --ct-theme-border-radius,
-          var(--ct-border-radius-md, 0.375rem)
-        );
-      }
-
-      .auth-result h3 {
-        margin: 0 0 0.75rem;
-        color: var(--ct-theme-color-text, var(--ct-color-gray-900, #111827));
-      }
-
-      .auth-result pre {
-        background-color: var(
-          --ct-theme-color-surface,
-          var(--ct-color-white, #ffffff)
-        );
-        padding: var(--ct-theme-spacing-normal, 0.75rem);
-        border-radius: var(
-          --ct-theme-border-radius,
-          var(--ct-border-radius-sm, 0.25rem)
-        );
-        overflow: auto;
-        max-height: 300px;
-        margin: 0;
-        font-size: 0.9rem;
-        font-family: monospace;
       }
 
       .oauth-button.logout {
