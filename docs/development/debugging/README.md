@@ -60,6 +60,7 @@ These issues compile without errors but fail at runtime.
 
 - [Logger System](logger-system.md) - Structured logging, levels, counts, timing, flags
 - [Console Commands](console-commands.md) - `globalThis.commontools.*` browser console reference
+  - Includes cell inspection utilities (`readCell`, `readArgumentCell`, `subscribeToCell`)
 - [VDOM Debug Helpers](vdom-debug.md) - `commontools.vdom.*` VDOM tree inspection
 
 ### Diagnosis
