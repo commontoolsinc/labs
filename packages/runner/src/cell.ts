@@ -1107,8 +1107,17 @@ export class CellImpl<T extends StorableValue>
       readTx,
       this.link,
     );
+    const afterResolve = { id: link.id, path: [...link.path] };
     const nonReactiveTx = createNonReactiveTransaction(readTx);
     link = maybeConvertArrayPathToDataURILink(nonReactiveTx, link);
+    // DEBUG(CT-1294): Log when maybeConvertArrayPathToDataURILink converts a writable link to a read-only data: URI
+    if (afterResolve.id !== link.id && afterResolve.id?.startsWith("of:") && link.id?.startsWith("data:")) {
+      console.warn(
+        `[CT-1294] resolveAsCell: writable link converted to read-only data: URI!\n` +
+        `  before: ${afterResolve.id} path=${JSON.stringify(afterResolve.path)}\n` +
+        `  after:  ${link.id} path=${JSON.stringify(link.path)}`
+      );
+    }
     return createCell(this.runtime, link, this.tx, this.synced);
   }
 
