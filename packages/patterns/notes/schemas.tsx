@@ -5,7 +5,14 @@
  * This file contains types shared across note.tsx, notebook.tsx, and note-md.tsx.
  */
 
-import { type Default, NAME, type Writable } from "commontools";
+import {
+  type Default,
+  NAME,
+  type Stream,
+  UI,
+  type VNode,
+  type Writable,
+} from "commontools";
 
 // ===== Core Entity Types =====
 
@@ -18,6 +25,7 @@ export interface MentionablePiece {
   isHidden?: boolean;
   mentioned: MentionablePiece[];
   backlinks: MentionablePiece[];
+  [UI]?: VNode;
 }
 
 /**
@@ -26,6 +34,7 @@ export interface MentionablePiece {
  */
 export interface MinimalPiece {
   [NAME]?: string;
+  [UI]?: VNode;
 }
 
 /**
@@ -38,9 +47,9 @@ export interface NotePiece {
   content?: string;
   summary?: string;
   isHidden?: boolean;
-  noteId?: string;
   backlinks?: MentionablePiece[];
   parentNotebook?: NotebookPiece | null;
+  [UI]?: VNode;
 }
 
 /**
@@ -50,8 +59,18 @@ export interface NotebookPiece {
   [NAME]?: string;
   title?: string;
   notes?: NotePiece[];
+  backlinks?: MentionablePiece[];
   isNotebook?: boolean;
   isHidden?: boolean;
+
+  createNote: Stream<{ title: string; content: string; navigate?: boolean }>;
+  createNotes: Stream<{ notesData: Array<{ title: string; content: string }> }>;
+  setTitle: Stream<{ newTitle: string }>;
+  createNotebook: Stream<{
+    title: string;
+    notesData?: Array<{ title: string; content: string }>;
+  }>;
+  [UI]?: VNode;
 }
 
 /**
@@ -83,7 +102,6 @@ export interface NoteInput {
   title?: Writable<Default<string, "Untitled Note">>;
   content?: Writable<Default<string, "">>;
   isHidden?: Default<boolean, false>;
-  noteId?: Default<string, "">;
   /** Pattern JSON for [[wiki-links]]. Defaults to creating new Notes. */
   linkPattern?: Writable<Default<string, "">>;
   /** Parent notebook reference. Set at creation, can be updated for moves. */
@@ -100,10 +118,10 @@ export interface NotebookInput {
 }
 
 export interface NoteMdInput {
-  /** Cell reference to note data (title + content + backlinks + noteId) */
+  /** Cell reference to note data (title + content + backlinks) */
   note?: Default<
     NotePiece,
-    { title: ""; content: ""; backlinks: []; noteId: "" }
+    { title: ""; content: ""; backlinks: [] }
   >;
   /** Direct reference to source note for Edit navigation */
   sourceNoteRef?: NotePiece;

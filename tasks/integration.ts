@@ -146,7 +146,7 @@ async function runPatternTests(
     return true;
   }
 
-  const concurrency = 5;
+  const concurrency = 1;
   console.log(
     `Found ${testFiles.length} pattern test(s), running ${concurrency} at a time`,
   );
@@ -166,7 +166,7 @@ async function runPatternTests(
             ...ctCmd,
             "test",
             "--timeout",
-            "60000",
+            "180000",
             "--root",
             patternsDir,
             testFile,

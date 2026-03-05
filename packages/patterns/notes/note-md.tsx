@@ -2,6 +2,7 @@
 import {
   action,
   computed,
+  equals,
   handler,
   NAME,
   navigateTo,
@@ -69,16 +70,19 @@ export default pattern<NoteMdInput, NoteMdOutput>(
     });
 
     // Type-based discovery for notes via mentionable list
-    const noteWish = wish<NotePiece>({ query: "#note", scope: ["."] });
+    const noteWish = wish<NotePiece>({
+      query: "#note",
+      scope: ["."],
+      headless: true,
+    });
 
-    // Use sourceNoteRef directly if provided, otherwise fall back to noteId lookup
+    // Use sourceNoteRef directly if provided, otherwise fall back to equality lookup
     const sourceNote = computed(() => {
       if (sourceNoteRef) {
         return sourceNoteRef;
       }
-      const myNoteId = note?.noteId;
-      if (!myNoteId) return null;
-      return noteWish.candidates.find((piece) => piece?.noteId === myNoteId);
+      if (!note) return null;
+      return noteWish.candidates.find((piece) => equals(piece, note));
     });
 
     // Action: navigate back to source note for editing
