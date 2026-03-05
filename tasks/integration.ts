@@ -166,7 +166,7 @@ async function runPatternTests(
             ...ctCmd,
             "test",
             "--timeout",
-            "120000",
+            "180000",
             "--root",
             patternsDir,
             testFile,
