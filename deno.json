@@ -30,7 +30,8 @@
     "./packages/utils",
     "./packages/vendor-astral",
     "./packages/leb128",
-    "./packages/fuse"
+    "./packages/fuse",
+    "./packages/fs-sync-example"
   ],
   "tasks": {
     "check": "./tasks/check.sh",
