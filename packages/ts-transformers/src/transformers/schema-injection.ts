@@ -102,6 +102,12 @@ function typeIncludesUndefined(type: ts.Type): boolean {
   return false;
 }
 
+function isNullishTypeNode(node: ts.TypeNode): boolean {
+  return node.kind === ts.SyntaxKind.UndefinedKeyword ||
+    node.kind === ts.SyntaxKind.NullKeyword ||
+    node.kind === ts.SyntaxKind.VoidKeyword;
+}
+
 function typeNodeIncludesUndefined(node: ts.TypeNode): boolean {
   if (node.kind === ts.SyntaxKind.UndefinedKeyword) {
     return true;
@@ -182,6 +188,23 @@ function buildShrunkTypeNodeFromType(
   if (normalized.some((path) => path.length === 0)) {
     return checker.typeToTypeNode(type, sourceFile, typeToNodeFlags) ??
       factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+  }
+
+  // Strip nullish constituents from union types (e.g. `T | undefined`) so the
+  // shrinking logic can resolve properties on the non-nullish part. This runs
+  // after the direct-access check above so leaf types like `string | undefined`
+  // are returned as-is when they have an empty-path access.
+  if ((type.flags & ts.TypeFlags.Union) !== 0) {
+    const nonNullable = checker.getNonNullableType(type);
+    if (nonNullable !== type) {
+      return buildShrunkTypeNodeFromType(
+        nonNullable,
+        paths,
+        checker,
+        sourceFile,
+        factory,
+      );
+    }
   }
 
   const grouped = groupPathsByHead(normalized);
@@ -323,6 +346,34 @@ function buildShrunkTypeNodeFromTypeNode(
     }
     // Could not resolve to concrete members — let the caller fall back.
     return undefined;
+  }
+
+  if (ts.isUnionTypeNode(node)) {
+    const nullish: ts.TypeNode[] = [];
+    const nonNullish: ts.TypeNode[] = [];
+    for (const member of node.types) {
+      (isNullishTypeNode(member) ? nullish : nonNullish).push(member);
+    }
+    if (nonNullish.length === 0) return node;
+
+    let changed = false;
+    const shrunkMembers = nonNullish.map((member) => {
+      const s = buildShrunkTypeNodeFromTypeNode(
+        member,
+        normalized,
+        factory,
+        checker,
+      );
+      if (s && s !== member) {
+        changed = true;
+        return s;
+      }
+      return member;
+    });
+    if (!changed) return node;
+
+    const all = [...shrunkMembers, ...nullish];
+    return all.length === 1 ? all[0] : factory.createUnionTypeNode(all);
   }
 
   return node;
@@ -811,22 +862,102 @@ function findCapabilitySummaryForParameter(
   return summary.params.find((param) => param.name === paramName);
 }
 
-/**
- * Collects the set of top-level property names from a shrunk TypeNode.
- * Returns an empty set if the node is undefined or not a type literal.
- */
-function collectMaterializedHeads(
-  node: ts.TypeNode | undefined,
-): Set<string> {
-  const heads = new Set<string>();
-  if (!node || !ts.isTypeLiteralNode(node)) return heads;
-  for (const member of node.members) {
-    if (ts.isPropertySignature(member) && member.name) {
-      const name = getPropertyNameText(member.name);
-      if (name) heads.add(name);
+/** Node-level check: does this TypeNode have a member named `head`? */
+function typeNodeHasHead(
+  node: ts.TypeNode,
+  head: string,
+  checker: ts.TypeChecker,
+): boolean {
+  if (ts.isTypeLiteralNode(node)) {
+    return node.members.some(
+      (m) =>
+        ts.isPropertySignature(m) && m.name &&
+        getPropertyNameText(m.name) === head,
+    );
+  }
+
+  if (ts.isUnionTypeNode(node)) {
+    // Valid if ANY non-nullish constituent has it
+    return node.types.some(
+      (m) => !isNullishTypeNode(m) && typeNodeHasHead(m, head, checker),
+    );
+  }
+
+  if (ts.isTypeReferenceNode(node)) {
+    const members = resolveTypeReferenceMembers(node, checker);
+    if (members) {
+      return members.some(
+        (m) =>
+          ts.isPropertySignature(m) && m.name &&
+          getPropertyNameText(m.name) === head,
+      );
     }
   }
-  return heads;
+
+  return false;
+}
+
+/** Type-level check: does this ts.Type have a property named `head`? */
+function typeHasHead(
+  type: ts.Type,
+  head: string,
+  checker: ts.TypeChecker,
+): boolean {
+  // Direct property lookup (works for simple object types)
+  if (type.getProperty(head)) return true;
+
+  // For unions, check each non-primitive constituent individually
+  // (getProperty on a union uses intersection semantics)
+  if (type.isUnion()) {
+    for (const constituent of type.types) {
+      if (constituent.getProperty(head)) return true;
+    }
+  }
+
+  // Numeric heads are valid on array-like types (index access)
+  if (Number.isFinite(Number(head))) {
+    const tc = checker as ts.TypeChecker & {
+      isArrayType?: (t: ts.Type) => boolean;
+      isTupleType?: (t: ts.Type) => boolean;
+    };
+    if (
+      tc.isArrayType?.(type) || tc.isTupleType?.(type) ||
+      !!checker.getIndexTypeOfType(type, ts.IndexKind.Number)
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Checks whether `head` can resolve as a property on the given type.
+ * Tries the shrunk TypeNode first, then baseTypeNode, then the resolved
+ * ts.Type. Handles unions (any non-nullish constituent), TypeReferences
+ * (resolved declarations), and arrays (numeric index heads).
+ */
+function typeHasProperty(
+  head: string,
+  shrunk: ts.TypeNode | undefined,
+  baseTypeNode: ts.TypeNode,
+  baseType: ts.Type | undefined,
+  checker: ts.TypeChecker,
+): boolean {
+  // 1. Check the shrunk node (if available)
+  if (shrunk && typeNodeHasHead(shrunk, head, checker)) return true;
+
+  // 2. Check the base type node
+  if (typeNodeHasHead(baseTypeNode, head, checker)) return true;
+
+  // 3. Fall back to the resolved semantic type (handles aliases, generics,
+  //    mapped types, and other forms that aren't visible at the node level).
+  if (baseType) {
+    const nonNullable = checker.getNonNullableType(baseType);
+    if (typeHasHead(nonNullable, head, checker)) return true;
+  }
+
+  return false;
 }
 
 /**
@@ -842,6 +973,7 @@ function validateShrinkCoverage(
   shrunk: ts.TypeNode | undefined,
   context: TransformationContext,
   fnNode: ts.Node,
+  checker: ts.TypeChecker,
 ): void {
   if (paths.length === 0 && !paramSummary.wildcard) return;
 
@@ -916,22 +1048,8 @@ function validateShrinkCoverage(
   }
 
   // Case 2: concrete type but some paths didn't resolve.
-  // Check the shrunk result if available; otherwise fall back to the base
-  // type node itself (covers defaults_only mode where shrinking is skipped).
-  // When neither yields heads (e.g. the base node is a TypeReference alias),
-  // fall back to the resolved ts.Type's apparent properties.
-  const shrunkHeads = collectMaterializedHeads(shrunk);
-  const materializedHeads = shrunkHeads.size > 0
-    ? shrunkHeads
-    : collectMaterializedHeads(baseTypeNode);
-  if (materializedHeads.size === 0 && baseType !== undefined) {
-    const props = baseType.getApparentProperties();
-    for (const prop of props) {
-      materializedHeads.add(prop.name);
-    }
-  }
   const missing = [...requestedHeads].filter(
-    (h) => !materializedHeads.has(h),
+    (h) => !typeHasProperty(h, shrunk, baseTypeNode, baseType, checker),
   );
   if (missing.length === 0) return;
 
@@ -1031,6 +1149,7 @@ function applyShrinkAndWrap(
       shrunk,
       context,
       fnNode,
+      checker,
     );
   }
 
@@ -1097,6 +1216,7 @@ function applyCapabilitySummaryToArgument(
         undefined,
         context,
         fnNode ?? fn,
+        checker,
       );
     }
 
@@ -1983,7 +2103,11 @@ export class SchemaInjectionTransformer extends Transformer {
               context,
             );
 
-            // Event type: use inferred or fallback to never/unknown refinement
+            // Event type: use inferred or fallback to never/unknown refinement.
+            // Validation already ran inside collectFunctionSchemaTypeNodes (via
+            // applyCapabilitySummaryToArgument), so don't pass `context` here
+            // to avoid double-validation with degraded type info (the shrunk
+            // node is synthetic and the recovered argumentType may be undefined).
             const eventTypeBase = inferred.argument ??
               getParameterSchemaType(factory, handlerFn.parameters[0]);
             const eventType = applyCapabilitySummaryToParameter(
@@ -1995,7 +2119,7 @@ export class SchemaInjectionTransformer extends Transformer {
               sourceFile,
               factory,
               capabilityRegistry,
-              context,
+              undefined,
               handlerFn,
             ) ?? eventTypeBase;
 

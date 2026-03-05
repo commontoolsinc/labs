@@ -257,6 +257,17 @@ to runtime contract support).
   formats, enum literals, `$ref`/`$defs`) that would be lost by the
   type-driven fallback. When no members are removed, the original
   TypeReference is kept intact to preserve schema references.
+- `buildShrunkTypeNodeFromTypeNode` handles `UnionTypeNode` by stripping
+  nullish constituents (`undefined`, `null`, `void`) and shrinking the
+  remaining non-nullish members.
+- `buildShrunkTypeNodeFromType` strips nullish union constituents via
+  `checker.getNonNullableType()` before property resolution, so types like
+  `{ amount?: number } | undefined` resolve correctly.
+- `validateShrinkCoverage` uses `typeHasProperty()` (path-driven) instead of
+  `collectMaterializedHeads()` (collect-then-check). This handles unions (any
+  non-nullish constituent), TypeReferences (resolved declarations), and array
+  types (numeric index heads) without requiring upfront enumeration of all
+  property names. The checker is threaded through as `ts.TypeChecker`.
 
 **Diagnostic codes:**
 
@@ -264,12 +275,14 @@ to runtime contract support).
   accesses
 - `schema:path-not-in-type` — concrete type missing accessed properties
 
-**Test coverage:** `test/schema-shrink-validation.test.ts` with 10 cases:
+**Test coverage:** `test/schema-shrink-validation.test.ts` with 14 cases:
 unknown-type error, missing-property error, valid-no-error, interprocedural
 unknown-type access in lift callback, interprocedural path-not-in-type via
 as-any cast in lift callback, wildcard unknown in lift, wildcard any in lift
 (no error), wildcard concrete in lift (no error), wildcard unknown in pattern,
-type-alias parameter in handler (no false positive).
+type-alias parameter in handler (no false positive), `T | undefined` handler
+parameter, multi-member union handler parameter, `TypeAlias | undefined`
+handler parameter, numeric array index access in lift.
 
 **Rationale:**
 

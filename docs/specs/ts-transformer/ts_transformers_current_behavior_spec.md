@@ -206,6 +206,16 @@ Diagnostics:
 When `shrunk` is `undefined` (as in `defaults_only` mode where full shrinking is
 skipped), validation falls back to inspecting the base type node directly.
 
+Union and array type support: validation uses `typeHasProperty()` which checks
+whether a specific property head resolves against the type through three layers:
+the shrunk TypeNode, the base TypeNode, and the resolved `ts.Type`. For union
+types (e.g. `{ amount?: number } | undefined`), non-nullish constituents are
+checked individually — a head is valid if ANY non-nullish member has it. For
+array types (e.g. `number[]`), numeric heads like `"0"` are valid when the type
+has a numeric index signature. TypeReferences within unions are resolved to their
+declaration members. This eliminates false `schema:path-not-in-type` errors on
+nullable/optional union patterns and array index accesses.
+
 ### 6.5 Pattern-context validation
 
 Enforces restricted reactive context rules.

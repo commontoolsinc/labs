@@ -284,4 +284,160 @@ Deno.test("Schema Shrink Validation", async (t) => {
       );
     },
   );
+
+  await t.step(
+    "no error when handler parameter is T | undefined",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { handler } from "commontools";',
+        "",
+        "export const h = handler<{ amount?: number } | undefined, {}>(",
+        "  (args) => { console.log(args.amount); },",
+        ");",
+      ].join("\n");
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const shrinkErrors = errors.filter(
+        (e) =>
+          e.type === "schema:unknown-type-access" ||
+          e.type === "schema:path-not-in-type",
+      );
+      assertEquals(
+        shrinkErrors.length,
+        0,
+        `Expected no shrink errors for T | undefined but got: ${
+          shrinkErrors.map((e) => e.message).join("; ")
+        }`,
+      );
+    },
+  );
+
+  await t.step(
+    "no error when handler parameter is a multi-member union",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { handler } from "commontools";',
+        "",
+        "export const h = handler<{ value?: number } | number | undefined, {}>(",
+        "  (args) => { console.log(args.value); },",
+        ");",
+      ].join("\n");
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const shrinkErrors = errors.filter(
+        (e) =>
+          e.type === "schema:unknown-type-access" ||
+          e.type === "schema:path-not-in-type",
+      );
+      assertEquals(
+        shrinkErrors.length,
+        0,
+        `Expected no shrink errors for multi-member union but got: ${
+          shrinkErrors.map((e) => e.message).join("; ")
+        }`,
+      );
+    },
+  );
+
+  await t.step(
+    "no error when handler parameter is TypeAlias | undefined",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { handler } from "commontools";',
+        "",
+        "interface Req { item: string }",
+        "",
+        "export const h = handler<Req | undefined, {}>(",
+        "  (args) => { console.log(args.item); },",
+        ");",
+      ].join("\n");
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const shrinkErrors = errors.filter(
+        (e) =>
+          e.type === "schema:unknown-type-access" ||
+          e.type === "schema:path-not-in-type",
+      );
+      assertEquals(
+        shrinkErrors.length,
+        0,
+        `Expected no shrink errors for TypeAlias | undefined but got: ${
+          shrinkErrors.map((e) => e.message).join("; ")
+        }`,
+      );
+    },
+  );
+
+  await t.step(
+    "no error when lift accesses numeric index on array",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { lift } from "commontools";',
+        "",
+        "const fn = lift((items: number[]) => items[0]);",
+      ].join("\n");
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const shrinkErrors = errors.filter(
+        (e) =>
+          e.type === "schema:unknown-type-access" ||
+          e.type === "schema:path-not-in-type",
+      );
+      assertEquals(
+        shrinkErrors.length,
+        0,
+        `Expected no shrink errors for array index access but got: ${
+          shrinkErrors.map((e) => e.message).join("; ")
+        }`,
+      );
+    },
+  );
+
+  await t.step(
+    "no error when handler without type args has SomeType | undefined param",
+    async () => {
+      // Reproduces pattern-ingredient-scaler: handler() without type args
+      // where the callback param is SomeType | undefined and accesses a property.
+      const source = [
+        "/// <cts-enable />",
+        'import { type Cell, handler } from "commontools";',
+        "",
+        "interface ServingsEvent { servings?: number; delta?: number }",
+        "",
+        "const setServings = handler(",
+        "  (event: ServingsEvent | undefined, context: { desiredServings: Cell<number> }) => {",
+        "    context.desiredServings.set(event?.servings ?? 1);",
+        "  },",
+        ");",
+      ].join("\n");
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const shrinkErrors = errors.filter(
+        (e) =>
+          e.type === "schema:unknown-type-access" ||
+          e.type === "schema:path-not-in-type",
+      );
+      assertEquals(
+        shrinkErrors.length,
+        0,
+        `Expected no shrink errors for handler with SomeType | undefined but got: ${
+          shrinkErrors.map((e) => e.message).join("; ")
+        }`,
+      );
+    },
+  );
 });

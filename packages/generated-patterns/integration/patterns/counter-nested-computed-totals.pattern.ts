@@ -194,7 +194,7 @@ const appendToGroup = handler(
   },
 );
 
-const liftGroupTotals = lift((entries: unknown) => {
+const liftGroupTotals = lift((entries: { subtotal: unknown }[] | undefined) => {
   if (!Array.isArray(entries)) {
     return [];
   }
@@ -208,7 +208,7 @@ const liftGrandTotal = lift((totals: number[]) => {
   return totals.reduce((sum, value) => sum + value, 0);
 });
 
-const liftGroupLabels = lift((entries: unknown) => {
+const liftGroupLabels = lift((entries: { label: unknown }[] | undefined) => {
   if (!Array.isArray(entries)) {
     return [];
   }
@@ -241,7 +241,7 @@ const liftMainSummary = lift((state: { parts: string[]; total: number }) => {
   return `${visible} => total ${state.total}`;
 });
 
-const liftGroupCount = lift((entries: unknown) => {
+const liftGroupCount = lift((entries: unknown[] | undefined) => {
   return Array.isArray(entries) ? entries.length : 0;
 });
 
