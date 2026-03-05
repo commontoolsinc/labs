@@ -593,7 +593,14 @@ export interface IEquatable {
 
 /**
  * Cells that allow deriving new cells from existing cells via array methods:
- * .map(), .filter(), .flatMap() and their WithPattern variants.
+ * .map() and their WithPattern variants.
+ *
+ * Note: .filter() and .flatMap() are deliberately omitted from the type
+ * interface to avoid conflicting with Array.prototype.filter/flatMap on
+ * OpaqueRef<T[]> (which is an intersection of OpaqueCell<T[]> & Array<…>).
+ * The runtime methods exist on Cell and are intercepted by the proxy; they
+ * just don't have type declarations here until the compiler transform
+ * (Phase 3) resolves the ambiguity.
  */
 export interface IDerivable<T> {
   map<S>(
@@ -619,27 +626,11 @@ export interface IDerivable<T> {
     ) => S,
     initialValue: S,
   ): OpaqueRef<S>;
-  filter(
-    this: IsThisObject,
-    fn: (
-      element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
-      index: OpaqueRef<number>,
-      array: OpaqueRef<T>,
-    ) => Opaque<boolean>,
-  ): OpaqueRef<(T extends Array<infer U> ? U : T)[]>;
   filterWithPattern<S>(
     this: IsThisObject,
     op: PatternFactory<T extends Array<infer U> ? U : T, S>,
     params: Record<string, any>,
   ): OpaqueRef<(T extends Array<infer U> ? U : T)[]>;
-  flatMap<S>(
-    this: IsThisObject,
-    fn: (
-      element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
-      index: OpaqueRef<number>,
-      array: OpaqueRef<T>,
-    ) => Opaque<S[]>,
-  ): OpaqueRef<S[]>;
   flatMapWithPattern<S>(
     this: IsThisObject,
     op: PatternFactory<T extends Array<infer U> ? U : T, S>,
