@@ -205,6 +205,16 @@ export class Runtime {
       );
     }
 
+    // Log any enabled experimental flags.
+    const enabledFlags = Object.entries(this.experimental)
+      .filter(([_, v]) => v)
+      .map(([k]) => k);
+    if (enabledFlags.length > 0) {
+      console.log(
+        `Experimental flags enabled: ${enabledFlags.join(", ")}`,
+      );
+    }
+
     // Propagate experimental flags to the memory layer's ambient config.
     setExperimentalStorableConfig(this.experimental);
     setCanonicalHashConfig(this.experimental.canonicalHashing);
