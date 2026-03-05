@@ -66,7 +66,10 @@ function makeMediumObject() {
 }
 const mediumObject = makeMediumObject();
 
-function makeLargeNestedTree(depth: number, breadth: number): unknown {
+function makeLargeNestedTree(
+  depth: number,
+  breadth: number,
+): Record<string, unknown> {
   if (depth === 0) {
     return { leaf: true, value: 42.5, label: "leaf-node" };
   }
