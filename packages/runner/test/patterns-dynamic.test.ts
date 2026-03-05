@@ -388,4 +388,447 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     expect(runCount).toBe(3);
     expect(result.key("doubled").get()).toEqual([10, 20, 10]);
   });
+
+  // ── filter builtin tests ──────────────────────────────────────────────
+
+  it("should filter an array by predicate", async () => {
+    const isEven = lift((x: number) => x % 2 === 0);
+
+    const filterPattern = pattern<{ values: number[] }>(({ values }) => {
+      return { values, evens: values.filter((x) => isEven(x)) };
+    });
+
+    const resultCell = runtime.getCell<{ values: number[]; evens: number[] }>(
+      space,
+      "filter-basic",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, filterPattern, {
+      values: [1, 2, 3, 4, 5],
+    }, resultCell);
+    tx.commit();
+
+    await result.pull();
+    expect(result.key("evens").get()).toEqual([2, 4]);
+  });
+
+  it("should reactively update filter when element value changes", async () => {
+    const isPositive = lift((x: number) => x > 0);
+
+    const filterPattern = pattern<{ values: number[] }>(({ values }) => {
+      return { values, positives: values.filter((x) => isPositive(x)) };
+    });
+
+    const cellA = runtime.getCell<number>(
+      space,
+      "filter-react-a",
+      undefined,
+      tx,
+    );
+    cellA.withTx(tx).set(5);
+    const cellB = runtime.getCell<number>(
+      space,
+      "filter-react-b",
+      undefined,
+      tx,
+    );
+    cellB.withTx(tx).set(-3);
+    const cellC = runtime.getCell<number>(
+      space,
+      "filter-react-c",
+      undefined,
+      tx,
+    );
+    cellC.withTx(tx).set(10);
+
+    const resultCell = runtime.getCell<
+      { values: number[]; positives: number[] }
+    >(
+      space,
+      "filter-reactive",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, filterPattern, {
+      values: [cellA, cellB, cellC],
+    }, resultCell);
+    tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+    // B is negative, so only A and C pass
+    expect(result.key("positives").get()).toEqual([5, 10]);
+
+    // Flip B from negative to positive
+    cellB.withTx(tx).set(7);
+    tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+    // Now all three are positive
+    expect(result.key("positives").get()).toEqual([5, 7, 10]);
+  });
+
+  it("should reconcile filter predicates by identity on mid-list insert", async () => {
+    let predRunCount = 0;
+    const isPositive = lift((x: number) => {
+      predRunCount++;
+      return x > 0;
+    });
+
+    const filterPattern = pattern<{ values: number[] }>(({ values }) => {
+      return { values, positives: values.filter((x) => isPositive(x)) };
+    });
+
+    const cellA = runtime.getCell<number>(
+      space,
+      "filter-recon-a",
+      undefined,
+      tx,
+    );
+    cellA.withTx(tx).set(1);
+    const cellB = runtime.getCell<number>(
+      space,
+      "filter-recon-b",
+      undefined,
+      tx,
+    );
+    cellB.withTx(tx).set(2);
+    const cellC = runtime.getCell<number>(
+      space,
+      "filter-recon-c",
+      undefined,
+      tx,
+    );
+    cellC.withTx(tx).set(3);
+
+    const resultCell = runtime.getCell<
+      { values: number[]; positives: number[] }
+    >(
+      space,
+      "filter-identity-reconcile",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, filterPattern, {
+      values: [cellA, cellB, cellC],
+    }, resultCell);
+    tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+    expect(result.key("positives").get()).toEqual([1, 2, 3]);
+    const runsAfterInit = predRunCount;
+    expect(runsAfterInit).toBe(3);
+
+    // Insert a new cell at index 1: [A, B, C] → [A, X, B, C]
+    const cellX = runtime.getCell<number>(
+      space,
+      "filter-recon-x",
+      undefined,
+      tx,
+    );
+    cellX.withTx(tx).set(99);
+
+    result.withTx(tx).key("values").set([cellA, cellX, cellB, cellC]);
+    tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+    expect(result.key("positives").get()).toEqual([1, 99, 2, 3]);
+
+    // Only 1 new predicate evaluation (for X). A, B, C reuse their runs.
+    const recomputesAfterInsert = predRunCount - runsAfterInit;
+    expect(recomputesAfterInsert).toBe(1);
+  });
+
+  it("should handle duplicate cell references in filter", async () => {
+    const isPositive = lift((x: number) => x > 0);
+
+    const cellA = runtime.getCell<number>(space, "filter-dup-a", undefined, tx);
+    cellA.withTx(tx).set(5);
+    const cellB = runtime.getCell<number>(space, "filter-dup-b", undefined, tx);
+    cellB.withTx(tx).set(-1);
+
+    const filterPattern = pattern<{ values: number[] }>(({ values }) => {
+      return { values, positives: values.filter((x) => isPositive(x)) };
+    });
+
+    const resultCell = runtime.getCell<
+      { values: number[]; positives: number[] }
+    >(
+      space,
+      "filter-duplicate-refs",
+      undefined,
+      tx,
+    );
+    // [A, B, A] — A appears twice, B is negative
+    const result = runtime.run(tx, filterPattern, {
+      values: [cellA, cellB, cellA],
+    }, resultCell);
+    tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+    // Both A occurrences pass, B doesn't
+    expect(result.key("positives").get()).toEqual([5, 5]);
+  });
+
+  it("should handle empty and undefined filter inputs", async () => {
+    const isEven = lift((x: number) => x % 2 === 0);
+
+    const filterPattern = pattern<{ values: number[] }>(({ values }) => {
+      return { values, evens: values.filter((x) => isEven(x)) };
+    });
+
+    const resultCell = runtime.getCell<{ values: number[]; evens: number[] }>(
+      space,
+      "filter-empty",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, filterPattern, {
+      values: [],
+    }, resultCell);
+    tx.commit();
+
+    await result.pull();
+    expect(result.key("evens").get()).toEqual([]);
+  });
+
+  it("should skip sparse holes in filter input", async () => {
+    let predRunCount = 0;
+    const isPositive = lift((x: number) => {
+      predRunCount++;
+      return x > 0;
+    });
+
+    const filterPattern = pattern<{ values: number[] }>(({ values }) => {
+      return { values, positives: values.filter((x) => isPositive(x)) };
+    });
+
+    // deno-lint-ignore no-sparse-arrays
+    const sparseInput = [1, , 3];
+
+    const resultCell = runtime.getCell<
+      { values: number[]; positives: number[] }
+    >(
+      space,
+      "filter-sparse",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, filterPattern, {
+      values: sparseInput,
+    }, resultCell);
+    tx.commit();
+
+    await result.pull();
+    // Only 2 predicate runs (hole skipped), both positive
+    expect(predRunCount).toBe(2);
+    expect(result.key("positives").get()).toEqual([1, 3]);
+  });
+
+  // ── flatMap builtin tests ─────────────────────────────────────────────
+
+  it("should flatMap an array", async () => {
+    const duplicate = lift((x: number) => [x, x * 10]);
+
+    const flatMapPattern = pattern<{ values: number[] }>(({ values }) => {
+      return { values, flat: values.flatMap((x) => duplicate(x)) };
+    });
+
+    const resultCell = runtime.getCell<{ values: number[]; flat: number[] }>(
+      space,
+      "flatmap-basic",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, flatMapPattern, {
+      values: [1, 2, 3],
+    }, resultCell);
+    tx.commit();
+
+    await result.pull();
+    expect(result.key("flat").get()).toEqual([1, 10, 2, 20, 3, 30]);
+  });
+
+  it("should reactively update flatMap when element value changes", async () => {
+    const expand = lift((x: number) => {
+      if (x > 0) return [x, x * 2];
+      return [];
+    });
+
+    const flatMapPattern = pattern<{ values: number[] }>(({ values }) => {
+      return { values, flat: values.flatMap((x) => expand(x)) };
+    });
+
+    const cellA = runtime.getCell<number>(
+      space,
+      "flatmap-react-a",
+      undefined,
+      tx,
+    );
+    cellA.withTx(tx).set(5);
+    const cellB = runtime.getCell<number>(
+      space,
+      "flatmap-react-b",
+      undefined,
+      tx,
+    );
+    cellB.withTx(tx).set(-1);
+
+    const resultCell = runtime.getCell<{ values: number[]; flat: number[] }>(
+      space,
+      "flatmap-reactive",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, flatMapPattern, {
+      values: [cellA, cellB],
+    }, resultCell);
+    tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+    // A expands to [5, 10], B returns [] (negative)
+    expect(result.key("flat").get()).toEqual([5, 10]);
+
+    // Flip B to positive
+    cellB.withTx(tx).set(3);
+    tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+    expect(result.key("flat").get()).toEqual([5, 10, 3, 6]);
+  });
+
+  it("should reconcile flatMap by identity on mid-list insert", async () => {
+    let runCount = 0;
+    const duplicate = lift((x: number) => {
+      runCount++;
+      return [x, x * 10];
+    });
+
+    const flatMapPattern = pattern<{ values: number[] }>(({ values }) => {
+      return { values, flat: values.flatMap((x) => duplicate(x)) };
+    });
+
+    const cellA = runtime.getCell<number>(
+      space,
+      "flatmap-recon-a",
+      undefined,
+      tx,
+    );
+    cellA.withTx(tx).set(1);
+    const cellB = runtime.getCell<number>(
+      space,
+      "flatmap-recon-b",
+      undefined,
+      tx,
+    );
+    cellB.withTx(tx).set(2);
+    const cellC = runtime.getCell<number>(
+      space,
+      "flatmap-recon-c",
+      undefined,
+      tx,
+    );
+    cellC.withTx(tx).set(3);
+
+    const resultCell = runtime.getCell<{ values: number[]; flat: number[] }>(
+      space,
+      "flatmap-identity-reconcile",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, flatMapPattern, {
+      values: [cellA, cellB, cellC],
+    }, resultCell);
+    tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+    expect(result.key("flat").get()).toEqual([1, 10, 2, 20, 3, 30]);
+    const runsAfterInit = runCount;
+    expect(runsAfterInit).toBe(3);
+
+    // Insert X at index 1: [A, B, C] → [A, X, B, C]
+    const cellX = runtime.getCell<number>(
+      space,
+      "flatmap-recon-x",
+      undefined,
+      tx,
+    );
+    cellX.withTx(tx).set(99);
+
+    result.withTx(tx).key("values").set([cellA, cellX, cellB, cellC]);
+    tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+    expect(result.key("flat").get()).toEqual([1, 10, 99, 990, 2, 20, 3, 30]);
+
+    // Only 1 new run (for X). A, B, C reuse their runs.
+    const recomputesAfterInsert = runCount - runsAfterInit;
+    expect(recomputesAfterInsert).toBe(1);
+  });
+
+  it("should handle empty sub-arrays in flatMap", async () => {
+    const maybeExpand = lift((x: number) => {
+      if (x % 2 === 0) return [x];
+      return []; // Odd numbers produce empty arrays
+    });
+
+    const flatMapPattern = pattern<{ values: number[] }>(({ values }) => {
+      return { values, flat: values.flatMap((x) => maybeExpand(x)) };
+    });
+
+    const resultCell = runtime.getCell<{ values: number[]; flat: number[] }>(
+      space,
+      "flatmap-empty-sub",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, flatMapPattern, {
+      values: [1, 2, 3, 4],
+    }, resultCell);
+    tx.commit();
+
+    await result.pull();
+    // Odd numbers contribute nothing
+    expect(result.key("flat").get()).toEqual([2, 4]);
+  });
+
+  it("should skip sparse holes in flatMap input", async () => {
+    let runCount = 0;
+    const duplicate = lift((x: number) => {
+      runCount++;
+      return [x, x * 10];
+    });
+
+    const flatMapPattern = pattern<{ values: number[] }>(({ values }) => {
+      return { values, flat: values.flatMap((x) => duplicate(x)) };
+    });
+
+    // deno-lint-ignore no-sparse-arrays
+    const sparseInput = [1, , 3];
+
+    const resultCell = runtime.getCell<{ values: number[]; flat: number[] }>(
+      space,
+      "flatmap-sparse",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, flatMapPattern, {
+      values: sparseInput,
+    }, resultCell);
+    tx.commit();
+
+    await result.pull();
+    // Only 2 pattern runs (hole skipped)
+    expect(runCount).toBe(2);
+    expect(result.key("flat").get()).toEqual([1, 10, 3, 30]);
+  });
 });

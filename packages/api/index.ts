@@ -592,9 +592,8 @@ export interface IEquatable {
 }
 
 /**
- * Cells that allow deriving new cells from existing cells. Currently just
- * .map(), but this will eventually include all Array, String and Number
- * methods.
+ * Cells that allow deriving new cells from existing cells via array methods:
+ * .map(), .filter(), .flatMap() and their WithPattern variants.
  */
 export interface IDerivable<T> {
   map<S>(
@@ -620,6 +619,32 @@ export interface IDerivable<T> {
     ) => S,
     initialValue: S,
   ): OpaqueRef<S>;
+  filter(
+    this: IsThisObject,
+    fn: (
+      element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
+      index: OpaqueRef<number>,
+      array: OpaqueRef<T>,
+    ) => Opaque<boolean>,
+  ): OpaqueRef<(T extends Array<infer U> ? U : T)[]>;
+  filterWithPattern<S>(
+    this: IsThisObject,
+    op: PatternFactory<T extends Array<infer U> ? U : T, S>,
+    params: Record<string, any>,
+  ): OpaqueRef<(T extends Array<infer U> ? U : T)[]>;
+  flatMap<S>(
+    this: IsThisObject,
+    fn: (
+      element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
+      index: OpaqueRef<number>,
+      array: OpaqueRef<T>,
+    ) => Opaque<S[]>,
+  ): OpaqueRef<S[]>;
+  flatMapWithPattern<S>(
+    this: IsThisObject,
+    op: PatternFactory<T extends Array<infer U> ? U : T, S>,
+    params: Record<string, any>,
+  ): OpaqueRef<S[]>;
 }
 
 export interface IOpaquable<T> {
