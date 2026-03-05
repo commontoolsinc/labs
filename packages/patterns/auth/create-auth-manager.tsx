@@ -1,3 +1,4 @@
+/// <cts-enable />
 /**
  * Factory for creating OAuth auth manager patterns.
  *
@@ -759,20 +760,7 @@ export function createAuthManager<T, R>(
             color: "#b45309",
           }}
         >
-          <style>
-            {"@keyframes ct-auth-spin { to { transform: rotate(360deg); } }"}
-          </style>
-          <span
-            style={{
-              display: "inline-block",
-              width: "14px",
-              height: "14px",
-              border: "2px solid #f59e0b",
-              borderTop: "2px solid transparent",
-              borderRadius: "50%",
-              animation: "ct-auth-spin 1s linear infinite",
-            }}
-          />
+          <span style={{ fontSize: "16px" }}>⟳</span>
           Refreshing session...
         </div>
       );
