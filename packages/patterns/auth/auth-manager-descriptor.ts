@@ -19,17 +19,13 @@ export interface AuthManagerDescriptor {
   variantWishTags?: Record<string, string>;
   /** Token field name on the auth object */
   tokenField: "token" | "accessToken";
-  /** Server endpoint for token refresh */
-  refreshEndpoint: string;
-  /** Scope key → scope URL (Google) or key → description (Airtable) */
-  scopeDescriptions: Record<string, string>;
   /**
-   * When true, scope keys are used directly as scope strings for verification.
-   * When false, a scopeMap is needed to convert keys to scope URLs.
+   * Unified scope registry. Each key is a short scope identifier (e.g. "gmail",
+   * "data.records:read"). `description` is the human-readable label shown in UI.
+   * `scopeString` is the value checked against the granted scopes array — for
+   * Airtable this equals the key, for Google it's the full URL.
    */
-  scopeKeysAreLiteral: boolean;
-  /** Maps scope keys to scope URL strings (only needed when scopeKeysAreLiteral is false) */
-  scopeMap?: Record<string, string>;
+  scopes: Record<string, { description: string; scopeString: string }>;
   /** Whether the provider supports user avatar images (Google: true, Airtable: false) */
   hasAvatarSupport: boolean;
 }

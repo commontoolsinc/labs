@@ -58,15 +58,21 @@ export const SCOPE_DESCRIPTIONS: Record<ScopeKey, string> = {
   "webhook:manage": "Manage webhooks",
 };
 
+/** Unified scope registry for the auth manager factory */
+const SCOPES: AuthManagerDescriptor["scopes"] = Object.fromEntries(
+  Object.entries(SCOPE_DESCRIPTIONS).map(([key, desc]) => [
+    key,
+    { description: desc, scopeString: key },
+  ]),
+);
+
 const AirtableAuthManagerDescriptor: AuthManagerDescriptor = {
   name: "airtable",
   displayName: "Airtable",
   brandColor: "#18BFFF",
   wishTag: "#airtableAuth",
   tokenField: "accessToken",
-  refreshEndpoint: "/api/integrations/airtable-oauth/refresh",
-  scopeDescriptions: SCOPE_DESCRIPTIONS,
-  scopeKeysAreLiteral: true,
+  scopes: SCOPES,
   hasAvatarSupport: false,
 };
 

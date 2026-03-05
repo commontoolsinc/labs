@@ -2,7 +2,15 @@
  * Shared types for OAuth auth patterns and auth managers.
  */
 
-/** Status of auth in preview UI */
+/**
+ * Visual status of auth in preview/consumer UI components.
+ *
+ * This type drives the preview indicator dot color and background.
+ * It is intentionally separate from AuthState: AuthStatus collapses
+ * several manager states (e.g. "loading" is not represented here)
+ * and adds "warning" which is a time-based visual hint, not a
+ * distinct manager state.
+ */
 export type AuthStatus =
   | "needs-login"
   | "missing-scopes"
@@ -13,7 +21,15 @@ export type AuthStatus =
 /** Token expiry warning level used in auth managers */
 export type TokenExpiryWarning = "ok" | "warning" | "expired";
 
-/** Auth state enumeration for auth managers */
+/**
+ * State machine enumeration for the auth manager's internal lifecycle.
+ *
+ * Each value maps to a distinct UI panel in the fullUI output and
+ * determines which actions are available. Unlike AuthStatus (which
+ * is a simplified visual indicator for consumers), AuthState tracks
+ * the full set of states the manager can be in, including "loading"
+ * and "token-expired" (which AuthStatus calls "expired").
+ */
 export type AuthState =
   | "loading"
   | "needs-login"

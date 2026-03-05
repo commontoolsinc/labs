@@ -78,8 +78,8 @@ import {
 import type { AuthStatus } from "../../auth/auth-types.ts";
 import {
   formatTokenExpiry,
-  getSelectedScopeSummary,
   getScopeSummary as getScopeSummaryGeneric,
+  getSelectedScopeSummary,
   STATUS_CONFIG,
 } from "../../auth/auth-ui-helpers.tsx";
 
@@ -121,6 +121,9 @@ export function createPreviewUI(
   const name = auth?.user?.name;
   const isAuthenticated = !!email;
 
+  // Date.now() capture is intentional — createPreviewUI produces a static
+  // snapshot for picker display, not a live-updating component. The main
+  // pattern UI uses a reactive clock (startReactiveClock) separately.
   const now = Date.now();
   const expiresAt = auth?.expiresAt || 0;
   const isExpired = isAuthenticated && expiresAt > 0 && expiresAt < now;
@@ -276,7 +279,10 @@ interface Output {
   bgUpdater: Stream<Record<string, never>>;
 }
 
-// Create guarded refresh function for Airtable OAuth
+// Module-scope singleton refresh guard for Airtable OAuth.
+// This is intentional: all instances of this auth pattern share one guard,
+// preventing concurrent refresh requests. This is correct because each
+// provider (e.g. Airtable, Google) has its own module with its own guard.
 const refreshAuthToken = createRefreshFunction(
   "/api/integrations/airtable-oauth/refresh",
 );
@@ -459,6 +465,10 @@ export default pattern<Input, Output>(
     });
 
     const loggedIn = computed(() => !!auth?.accessToken);
+    const notLoggedInWithScopes = computed(() => !loggedIn && hasSelectedScopes);
+    const showTokenStatus = computed(() =>
+      !!auth?.user?.email && !isTokenExpired
+    );
 
     // Data-only computed for granted scopes
     const grantedScopesList = computed(() => {
@@ -498,25 +508,23 @@ export default pattern<Input, Output>(
             }}
           >
             <h3 style={{ fontSize: "16px", marginTop: "0" }}>
-              Status: {loggedIn ? "Authenticated" : "Not Authenticated"}
+              Status: {ifElse(loggedIn, "Authenticated", "Not Authenticated")}
             </h3>
 
-            {loggedIn
-              ? (
-                <div>
-                  <p style={{ margin: "8px 0" }}>
-                    <strong>Email:</strong> {auth.user.email}
-                  </p>
-                  <p style={{ margin: "8px 0" }}>
-                    <strong>Name:</strong> {auth.user.name}
-                  </p>
-                </div>
-              )
-              : (
-                <p style={{ color: "#666" }}>
-                  Select permissions below and authenticate with Airtable
+            {ifElse(
+              loggedIn,
+              <div>
+                <p style={{ margin: "8px 0" }}>
+                  <strong>Email:</strong> {auth.user.email}
                 </p>
-              )}
+                <p style={{ margin: "8px 0" }}>
+                  <strong>Name:</strong> {auth.user.name}
+                </p>
+              </div>,
+              <p style={{ color: "#666" }}>
+                Select permissions below and authenticate with Airtable
+              </p>,
+            )}
           </div>
 
           {/* Permissions checkboxes */}
@@ -531,7 +539,8 @@ export default pattern<Input, Output>(
           >
             <h4 style={{ marginTop: "0", marginBottom: "12px" }}>
               Permissions
-              {loggedIn && (
+              {ifElse(
+                loggedIn,
                 <span
                   style={{
                     fontWeight: "normal",
@@ -541,7 +550,8 @@ export default pattern<Input, Output>(
                   }}
                 >
                   (locked while authenticated)
-                </span>
+                </span>,
+                null,
               )}
             </h4>
             <div
@@ -569,25 +579,27 @@ export default pattern<Input, Output>(
           </div>
 
           {/* Re-auth warning */}
-          {needsReauth &&
-            (
-              <div
-                style={{
-                  padding: "12px",
-                  backgroundColor: "#fff3cd",
-                  borderRadius: "8px",
-                  border: "1px solid #ffc107",
-                  fontSize: "14px",
-                }}
-              >
-                <strong>Note:</strong>{" "}
-                You've selected new permissions. Click "Authenticate with
-                Airtable" below to grant access.
-              </div>
-            )}
+          {ifElse(
+            needsReauth,
+            <div
+              style={{
+                padding: "12px",
+                backgroundColor: "#fff3cd",
+                borderRadius: "8px",
+                border: "1px solid #ffc107",
+                fontSize: "14px",
+              }}
+            >
+              <strong>Note:</strong>{" "}
+              You've selected new permissions. Click "Authenticate with
+              Airtable" below to grant access.
+            </div>,
+            null,
+          )}
 
           {/* Favorite reminder */}
-          {loggedIn && (
+          {ifElse(
+            loggedIn,
             <div
               style={{
                 padding: "15px",
@@ -602,78 +614,83 @@ export default pattern<Input, Output>(
               patterns. Any pattern using{" "}
               <code>wish({"{"} query: "#airtableAuth" {"}"})</code>{" "}
               will automatically find and use it.
-            </div>
+            </div>,
+            null,
           )}
 
           {/* Show selected scopes */}
-          {(!loggedIn && hasSelectedScopes) &&
-            (
-              <div style={{ fontSize: "14px", color: "#666" }}>
-                Will request: {scopesDisplay}
-              </div>
-            )}
+          {ifElse(
+            notLoggedInWithScopes,
+            <div style={{ fontSize: "14px", color: "#666" }}>
+              Will request: {scopesDisplay}
+            </div>,
+            null,
+          )}
 
           {/* Token expired warning */}
-          {isTokenExpired &&
-            (
-              <div
+          {ifElse(
+            isTokenExpired,
+            <div
+              style={{
+                padding: "16px",
+                backgroundColor: "#fee2e2",
+                borderRadius: "8px",
+                border: "1px solid #ef4444",
+                marginBottom: "15px",
+              }}
+            >
+              <h4
                 style={{
-                  padding: "16px",
-                  backgroundColor: "#fee2e2",
-                  borderRadius: "8px",
-                  border: "1px solid #ef4444",
-                  marginBottom: "15px",
+                  margin: "0 0 8px 0",
+                  color: "#dc2626",
+                  fontSize: "14px",
                 }}
               >
-                <h4
-                  style={{
-                    margin: "0 0 8px 0",
-                    color: "#dc2626",
-                    fontSize: "14px",
-                  }}
-                >
-                  Session Expired
-                </h4>
+                Session Expired
+              </h4>
+              <p
+                style={{
+                  margin: "0 0 12px 0",
+                  fontSize: "13px",
+                  color: "#4b5563",
+                }}
+              >
+                Your Airtable token has expired. Click below to refresh it.
+              </p>
+              <button
+                type="button"
+                onClick={handleRefresh({ auth, refreshing, refreshFailed })}
+                disabled={refreshing}
+                style={{
+                  padding: "10px 20px",
+                  backgroundColor: refreshing ? "#93c5fd" : "#3b82f6",
+                  color: "white",
+                  border: "none",
+                  borderRadius: "6px",
+                  cursor: refreshing ? "not-allowed" : "pointer",
+                  fontWeight: "500",
+                  fontSize: "14px",
+                }}
+              >
+                {ifElse(refreshing, "Refreshing...", "Refresh Token")}
+              </button>
+              {ifElse(
+                refreshFailed,
                 <p
                   style={{
-                    margin: "0 0 12px 0",
+                    margin: "8px 0 0 0",
                     fontSize: "13px",
-                    color: "#4b5563",
-                  }}
-                >
-                  Your Airtable token has expired. Click below to refresh it.
-                </p>
-                <button
-                  type="button"
-                  onClick={handleRefresh({ auth, refreshing, refreshFailed })}
-                  disabled={refreshing}
-                  style={{
-                    padding: "10px 20px",
-                    backgroundColor: refreshing ? "#93c5fd" : "#3b82f6",
-                    color: "white",
-                    border: "none",
-                    borderRadius: "6px",
-                    cursor: refreshing ? "not-allowed" : "pointer",
+                    color: "#dc2626",
                     fontWeight: "500",
-                    fontSize: "14px",
                   }}
                 >
-                  {refreshing ? "Refreshing..." : "Refresh Token"}
-                </button>
-                {refreshFailed && (
-                  <p
-                    style={{
-                      margin: "8px 0 0 0",
-                      fontSize: "13px",
-                      color: "#dc2626",
-                      fontWeight: "500",
-                    }}
-                  >
-                    Refresh failed — try signing in again below.
-                  </p>
-                )}
-              </div>
-            )}
+                  Refresh failed — try signing in again below.
+                </p>,
+                null,
+              )}
+            </div>,
+            null,
+          )}
 
           <ct-oauth
             $auth={auth}
@@ -686,83 +703,85 @@ export default pattern<Input, Output>(
           />
 
           {/* Show granted scopes */}
-          {loggedIn &&
-            (
-              <div
-                style={{
-                  padding: "15px",
-                  backgroundColor: "#e3f2fd",
-                  borderRadius: "8px",
-                  fontSize: "14px",
-                }}
-              >
-                <strong>Granted Scopes:</strong>
-                <ul style={{ margin: "8px 0 0 0", paddingLeft: "20px" }}>
-                  {grantedScopesList.map((scope) => <li>{scope}</li>)}
-                </ul>
-              </div>
-            )}
+          {ifElse(
+            loggedIn,
+            <div
+              style={{
+                padding: "15px",
+                backgroundColor: "#e3f2fd",
+                borderRadius: "8px",
+                fontSize: "14px",
+              }}
+            >
+              <strong>Granted Scopes:</strong>
+              <ul style={{ margin: "8px 0 0 0", paddingLeft: "20px" }}>
+                {grantedScopesList.map((scope) => <li>{scope}</li>)}
+              </ul>
+            </div>,
+            null,
+          )}
 
           {/* Token status when authenticated and NOT expired */}
-          {(auth?.user?.email && !isTokenExpired) &&
-            (
+          {ifElse(
+            showTokenStatus,
+            <div
+              style={{
+                padding: "16px",
+                backgroundColor: "#f0f9ff",
+                borderRadius: "8px",
+                border: "1px solid #0ea5e9",
+              }}
+            >
               <div
                 style={{
-                  padding: "16px",
-                  backgroundColor: "#f0f9ff",
-                  borderRadius: "8px",
-                  border: "1px solid #0ea5e9",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                  gap: "12px",
                 }}
               >
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    flexWrap: "wrap",
-                    gap: "12px",
-                  }}
-                >
-                  <div>
-                    <h4
-                      style={{
-                        margin: "0 0 4px 0",
-                        fontSize: "14px",
-                        color: "#0369a1",
-                      }}
-                    >
-                      Token Status
-                    </h4>
-                    <p
-                      style={{
-                        margin: "0",
-                        fontSize: "13px",
-                        color: "#4b5563",
-                      }}
-                    >
-                      Expires in: <strong>{tokenExpiryDisplay}</strong>
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleRefresh({ auth, refreshing, refreshFailed })}
-                    disabled={refreshing}
+                <div>
+                  <h4
                     style={{
-                      padding: "8px 16px",
-                      backgroundColor: refreshing ? "#7dd3fc" : "#0ea5e9",
-                      color: "white",
-                      border: "none",
-                      borderRadius: "6px",
-                      cursor: refreshing ? "not-allowed" : "pointer",
-                      fontWeight: "500",
-                      fontSize: "13px",
+                      margin: "0 0 4px 0",
+                      fontSize: "14px",
+                      color: "#0369a1",
                     }}
                   >
-                    {refreshing ? "Refreshing..." : "Refresh Now"}
-                  </button>
+                    Token Status
+                  </h4>
+                  <p
+                    style={{
+                      margin: "0",
+                      fontSize: "13px",
+                      color: "#4b5563",
+                    }}
+                  >
+                    Expires in: <strong>{tokenExpiryDisplay}</strong>
+                  </p>
                 </div>
+                <button
+                  type="button"
+                  onClick={handleRefresh({ auth, refreshing, refreshFailed })}
+                  disabled={refreshing}
+                  style={{
+                    padding: "8px 16px",
+                    backgroundColor: refreshing ? "#7dd3fc" : "#0ea5e9",
+                    color: "white",
+                    border: "none",
+                    borderRadius: "6px",
+                    cursor: refreshing ? "not-allowed" : "pointer",
+                    fontWeight: "500",
+                    fontSize: "13px",
+                  }}
+                >
+                  {ifElse(refreshing, "Refreshing...", "Refresh Now")}
+                </button>
               </div>
-            )}
+            </div>,
+            null,
+          )}
 
           <div
             style={{
@@ -940,7 +959,11 @@ import type { AuthManagerDescriptor } from "../../../auth/auth-manager-descripto
 import AirtableAuth from "../airtable-auth.tsx";
 
 // Re-export shared types for consumers
-export type { AuthInfo, AuthState, TokenExpiryWarning } from "../../../auth/auth-types.ts";
+export type {
+  AuthInfo,
+  AuthState,
+  TokenExpiryWarning,
+} from "../../../auth/auth-types.ts";
 export type {
   AuthManagerInput as AirtableAuthManagerInput,
   AuthManagerOutput as AirtableAuthManagerOutput,
@@ -968,15 +991,21 @@ export const SCOPE_DESCRIPTIONS: Record<ScopeKey, string> = {
   "webhook:manage": "Manage webhooks",
 };
 
+/** Unified scope registry for the auth manager factory */
+const SCOPES: AuthManagerDescriptor["scopes"] = Object.fromEntries(
+  Object.entries(SCOPE_DESCRIPTIONS).map(([key, desc]) => [
+    key,
+    { description: desc, scopeString: key },
+  ]),
+);
+
 const AirtableAuthManagerDescriptor: AuthManagerDescriptor = {
   name: "airtable",
   displayName: "Airtable",
   brandColor: "#18BFFF",
   wishTag: "#airtableAuth",
   tokenField: "accessToken",
-  refreshEndpoint: "/api/integrations/airtable-oauth/refresh",
-  scopeDescriptions: SCOPE_DESCRIPTIONS,
-  scopeKeysAreLiteral: true,
+  scopes: SCOPES,
   hasAvatarSupport: false,
 };
 

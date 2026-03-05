@@ -90,5 +90,6 @@ export function formatTokenExpiry(
   const mins = minutes % 60;
 
   if (hours > 0) return `${hours}h ${mins}m`;
+  if (minutes === 0) return "< 1 min";
   return `${mins}m`;
 }

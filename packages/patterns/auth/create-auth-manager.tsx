@@ -32,7 +32,7 @@ import { STATUS_COLORS, STATUS_MESSAGES } from "./auth-manager-descriptor.ts";
 import { formatTimeRemaining } from "./auth-ui-helpers.tsx";
 import {
   startReactiveClock,
-  TOKEN_WARNING_THRESHOLD_MS,
+  TOKEN_EXPIRY_THRESHOLD_MS,
 } from "./auth-reactive.ts";
 
 // Re-export for consumers
@@ -99,6 +99,9 @@ const attemptRefresh = handler<
 
   refreshStream.send({});
 
+  // Note: in theory the Writable could be invalid if the pattern were
+  // hot-reloaded, but CTS pattern lifecycle matches page lifecycle so
+  // there is no practical risk of accessing a stale Writable here.
   setTimeout(() => {
     if (refreshing.get()) {
       refreshing.set(false);
@@ -176,7 +179,7 @@ export function createAuthManager(
         const tr = tokenTimeRemaining as number | null;
         if (tr === null) return "ok";
         if (tr < 0) return "expired";
-        if (tr < TOKEN_WARNING_THRESHOLD_MS) return "warning";
+        if (tr < TOKEN_EXPIRY_THRESHOLD_MS) return "warning";
         return "ok";
       });
 
@@ -187,22 +190,14 @@ export function createAuthManager(
       // Scope verification
       const missingScopes = computed((): string[] => {
         const granted: string[] = (auth?.scope ?? []) as string[];
-        if (descriptor.scopeKeysAreLiteral) {
-          // Scope keys ARE the scope strings (e.g. Airtable)
-          const value = (requiredScopes as string[]).filter(
-            (key) => !granted.includes(key),
-          );
-          debugLog(debugMode as boolean, "missingScopes:", value);
-          return value;
-        } else {
-          // Scope keys map to URLs (e.g. Google)
-          const scopeMap = descriptor.scopeMap ?? {};
-          const value = (requiredScopes as string[]).filter(
-            (key) => !granted.includes(scopeMap[key] ?? key),
-          );
-          debugLog(debugMode as boolean, "missingScopes:", value);
-          return value;
-        }
+        const value = (requiredScopes as string[]).filter(
+          (key) =>
+            !granted.includes(
+              descriptor.scopes[key]?.scopeString ?? key,
+            ),
+        );
+        debugLog(debugMode as boolean, "missingScopes:", value);
+        return value;
       });
       const hasRequiredScopes = computed(
         () => (missingScopes as string[]).length === 0,
@@ -247,9 +242,6 @@ export function createAuthManager(
         }
       });
 
-      const isRefreshing = computed(() => refreshing.get() === true);
-      const hasRefreshFailed = computed(() => refreshFailed.get() === true);
-
       const statusDotColor = computed(
         () => STATUS_COLORS[currentState as AuthState] ?? STATUS_COLORS.loading,
       );
@@ -259,7 +251,7 @@ export function createAuthManager(
         if (state === "ready") return `Signed in as ${currentEmail}`;
         if (state === "missing-scopes") {
           const names = (missingScopes as string[])
-            .map((k) => descriptor.scopeDescriptions[k] ?? k)
+            .map((k) => descriptor.scopes[k]?.description ?? k)
             .join(", ");
           return `Missing: ${names}`;
         }
@@ -276,8 +268,8 @@ export function createAuthManager(
         authCell: auth,
         email: currentEmail ?? "",
         hasRequiredScopes: hasRequiredScopes as boolean,
-        grantedScopes: ((auth?.scope ?? []) as string[]).slice(),
-        missingScopes: Array.from(missingScopes as string[]),
+        grantedScopes: (auth?.scope ?? []) as string[],
+        missingScopes: missingScopes as string[],
         tokenExpiresAt: auth?.expiresAt ?? null,
         isTokenExpired: isTokenExpired as boolean,
         tokenTimeRemaining: tokenTimeRemaining as number | null,
@@ -294,7 +286,7 @@ export function createAuthManager(
       // ====================================================================
       const createAuth = action(() => {
         const selected: Record<string, boolean> = {};
-        for (const key of Object.keys(descriptor.scopeDescriptions)) {
+        for (const key of Object.keys(descriptor.scopes)) {
           selected[key] = false;
         }
         for (const scope of requiredScopes as string[]) {
@@ -407,12 +399,12 @@ export function createAuthManager(
 
       const scopesList = computed(() =>
         (requiredScopes as string[])
-          .map((k) => descriptor.scopeDescriptions[k] ?? k)
+          .map((k) => descriptor.scopes[k]?.description ?? k)
           .join(", ")
       );
       const missingScopesList = computed(() =>
         (missingScopes as string[])
-          .map((k) => descriptor.scopeDescriptions[k] ?? k)
+          .map((k) => descriptor.scopes[k]?.description ?? k)
           .join(", ")
       );
 
@@ -621,7 +613,7 @@ export function createAuthManager(
                   refreshFailed,
                   refreshStartedAt,
                 })}
-                disabled={isRefreshing}
+                disabled={refreshing}
                 style={{
                   padding: "8px 16px",
                   backgroundColor: "#3b82f6",
@@ -633,10 +625,10 @@ export function createAuthManager(
                   fontSize: "14px",
                 }}
               >
-                {ifElse(isRefreshing, "Refreshing...", "Refresh Session")}
+                {ifElse(refreshing, "Refreshing...", "Refresh Session")}
               </button>
               {ifElse(
-                hasRefreshFailed,
+                refreshFailed,
                 <span style={{ fontSize: "13px", color: "#dc2626" }}>
                   Refresh failed — try signing in again below.
                 </span>,
@@ -797,7 +789,7 @@ export function createAuthManager(
         tokenExpiredUI,
         scopesOrPrev,
       );
-      const refreshOrPrev = ifElse(isRefreshing, refreshingUI, expiredOrPrev);
+      const refreshOrPrev = ifElse(refreshing, refreshingUI, expiredOrPrev);
       const fullUI = ifElse(isReadyState, readyUI, refreshOrPrev);
 
       // ====================================================================

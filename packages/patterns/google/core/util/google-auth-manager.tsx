@@ -71,6 +71,14 @@ export type ScopeKey = keyof typeof SCOPE_MAP;
 /** Account type for multi-account support */
 export type AccountType = "default" | "personal" | "work";
 
+/** Unified scope registry for the auth manager factory */
+const SCOPES: AuthManagerDescriptor["scopes"] = Object.fromEntries(
+  Object.entries(SCOPE_MAP).map(([key, url]) => [
+    key,
+    { description: SCOPE_DESCRIPTIONS[key as ScopeKey], scopeString: url },
+  ]),
+);
+
 const GoogleAuthManagerDescriptor: AuthManagerDescriptor = {
   name: "google",
   displayName: "Google",
@@ -81,10 +89,7 @@ const GoogleAuthManagerDescriptor: AuthManagerDescriptor = {
     work: "#googleAuthWork",
   },
   tokenField: "token",
-  refreshEndpoint: "/api/integrations/google-oauth/refresh",
-  scopeDescriptions: SCOPE_DESCRIPTIONS,
-  scopeKeysAreLiteral: false,
-  scopeMap: SCOPE_MAP,
+  scopes: SCOPES,
   hasAvatarSupport: true,
 };
 
