@@ -114,11 +114,8 @@ describe("OpaqueRef map callbacks", () => {
 
     // The map callback should NOT capture "spotNumber" as a variable.
     // "spotNumber" in `{ spotNumber: sn }` is a property key, not a variable reference.
-    // If the bug were present, the output would contain `params: { spotNumber }` which
-    // causes ReferenceError at runtime (spotNumber is an action param, not a free var).
-    assertStringIncludes(output, "params: {}");
-
-    // The map's params object must be empty — no spurious capture
+    // If the bug were present, the output would contain `spotNumber: spotNumber` or
+    // `spotNumber` in the captures object, causing a ReferenceError at runtime.
     const mapStart = output.indexOf("mapWithPattern(");
     assert(
       mapStart !== -1,
@@ -129,6 +126,8 @@ describe("OpaqueRef map callbacks", () => {
       !mapSection.includes("spotNumber: spotNumber"),
       "should not capture destructuring property key 'spotNumber' as a variable",
     );
+    // The captures object (last arg to mapWithPattern) must be empty
+    assertStringIncludes(output, "), {})");
   });
 
   it("derives map callback parameters and unary negations", async () => {
