@@ -28,7 +28,8 @@ export function computeInputHashFromValue<T extends Record<string, any>>(
 ): string {
   const safeInputs = inputs ?? {};
   // Exclude 'result' type hint from the hash - only hash actual fetch parameters
-  const { result: _result, ...inputsOnly } = safeInputs;
+  const inputsOnly = { ...(safeInputs as Record<string, unknown>) };
+  delete (inputsOnly as Record<string, unknown>).result;
   // refer() cannot hash undefined values; normalize to a deep storable shape
   // (omits undefined object props, converts undefined array elements to null).
   const storableInputs = toDeepStorableValue(inputsOnly);
@@ -118,10 +119,14 @@ export async function tryWriteResult<T extends Record<string, any>>(
   inputsCell: Cell<T>,
   expectedHash: string,
   action: (tx: IExtendedStorageTransaction) => void,
+  snapshotInputs?: (cell: Cell<T>) => T,
 ): Promise<boolean> {
   let success = false;
   await runtime.editWithRetry((tx) => {
-    const currentHash = computeInputHash(tx, inputsCell);
+    const inputs = snapshotInputs
+      ? snapshotInputs(inputsCell.withTx(tx))
+      : inputsCell.getAsQueryResult([], tx);
+    const currentHash = computeInputHashFromValue(inputs);
 
     // Only write if inputs haven't changed since we started the request
     if (currentHash === expectedHash) {

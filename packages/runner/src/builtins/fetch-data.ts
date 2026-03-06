@@ -13,7 +13,7 @@ import {
 
 /** The shape of fetchData's input cell. */
 type FetchDataInputs = {
-  url: string;
+  url?: string;
   mode?: "text" | "json";
   options?: { body?: any; method?: string; headers?: Record<string, string> };
 };
@@ -41,6 +41,26 @@ const fetchDataInputSchema = {
     },
   },
 } as const satisfies JSONSchema;
+
+function snapshotFetchDataInputs(
+  cell: Cell<FetchDataInputs>,
+): FetchDataInputs {
+  const snapshot = cell.asSchema(fetchDataInputSchema).get() ??
+    ({} as FetchDataInputs);
+  const mode = snapshot.mode === "text" || snapshot.mode === "json"
+    ? snapshot.mode
+    : undefined;
+  const body = snapshot.options?.body;
+  const options = snapshot.options
+    ? {
+      ...snapshot.options,
+      body: body !== undefined && typeof body !== "string"
+        ? JSON.stringify(body)
+        : body,
+    }
+    : undefined;
+  return { url: snapshot.url, mode, options };
+}
 
 /**
  * Fetch data from a URL.
@@ -150,7 +170,7 @@ export function fetchData(
     // should be fine.
     sendResult(tx, { pending, result, error });
 
-    const inputsSnapshot = inputsCell.asSchema(fetchDataInputSchema).get();
+    const inputsSnapshot = snapshotFetchDataInputs(inputsCell.withTx(tx));
     const url = inputsSnapshot?.url;
     if (!url) {
       // Only update if values actually need to change to reduce transaction conflicts
@@ -223,21 +243,7 @@ export function fetchData(
         // asSchema().get() returns a frozen plain snapshot with nested
         // properties (like options.headers) fully resolved, safe to use
         // after commit.
-        (cell) => {
-          const snapshot = cell.asSchema(fetchDataInputSchema).get();
-          // Stringify non-string bodies so startFetch receives ready-to-send
-          // options. Since .get() returns a frozen object, build a new one.
-          const body = snapshot.options?.body;
-          const options = snapshot.options
-            ? {
-              ...snapshot.options,
-              body: body !== undefined && typeof body !== "string"
-                ? JSON.stringify(body)
-                : body,
-            }
-            : undefined;
-          return { ...snapshot, options } as FetchDataInputs;
-        },
+        snapshotFetchDataInputs,
       ).then(
         ({ claimed, inputs, inputHash }) => {
           if (!claimed) {
@@ -329,11 +335,18 @@ async function startFetch(
     await runtime.idle();
 
     // Try to write result - any tab can write if inputs match
-    await tryWriteResult(runtime, internal, inputsCell, inputHash, (tx) => {
-      pending.withTx(tx).set(false);
-      result.withTx(tx).set(data);
-      error.withTx(tx).set(undefined);
-    });
+    await tryWriteResult(
+      runtime,
+      internal,
+      inputsCell,
+      inputHash,
+      (tx) => {
+        pending.withTx(tx).set(false);
+        result.withTx(tx).set(data);
+        error.withTx(tx).set(undefined);
+      },
+      snapshotFetchDataInputs,
+    );
   } catch (err) {
     // Don't write errors if request was aborted
     if (abortSignal.aborted) return;
@@ -342,7 +355,9 @@ async function startFetch(
 
     // Write error - but only update inputHash if inputs haven't changed
     await runtime.editWithRetry((tx) => {
-      const currentHash = computeInputHash(tx, inputsCell);
+      const currentHash = computeInputHashFromValue(
+        snapshotFetchDataInputs(inputsCell.withTx(tx)),
+      );
 
       // Always clear pending and result
       pending.withTx(tx).set(false);
