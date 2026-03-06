@@ -49,13 +49,14 @@ function isNecessarilyFrozenValue(value: unknown): boolean {
 function isNecessarilyOrKnownDeepFrozen(value: unknown): boolean {
   // Note: The `as` cast here is safe because the antecedent being `false` means
   // that `value` must be an `object` consequent.
-  return isNecessarilyFrozenValue(value) || isInDeepFrozenCache(value as object);
+  return isNecessarilyFrozenValue(value) ||
+    isInDeepFrozenCache(value as object);
 }
 
 /**
  * Returns `true` if the value is deeply frozen: either a primitive, or a
  * frozen object/array whose every nested value is also deeply frozen
- * (recursively). Caches results fast repeat checks.
+ * (recursively). Caches results for fast repeat checks.
  *
  * Handles circular references and sparse arrays.
  */
@@ -66,7 +67,10 @@ export function isDeepFrozen(value: unknown): boolean {
 /**
  * Internal recursive deep-frozen check with cycle detection.
  */
-function isDeepFrozenInProgress(value: unknown, inProgress?: Set<object>): boolean {
+function isDeepFrozenInProgress(
+  value: unknown,
+  inProgress?: Set<object>,
+): boolean {
   if (isNecessarilyOrKnownDeepFrozen(value)) {
     return true;
   } else if (!Object.isFrozen(value)) {
