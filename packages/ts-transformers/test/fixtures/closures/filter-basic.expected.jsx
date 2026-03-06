@@ -7,6 +7,11 @@ interface Item {
 interface State {
     items: Item[];
 }
+// FIXTURE: filter-basic
+// Verifies: .filter() and .map() on reactive arrays are both transformed
+//   .filter(fn) → .filterWithPattern(pattern(...), {})
+//   .map(fn)    → .mapWithPattern(pattern(...), {})
+// Context: No captured outer variables — params objects are empty {}
 export default pattern((state) => {
     return {
         [UI]: (<ul>
