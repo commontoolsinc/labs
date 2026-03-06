@@ -1,0 +1,118 @@
+import * as __ctHelpers from "commontools";
+import { pattern, UI } from "commontools";
+interface Spot {
+    spotNumber: string;
+}
+interface State {
+    spots: Spot[];
+}
+export default pattern((state) => {
+    return {
+        [UI]: (<ul>
+        {state.spots.mapWithPattern(__ctHelpers.pattern(({ element: spot, params: {} }) => {
+                const { spotNumber: sn } = spot;
+                return <li>{sn}</li>;
+            }, {
+                type: "object",
+                properties: {
+                    element: {
+                        $ref: "#/$defs/Spot"
+                    },
+                    params: {
+                        type: "object",
+                        properties: {}
+                    }
+                },
+                required: ["element", "params"],
+                $defs: {
+                    Spot: {
+                        type: "object",
+                        properties: {
+                            spotNumber: {
+                                type: "string"
+                            }
+                        },
+                        required: ["spotNumber"]
+                    }
+                }
+            } as const satisfies __ctHelpers.JSONSchema, {
+                anyOf: [{
+                        $ref: "https://commonfabric.org/schemas/vnode.json"
+                    }, {
+                        type: "object",
+                        properties: {}
+                    }, {
+                        $ref: "#/$defs/UIRenderable",
+                        asOpaque: true
+                    }],
+                $defs: {
+                    UIRenderable: {
+                        type: "object",
+                        properties: {
+                            $UI: {
+                                $ref: "https://commonfabric.org/schemas/vnode.json"
+                            }
+                        },
+                        required: ["$UI"]
+                    }
+                }
+            } as const satisfies __ctHelpers.JSONSchema), {})}
+      </ul>),
+    };
+}, {
+    type: "object",
+    properties: {
+        spots: {
+            type: "array",
+            items: {
+                $ref: "#/$defs/Spot"
+            }
+        }
+    },
+    required: ["spots"],
+    $defs: {
+        Spot: {
+            type: "object",
+            properties: {
+                spotNumber: {
+                    type: "string"
+                }
+            },
+            required: ["spotNumber"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        $UI: {
+            $ref: "#/$defs/JSXElement"
+        }
+    },
+    required: ["$UI"],
+    $defs: {
+        JSXElement: {
+            anyOf: [{
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    $ref: "#/$defs/UIRenderable",
+                    asOpaque: true
+                }]
+        },
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema);
+// @ts-ignore: Internals
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+// @ts-ignore: Internals
+h.fragment = __ctHelpers.h.fragment;
