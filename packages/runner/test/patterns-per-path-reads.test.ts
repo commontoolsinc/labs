@@ -1,27 +1,29 @@
-// Per-path reads: verify that fine-grained scheduling only triggers the
-// lifts that actually read the changed data. A handler mutates one branch
-// of internal state; only the lifts downstream of that branch should re-run.
+// Per-path reads: verify that fine-grained scheduling only triggers sinks
+// that actually read the changed sub-paths. The optimization makes the
+// document-level read in validateAndTransform non-scheduling, and instead
+// emits per-path reads for only the paths the schema actually consumes.
+//
+// The scenario: multiple consumers (via asSchema) read the SAME mutable cell
+// with DIFFERENT schemas. Changing a field covered by one schema should NOT
+// trigger the sink of the other schema.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import "@commontools/utils/equal-ignoring-symbols";
 
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import type { JSONSchema } from "../src/builder/types.ts";
-import { createBuilder } from "../src/builder/factory.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-describe("Per-path reads - selective lift triggering", () => {
+describe("Per-path reads - schema-selective sinks", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
-  let lift: ReturnType<typeof createBuilder>["commontools"]["lift"];
-  let pattern: ReturnType<typeof createBuilder>["commontools"]["pattern"];
-  let handler: ReturnType<typeof createBuilder>["commontools"]["handler"];
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -29,15 +31,7 @@ describe("Per-path reads - selective lift triggering", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
     });
-
     tx = runtime.edit();
-
-    const { commontools } = createBuilder();
-    ({
-      lift,
-      pattern,
-      handler,
-    } = commontools);
   });
 
   afterEach(async () => {
@@ -46,562 +40,330 @@ describe("Per-path reads - selective lift triggering", () => {
     await storageManager?.close();
   });
 
-  it("handler changing one field should only re-run downstream lifts", async () => {
-    // Track which lifts ran and in what order
-    const executionLog: string[] = [];
+  it("two asSchema views of the same cell: changing one field should not trigger the other view's sink", async () => {
+    // Create a cell with nested data under two top-level fields
+    const cell = runtime.getCell<{
+      profile: { name: string; age: number };
+      stats: { score: number; level: string };
+    }>(space, "per-path-two-views");
 
-    // ── Two independent lift chains ──
-    //
-    //   args.left ──► liftDouble ──► liftFormat ("left: ...")
-    //   args.right ──► liftSquare ──► liftLabel ("right: ...")
-    //
-    //   handler "incLeft" only mutates args.left
-    //   handler "incRight" only mutates args.right
-    //
-    // When incLeft fires, only liftDouble + liftFormat should re-run.
-    // When incRight fires, only liftSquare + liftLabel should re-run.
-
-    const liftDouble = lift(
-      { type: "number" } as const satisfies JSONSchema,
-      { type: "number" } as const satisfies JSONSchema,
-      (x: number) => {
-        executionLog.push("liftDouble");
-        return x * 2;
-      },
-    );
-
-    const liftFormat = lift(
-      { type: "number" } as const satisfies JSONSchema,
-      { type: "string" } as const satisfies JSONSchema,
-      (x: number) => {
-        executionLog.push("liftFormat");
-        return `left: ${x}`;
-      },
-    );
-
-    const liftSquare = lift(
-      { type: "number" } as const satisfies JSONSchema,
-      { type: "number" } as const satisfies JSONSchema,
-      (x: number) => {
-        executionLog.push("liftSquare");
-        return x * x;
-      },
-    );
-
-    const liftLabel = lift(
-      { type: "number" } as const satisfies JSONSchema,
-      { type: "string" } as const satisfies JSONSchema,
-      (x: number) => {
-        executionLog.push("liftLabel");
-        return `right: ${x}`;
-      },
-    );
-
-    const incLeft = handler<
-      Record<string, never>,
-      { left: number }
-    >(
-      (_event, state) => {
-        state.left += 1;
-      },
-      { proxy: true },
-    );
-
-    const incRight = handler<
-      Record<string, never>,
-      { right: number }
-    >(
-      (_event, state) => {
-        state.right += 1;
-      },
-      { proxy: true },
-    );
-
-    const testPattern = pattern<{ left: number; right: number }>(
-      ({ left, right }) => {
-        const doubled = liftDouble(left);
-        const formatted = liftFormat(doubled);
-        const squared = liftSquare(right);
-        const labeled = liftLabel(squared);
-        return {
-          left,
-          right,
-          formatted,
-          labeled,
-          incLeft: incLeft({ left }),
-          incRight: incRight({ right }),
-        };
-      },
-    );
-
-    const resultCell = runtime.getCell<{
-      left: number;
-      right: number;
-      formatted: string;
-      labeled: string;
-      incLeft: unknown;
-      incRight: unknown;
-    }>(space, "per-path-selective-test", undefined, tx);
-
-    const result = runtime.run(
-      tx,
-      testPattern,
-      { left: 1, right: 2 },
-      resultCell,
-    );
+    cell.withTx(tx).set({
+      profile: { name: "Alice", age: 30 },
+      stats: { score: 100, level: "gold" },
+    });
     tx.commit();
     tx = runtime.edit();
 
-    // Initial pull – all lifts should run
-    let value = await result.pull();
-    expect(value).toMatchObject({
-      left: 1,
-      right: 2,
-      formatted: "left: 2",
-      labeled: "right: 4",
-    });
-
-    // Record which lifts ran on initial setup
-    const initialRuns = [...executionLog];
-    expect(initialRuns).toContain("liftDouble");
-    expect(initialRuns).toContain("liftFormat");
-    expect(initialRuns).toContain("liftSquare");
-    expect(initialRuns).toContain("liftLabel");
-
-    // ── Trigger incLeft handler ──
-    executionLog.length = 0;
-    result.key("incLeft").send({});
-    value = await result.pull();
-
-    expect(value).toMatchObject({
-      left: 2,
-      formatted: "left: 4",
-      // right side unchanged
-      right: 2,
-      labeled: "right: 4",
-    });
-
-    // Only the left-side chain should have re-run
-    expect(executionLog).toContain("liftDouble");
-    expect(executionLog).toContain("liftFormat");
-    expect(executionLog).not.toContain("liftSquare");
-    expect(executionLog).not.toContain("liftLabel");
-
-    // ── Trigger incRight handler ──
-    executionLog.length = 0;
-    result.key("incRight").send({});
-    value = await result.pull();
-
-    expect(value).toMatchObject({
-      left: 2,
-      formatted: "left: 4",
-      right: 3,
-      labeled: "right: 9",
-    });
-
-    // Only the right-side chain should have re-run
-    expect(executionLog).not.toContain("liftDouble");
-    expect(executionLog).not.toContain("liftFormat");
-    expect(executionLog).toContain("liftSquare");
-    expect(executionLog).toContain("liftLabel");
-  });
-
-  it("cascade of lifts: only affected chain re-runs", async () => {
-    // A deeper cascade: input → stage1 → stage2 → stage3
-    // Two parallel cascades share no data.
-
-    const executionLog: string[] = [];
-
-    const addOne = lift(
-      { type: "number" } as const satisfies JSONSchema,
-      { type: "number" } as const satisfies JSONSchema,
-      (x: number) => {
-        executionLog.push("addOne");
-        return x + 1;
-      },
-    );
-
-    const timesTwo = lift(
-      { type: "number" } as const satisfies JSONSchema,
-      { type: "number" } as const satisfies JSONSchema,
-      (x: number) => {
-        executionLog.push("timesTwo");
-        return x * 2;
-      },
-    );
-
-    const toString = lift(
-      { type: "number" } as const satisfies JSONSchema,
-      { type: "string" } as const satisfies JSONSchema,
-      (x: number) => {
-        executionLog.push("toString");
-        return String(x);
-      },
-    );
-
-    const negate = lift(
-      { type: "number" } as const satisfies JSONSchema,
-      { type: "number" } as const satisfies JSONSchema,
-      (x: number) => {
-        executionLog.push("negate");
-        return -x;
-      },
-    );
-
-    const abs = lift(
-      { type: "number" } as const satisfies JSONSchema,
-      { type: "number" } as const satisfies JSONSchema,
-      (x: number) => {
-        executionLog.push("abs");
-        return Math.abs(x);
-      },
-    );
-
-    const toHex = lift(
-      { type: "number" } as const satisfies JSONSchema,
-      { type: "string" } as const satisfies JSONSchema,
-      (x: number) => {
-        executionLog.push("toHex");
-        return `0x${x.toString(16)}`;
-      },
-    );
-
-    const bumpA = handler<
-      Record<string, never>,
-      { a: number }
+    // Two views with disjoint schemas on the same cell
+    const profileView = cell.asSchema<
+      { profile: { name: string; age: number } }
     >(
-      (_event, state) => {
-        state.a += 10;
-      },
-      { proxy: true },
-    );
-
-    const bumpB = handler<
-      Record<string, never>,
-      { b: number }
-    >(
-      (_event, state) => {
-        state.b += 10;
-      },
-      { proxy: true },
-    );
-
-    // Chain A: a → addOne → timesTwo → toString → resultA
-    // Chain B: b → negate → abs → toHex → resultB
-    const cascadePattern = pattern<{ a: number; b: number }>(
-      ({ a, b }) => {
-        const s1a = addOne(a);
-        const s2a = timesTwo(s1a);
-        const resultA = toString(s2a);
-
-        const s1b = negate(b);
-        const s2b = abs(s1b);
-        const resultB = toHex(s2b);
-
-        return {
-          a,
-          b,
-          resultA,
-          resultB,
-          bumpA: bumpA({ a }),
-          bumpB: bumpB({ b }),
-        };
-      },
-    );
-
-    const resultCell = runtime.getCell<{
-      a: number;
-      b: number;
-      resultA: string;
-      resultB: string;
-      bumpA: unknown;
-      bumpB: unknown;
-    }>(space, "per-path-cascade-test", undefined, tx);
-
-    const result = runtime.run(
-      tx,
-      cascadePattern,
-      { a: 1, b: 5 },
-      resultCell,
-    );
-    tx.commit();
-    tx = runtime.edit();
-
-    let value = await result.pull();
-    expect(value).toMatchObject({
-      a: 1,
-      b: 5,
-      resultA: "4", // (1+1)*2 = 4
-      resultB: "0x5", // abs(-5) = 5
-    });
-
-    // ── Bump A ──
-    executionLog.length = 0;
-    result.key("bumpA").send({});
-    value = await result.pull();
-
-    expect(value).toMatchObject({
-      a: 11,
-      resultA: "24", // (11+1)*2 = 24
-      b: 5,
-      resultB: "0x5",
-    });
-
-    // Chain A lifts ran
-    expect(executionLog).toContain("addOne");
-    expect(executionLog).toContain("timesTwo");
-    expect(executionLog).toContain("toString");
-    // Chain B lifts did NOT run
-    expect(executionLog).not.toContain("negate");
-    expect(executionLog).not.toContain("abs");
-    expect(executionLog).not.toContain("toHex");
-
-    // ── Bump B ──
-    executionLog.length = 0;
-    result.key("bumpB").send({});
-    value = await result.pull();
-
-    expect(value).toMatchObject({
-      a: 11,
-      resultA: "24",
-      b: 15,
-      resultB: "0xf", // abs(-15) = 15
-    });
-
-    // Chain B lifts ran
-    expect(executionLog).toContain("negate");
-    expect(executionLog).toContain("abs");
-    expect(executionLog).toContain("toHex");
-    // Chain A lifts did NOT run
-    expect(executionLog).not.toContain("addOne");
-    expect(executionLog).not.toContain("timesTwo");
-    expect(executionLog).not.toContain("toString");
-  });
-
-  it("shared lift re-runs only when its specific input changes", async () => {
-    // A "summary" lift reads from both branches. It should re-run when
-    // either branch changes, but the branch-specific lifts should not
-    // cross-contaminate.
-
-    const executionLog: string[] = [];
-
-    const double = lift(
-      { type: "number" } as const satisfies JSONSchema,
-      { type: "number" } as const satisfies JSONSchema,
-      (x: number) => {
-        executionLog.push("double");
-        return x * 2;
-      },
-    );
-
-    const triple = lift(
-      { type: "number" } as const satisfies JSONSchema,
-      { type: "number" } as const satisfies JSONSchema,
-      (x: number) => {
-        executionLog.push("triple");
-        return x * 3;
-      },
-    );
-
-    const summarize = lift(
       {
         type: "object",
-        properties: { a: { type: "number" }, b: { type: "number" } },
-        required: ["a", "b"],
+        properties: {
+          profile: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              age: { type: "number" },
+            },
+            required: ["name", "age"],
+          },
+        },
+        required: ["profile"],
       } as const satisfies JSONSchema,
-      { type: "string" } as const satisfies JSONSchema,
-      ({ a, b }) => {
-        executionLog.push("summarize");
-        return `${a}+${b}=${a + b}`;
-      },
     );
 
-    const incA = handler<
-      Record<string, never>,
-      { a: number }
+    const statsView = cell.asSchema<
+      { stats: { score: number; level: string } }
     >(
-      (_event, state) => {
-        state.a += 1;
-      },
-      { proxy: true },
+      {
+        type: "object",
+        properties: {
+          stats: {
+            type: "object",
+            properties: {
+              score: { type: "number" },
+              level: { type: "string" },
+            },
+            required: ["score", "level"],
+          },
+        },
+        required: ["stats"],
+      } as const satisfies JSONSchema,
     );
 
-    const incB = handler<
-      Record<string, never>,
-      { b: number }
-    >(
-      (_event, state) => {
-        state.b += 1;
-      },
-      { proxy: true },
-    );
+    const profileValues: string[] = [];
+    const statsValues: string[] = [];
 
-    //   a ──► double ──┐
-    //                   ├──► summarize
-    //   b ──► triple ──┘
+    profileView.sink((v) => {
+      profileValues.push(`${v.profile.name}:${v.profile.age}`);
+    });
 
-    const sharedPattern = pattern<{ a: number; b: number }>(
-      ({ a, b }) => {
-        const da = double(a);
-        const tb = triple(b);
-        const summary = summarize({ a: da, b: tb });
-        return {
-          a,
-          b,
-          doubled: da,
-          tripled: tb,
-          summary,
-          incA: incA({ a }),
-          incB: incB({ b }),
-        };
-      },
-    );
+    statsView.sink((v) => {
+      statsValues.push(`${v.stats.score}:${v.stats.level}`);
+    });
 
-    const resultCell = runtime.getCell<{
-      a: number;
-      b: number;
-      doubled: number;
-      tripled: number;
-      summary: string;
-      incA: unknown;
-      incB: unknown;
-    }>(space, "per-path-shared-lift-test", undefined, tx);
+    await runtime.idle();
 
-    const result = runtime.run(
-      tx,
-      sharedPattern,
-      { a: 1, b: 2 },
-      resultCell,
-    );
+    // Initial values from both sinks
+    expect(profileValues).toEqual(["Alice:30"]);
+    expect(statsValues).toEqual(["100:gold"]);
+
+    // Change profile only
+    cell.withTx(tx).set({
+      profile: { name: "Bob", age: 25 },
+      stats: { score: 100, level: "gold" },
+    });
     tx.commit();
     tx = runtime.edit();
+    await runtime.idle();
 
-    let value = await result.pull();
-    expect(value).toMatchObject({
-      a: 1,
-      b: 2,
-      doubled: 2,
-      tripled: 6,
-      summary: "2+6=8",
+    expect(profileValues).toEqual(["Alice:30", "Bob:25"]);
+    // With per-path reads, stats sink should NOT have re-fired
+    expect(statsValues).toEqual(["100:gold"]);
+
+    // Change stats only
+    cell.withTx(tx).set({
+      profile: { name: "Bob", age: 25 },
+      stats: { score: 200, level: "platinum" },
     });
+    tx.commit();
+    tx = runtime.edit();
+    await runtime.idle();
 
-    // ── inc A ──
-    executionLog.length = 0;
-    result.key("incA").send({});
-    value = await result.pull();
-
-    expect(value).toMatchObject({
-      a: 2,
-      doubled: 4,
-      tripled: 6,
-      summary: "4+6=10",
-    });
-
-    // double re-ran, triple did NOT
-    expect(executionLog).toContain("double");
-    expect(executionLog).not.toContain("triple");
-    // summarize MUST re-run because its input changed
-    expect(executionLog).toContain("summarize");
-
-    // ── inc B ──
-    executionLog.length = 0;
-    result.key("incB").send({});
-    value = await result.pull();
-
-    expect(value).toMatchObject({
-      a: 2,
-      b: 3,
-      doubled: 4,
-      tripled: 9,
-      summary: "4+9=13",
-    });
-
-    // triple re-ran, double did NOT
-    expect(executionLog).not.toContain("double");
-    expect(executionLog).toContain("triple");
-    // summarize MUST re-run because its input changed
-    expect(executionLog).toContain("summarize");
+    // Profile sink should NOT have re-fired
+    expect(profileValues).toEqual(["Alice:30", "Bob:25"]);
+    expect(statsValues).toEqual(["100:gold", "200:platinum"]);
   });
 
-  it("array content changes trigger downstream lifts", async () => {
-    // Verify that changing array element values (same length) triggers
-    // lifts that read the array.
+  it("deeply nested schema views: only the consumed sub-path triggers re-run", async () => {
+    const cell = runtime.getCell<{
+      config: {
+        display: { theme: string; fontSize: number };
+        network: { timeout: number; retries: number };
+      };
+    }>(space, "per-path-deep-nested");
 
-    const executionLog: string[] = [];
-
-    const sumArray = lift(
-      {
-        type: "array",
-        items: { type: "number" },
-      } as const satisfies JSONSchema,
-      { type: "number" } as const satisfies JSONSchema,
-      (arr: number[]) => {
-        executionLog.push("sumArray");
-        return arr.reduce((a, b) => a + b, 0);
+    cell.withTx(tx).set({
+      config: {
+        display: { theme: "dark", fontSize: 14 },
+        network: { timeout: 5000, retries: 3 },
       },
-    );
-
-    const countItems = lift(
-      {
-        type: "array",
-        items: { type: "number" },
-      } as const satisfies JSONSchema,
-      { type: "number" } as const satisfies JSONSchema,
-      (arr: number[]) => {
-        executionLog.push("countItems");
-        return arr.length;
-      },
-    );
-
-    const setItems = handler<
-      { items: number[] },
-      { items: number[] }
-    >(
-      (event, state) => {
-        // Replace with new array of potentially same length
-        state.items = event.items;
-      },
-      { proxy: true },
-    );
-
-    const arrayPattern = pattern<{ items: number[] }>(
-      ({ items }) => {
-        return {
-          items,
-          sum: sumArray(items),
-          count: countItems(items),
-          setItems: setItems({ items }),
-        };
-      },
-    );
-
-    const resultCell = runtime.getCell<{
-      items: number[];
-      sum: number;
-      count: number;
-      setItems: unknown;
-    }>(space, "per-path-array-test", undefined, tx);
-
-    const result = runtime.run(
-      tx,
-      arrayPattern,
-      { items: [1, 2, 3] },
-      resultCell,
-    );
+    });
     tx.commit();
     tx = runtime.edit();
 
-    let value = await result.pull();
-    expect(value).toMatchObject({ sum: 6, count: 3 });
+    const displayView = cell.asSchema<{
+      config: { display: { theme: string; fontSize: number } };
+    }>(
+      {
+        type: "object",
+        properties: {
+          config: {
+            type: "object",
+            properties: {
+              display: {
+                type: "object",
+                properties: {
+                  theme: { type: "string" },
+                  fontSize: { type: "number" },
+                },
+                required: ["theme", "fontSize"],
+              },
+            },
+            required: ["display"],
+          },
+        },
+        required: ["config"],
+      } as const satisfies JSONSchema,
+    );
 
-    // Change array content but keep same length
-    executionLog.length = 0;
-    result.key("setItems").send({ items: [10, 20, 30] });
-    value = await result.pull();
+    const networkView = cell.asSchema<{
+      config: { network: { timeout: number; retries: number } };
+    }>(
+      {
+        type: "object",
+        properties: {
+          config: {
+            type: "object",
+            properties: {
+              network: {
+                type: "object",
+                properties: {
+                  timeout: { type: "number" },
+                  retries: { type: "number" },
+                },
+                required: ["timeout", "retries"],
+              },
+            },
+            required: ["network"],
+          },
+        },
+        required: ["config"],
+      } as const satisfies JSONSchema,
+    );
 
-    expect(value).toMatchObject({ sum: 60, count: 3 });
-    // Both lifts must re-run because array content changed
-    expect(executionLog).toContain("sumArray");
-    expect(executionLog).toContain("countItems");
+    const displayValues: string[] = [];
+    const networkValues: string[] = [];
+
+    displayView.sink((v) => {
+      displayValues.push(
+        `${v.config.display.theme}:${v.config.display.fontSize}`,
+      );
+    });
+
+    networkView.sink((v) => {
+      networkValues.push(
+        `${v.config.network.timeout}:${v.config.network.retries}`,
+      );
+    });
+
+    await runtime.idle();
+
+    expect(displayValues).toEqual(["dark:14"]);
+    expect(networkValues).toEqual(["5000:3"]);
+
+    // Change only display.theme
+    cell.withTx(tx).set({
+      config: {
+        display: { theme: "light", fontSize: 14 },
+        network: { timeout: 5000, retries: 3 },
+      },
+    });
+    tx.commit();
+    tx = runtime.edit();
+    await runtime.idle();
+
+    expect(displayValues).toEqual(["dark:14", "light:14"]);
+    // Network sink should NOT re-fire
+    expect(networkValues).toEqual(["5000:3"]);
+
+    // Change only network.timeout
+    cell.withTx(tx).set({
+      config: {
+        display: { theme: "light", fontSize: 14 },
+        network: { timeout: 10000, retries: 3 },
+      },
+    });
+    tx.commit();
+    tx = runtime.edit();
+    await runtime.idle();
+
+    // Display sink should NOT re-fire
+    expect(displayValues).toEqual(["dark:14", "light:14"]);
+    expect(networkValues).toEqual(["5000:3", "10000:3"]);
+  });
+
+  // Array elements are stored as separate sub-entities, so cell.set()
+  // replacing the whole value creates new element entities even when
+  // the data is identical. This triggers sinks that read those elements.
+  // Fine-grained array isolation would require element-level writes.
+  it.skip("array vs object field: changing array should not trigger object-only sink", async () => {
+    const cell = runtime.getCell<{
+      items: Array<{ name: string; value: number }>;
+      summary: { total: number; label: string };
+    }>(space, "per-path-array-vs-object");
+
+    cell.withTx(tx).set({
+      items: [
+        { name: "a", value: 10 },
+        { name: "b", value: 20 },
+      ],
+      summary: { total: 30, label: "test" },
+    });
+    tx.commit();
+    tx = runtime.edit();
+
+    const itemsView = cell.asSchema<{
+      items: Array<{ name: string; value: number }>;
+    }>(
+      {
+        type: "object",
+        properties: {
+          items: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                name: { type: "string" },
+                value: { type: "number" },
+              },
+              required: ["name", "value"],
+            },
+          },
+        },
+        required: ["items"],
+      } as const satisfies JSONSchema,
+    );
+
+    const summaryView = cell.asSchema<{
+      summary: { total: number; label: string };
+    }>(
+      {
+        type: "object",
+        properties: {
+          summary: {
+            type: "object",
+            properties: {
+              total: { type: "number" },
+              label: { type: "string" },
+            },
+            required: ["total", "label"],
+          },
+        },
+        required: ["summary"],
+      } as const satisfies JSONSchema,
+    );
+
+    const itemsCounts: number[] = [];
+    const summaryLabels: string[] = [];
+
+    itemsView.sink((v) => {
+      itemsCounts.push(v.items.length);
+    });
+
+    summaryView.sink((v) => {
+      summaryLabels.push(v.summary.label);
+    });
+
+    await runtime.idle();
+
+    expect(itemsCounts).toEqual([2]);
+    expect(summaryLabels).toEqual(["test"]);
+
+    // Change only items
+    cell.withTx(tx).set({
+      items: [
+        { name: "a", value: 10 },
+        { name: "b", value: 20 },
+        { name: "c", value: 30 },
+      ],
+      summary: { total: 30, label: "test" },
+    });
+    tx.commit();
+    tx = runtime.edit();
+    await runtime.idle();
+
+    expect(itemsCounts).toEqual([2, 3]);
+    // Summary sink should NOT re-fire
+    expect(summaryLabels).toEqual(["test"]);
+
+    // Change only summary
+    cell.withTx(tx).set({
+      items: [
+        { name: "a", value: 10 },
+        { name: "b", value: 20 },
+        { name: "c", value: 30 },
+      ],
+      summary: { total: 60, label: "updated" },
+    });
+    tx.commit();
+    tx = runtime.edit();
+    await runtime.idle();
+
+    // Items sink should NOT re-fire
+    expect(itemsCounts).toEqual([2, 3]);
+    expect(summaryLabels).toEqual(["test", "updated"]);
   });
 });

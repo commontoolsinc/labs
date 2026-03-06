@@ -2411,9 +2411,9 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     _link?: NormalizedFullLink,
   ): Immutable<StorableValue>[] | undefined {
     this.traverseArrayCalls++;
-    // Record a read at the array level so that changes to the array
-    // (including element replacements) trigger re-execution.
-    this.objectCreator.recordPathRead?.(doc.address);
+    // No container-level read here — per-element reads below provide
+    // fine-grained scheduling. Whole-array writes are at a broader path
+    // that overlaps element reads anyway.
     const docArray = doc.value as Immutable<StorableDatum>[];
     const arrayObj = new Array<Immutable<StorableValue>>(docArray.length);
     for (let index = 0; index < docArray.length; index++) {
@@ -2590,9 +2590,9 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     _link?: NormalizedFullLink,
   ): Record<string, Immutable<StorableValue>> | undefined {
     this.traverseObjectCalls++;
-    // Record a read at the object level so that property additions/removals
-    // trigger re-execution.
-    this.objectCreator.recordPathRead?.(doc.address);
+    // No container-level read here — per-property reads below provide
+    // fine-grained scheduling. Whole-object writes are at a broader path
+    // that overlaps property reads anyway.
     const filteredObj: Record<string, Immutable<StorableValue>> = {};
     for (const [propKey, propValue] of Object.entries(doc.value!)) {
       // We'll use marker schemas to detect some places where we want special

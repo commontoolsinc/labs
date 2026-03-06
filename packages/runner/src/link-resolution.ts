@@ -12,6 +12,7 @@ import type {
 } from "./storage/interface.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import type { Runtime } from "./runtime.ts";
+import { ignoreReadForScheduling } from "./scheduler.ts";
 
 const logger = getLogger("link-resolution");
 
@@ -108,9 +109,12 @@ export function resolveLink(
       (lastNode !== "writeRedirect" ||
         (sigilProbe.ok.value as LinkV1Inner).overwrite === "redirect")
     ) {
-      // Read the full value at this path to ensure correct reactivity logging
-      // (we need to be reactive to siblings that could invalidate the link)
-      const whole = tx.readValueOrThrow({ ...link, path: link.path });
+      // Read the full value at this path. The sigil probe above already
+      // provides scheduling reactivity for link changes, so this read is
+      // non-scheduling to avoid overly broad dependencies.
+      const whole = tx.readValueOrThrow({ ...link, path: link.path }, {
+        meta: ignoreReadForScheduling,
+      });
       nextLink = parseLink(whole as CellLink, link);
     } else if (sigilProbe.error?.name === "NotFoundError") {
       const lastValid = (sigilProbe.error as INotFoundError).path.slice(); // [] => doc missing
@@ -142,8 +146,11 @@ export function resolveLink(
             path: ["value", ...lastValid, "/", LINK_V1_TAG],
           });
           if (parentSigil.ok && isRecord(parentSigil.ok.value)) {
-            // Read the full value at the parent to ensure proper reactivity
-            const whole = tx.readValueOrThrow({ ...link, path: lastValid });
+            // Read the full value at the parent. The sigil probe provides
+            // scheduling reactivity, so this is non-scheduling.
+            const whole = tx.readValueOrThrow({ ...link, path: lastValid }, {
+              meta: ignoreReadForScheduling,
+            });
             nextLink = parseLink(whole as CellLink, {
               ...link,
               path: lastValid,
@@ -220,7 +227,9 @@ function checkLegacyAt(
   });
   if (Array.isArray(aliasPath.ok?.value)) {
     return parseLink(
-      tx.readValueOrThrow({ ...link, path: atPath }) as CellLink,
+      tx.readValueOrThrow({ ...link, path: atPath }, {
+        meta: ignoreReadForScheduling,
+      }) as CellLink,
       { ...link, path: atPath },
     );
   }
@@ -231,7 +240,9 @@ function checkLegacyAt(
   });
   if (typeof legacyCell.ok?.value === "string") {
     return parseLink(
-      tx.readValueOrThrow({ ...link, path: atPath }) as CellLink,
+      tx.readValueOrThrow({ ...link, path: atPath }, {
+        meta: ignoreReadForScheduling,
+      }) as CellLink,
       { ...link, path: atPath },
     );
   }
