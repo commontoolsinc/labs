@@ -104,8 +104,10 @@ type SinkOptions = {
   changeGroup?: ChangeGroup;
 };
 
-// Shared map factory instance for all cells
+// Shared factory instances for all cells
 let mapFactory: NodeFactory<any, any> | undefined;
+let filterFactory: NodeFactory<any, any> | undefined;
+let flatMapFactory: NodeFactory<any, any> | undefined;
 
 // WeakMap to store connected nodes for each cell instance
 const cellNodes = new WeakMap<OpaqueCell<unknown>, Set<NodeRef>>();
@@ -250,7 +252,13 @@ export type { AnyCell, Cell, Stream } from "@commontools/api";
 
 export type { MemorySpace } from "@commontools/memory/interface";
 
-const cellMethods = new Set<keyof ICell<unknown>>([
+const cellMethods = new Set<
+  | keyof ICell<unknown>
+  | "filter"
+  | "filterWithPattern"
+  | "flatMap"
+  | "flatMapWithPattern"
+>([
   "get",
   "sample",
   "set",
@@ -265,6 +273,10 @@ const cellMethods = new Set<keyof ICell<unknown>>([
   "map",
   "mapWithPattern",
   "reduce",
+  "filter",
+  "filterWithPattern",
+  "flatMap",
+  "flatMapWithPattern",
   "toJSON",
   "for",
   "asSchema",
@@ -1489,6 +1501,106 @@ export class CellImpl<T extends StorableValue>
       if (!Array.isArray(list)) return initialValue;
       return list.reduce(fn, initialValue);
     })(this as unknown as OpaqueRef<any>);
+  }
+
+  /**
+   * Filter an array cell, creating a new array with only matching elements.
+   * Similar to Array.prototype.filter but works with OpaqueRefs.
+   * Output contains cell references to the original elements.
+   */
+  filter(
+    fn: (
+      element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
+      index: OpaqueRef<number>,
+      array: OpaqueRef<T>,
+    ) => Opaque<boolean>,
+  ): OpaqueRef<(T extends Array<infer U> ? U : T)[]> {
+    if (!filterFactory) {
+      filterFactory = createNodeFactory({
+        type: "ref",
+        implementation: "filter",
+      });
+    }
+
+    return filterFactory({
+      list: this as unknown as OpaqueRef<T>,
+      op: pattern(
+        ({ element, index, array }: Opaque<any>) => fn(element, index, array),
+      ),
+    });
+  }
+
+  /**
+   * Filter an array cell using a pre-defined pattern.
+   * Similar to filter but accepts a pre-defined pattern instead of a function.
+   */
+  filterWithPattern<S>(
+    this: IsThisObject,
+    op: PatternFactory<T extends Array<infer U> ? U : T, S>,
+    params: Record<string, any>,
+  ): OpaqueRef<(T extends Array<infer U> ? U : T)[]> {
+    if (!filterFactory) {
+      filterFactory = createNodeFactory({
+        type: "ref",
+        implementation: "filter",
+      });
+    }
+
+    return filterFactory({
+      list: this as unknown as OpaqueRef<T>,
+      op: op,
+      params: params,
+    });
+  }
+
+  /**
+   * FlatMap over an array cell, creating a flattened array from per-element arrays.
+   * Similar to Array.prototype.flatMap but works with OpaqueRefs.
+   * Each callback should return an array; results are concatenated one level deep.
+   */
+  flatMap<S>(
+    fn: (
+      element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
+      index: OpaqueRef<number>,
+      array: OpaqueRef<T>,
+    ) => Opaque<S[]>,
+  ): OpaqueRef<S[]> {
+    if (!flatMapFactory) {
+      flatMapFactory = createNodeFactory({
+        type: "ref",
+        implementation: "flatMap",
+      });
+    }
+
+    return flatMapFactory({
+      list: this as unknown as OpaqueRef<T>,
+      op: pattern(
+        ({ element, index, array }: Opaque<any>) => fn(element, index, array),
+      ),
+    });
+  }
+
+  /**
+   * FlatMap over an array cell using a pre-defined pattern.
+   * Similar to flatMap but accepts a pre-defined pattern instead of a function.
+   */
+  flatMapWithPattern<S>(
+    this: IsThisObject,
+    op: PatternFactory<T extends Array<infer U> ? U : T, S[]>,
+    params: Record<string, any>,
+  ): OpaqueRef<S[]> {
+    if (!flatMapFactory) {
+      flatMapFactory = createNodeFactory({
+        type: "ref",
+        implementation: "flatMap",
+      });
+    }
+
+    return flatMapFactory({
+      list: this as unknown as OpaqueRef<T>,
+      op: op,
+      params: params,
+    });
   }
 
   toJSON(): SigilLink | null {

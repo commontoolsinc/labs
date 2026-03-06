@@ -592,9 +592,18 @@ export interface IEquatable {
 }
 
 /**
- * Cells that allow deriving new cells from existing cells. Currently just
- * .map(), but this will eventually include all Array, String and Number
- * methods.
+ * Cells that allow deriving new cells from existing cells via array methods:
+ * .map() and their WithPattern variants.
+ *
+ * Note: .filter() and .flatMap() are deliberately omitted from the type
+ * interface to avoid conflicting with Array.prototype.filter/flatMap on
+ * OpaqueRef<T[]> (which is an intersection of OpaqueCell<T[]> & Array<…>).
+ * The runtime methods exist on Cell and are intercepted by the proxy; they
+ * just don't have type declarations here until the compiler transform
+ * (Phase 3) resolves the ambiguity. This means pattern authors won't get
+ * autocomplete for .filter()/.flatMap() — they'll see Array.prototype
+ * signatures instead. The proxy intercepts correctly at runtime, but
+ * TypeScript won't type-check the reactive return type.
  */
 export interface IDerivable<T> {
   map<S>(
@@ -620,6 +629,16 @@ export interface IDerivable<T> {
     ) => S,
     initialValue: S,
   ): OpaqueRef<S>;
+  filterWithPattern<S>(
+    this: IsThisObject,
+    op: PatternFactory<T extends Array<infer U> ? U : T, S>,
+    params: Record<string, any>,
+  ): OpaqueRef<(T extends Array<infer U> ? U : T)[]>;
+  flatMapWithPattern<S>(
+    this: IsThisObject,
+    op: PatternFactory<T extends Array<infer U> ? U : T, S[]>,
+    params: Record<string, any>,
+  ): OpaqueRef<S[]>;
 }
 
 export interface IOpaquable<T> {
