@@ -8,6 +8,12 @@
 import { type Default, NAME, type Stream, type Writable } from "commontools";
 
 // ===== Core Entity Types =====
+//
+// IMPORTANT: Do NOT add [UI] to these entity types. Including [UI] in types
+// that are used as references (e.g. in arrays, backlinks, mentioned lists)
+// causes the runtime to deeply traverse and instantiate UI trees for every
+// referenced piece, making everything extremely slow. Only pattern Output
+// interfaces should declare [UI]. See NoteOutput, NotebookOutput, etc.
 
 /**
  * A piece that can be mentioned via [[wiki-links]] and appear in backlinks.
