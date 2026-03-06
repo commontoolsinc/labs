@@ -328,15 +328,11 @@ describe("Per-path reads - schema-selective sinks", () => {
     expect(itemsCounts).toEqual([2]);
     expect(summaryLabels).toEqual(["test"]);
 
-    // Change only items — read current value, replace just the items field
-    const cur1 = cell.withTx(tx).getRaw() as any;
-    cell.withTx(tx).setRaw({
-      ...cur1,
-      items: [
-        { name: "a", value: 10 },
-        { name: "b", value: 20 },
-        { name: "c", value: 30 },
-      ],
+    // Change only items — reuse existing items (which carry IDs) and append a new one
+    const oldItems = cell.withTx(tx).get()!.items;
+    cell.withTx(tx).set({
+      items: [...oldItems, { name: "c", value: 30 }],
+      summary: { total: 30, label: "test" },
     });
     tx.commit();
     tx = runtime.edit();
@@ -346,10 +342,10 @@ describe("Per-path reads - schema-selective sinks", () => {
     // Summary sink should NOT re-fire
     expect(summaryLabels).toEqual(["test"]);
 
-    // Change only summary — read current value, replace just the summary field
-    const cur2 = cell.withTx(tx).getRaw() as any;
-    cell.withTx(tx).setRaw({
-      ...cur2,
+    // Change only summary — reuse existing items with their IDs
+    const oldItems2 = cell.withTx(tx).get()!.items;
+    cell.withTx(tx).set({
+      items: [...oldItems2],
       summary: { total: 60, label: "updated" },
     });
     tx.commit();
