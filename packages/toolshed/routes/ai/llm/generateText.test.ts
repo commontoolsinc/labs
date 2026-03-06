@@ -159,6 +159,99 @@ describe("configureJsonMode", () => {
       "You are an expert assistant who responds in JSON format.\nEnsure the response is valid JSON. DO NOT include any other text or formatting.",
     );
   });
+
+  describe("streaming flag variations", () => {
+    it("does not add prefill for Anthropic when streaming is true", () => {
+      const streamParams: Record<string, unknown> = {};
+      const messages = [{
+        role: "user" as const,
+        content: "Generate a JSON response",
+      }];
+
+      configureJsonMode(
+        streamParams,
+        "anthropic:claude-3-7-sonnet",
+        messages,
+        true,
+      );
+
+      assertEquals(streamParams.mode, "json");
+      assertEquals(streamParams.prefill, undefined);
+    });
+
+    it("does not add prefill for Anthropic when last message is assistant", () => {
+      const streamParams: Record<string, unknown> = {};
+      const messages = [
+        { role: "user" as const, content: "Generate a JSON response" },
+        { role: "assistant" as const, content: "Sure" },
+      ];
+
+      configureJsonMode(
+        streamParams,
+        "anthropic:claude-3-7-sonnet",
+        messages,
+        false,
+      );
+
+      assertEquals(streamParams.prefill, undefined);
+    });
+
+    it("adds Groq system prompt even when streaming", () => {
+      const streamParams: Record<string, unknown> = {};
+      const messages = [{
+        role: "user" as const,
+        content: "Generate a JSON response",
+      }];
+
+      configureJsonMode(streamParams, "groq:model", messages, true);
+
+      assertEquals(streamParams.mode, undefined);
+      assertEquals(
+        (streamParams.system as string).includes(
+          "respond with pure, correct JSON only",
+        ),
+        true,
+      );
+    });
+
+    it("appends Groq JSON prompt to existing system prompt", () => {
+      const streamParams: Record<string, unknown> = {
+        system: "You are a helper.",
+      };
+      const messages = [{
+        role: "user" as const,
+        content: "Generate a JSON response",
+      }];
+
+      configureJsonMode(streamParams, "groq:model", messages, false);
+
+      assertEquals(
+        (streamParams.system as string).startsWith("You are a helper."),
+        true,
+      );
+      assertEquals(
+        (streamParams.system as string).includes(
+          "respond with pure, correct JSON only",
+        ),
+        true,
+      );
+    });
+  });
+
+  describe("gateway model JSON mode", () => {
+    it("configures gateway models like OpenAI (response_format)", () => {
+      const streamParams: Record<string, unknown> = {};
+      const messages = [{
+        role: "user" as const,
+        content: "Generate a JSON response",
+      }];
+
+      configureJsonMode(streamParams, "gateway:some-model", messages, false);
+
+      assertEquals(streamParams.mode, undefined);
+      assertEquals(streamParams.response_format, { type: "json_object" });
+    });
+  });
 });
 
 describe("cleanJsonResponse", () => {
