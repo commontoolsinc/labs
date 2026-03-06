@@ -29,6 +29,7 @@ import {
   NAME,
   pattern,
   UI,
+  wish,
   Writable,
 } from "commontools";
 import GmailExtractor, {
@@ -534,6 +535,20 @@ interface PatternOutput {
   dueCount: number;
 }
 
+/** Shape of style data from the email-style-extractor pattern */
+interface EmailStyleData {
+  overallTone: string;
+  formalityLevel: string;
+  greetingPatterns: string[];
+  closingPatterns: string[];
+  sentenceStyle: string;
+  vocabularyNotes: string;
+  signatureBlock: string;
+  punctuationHabits: string;
+  examplePhrases: string[];
+  summary: string;
+}
+
 export default pattern<PatternInput, PatternOutput>(() => {
   // ==========================================================================
   // STATE
@@ -584,6 +599,24 @@ export default pattern<PatternInput, PatternOutput>(() => {
   } = createGoogleAuth({
     requiredScopes: ["gmail", "gmailModify"] as ScopeKey[],
   });
+
+  // ==========================================================================
+  // EMAIL STYLE WISH
+  // ==========================================================================
+
+  // Wish for email style data from the email-style-extractor pattern.
+  // Returns undefined if the style extractor isn't deployed — drafts gracefully
+  // fall back to the generic professional tone.
+  const emailStyleWish = wish<{
+    style: EmailStyleData | null;
+    stylePrompt: string;
+  }>({
+    query: "#emailStyle",
+  });
+  const emailStylePrompt = derive(
+    emailStyleWish.result,
+    (r) => r?.stylePrompt ?? "",
+  );
 
   // ==========================================================================
   // GMAIL EXTRACTOR
@@ -709,6 +742,15 @@ export default pattern<PatternInput, PatternOutput>(() => {
   // Single generateText call - only runs when a thread is selected for drafting
   // Uses computed prompt that builds from the selected thread's data
   // NOTE: When prompt is falsy/undefined, generateText should skip the API call
+  // Build style-aware system prompt
+  const draftSystemPrompt = derive(
+    emailStylePrompt,
+    (prompt) =>
+      prompt
+        ? `You are a helpful assistant that drafts follow-up emails matching the user's personal writing style.\n\n${prompt}`
+        : "You are a helpful assistant that drafts professional follow-up emails.",
+  );
+
   const draftLlmResult = generateText({
     prompt: computed((): string | undefined => {
       const threadId = generatingDraftFor.get();
@@ -741,8 +783,13 @@ export default pattern<PatternInput, PatternOutput>(() => {
       );
       const pingCount = Number(currentThread.pingCount) || 0;
 
+      // Use pre-built style prompt from the extractor, or fall back to generic
+      const styleGuidance = emailStylePrompt
+        ? emailStylePrompt
+        : "Keep it professional and friendly. Reference the original subject matter.";
+
       return `Based on this email thread, draft a brief, polite follow-up email asking for an update.
-Keep it professional and friendly. Reference the original subject matter.
+${styleGuidance}
 Don't be pushy. Make it 2-3 sentences max. Do not include a subject line - only the body text.
 
 Thread summary:
@@ -756,8 +803,7 @@ ${threadSummary}
 
 Write only the email body, no subject line or greeting line (the greeting will be auto-added):`;
     }),
-    system:
-      "You are a helpful assistant that drafts professional follow-up emails.",
+    system: draftSystemPrompt,
     model: "anthropic:claude-sonnet-4-5",
   });
 
