@@ -73,24 +73,9 @@ import * as Differential from "./differential.ts";
 import * as Address from "./transaction/address.ts";
 import { ACL_TYPE, ANYONE_USER } from "@commontools/memory/acl";
 import {
-  jsonFromValue,
-  valueFromJson,
-} from "@commontools/memory/json-encoding-dispatch";
-import type { ReconstructionContext } from "@commontools/memory/storable-protocol";
-
-/**
- * Minimal reconstruction context for decoding values at the storage boundary.
- * Only handles types that don't require runtime context (undefined, bigint,
- * sparse arrays, etc.); `getCell` is unimplemented until Cell serialization
- * is wired up.
- */
-const storageReconstructionContext: ReconstructionContext = {
-  getCell() {
-    throw new globalThis.Error(
-      "getCell is not available at the storage boundary",
-    );
-  },
-};
+  toDeepStorableValue,
+  valueEquals,
+} from "@commontools/memory/storable-value";
 
 export type { Result, Unit };
 export interface Selector<Key> extends Iterable<Key> {
@@ -1956,25 +1941,17 @@ export class Provider implements IStorageProvider {
     // transaction
     const facts: Fact[] = [];
     for (const { uri, value } of batch) {
-      const content = value.value !== undefined
-        ? jsonFromValue(
-          { value: value.value, source: value.source } as StorableValue,
-        )
+      const newValue = value.value !== undefined
+        ? { value: value.value, source: value.source }
         : undefined;
 
       const current = workspace.get({ id: uri, type: this.the });
-      const currentContent = current?.is !== undefined
-        ? jsonFromValue(current.is)
-        : undefined;
-      if (currentContent !== content) {
-        if (content !== undefined) {
+      if (!valueEquals(current?.is, newValue)) {
+        if (newValue !== undefined) {
           facts.push(assert({
             the,
             of: uri,
-            is: valueFromJson(
-              content,
-              storageReconstructionContext,
-            ) as StorableDatum,
+            is: toDeepStorableValue(newValue) as StorableDatum,
             // If fact has no `cause` it is unclaimed fact.
             cause: current?.cause ? current : null,
           }));
