@@ -80,6 +80,9 @@ export function filter(
     }
     if (list === undefined) {
       resultWithLog.set([]);
+      for (const entry of elementRuns.values()) {
+        runtime.runner.stop(entry.resultCell);
+      }
       elementRuns.clear();
       return;
     }
