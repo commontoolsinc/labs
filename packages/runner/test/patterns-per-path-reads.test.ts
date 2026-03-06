@@ -255,11 +255,7 @@ describe("Per-path reads - schema-selective sinks", () => {
     expect(networkValues).toEqual(["5000:3", "10000:3"]);
   });
 
-  // Array elements are stored as separate sub-entities, so cell.set()
-  // replacing the whole value creates new element entities even when
-  // the data is identical. This triggers sinks that read those elements.
-  // Fine-grained array isolation would require element-level writes.
-  it.skip("array vs object field: changing array should not trigger object-only sink", async () => {
+  it("array vs object field: changing array should not trigger object-only sink", async () => {
     const cell = runtime.getCell<{
       items: Array<{ name: string; value: number }>;
       summary: { total: number; label: string };
@@ -332,14 +328,15 @@ describe("Per-path reads - schema-selective sinks", () => {
     expect(itemsCounts).toEqual([2]);
     expect(summaryLabels).toEqual(["test"]);
 
-    // Change only items
-    cell.withTx(tx).set({
+    // Change only items — read current value, replace just the items field
+    const cur1 = cell.withTx(tx).getRaw() as any;
+    cell.withTx(tx).setRaw({
+      ...cur1,
       items: [
         { name: "a", value: 10 },
         { name: "b", value: 20 },
         { name: "c", value: 30 },
       ],
-      summary: { total: 30, label: "test" },
     });
     tx.commit();
     tx = runtime.edit();
@@ -349,13 +346,10 @@ describe("Per-path reads - schema-selective sinks", () => {
     // Summary sink should NOT re-fire
     expect(summaryLabels).toEqual(["test"]);
 
-    // Change only summary
-    cell.withTx(tx).set({
-      items: [
-        { name: "a", value: 10 },
-        { name: "b", value: 20 },
-        { name: "c", value: 30 },
-      ],
+    // Change only summary — read current value, replace just the summary field
+    const cur2 = cell.withTx(tx).getRaw() as any;
+    cell.withTx(tx).setRaw({
+      ...cur2,
       summary: { total: 60, label: "updated" },
     });
     tx.commit();
