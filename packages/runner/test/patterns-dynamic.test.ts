@@ -541,6 +541,19 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     // Only 1 new predicate evaluation (for X). A, B, C reuse their runs.
     const recomputesAfterInsert = predRunCount - runsAfterInit;
     expect(recomputesAfterInsert).toBe(1);
+
+    // Remove B: [A, X, B, C] → [A, X, C]
+    const runsBeforeRemoval = predRunCount;
+    result.withTx(tx).key("values").set([cellA, cellX, cellC]);
+    tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+    expect(result.key("positives").get()).toEqual([1, 99, 3]);
+
+    // No new predicate evaluations — existing runs reused, B's just excluded.
+    const recomputesAfterRemoval = predRunCount - runsBeforeRemoval;
+    expect(recomputesAfterRemoval).toBe(0);
   });
 
   it("should handle duplicate cell references in filter", async () => {
@@ -595,6 +608,54 @@ describe("Pattern Runner - Dynamic Patterns", () => {
 
     await result.pull();
     expect(result.key("evens").get()).toEqual([]);
+  });
+
+  it("should clean up predicate runs when filter list becomes undefined", async () => {
+    let predRunCount = 0;
+    const isPositive = lift((x: number) => {
+      predRunCount++;
+      return x > 0;
+    });
+
+    const filterPattern = pattern<{ values: number[] }>(({ values }) => {
+      return { values, positives: values.filter((x) => isPositive(x)) };
+    });
+
+    const resultCell = runtime.getCell<
+      { values: number[]; positives: number[] }
+    >(
+      space,
+      "filter-undef-cleanup",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, filterPattern, {
+      values: [1, 2, 3],
+    }, resultCell);
+    tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+    expect(result.key("positives").get()).toEqual([1, 2, 3]);
+    expect(predRunCount).toBe(3);
+
+    // Set list to undefined — should clean up and produce empty output
+    result.withTx(tx).key("values").set(undefined as any);
+    tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+    expect(result.key("positives").get()).toEqual([]);
+
+    // Restore list — predicates must re-run (old runs were stopped)
+    const runsBeforeRestore = predRunCount;
+    result.withTx(tx).key("values").set([4, 5]);
+    tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+    expect(result.key("positives").get()).toEqual([4, 5]);
+    expect(predRunCount - runsBeforeRestore).toBe(2);
   });
 
   it("should skip sparse holes in filter input", async () => {
@@ -773,6 +834,19 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     // Only 1 new run (for X). A, B, C reuse their runs.
     const recomputesAfterInsert = runCount - runsAfterInit;
     expect(recomputesAfterInsert).toBe(1);
+
+    // Remove B: [A, X, B, C] → [A, X, C]
+    const runsBeforeRemoval = runCount;
+    result.withTx(tx).key("values").set([cellA, cellX, cellC]);
+    tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+    expect(result.key("flat").get()).toEqual([1, 10, 99, 990, 3, 30]);
+
+    // No new pattern runs — existing runs reused, B's output just excluded.
+    const recomputesAfterRemoval = runCount - runsBeforeRemoval;
+    expect(recomputesAfterRemoval).toBe(0);
   });
 
   it("should handle empty sub-arrays in flatMap", async () => {
