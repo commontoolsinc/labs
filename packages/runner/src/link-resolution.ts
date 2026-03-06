@@ -227,9 +227,7 @@ function checkLegacyAt(
   });
   if (Array.isArray(aliasPath.ok?.value)) {
     return parseLink(
-      tx.readValueOrThrow({ ...link, path: atPath }, {
-        meta: ignoreReadForScheduling,
-      }) as CellLink,
+      tx.readValueOrThrow({ ...link, path: atPath }) as CellLink,
       { ...link, path: atPath },
     );
   }
@@ -240,9 +238,7 @@ function checkLegacyAt(
   });
   if (typeof legacyCell.ok?.value === "string") {
     return parseLink(
-      tx.readValueOrThrow({ ...link, path: atPath }, {
-        meta: ignoreReadForScheduling,
-      }) as CellLink,
+      tx.readValueOrThrow({ ...link, path: atPath }) as CellLink,
       { ...link, path: atPath },
     );
   }
