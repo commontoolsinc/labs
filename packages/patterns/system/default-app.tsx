@@ -19,7 +19,6 @@ const MAX_RECENT_CHARMS = 10;
 import BacklinksIndex, { type MentionablePiece } from "./backlinks-index.tsx";
 import SummaryIndex from "./summary-index.tsx";
 import Notebook from "../notes/notebook.tsx";
-import NotesImportExport from "../notes/notes-import-export.tsx";
 import PieceGrid from "./piece-grid.tsx";
 
 type MinimalPiece = {
@@ -139,7 +138,7 @@ const menuAllNotebooks = handler<
   if (existing) {
     return navigateTo(existing);
   }
-  return navigateTo(NotesImportExport({ importMarkdown: "" }));
+  return;
 });
 
 // Handler: Add piece to allPieces if not already present

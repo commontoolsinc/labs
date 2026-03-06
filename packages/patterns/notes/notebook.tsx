@@ -61,7 +61,7 @@ const removeFromAllNotebooks = (
 // ===== Output Type =====
 
 /** A #notebook that organizes notes into collections. */
-interface NotebookOutput {
+interface NotebookOutput extends NotebookPiece {
   [NAME]: string;
   [UI]: VNode;
   title: string;
