@@ -1,5 +1,6 @@
 import { refer } from "@commontools/memory/reference";
 import { canonicalHash } from "@commontools/memory/canonical-hash";
+import { deepFreeze } from "@commontools/memory/deep-freeze";
 import { MIME } from "@commontools/memory/interface";
 import type { JSONSchemaObj } from "@commontools/api";
 import type {
@@ -1302,7 +1303,7 @@ export function mergeSchemaFlags(flagSchema: JSONSchema, schema: JSONSchema) {
   const key = stableHash(flagSchema) + "|" + stableHash(schema);
   const cached = _mergeSchemaFlagsCache.get(key);
   if (cached !== undefined) return cached;
-  const result = _mergeSchemaFlagsUncached(flagSchema, schema);
+  const result = deepFreeze(_mergeSchemaFlagsUncached(flagSchema, schema));
   internSet(_mergeSchemaFlagsCache, key, result);
   return result;
 }
@@ -1364,7 +1365,7 @@ export function combineSchema(
   const key = stableHash(parentSchema) + "|" + stableHash(linkSchema);
   const cached = _combineSchemaCache.get(key);
   if (cached !== undefined) return cached;
-  const result = _combineSchemaUncached(parentSchema, linkSchema);
+  const result = deepFreeze(_combineSchemaUncached(parentSchema, linkSchema));
   internSet(_combineSchemaCache, key, result);
   return result;
 }
@@ -1896,6 +1897,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     schema: JSONSchema,
     link?: NormalizedFullLink,
   ): TraverseResult<Immutable<StorableValue>> {
+    schema = deepFreeze(schema);
     this.traverseWithSchemaCalls++;
     this.currentDepth++;
     if (this.currentDepth > this.maxDepth) this.maxDepth = this.currentDepth;
@@ -2839,11 +2841,13 @@ function mergeSchemaOption(
   const key = stableHash(outerSchema) + "|" + stableHash(innerSchema);
   const cached = _mergeSchemaOptionCache.get(key);
   if (cached !== undefined) return cached;
-  const result = isObject(innerSchema)
-    ? { ...outerSchema, ...innerSchema }
-    : innerSchema
-    ? outerSchema // innerSchema === true
-    : false; // innerSchema === false
+  const result = deepFreeze(
+    isObject(innerSchema)
+      ? { ...outerSchema, ...innerSchema }
+      : innerSchema
+      ? outerSchema // innerSchema === true
+      : false, // innerSchema === false
+  );
   internSet(_mergeSchemaOptionCache, key, result as JSONSchema);
   return result;
 }
@@ -2950,7 +2954,9 @@ export function mergeAnyOfBranchSchemas(
   const cached = _mergeAnyOfBranchCache.get(key);
   if (cached !== undefined) return cached;
 
-  const result = _mergeAnyOfBranchSchemasUncached(branches, outerSchema);
+  const result = deepFreeze(
+    _mergeAnyOfBranchSchemasUncached(branches, outerSchema),
+  );
   if (_mergeAnyOfBranchCache.size >= INTERN_CACHE_MAX) {
     _mergeAnyOfBranchCache.clear();
   }
