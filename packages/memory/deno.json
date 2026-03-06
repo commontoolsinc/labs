@@ -57,7 +57,8 @@
     "./frozen-builtins": "./frozen-builtins.ts",
     "./storable-native-instances": "./storable-native-instances.ts",
     "./special-primitive-value": "./special-primitive-value.ts",
-    "./storable-content-id": "./storable-content-id.ts"
+    "./storable-content-id": "./storable-content-id.ts",
+    "./canonical-hash": "./canonical-hash.ts"
   },
   "imports": {
     "@commontools/leb128": "jsr:@commontools/leb128",
