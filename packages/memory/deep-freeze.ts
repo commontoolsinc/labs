@@ -3,9 +3,10 @@
  * unchanged. Arrays and plain objects are frozen after their children are
  * recursively frozen.
  *
- * Already-frozen objects are still recursed into (their children may not be
- * frozen). After freezing, the result is recorded in the `isDeepFrozen` cache
- * so subsequent checks return immediately.
+ * Objects already confirmed as deep-frozen (present in the cache) are
+ * returned immediately. Otherwise, already-frozen objects are still recursed
+ * into (their children may not be frozen). After freezing, the result is
+ * recorded in the cache so subsequent calls return in O(1).
  *
  * Handles sparse arrays correctly (only visits populated indices).
  */
@@ -80,6 +81,8 @@ export function deepFreeze<T>(value: T): T {
   if (value === null || typeof value !== "object") {
     return value;
   }
+
+  if (deepFrozenCache.has(value as object)) return value;
 
   const alreadyFrozen = Object.isFrozen(value);
 
