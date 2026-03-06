@@ -14,7 +14,7 @@ import {
 } from "@commontools/memory/storable-value-dispatch";
 import type { MemorySpace, StorableValue } from "@commontools/memory/interface";
 import { getTopFrame, pattern } from "./builder/pattern.ts";
-import { createNodeFactory } from "./builder/module.ts";
+import { createNodeFactory, lift } from "./builder/module.ts";
 import {
   type AnyCell,
   type AnyCellWrapping,
@@ -264,6 +264,7 @@ const cellMethods = new Set<keyof ICell<unknown>>([
   "key",
   "map",
   "mapWithPattern",
+  "reduce",
   "toJSON",
   "for",
   "asSchema",
@@ -1467,6 +1468,27 @@ export class CellImpl<T extends StorableValue>
       op: op,
       params: params,
     });
+  }
+
+  /**
+   * Reduce an array cell to a single accumulated value.
+   * Similar to Array.prototype.reduce but reactive — re-runs the full
+   * reduction when any element changes.
+   */
+  reduce<S>(
+    this: IsThisObject,
+    fn: (
+      accumulator: S,
+      element: T extends Array<infer U> ? U : T,
+      index: number,
+      array: (T extends Array<infer U> ? U : T)[],
+    ) => S,
+    initialValue: S,
+  ): OpaqueRef<S> {
+    return lift((list: any[]) => {
+      if (!Array.isArray(list)) return initialValue;
+      return list.reduce(fn, initialValue);
+    })(this as unknown as OpaqueRef<any>);
   }
 
   toJSON(): SigilLink | null {

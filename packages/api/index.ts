@@ -610,6 +610,16 @@ export interface IDerivable<T> {
     op: PatternFactory<T extends Array<infer U> ? U : T, S>,
     params: Record<string, any>,
   ): OpaqueRef<S[]>;
+  reduce<S>(
+    this: IsThisObject,
+    fn: (
+      accumulator: S,
+      element: T extends Array<infer U> ? U : T,
+      index: number,
+      array: (T extends Array<infer U> ? U : T)[],
+    ) => S,
+    initialValue: S,
+  ): OpaqueRef<S>;
 }
 
 export interface IOpaquable<T> {
