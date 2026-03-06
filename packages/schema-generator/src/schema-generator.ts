@@ -20,6 +20,7 @@ import {
   getPropertyNameText,
   isDefaultTypeRef,
   safeGetIndexTypeOfType,
+  safeGetNodeText,
   safeGetTypeOfSymbolAtLocation,
 } from "./type-utils.ts";
 import { extractDocFromType } from "./doc-utils.ts";
@@ -233,13 +234,7 @@ export class SchemaGenerator implements ISchemaGenerator {
         // Create a more specific key that includes type argument info to
         // avoid false cycles
         const argTexts = typeNode.typeArguments
-          ? typeNode.typeArguments.map((arg) => {
-            try {
-              return arg.getText();
-            } catch {
-              return "";
-            }
-          }).join(",")
+          ? typeNode.typeArguments.map((arg) => safeGetNodeText(arg)).join(",")
           : "";
         // Include a source location hash to further distinguish instances
         const locationHash = typeNode.getSourceFile?.()?.fileName || "";
@@ -258,13 +253,8 @@ export class SchemaGenerator implements ISchemaGenerator {
         const wrapperKind = detectWrapperViaNode(typeNode, checker);
         if (wrapperKind) {
           const argTexts = typeNode.typeArguments
-            ? typeNode.typeArguments.map((arg) => {
-              try {
-                return arg.getText();
-              } catch {
-                return "";
-              }
-            }).join(",")
+            ? typeNode.typeArguments.map((arg) => safeGetNodeText(arg))
+              .join(",")
             : "";
           const locationHash = typeNode.getSourceFile?.()?.fileName || "";
           const position = typeNode.pos || 0;
