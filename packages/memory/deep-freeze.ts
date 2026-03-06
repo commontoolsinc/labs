@@ -125,8 +125,6 @@ export function deepFreeze<T>(value: T): T {
     return value;
   }
 
-  if (deepFrozenCache.has(value as object)) return value;
-
   const alreadyFrozen = Object.isFrozen(value);
 
   if (Array.isArray(value)) {
