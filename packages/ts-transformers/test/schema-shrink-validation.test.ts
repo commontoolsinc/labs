@@ -443,6 +443,37 @@ Deno.test("Schema Shrink Validation", async (t) => {
   );
 
   await t.step(
+    "no error when lift accesses .length on array type alias",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { lift } from "commontools";',
+        "",
+        "type Items = Array<{ name: string }>;",
+        "const hasItems = lift<Items, boolean>(",
+        "  (items) => items && items.length > 0,",
+        ");",
+      ].join("\n");
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const shrinkErrors = errors.filter(
+        (e) =>
+          e.type === "schema:unknown-type-access" ||
+          e.type === "schema:path-not-in-type",
+      );
+      assertEquals(
+        shrinkErrors.length,
+        0,
+        `Expected no shrink errors for .length on array type alias but got: ${
+          shrinkErrors.map((e) => e.message).join("; ")
+        }`,
+      );
+    },
+  );
+
+  await t.step(
     "no error when handler without type args has SomeType | undefined param",
     async () => {
       // Reproduces pattern-ingredient-scaler: handler() without type args

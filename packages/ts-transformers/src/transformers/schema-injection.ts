@@ -1230,9 +1230,18 @@ function applyCapabilitySummaryToArgument(
   const innerTypeNode = extractCellLikeInnerTypeNode(argumentNode);
   const shouldWrap = !!innerTypeNode;
   const baseTypeNode = innerTypeNode ?? argumentNode;
-  const baseType = shouldWrap && argumentType
+  let baseType = shouldWrap && argumentType
     ? (unwrapCellLikeType(argumentType, checker) ?? argumentType)
     : argumentType;
+
+  if (!baseType) {
+    try {
+      baseType = checker.getTypeFromTypeNode(baseTypeNode);
+    } catch (_e: unknown) {
+      // Synthetic nodes may not be resolvable by the checker.
+      baseType = undefined;
+    }
+  }
 
   if (mode === "defaults_only") {
     // Validate that the base type can support the accessed paths even though
