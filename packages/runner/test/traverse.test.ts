@@ -21,6 +21,7 @@ import {
   MapSet,
   mergeAnyOfBranchSchemas,
   PointerCycleTracker,
+  ReadLog,
   SchemaObjectTraverser,
 } from "../src/traverse.ts";
 import { StoreObjectManager } from "../src/storage/query.ts";
@@ -3044,5 +3045,101 @@ describe("SchemaObjectTraverser unknown type handling", () => {
 
     expect(error).toBeUndefined();
     expect(result).toBe("hello");
+  });
+
+  describe("ReadLog", () => {
+    const space = "did:test:space" as any;
+    const id = "of:doc-1" as any;
+    const type = "application/json" as any;
+
+    function addr(path: string[]): IMemorySpaceAddress {
+      return { space, id, type, path };
+    }
+
+    it("returns a single leaf for a single read", () => {
+      const log = new ReadLog();
+      log.addRead(addr(["a", "b"]));
+      expect(log.getLeafNodes()).toEqual([addr(["a", "b"])]);
+    });
+
+    it("deduplicates identical reads", () => {
+      const log = new ReadLog();
+      log.addRead(addr(["a", "b"]));
+      log.addRead(addr(["a", "b"]));
+      expect(log.getLeafNodes()).toEqual([addr(["a", "b"])]);
+    });
+
+    it("returns sibling paths as separate leaves", () => {
+      const log = new ReadLog();
+      log.addRead(addr(["a", "b"]));
+      log.addRead(addr(["a", "c"]));
+      const leaves = log.getLeafNodes();
+      expect(leaves).toHaveLength(2);
+      expect(leaves).toContainEqual(addr(["a", "b"]));
+      expect(leaves).toContainEqual(addr(["a", "c"]));
+    });
+
+    it("returns only the deepest paths (children subsume parents)", () => {
+      const log = new ReadLog();
+      log.addRead(addr(["a"]));
+      log.addRead(addr(["a", "b"]));
+      expect(log.getLeafNodes()).toEqual([addr(["a", "b"])]);
+    });
+
+    it("child added before parent: parent is not a leaf", () => {
+      const log = new ReadLog();
+      log.addRead(addr(["a", "b"]));
+      log.addRead(addr(["a"]));
+      expect(log.getLeafNodes()).toEqual([addr(["a", "b"])]);
+    });
+
+    it("handles empty path (whole-document read)", () => {
+      const log = new ReadLog();
+      log.addRead(addr([]));
+      expect(log.getLeafNodes()).toEqual([addr([])]);
+    });
+
+    it("empty path subsumes all deeper reads", () => {
+      const log = new ReadLog();
+      log.addRead(addr([]));
+      log.addRead(addr(["a", "b"]));
+      // Empty path gets a child "a", so it's no longer a leaf
+      expect(log.getLeafNodes()).toEqual([addr(["a", "b"])]);
+    });
+
+    it("handles deeply nested paths", () => {
+      const log = new ReadLog();
+      log.addRead(addr(["a", "b", "c"]));
+      log.addRead(addr(["a", "b", "d"]));
+      const leaves = log.getLeafNodes();
+      expect(leaves).toHaveLength(2);
+      expect(leaves).toContainEqual(addr(["a", "b", "c"]));
+      expect(leaves).toContainEqual(addr(["a", "b", "d"]));
+    });
+
+    it("tracks reads across multiple documents separately", () => {
+      const log = new ReadLog();
+      const id2 = "of:doc-2" as any;
+      log.addRead(addr(["a"]));
+      log.addRead({ space, id: id2, type, path: ["a"] });
+      const leaves = log.getLeafNodes();
+      expect(leaves).toHaveLength(2);
+      expect(leaves).toContainEqual(addr(["a"]));
+      expect(leaves).toContainEqual({ space, id: id2, type, path: ["a"] });
+    });
+
+    it("correctly builds path tree when intermediate node already exists", () => {
+      // This is the regression test for the getPathNode bug where cur was only
+      // advanced inside the `if (next === undefined)` block, causing subsequent
+      // path parts to be inserted at the wrong level.
+      const log = new ReadLog();
+      log.addRead(addr(["a"])); // creates a -> {}
+      log.addRead(addr(["a", "b"])); // must create b under a, not at root
+      log.addRead(addr(["a", "c"])); // must create c under a, not at root
+      const leaves = log.getLeafNodes();
+      expect(leaves).toHaveLength(2);
+      expect(leaves).toContainEqual(addr(["a", "b"]));
+      expect(leaves).toContainEqual(addr(["a", "c"]));
+    });
   });
 });
