@@ -158,6 +158,28 @@ const List = pattern<ListInput, ListOutput>(({ items }) => ({
 - **YES** → Use `handler()` at module scope, bind with item-specific data
 - **NO** → Use `action()` inside pattern body, close over what you need
 
+## Common Gotchas
+
+**Don't use `computed()` for conditional JSX rendering.** Use JSX ternaries
+instead — the compiler transforms them into reactive `ifElse()` calls. Nested
+ternaries work correctly (ternary inside the branch of another ternary is also
+transformed). Inside a `computed()` body, ternaries are plain JS where a
+`Writable<boolean>` is always truthy. See `docs/common/concepts/computed/computed.md`.
+
+```tsx
+// ❌ WRONG - computed() for conditional sections
+{computed(() => {
+  if (!showAdmin.get()) return null;
+  return <div>{showForm ? <form>...</form> : null}</div>;
+  //            ^^^^^^^^ plain JS — Writable is always truthy!
+})}
+
+// ✅ RIGHT - bare JSX ternaries, nest as needed
+{showAdmin
+  ? <div>{showForm ? <form>...</form> : null}</div>
+  : null}
+```
+
 ## Documentation
 
 Start with `docs/common/patterns/`—especially `docs/common/patterns/meta/` which contains generalizable idioms that grow over time.

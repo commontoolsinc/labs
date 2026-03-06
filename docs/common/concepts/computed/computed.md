@@ -71,19 +71,53 @@ export default pattern<Input>(({ deck }) => ({
 
 Static strings like `[NAME]: "My Pattern"` don't need `computed()`.
 
-**Never wrap JSX in `computed()`** - the transformer automatically handles reactivity in JSX expressions. The compiler analyzes your JSX and wraps reactive expressions in `derive()` calls behind the scenes, so explicit `computed()` is unnecessary and can cause issues.
+**Never wrap JSX in `computed()`** — the transformer automatically handles
+reactivity in JSX expressions. Ternaries in JSX children position are
+automatically converted to `ifElse()`, which correctly unwraps reactive
+values. Nested ternaries work too — a ternary inside the truthy branch of
+another ternary is also transformed. See `docs/common/patterns/conditional.md`.
 
-Similarly, ternaries in JSX are automatically converted to `ifElse()` - see `docs/common/patterns/conditional.md`.
+Inside a `computed()` body, ternaries are **not** transformed — they execute
+as plain JS where a `Writable<boolean>` object is always truthy. This is
+the most common source of "conditional section always renders" bugs.
 
 ```tsx
-// ❌ WRONG - Don't wrap JSX in computed()
-{computed(() => (
-  <div style={{ background: headerColor }}>...</div>
-))}
+// ❌ WRONG - computed() for conditional JSX. The ternary inside the
+// computed body is plain JS, not transformed to ifElse(). `showForm`
+// is a Writable object (always truthy), so the form always renders.
+{computed(() => {
+  if (!adminMode.get()) return null;
+  return (
+    <>
+      {showForm
+        ? <div>This ALWAYS renders — showForm is an object!</div>
+        : null}
+    </>
+  );
+})}
 
-// ✅ RIGHT - Just use the value directly in JSX
-<div style={{ background: headerColor }}>...</div>
+// ❌ ALSO WRONG - same problem, just with early-return style
+{computed(() => {
+  if (!showForm.get()) return null;
+  return <div>Form content</div>;
+})}
+// This "works" because .get() returns the actual boolean, but it's
+// still unnecessary — use a JSX ternary instead.
+
+// ✅ RIGHT - Use JSX ternaries. They nest correctly.
+{adminMode
+  ? (
+    <>
+      {showForm
+        ? <div>Form content — both ternaries get ifElse() transforms</div>
+        : null}
+    </>
+  )
+  : null}
 ```
+
+**Rule of thumb:** `computed()` is for deriving data (strings, numbers,
+arrays, objects). For conditional rendering, use JSX ternaries.
 
 Example of correct usage:
 
