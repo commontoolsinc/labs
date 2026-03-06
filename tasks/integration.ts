@@ -155,6 +155,9 @@ async function findPatternTests(
   testFiles.sort();
 
   if (chunk && totalChunks) {
+    if (chunk > totalChunks) {
+      throw new Error(`Nonsensical chunk demand: ${chunk}/${totalChunks}`);
+    }
     const perChunk = testFiles.length / totalChunks;
     const first = Math.floor((chunk - 1) * perChunk);
     const afterLast = Math.floor(chunk * perChunk);

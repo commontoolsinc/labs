@@ -183,7 +183,7 @@ jobs:
     needs: ["build"]
     strategy:
       matrix:
-        chunk: [1, 2, 3]
+        chunk: [1, 2, 3, 4, 5]
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
@@ -197,7 +197,7 @@ jobs:
       - name: 🧪 Run pattern unit tests
         run: |
           chmod +x ./common-binaries/ct
-          CT_BINARY=./common-binaries/ct deno task integration pattern-tests ${{ matrix.chunk }}/3
+          CT_BINARY=./common-binaries/ct deno task integration pattern-tests ${{ matrix.chunk }}/5
 
   generated-patterns-integration-test:
     name: "Generated Patterns Integration Tests"
