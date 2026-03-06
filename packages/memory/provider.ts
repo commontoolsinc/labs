@@ -127,7 +127,7 @@ function maybeReportSchemaFlushStats() {
   lastSchemaFlushReport = now;
   const lines = schemaFlushStats.report();
   if (lines.length > 0) {
-    logger.info("schema-flush-stats", () => lines);
+    logger.warn("schema-flush-stats", () => lines);
     schemaFlushStats.reset();
   }
 }
@@ -328,9 +328,11 @@ class MemoryProviderSession<
   private pendingSchemaChanges = new Map<MemorySpace, Set<string>>();
   // Whether a schema flush is already scheduled
   private schemaFlushScheduled = false;
-  // Incremented on write start, decremented on write end. Used to detect
-  // whether the stream pipe has pulled another message during a flush yield.
-  private writeGeneration = 0;
+  // Generation counter: incremented on each commit that accumulates
+  // schema changes. Compared across yield points to detect new work.
+  private schemaChangeGeneration = 0;
+  // Duration of the previous schema flush (ms), for batch logging
+  private lastFlushMs = 0;
 
   constructor(
     public memory: MemorySession,
@@ -364,17 +366,14 @@ class MemoryProviderSession<
       UCAN<ConsumerCommandInvocation<MemoryProtocol>>
     >({
       write: async (command) => {
-        this.writeGeneration++;
         try {
           await this.invoke(
             command as UCAN<ConsumerCommandInvocation<Protocol>>,
           );
-          // After invoke completes, try to flush pending schema changes.
-          // The flush yields a microtask to let the stream pipe pull another
-          // message first. If another write arrives (writeGeneration changes),
-          // the flush defers — batching all buffered messages into one
-          // schema traversal.
-          await this.maybeFlushSchemaChanges();
+          // Schedule a debounced flush. The 5ms window lets multiple
+          // rapid commits (e.g. buffered websocket messages) coalesce
+          // into a single schema traversal.
+          this.scheduleSchemaFlush();
         } catch (error) {
           logger.error(
             "stream-error",
@@ -441,6 +440,7 @@ class MemoryProviderSession<
     return { ok: {} };
   }
   dispose() {
+    this.schemaFlushScheduled = false;
     this.memory.unsubscribe(this);
     this.controller = undefined;
     this.sessions?.delete(this);
@@ -789,10 +789,8 @@ class MemoryProviderSession<
         }
       }
     }
-    // Schedule a microtask flush for cross-session notifications (when
-    // commit() is called from another session's transact, not our own
-    // write callback). The write callback's maybeFlushSchemaChanges
-    // provides additional batching for our own writes.
+    // Schedule a debounced flush (5ms window). Multiple rapid commits
+    // coalesce into a single schema traversal.
     this.scheduleSchemaFlush();
     logger.timeEnd("commit");
     return { ok: {} };
@@ -1071,6 +1069,11 @@ class MemoryProviderSession<
     const changedDocs = this.extractChangedDocKeys(space, transaction);
     if (changedDocs.size === 0) return;
 
+    // Track when the first change in this batch arrived
+    if (this.pendingSchemaChanges.size === 0) {
+      this.schemaAccumulateStart = performance.now();
+    }
+
     let pending = this.pendingSchemaChanges.get(space);
     if (!pending) {
       pending = new Set<string>();
@@ -1079,32 +1082,35 @@ class MemoryProviderSession<
     for (const doc of changedDocs) {
       pending.add(doc);
     }
+    this.schemaChangeGeneration++;
   }
 
   /**
-   * Schedule a microtask flush for cross-session commit notifications.
+   * Schedule a debounced schema flush. Uses a queueMicrotask loop
+   * that keeps yielding as long as new schema changes arrive.
+   * This naturally batches rapid commits without creating timer
+   * resources that leak in tests.
    */
   private scheduleSchemaFlush(): void {
     if (this.schemaFlushScheduled) return;
     if (this.pendingSchemaChanges.size === 0) return;
     this.schemaFlushScheduled = true;
-    queueMicrotask(() => this.flushSchemaChanges());
+    queueMicrotask(() => this.debouncedFlush());
   }
 
-  /**
-   * Yield one microtask to let the stream pipe pull the next message.
-   * If another write arrives (writeGeneration changes), defer the flush
-   * to batch with the next message. Otherwise flush now.
-   */
-  private async maybeFlushSchemaChanges(): Promise<void> {
-    if (this.pendingSchemaChanges.size === 0) return;
-    const gen = this.writeGeneration;
-    // Yield to let the pipe pull the next buffered chunk
-    await Promise.resolve();
-    if (this.writeGeneration !== gen) {
-      // Another write arrived — it will call maybeFlush after its invoke
-      return;
-    }
+  private async debouncedFlush(): Promise<void> {
+    if (!this.schemaFlushScheduled) return;
+
+    // Keep yielding as long as new changes arrive.
+    // This lets the stream pipe drain all buffered messages.
+    let gen: number;
+    do {
+      gen = this.schemaChangeGeneration;
+      await Promise.resolve();
+      if (!this.schemaFlushScheduled) return;
+    } while (this.schemaChangeGeneration !== gen);
+
+    this.schemaFlushScheduled = false;
     await this.flushSchemaChanges();
   }
 
@@ -1115,6 +1121,7 @@ class MemoryProviderSession<
   private async flushSchemaChanges(
     isConflict = false,
   ): Promise<void> {
+    // Cancel any pending debounced flush since we're flushing now
     this.schemaFlushScheduled = false;
 
     // Guard against flush after session disposal
@@ -1207,7 +1214,21 @@ class MemoryProviderSession<
     }
 
     logger.timeEnd("schema-flush");
-    schemaFlushStats.record(commitCount, isConflict, performance.now() - t0);
+    const flushMs = performance.now() - t0;
+    const prevFlushMs = this.lastFlushMs;
+    this.lastFlushMs = flushMs;
+    schemaFlushStats.record(commitCount, isConflict, flushMs);
+    if (commitCount > 1) {
+      logger.warn(
+        "schema-flush-batch",
+        () => [
+          `saved=${commitCount - 1}`,
+          `flushMs=${flushMs.toFixed(1)}`,
+          `prevFlushMs=${prevFlushMs.toFixed(1)}`,
+          isConflict ? "conflict" : "",
+        ],
+      );
+    }
     maybeReportSchemaFlushStats();
   }
 
