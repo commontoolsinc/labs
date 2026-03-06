@@ -93,12 +93,12 @@ const enum TypeValidity {
  * `canonicalHash` rejects (NaN, Infinity, Date, RegExp). These don't
  * appear in normal JSON Schema data but may surface in edge-case tests.
  */
+// TODO(danfuzz): Remove fallbacks once the data model covers NaN, Infinity,
+// Date, and RegExp directly.
 const _stableHashCache = new WeakMap<object, string>();
 
 export function stableHash(value: unknown): string {
-  if (value === null) return "h:null";
-  if (value === undefined) return "h:undef";
-  if (typeof value !== "object") {
+  if (value === null || value === undefined || typeof value !== "object") {
     if (typeof value === "number" && !Number.isFinite(value)) {
       return `h:num:${value}`;
     }
