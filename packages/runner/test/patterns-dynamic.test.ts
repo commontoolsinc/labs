@@ -801,6 +801,32 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     expect(result.key("flat").get()).toEqual([2, 4]);
   });
 
+  it("should include scalar results directly in flatMap (JS semantics)", async () => {
+    // JS: [1,2,3].flatMap(x => x === 2 ? [20, 21] : x) → [1, 20, 21, 3]
+    const expandOrPassthrough = lift((x: number) => {
+      if (x === 2) return [20, 21];
+      return x; // scalar, not wrapped in array
+    });
+
+    const flatMapPattern = pattern<{ values: number[] }>(({ values }) => {
+      return { values, flat: values.flatMap((x) => expandOrPassthrough(x)) };
+    });
+
+    const resultCell = runtime.getCell<{ values: number[]; flat: number[] }>(
+      space,
+      "flatmap-scalar",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, flatMapPattern, {
+      values: [1, 2, 3],
+    }, resultCell);
+    tx.commit();
+
+    await result.pull();
+    expect(result.key("flat").get()).toEqual([1, 20, 21, 3]);
+  });
+
   it("should skip sparse holes in flatMap input", async () => {
     let runCount = 0;
     const duplicate = lift((x: number) => {

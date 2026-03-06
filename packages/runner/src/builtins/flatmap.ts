@@ -10,9 +10,10 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
  * Implementation of built-in flatMap module. Like map, this is called once at
  * setup and manages its own actions for the scheduler.
  *
- * Runs a pattern per element that returns an array. The output is the
- * concatenation of all per-element result arrays, flattened one level deep
- * (consistent with Array.prototype.flatMap). Output is always dense.
+ * Runs a pattern per element. If the result is an array, it is spread into
+ * the output (one level deep, consistent with Array.prototype.flatMap). If
+ * the result is a scalar, it is included directly. undefined results are
+ * skipped (see two-pass convergence below). Output is always dense.
  *
  * Sub-arrays are iterated with forEach, which skips holes — so sparse
  * per-element results are densified during flattening.
@@ -145,14 +146,19 @@ export function flatMap(
         elementRuns.set(elementKey, { resultCell, lastIndex: i });
       }
 
-      // Read result array and flatten one level into output.
-      // forEach skips holes in sub-arrays (sparse-safe).
-      const resultArray = elementRuns.get(elementKey)!.resultCell.withTx(tx)
+      // Read per-element result and flatten one level into output.
+      // Matches JS flatMap semantics: arrays are spread, scalars are included
+      // directly. undefined is skipped (two-pass convergence: new elements
+      // have undefined result cells on the first pass before the pattern runs).
+      const elemResult = elementRuns.get(elementKey)!.resultCell.withTx(tx)
         .get();
-      if (Array.isArray(resultArray)) {
-        resultArray.forEach((v) => {
+      if (Array.isArray(elemResult)) {
+        // forEach skips holes in sub-arrays (sparse-safe)
+        elemResult.forEach((v) => {
           newArrayValue.push(v);
         });
+      } else if (elemResult !== undefined) {
+        newArrayValue.push(elemResult);
       }
     }
     resultWithLog.set(newArrayValue);

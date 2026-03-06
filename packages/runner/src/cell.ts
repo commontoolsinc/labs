@@ -252,7 +252,13 @@ export type { AnyCell, Cell, Stream } from "@commontools/api";
 
 export type { MemorySpace } from "@commontools/memory/interface";
 
-const cellMethods = new Set<keyof ICell<unknown> | string>([
+const cellMethods = new Set<
+  | keyof ICell<unknown>
+  | "filter"
+  | "filterWithPattern"
+  | "flatMap"
+  | "flatMapWithPattern"
+>([
   "get",
   "sample",
   "set",
