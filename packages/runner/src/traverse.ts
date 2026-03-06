@@ -1,6 +1,6 @@
 import { refer } from "@commontools/memory/reference";
 import { canonicalHash } from "@commontools/memory/canonical-hash";
-import { deepFreeze, isDeepFrozen } from "@commontools/memory/deep-freeze";
+import { deepFreeze } from "@commontools/memory/deep-freeze";
 import { MIME } from "@commontools/memory/interface";
 import type { JSONSchemaObj } from "@commontools/api";
 import type {
@@ -1897,9 +1897,6 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     schema: JSONSchema,
     link?: NormalizedFullLink,
   ): TraverseResult<Immutable<StorableValue>> {
-    if (!isDeepFrozen(schema)) {
-      schema = deepFreeze(schema);
-    }
     this.traverseWithSchemaCalls++;
     this.currentDepth++;
     if (this.currentDepth > this.maxDepth) this.maxDepth = this.currentDepth;
