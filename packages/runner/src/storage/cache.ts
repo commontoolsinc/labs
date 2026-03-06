@@ -74,7 +74,7 @@ import * as Address from "./transaction/address.ts";
 import { ACL_TYPE, ANYONE_USER } from "@commontools/memory/acl";
 import {
   toDeepStorableValue,
-  valueEquals,
+  valueEqual,
 } from "@commontools/memory/storable-value";
 
 export type { Result, Unit };
@@ -1946,7 +1946,7 @@ export class Provider implements IStorageProvider {
         : undefined;
 
       const current = workspace.get({ id: uri, type: this.the });
-      if (!valueEquals(current?.is, newValue)) {
+      if (!valueEqual(current?.is, newValue)) {
         if (newValue !== undefined) {
           facts.push(assert({
             the,

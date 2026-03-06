@@ -563,7 +563,7 @@ function isStorableArray(array: unknown[]): boolean {
  * Flag ON (rich): uses deep structural equality that correctly handles
  * undefined, sparse arrays, and other extended types.
  */
-export function valueEquals(a: unknown, b: unknown): boolean {
+export function valueEqual(a: unknown, b: unknown): boolean {
   if (currentConfig.richStorableValues) {
     return deepEqual(a, b);
   }
