@@ -1069,11 +1069,6 @@ class MemoryProviderSession<
     const changedDocs = this.extractChangedDocKeys(space, transaction);
     if (changedDocs.size === 0) return;
 
-    // Track when the first change in this batch arrived
-    if (this.pendingSchemaChanges.size === 0) {
-      this.schemaAccumulateStart = performance.now();
-    }
-
     let pending = this.pendingSchemaChanges.get(space);
     if (!pending) {
       pending = new Set<string>();
