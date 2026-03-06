@@ -73,8 +73,8 @@ Static strings like `[NAME]: "My Pattern"` don't need `computed()`.
 
 **Never wrap JSX in `computed()`** — the transformer automatically handles
 reactivity in JSX expressions. Ternaries in JSX children position are
-automatically converted to `ifElse()`, which correctly unwraps reactive
-values. Nested ternaries work too — a ternary inside the truthy branch of
+automatically converted to `ifElse()`, which correctly unwraps
+OpaqueRefs. Nested ternaries work too — a ternary inside the truthy branch of
 another ternary is also transformed. See `docs/common/patterns/conditional.md`.
 
 Inside a `computed()` body, ternaries are **not** transformed — they execute
