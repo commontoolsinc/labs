@@ -63,6 +63,7 @@ const OPAQUE_REF_OWNER_NAMES = new Set([
   "OpaqueRef",
 ]);
 
+/** Includes WithPattern variants so call-kind detection works on already-transformed code. */
 const ARRAY_METHOD_NAMES = new Set([
   "map",
   "mapWithPattern",
@@ -256,7 +257,7 @@ function resolveSymbolKind(
     if (cellKind) return cellKind;
 
     if (
-      isArrayMapDeclaration(declaration) ||
+      isArrayMethodDeclaration(declaration) ||
       isOpaqueRefMapDeclaration(declaration)
     ) {
       return { kind: "array-map", symbol: resolved };
@@ -409,7 +410,7 @@ function detectCellMethodFromDeclaration(
   return undefined;
 }
 
-function isArrayMapDeclaration(declaration: ts.Declaration): boolean {
+function isArrayMethodDeclaration(declaration: ts.Declaration): boolean {
   if (!hasIdentifierName(declaration)) return false;
   if (!ARRAY_METHOD_NAMES.has(declaration.name.text)) return false;
 

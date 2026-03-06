@@ -808,6 +808,17 @@ export function isReactiveArrayMethodCall(
     return true;
   }
 
+  // Special case: chained reactive array methods (e.g. .filter().map()).
+  // The type checker sees the static return type (T[]) rather than the runtime
+  // OpaqueRef<T[]>, so we detect this syntactically: if the receiver is itself
+  // a reactive array method call, the result is also a reactive array.
+  if (
+    ts.isCallExpression(target) &&
+    isReactiveArrayMethodCall(target, checker, typeRegistry, logger)
+  ) {
+    return true;
+  }
+
   const targetType = getTypeAtLocationWithFallback(
     target,
     checker,
@@ -821,19 +832,4 @@ export function isReactiveArrayMethodCall(
   // Type-based check: target is OpaqueRef<T[]> or Cell<T[]>
   return isOpaqueRefType(targetType, checker) &&
     hasArrayTypeArgument(targetType, checker);
-}
-
-/**
- * @deprecated Use isReactiveArrayMethodCall instead.
- * Kept for backwards compatibility — delegates to the generalized version.
- */
-export function isReactiveArrayMapCall(
-  node: ts.CallExpression,
-  checker: ts.TypeChecker,
-  typeRegistry?: WeakMap<ts.Node, ts.Type>,
-  logger?: (message: string) => void,
-): boolean {
-  if (!ts.isPropertyAccessExpression(node.expression)) return false;
-  if (node.expression.name.text !== "map") return false;
-  return isReactiveArrayMethodCall(node, checker, typeRegistry, logger);
 }

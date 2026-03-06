@@ -39,7 +39,55 @@ export default pattern((state) => {
             } as const satisfies __ctHelpers.JSONSchema, {
                 type: "boolean",
                 asOpaque: true
-            } as const satisfies __ctHelpers.JSONSchema), {}).map((item) => (<li>{item.name}</li>))}
+            } as const satisfies __ctHelpers.JSONSchema), {}).mapWithPattern(__ctHelpers.pattern(({ element: item, params: {} }) => (<li>{item.name}</li>), {
+                type: "object",
+                properties: {
+                    element: {
+                        $ref: "#/$defs/Item",
+                        asOpaque: true
+                    },
+                    params: {
+                        type: "object",
+                        properties: {}
+                    }
+                },
+                required: ["element", "params"],
+                $defs: {
+                    Item: {
+                        type: "object",
+                        properties: {
+                            name: {
+                                type: "string"
+                            },
+                            active: {
+                                type: "boolean"
+                            }
+                        },
+                        required: ["name", "active"]
+                    }
+                }
+            } as const satisfies __ctHelpers.JSONSchema, {
+                anyOf: [{
+                        $ref: "https://commonfabric.org/schemas/vnode.json"
+                    }, {
+                        type: "object",
+                        properties: {}
+                    }, {
+                        $ref: "#/$defs/UIRenderable",
+                        asOpaque: true
+                    }],
+                $defs: {
+                    UIRenderable: {
+                        type: "object",
+                        properties: {
+                            $UI: {
+                                $ref: "https://commonfabric.org/schemas/vnode.json"
+                            }
+                        },
+                        required: ["$UI"]
+                    }
+                }
+            } as const satisfies __ctHelpers.JSONSchema), {})}
       </ul>),
     };
 }, {

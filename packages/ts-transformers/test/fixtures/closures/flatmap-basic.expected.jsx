@@ -45,7 +45,41 @@ export default pattern((state) => {
                     type: "string"
                 },
                 asOpaque: true
-            } as const satisfies __ctHelpers.JSONSchema), {}).map((member) => (<li>{member}</li>))}
+            } as const satisfies __ctHelpers.JSONSchema), {}).mapWithPattern(__ctHelpers.pattern(({ element: member, params: {} }) => (<li>{member}</li>), {
+                type: "object",
+                properties: {
+                    element: {
+                        type: "string",
+                        asOpaque: true
+                    },
+                    params: {
+                        type: "object",
+                        properties: {}
+                    }
+                },
+                required: ["element", "params"]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                anyOf: [{
+                        $ref: "https://commonfabric.org/schemas/vnode.json"
+                    }, {
+                        type: "object",
+                        properties: {}
+                    }, {
+                        $ref: "#/$defs/UIRenderable",
+                        asOpaque: true
+                    }],
+                $defs: {
+                    UIRenderable: {
+                        type: "object",
+                        properties: {
+                            $UI: {
+                                $ref: "https://commonfabric.org/schemas/vnode.json"
+                            }
+                        },
+                        required: ["$UI"]
+                    }
+                }
+            } as const satisfies __ctHelpers.JSONSchema), {})}
       </ul>),
     };
 }, {

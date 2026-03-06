@@ -225,7 +225,7 @@ export default pattern((state) => {
             state: {
                 threshold: state.threshold
             }
-        }).map((x) => (<li>Value: {__ctHelpers.derive({
+        }).mapWithPattern(__ctHelpers.pattern(({ element: x, params: { state } }) => (<li>Value: {__ctHelpers.derive({
             type: "object",
             properties: {
                 x: {
@@ -251,7 +251,57 @@ export default pattern((state) => {
             state: {
                 factor: state.factor
             }
-        }, ({ x, state }) => x * state.factor)}</li>))}
+        }, ({ x, state }) => x * state.factor)}</li>), {
+            type: "object",
+            properties: {
+                element: {
+                    type: "number",
+                    asOpaque: true
+                },
+                params: {
+                    type: "object",
+                    properties: {
+                        state: {
+                            type: "object",
+                            properties: {
+                                factor: {
+                                    type: "number",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["factor"]
+                        }
+                    },
+                    required: ["state"]
+                }
+            },
+            required: ["element", "params"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            anyOf: [{
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    $ref: "#/$defs/UIRenderable",
+                    asOpaque: true
+                }],
+            $defs: {
+                UIRenderable: {
+                    type: "object",
+                    properties: {
+                        $UI: {
+                            $ref: "https://commonfabric.org/schemas/vnode.json"
+                        }
+                    },
+                    required: ["$UI"]
+                }
+            }
+        } as const satisfies __ctHelpers.JSONSchema), {
+            state: {
+                factor: state.factor
+            }
+        })}
         </ul>
 
         {/* Multiple filters */}
@@ -319,7 +369,38 @@ export default pattern((state) => {
             state: {
                 start: state.start
             }
-        }).filter((x) => x < state.end).length)}
+        }).filterWithPattern(__ctHelpers.pattern(({ element: x, params: { state } }) => x < state.end, {
+            type: "object",
+            properties: {
+                element: {
+                    type: "number",
+                    asOpaque: true
+                },
+                params: {
+                    type: "object",
+                    properties: {
+                        state: {
+                            type: "object",
+                            properties: {
+                                end: {
+                                    type: "number",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["end"]
+                        }
+                    },
+                    required: ["state"]
+                }
+            },
+            required: ["element", "params"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema), {
+            state: {
+                end: state.end
+            }
+        }).length)}
         </p>
 
         <h3>Methods with Reactive Arguments</h3>

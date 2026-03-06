@@ -13,14 +13,6 @@ import {
   isReactiveArrayMethodCall,
   registerSyntheticCallType,
 } from "../../ast/mod.ts";
-
-/** Maps array method names to their WithPattern compiler target names. */
-const METHOD_TO_WITH_PATTERN: Record<string, string> = {
-  map: "mapWithPattern",
-  filter: "filterWithPattern",
-  flatMap: "flatMapWithPattern",
-};
-
 import { buildHierarchicalParamsValue } from "../../utils/capture-tree.ts";
 import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
 import {
@@ -33,6 +25,13 @@ import type { ComputedAliasInfo } from "./map-utils.ts";
 import { CaptureCollector } from "../capture-collector.ts";
 import { PatternBuilder } from "../utils/pattern-builder.ts";
 import { SchemaFactory } from "../utils/schema-factory.ts";
+
+/** Maps array method names to their WithPattern compiler target names. */
+const METHOD_TO_WITH_PATTERN: Record<string, string> = {
+  map: "mapWithPattern",
+  filter: "filterWithPattern",
+  flatMap: "flatMapWithPattern",
+};
 
 export class MapStrategy implements ClosureTransformationStrategy {
   canTransform(
@@ -62,21 +61,6 @@ export class MapStrategy implements ClosureTransformationStrategy {
     }
     return undefined;
   }
-}
-
-/**
- * Checks if this is an OpaqueRef<T[]> or Cell<T[]> array method call.
- * Only transforms calls on reactive arrays (OpaqueRef/Cell), not plain arrays.
- *
- * @deprecated Use isReactiveArrayMethodCall from ast/mod.ts instead.
- */
-export function isOpaqueRefArrayMapCall(
-  node: ts.CallExpression,
-  checker: ts.TypeChecker,
-  typeRegistry?: WeakMap<ts.Node, ts.Type>,
-  logger?: (message: string) => void,
-): boolean {
-  return isReactiveArrayMethodCall(node, checker, typeRegistry, logger);
 }
 
 /**
@@ -122,6 +106,38 @@ function shouldTransformMap(
     return true;
   }
 
+  // Inside safe wrappers (computed, derive, action, lift, handler),
+  // OpaqueRef gets auto-unwrapped to plain values, so we should NOT transform
+  // unless the target is a Cell or Stream (which aren't auto-unwrapped).
+  if (isInsideSafeCallbackWrapper(mapCall, context.checker)) {
+    const targetType = getTypeAtLocationWithFallback(
+      mapTarget,
+      context.checker,
+      context.options.typeRegistry,
+      context.options.logger,
+    );
+    if (!targetType) return false;
+    if (!isOpaqueRefType(targetType, context.checker)) return false;
+    const cellKind = getCellKind(targetType, context.checker);
+    return cellKind === "cell" || cellKind === "stream";
+  }
+
+  // Special case: chained reactive array methods (e.g. .filter().map()).
+  // The type checker sees the static return type (T[]) rather than the runtime
+  // OpaqueRef<T[]>, so detect this syntactically: if the receiver is itself
+  // a reactive array method call, the result is also a reactive array.
+  if (
+    ts.isCallExpression(mapTarget) &&
+    isReactiveArrayMethodCall(
+      mapTarget,
+      context.checker,
+      context.options.typeRegistry,
+      context.options.logger,
+    )
+  ) {
+    return true;
+  }
+
   // Get the type of the map target from registry (preferred) or checker
   const targetType = getTypeAtLocationWithFallback(
     mapTarget,
@@ -135,15 +151,6 @@ function shouldTransformMap(
   // Check if this is a cell-like type at all
   if (!isOpaqueRefType(targetType, context.checker)) {
     return false;
-  }
-
-  // Inside safe wrappers (computed, derive, action, lift, handler),
-  // OpaqueRef gets auto-unwrapped to plain values, so we should NOT transform.
-  // Cell and Stream do NOT get auto-unwrapped, so we still transform those.
-  if (isInsideSafeCallbackWrapper(mapCall, context.checker)) {
-    // Only transform Cell and Stream (not auto-unwrapped), not OpaqueRef (auto-unwrapped)
-    const cellKind = getCellKind(targetType, context.checker);
-    return cellKind === "cell" || cellKind === "stream";
   }
 
   // Outside safe wrappers, transform all cell-like types
