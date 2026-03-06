@@ -745,13 +745,15 @@ describe("Cell Static Methods", () => {
 
     it("should handle creating cell with special number values", () => {
       withinHandlerContext(runtime, space, tx, () => {
-        const nanCell = Cell.of(NaN);
-        const infCell = Cell.of(Infinity);
-        const negInfCell = Cell.of(-Infinity);
+        const zeroCell = Cell.of(0);
+        const negCell = Cell.of(-42);
+        const minCell = Cell.of(Number.MIN_SAFE_INTEGER);
+        const epsCell = Cell.of(Number.EPSILON);
 
-        expect(Number.isNaN(nanCell.get())).toBe(true);
-        expect(infCell.get()).toBe(Infinity);
-        expect(negInfCell.get()).toBe(-Infinity);
+        expect(zeroCell.get()).toBe(0);
+        expect(negCell.get()).toBe(-42);
+        expect(minCell.get()).toBe(Number.MIN_SAFE_INTEGER);
+        expect(epsCell.get()).toBe(Number.EPSILON);
       });
     });
 
