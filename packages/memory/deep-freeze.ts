@@ -43,6 +43,16 @@ function isNecessarilyFrozenValue(value: unknown): boolean {
 }
 
 /**
+ * Indicates whether the given value is either _necessarily_ or _already known
+ * to be_ deep-frozen.
+ */
+function isNecessarilyOrKnownDeepFrozen(value: unknown): boolean {
+  // Note: The `as` cast here is safe because the antecedent being `false` means
+  // that `value` must be an `object` consequent.
+  return isNecessarilyFrozenValue(value) || isInDeepFrozenCache(value as object);
+}
+
+/**
  * Returns `true` if the value is deeply frozen: either a primitive, or a
  * frozen object/array whose every nested value is also deeply frozen
  * (recursively). Caches results fast repeat checks.
@@ -50,23 +60,34 @@ function isNecessarilyFrozenValue(value: unknown): boolean {
  * Handles circular references and sparse arrays.
  */
 export function isDeepFrozen(value: unknown): boolean {
-  return isNecessarilyFrozenValue(value)
-    || isDeepFrozenObject(value as object, new Set<object>());
+  return isDeepFrozenInProgress(value);
 }
 
 /**
  * Internal recursive deep-frozen check with cycle detection.
  */
-function isDeepFrozenObject(obj: object, inProgress: Set<object>): boolean {
-  if (isInDeepFrozenCache(obj)) {
+function isDeepFrozenInProgress(value: unknown, inProgress?: Set<object>): boolean {
+  if (isNecessarilyOrKnownDeepFrozen(value)) {
     return true;
-  } else if (!Object.isFrozen(obj)) {
+  } else if (!Object.isFrozen(value)) {
     return false;
   }
 
-  // Cycle detection: if we're already checking this object, treat it as
-  // frozen (all paths must confirm independently).
-  if (inProgress.has(obj)) return true;
+  const obj = value as object;
+
+  if (inProgress) {
+    // We're in a recursive call, so notice if we're in fact already checking
+    // `value`. If so, treat it as frozen for the sake of the rest of the check.
+    // It will only end up getting marked as actually deep-frozen if the rest
+    // of the call actually confirms.
+    if (inProgress.has(obj)) return true;
+  } else {
+    // This is the base non-recursive call, and we have to set up the
+    // `inProgress` set. This isn't done by default exactly so that the quick
+    // checks at the top of this function don't incur object-creation overhead.
+    inProgress = new Set<object>();
+  }
+
   inProgress.add(obj);
 
   let result = true;
@@ -74,22 +95,16 @@ function isDeepFrozenObject(obj: object, inProgress: Set<object>): boolean {
   if (Array.isArray(obj)) {
     for (let i = 0; i < obj.length; i++) {
       if (!(i in obj)) continue; // sparse hole
-      const el = obj[i];
-      if (el !== null && typeof el === "object") {
-        if (!isDeepFrozenObject(el as object, inProgress)) {
-          result = false;
-          break;
-        }
+      if (!isDeepFrozenInProgress(obj[i], inProgress)) {
+        result = false;
+        break;
       }
-      // primitives are always frozen
     }
   } else {
     for (const v of Object.values(obj)) {
-      if (v !== null && typeof v === "object") {
-        if (!isDeepFrozenObject(v as object, inProgress)) {
-          result = false;
-          break;
-        }
+      if (!isDeepFrozenInProgress(v, inProgress)) {
+        result = false;
+        break;
       }
     }
   }
@@ -102,8 +117,7 @@ function isDeepFrozenObject(obj: object, inProgress: Set<object>): boolean {
 }
 
 export function deepFreeze<T>(value: T): T {
-  if (isNecessarilyFrozenValue(value)
-      || isInDeepFrozenCache(value as object)) {
+  if (isNecessarilyOrKnownDeepFrozen(value)) {
     return value;
   }
 
