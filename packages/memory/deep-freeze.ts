@@ -12,17 +12,15 @@
  */
 
 /**
- * WeakMap cache of confirmed deep-frozen objects. Only `true` results are
- * cached -- `false` is never stored, because a currently-unfrozen object
- * may be frozen later and must not be permanently marked as non-frozen.
+ * Cache of confirmed deep-frozen objects.
  */
-const deepFrozenCache = new WeakMap<object, true>();
+const deepFrozenCache = new WeakSet<object>();
 
 /**
  * Adds a value which has been determined to be deep-frozen to the cache.
  */
 function addToDeepFrozenCache(obj: object) {
-  deepFrozenCache.set(obj, true);
+  deepFrozenCache.add(obj);
 }
 
 /**
@@ -47,7 +45,7 @@ function isNecessarilyFrozenValue(value: unknown): boolean {
 /**
  * Returns `true` if the value is deeply frozen: either a primitive, or a
  * frozen object/array whose every nested value is also deeply frozen
- * (recursively). Caches results in a WeakMap for fast repeat checks.
+ * (recursively). Caches results fast repeat checks.
  *
  * Handles circular references and sparse arrays.
  */
