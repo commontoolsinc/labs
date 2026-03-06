@@ -1,7 +1,7 @@
 {
   "name": "@commontools/llm",
   "tasks": {
-    "test": "deno test"
+    "test": "ENV=test deno test --allow-env"
   },
   "exports": {
     ".": "./src/index.ts",
