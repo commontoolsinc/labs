@@ -52,6 +52,10 @@ import { resolve } from "./storage/transaction/attestation.ts";
 import { isWriteRedirectLink } from "./link-types.ts";
 import { LastNode } from "./link-resolution.ts";
 import type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
+import {
+  ignoreReadForScheduling,
+  onlyReadForSchedulingMarker,
+} from "./scheduler.ts";
 
 const logger = getLogger("traverse", { enabled: true, level: "warn" });
 
@@ -385,7 +389,7 @@ class ManagedStorageJournal implements ITransactionJournal {
 
 /**
  * Implementation of IStorageTransaction that is backed by an ObjectManager
- * This is a read-only transaction, and is only used by the traverse code.
+ * This is a read-only transaction, and is only used by the query traversal.
  */
 export class ManagedStorageTransaction implements IStorageTransaction {
   constructor(
@@ -400,8 +404,11 @@ export class ManagedStorageTransaction implements IStorageTransaction {
 
   read(
     address: IMemorySpaceAddress,
-    _options?: IReadOptions,
+    options?: IReadOptions,
   ): Result<IAttestation, ReadError> {
+    if (options?.meta?.[onlyReadForSchedulingMarker]) {
+      return { ok: { address, value: undefined } };
+    }
     const source = this.manager.load(address) ??
       { address: { ...address, path: [] } };
     return resolve(source, address);
@@ -584,6 +591,8 @@ function getNormalizedLink(
 // Value traversed must be a DAG, though it may have aliases or cell links
 // that make it seem like it has cycles
 export abstract class BaseObjectTraverser {
+  protected readLog: ReadLog = new ReadLog();
+
   constructor(
     protected tx: IExtendedStorageTransaction,
     protected selector: SchemaPathSelector = DefaultSelector,
@@ -614,6 +623,9 @@ export abstract class BaseObjectTraverser {
    * Otherwise, it will return the fully traversed object.
    * If a cycle is detected, it will not traverse the cyclic element
    *
+   * Our reactivity mark strategy is to mark the doc read, and any time
+   * we follow a link, also mark that returned doc read.
+   *
    * @param doc
    * @param defaultValue optional default value
    * @param itemLink optinal item link to use when creating links
@@ -640,7 +652,7 @@ export abstract class BaseObjectTraverser {
         return cached;
       }
     }
-
+    this.readLog.addRead(doc.address);
     if (doc.value === undefined) {
       // If we have a default, annotate it and return it
       // Otherwise, return undefined
@@ -671,6 +683,7 @@ export abstract class BaseObjectTraverser {
           },
           value: item,
         };
+        this.readLog.addRead(docItem.address);
         // We follow the first link in array elements so we don't have
         // strangeness with setting item at 0 to item at 1
         let arrayElementLink = itemLink;
@@ -681,6 +694,7 @@ export abstract class BaseObjectTraverser {
             DefaultSelector,
             "writeRedirect",
           );
+          this.readLog.addRead(redirDoc.address);
           const [linkDoc, _selector] = this.nextLink(redirDoc, redirSelector);
           // our item link should point one past the last redirect, but it may
           // be invalid (in which case, we should base the link on redirDoc).
@@ -690,6 +704,7 @@ export abstract class BaseObjectTraverser {
           // We can follow all the links, since we don't need to track cells
           const [valueDoc, _] = this.getDocAtPath(linkDoc, [], DefaultSelector);
           docItem = valueDoc;
+          this.readLog.addRead(docItem.address);
           if (docItem.value === undefined) {
             logger.debug(
               "traverse",
@@ -734,6 +749,7 @@ export abstract class BaseObjectTraverser {
           DefaultSelector,
           "writeRedirect",
         );
+        this.readLog.addRead(redirDoc.address);
         if (redirDoc.value === undefined) {
           logger.debug(
             "traverse",
@@ -841,6 +857,7 @@ export abstract class BaseObjectTraverser {
     doc: IMemorySpaceAttestation,
     selector?: SchemaPathSelector,
   ): [IMemorySpaceAttestation, SchemaPathSelector | undefined] {
+    this.readLog.addRead(doc.address);
     const link = parseLink(doc.value, doc.address);
     if (link !== undefined) {
       return followPointer(
@@ -862,6 +879,11 @@ export abstract class BaseObjectTraverser {
 /**
  * Traverses a data structure following a path and resolves any pointers.
  * If we load any additional documents, we will also let the helper know.
+ *
+ * We are passed a doc with a value, but this read has not been registered
+ * with the reactivity system yet, so sometimes we need to do that when we
+ * follow pointers. Our caller is responsible for registering reads on the
+ * returned tuple.
  *
  * @param manager - Storage manager for document access.
  * @param doc - IAttestation for the current document
@@ -889,6 +911,7 @@ export function getAtPath(
   selector?: SchemaPathSelector,
   includeSource?: boolean,
   lastNode: LastNode = "value",
+  readLog?: ReadLog,
 ): [
   IMemorySpaceAttestation,
   SchemaPathSelector | undefined,
@@ -898,6 +921,7 @@ export function getAtPath(
 
   while (true) {
     if (isPrimitiveCellLink(curDoc.value)) {
+      readLog?.addRead(curDoc.address);
       // we follow links when we point to a child of the link, since we need
       // them to resolve the link.
       // we follow all links when the lastNode is value
@@ -983,7 +1007,7 @@ export function getAtPath(
 
 function notFound(address: IMemorySpaceAddress): IMemorySpaceAttestation {
   return {
-    address: { ...address, path: [] },
+    address,
     value: undefined,
   };
 }
@@ -1045,12 +1069,14 @@ function followPointer(
   selector?: SchemaPathSelector,
   includeSource?: boolean,
   lastNode?: LastNode,
+  readLog?: ReadLog,
 ): [
   IMemorySpaceAttestation,
   SchemaPathSelector | undefined,
 ] {
   // doc.address's path doesn't have the same value nesting semantics as
   // link path, but we don't use the path field from that argument.
+  readLog?.addRead(doc.address);
   const link = parseLink(doc.value, doc.address)!;
   // We may access portions of the doc outside what we have in our doc
   // attestation, so set the target to the top level doc from the manager.
@@ -1082,7 +1108,13 @@ function followPointer(
   // Attempt to read the actual link location. This will often fail because
   // there is an intermediate link, but we'll handle that below
   // Load the data from the manager.
-  const { ok: valueEntry, error } = tx.read(target);
+  // The path here is just the link path, but we may be interested in the deeper
+  // contents and this could just be an intermediate link, so ignore this read
+  // for scheduling. We'll have to tag it later.
+  const { ok: valueEntry, error } = tx.read(target, {
+    meta: ignoreReadForScheduling,
+  });
+  readLog?.addRead(target);
 
   if (error !== undefined) {
     // If we had an unexpected error, or didn't find the doc at all, return.
@@ -1146,6 +1178,7 @@ function followPointer(
         selector,
         includeSource,
         lastNode,
+        readLog,
       );
     }
   }
@@ -1243,6 +1276,7 @@ export function loadSource(
     type: "application/json",
     path: [],
   };
+  // This only happens in the query path, so don't worry about scheduler
   const { ok: entry, error } = tx.read(address);
   if (error) {
     return;
@@ -1512,6 +1546,7 @@ function _combineSchemaUncached(
 
 // Load the linked pattern from the doc ()
 // We don't recurse, since that's not required for pattern links
+// We don't mark anything for reactivity, since this is for queries
 function loadLinkedPattern(
   tx: IExtendedStorageTransaction,
   valueEntry: IMemorySpaceAttestation,
@@ -1554,6 +1589,7 @@ function loadLinkedPattern(
   if (address === undefined) {
     return;
   }
+  // This only happens in the query path, so don't worry about scheduler
   const result = tx.read(address);
   if (result.error) {
     return;
@@ -1575,6 +1611,7 @@ function loadLinkedPattern(
       type: "application/json" as MIME,
       path: [],
     };
+    // This only happens in the query path, so don't worry about scheduler
     const legacyResult = tx.read(legacyAddress);
     if (!legacyResult.error) {
       entry = legacyResult.ok;
@@ -1799,12 +1836,14 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     return rv;
   }
 
-  // Traverse the specified doc with the selector.
-  // The selector should have been re-rooted if needed to be relative to the
-  // specified doc. This generally means that its path starts with value.
-  // The selector must have a valid (defined) schema
-  // Once we've gotten the path of our doc to match the path of our selector,
-  // we can call traverseWithSchema instead.
+  /**
+   * Traverse the specified doc with the selector.
+   * The selector should have been re-rooted if needed to be relative to the
+   * specified doc. This generally means that its path starts with value.
+   * The selector must have a valid (defined) schema
+   * Once we've gotten the path of our doc to match the path of our selector,
+   * we can call traverseWithSchema instead.
+   */
   traverseWithSelector(
     doc: IMemorySpaceAttestation,
     selector: SchemaPathSelector,
@@ -1828,6 +1867,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         selector,
         "writeRedirect",
       );
+      this.readLog.addRead(nextDoc.address);
       if (nextDoc.value === undefined) {
         // While this is technically acceptable, log it
         logger.debug("traverse", () => [
@@ -2121,6 +2161,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
       throw new Error("Schema is neither boolean nor an object");
     }
     const schemaObj = resolved;
+    this.readLog.addRead(doc.address);
     if (doc.value === undefined) {
       // If we have a default, annotate it and return it
       // Otherwise, return undefined
@@ -2369,9 +2410,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     this.traverseArrayCalls++;
     const docArray = doc.value as Immutable<StorableDatum>[];
     const arrayObj = new Array<Immutable<StorableValue>>(docArray.length);
-    for (let index = 0; index < docArray.length; index++) {
-      if (!(index in docArray)) continue; // preserve sparse holes
-      const item = docArray[index];
+    docArray.forEach((item, index) => {
       const itemSchema = this.cfc.schemaAtPath(schema, [index.toString()]);
       let curDoc: IMemorySpaceAttestation = {
         address: {
@@ -2380,6 +2419,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         },
         value: item,
       };
+      this.readLog.addRead(curDoc.address);
       let curSelector: SchemaPathSelector = {
         path: curDoc.address.path,
         schema: itemSchema,
@@ -2416,12 +2456,14 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         );
         curDoc = redirDoc;
         curSelector = selector!;
+        this.readLog.addRead(curDoc.address);
         // redirDoc has only followed redirects.
         // If our redirDoc is a link, resolve one step, and use that value instead
         // because arrays dereference one more link.
         const [linkDoc, linkSelector] = this.nextLink(redirDoc, curSelector);
         curDoc = linkDoc;
         curSelector = linkSelector!;
+        this.readLog.addRead(curDoc.address);
         if (curDoc.value === undefined) {
           logger.info(
             "traverse",
@@ -2511,7 +2553,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
           arrayObj[index] = val;
         }
       }
-    }
+    });
     return arrayObj;
   }
 
@@ -2678,6 +2720,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
       selector,
       "writeRedirect",
     );
+    this.readLog.addRead(redirDoc.address);
     if (redirDoc.value === undefined) {
       // This may be ok, but log it anyhow
       logger.info(
@@ -3116,4 +3159,71 @@ function getNextCellLink(
     doc.value,
   ]);
   return getNormalizedLink(doc.address, schema);
+}
+
+type PathNode = Map<string, PathNode>;
+type Path = readonly string[];
+// Accumulate reads at every level. Our normal read reactivity log assumes
+// writes above, at, or below our read invalidates our read. However, writes
+// below a one-level read shouldn't invalidate our read. To make this work,
+// we collect all our reads at the level we perform them, and then collect
+// the leaf nodes. These can be incorporated into the existing reactivity
+// system.
+// If we miss mentioning a child read, we will end up running more often than
+// we need to, but that's better than the alternative of not running when we
+// need to.
+export class ReadLog {
+  private docTree = new Map<string, PathNode>();
+  private docAddresses = new Map<string, Omit<IMemorySpaceAddress, "path">>();
+
+  public addRead(address: IMemorySpaceAddress) {
+    const key = `${address.space}/${address.id}/${address.type}`;
+    let docRoot: PathNode | undefined = this.docTree.get(key);
+    if (docRoot === undefined) {
+      docRoot = new Map<string, PathNode>();
+      this.docTree.set(key, docRoot);
+      const { path: _, ...rest } = address;
+      this.docAddresses.set(key, rest);
+    }
+    this.getPathNode(docRoot, address.path);
+  }
+
+  public getLeafNodes(): IMemorySpaceAddress[] {
+    const rv: IMemorySpaceAddress[] = [];
+    for (const [key, root] of this.docTree) {
+      const docAddress = this.docAddresses.get(key)!;
+      const leafPaths: Path[] = [];
+      this.walkTree(leafPaths, [], root);
+      for (const path of leafPaths) {
+        rv.push({ ...docAddress, path: path });
+      }
+    }
+    return rv;
+  }
+
+  private getPathNode(cur: PathNode, remaining: Path) {
+    for (const part of remaining) {
+      let next = cur.get(part);
+      if (next === undefined) {
+        next = new Map<string, PathNode>();
+        cur.set(part, next);
+      }
+      cur = next;
+    }
+  }
+
+  // Walk the tree, pushing all the leaf paths into acc
+  private walkTree(
+    acc: Path[],
+    path: Path,
+    cur: PathNode,
+  ) {
+    if (cur.size === 0) {
+      acc.push(path);
+    } else {
+      for (const [part, child] of cur.entries()) {
+        this.walkTree(acc, [...path, part], child);
+      }
+    }
+  }
 }

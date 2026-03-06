@@ -117,12 +117,20 @@ const ignoreReadForSchedulingMarker: unique symbol = Symbol(
   "ignoreReadForSchedulingMarker",
 );
 
+export const onlyReadForSchedulingMarker: unique symbol = Symbol(
+  "onlyReadForSchedulingMarker",
+);
+
 const markReadAsPotentialWriteMarker: unique symbol = Symbol(
   "markReadAsPotentialWriteMarker",
 );
 
 export const ignoreReadForScheduling: Metadata = {
   [ignoreReadForSchedulingMarker]: true,
+};
+
+export const onlyReadForScheduling: Metadata = {
+  [onlyReadForSchedulingMarker]: true,
 };
 
 export const markReadAsPotentialWrite: Metadata = {
