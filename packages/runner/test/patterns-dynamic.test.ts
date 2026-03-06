@@ -932,6 +932,52 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     expect(result.key("flat").get()).toEqual([1, 10, 3, 30]);
   });
 
+  it("should clean up pattern runs when flatMap list becomes undefined", async () => {
+    let runCount = 0;
+    const duplicate = lift((x: number) => {
+      runCount++;
+      return [x, x * 10];
+    });
+
+    const flatMapPattern = pattern<{ values: number[] }>(({ values }) => {
+      return { values, flat: values.flatMap((x) => duplicate(x)) };
+    });
+
+    const resultCell = runtime.getCell<{ values: number[]; flat: number[] }>(
+      space,
+      "flatmap-undef-cleanup",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, flatMapPattern, {
+      values: [1, 2, 3],
+    }, resultCell);
+    tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+    expect(result.key("flat").get()).toEqual([1, 10, 2, 20, 3, 30]);
+    expect(runCount).toBe(3);
+
+    // Set list to undefined — should clean up and produce empty output
+    result.withTx(tx).key("values").set(undefined as any);
+    tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+    expect(result.key("flat").get()).toEqual([]);
+
+    // Restore list — patterns must re-run (old runs were stopped)
+    const runsBeforeRestore = runCount;
+    result.withTx(tx).key("values").set([4, 5]);
+    tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+    expect(result.key("flat").get()).toEqual([4, 40, 5, 50]);
+    expect(runCount - runsBeforeRestore).toBe(2);
+  });
+
   // ── WithPattern variant tests ───────────────────────────────────────
 
   it("should filter with a pre-defined pattern (filterWithPattern)", async () => {
