@@ -10,12 +10,39 @@
  *
  * Handles sparse arrays correctly (only visits populated indices).
  */
+
 /**
  * WeakMap cache of confirmed deep-frozen objects. Only `true` results are
  * cached -- `false` is never stored, because a currently-unfrozen object
  * may be frozen later and must not be permanently marked as non-frozen.
  */
 const deepFrozenCache = new WeakMap<object, true>();
+
+/**
+ * Adds a value which has been determined to be deep-frozen to the cache.
+ */
+function addToDeepFrozenCache(obj: object) {
+  deepFrozenCache.set(obj, true);
+}
+
+/**
+ * Indicates whether or not the given object is already in the
+ * `deepFrozenCache`.
+ */
+function isInDeepFrozenCache(obj: object): boolean {
+  return deepFrozenCache.has(obj);
+}
+
+/**
+ * Indicates whether or not a value is "necessarily frozen." As of this writing,
+ * this is the same as asking if it's a primitive value, but with an emphasis on
+ * the point. However, at some point we'll end up with special knowledge about
+ * objects which are also "necessarily frozen" by construction, and this is the
+ * place where we'll get to expand the logic accordingly.
+ */
+function isNecessarilyFrozenValue(value: unknown): boolean {
+  return (value === null) || (typeof value !== "object");
+}
 
 /**
  * Returns `true` if the value is deeply frozen: either a primitive, or a
@@ -25,18 +52,17 @@ const deepFrozenCache = new WeakMap<object, true>();
  * Handles circular references and sparse arrays.
  */
 export function isDeepFrozen(value: unknown): boolean {
-  if (value === null || typeof value !== "object") return true;
-
-  return isDeepFrozenObject(value as object, new Set<object>());
+  return isNecessarilyFrozenValue(value)
+    || isDeepFrozenObject(value as object, new Set<object>());
 }
 
 /**
  * Internal recursive deep-frozen check with cycle detection.
  */
 function isDeepFrozenObject(obj: object, inProgress: Set<object>): boolean {
-  if (deepFrozenCache.has(obj)) return true;
-
-  if (!Object.isFrozen(obj)) {
+  if (isInDeepFrozenCache(obj)) {
+    return true;
+  } else if (!Object.isFrozen(obj)) {
     return false;
   }
 
@@ -72,17 +98,16 @@ function isDeepFrozenObject(obj: object, inProgress: Set<object>): boolean {
 
   inProgress.delete(obj);
   if (result) {
-    deepFrozenCache.set(obj, true);
+    addToDeepFrozenCache(obj);
   }
   return result;
 }
 
 export function deepFreeze<T>(value: T): T {
-  if (value === null || typeof value !== "object") {
+  if (isNecessarilyFrozenValue(value)
+      || isInDeepFrozenCache(value as object)) {
     return value;
   }
-
-  if (deepFrozenCache.has(value as object)) return value;
 
   const alreadyFrozen = Object.isFrozen(value);
 
@@ -98,6 +123,6 @@ export function deepFreeze<T>(value: T): T {
   }
 
   if (!alreadyFrozen) Object.freeze(value);
-  deepFrozenCache.set(value as object, true);
+  addToDeepFrozenCache(value as object);
   return value;
 }
