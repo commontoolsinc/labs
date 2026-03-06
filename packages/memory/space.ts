@@ -175,6 +175,7 @@ const PRAGMAS = `
 // Must be set before database has any content (new DBs only)
 const NEW_DB_PRAGMAS = `
   PRAGMA page_size=32768;
+  PRAGMA auto_vacuum=2;
 `;
 
 const IMPORT_DATUM =
