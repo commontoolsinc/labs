@@ -98,7 +98,7 @@ const enum TypeValidity {
 const _stableHashCache = new WeakMap<object, string>();
 
 export function stableHash(value: unknown): string {
-  if (value === null || value === undefined || typeof value !== "object") {
+  if (value === null || typeof value !== "object") {
     if (typeof value === "number" && !Number.isFinite(value)) {
       return `h:num:${value}`;
     }
