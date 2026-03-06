@@ -87,12 +87,17 @@ export class PatternContextValidationTransformer extends Transformer {
         // Check for lift/handler inside pattern
         this.validateBuilderPlacement(node, context, checker);
 
-        // Check for .map() on fallback expressions (x ?? [] or x || [])
+        // Check for .map()/.filter()/.flatMap() on fallback expressions (x ?? [] or x || [])
         // Only in restricted context (pattern body) where this pattern causes runtime failures.
-        // Note: We use isInsideRestrictedContext, not isInRestrictedReactiveContext, because
-        // the map-on-fallback pattern fails even inside JSX expressions (which are "safe" for
-        // other validations but still need this check).
-        if (isInsideRestrictedContext(node, checker)) {
+        // Note: We use isInsideRestrictedContext (not isInRestrictedReactiveContext) because
+        // the fallback pattern fails even inside JSX expressions (which are "safe" for other
+        // validations but still need this check). However, we DO skip inside callback-based
+        // safe wrappers (computed, derive, action, etc.) where OpaqueRef is auto-unwrapped
+        // and the fallback produces a plain array — no type mismatch occurs.
+        if (
+          isInsideRestrictedContext(node, checker) &&
+          !isInsideSafeCallbackWrapper(node, checker)
+        ) {
           this.validateMapOnFallbackExpression(node, context, checker);
         }
 

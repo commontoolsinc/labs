@@ -54,10 +54,7 @@ export default pattern((state) => {
             } as const satisfies __ctHelpers.JSONSchema), {}).mapWithPattern(__ctHelpers.pattern(({ element: member, params: {} }) => (<li>{member}</li>), {
                 type: "object",
                 properties: {
-                    element: {
-                        type: "string",
-                        asOpaque: true
-                    },
+                    element: true,
                     params: {
                         type: "object",
                         properties: {}
