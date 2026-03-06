@@ -5,7 +5,7 @@ import { getPatternEnvironment } from "../builder/env.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { JSONSchema, Schema } from "../builder/types.ts";
 import {
-  computeInputHash,
+  computeInputHashFromValue,
   internalSchema,
   tryClaimMutex,
   tryWriteResult,
@@ -150,9 +150,8 @@ export function fetchData(
     // should be fine.
     sendResult(tx, { pending, result, error });
 
-    const { url } = inputsCell.getAsQueryResult([], tx);
-    const inputHash = computeInputHash(tx, inputsCell);
-
+    const inputsSnapshot = inputsCell.asSchema(fetchDataInputSchema).get();
+    const url = inputsSnapshot?.url;
     if (!url) {
       // Only update if values actually need to change to reduce transaction conflicts
       const currentPending = pending.withTx(tx).get();
@@ -174,6 +173,7 @@ export function fetchData(
       return;
     }
 
+    const inputHash = computeInputHashFromValue(inputsSnapshot);
     // Check if we're already working on or have the result for these inputs
     const currentInternal = internal.withTx(tx).get();
     const currentPending = pending.withTx(tx).get();
@@ -210,7 +210,6 @@ export function fetchData(
     // Start a new fetch if we don't have a result/error and aren't already fetching
     if (!hasValidResult && !hasError && !alreadyFetching) {
       const newRequestId = crypto.randomUUID();
-
       // Try to claim mutex - returns immediately if another tab is processing
       tryClaimMutex(
         runtime,
