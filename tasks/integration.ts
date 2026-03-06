@@ -158,6 +158,8 @@ async function findPatternTests(
     const perChunk = testFiles.length / totalChunks;
     const first = Math.floor((chunk - 1) * perChunk);
     const afterLast = Math.floor(chunk * perChunk);
+    console.log(`Testing pattern chunk ${chunk} of ${totalChunks}.`);
+    console.log(`${testFiles.length} tests in total across all chunks.`);
     return testFiles.slice(first, afterLast);
   } else {
     return testFiles;

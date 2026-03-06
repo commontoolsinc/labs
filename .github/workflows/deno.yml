@@ -178,9 +178,12 @@ jobs:
           deno task integration
 
   pattern-unit-test:
-    name: "Pattern Unit Tests"
+    name: "Pattern Unit Tests (${{ matrix.chunk }}/3)"
     runs-on: ubuntu-latest
     needs: ["build"]
+    strategy:
+      matrix:
+        chunk: [1, 2, 3]
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
@@ -194,7 +197,7 @@ jobs:
       - name: 🧪 Run pattern unit tests
         run: |
           chmod +x ./common-binaries/ct
-          CT_BINARY=./common-binaries/ct deno task integration pattern-tests
+          CT_BINARY=./common-binaries/ct deno task integration pattern-tests ${{ matrix.chunk }}/3
 
   generated-patterns-integration-test:
     name: "Generated Patterns Integration Tests"
