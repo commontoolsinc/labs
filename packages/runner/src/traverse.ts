@@ -1897,6 +1897,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     schema: JSONSchema,
     link?: NormalizedFullLink,
   ): TraverseResult<Immutable<StorableValue>> {
+    schema = deepFreeze(schema);
     this.traverseWithSchemaCalls++;
     this.currentDepth++;
     if (this.currentDepth > this.maxDepth) this.maxDepth = this.currentDepth;
