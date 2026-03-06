@@ -65,6 +65,11 @@ export interface Metadata extends Record<PropertyKey, unknown> {}
  */
 export interface IReadOptions {
   meta?: Metadata;
+  /**
+   * When true, the read is tracked as non-recursive for scheduler invalidation:
+   * parent/same-path writes invalidate, child writes invalidate only on key add.
+   */
+  nonRecursive?: boolean;
 }
 
 // This type is used to tag a document with any important metadata.
@@ -918,6 +923,7 @@ export type Activity = Variant<{
 
 export interface IReadActivity extends IMemorySpaceAddress {
   meta: Metadata;
+  nonRecursive?: boolean;
 }
 
 /**

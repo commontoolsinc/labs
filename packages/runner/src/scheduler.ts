@@ -108,6 +108,8 @@ type PopulateDependenciesEntry = PopulateDependencies | ReactivityLog;
  */
 export type ReactivityLog = {
   reads: IMemorySpaceAddress[];
+  /** Reads that should not invalidate on child writes unless they add a new key */
+  nonRecursiveReads?: IMemorySpaceAddress[];
   writes: IMemorySpaceAddress[];
   /** Reads marked as potential writes (e.g., for diffAndUpdate which reads then conditionally writes) */
   potentialWrites?: IMemorySpaceAddress[];
@@ -124,6 +126,9 @@ export const onlyReadForSchedulingMarker: unique symbol = Symbol(
 const markReadAsPotentialWriteMarker: unique symbol = Symbol(
   "markReadAsPotentialWriteMarker",
 );
+const nonRecursiveReadMarker: unique symbol = Symbol(
+  "nonRecursiveReadMarker",
+);
 
 export const ignoreReadForScheduling: Metadata = {
   [ignoreReadForSchedulingMarker]: true,
@@ -135,6 +140,10 @@ export const onlyReadForScheduling: Metadata = {
 
 export const markReadAsPotentialWrite: Metadata = {
   [markReadAsPotentialWriteMarker]: true,
+};
+
+export const nonRecursiveRead: Metadata = {
+  [nonRecursiveReadMarker]: true,
 };
 
 export type SpaceAndURI = `${MemorySpace}/${URI}`;
@@ -166,6 +175,10 @@ export class Scheduler {
   private dependencies = new WeakMap<Action, ReactivityLog>();
   private cancels = new WeakMap<Action, Cancel>();
   private triggers = new Map<SpaceAndURI, Map<Action, SortedAndCompactPaths>>();
+  private nonRecursiveTriggers = new Map<
+    SpaceAndURI,
+    Map<Action, SortedAndCompactPaths>
+  >();
   private actionChangeGroups = new WeakMap<Action, ChangeGroup>();
   private retries = new WeakMap<Action, number>();
 
@@ -645,9 +658,16 @@ export class Scheduler {
     // If a ReactivityLog was provided directly, set up dependencies immediately.
     // This ensures writes are tracked right away for reverse dependency graph.
     if (immediateLog) {
-      const reads = this.setDependencies(action, immediateLog);
+      const { reads, nonRecursiveReads } = this.setDependencies(
+        action,
+        immediateLog,
+      );
       this.updateDependents(action, immediateLog);
-      const { entities } = this.addTriggerPaths(action, reads);
+      const { entities } = this.addTriggerPaths(
+        action,
+        reads,
+        nonRecursiveReads,
+      );
 
       // Register the cancel function for the latest trigger set.
       this.setCancelForEntities(action, entities);
@@ -695,7 +715,7 @@ export class Scheduler {
 
     this.updateChangeGroup(action, options);
 
-    const reads = this.setDependencies(action, log);
+    const { reads, nonRecursiveReads } = this.setDependencies(action, log);
 
     // Update reverse dependency graph
     if (this.pullMode) this.updateDependents(action, log);
@@ -712,6 +732,7 @@ export class Scheduler {
     const { entities, pathsWithValuesByEntity } = this.addTriggerPaths(
       action,
       reads,
+      nonRecursiveReads,
     );
 
     logger.debug("schedule-resubscribe", () => [
@@ -1111,18 +1132,44 @@ export class Scheduler {
 
             const spaceAndURI = `${space}/${change.address.id}` as SpaceAndURI;
             const paths = this.triggers.get(spaceAndURI);
+            const nonRecursivePaths = this.nonRecursiveTriggers.get(
+              spaceAndURI,
+            );
 
-            if (paths) {
+            if (paths || nonRecursivePaths) {
               logger.debug("schedule-change-match", () => [
-                `Change #${changeIndex} found ${paths.size} registered actions for ${spaceAndURI}`,
+                `Change #${changeIndex} found ${
+                  (paths?.size ?? 0) + (nonRecursivePaths?.size ?? 0)
+                } registered actions for ${spaceAndURI}`,
               ]);
 
-              const triggeredActions = determineTriggeredActions(
-                paths,
-                change.before,
-                change.after,
-                change.address.path,
-              );
+              const triggeredActionSet = new Set<Action>();
+              if (paths) {
+                for (
+                  const action of determineTriggeredActions(
+                    paths,
+                    change.before,
+                    change.after,
+                    change.address.path,
+                  )
+                ) {
+                  triggeredActionSet.add(action);
+                }
+              }
+              if (nonRecursivePaths) {
+                for (
+                  const action of determineTriggeredActions(
+                    nonRecursivePaths,
+                    change.before,
+                    change.after,
+                    change.address.path,
+                    { nonRecursive: true },
+                  )
+                ) {
+                  triggeredActionSet.add(action);
+                }
+              }
+              const triggeredActions = [...triggeredActionSet];
 
               logger.debug("schedule-change-trigger", () => [
                 `Change #${changeIndex} triggered ${triggeredActions.length} actions`,
@@ -1207,10 +1254,14 @@ export class Scheduler {
   private setDependencies(
     action: Action,
     log: ReactivityLog,
-  ): IMemorySpaceAddress[] {
+  ): {
+    reads: IMemorySpaceAddress[];
+    nonRecursiveReads: IMemorySpaceAddress[];
+  } {
     const reads = sortAndCompactPaths(log.reads);
+    const nonRecursiveReads = sortAndCompactPaths(log.nonRecursiveReads ?? []);
     const writes = sortAndCompactPaths(log.writes);
-    this.dependencies.set(action, { reads, writes });
+    this.dependencies.set(action, { reads, nonRecursiveReads, writes });
 
     // Initialize/update mightWrite with declared writes
     // This ensures dependency chain can be built even before action runs
@@ -1262,18 +1313,22 @@ export class Scheduler {
       this.backfillDependentsForNewWrites(action, addedWrites);
     }
 
-    return reads;
+    return { reads, nonRecursiveReads };
   }
 
   private addTriggerPaths(
     action: Action,
     reads: IMemorySpaceAddress[],
+    nonRecursiveReads: IMemorySpaceAddress[],
   ): {
     entities: Set<SpaceAndURI>;
     pathsWithValuesByEntity: Map<SpaceAndURI, SortedAndCompactPaths>;
   } {
     this.clearActionTriggers(action);
     const pathsByEntity = addressesToPathByEntity(reads);
+    const nonRecursivePathsByEntity = addressesToPathByEntity(
+      nonRecursiveReads,
+    );
     const entities = new Set<SpaceAndURI>();
     const pathsWithValuesByEntity = new Map<
       SpaceAndURI,
@@ -1293,6 +1348,19 @@ export class Scheduler {
       );
       this.triggers.get(spaceAndURI)!.set(action, pathsWithValues);
       pathsWithValuesByEntity.set(spaceAndURI, pathsWithValues);
+    }
+    for (const [spaceAndURI, paths] of nonRecursivePathsByEntity) {
+      entities.add(spaceAndURI);
+      if (!this.nonRecursiveTriggers.has(spaceAndURI)) {
+        this.nonRecursiveTriggers.set(spaceAndURI, new Map());
+      }
+      const pathsWithValues = paths.map((path) =>
+        [
+          "value",
+          ...path,
+        ] as readonly MemoryAddressPathComponent[]
+      );
+      this.nonRecursiveTriggers.get(spaceAndURI)!.set(action, pathsWithValues);
     }
 
     return { entities, pathsWithValuesByEntity };
@@ -1318,6 +1386,7 @@ export class Scheduler {
       ]);
       for (const spaceAndURI of entities) {
         this.triggers.get(spaceAndURI)?.delete(action);
+        this.nonRecursiveTriggers.get(spaceAndURI)?.delete(action);
       }
     });
   }
@@ -1348,13 +1417,20 @@ export class Scheduler {
       log = populateDependencies;
     }
 
-    const reads = this.setDependencies(action, log);
+    const { reads, nonRecursiveReads } = this.setDependencies(action, log);
     if (options.updateDependents ?? true) {
       this.updateDependents(action, log);
     }
 
     const readsForTriggers = options.useRawReadsForTriggers ? log.reads : reads;
-    const { entities } = this.addTriggerPaths(action, readsForTriggers);
+    const nonRecursiveReadsForTriggers = options.useRawReadsForTriggers
+      ? (log.nonRecursiveReads ?? [])
+      : nonRecursiveReads;
+    const { entities } = this.addTriggerPaths(
+      action,
+      readsForTriggers,
+      nonRecursiveReadsForTriggers,
+    );
     this.setCancelForEntities(action, entities);
 
     return { log, entities };
@@ -1377,7 +1453,7 @@ export class Scheduler {
       this.reverseDependencies.delete(action);
     }
 
-    const reads = log.reads;
+    const reads = this.getAllReads(log);
     const newDependencies = new Set<Action>();
 
     // Group reads by entity for efficient lookup
@@ -1437,7 +1513,9 @@ export class Scheduler {
     this.runtime.telemetry.submit({
       type: "scheduler.dependencies.update",
       actionId,
-      reads: log.reads.map((r) => `${r.space}/${r.id}/${r.path.join("/")}`),
+      reads: this.getAllReads(log).map((r) =>
+        `${r.space}/${r.id}/${r.path.join("/")}`
+      ),
       writes: log.writes.map((w) => `${w.space}/${w.id}/${w.path.join("/")}`),
     });
   }
@@ -1469,8 +1547,8 @@ export class Scheduler {
     const scanAction = (action: Action) => {
       if (action === writer) return;
       const log = this.dependencies.get(action);
-      if (!log?.reads?.length) return;
-      if (!this.readsOverlapWrites(log.reads, writes)) return;
+      if (!log?.reads?.length && !log?.nonRecursiveReads?.length) return;
+      if (!this.readsOverlapWrites(this.getAllReads(log), writes)) return;
       this.registerDependentEdge(writer, action);
     };
 
@@ -1494,6 +1572,10 @@ export class Scheduler {
       }
     }
     return false;
+  }
+
+  private getAllReads(log: ReactivityLog): IMemorySpaceAddress[] {
+    return [...log.reads, ...(log.nonRecursiveReads ?? [])];
   }
 
   /**
@@ -3224,7 +3306,17 @@ export function txToReactivityLog(
         type: activity.read.type,
         path: activity.read.path.slice(1), // Remove the "value" prefix
       };
-      log.reads.push(address);
+      if (
+        activity.read.nonRecursive === true ||
+        activity.read.meta?.[nonRecursiveReadMarker]
+      ) {
+        if (!log.nonRecursiveReads) {
+          log.nonRecursiveReads = [];
+        }
+        log.nonRecursiveReads.push(address);
+      } else {
+        log.reads.push(address);
+      }
       // If marked as potential write, also add to potentialWrites
       if (activity.read.meta?.[markReadAsPotentialWriteMarker]) {
         if (!log.potentialWrites) {

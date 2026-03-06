@@ -115,6 +115,7 @@ export const read = (
         ...address,
         space,
         meta: options?.meta ?? {},
+        ...(options?.nonRecursive === true && { nonRecursive: true }),
       },
     });
 

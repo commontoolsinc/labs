@@ -2980,6 +2980,69 @@ describe("SchemaObjectTraverser unknown type handling", () => {
     ).toBe(true);
   });
 
+  it("treats inline asCell object properties as opaque when traverseCells=false", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const targetUri = "of:doc-ascell-inline-target" as URI;
+    const outerUri = "of:doc-ascell-inline-outer" as URI;
+
+    store.set(`${targetUri}/${type}`, {
+      the: type,
+      of: targetUri as Entity,
+      is: { value: { shouldNotLoad: true } },
+      cause: refer({ the: type, of: targetUri as Entity }),
+      since: 1,
+    });
+
+    const outerValue = {
+      inner: {
+        ref: { "/": { [LINK_V1_TAG]: { id: targetUri, path: [] } } },
+        local: 123,
+      },
+    };
+    store.set(`${outerUri}/${type}`, {
+      the: type,
+      of: outerUri as Entity,
+      is: { value: outerValue },
+      cause: refer({ the: type, of: outerUri as Entity }),
+      since: 2,
+    });
+
+    const schema = {
+      type: "object",
+      properties: {
+        inner: { type: "object", asCell: true },
+      },
+      required: ["inner"],
+      additionalProperties: false,
+    } as JSONSchema;
+
+    const manager = new StoreObjectManager(store);
+    const managedTx = new ManagedStorageTransaction(manager);
+    const tx = new ExtendedStorageTransaction(managedTx);
+    const traverser = new SchemaObjectTraverser(
+      tx,
+      { path: ["value"], schema },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      false,
+    );
+
+    const { ok: result, error } = traverser.traverse({
+      address: { space: "did:null:null", id: outerUri, type, path: ["value"] },
+      value: outerValue,
+    });
+
+    expect(error).toBeUndefined();
+    expect(result).toEqual({ inner: undefined });
+    expect(
+      [...manager.getReadDocs()].some((att) => att.address.id === targetUri),
+    )
+      .toBe(false);
+  });
+
   it("type union [unknown, string] treats object value as opaque", () => {
     const store = new Map<string, Revision<State>>();
     const type = "application/json" as const;
@@ -3045,101 +3108,5 @@ describe("SchemaObjectTraverser unknown type handling", () => {
 
     expect(error).toBeUndefined();
     expect(result).toBe("hello");
-  });
-
-  describe("ReadLog", () => {
-    const space = "did:test:space" as any;
-    const id = "of:doc-1" as any;
-    const type = "application/json" as any;
-
-    function addr(path: string[]): IMemorySpaceAddress {
-      return { space, id, type, path };
-    }
-
-    it("returns a single leaf for a single read", () => {
-      const log = new ReadLog();
-      log.addRead(addr(["a", "b"]));
-      expect(log.getLeafNodes()).toEqual([addr(["a", "b"])]);
-    });
-
-    it("deduplicates identical reads", () => {
-      const log = new ReadLog();
-      log.addRead(addr(["a", "b"]));
-      log.addRead(addr(["a", "b"]));
-      expect(log.getLeafNodes()).toEqual([addr(["a", "b"])]);
-    });
-
-    it("returns sibling paths as separate leaves", () => {
-      const log = new ReadLog();
-      log.addRead(addr(["a", "b"]));
-      log.addRead(addr(["a", "c"]));
-      const leaves = log.getLeafNodes();
-      expect(leaves).toHaveLength(2);
-      expect(leaves).toContainEqual(addr(["a", "b"]));
-      expect(leaves).toContainEqual(addr(["a", "c"]));
-    });
-
-    it("returns only the deepest paths (children subsume parents)", () => {
-      const log = new ReadLog();
-      log.addRead(addr(["a"]));
-      log.addRead(addr(["a", "b"]));
-      expect(log.getLeafNodes()).toEqual([addr(["a", "b"])]);
-    });
-
-    it("child added before parent: parent is not a leaf", () => {
-      const log = new ReadLog();
-      log.addRead(addr(["a", "b"]));
-      log.addRead(addr(["a"]));
-      expect(log.getLeafNodes()).toEqual([addr(["a", "b"])]);
-    });
-
-    it("handles empty path (whole-document read)", () => {
-      const log = new ReadLog();
-      log.addRead(addr([]));
-      expect(log.getLeafNodes()).toEqual([addr([])]);
-    });
-
-    it("empty path subsumes all deeper reads", () => {
-      const log = new ReadLog();
-      log.addRead(addr([]));
-      log.addRead(addr(["a", "b"]));
-      // Empty path gets a child "a", so it's no longer a leaf
-      expect(log.getLeafNodes()).toEqual([addr(["a", "b"])]);
-    });
-
-    it("handles deeply nested paths", () => {
-      const log = new ReadLog();
-      log.addRead(addr(["a", "b", "c"]));
-      log.addRead(addr(["a", "b", "d"]));
-      const leaves = log.getLeafNodes();
-      expect(leaves).toHaveLength(2);
-      expect(leaves).toContainEqual(addr(["a", "b", "c"]));
-      expect(leaves).toContainEqual(addr(["a", "b", "d"]));
-    });
-
-    it("tracks reads across multiple documents separately", () => {
-      const log = new ReadLog();
-      const id2 = "of:doc-2" as any;
-      log.addRead(addr(["a"]));
-      log.addRead({ space, id: id2, type, path: ["a"] });
-      const leaves = log.getLeafNodes();
-      expect(leaves).toHaveLength(2);
-      expect(leaves).toContainEqual(addr(["a"]));
-      expect(leaves).toContainEqual({ space, id: id2, type, path: ["a"] });
-    });
-
-    it("correctly builds path tree when intermediate node already exists", () => {
-      // This is the regression test for the getPathNode bug where cur was only
-      // advanced inside the `if (next === undefined)` block, causing subsequent
-      // path parts to be inserted at the wrong level.
-      const log = new ReadLog();
-      log.addRead(addr(["a"])); // creates a -> {}
-      log.addRead(addr(["a", "b"])); // must create b under a, not at root
-      log.addRead(addr(["a", "c"])); // must create c under a, not at root
-      const leaves = log.getLeafNodes();
-      expect(leaves).toHaveLength(2);
-      expect(leaves).toContainEqual(addr(["a", "b"]));
-      expect(leaves).toContainEqual(addr(["a", "c"]));
-    });
   });
 });

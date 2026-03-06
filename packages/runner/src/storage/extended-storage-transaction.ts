@@ -67,11 +67,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     return this.tx.reader(space);
   }
 
+  private transformReadOptions(options?: IReadOptions): IReadOptions {
+    return options ?? {};
+  }
+
   read(
     address: IMemorySpaceAddress,
     options?: IReadOptions,
   ): Result<IAttestation, ReadError> {
-    const result = this.tx.read(address, options);
+    const result = this.tx.read(address, this.transformReadOptions(options));
     logResult("read", result, address, options);
     return result;
   }
@@ -80,7 +84,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     address: IMemorySpaceAddress,
     options?: IReadOptions,
   ): StorableValue {
-    const readResult = this.tx.read(address, options);
+    const readResult = this.tx.read(
+      address,
+      this.transformReadOptions(options),
+    );
     logResult("readOrThrow, initial", readResult, address, options);
     if (
       readResult.error &&

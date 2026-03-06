@@ -616,6 +616,29 @@ describe("scheduler", () => {
 
     await readTx.commit();
   });
+
+  it("should track non-recursive reads separately in reactivity logs", async () => {
+    const testCell = runtime.getCell<{ value: { nested: number } }>(
+      space,
+      "non-recursive-log-cell",
+      undefined,
+      tx,
+    );
+    testCell.set({ value: { nested: 1 } });
+    tx.commit();
+    tx = runtime.edit();
+
+    const readTx = runtime.edit();
+    testCell.withTx(readTx).key("value").getRaw({ nonRecursive: true });
+
+    const log = txToReactivityLog(readTx);
+    expect(log.nonRecursiveReads).toBeDefined();
+    expect(log.nonRecursiveReads!.length).toBeGreaterThanOrEqual(1);
+    expect(log.nonRecursiveReads!.some((addr) => addr.path[0] === "value"))
+      .toBe(true);
+
+    await readTx.commit();
+  });
 });
 
 describe("event handling", () => {

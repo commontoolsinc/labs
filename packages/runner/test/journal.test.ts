@@ -904,6 +904,75 @@ describe("Journal", () => {
     });
   });
 
+  describe("nonRecursive reads", () => {
+    it("records nonRecursive: true in activity when option is set", () => {
+      const { ok: reader } = journal.reader(space);
+      const address = {
+        id: "test:nonrecursive",
+        type: "application/json",
+        path: ["value", "a"],
+      } as const;
+
+      reader!.read(address, { nonRecursive: true });
+
+      const activity = [...journal.activity()];
+      expect(activity).toHaveLength(1);
+      expect(activity[0].read).toEqual({
+        ...address,
+        space,
+        meta: {},
+        nonRecursive: true,
+      });
+    });
+
+    it("omits nonRecursive from activity for a regular read", () => {
+      const { ok: reader } = journal.reader(space);
+      const address = {
+        id: "test:recursive",
+        type: "application/json",
+        path: ["value", "a"],
+      } as const;
+
+      reader!.read(address);
+
+      const activity = [...journal.activity()];
+      expect(activity).toHaveLength(1);
+      expect(activity[0].read).not.toHaveProperty("nonRecursive");
+    });
+
+    it("omits nonRecursive from activity when option is false", () => {
+      const { ok: reader } = journal.reader(space);
+      const address = {
+        id: "test:nonrecursive-false",
+        type: "application/json",
+        path: ["value", "a"],
+      } as const;
+
+      reader!.read(address, { nonRecursive: false });
+
+      const activity = [...journal.activity()];
+      expect(activity).toHaveLength(1);
+      expect(activity[0].read).not.toHaveProperty("nonRecursive");
+    });
+
+    it("distinguishes nonRecursive reads from regular reads in activity", () => {
+      const { ok: reader } = journal.reader(space);
+      const address = {
+        id: "test:mixed",
+        type: "application/json",
+        path: ["value", "a"],
+      } as const;
+
+      reader!.read(address, { nonRecursive: true });
+      reader!.read(address);
+
+      const activity = [...journal.activity()];
+      expect(activity).toHaveLength(2);
+      expect(activity[0].read).toHaveProperty("nonRecursive", true);
+      expect(activity[1].read).not.toHaveProperty("nonRecursive");
+    });
+  });
+
   describe("Edge Cases", () => {
     it("should handle empty paths correctly", () => {
       const { ok: writer } = journal.writer(space);

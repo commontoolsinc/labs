@@ -1,7 +1,8 @@
 import { isRecord } from "@commontools/utils/types";
 import { deepEqual } from "@commontools/utils/deep-equal";
-import { arrayEqual } from "./path-utils.ts";
 import type { StorableValue } from "@commontools/memory/interface";
+import { isArrayIndexPropertyName } from "@commontools/memory/storable-value";
+import { arrayEqual } from "./path-utils.ts";
 import type { Action, SpaceAndURI } from "./scheduler.ts";
 import type {
   IMemorySpaceAddress,
@@ -11,6 +12,13 @@ import type {
 export type SortedAndCompactPaths = Array<
   readonly MemoryAddressPathComponent[]
 >;
+export interface DetermineTriggeredActionsOptions {
+  /**
+   * Non-recursive reads are invalidated by parent/same-path writes only.
+   * Child-path writes invalidate only if they add a new direct child key.
+   */
+  nonRecursive?: boolean;
+}
 
 type Keyable = Record<MemoryAddressPathComponent, StorableValue>;
 
@@ -95,6 +103,7 @@ export function determineTriggeredActions(
   before: StorableValue,
   after: StorableValue,
   startPath: readonly MemoryAddressPathComponent[] = [],
+  options?: DetermineTriggeredActionsOptions,
 ): Action[] {
   const triggeredActions: Action[] = [];
 
@@ -164,7 +173,12 @@ export function determineTriggeredActions(
     const beforeCanReach = beforeLastObject + 1 >= targetPath.length;
     const afterCanReach = afterLastObject + 1 >= targetPath.length;
 
-    // Determine if there was a change. We need to trigger if:
+    const isWriteOnReadOrParent = isPrefix(targetPath, startPath) ||
+      isPrefix(startPath, targetPath);
+    const isChildWrite = isPrefix(targetPath, startPath) &&
+      startPath.length > targetPath.length;
+
+    // Determine if there was a change. For recursive reads, trigger if:
     // 1. Both paths are reachable and the values differ
     // 2. Reachability changed (one can reach, the other can't)
     // 3. Neither can reach, but the depth of reachability changed
@@ -183,6 +197,27 @@ export function determineTriggeredActions(
       // Neither reachable - check if we can traverse to different depths
       // This detects when intermediate path segments appear/disappear
       hasChanged = beforeLastObject !== afterLastObject;
+    }
+
+    if (
+      options?.nonRecursive &&
+      startPath.length > 0 &&
+      isWriteOnReadOrParent
+    ) {
+      if (isChildWrite) {
+        // For non-recursive reads: child writes only invalidate when they add
+        // a new direct child key under the read path.
+        const childKey = startPath[targetPath.length];
+        hasChanged = childKey !== undefined &&
+          isChildKeyAdded(
+            beforeCanReach ? beforeValues[targetPath.length] : undefined,
+            afterCanReach ? afterValues[targetPath.length] : undefined,
+            childKey,
+          );
+      } else {
+        // Same-path and parent writes always invalidate non-recursive reads.
+        hasChanged = true;
+      }
     }
 
     if (hasChanged) {
@@ -229,6 +264,34 @@ function commonPrefixLength(
     }
   }
   return Math.min(a.length, b.length);
+}
+
+function isPrefix(
+  prefix: readonly MemoryAddressPathComponent[],
+  full: readonly MemoryAddressPathComponent[],
+): boolean {
+  if (prefix.length > full.length) return false;
+  return prefix.every((value, index) => value === full[index]);
+}
+
+function isChildKeyAdded(
+  before: StorableValue,
+  after: StorableValue,
+  key: MemoryAddressPathComponent,
+): boolean {
+  return !hasDirectChild(before, key) && hasDirectChild(after, key);
+}
+
+function hasDirectChild(
+  value: StorableValue,
+  key: MemoryAddressPathComponent,
+): boolean {
+  if (Array.isArray(value)) {
+    if (!isArrayIndexPropertyName(key)) return false;
+    const index = Number(key);
+    return Object.hasOwn(value, index);
+  }
+  return isRecord(value) && Object.hasOwn(value, key);
 }
 
 function comparePaths(

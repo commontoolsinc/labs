@@ -1733,6 +1733,27 @@ describe("determineTriggeredActions", () => {
       expect(result).not.toContain(action3); // Should not trigger because user.settings didn't change
     });
 
+    it("does not trigger sibling key reader when a new key is added to an object", () => {
+      const actionA = createAction("actionA");
+      const actionB = createAction("actionB");
+      const actionC = createAction("actionC");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [actionA, [["obj", "existing"]]], // Watches the unchanged sibling key
+        [actionB, [["obj", "newKey"]]], // Watches the newly added key
+        [actionC, [["obj"]]], // Watches the whole object
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        { obj: { existing: 42 } },
+        { obj: { existing: 42, newKey: "hello" } },
+      );
+
+      expect(result).not.toContain(actionA); // sibling key unchanged, must not trigger
+      expect(result).toContain(actionB); // newly added key, must trigger
+      expect(result).toContain(actionC); // whole object changed, must trigger
+    });
+
     it("handles type changes in nested structures", () => {
       const action1 = createAction("action1");
       const dependencies = new Map<Action, SortedAndCompactPaths>([
@@ -1858,6 +1879,109 @@ describe("determineTriggeredActions", () => {
       expect(result).not.toContain(userNameAction); // name didn't change
       expect(result).not.toContain(featuredPostsAction); // featured posts didn't change
       expect(result).not.toContain(settingsAction); // settings didn't change
+    });
+  });
+
+  describe("non-recursive reads", () => {
+    it("does not trigger on child value updates for non-recursive reads", () => {
+      const action = createAction("nonRecursiveChildUpdate");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action, [["value", "a"]]],
+      ]);
+      const before = { value: { a: { existing: 1 } } };
+      const after = { value: { a: { existing: 2 } } };
+
+      const result = determineTriggeredActions(
+        dependencies,
+        before as StorableDatum,
+        after as StorableDatum,
+        ["value", "a", "existing"],
+        { nonRecursive: true },
+      );
+      expect(result).toEqual([]);
+    });
+
+    it("triggers when a child write creates a new key for non-recursive reads", () => {
+      const action = createAction("nonRecursiveNewChildKey");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action, [["value", "a"]]],
+      ]);
+      const before = { value: { a: { existing: 1 } } };
+      const after = { value: { a: { existing: 1, added: 2 } } };
+
+      const result = determineTriggeredActions(
+        dependencies,
+        before as StorableDatum,
+        after as StorableDatum,
+        ["value", "a", "added"],
+        { nonRecursive: true },
+      );
+      expect(result).toEqual([action]);
+    });
+
+    it("triggers on same-path write for non-recursive reads", () => {
+      const action = createAction("nonRecursiveSamePathWrite");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action, [["value", "a"]]],
+      ]);
+      const before = { value: { a: { b: 1 } } };
+      const after = { value: { a: { b: 2 } } };
+
+      const result = determineTriggeredActions(
+        dependencies,
+        before as StorableDatum,
+        after as StorableDatum,
+        ["value", "a"],
+        { nonRecursive: true },
+      );
+      expect(result).toEqual([action]);
+    });
+
+    it("non-recursive and recursive reads of same path respond differently to a deep child write", () => {
+      // A recursive reader subscribes to ["value", "a"] and should be woken up
+      // when a deeply nested value changes. A non-recursive reader of the same
+      // path only cares about changes to the direct keys of the object at that
+      // path, so updating an existing nested value should leave it unaffected.
+      const recursiveAction = createAction("recursive");
+      const nonRecursiveAction = createAction("nonRecursive");
+
+      const before = { value: { a: { existing: 1 } } };
+      const after = { value: { a: { existing: 2 } } };
+
+      const recursiveResult = determineTriggeredActions(
+        new Map([[recursiveAction, [["value", "a"]]]]),
+        before as StorableDatum,
+        after as StorableDatum,
+        ["value", "a", "existing"],
+      );
+      expect(recursiveResult).toEqual([recursiveAction]);
+
+      const nonRecursiveResult = determineTriggeredActions(
+        new Map([[nonRecursiveAction, [["value", "a"]]]]),
+        before as StorableDatum,
+        after as StorableDatum,
+        ["value", "a", "existing"],
+        { nonRecursive: true },
+      );
+      expect(nonRecursiveResult).toEqual([]);
+    });
+
+    it("still triggers on parent writes for non-recursive reads", () => {
+      const action = createAction("nonRecursiveParentWrite");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action, [["value", "a"]]],
+      ]);
+      const before = { value: { a: { b: 1 }, x: 1 } };
+      const after = { value: { a: { b: 1 }, x: 2 } };
+
+      const result = determineTriggeredActions(
+        dependencies,
+        before as StorableDatum,
+        after as StorableDatum,
+        ["value"],
+        { nonRecursive: true },
+      );
+      expect(result).toEqual([action]);
     });
   });
 });
