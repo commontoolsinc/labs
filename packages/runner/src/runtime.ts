@@ -245,6 +245,9 @@ export class Runtime {
       options.errorHandlers,
     );
 
+    // Enable pull-based scheduling
+    this.scheduler.enablePullMode();
+
     // Register built-in modules with runtime injection
     registerBuiltins(this);
 
