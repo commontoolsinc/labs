@@ -358,10 +358,6 @@ function resolveSymbolKind(
     return { kind: "builder", symbol: resolved, builderName: name };
   }
 
-  if (ARRAY_METHOD_NAMES.has(name)) {
-    return { kind: "array-map", symbol: resolved };
-  }
-
   return undefined;
 }
 

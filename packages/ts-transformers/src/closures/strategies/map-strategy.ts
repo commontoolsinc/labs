@@ -109,6 +109,8 @@ function shouldTransformMap(
   // Inside safe wrappers (computed, derive, action, lift, handler),
   // OpaqueRef gets auto-unwrapped to plain values, so we should NOT transform
   // unless the target is a Cell or Stream (which aren't auto-unwrapped).
+  // This intentionally comes before chain detection — inside safe wrappers,
+  // chained methods like .filter().map() operate on plain unwrapped arrays.
   if (isInsideSafeCallbackWrapper(mapCall, context.checker)) {
     const targetType = getTypeAtLocationWithFallback(
       mapTarget,
@@ -157,9 +159,6 @@ function shouldTransformMap(
   return true;
 }
 
-/**
- * Create the final pattern call with params object.
- */
 /**
  * Create the final pattern call with params object.
  */
