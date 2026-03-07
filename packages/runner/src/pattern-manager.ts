@@ -389,7 +389,7 @@ export class PatternManager {
       patternMeta = metaCell.get();
     }
 
-    if (!patternMeta.src && !patternMeta.program) {
+    if (!patternMeta?.src && !patternMeta?.program) {
       throw new Error(`Pattern ${patternId} has no stored source`);
     }
 

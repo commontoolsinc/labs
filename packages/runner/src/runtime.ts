@@ -26,6 +26,10 @@ import {
   resetJsonEncodingConfig,
   setJsonEncodingConfig,
 } from "@commontools/memory/json-encoding-dispatch";
+import {
+  resetStorableValueConfig,
+  setStorableValueConfig,
+} from "@commontools/memory/storable-value-dispatch";
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
 import type {
   ChangeGroup,
@@ -205,6 +209,7 @@ export class Runtime {
     setExperimentalStorableConfig(this.experimental);
     setCanonicalHashConfig(this.experimental.canonicalHashing);
     setJsonEncodingConfig(this.experimental.unifiedJsonEncoding);
+    setStorableValueConfig(this.experimental.richStorableValues);
     this.id = options.storageManager.id;
     this.apiUrl = new URL(options.apiUrl);
     this.staticCache = isDeno()
@@ -329,6 +334,7 @@ export class Runtime {
     resetExperimentalStorableConfig();
     resetCanonicalHashConfig();
     resetJsonEncodingConfig();
+    resetStorableValueConfig();
 
     // Clear the current runtime reference
     // Removed setCurrentRuntime call - no longer using singleton pattern

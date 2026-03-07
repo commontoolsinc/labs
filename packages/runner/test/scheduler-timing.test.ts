@@ -240,6 +240,46 @@ describe("debounce and throttling", () => {
     expect(stats!.averageTime).toBeLessThan(50);
   });
 
+  it("should auto-debounce slow actions after threshold runs", async () => {
+    const cell = runtime.getCell<number>(
+      space,
+      "auto-debounce-slow",
+      undefined,
+      tx,
+    );
+    cell.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    // Action that takes >50ms per run
+    const action: Action = async (actionTx) => {
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      const val = cell.withTx(actionTx).get();
+      cell.withTx(actionTx).send(val + 1);
+    };
+
+    // Run 3+ times to exceed AUTO_DEBOUNCE_MIN_RUNS
+    for (let i = 0; i < 3; i++) {
+      runtime.scheduler.subscribe(
+        action,
+        {
+          reads: [cell.getAsNormalizedFullLink()],
+          writes: [cell.getAsNormalizedFullLink()],
+        },
+        { isEffect: true },
+      );
+      await cell.pull();
+      await runtime.idle();
+    }
+
+    // After 3 runs averaging >50ms, auto-debounce should kick in (100ms)
+    const stats = runtime.scheduler.getActionStats(action);
+    expect(stats).toBeDefined();
+    expect(stats!.runCount).toBeGreaterThanOrEqual(3);
+    expect(stats!.averageTime).toBeGreaterThanOrEqual(50);
+    expect(runtime.scheduler.getDebounce(action)).toBe(100);
+  });
+
   it("should not auto-debounce fast actions", async () => {
     const cell = runtime.getCell<number>(space, "fast-action", undefined, tx);
     cell.set(0);

@@ -1660,6 +1660,12 @@ export type WishParams = {
    * Default (undefined) = favorites only for backward compatibility.
    */
   scope?: (DID | "~" | ".")[];
+  /**
+   * When true, skip the suggestion/picker UI pattern (suggestion.tsx).
+   * Multiple candidates are returned as-is without disambiguation.
+   * Use this for programmatic discovery where no user interaction is needed.
+   */
+  headless?: boolean;
 };
 
 export type WishState<T> = {

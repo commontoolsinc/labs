@@ -2889,6 +2889,7 @@ interface CTModalElement extends CTHTMLElement {}
 interface CTModalProviderElement extends CTHTMLElement {}
 interface CTChevronButtonElement extends CTHTMLElement {}
 interface CTCardElement extends CTHTMLElement {}
+interface CTCalendarElement extends CTHTMLElement {}
 interface CTQuestionElement extends CTHTMLElement {}
 interface CTAlertElement extends CTHTMLElement {}
 interface CTVStackElement extends CTHTMLElement {}
@@ -3307,6 +3308,18 @@ interface CTAlertAttributes<T> extends CTHTMLAttributes<T> {
 
 interface CTCardAttributes<T> extends CTHTMLAttributes<T> {
   "clickable"?: boolean;
+}
+
+interface CTCalendarAttributes<T> extends CTHTMLAttributes<T> {
+  "value"?: CellLike<string> | string;
+  "$value"?: CellLike<string>;
+  "markedDates"?: CellLike<string[]> | string[];
+  "$markedDates"?: CellLike<string[]>;
+  "min"?: string;
+  "max"?: string;
+  "disabled"?: boolean;
+  "onct-change"?: EventHandler<{ value: string; oldValue: string }>;
+  "onct-month-change"?: EventHandler<{ year: number; month: number }>;
 }
 
 interface CTQuestionAttributes<T> extends CTHTMLAttributes<T> {
@@ -4680,6 +4693,10 @@ declare global {
       "ct-card": CTDOM.DetailedHTMLProps<
         CTCardAttributes<CTCardElement>,
         CTCardElement
+      >;
+      "ct-calendar": CTDOM.DetailedHTMLProps<
+        CTCalendarAttributes<CTCalendarElement>,
+        CTCalendarElement
       >;
       "ct-question": CTDOM.DetailedHTMLProps<
         CTQuestionAttributes<CTQuestionElement>,
