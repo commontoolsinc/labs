@@ -7,38 +7,6 @@ import { transformSource } from "../utils.ts";
 const staticCache = new StaticCacheFS();
 const commontools = await staticCache.getText("types/commontools.d.ts");
 
-const SOURCE = `/// <cts-enable />
-import { h, pattern, UI, ifElse, NAME } from "commontools";
-
-interface Charm {
-  id: string;
-  [key: string]: string | undefined;
-}
-
-interface State {
-  charms: Charm[];
-  defaultName: string;
-}
-
-export default pattern<State>((state) => {
-  return {
-    [UI]: (
-      <section>
-        <ul>
-          {state.charms.map((charm: any, index: number) => (
-            <li key={charm.id}>
-              <span class="number">{index + 1}</span>
-              <span class="name">{charm[NAME] || state.defaultName}</span>
-            </li>
-          ))}
-        </ul>
-        {ifElse(!state.charms.length, <p>No charms</p>, <p>Loaded charms</p>)}
-      </section>
-    ),
-  };
-});
-`;
-
 const WISH_DEFAULT_ARRAY_SOURCE = `/// <cts-enable />
 import { Default, handler, NAME, pattern, UI, wish, Writable } from "commontools";
 
