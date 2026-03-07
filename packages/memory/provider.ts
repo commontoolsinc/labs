@@ -230,6 +230,13 @@ export interface Provider<Protocol extends Proto> {
     ucan: UCAN<ConsumerInvocationFor<Ability, Protocol>>,
   ): Await<ConsumerResultFor<Ability, Protocol>>;
 
+  /**
+   * Dispose all sessions without closing the ReadableStream pipe.
+   * Clears pending timers and unsubscribes from memory, but leaves
+   * the consumer's pipe intact.
+   */
+  disposeSessions(): void;
+
   close(): CloseResult;
 }
 
@@ -269,6 +276,18 @@ class MemoryProvider<
     );
     this.sessions.add(session);
     return session;
+  }
+
+  /**
+   * Dispose all sessions without closing the ReadableStream pipe.
+   * This clears pending timers and unsubscribes from memory, but
+   * leaves the consumer's pipe intact so runtime.dispose() can
+   * complete its scheduler.idle() call.
+   */
+  disposeSessions() {
+    for (const session of this.sessions) {
+      (session as MemoryProviderSession<Space, MemoryProtocol>).dispose();
+    }
   }
 
   async close() {
@@ -326,8 +345,8 @@ class MemoryProviderSession<
   private spaceSessionCache = new Map<MemorySpace, SpaceSession<Space>>();
   // Accumulated doc keys per space for debounced schema matching
   private pendingSchemaChanges = new Map<MemorySpace, Set<string>>();
-  // Whether a schema flush is already scheduled via queueMicrotask
-  private schemaFlushScheduled = false;
+  // Timer for the debounced schema flush (setTimeout(0))
+  private schemaFlushTimer: ReturnType<typeof setTimeout> | null = null;
   // Duration of the previous schema flush (ms), for batch logging
   private lastFlushMs = 0;
 
@@ -437,7 +456,10 @@ class MemoryProviderSession<
     return { ok: {} };
   }
   dispose() {
-    this.schemaFlushScheduled = false;
+    if (this.schemaFlushTimer !== null) {
+      clearTimeout(this.schemaFlushTimer);
+      this.schemaFlushTimer = null;
+    }
     this.memory.unsubscribe(this);
     this.controller = undefined;
     this.sessions?.delete(this);
@@ -1077,23 +1099,20 @@ class MemoryProviderSession<
   }
 
   /**
-   * Schedule a schema flush via queueMicrotask.
-   *
-   * Batching happens naturally: commits arriving while a previous
-   * flushSchemaChanges() is running accumulate into pendingSchemaChanges.
-   * When the flush finishes, scheduleSchemaFlush fires again and picks
-   * up the entire batch. Cross-session notifications are synchronous and
-   * all fire within a single macrotask, so they're also batched.
+   * Schedule a schema flush via setTimeout(0).
+   * Yields to the macrotask queue so websocket I/O callbacks can
+   * fire and accumulate more changes before we flush.
+   * Only one timer is ever in flight — additional commits just
+   * accumulate in pendingSchemaChanges and get picked up when
+   * the timer fires.
    */
   private scheduleSchemaFlush(): void {
-    if (this.schemaFlushScheduled) return;
     if (this.pendingSchemaChanges.size === 0) return;
-    this.schemaFlushScheduled = true;
-    queueMicrotask(() => {
-      if (!this.schemaFlushScheduled) return;
-      this.schemaFlushScheduled = false;
+    if (this.schemaFlushTimer !== null) return;
+    this.schemaFlushTimer = setTimeout(() => {
+      this.schemaFlushTimer = null;
       this.flushSchemaChanges();
-    });
+    }, 0);
   }
 
   /**
@@ -1104,7 +1123,10 @@ class MemoryProviderSession<
     isConflict = false,
   ): Promise<void> {
     // Cancel any pending scheduled flush since we're flushing now
-    this.schemaFlushScheduled = false;
+    if (this.schemaFlushTimer !== null) {
+      clearTimeout(this.schemaFlushTimer);
+      this.schemaFlushTimer = null;
+    }
 
     // Guard against flush after session disposal
     if (!this.controller) return;
