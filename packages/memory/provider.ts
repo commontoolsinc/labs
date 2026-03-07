@@ -1096,14 +1096,16 @@ class MemoryProviderSession<
   private async debouncedFlush(): Promise<void> {
     if (!this.schemaFlushScheduled) return;
 
-    // Keep yielding as long as new changes arrive.
-    // This lets the stream pipe drain all buffered messages.
+    // Keep yielding as long as new changes arrive, up to a limit.
+    // This lets the stream pipe drain all buffered messages without
+    // starving the flush if commits arrive continuously.
     let gen: number;
+    let yields = 0;
     do {
       gen = this.schemaChangeGeneration;
       await Promise.resolve();
       if (!this.schemaFlushScheduled) return;
-    } while (this.schemaChangeGeneration !== gen);
+    } while (this.schemaChangeGeneration !== gen && ++yields < 50);
 
     this.schemaFlushScheduled = false;
     await this.flushSchemaChanges();
