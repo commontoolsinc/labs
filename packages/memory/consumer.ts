@@ -112,9 +112,9 @@ export const open = ({
   ttl?: Seconds;
 }) => {
   const consumer = create({ as, clock, ttl });
-  session.readable.pipeThrough(consumer).pipeTo(
+  consumer.closed = session.readable.pipeThrough(consumer).pipeTo(
     session.writable as WritableStream<Protocol>,
-  );
+  ).catch(() => {});
   return consumer;
 };
 
@@ -151,6 +151,7 @@ class MemoryConsumerSession<
   private batchStartTime: number | null = null;
   private lastFlushTime: number | null = null;
   private cancelled = false;
+  closed: Promise<void> = Promise.resolve();
 
   constructor(
     public as: Signer,
@@ -455,6 +456,8 @@ export interface MemoryConsumer<Space extends MemorySpace>
     > {
   as: Signer;
   cancel(): void;
+  close(): void;
+  closed: Promise<void>;
 }
 
 export interface MemorySpaceSession<Space extends MemorySpace = MemorySpace> {
