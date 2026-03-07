@@ -641,6 +641,63 @@ describe("scheduler", () => {
 
     await readTx.commit();
   });
+
+  it("should track read without load for scheduling and still trigger on writes", async () => {
+    const sourceCell = runtime.getCell<number>(
+      space,
+      "source-cell-for-track-without-load",
+      undefined,
+      tx,
+    );
+    sourceCell.set(1);
+
+    const resultCell = runtime.getCell<{ count: number; lastRead: unknown }>(
+      space,
+      "result-cell-for-track-without-load",
+      undefined,
+      tx,
+    );
+    resultCell.set({ count: 0, lastRead: null });
+    tx.commit();
+    tx = runtime.edit();
+
+    const sourceLink = sourceCell.getAsNormalizedFullLink();
+    const sourceAddress = {
+      space: sourceLink.space,
+      id: sourceLink.id,
+      type: sourceLink.type,
+      path: ["value", ...sourceLink.path],
+    };
+
+    let actionRunCount = 0;
+    const action: Action = (actionTx) => {
+      actionRunCount++;
+      const readResult = actionTx.read(sourceAddress, {
+        trackReadWithoutLoad: true,
+      });
+      // sourceCell has a value, but trackReadWithoutLoad should not fetch it.
+      expect(readResult.error).toBeUndefined();
+      expect(readResult.ok?.value).toBeUndefined();
+      resultCell.withTx(actionTx).set({
+        count: actionRunCount,
+        lastRead: readResult.ok?.value,
+      });
+    };
+
+    runtime.scheduler.subscribe(action, { reads: [], writes: [] }, {});
+    await resultCell.pull();
+    expect(actionRunCount).toBe(1);
+    expect(resultCell.get()).toEqual({ count: 1, lastRead: undefined });
+
+    // Write to the same address: tracked read should still invalidate.
+    sourceCell.withTx(tx).set(2);
+    tx.commit();
+    tx = runtime.edit();
+    await resultCell.pull();
+
+    expect(actionRunCount).toBe(2);
+    expect(resultCell.get()).toEqual({ count: 2, lastRead: undefined });
+  });
 });
 
 describe("event handling", () => {

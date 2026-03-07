@@ -973,6 +973,45 @@ describe("Journal", () => {
     });
   });
 
+  describe("trackReadWithoutLoad reads", () => {
+    it("records read activity but skips loading from storage", async () => {
+      const replica = storage.open(space).replica;
+      await replica.commit({
+        facts: [
+          assert({
+            the: "application/json",
+            of: "test:track-without-load",
+            is: { present: true },
+          }),
+        ],
+        claims: [],
+      });
+
+      const freshJournal = Journal.open(storage);
+      const { ok: reader } = freshJournal.reader(space);
+      const address = {
+        id: "test:track-without-load",
+        type: "application/json",
+        path: [],
+      } as const;
+
+      const result = reader!.read(address, { trackReadWithoutLoad: true });
+      expect(result.error).toBeUndefined();
+      // Value exists in replica, but should not be loaded when tracking only.
+      expect(result.ok?.value).toBeUndefined();
+
+      const activity = [...freshJournal.activity()];
+      expect(activity).toHaveLength(1);
+      expect(activity[0].read).toEqual({
+        ...address,
+        space,
+        meta: {},
+      });
+      // No load means no history invariant captured.
+      expect([...freshJournal.history(space)]).toHaveLength(0);
+    });
+  });
+
   describe("Edge Cases", () => {
     it("should handle empty paths correctly", () => {
       const { ok: writer } = journal.writer(space);
