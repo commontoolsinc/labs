@@ -119,20 +119,18 @@ export const open = ({
   // in-flight messages were still being delivered from consumer to provider,
   // causing hash format mismatches in Access.claim().
   //
-  // The catch handler is necessary because pipeTo() rejects when the
-  // TransformStream is terminated during teardown (consumer.close() calls
-  // cancel() then controller.terminate()). This rejection is an expected
-  // consequence of intentional shutdown -- the stream was told to stop, and
-  // it did. Without catching it, we'd get unhandled promise rejections on
-  // every Runtime.dispose(). We gate on `isCancelled` to distinguish this
-  // expected teardown rejection from genuine pipeline errors (e.g., a bug in
-  // the transform callback or an I/O failure on the writable side), which
-  // are logged so they're not silently lost.
+  // pipeTo() rejects when the TransformStream is terminated during teardown
+  // (consumer.close() calls cancel() then controller.terminate()). That
+  // rejection is an expected consequence of intentional shutdown -- the
+  // stream was told to stop, and it did. The catch below suppresses only
+  // that expected case (identified by isCancelled being true) and rethrows
+  // everything else so that unexpected pipeline errors propagate to the
+  // caller via `await consumer.closed`.
   consumer.closed = session.readable.pipeThrough(consumer).pipeTo(
     session.writable as WritableStream<Protocol>,
   ).catch((error) => {
     if (!consumer.isCancelled) {
-      logger.error("stream-error", () => ["pipeTo pipeline error:", error]);
+      throw error;
     }
   });
   return consumer;
