@@ -55,10 +55,7 @@ export function getCellKind(
 
 /**
  * Returns true when `expression` is a simple identifier or property-access
- * whose type is a branded cell type (OpaqueRef, Cell, Stream, …).
- *
- * A string-based type-name fallback is included so that the check continues
- * to work after OpaqueRef debranding.
+ * whose type is a branded cell type (Cell, Stream, Writable, …).
  */
 export function isSimpleOpaqueRefAccess(
   expression: ts.Expression,
@@ -68,16 +65,7 @@ export function isSimpleOpaqueRefAccess(
     ts.isIdentifier(expression) || ts.isPropertyAccessExpression(expression)
   ) {
     const type = checker.getTypeAtLocation(expression);
-    if (isCellBrandedType(type, checker)) {
-      return true;
-    }
-    // String-based fallback for after OpaqueRef debranding
-    const typeStr = checker.typeToString(type);
-    return typeStr.includes("OpaqueRef<") ||
-      typeStr.includes("OpaqueCell<") ||
-      typeStr.includes("Cell<") ||
-      typeStr.includes("Stream<") ||
-      typeStr.includes("Writable<");
+    return isCellBrandedType(type, checker);
   }
   return false;
 }

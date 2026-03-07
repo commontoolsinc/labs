@@ -343,7 +343,7 @@ export class PatternContextValidationTransformer extends Transformer {
               const receiverType = checker.getTypeAtLocation(
                 node.expression.expression,
               );
-              if (this.isCellLikeOrOpaqueRefType(receiverType, checker)) {
+              if (this.isCellLikeType(receiverType, checker)) {
                 context.reportDiagnostic({
                   severity: "error",
                   type: "standalone-function:reactive-operation",
@@ -392,24 +392,22 @@ export class PatternContextValidationTransformer extends Transformer {
   }
 
   /**
-   * Checks if a type is a CellLike or OpaqueRef type that would require
-   * reactive handling in .map() calls inside standalone functions.
+   * Checks if a type is a Cell-like type that would require reactive handling
+   * in .map() calls inside standalone functions.
    *
-   * Uses string-based type-name matching rather than brand-based detection
-   * so this works even after OpaqueRef debranding.
+   * Uses string-based type-name matching for Cell/Stream/Writable which retain
+   * their brands. OpaqueRef is not checked here — it is detected via context
+   * (isRootOpaqueParameter, isReactiveOriginCall).
    */
-  private isCellLikeOrOpaqueRefType(
+  private isCellLikeType(
     type: ts.Type,
     checker: ts.TypeChecker,
   ): boolean {
     const typeStr = checker.typeToString(type);
     const cellLikePatterns = [
       "Cell<",
-      "OpaqueCell<",
       "Writable<",
       "Stream<",
-      "OpaqueRef<",
-      "OpaqueRefMethods<",
     ];
 
     return cellLikePatterns.some((pattern) => typeStr.includes(pattern));

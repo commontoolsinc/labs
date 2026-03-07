@@ -58,17 +58,10 @@ export class OpaqueGetValidationTransformer extends Transformer {
       return;
     }
 
-    // Check if the receiver is an "opaque" cell kind (OpaqueRef/OpaqueCell)
-    // These types don't have .get() - values are accessed directly
+    // Check if the receiver is an "opaque" cell kind (OpaqueRef/OpaqueCell).
+    // These types don't have .get() — values are accessed directly.
     const cellKind = getCellKind(receiverType, checker);
-
-    // String-based fallback for after OpaqueRef debranding
-    const isOpaque = cellKind === "opaque" ||
-      (!cellKind && (() => {
-        const typeStr = checker.typeToString(receiverType);
-        return typeStr.includes("OpaqueRef<") ||
-          typeStr.includes("OpaqueCell<");
-      })());
+    const isOpaque = cellKind === "opaque";
 
     if (isOpaque) {
       // Get the receiver text for the error message

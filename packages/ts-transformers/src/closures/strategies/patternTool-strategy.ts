@@ -517,21 +517,17 @@ function isModuleScopedDeclaration(decl: ts.Declaration): boolean {
 }
 
 /**
- * Check if a type is a CellLike type (Cell, Writable, OpaqueCell, Stream).
+ * Check if a type is a Cell-like type (Cell, Writable, Stream).
  *
  * This function is used to decide which module-scoped variables to capture
  * in patternTool() extraParams. In practice, module-scoped reactive variables
  * come from cell(), Cell.of(), Writable.of(), etc. — never OpaqueRef (which
  * is a proxy wrapper for pattern parameters, always pattern-scoped).
- *
- * Uses string-based type-name matching rather than brand-based detection
- * so this works even after OpaqueRef debranding.
  */
 function isCellLikeType(type: ts.Type, checker: ts.TypeChecker): boolean {
   const typeStr = checker.typeToString(type);
   const cellLikePatterns = [
     "Cell<",
-    "OpaqueCell<",
     "Writable<",
     "Stream<",
   ];

@@ -27,8 +27,8 @@ export function classifyReactiveReceiverKind(
   }
 
   // String-based fallback: recognise Cell/Stream/Writable even if the brand
-  // is absent (e.g. after OpaqueRef debranding).  Only match top-level type
-  // names — not types nested inside arrays or other generics.
+  // is absent (e.g. after type erasure).  Only match top-level type names —
+  // not types nested inside arrays or other generics.
   const typeStr = checker.typeToString(type);
   const startsWithReactive = (prefix: string) =>
     typeStr === prefix.slice(0, -1) || typeStr.startsWith(prefix);
@@ -38,13 +38,6 @@ export function classifyReactiveReceiverKind(
     startsWithReactive("Writable<")
   ) {
     return "celllike_requires_rewrite";
-  }
-  if (
-    startsWithReactive("OpaqueRef<") ||
-    startsWithReactive("OpaqueCell<") ||
-    startsWithReactive("OpaqueRefMethods<")
-  ) {
-    return "reactive";
   }
 
   return "plain";
