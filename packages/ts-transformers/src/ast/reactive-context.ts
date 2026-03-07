@@ -297,7 +297,8 @@ export function isInsideRestrictedContext(
           if (callKind.kind === "array-map") {
             let isReactive = true;
             if (
-              ts.isPropertyAccessExpression(functionParent.expression)
+              ts.isPropertyAccessExpression(functionParent.expression) ||
+              ts.isPropertyAccessChain(functionParent.expression)
             ) {
               const receiverType = checker.getTypeAtLocation(
                 functionParent.expression.expression,
