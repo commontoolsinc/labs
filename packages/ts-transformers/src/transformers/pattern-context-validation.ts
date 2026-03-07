@@ -44,7 +44,6 @@ export class PatternContextValidationTransformer extends Transformer {
   transform(context: TransformationContext): ts.SourceFile {
     const checker = context.checker;
     const analyze = createDataFlowAnalyzer(checker);
-    const useLegacy = context.options.useLegacyOpaqueRefSemantics ?? false;
 
     const visit = (node: ts.Node): ts.Node => {
       // Skip JSX - OpaqueRefJSXTransformer handles those
@@ -71,7 +70,6 @@ export class PatternContextValidationTransformer extends Transformer {
       // (they are handled by OpaqueRefJSXTransformer), so this won't flag
       // optional chaining inside JSX like <div>{user?.name}</div>
       if (
-        useLegacy &&
         ts.isPropertyAccessExpression(node) &&
         node.questionDotToken
       ) {
@@ -98,9 +96,7 @@ export class PatternContextValidationTransformer extends Transformer {
         // the map-on-fallback pattern fails even inside JSX expressions (which are "safe" for
         // other validations but still need this check).
         if (isInsideRestrictedContext(node, checker, context)) {
-          if (useLegacy) {
-            this.validateMapOnFallbackExpression(node, context, checker);
-          }
+          this.validateMapOnFallbackExpression(node, context, checker, analyze);
         }
 
         // Check for .get() calls
@@ -121,7 +117,7 @@ export class PatternContextValidationTransformer extends Transformer {
 
       // Check for property access used in computation (not just pass-through)
       // This applies to expressions in binary operators, conditionals, etc.
-      if (useLegacy && this.isComputationExpression(node)) {
+      if (this.isComputationExpression(node)) {
         this.validateComputationExpression(node, context, checker, analyze);
       }
 
@@ -403,7 +399,8 @@ export class PatternContextValidationTransformer extends Transformer {
   private validateMapOnFallbackExpression(
     node: ts.CallExpression,
     context: TransformationContext,
-    checker: ts.TypeChecker,
+    _checker: ts.TypeChecker,
+    analyze: ReturnType<typeof createDataFlowAnalyzer>,
   ): void {
     if (!ts.isPropertyAccessExpression(node.expression)) return;
     if (node.expression.name.text !== "map") return;
@@ -426,12 +423,9 @@ export class PatternContextValidationTransformer extends Transformer {
       return;
     }
 
-    // Check if left side is OpaqueRef and right side is not
-    const leftType = checker.getTypeAtLocation(target.left);
-    const rightType = checker.getTypeAtLocation(target.right);
-
-    const leftIsOpaque = isOpaqueRefType(leftType, checker);
-    const rightIsOpaque = isOpaqueRefType(rightType, checker);
+    // Check if left side traces to a reactive pattern parameter and right side does not
+    const leftIsOpaque = analyze(target.left).containsOpaqueRef;
+    const rightIsOpaque = analyze(target.right).containsOpaqueRef;
 
     if (leftIsOpaque && !rightIsOpaque) {
       context.reportDiagnostic({
