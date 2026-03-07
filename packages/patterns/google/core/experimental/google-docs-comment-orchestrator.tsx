@@ -9,10 +9,11 @@ import {
   ifElse,
   NAME,
   pattern,
-  Secret,
   UI,
   Writable,
 } from "commontools";
+
+type Secret<T> = T;
 
 // Import trusted handlers from confirmation file (TRUST BOUNDARY)
 import {

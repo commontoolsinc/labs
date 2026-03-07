@@ -9,7 +9,6 @@
  *   ./tools/apple-sync.ts calendar
  */
 import {
-  Confidential,
   Default,
   derive,
   handler,
@@ -19,6 +18,8 @@ import {
   UI,
   Writable,
 } from "commontools";
+
+type Confidential<T> = T;
 
 /**
  * A calendar event

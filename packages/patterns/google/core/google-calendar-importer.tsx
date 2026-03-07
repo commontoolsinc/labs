@@ -1,7 +1,6 @@
 /// <cts-enable />
 import {
   computed,
-  Confidential,
   Default,
   derive,
   getPatternEnvironment,
@@ -10,11 +9,14 @@ import {
   NAME,
   pattern,
   patternTool,
-  Secret,
   str,
   UI,
   Writable,
 } from "commontools";
+
+type Secret<T> = T;
+type Confidential<T> = T;
+
 import {
   createGoogleAuth,
   type ScopeKey,

@@ -6,11 +6,12 @@ import {
   ifElse,
   NAME,
   pattern,
-  Secret,
   Stream,
   UI,
   Writable,
 } from "commontools";
+
+type Secret<T> = T;
 
 import { createRefreshFunction } from "../../auth/auth-refresh.ts";
 import {

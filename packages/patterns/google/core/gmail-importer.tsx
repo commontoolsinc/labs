@@ -1,7 +1,6 @@
 /// <cts-enable />
 import {
   computed,
-  Confidential,
   Default,
   derive,
   getPatternEnvironment,
@@ -11,13 +10,16 @@ import {
   pattern,
   patternTool,
   PatternToolResult as _PatternToolResult,
-  Secret,
   str,
   Stream,
   UI,
   VNode,
   Writable,
 } from "commontools";
+
+type Secret<T> = T;
+type Confidential<T> = T;
+
 import TurndownService from "turndown";
 import { GmailClient } from "./util/gmail-client.ts";
 import {
