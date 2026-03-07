@@ -28,6 +28,7 @@
  */
 import ts from "typescript";
 import { detectCallKind } from "./call-kind.ts";
+import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
 
 /**
  * Builder names that establish a "reactive context" where reading opaques is NOT allowed.
@@ -289,9 +290,26 @@ export function isInsideRestrictedContext(
           ) {
             return true;
           }
-          // array-map on opaques/cells is restricted
+          // array-map on opaques/cells is restricted, but only if the
+          // receiver is actually a reactive type (OpaqueRef/Cell). Plain array
+          // methods (Array.prototype.filter/map/flatMap) share the same
+          // "array-map" call kind but should not create a restricted context.
           if (callKind.kind === "array-map") {
-            return true;
+            let isReactive = true;
+            if (
+              ts.isPropertyAccessExpression(functionParent.expression)
+            ) {
+              const receiverType = checker.getTypeAtLocation(
+                functionParent.expression.expression,
+              );
+              if (
+                !(receiverType.flags & ts.TypeFlags.Any) &&
+                !isOpaqueRefType(receiverType, checker)
+              ) {
+                isReactive = false;
+              }
+            }
+            if (isReactive) return true;
           }
         }
       }
