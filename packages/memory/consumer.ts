@@ -112,6 +112,22 @@ export const open = ({
   ttl?: Seconds;
 }) => {
   const consumer = create({ as, clock, ttl });
+  // The pipeTo() promise is captured as `consumer.closed` so that callers
+  // (specifically StorageManagerEmulator.close()) can await full pipeline
+  // shutdown before resetting ambient state like the canonical hash config.
+  // Without this, Runtime.dispose() could reset the hash config while
+  // in-flight messages were still being delivered from consumer to provider,
+  // causing hash format mismatches in Access.claim().
+  //
+  // The catch handler is necessary because pipeTo() rejects when the
+  // TransformStream is terminated during teardown (consumer.close() calls
+  // cancel() then controller.terminate()). This rejection is an expected
+  // consequence of intentional shutdown -- the stream was told to stop, and
+  // it did. Without catching it, we'd get unhandled promise rejections on
+  // every Runtime.dispose(). We gate on `isCancelled` to distinguish this
+  // expected teardown rejection from genuine pipeline errors (e.g., a bug in
+  // the transform callback or an I/O failure on the writable side), which
+  // are logged so they're not silently lost.
   consumer.closed = session.readable.pipeThrough(consumer).pipeTo(
     session.writable as WritableStream<Protocol>,
   ).catch((error) => {
