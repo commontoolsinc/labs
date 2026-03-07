@@ -44,14 +44,12 @@
     "./rich-storable-value": "./rich-storable-value.ts",
     "./schema": "./schema.ts",
     "./storable-value": "./storable-value.ts",
+    "./storable-value-dispatch": "./storable-value-dispatch.ts",
     "./storable-protocol": "./storable-protocol.ts",
-    "./serialization-context": "./serialization-context.ts",
     "./type-tags": "./type-tags.ts",
-    "./json-serialization-context": "./json-serialization-context.ts",
     "./json-encoding": "./json-encoding.ts",
     "./json-encoding-dispatch": "./json-encoding-dispatch.ts",
-    "./serialization": "./serialization.ts",
-    "./type-handlers": "./type-handlers.ts",
+    "./json-type-handlers": "./json-type-handlers.ts",
     "./explicit-tag-storable": "./explicit-tag-storable.ts",
     "./unknown-storable": "./unknown-storable.ts",
     "./problematic-storable": "./problematic-storable.ts",
@@ -59,7 +57,8 @@
     "./frozen-builtins": "./frozen-builtins.ts",
     "./storable-native-instances": "./storable-native-instances.ts",
     "./special-primitive-value": "./special-primitive-value.ts",
-    "./storable-content-id": "./storable-content-id.ts"
+    "./storable-content-id": "./storable-content-id.ts",
+    "./canonical-hash": "./canonical-hash.ts"
   },
   "imports": {
     "@commontools/leb128": "jsr:@commontools/leb128",

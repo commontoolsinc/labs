@@ -21,7 +21,6 @@ import {
   MapSet,
   mergeAnyOfBranchSchemas,
   PointerCycleTracker,
-  ReadLog,
   SchemaObjectTraverser,
 } from "../src/traverse.ts";
 import { StoreObjectManager } from "../src/storage/query.ts";

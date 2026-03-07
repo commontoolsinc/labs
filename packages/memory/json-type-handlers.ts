@@ -5,10 +5,21 @@ import {
   type ReconstructionContext,
   type StorableInstance,
 } from "./storable-protocol.ts";
-import type { SerializationContext } from "./serialization-context.ts";
-import type { SerializedForm } from "./json-serialization-context.ts";
 import { ExplicitTagStorable } from "./explicit-tag-storable.ts";
 import { ProblematicStorable } from "./problematic-storable.ts";
+
+/**
+ * JSON-compatible wire format value. This is the intermediate tree
+ * representation used during serialization tree walking -- NOT the final
+ * serialized form (which is `string`). Internal to the JSON implementation.
+ */
+export type JsonWireValue =
+  | null
+  | boolean
+  | number
+  | string
+  | JsonWireValue[]
+  | { [key: string]: JsonWireValue };
 import {
   StorableEpochDays,
   StorableEpochNsec,
@@ -20,6 +31,21 @@ import {
   fromBase64url,
   toUnpaddedBase64url,
 } from "./bigint-encoding.ts";
+
+/**
+ * Narrow interface for what type handlers need from the encoding context
+ * during tree walking. Contains only the tag-wrapping and tag-lookup methods
+ * needed by handler serialize/deserialize implementations.
+ *
+ * This is NOT a public interface -- it exists to type the `codec` parameter
+ * passed to type handlers by the internal tree-walking engine.
+ */
+export interface TypeHandlerCodec {
+  /** Wrap a tag and state into the wire format's tagged representation. */
+  wrapTag(tag: string, state: JsonWireValue): JsonWireValue;
+  /** Get the wire format tag for a storable instance's type. */
+  getTagFor(value: StorableInstance): string;
+}
 
 /**
  * Interface for per-type serialize/deserialize handlers. Each handler knows
@@ -40,25 +66,24 @@ export interface TypeHandler {
 
   /**
    * Serialize the value. Only called after `canSerialize` returned `true`.
-   * The handler is responsible for encoding via `context.encode()` and for
+   * The handler is responsible for tag wrapping via `codec.wrapTag()` and for
    * recursively serializing nested values via the provided `recurse` callback.
    */
   serialize(
     value: StorableValue,
-    context: SerializationContext<SerializedForm>,
-    recurse: (v: StorableValue) => SerializedForm,
-  ): SerializedForm;
+    codec: TypeHandlerCodec,
+    recurse: (v: StorableValue) => JsonWireValue,
+  ): JsonWireValue;
 
   /**
    * Deserialize a value from its wire format state. The state has already been
-   * decoded (tag stripped) but inner values have NOT been recursively
+   * unwrapped (tag stripped) but inner values have NOT been recursively
    * deserialized -- the handler must call `recurse` on nested values.
    */
   deserialize(
-    state: SerializedForm,
-    context: SerializationContext<SerializedForm>,
+    state: JsonWireValue,
     runtime: ReconstructionContext,
-    recurse: (v: SerializedForm) => StorableValue,
+    recurse: (v: JsonWireValue) => StorableValue,
   ): StorableValue;
 }
 
@@ -114,7 +139,7 @@ export class TypeHandlerRegistry {
  */
 function makeProblematic(
   tag: string,
-  state: SerializedForm,
+  state: JsonWireValue,
   message: string,
 ): ProblematicStorable {
   return new ProblematicStorable(tag, state as StorableValue, message);
@@ -137,17 +162,16 @@ export const UndefinedHandler: TypeHandler = {
 
   serialize(
     _value: StorableValue,
-    context: SerializationContext<SerializedForm>,
-    _recurse: (v: StorableValue) => SerializedForm,
-  ): SerializedForm {
-    return context.encode(TAGS.Undefined, null);
+    codec: TypeHandlerCodec,
+    _recurse: (v: StorableValue) => JsonWireValue,
+  ): JsonWireValue {
+    return codec.wrapTag(TAGS.Undefined, null);
   },
 
   deserialize(
-    _state: SerializedForm,
-    _context: SerializationContext<SerializedForm>,
+    _state: JsonWireValue,
     _runtime: ReconstructionContext,
-    _recurse: (v: SerializedForm) => StorableValue,
+    _recurse: (v: JsonWireValue) => StorableValue,
   ): StorableValue {
     return undefined;
   },
@@ -171,19 +195,18 @@ export const BigIntHandler: TypeHandler = {
 
   serialize(
     value: StorableValue,
-    context: SerializationContext<SerializedForm>,
-    _recurse: (v: StorableValue) => SerializedForm,
-  ): SerializedForm {
+    codec: TypeHandlerCodec,
+    _recurse: (v: StorableValue) => JsonWireValue,
+  ): JsonWireValue {
     const bytes = bigintToMinimalTwosComplement(value as bigint);
     const b64 = toUnpaddedBase64url(bytes);
-    return context.encode(TAGS.BigInt, b64 as SerializedForm);
+    return codec.wrapTag(TAGS.BigInt, b64 as JsonWireValue);
   },
 
   deserialize(
-    state: SerializedForm,
-    _context: SerializationContext<SerializedForm>,
+    state: JsonWireValue,
     _runtime: ReconstructionContext,
-    _recurse: (v: SerializedForm) => StorableValue,
+    _recurse: (v: JsonWireValue) => StorableValue,
   ): StorableValue {
     if (typeof state !== "string") {
       return makeProblematic(
@@ -222,20 +245,19 @@ export const EpochNsecHandler: TypeHandler = {
 
   serialize(
     value: StorableValue,
-    context: SerializationContext<SerializedForm>,
-    _recurse: (v: StorableValue) => SerializedForm,
-  ): SerializedForm {
+    codec: TypeHandlerCodec,
+    _recurse: (v: StorableValue) => JsonWireValue,
+  ): JsonWireValue {
     const nsec = (value as StorableEpochNsec).value;
     const bytes = bigintToMinimalTwosComplement(nsec);
     const b64 = toUnpaddedBase64url(bytes);
-    return context.encode(TAGS.EpochNsec, b64 as SerializedForm);
+    return codec.wrapTag(TAGS.EpochNsec, b64 as JsonWireValue);
   },
 
   deserialize(
-    state: SerializedForm,
-    _context: SerializationContext<SerializedForm>,
+    state: JsonWireValue,
     _runtime: ReconstructionContext,
-    _recurse: (v: SerializedForm) => StorableValue,
+    _recurse: (v: JsonWireValue) => StorableValue,
   ): StorableValue {
     if (typeof state !== "string") {
       return makeProblematic(
@@ -275,20 +297,19 @@ export const EpochDaysHandler: TypeHandler = {
 
   serialize(
     value: StorableValue,
-    context: SerializationContext<SerializedForm>,
-    _recurse: (v: StorableValue) => SerializedForm,
-  ): SerializedForm {
+    codec: TypeHandlerCodec,
+    _recurse: (v: StorableValue) => JsonWireValue,
+  ): JsonWireValue {
     const days = (value as StorableEpochDays).value;
     const bytes = bigintToMinimalTwosComplement(days);
     const b64 = toUnpaddedBase64url(bytes);
-    return context.encode(TAGS.EpochDays, b64 as SerializedForm);
+    return codec.wrapTag(TAGS.EpochDays, b64 as JsonWireValue);
   },
 
   deserialize(
-    state: SerializedForm,
-    _context: SerializationContext<SerializedForm>,
+    state: JsonWireValue,
     _runtime: ReconstructionContext,
-    _recurse: (v: SerializedForm) => StorableValue,
+    _recurse: (v: JsonWireValue) => StorableValue,
   ): StorableValue {
     if (typeof state !== "string") {
       return makeProblematic(
@@ -314,10 +335,10 @@ export const EpochDaysHandler: TypeHandler = {
 /**
  * Handler for `StorableInstance` values (custom protocol types, including
  * `StorableError` and `ExplicitTagStorable` subtypes). Serializes via
- * `[DECONSTRUCT]` and the context's tag/encode methods. Deserialization
- * is not dispatched via this handler's tag (since each instance type has its
- * own tag like `TAGS.Error`); instead, the serializer falls back to the
- * class registry for those tags.
+ * `[DECONSTRUCT]` and the codec's tag methods. Deserialization is not
+ * dispatched via this handler's tag (since each instance type has its own
+ * tag like `TAGS.Error`); instead, the deserializer falls back to the class
+ * registry for those tags.
  */
 export const StorableInstanceHandler: TypeHandler = {
   // This tag is not used for deserialization dispatch -- StorableInstance
@@ -331,30 +352,29 @@ export const StorableInstanceHandler: TypeHandler = {
 
   serialize(
     value: StorableValue,
-    context: SerializationContext<SerializedForm>,
-    recurse: (v: StorableValue) => SerializedForm,
-  ): SerializedForm {
+    codec: TypeHandlerCodec,
+    recurse: (v: StorableValue) => JsonWireValue,
+  ): JsonWireValue {
     const inst = value as StorableInstance;
 
     // ExplicitTagStorable (UnknownStorable, ProblematicStorable): use
     // preserved typeTag and re-serialize their stored state.
     if (inst instanceof ExplicitTagStorable) {
       const serializedState = recurse(inst.state);
-      return context.encode(inst.typeTag, serializedState);
+      return codec.wrapTag(inst.typeTag, serializedState);
     }
 
-    // General StorableInstance: use DECONSTRUCT and context for tag.
+    // General StorableInstance: use DECONSTRUCT and codec for tag.
     const state = inst[DECONSTRUCT]();
-    const tag = context.getTagFor(inst);
+    const tag = codec.getTagFor(inst);
     const serializedState = recurse(state);
-    return context.encode(tag, serializedState);
+    return codec.wrapTag(tag, serializedState);
   },
 
   deserialize(
-    _state: SerializedForm,
-    _context: SerializationContext<SerializedForm>,
+    _state: JsonWireValue,
     _runtime: ReconstructionContext,
-    _recurse: (v: SerializedForm) => StorableValue,
+    _recurse: (v: JsonWireValue) => StorableValue,
   ): StorableValue {
     // Not reached via tag dispatch -- StorableInstance deserialization is
     // handled by the class registry fallback in deserialize().

@@ -6,12 +6,15 @@ import {
 } from "@commontools/utils/types";
 import {
   isArrayIndexPropertyName,
-  toDeepStorableValue,
   toStorableValue,
 } from "@commontools/memory/storable-value";
+import {
+  fromStorable,
+  toStorable,
+} from "@commontools/memory/storable-value-dispatch";
 import type { MemorySpace, StorableValue } from "@commontools/memory/interface";
 import { getTopFrame, pattern } from "./builder/pattern.ts";
-import { createNodeFactory } from "./builder/module.ts";
+import { createNodeFactory, lift } from "./builder/module.ts";
 import {
   type AnyCell,
   type AnyCellWrapping,
@@ -101,8 +104,10 @@ type SinkOptions = {
   changeGroup?: ChangeGroup;
 };
 
-// Shared map factory instance for all cells
+// Shared factory instances for all cells
 let mapFactory: NodeFactory<any, any> | undefined;
+let filterFactory: NodeFactory<any, any> | undefined;
+let flatMapFactory: NodeFactory<any, any> | undefined;
 
 // WeakMap to store connected nodes for each cell instance
 const cellNodes = new WeakMap<OpaqueCell<unknown>, Set<NodeRef>>();
@@ -247,7 +252,13 @@ export type { AnyCell, Cell, Stream } from "@commontools/api";
 
 export type { MemorySpace } from "@commontools/memory/interface";
 
-const cellMethods = new Set<keyof ICell<unknown>>([
+const cellMethods = new Set<
+  | keyof ICell<unknown>
+  | "filter"
+  | "filterWithPattern"
+  | "flatMap"
+  | "flatMapWithPattern"
+>([
   "get",
   "sample",
   "set",
@@ -261,6 +272,11 @@ const cellMethods = new Set<keyof ICell<unknown>>([
   "key",
   "map",
   "mapWithPattern",
+  "reduce",
+  "filter",
+  "filterWithPattern",
+  "flatMap",
+  "flatMapWithPattern",
   "toJSON",
   "for",
   "asSchema",
@@ -1165,10 +1181,11 @@ export class CellImpl<T extends StorableValue>
 
     const tx = this.runtime.readTx(this.tx);
     // Resolve all links ON THE WAY to the target, but don't resolve the final link
-    return tx.readValueOrThrow(
+    const value = tx.readValueOrThrow(
       resolveLink(this.runtime, tx, this.link, "top"),
       options,
-    ) as
+    );
+    return fromStorable(value as StorableValue) as
       | Immutable<T>
       | undefined;
   }
@@ -1180,7 +1197,7 @@ export class CellImpl<T extends StorableValue>
     // retry on conflict.
     if (!this.synced) this.sync();
 
-    value = toDeepStorableValue(value);
+    value = toStorable(value);
     this.tx.writeValueOrThrow(this.link, findAndInlineDataURILinks(value));
   }
 
@@ -1459,6 +1476,127 @@ export class CellImpl<T extends StorableValue>
     }
 
     return mapFactory({
+      list: this as unknown as OpaqueRef<T>,
+      op: op,
+      params: params,
+    });
+  }
+
+  /**
+   * Reduce an array cell to a single accumulated value.
+   * Similar to Array.prototype.reduce but reactive — re-runs the full
+   * reduction when any element changes.
+   */
+  reduce<S>(
+    this: IsThisObject,
+    fn: (
+      accumulator: S,
+      element: T extends Array<infer U> ? U : T,
+      index: number,
+      array: (T extends Array<infer U> ? U : T)[],
+    ) => S,
+    initialValue: S,
+  ): OpaqueRef<S> {
+    return lift((list: any[]) => {
+      if (!Array.isArray(list)) return initialValue;
+      return list.reduce(fn, initialValue);
+    })(this as unknown as OpaqueRef<any>);
+  }
+
+  /**
+   * Filter an array cell, creating a new array with only matching elements.
+   * Similar to Array.prototype.filter but works with OpaqueRefs.
+   * Output contains cell references to the original elements.
+   */
+  filter(
+    fn: (
+      element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
+      index: OpaqueRef<number>,
+      array: OpaqueRef<T>,
+    ) => Opaque<boolean>,
+  ): OpaqueRef<(T extends Array<infer U> ? U : T)[]> {
+    if (!filterFactory) {
+      filterFactory = createNodeFactory({
+        type: "ref",
+        implementation: "filter",
+      });
+    }
+
+    return filterFactory({
+      list: this as unknown as OpaqueRef<T>,
+      op: pattern(
+        ({ element, index, array }: Opaque<any>) => fn(element, index, array),
+      ),
+    });
+  }
+
+  /**
+   * Filter an array cell using a pre-defined pattern.
+   * Similar to filter but accepts a pre-defined pattern instead of a function.
+   */
+  filterWithPattern<S>(
+    this: IsThisObject,
+    op: PatternFactory<T extends Array<infer U> ? U : T, S>,
+    params: Record<string, any>,
+  ): OpaqueRef<(T extends Array<infer U> ? U : T)[]> {
+    if (!filterFactory) {
+      filterFactory = createNodeFactory({
+        type: "ref",
+        implementation: "filter",
+      });
+    }
+
+    return filterFactory({
+      list: this as unknown as OpaqueRef<T>,
+      op: op,
+      params: params,
+    });
+  }
+
+  /**
+   * FlatMap over an array cell, creating a flattened array from per-element arrays.
+   * Similar to Array.prototype.flatMap but works with OpaqueRefs.
+   * Each callback should return an array; results are concatenated one level deep.
+   */
+  flatMap<S>(
+    fn: (
+      element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
+      index: OpaqueRef<number>,
+      array: OpaqueRef<T>,
+    ) => Opaque<S[]>,
+  ): OpaqueRef<S[]> {
+    if (!flatMapFactory) {
+      flatMapFactory = createNodeFactory({
+        type: "ref",
+        implementation: "flatMap",
+      });
+    }
+
+    return flatMapFactory({
+      list: this as unknown as OpaqueRef<T>,
+      op: pattern(
+        ({ element, index, array }: Opaque<any>) => fn(element, index, array),
+      ),
+    });
+  }
+
+  /**
+   * FlatMap over an array cell using a pre-defined pattern.
+   * Similar to flatMap but accepts a pre-defined pattern instead of a function.
+   */
+  flatMapWithPattern<S>(
+    this: IsThisObject,
+    op: PatternFactory<T extends Array<infer U> ? U : T, S[]>,
+    params: Record<string, any>,
+  ): OpaqueRef<S[]> {
+    if (!flatMapFactory) {
+      flatMapFactory = createNodeFactory({
+        type: "ref",
+        implementation: "flatMap",
+      });
+    }
+
+    return flatMapFactory({
       list: this as unknown as OpaqueRef<T>,
       op: op,
       params: params,

@@ -26,12 +26,32 @@ export const unclaimed = (
 ): Unclaimed => ({ the, of });
 
 /**
- * Returns a cached merkle reference to an unclaimed fact.
- * Caching is handled by refer() for {the, of} patterns.
+ * Cache of frozen `{ the, of }` objects keyed by `"${the}\0${of}"`. Reusing
+ * the same frozen object identity lets downstream caches (WeakMap in
+ * `canonicalHash()`, merkle-reference's internal WeakMap) hit on every
+ * repeat instead of re-hashing a fresh object each time.
+ */
+const frozenUnclaimedCache = new Map<
+  string,
+  Readonly<{ the: MIME; of: URI }>
+>();
+
+/**
+ * Returns a content identifier for an unclaimed fact. Caches and reuses a
+ * frozen `{ the, of }` object per distinct pair so that identity-based hash
+ * caches downstream benefit from repeated calls.
  */
 export const unclaimedRef = (
   { the, of }: { the: MIME; of: URI },
-): ContentId<Unclaimed> => refer({ the, of });
+): ContentId<Unclaimed> => {
+  const key = `${the}\0${of}`;
+  let frozen = frozenUnclaimedCache.get(key);
+  if (!frozen) {
+    frozen = Object.freeze({ the, of });
+    frozenUnclaimedCache.set(key, frozen);
+  }
+  return refer(frozen);
+};
 
 export const assert = <
   Is extends StorableDatum,

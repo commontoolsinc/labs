@@ -36,9 +36,16 @@ export function createRef(
   // functions and undefined values, since `merkle-reference` doesn't support
   // them.
   function traverse(obj: any): any {
-    // Avoid cycles
-    if (seen.has(obj)) return null;
-    seen.add(obj);
+    // Avoid cycles — only track objects/arrays/functions (not primitives).
+    // Primitives use value equality in Set, so repeated strings like
+    // "primary" would be incorrectly deduplicated, causing hash collisions
+    // for patterns that differ only in the position of repeated values.
+    if (
+      obj !== null && (typeof obj === "object" || typeof obj === "function")
+    ) {
+      if (seen.has(obj)) return null;
+      seen.add(obj);
+    }
 
     // Don't traverse into ids.
     if (isRecord(obj) && "/" in obj) return obj;

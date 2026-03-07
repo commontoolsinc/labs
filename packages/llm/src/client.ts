@@ -9,12 +9,41 @@ import {
 
 type PartialCallback = (text: string) => void;
 
-let llmApiUrl = typeof globalThis.location !== "undefined"
-  ? globalThis.location.protocol + "//" + globalThis.location.host +
-    "/api/ai/llm"
-  : Deno?.env.get("API_URL")
-  ? new URL("/api/ai/llm", Deno.env.get("API_URL")).toString()
-  : "//api/ai/llm";
+/**
+ * Detect if we're running in a test environment.
+ * Checks CI=true (CI runners) and ENV=test (set by deno task test).
+ * Evaluated once at module load — these vars never change mid-process.
+ */
+const _isTestEnvironment = (() => {
+  try {
+    return Deno?.env?.get?.("CI") === "true" ||
+      Deno?.env?.get?.("ENV") === "test";
+  } catch {
+    return false;
+  }
+})();
+
+const TEST_GUARD_MESSAGE =
+  "LLMClient: live LLM calls are blocked in test environments. " +
+  "Use enableMockMode() and addMockResponse() to set up mocks.";
+
+function getInitialLLMUrl(): string {
+  if (typeof globalThis.location !== "undefined") {
+    return globalThis.location.protocol + "//" + globalThis.location.host +
+      "/api/ai/llm";
+  }
+  try {
+    const apiUrl = Deno?.env?.get?.("API_URL");
+    if (apiUrl) {
+      return new URL("/api/ai/llm", apiUrl).toString();
+    }
+  } catch {
+    // Permission denied or Deno not available — fall through
+  }
+  return "//api/ai/llm";
+}
+
+let llmApiUrl = getInitialLLMUrl();
 
 export const setLLMUrl = (toolshedUrl: string) => {
   llmApiUrl = new URL("/api/ai/llm", toolshedUrl).toString();
@@ -128,7 +157,10 @@ class MockCatalog {
   }
 }
 
-// Global mock catalog
+// Global mock catalog — module-level singleton. Tests that share a process
+// must coordinate via enableMockMode/resetMockMode to avoid interference.
+// Deno runs test files in separate processes by default, so this is safe
+// as long as tests within a single file don't run in parallel.
 const mockCatalog = new MockCatalog();
 
 /**
@@ -231,6 +263,11 @@ export class LLMClient {
       );
     }
 
+    // Guard: block live calls in test environments
+    if (_isTestEnvironment) {
+      throw new Error(TEST_GUARD_MESSAGE);
+    }
+
     const response = await fetch(llmApiUrl + "/generateObject", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -286,9 +323,10 @@ export class LLMClient {
     if (mockCatalog.isEnabled()) {
       const mockResponse = mockCatalog.findResponse(request);
       if (mockResponse) {
-        // Simulate streaming behavior if callback is provided
+        // NOTE: Streaming simulation calls the callback once with the full
+        // text rather than delivering incremental chunks. Tests that depend on
+        // partial-chunk behavior will need a more granular mock.
         if (callback && request.stream) {
-          // Extract text from mock response content
           let text = "";
           if (typeof mockResponse.content === "string") {
             text = mockResponse.content;
@@ -299,7 +337,6 @@ export class LLMClient {
             text = textPart?.text || "";
           }
 
-          // Simulate streaming by calling callback with accumulated text
           if (text) {
             callback(text);
           }
@@ -312,6 +349,11 @@ export class LLMClient {
       throw new Error(
         "Mock mode enabled but no matching mock response found for sendRequest",
       );
+    }
+
+    // Guard: block live calls in test environments
+    if (_isTestEnvironment) {
+      throw new Error(TEST_GUARD_MESSAGE);
     }
 
     const response = await fetch(llmApiUrl, {

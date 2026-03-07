@@ -68,7 +68,23 @@ export type {
 } from "./space-schema.ts";
 import { StorableDatum, StorableValue } from "./interface.ts";
 import { isObject } from "../utils/src/types.ts";
+import { jsonFromValue, valueFromJson } from "./json-encoding-dispatch.ts";
+import type { ReconstructionContext } from "./storable-protocol.ts";
 export type * from "./interface.ts";
+
+/**
+ * Minimal reconstruction context for decoding values at the storage boundary.
+ * Step 0 only handles types that don't require runtime context (undefined,
+ * bigint, sparse arrays, etc.), so `getCell` is unimplemented. Future steps
+ * that add Cell serialization will need to supply a real context.
+ */
+const storageReconstructionContext: ReconstructionContext = {
+  getCell() {
+    throw new globalThis.Error(
+      "getCell is not available at the storage boundary (step 0)",
+    );
+  },
+};
 
 export const PREPARE = `
 BEGIN TRANSACTION;
@@ -548,7 +564,15 @@ const recall = <Space extends MemorySpace>(
     };
 
     if (row.is) {
-      revision.is = JSON.parse(row.is);
+      // `revision.is` is typed `undefined` in some union members, but at
+      // runtime the storage row can carry a value. Before the encoding
+      // dispatch, `JSON.parse` returned `any` which silently satisfied the
+      // type; `valueFromJson` returns `StorableValue`, so we need a cast.
+      // deno-lint-ignore no-explicit-any
+      (revision as any).is = valueFromJson(
+        row.is,
+        storageReconstructionContext,
+      );
     }
 
     return revision;
@@ -627,7 +651,12 @@ const getFact = <Space extends MemorySpace>(
     since: row.since,
   };
   if (row.is) {
-    revision.is = JSON.parse(row.is);
+    // See comment in `recall` for why this cast is needed.
+    // deno-lint-ignore no-explicit-any
+    (revision as any).is = valueFromJson(
+      row.is,
+      storageReconstructionContext,
+    );
   }
   return revision;
 };
@@ -685,7 +714,9 @@ const toFact = function (row: StateRow): SelectedFact {
     cause: row.cause
       ? row.cause as CauseString
       : unclaimedRef(row as FactAddress).toString() as CauseString,
-    is: row.is ? JSON.parse(row.is) as StorableDatum : undefined,
+    is: row.is
+      ? valueFromJson(row.is, storageReconstructionContext) as StorableDatum
+      : undefined,
     since: row.since,
   };
 };
@@ -757,7 +788,7 @@ const importDatum = <Space extends MemorySpace>(
     );
     stmt.run({
       this: is,
-      source: JSON.stringify(datum),
+      source: jsonFromValue(datum),
     });
 
     return is;

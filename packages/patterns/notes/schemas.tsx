@@ -5,9 +5,15 @@
  * This file contains types shared across note.tsx, notebook.tsx, and note-md.tsx.
  */
 
-import { type Default, NAME, type Writable } from "commontools";
+import { type Default, NAME, type Stream, type Writable } from "commontools";
 
 // ===== Core Entity Types =====
+//
+// IMPORTANT: Do NOT add [UI] to these entity types. Including [UI] in types
+// that are used as references (e.g. in arrays, backlinks, mentioned lists)
+// causes the runtime to deeply traverse and instantiate UI trees for every
+// referenced piece, making everything extremely slow. Only pattern Output
+// interfaces should declare [UI]. See NoteOutput, NotebookOutput, etc.
 
 /**
  * A piece that can be mentioned via [[wiki-links]] and appear in backlinks.
@@ -38,7 +44,6 @@ export interface NotePiece {
   content?: string;
   summary?: string;
   isHidden?: boolean;
-  noteId?: string;
   backlinks?: MentionablePiece[];
   parentNotebook?: NotebookPiece | null;
 }
@@ -50,8 +55,17 @@ export interface NotebookPiece {
   [NAME]?: string;
   title?: string;
   notes?: NotePiece[];
+  backlinks?: MentionablePiece[];
   isNotebook?: boolean;
   isHidden?: boolean;
+
+  createNote: Stream<{ title: string; content: string; navigate?: boolean }>;
+  createNotes: Stream<{ notesData: Array<{ title: string; content: string }> }>;
+  setTitle: Stream<{ newTitle: string }>;
+  createNotebook: Stream<{
+    title: string;
+    notesData?: Array<{ title: string; content: string }>;
+  }>;
 }
 
 /**
@@ -66,13 +80,23 @@ export interface NotebookCell {
   isHidden?: boolean;
 }
 
+/**
+ * A daily journal's core data shape.
+ */
+export interface DailyJournalPiece {
+  [NAME]?: string;
+  title?: string;
+  entries?: NotePiece[];
+  isJournal?: boolean;
+  isHidden?: boolean;
+}
+
 // ===== Input Types =====
 
 export interface NoteInput {
   title?: Writable<Default<string, "Untitled Note">>;
   content?: Writable<Default<string, "">>;
   isHidden?: Default<boolean, false>;
-  noteId?: Default<string, "">;
   /** Pattern JSON for [[wiki-links]]. Defaults to creating new Notes. */
   linkPattern?: Writable<Default<string, "">>;
   /** Parent notebook reference. Set at creation, can be updated for moves. */
@@ -89,10 +113,10 @@ export interface NotebookInput {
 }
 
 export interface NoteMdInput {
-  /** Cell reference to note data (title + content + backlinks + noteId) */
+  /** Cell reference to note data (title + content + backlinks) */
   note?: Default<
     NotePiece,
-    { title: ""; content: ""; backlinks: []; noteId: "" }
+    { title: ""; content: ""; backlinks: [] }
   >;
   /** Direct reference to source note for Edit navigation */
   sourceNoteRef?: NotePiece;
@@ -113,12 +137,8 @@ export const generateId = (): string =>
  * Get a comparable name from a piece.
  * Handles both local pieces (title) and wish("#default") pieces ([NAME]).
  */
-export const getPieceName = (piece: unknown): string => {
-  // First try [NAME] (works for wish("#default") pieces)
-  const symbolName = (piece as MinimalPiece)?.[NAME];
-  if (typeof symbolName === "string") return symbolName;
-  // Fallback to title (works for local pieces)
-  const titleProp = (piece as NotePiece)?.title;
-  if (typeof titleProp === "string") return titleProp;
-  return "";
+export const getPieceName = (
+  piece?: { [NAME]?: string; title?: string },
+): string => {
+  return piece?.[NAME] ?? piece?.title ?? "";
 };

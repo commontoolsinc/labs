@@ -21,6 +21,8 @@ export interface CTTheme {
   fontFamily: string;
   /** Monospace font family for code */
   monoFontFamily: string;
+  /** Base font size for UI elements */
+  fontSize: string;
   /** Border radius for UI elements */
   borderRadius: string;
   /** Overall density/spacing preference */
@@ -157,6 +159,7 @@ export const defaultTheme: CTTheme = {
   fontFamily: "system-ui, -apple-system, sans-serif",
   monoFontFamily:
     "ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, Consolas, 'DejaVu Sans Mono', monospace",
+  fontSize: "1rem",
   borderRadius: "0.5rem",
   density: "comfortable",
   colorScheme: "light",
@@ -367,6 +370,10 @@ export function mergeWithDefaultTheme(
     mergedTheme.monoFontFamily = partialTheme.monoFontFamily;
   }
 
+  if (partialTheme.fontSize) {
+    mergedTheme.fontSize = partialTheme.fontSize;
+  }
+
   if (partialTheme.density) {
     mergedTheme.density = partialTheme.density;
   }
@@ -441,6 +448,7 @@ export function applyThemeToElement(
       "--ct-theme-mono-font-family",
       theme.monoFontFamily,
     );
+    element.style.setProperty("--ct-theme-font-size", theme.fontSize);
     element.style.setProperty("--ct-theme-border-radius", theme.borderRadius);
     element.style.setProperty(
       "--ct-theme-animation-duration",

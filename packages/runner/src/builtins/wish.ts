@@ -511,6 +511,7 @@ const TARGET_SCHEMA = {
     path: { type: "array", items: { type: "string" } },
     context: { type: "object", additionalProperties: { asCell: true } },
     scope: { type: "array", items: { type: "string" } },
+    headless: { type: "boolean" },
   },
   required: ["query"],
 } as const satisfies JSONSchema;
@@ -596,7 +597,8 @@ export function wish(
     const targetValue = inputsWithTx.asSchema(TARGET_SCHEMA).get();
 
     if (typeof targetValue === "object") {
-      const { query, path, schema, context, scope } = targetValue as WishParams;
+      const { query, path, schema, context, scope, headless } =
+        targetValue as WishParams;
 
       if (query === undefined || query === null || query === "") {
         const errorMsg = `Wish target "${
@@ -648,10 +650,10 @@ export function wish(
             tx,
           );
 
-          if (uniqueResultCells.length === 1) {
-            // Single result - fast path with unified shape
+          if (uniqueResultCells.length === 1 || headless) {
+            // Single result or headless mode - fast path with unified shape
             // Prefer the result cell's own [UI]; fall back to ct-cell-link
-            const resultUI = resultCells[0].key(UI).get();
+            const resultUI = uniqueResultCells[0].key(UI).get();
             sendResult(tx, {
               result: uniqueResultCells[0],
               candidates: candidatesCell,
@@ -733,6 +735,16 @@ export function wish(
             } satisfies WishState<any>,
           );
         }
+      } else if (headless) {
+        // Headless mode with freeform query — no suggestion pattern
+        sendResult(
+          tx,
+          {
+            result: undefined,
+            candidates: [],
+            [UI]: undefined,
+          } satisfies WishState<any>,
+        );
       } else {
         // Otherwise it's a generic query, instantiate suggestion.tsx
         sendResult(

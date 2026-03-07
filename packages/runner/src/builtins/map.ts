@@ -136,7 +136,7 @@ export function map(
       } else {
         const resultCell = runtime.getCell(
           parentCell.space,
-          { result, elementKey },
+          { map: result, elementKey },
           undefined,
           tx,
         );
