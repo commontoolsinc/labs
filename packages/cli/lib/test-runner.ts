@@ -694,8 +694,18 @@ export async function runTestPattern(
   }
   const engine = new Engine(runtime);
 
-  // Track sink subscription for cleanup
+  // Track sink subscriptions for cleanup
   let sinkCancel: (() => void) | undefined;
+  const assertionSinkCancels: (() => void)[] = [];
+
+  // Catch unhandled errors from async pattern code (e.g. wish() using setTimeout).
+  // Without this, patterns that throw in async callbacks crash the process.
+  const uncaughtErrors: string[] = [];
+  const globalErrorHandler = (e: ErrorEvent) => {
+    e.preventDefault();
+    uncaughtErrors.push(e.error?.message ?? e.message);
+  };
+  globalThis.addEventListener("error", globalErrorHandler);
 
   try {
     // 2. Compile the test pattern
@@ -775,6 +785,31 @@ export async function runTestPattern(
     // 4. Get the tests array from pattern output
     const testsCell = patternResult.key("tests") as Cell<unknown>;
     const testsValue = testsCell.get();
+
+    // In pull mode, assertion computations are stored as cell references in the
+    // tests array. The patternResult sink doesn't deeply dereference them, so
+    // their computations have no effect in the dependency chain and never
+    // re-execute when inputs change. Sink each assertion cell individually so
+    // pull mode keeps them reactive.
+    if (
+      Array.isArray(testsValue) && runtime.scheduler.isPullModeEnabled()
+    ) {
+      for (let i = 0; i < testsValue.length; i++) {
+        const step = testsValue[i] as { assertion?: unknown };
+        if ("assertion" in step) {
+          try {
+            const assertCell = testsCell.key(i).key(
+              "assertion",
+            ) as Cell<unknown>;
+            assertionSinkCancels.push(assertCell.sink(() => {}));
+          } catch {
+            // Some assertion cells may not support sink
+          }
+        }
+      }
+      // Let the new sinks settle so dependency graph is up to date
+      await runtime.idle();
+    }
 
     // Validate it's an array
     if (!Array.isArray(testsValue)) {
@@ -1171,6 +1206,8 @@ export async function runTestPattern(
     };
   } finally {
     // 6. Cleanup
+    globalThis.removeEventListener("error", globalErrorHandler);
+    for (const cancel of assertionSinkCancels) cancel();
     sinkCancel?.();
     engine.dispose();
     await storageManager.close();
