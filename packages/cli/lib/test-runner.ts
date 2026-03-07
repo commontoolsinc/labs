@@ -133,6 +133,8 @@ export interface TestRunnerOptions {
   root?: string;
   /** Print logger stats for steps slower than this (ms). 0 = every step. Default 5000. Only applies when verbose is true. */
   statsThreshold?: number;
+  /** Print per-test scheduler performance summary. Enabled by --perf-stats or --verbose. */
+  perfStats?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -1273,12 +1275,14 @@ export async function runTests(
     }
   }
 
-  // Performance summary
-  const resultsWithPerf = allResults.filter((r) => r.perf);
-  if (resultsWithPerf.length > 0) {
-    console.log(`\n--- Performance Summary ---`);
-    for (const result of resultsWithPerf) {
-      printPerfSummary(result.perf!, result.path);
+  // Performance summary (only with --verbose or --perf-stats)
+  if (options.perfStats) {
+    const resultsWithPerf = allResults.filter((r) => r.perf);
+    if (resultsWithPerf.length > 0) {
+      console.log(`\n--- Performance Summary ---`);
+      for (const result of resultsWithPerf) {
+        printPerfSummary(result.perf!, result.path);
+      }
     }
   }
 
