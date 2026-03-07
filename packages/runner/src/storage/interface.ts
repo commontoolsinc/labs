@@ -66,6 +66,12 @@ export interface Metadata extends Record<PropertyKey, unknown> {}
 export interface IReadOptions {
   meta?: Metadata;
   /**
+   * When true, register the read in transaction activity but skip loading
+   * from storage. Use when caller already has the value and only needs
+   * dependency tracking.
+   */
+  onlyReadForScheduling?: boolean;
+  /**
    * When true, the read is tracked as non-recursive for scheduler invalidation:
    * parent/same-path writes invalidate, child writes invalidate only on key add.
    */

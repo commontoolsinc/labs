@@ -119,6 +119,15 @@ export const read = (
       },
     });
 
+    if (options?.onlyReadForScheduling === true) {
+      return {
+        ok: {
+          address,
+          value: undefined,
+        },
+      };
+    }
+
     const result = branch.read(address, options);
     if (result.error) {
       return { error: result.error.from(space) };

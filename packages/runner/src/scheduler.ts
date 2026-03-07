@@ -119,31 +119,16 @@ const ignoreReadForSchedulingMarker: unique symbol = Symbol(
   "ignoreReadForSchedulingMarker",
 );
 
-export const onlyReadForSchedulingMarker: unique symbol = Symbol(
-  "onlyReadForSchedulingMarker",
-);
-
 const markReadAsPotentialWriteMarker: unique symbol = Symbol(
   "markReadAsPotentialWriteMarker",
-);
-const nonRecursiveReadMarker: unique symbol = Symbol(
-  "nonRecursiveReadMarker",
 );
 
 export const ignoreReadForScheduling: Metadata = {
   [ignoreReadForSchedulingMarker]: true,
 };
 
-export const onlyReadForScheduling: Metadata = {
-  [onlyReadForSchedulingMarker]: true,
-};
-
 export const markReadAsPotentialWrite: Metadata = {
   [markReadAsPotentialWriteMarker]: true,
-};
-
-export const nonRecursiveRead: Metadata = {
-  [nonRecursiveReadMarker]: true,
 };
 
 export type SpaceAndURI = `${MemorySpace}/${URI}`;
@@ -3386,10 +3371,7 @@ export function txToReactivityLog(
         type: activity.read.type,
         path: activity.read.path.slice(1), // Remove the "value" prefix
       };
-      if (
-        activity.read.nonRecursive === true ||
-        activity.read.meta?.[nonRecursiveReadMarker]
-      ) {
+      if (activity.read.nonRecursive === true) {
         if (!log.nonRecursiveReads) {
           log.nonRecursiveReads = [];
         }
