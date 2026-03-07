@@ -114,7 +114,11 @@ export const open = ({
   const consumer = create({ as, clock, ttl });
   consumer.closed = session.readable.pipeThrough(consumer).pipeTo(
     session.writable as WritableStream<Protocol>,
-  ).catch(() => {});
+  ).catch((error) => {
+    if (!consumer.isCancelled) {
+      logger.error("stream-error", () => ["pipeTo pipeline error:", error]);
+    }
+  });
   return consumer;
 };
 
@@ -152,6 +156,10 @@ class MemoryConsumerSession<
   private lastFlushTime: number | null = null;
   private cancelled = false;
   closed: Promise<void> = Promise.resolve();
+
+  get isCancelled(): boolean {
+    return this.cancelled;
+  }
 
   constructor(
     public as: Signer,
@@ -455,6 +463,7 @@ export interface MemoryConsumer<Space extends MemorySpace>
       UCAN<ConsumerCommandInvocation<Protocol>>
     > {
   as: Signer;
+  readonly isCancelled: boolean;
   cancel(): void;
   close(): void;
   closed: Promise<void>;
