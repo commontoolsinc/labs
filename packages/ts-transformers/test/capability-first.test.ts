@@ -1,9 +1,4 @@
-import {
-  assert,
-  assertEquals,
-  assertNotEquals,
-  assertStringIncludes,
-} from "@std/assert";
+import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { transformSource, validateSource } from "./utils.ts";
 import { COMMONTOOLS_TYPES } from "./commontools-test-types.ts";
 
@@ -13,9 +8,7 @@ import { pattern } from "commontools";
 const p = pattern(({ foo, user: { name } }) => <div>{foo && name}</div>);
 `;
 
-  const output = await transformSource(source, {
-    useLegacyOpaqueRefSemantics: false,
-  });
+  const output = await transformSource(source, {});
 
   assertStringIncludes(output, "__ctHelpers.when(");
   assert(!output.includes("{foo && name}"));
@@ -32,9 +25,7 @@ import { pattern, computed } from "commontools";
 const p = pattern(({ foo, bar }) => <div>{computed(() => foo && bar)}</div>);
 `;
 
-  const output = await transformSource(source, {
-    useLegacyOpaqueRefSemantics: false,
-  });
+  const output = await transformSource(source, {});
 
   assertStringIncludes(output, "=> foo && bar");
   assert(!output.includes("__ctHelpers.when("));
@@ -48,9 +39,7 @@ import { pattern } from "commontools";
 const p = pattern(({ list }: { list: string[] }) => <div>{[0, 1].forEach(() => list.map((item) => item))}</div>);
 `;
 
-    const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
-    });
+    const output = await transformSource(source, {});
 
     assertStringIncludes(output, "list.map((item) => item)");
     assert(!output.includes(".mapWithPattern("));
@@ -72,9 +61,7 @@ const p = pattern((input: { user: { name: string }; value: { foo: number } }) =>
 });
 `;
 
-    const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
-    });
+    const output = await transformSource(source, {});
 
     assertStringIncludes(output, 'const value = input.key("user");');
     assertStringIncludes(output, "return <div>{value.foo}</div>;");
@@ -93,9 +80,7 @@ const p = pattern((input: { ok: boolean }) => {
 });
 `;
 
-    const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
-    });
+    const output = await transformSource(source, {});
 
     assertStringIncludes(output, "arr.map((x) => x + 1)");
     assert(!output.includes(".mapWithPattern("));
@@ -127,7 +112,6 @@ export default pattern<State>((state) => {
 `;
 
     const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
 
@@ -161,11 +145,9 @@ const p = pattern<{ list: Item[] }>(({ list }) => (
 `;
 
     const { diagnostics } = await validateSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
     const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
 
@@ -186,9 +168,7 @@ import { pattern, derive } from "commontools";
 const p = pattern((input: { list: Array<{ name: string; age: number }> }) => <div>{derive(input.list, (v) => v).map(({ name }) => <span>{name}</span>)}</div>);
 `;
 
-    const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
-    });
+    const output = await transformSource(source, {});
 
     assertStringIncludes(output, ".mapWithPattern(");
     assertStringIncludes(
@@ -206,9 +186,7 @@ import { pattern } from "commontools";
 const p = pattern(({ foo, ...rest }) => <div>{foo}</div>);
 `;
 
-    const { diagnostics } = await validateSource(source, {
-      useLegacyOpaqueRefSemantics: false,
-    });
+    const { diagnostics } = await validateSource(source, {});
     const computationDiagnostics = diagnostics.filter((diagnostic) =>
       diagnostic.type === "pattern-context:computation"
     );
@@ -229,12 +207,8 @@ import { pattern } from "commontools";
 const p = pattern(([first]) => <div>{first}</div>);
 `;
 
-    const { diagnostics } = await validateSource(source, {
-      useLegacyOpaqueRefSemantics: false,
-    });
-    const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
-    });
+    const { diagnostics } = await validateSource(source, {});
+    const output = await transformSource(source, {});
     const computationDiagnostics = diagnostics.filter((diagnostic) =>
       diagnostic.type === "pattern-context:computation"
     );
@@ -253,11 +227,9 @@ const p = pattern<{ foo: string }>(({ foo = "fallback" }) => <div>{foo}</div>);
 `;
 
     const { diagnostics } = await validateSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
     const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
     const computationDiagnostics = diagnostics.filter((diagnostic) =>
@@ -285,11 +257,9 @@ const p = pattern<Input>(({ foo = "fallback", count = 0 }) => <div>{foo}:{count}
 `;
 
     const { diagnostics } = await validateSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
     const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
     const computationDiagnostics = diagnostics.filter((diagnostic) =>
@@ -316,7 +286,6 @@ const p = pattern<Input>(({ foo = "fallback", count = 0 }) => <div>{foo}:{count}
 `;
 
     const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
 
@@ -336,7 +305,6 @@ const p = pattern(({ foo = fallback }) => <div>{foo}</div>);
 `;
 
     const { diagnostics } = await validateSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
     const computationDiagnostics = diagnostics.filter((diagnostic) =>
@@ -360,12 +328,8 @@ const key = "foo" as const;
 const p = pattern(({ [key]: foo }) => <div>{foo}</div>);
 `;
 
-    const { diagnostics } = await validateSource(source, {
-      useLegacyOpaqueRefSemantics: false,
-    });
-    const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
-    });
+    const { diagnostics } = await validateSource(source, {});
+    const output = await transformSource(source, {});
     const computationDiagnostics = diagnostics.filter((diagnostic) =>
       diagnostic.type === "pattern-context:computation"
     );
@@ -384,11 +348,9 @@ const p = pattern<{ ["foo"]: string; bar: string }>(({ ["foo"]: foo = "fallback"
 `;
 
     const { diagnostics } = await validateSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
     const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
     const computationDiagnostics = diagnostics.filter((diagnostic) =>
@@ -421,11 +383,9 @@ const p = pattern<State>((state) => {
 `;
 
     const { diagnostics } = await validateSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
     const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
 
@@ -454,9 +414,7 @@ import { pattern } from "commontools";
 const p = pattern((input) => input?.foo());
 `;
 
-    const { diagnostics } = await validateSource(source, {
-      useLegacyOpaqueRefSemantics: false,
-    });
+    const { diagnostics } = await validateSource(source, {});
 
     const optionalDiagnostics = diagnostics.filter((diagnostic) =>
       diagnostic.type === "pattern-context:optional-chaining"
@@ -478,9 +436,7 @@ const p = pattern((input) => {
 });
 `;
 
-    const { diagnostics } = await validateSource(source, {
-      useLegacyOpaqueRefSemantics: false,
-    });
+    const { diagnostics } = await validateSource(source, {});
 
     const builderDiagnostics = diagnostics.filter((diagnostic) =>
       diagnostic.type === "pattern-context:builder-placement"
@@ -498,9 +454,7 @@ import { pattern } from "commontools";
 const p = pattern((input) => input.get());
 `;
 
-    const { diagnostics } = await validateSource(source, {
-      useLegacyOpaqueRefSemantics: false,
-    });
+    const { diagnostics } = await validateSource(source, {});
 
     const getDiagnostics = diagnostics.filter((diagnostic) =>
       diagnostic.type === "pattern-context:get-call"
@@ -518,9 +472,7 @@ const helper = ({ value }: { value: number }) => computed(() => value + 1);
 const p = pattern((input) => input.foo);
 `;
 
-    const { diagnostics } = await validateSource(source, {
-      useLegacyOpaqueRefSemantics: false,
-    });
+    const { diagnostics } = await validateSource(source, {});
 
     const standaloneDiagnostics = diagnostics.filter((diagnostic) =>
       diagnostic.type === "standalone-function:reactive-operation"
@@ -539,7 +491,6 @@ const fn = lift((input: Writable<{ foo: string; bar: string }>) => input.get().f
 `;
 
     const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
 
@@ -557,7 +508,6 @@ const p = pattern((input: Writable<{ foo: string; bar: string }>) => input.key("
 `;
 
     const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
 
@@ -578,7 +528,6 @@ const fn = lift((input: Writable<{ foo: string | undefined; bar: string }>) =>
 `;
 
     const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
 
@@ -600,7 +549,6 @@ const p = pattern<Writable<{ foo: string; bar: string }>, { foo: string }>((inpu
 `;
 
     const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
 
@@ -620,7 +568,6 @@ const d = derive(state, (input: Writable<{ foo: string; bar: string }>) => input
 `;
 
     const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
 
@@ -643,7 +590,6 @@ const d = derive<Writable<{ foo: string; bar: string }>, string>(
 `;
 
     const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
 
@@ -664,7 +610,6 @@ const h = handler((event: { id: string }, state: Writable<{ foo: string; bar: st
 `;
 
     const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
 
@@ -689,7 +634,6 @@ const h = handler<
 `;
 
     const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
 
@@ -710,7 +654,6 @@ const fn = lift((input: Writable<{ foo: string; bar: string }>) => input);
 `;
 
     const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
 
@@ -733,7 +676,6 @@ const fn = lift((input: Writable<{ foo: string; bar: string }>) => helper(input)
 `;
 
     const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
 
@@ -757,7 +699,6 @@ const p = pattern((input: Writable<{ foo: string; bar: string }>) => helper(inpu
 `;
 
     const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
 
@@ -779,7 +720,6 @@ const fn = lift((input: Writable<{ foo: string; bar: string }>) => {
 `;
 
     const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
 
@@ -800,7 +740,6 @@ const fn = lift<Writable<{ foo: string; bar: string }>, string>(
 `;
 
     const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
 
@@ -822,7 +761,6 @@ const p = pattern((input: Writable<{ foo: string; bar: string }>) => {
 `;
 
     const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
 
@@ -841,9 +779,7 @@ import { pattern } from "commontools";
 const p = pattern((input) => ({ ...input }));
 `;
 
-    const { diagnostics } = await validateSource(source, {
-      useLegacyOpaqueRefSemantics: false,
-    });
+    const { diagnostics } = await validateSource(source, {});
     const computationDiagnostics = diagnostics.filter((diagnostic) =>
       diagnostic.type === "pattern-context:computation"
     );
@@ -865,9 +801,7 @@ const p = pattern((input) => {
 });
 `;
 
-    const { diagnostics } = await validateSource(source, {
-      useLegacyOpaqueRefSemantics: false,
-    });
+    const { diagnostics } = await validateSource(source, {});
     const computationDiagnostics = diagnostics.filter((diagnostic) =>
       diagnostic.type === "pattern-context:computation"
     );
@@ -884,9 +818,7 @@ import { pattern } from "commontools";
 const p = pattern((input, key: string) => input[key]);
 `;
 
-    const { diagnostics } = await validateSource(source, {
-      useLegacyOpaqueRefSemantics: false,
-    });
+    const { diagnostics } = await validateSource(source, {});
     const computationDiagnostics = diagnostics.filter((diagnostic) =>
       diagnostic.type === "pattern-context:computation"
     );
@@ -903,12 +835,8 @@ import { NAME, UI, pattern } from "commontools";
 const p = pattern(({ items }) => items.map((item) => ({ n: item[NAME], u: item[UI] })));
 `;
 
-    const { diagnostics } = await validateSource(source, {
-      useLegacyOpaqueRefSemantics: false,
-    });
-    const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
-    });
+    const { diagnostics } = await validateSource(source, {});
+    const output = await transformSource(source, {});
 
     const computationDiagnostics = diagnostics.filter((diagnostic) =>
       diagnostic.type === "pattern-context:computation"
@@ -928,12 +856,8 @@ import { SELF, pattern } from "commontools";
 const p = pattern(({ [SELF]: self, value }) => self);
 `;
 
-    const { diagnostics } = await validateSource(source, {
-      useLegacyOpaqueRefSemantics: false,
-    });
-    const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
-    });
+    const { diagnostics } = await validateSource(source, {});
+    const output = await transformSource(source, {});
 
     const computationDiagnostics = diagnostics.filter((diagnostic) =>
       diagnostic.type === "pattern-context:computation"
@@ -961,9 +885,7 @@ const p = pattern(({ items }) =>
 );
 `;
 
-    const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
-    });
+    const output = await transformSource(source, {});
 
     assertStringIncludes(output, 'item.key("subItems").mapWithPattern(');
     assertStringIncludes(output, 'return subItem.key("value");');
@@ -983,9 +905,7 @@ const p = pattern((input) => {
 });
 `;
 
-    const { diagnostics } = await validateSource(source, {
-      useLegacyOpaqueRefSemantics: false,
-    });
+    const { diagnostics } = await validateSource(source, {});
     const computationDiagnostics = diagnostics.filter((diagnostic) =>
       diagnostic.type === "pattern-context:computation"
     );
@@ -1002,9 +922,7 @@ import { pattern } from "commontools";
 const p = pattern((input) => JSON.stringify(input));
 `;
 
-    const { diagnostics } = await validateSource(source, {
-      useLegacyOpaqueRefSemantics: false,
-    });
+    const { diagnostics } = await validateSource(source, {});
     const computationDiagnostics = diagnostics.filter((diagnostic) =>
       diagnostic.type === "pattern-context:computation"
     );
@@ -1026,93 +944,10 @@ const fn = lift((input: Writable<{ foo: string; bar: string }>) => {
 `;
 
     const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
 
     assertStringIncludes(output, "asCell: true");
-    assertStringIncludes(output, '"foo"');
-    assertStringIncludes(output, '"bar"');
-  },
-);
-
-Deno.test(
-  "Default mode uses capability-first transform output",
-  async () => {
-    const source = `/// <cts-enable />
-import { pattern } from "commontools";
-const p = pattern(({ foo, bar }) => <div>{foo && bar}</div>);
-`;
-
-    const defaultOutput = await transformSource(source, {
-      types: COMMONTOOLS_TYPES,
-    });
-    const explicitCapabilityOutput = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
-      types: COMMONTOOLS_TYPES,
-    });
-    const explicitLegacyOutput = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: true,
-      types: COMMONTOOLS_TYPES,
-    });
-
-    assertEquals(defaultOutput, explicitCapabilityOutput);
-    assertNotEquals(defaultOutput, explicitLegacyOutput);
-  },
-);
-
-Deno.test(
-  "Default mode uses capability-first diagnostics",
-  async () => {
-    const source = `/// <cts-enable />
-import { pattern } from "commontools";
-const p = pattern((input) => input.get());
-`;
-
-    const defaultResult = await validateSource(source, {
-      types: COMMONTOOLS_TYPES,
-    });
-    const explicitCapabilityResult = await validateSource(source, {
-      useLegacyOpaqueRefSemantics: false,
-      types: COMMONTOOLS_TYPES,
-    });
-
-    const toComparable = (
-      diagnostics: readonly {
-        type: string;
-        severity: string;
-        message: string;
-      }[],
-    ) =>
-      diagnostics.map(({ type, severity, message }) => ({
-        type,
-        severity,
-        message,
-      }));
-
-    assertEquals(
-      toComparable(explicitCapabilityResult.diagnostics),
-      toComparable(defaultResult.diagnostics),
-    );
-  },
-);
-
-Deno.test(
-  "Legacy opt-out parity: legacy mode keeps full-shape action state schema",
-  async () => {
-    const source = `/// <cts-enable />
-import { action, pattern, type Writable } from "commontools";
-const p = pattern((input: Writable<{ foo: string; bar: string }>) => {
-  const a = action(() => input.key("foo").get());
-  return a;
-});
-`;
-
-    const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: true,
-      types: COMMONTOOLS_TYPES,
-    });
-
     assertStringIncludes(output, '"foo"');
     assertStringIncludes(output, '"bar"');
   },
@@ -1128,7 +963,6 @@ const fn = lift(() => items.map((item) => item));
 `;
 
     const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
 
@@ -1158,7 +992,6 @@ export default pattern<State>((state) => {
 `;
 
     const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
 
@@ -1191,7 +1024,6 @@ export default pattern<State>((state) => {
 `;
 
     const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
 
@@ -1212,7 +1044,6 @@ const p = pattern(() => {
 `;
 
     const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
 
@@ -1261,11 +1092,9 @@ export default pattern<Input>(({ messages }) => {
 `;
 
     const { diagnostics } = await validateSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
     const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
 
@@ -1305,11 +1134,9 @@ export default pattern<{ items?: Item[] }>(({ items }) => {
 `;
 
     const { diagnostics } = await validateSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
     const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
 
@@ -1347,11 +1174,9 @@ export default pattern<{ items?: Item[] }>(({ items }) => {
 `;
 
     const { diagnostics } = await validateSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
     const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
 
@@ -1389,11 +1214,9 @@ export default pattern<{ items?: Item[] }>(({ items }) => {
 `;
 
     const { diagnostics } = await validateSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
     const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
 
@@ -1431,7 +1254,6 @@ export default pattern<State>((state) => ({
 `;
 
     const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
 
@@ -1473,7 +1295,6 @@ const _summary = derive(
 `;
 
     const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
 
@@ -1502,7 +1323,6 @@ const d = derive(input, (v: Writable<{ foo: string; bar: string }>) => {
 `;
 
     const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
 
@@ -1525,7 +1345,6 @@ const h = handler((event: { id: string }, state: Writable<{ foo: string; bar: st
 `;
 
     const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: false,
       types: COMMONTOOLS_TYPES,
     });
 

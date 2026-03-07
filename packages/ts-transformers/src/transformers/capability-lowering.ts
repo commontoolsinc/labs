@@ -4,6 +4,7 @@ import {
   detectCallKind,
   getTypeAtLocationWithFallback,
   isFunctionLikeExpression,
+  isReactiveOriginCall,
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
 import {
@@ -542,25 +543,13 @@ function reportComputationError(
   });
 }
 
+// isOpaqueOriginCall delegates to the shared isReactiveOriginCall.
+// Kept as a local alias for readability in this module.
 function isOpaqueOriginCall(
   expression: ts.CallExpression,
   context: TransformationContext,
 ): boolean {
-  const kind = detectCallKind(expression, context.checker);
-  if (!kind) return false;
-
-  switch (kind.kind) {
-    case "builder":
-    case "cell-factory":
-    case "cell-for":
-    case "derive":
-    case "wish":
-    case "generate-object":
-    case "pattern-tool":
-      return true;
-    default:
-      return false;
-  }
+  return isReactiveOriginCall(expression, context.checker);
 }
 
 function isOpaqueSourceExpression(
@@ -1299,8 +1288,7 @@ function registerBuilderSummariesInSubtree(
 
 export class CapabilityLoweringTransformer extends Transformer {
   override filter(context: TransformationContext): boolean {
-    return context.ctHelpers.sourceHasHelpers() &&
-      !context.options.useLegacyOpaqueRefSemantics;
+    return context.ctHelpers.sourceHasHelpers();
   }
 
   transform(context: TransformationContext): ts.SourceFile {

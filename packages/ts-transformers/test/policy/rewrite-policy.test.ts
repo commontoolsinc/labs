@@ -35,7 +35,7 @@ Deno.test("Rewrite policy: map rewrite matrix", () => {
     false,
   );
   assertEquals(
-    shouldRewriteCollectionMethod("pattern", "map", "opaque_autounwrapped"),
+    shouldRewriteCollectionMethod("pattern", "map", "reactive"),
     true,
   );
   assertEquals(
@@ -53,7 +53,7 @@ Deno.test("Rewrite policy: map rewrite matrix", () => {
     false,
   );
   assertEquals(
-    shouldRewriteCollectionMethod("compute", "map", "opaque_autounwrapped"),
+    shouldRewriteCollectionMethod("compute", "map", "reactive"),
     false,
   );
   assertEquals(

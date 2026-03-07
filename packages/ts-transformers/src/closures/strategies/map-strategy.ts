@@ -118,10 +118,6 @@ function shouldTransformMap(
     return false;
   }
 
-  if (context.options.useLegacyOpaqueRefSemantics) {
-    return shouldTransformMapLegacy(mapCall, context);
-  }
-
   const mapTarget = mapCall.expression.expression;
   const contextInfo = classifyReactiveContext(
     mapCall,
@@ -452,48 +448,6 @@ function isReactiveMapOrigin(
   }
 
   return false;
-}
-
-function shouldTransformMapLegacy(
-  mapCall: ts.CallExpression,
-  context: TransformationContext,
-): boolean {
-  if (!ts.isPropertyAccessExpression(mapCall.expression)) return false;
-
-  const mapTarget = mapCall.expression.expression;
-
-  // Special case: derive() always returns OpaqueRef at runtime
-  if (isDeriveCall(mapTarget)) {
-    return true;
-  }
-
-  const targetType = getTypeAtLocationWithFallback(
-    mapTarget,
-    context.checker,
-    context.options.typeRegistry,
-    context.options.logger,
-  );
-
-  if (!targetType) return false;
-
-  const receiverKind = classifyReactiveReceiverKind(
-    targetType,
-    context.checker,
-  );
-  if (receiverKind === "plain") {
-    return false;
-  }
-
-  const contextInfo = classifyReactiveContext(
-    mapCall,
-    context.checker,
-    context,
-  );
-  if (contextInfo.kind === "compute") {
-    return receiverKind === "celllike_requires_rewrite";
-  }
-
-  return true;
 }
 
 /**

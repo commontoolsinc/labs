@@ -5,10 +5,14 @@ import {
 } from "@commontools/schema-generator/cell-brand";
 
 /**
- * Check if a type is a cell type by looking for the CELL_BRAND property.
+ * Brand-based detection: checks for the CELL_BRAND property on a type.
  * This includes OpaqueCell, Cell, Stream, and other cell variants.
+ *
+ * Redundant with context-based detection for OpaqueRef (which is identified
+ * via `isReactiveOriginCall`, `isRootOpaqueParameter`, etc.). Kept because
+ * Cell, Stream, and Writable retain their brands after OpaqueRef debranding.
  */
-export function isOpaqueRefType(
+export function isCellBrandedType(
   type: ts.Type,
   checker: ts.TypeChecker,
 ): boolean {
@@ -17,12 +21,12 @@ export function isOpaqueRefType(
   }
   if (type.flags & ts.TypeFlags.Union) {
     return (type as ts.UnionType).types.some((t) =>
-      isOpaqueRefType(t, checker)
+      isCellBrandedType(t, checker)
     );
   }
   if (type.flags & ts.TypeFlags.Intersection) {
     return (type as ts.IntersectionType).types.some((t) =>
-      isOpaqueRefType(t, checker)
+      isCellBrandedType(t, checker)
     );
   }
 
@@ -49,6 +53,13 @@ export function getCellKind(
   return utilGetCellKind(type, checker);
 }
 
+/**
+ * Returns true when `expression` is a simple identifier or property-access
+ * whose type is a branded cell type (OpaqueRef, Cell, Stream, …).
+ *
+ * A string-based type-name fallback is included so that the check continues
+ * to work after OpaqueRef debranding.
+ */
 export function isSimpleOpaqueRefAccess(
   expression: ts.Expression,
   checker: ts.TypeChecker,
@@ -57,7 +68,16 @@ export function isSimpleOpaqueRefAccess(
     ts.isIdentifier(expression) || ts.isPropertyAccessExpression(expression)
   ) {
     const type = checker.getTypeAtLocation(expression);
-    return isOpaqueRefType(type, checker);
+    if (isCellBrandedType(type, checker)) {
+      return true;
+    }
+    // String-based fallback for after OpaqueRef debranding
+    const typeStr = checker.typeToString(type);
+    return typeStr.includes("OpaqueRef<") ||
+      typeStr.includes("OpaqueCell<") ||
+      typeStr.includes("Cell<") ||
+      typeStr.includes("Stream<") ||
+      typeStr.includes("Writable<");
   }
   return false;
 }

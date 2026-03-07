@@ -2023,9 +2023,7 @@ export class SchemaInjectionTransformer extends Transformer {
   transform(context: TransformationContext): ts.SourceFile {
     const { sourceFile, tsContext: transformation, checker } = context;
     const typeRegistry = context.options.typeRegistry;
-    const capabilityRegistry = context.options.useLegacyOpaqueRefSemantics
-      ? undefined
-      : context.options.capabilitySummaryRegistry;
+    const capabilityRegistry = context.options.capabilitySummaryRegistry;
 
     const visit = (node: ts.Node): ts.Node => {
       if (!ts.isCallExpression(node)) {

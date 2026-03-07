@@ -8,7 +8,6 @@ import {
   groupCapturesByRoot,
 } from "../../utils/capture-tree.ts";
 import { createPropertyName } from "../../utils/identifiers.ts";
-import { isOpaqueRefType } from "../../transformers/opaque-ref/opaque-ref.ts";
 
 /**
  * PatternToolStrategy transforms patternTool() calls to capture closed-over variables.
@@ -525,17 +524,10 @@ function isModuleScopedDeclaration(decl: ts.Declaration): boolean {
  * come from cell(), Cell.of(), Writable.of(), etc. — never OpaqueRef (which
  * is a proxy wrapper for pattern parameters, always pattern-scoped).
  *
- * The isOpaqueRefType brand check is included as a safety net; it shouldn't
- * match in practice because isModuleScopedDeclaration filters first.
- *
- * See also: isCellLikeOrOpaqueRefType in pattern-context-validation.ts,
- * which additionally matches OpaqueRef for validating .map() receivers.
+ * Uses string-based type-name matching rather than brand-based detection
+ * so this works even after OpaqueRef debranding.
  */
 function isCellLikeType(type: ts.Type, checker: ts.TypeChecker): boolean {
-  if (isOpaqueRefType(type, checker)) {
-    return true;
-  }
-
   const typeStr = checker.typeToString(type);
   const cellLikePatterns = [
     "Cell<",

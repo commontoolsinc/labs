@@ -26,12 +26,12 @@
  * ROOT CAUSE (in map-strategy.ts):
  * When checking if .map() needs transformation:
  * 1. isDeriveCall(target) - The target is the derive result IDENTIFIER, not a derive CALL
- * 2. isOpaqueRefType(targetType) - The type registry has the unwrapped type, not OpaqueRef<T>
+ * 2. isCellBrandedType(targetType) - The type registry has the unwrapped type, not OpaqueRef<T>
  *
  * The type flow:
  * - derive(..., ({ msg }) => msg.reactions || []) returns OpaqueRef<Reaction[] | never[]>
  * - But the type registry stores the callback return type (Reaction[] | never[]), not OpaqueRef
- * - So isOpaqueRefType() fails and the .map() is not transformed
+ * - So isCellBrandedType() fails and the .map() is not transformed
  *
  * WORKAROUND:
  * Use direct property access WITHOUT fallback:

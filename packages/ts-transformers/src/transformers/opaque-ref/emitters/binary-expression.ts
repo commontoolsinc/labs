@@ -11,24 +11,10 @@ import {
   registerSyntheticCallType,
   selectDataFlowsReferencedIn,
 } from "../../../ast/mod.ts";
-import { isOpaqueRefType, isSimpleOpaqueRefAccess } from "../opaque-ref.ts";
+import { isCellBrandedType, isSimpleOpaqueRefAccess } from "../opaque-ref.ts";
 import { shouldLowerLogicalInJsx } from "../../../policy/mod.ts";
 import { unwrapExpression } from "../../../utils/expression.ts";
 import { isFallbackOperator } from "../../../utils/reactive-keys.ts";
-
-/**
- * Check if an expression is JSX (element, fragment, or self-closing).
- * Also handles parenthesized JSX like `(<div>...</div>)`.
- */
-function isJsxExpression(expr: ts.Expression): boolean {
-  // Unwrap parentheses
-  while (ts.isParenthesizedExpression(expr)) {
-    expr = expr.expression;
-  }
-  return ts.isJsxElement(expr) ||
-    ts.isJsxFragment(expr) ||
-    ts.isJsxSelfClosingElement(expr);
-}
 
 function isMapReceiverBinary(expression: ts.BinaryExpression): boolean {
   let current: ts.Node = expression;
@@ -69,21 +55,21 @@ export const emitBinaryExpression: Emitter = ({
 }) => {
   if (!ts.isBinaryExpression(expression)) return undefined;
   const operator = expression.operatorToken.kind;
-  const useLegacySemantics = context.options.useLegacyOpaqueRefSemantics;
-  const shouldLowerByContextPolicy = !useLegacySemantics &&
-    shouldLowerLogicalInJsx(reactiveContextKind, operator);
+  const shouldLowerByContextPolicy = shouldLowerLogicalInJsx(
+    reactiveContextKind,
+    operator,
+  );
 
-  // Check if the left side of && or || has an OpaqueRef type.
-  // This is important for cases like `computed(() => plainValue) && <JSX>`
-  // where the computed() returns an OpaqueRef but doesn't contain opaques in its inputs.
-  // OpaqueRefs are always truthy as objects, so we need when/unless for correct semantics.
+  // Secondary signal: check if the left side has a cell brand (Cell, Stream, etc.).
+  // In pattern context, shouldLowerByContextPolicy already handles lowering, so this
+  // is mainly a safety net for edge cases outside pattern context.
   const leftType = context.checker.getTypeAtLocation(expression.left);
-  const leftIsOpaqueRef = isOpaqueRefType(leftType, context.checker);
+  const leftIsCellBranded = isCellBrandedType(leftType, context.checker);
 
-  // Skip if no dataflows AND left side isn't an OpaqueRef type
+  // Skip if no dataflows AND left side isn't cell-branded AND policy doesn't require lowering
   if (
     dataFlows.all.length === 0 &&
-    !leftIsOpaqueRef &&
+    !leftIsCellBranded &&
     !shouldLowerByContextPolicy
   ) {
     return undefined;
@@ -100,8 +86,8 @@ export const emitBinaryExpression: Emitter = ({
   // If the right side is simple (not JSX, no reactive deps), using when/unless is just
   // overhead - better to wrap the whole expression in derive.
   if (operator === ts.SyntaxKind.AmpersandAmpersandToken) {
-    if (!useLegacySemantics && !shouldLowerByContextPolicy) {
-      // New policy: outside pattern context we do not lower && in JSX.
+    if (!shouldLowerByContextPolicy) {
+      // Outside pattern context we do not lower && in JSX.
       if (inSafeContext) return undefined;
     }
 
@@ -109,18 +95,8 @@ export const emitBinaryExpression: Emitter = ({
       dataFlows,
       expression.left,
     );
-    const rightDataFlows = selectDataFlowsReferencedIn(
-      dataFlows,
-      expression.right,
-    );
 
-    // Check if right side is "expensive" - JSX or has reactive dependencies that need derive
-    const rightIsJsx = isJsxExpression(expression.right);
-    const rightNeedsDerive = rightDataFlows.length > 0 &&
-      !isSimpleOpaqueRefAccess(expression.right, context.checker);
-    const rightIsExpensive = rightIsJsx || rightNeedsDerive;
-    const shouldLower = shouldLowerByContextPolicy ||
-      (useLegacySemantics && (rightIsExpensive || leftIsOpaqueRef));
+    const shouldLower = shouldLowerByContextPolicy;
 
     if (shouldLower) {
       // Process left side - derive if it has reactive deps, otherwise pass as-is
@@ -174,8 +150,8 @@ export const emitBinaryExpression: Emitter = ({
   //
   // Same rationale as &&: only beneficial when right side is expensive.
   if (operator === ts.SyntaxKind.BarBarToken) {
-    if (!useLegacySemantics && !shouldLowerByContextPolicy) {
-      // New policy: outside pattern context we do not lower || in JSX.
+    if (!shouldLowerByContextPolicy) {
+      // Outside pattern context we do not lower || in JSX.
       if (inSafeContext) return undefined;
     }
 
@@ -183,23 +159,9 @@ export const emitBinaryExpression: Emitter = ({
       dataFlows,
       expression.left,
     );
-    const rightDataFlows = selectDataFlowsReferencedIn(
-      dataFlows,
-      expression.right,
-    );
 
-    // Check if right side is "expensive" - JSX or has reactive dependencies that need derive
-    const rightIsJsx = isJsxExpression(expression.right);
-    const rightNeedsDerive = rightDataFlows.length > 0 &&
-      !isSimpleOpaqueRefAccess(expression.right, context.checker);
-    const rightIsExpensive = rightIsJsx || rightNeedsDerive;
-    const shouldLower = shouldLowerByContextPolicy ||
-      (useLegacySemantics && (rightIsExpensive || leftIsOpaqueRef));
+    const shouldLower = shouldLowerByContextPolicy;
 
-    // Use unless() transformation if:
-    // 1. Right side is expensive (JSX or needs derive) - original optimization
-    // 2. OR left side is an OpaqueRef type - needed because OpaqueRefs are always truthy objects
-    //    so `computed(...) || <Fallback>` would never render fallback without unless()
     if (shouldLower) {
       // Process left side - derive if it has reactive deps, otherwise pass as-is
       let condition: ts.Expression = expression.left;

@@ -1,4 +1,8 @@
 export { type CallKind, detectCallKind } from "./call-kind.ts";
+export {
+  isReactiveOriginCall,
+  isReactiveSourceExpression,
+} from "./reactive-origin.ts";
 export * from "./dataflow.ts";
 export {
   classifyReactiveContext,

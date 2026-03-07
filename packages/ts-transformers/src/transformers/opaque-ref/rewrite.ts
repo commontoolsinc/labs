@@ -44,7 +44,7 @@ function rewriteChildExpressions(
   const visitor = (child: ts.Node): ts.Node => {
     if (ts.isExpression(child)) {
       const analysis = analyze(child);
-      if (analysis.containsOpaqueRef && analysis.requiresRewrite) {
+      if (analysis.containsReactiveRef && analysis.requiresRewrite) {
         // Skip wrapping if inside a safe callback wrapper (computed/derive/action/etc.)
         // This prevents double-wrapping expressions already in a reactive context
         if (isInsideSafeCallbackWrapper(child, context.checker, context)) {
