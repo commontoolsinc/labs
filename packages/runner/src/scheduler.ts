@@ -1266,7 +1266,10 @@ export class Scheduler {
     nonRecursiveReads: IMemorySpaceAddress[];
   } {
     const reads = sortAndCompactPaths(log.reads);
-    const nonRecursiveReads = sortAndCompactPaths(log.nonRecursiveReads ?? []);
+    const nonRecursiveReads = sortAndCompactPaths(
+      log.nonRecursiveReads ?? [],
+      false,
+    );
     const writes = sortAndCompactPaths(log.writes);
     this.dependencies.set(action, { reads, nonRecursiveReads, writes });
 

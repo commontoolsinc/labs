@@ -282,6 +282,24 @@ describe("sortAndCompactPaths", () => {
     ]);
   });
 
+  describe("compactifyChildren = false", () => {
+    it("preserves child paths", () => {
+      const addresses = createAddresses([["a"], ["a", "b"], ["a", "b", "c"]]);
+      const result = sortAndCompactPaths(addresses, false);
+      expect(result).toEqual(addresses);
+    });
+
+    it("still removes exact duplicates", () => {
+      const addresses = createAddresses([
+        ["a", "b"],
+        ["a", "b"],
+        ["a", "c"],
+      ]);
+      const result = sortAndCompactPaths(addresses, false);
+      expect(result).toEqual(createAddresses([["a", "b"], ["a", "c"]]));
+    });
+  });
+
   it("only compacts paths within same space/id/type", () => {
     const addresses: IMemorySpaceAddress[] = [
       createAddress(

@@ -25,13 +25,16 @@ type Keyable = Record<MemoryAddressPathComponent, StorableValue>;
 /**
  * Sorts and compactifies the paths.
  *
- * Compactifies by removing any entries that have another as a prefix.
+ * Compactifies by removing any duplicate entries, and potentially entries
+ * that have another as a prefix.
  *
  * @param paths - The paths to sort and compactify.
+ * @param compactifyChildren - whether to remove entries that have the same prefix
  * @returns The sorted and compactified paths.
  */
 export function sortAndCompactPaths(
   unsorted: IMemorySpaceAddress[],
+  compactifyChildren = true,
 ): IMemorySpaceAddress[] {
   if (unsorted.length === 0) return [];
 
@@ -54,15 +57,18 @@ export function sortAndCompactPaths(
   let previous = sorted[0];
   for (let i = 1; i < sorted.length; i++) {
     if (
-      sorted[i].space !== previous.space ||
-      sorted[i].id !== previous.id ||
-      sorted[i].type !== previous.type ||
+      sorted[i].space === previous.space &&
+      sorted[i].id === previous.id &&
+      sorted[i].type === previous.type &&
       // Is the previous path a prefix of the current path?
-      !previous.path.every((value, index) => value === sorted[i].path[index])
+      previous.path.every((value, index) => value === sorted[i].path[index]) &&
+      // If we compactifyChildren, or the paths are identical, skip this
+      (compactifyChildren || previous.path.length === sorted[i].path.length)
     ) {
-      result.push(sorted[i]);
-      previous = sorted[i];
+      continue;
     }
+    result.push(sorted[i]);
+    previous = sorted[i];
   }
   return result;
 }
