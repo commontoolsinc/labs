@@ -1025,7 +1025,7 @@ export function getAtPath(
         },
         value: undefined,
       };
-      // go ahead and register this read -- a subsequnt write
+      // go ahead and register this read -- a subsequent write
       // at this location should re-trigger us
       tx.read(curDoc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
       return [curDoc, selector];
