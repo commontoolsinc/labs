@@ -7,6 +7,38 @@ import { transformSource } from "../utils.ts";
 const staticCache = new StaticCacheFS();
 const commontools = await staticCache.getText("types/commontools.d.ts");
 
+const MAP_WITH_INDEX_AND_CAPTURES_SOURCE = `/// <cts-enable />
+import { h, pattern, UI, ifElse, NAME } from "commontools";
+
+interface Charm {
+  id: string;
+  [key: string]: string | undefined;
+}
+
+interface State {
+  charms: Charm[];
+  defaultName: string;
+}
+
+export default pattern<State>((state) => {
+  return {
+    [UI]: (
+      <section>
+        <ul>
+          {state.charms.map((charm: any, index: number) => (
+            <li key={charm.id}>
+              <span class="number">{index + 1}</span>
+              <span class="name">{charm[NAME] || state.defaultName}</span>
+            </li>
+          ))}
+        </ul>
+        {ifElse(!state.charms.length, <p>No charms</p>, <p>Loaded charms</p>)}
+      </section>
+    ),
+  };
+});
+`;
+
 const WISH_DEFAULT_ARRAY_SOURCE = `/// <cts-enable />
 import { Default, handler, NAME, pattern, UI, wish, Writable } from "commontools";
 
@@ -64,6 +96,19 @@ export default pattern<State>((state) => {
 `;
 
 describe("OpaqueRef map callbacks", () => {
+  it("transforms map with index, NAME, outer captures, and ifElse", async () => {
+    const output = await transformSource(MAP_WITH_INDEX_AND_CAPTURES_SOURCE, {
+      types: { "commontools.d.ts": commontools },
+    });
+
+    // Map should be transformed to mapWithPattern
+    assertStringIncludes(output, "mapWithPattern(");
+    // Outer state.defaultName should be captured
+    assertStringIncludes(output, "defaultName");
+    // ifElse should remain (it's a helper call, not a raw ternary)
+    assertStringIncludes(output, "ifElse(");
+  });
+
   it("transforms wish<Default<Array<T>, []>>().result.map() to mapWithPattern", async () => {
     const output = await transformSource(WISH_DEFAULT_ARRAY_SOURCE, {
       types: { "commontools.d.ts": commontools },

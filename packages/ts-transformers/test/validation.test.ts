@@ -1011,6 +1011,38 @@ Deno.test("Pattern Context Validation - Map on Fallback", async (t) => {
   );
 
   await t.step(
+    "capability-first mode allows reactive || [] fallback map",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern, UI } from "commontools";
+
+      interface Item { name: string; }
+
+      export default pattern<{ items?: Item[] }>(({ items }) => {
+        return {
+          [UI]: (
+            <div>
+              {(items || []).map((item) => <span>{item.name}</span>)}
+            </div>
+          ),
+        };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics).filter((error) =>
+        error.type === "pattern-context:map-on-fallback"
+      );
+      assertEquals(
+        errors.length,
+        0,
+        "Capability-first should allow reactive || [] fallback map usage",
+      );
+    },
+  );
+
+  await t.step(
     "allows .map() on direct property access (correct usage)",
     async () => {
       const source = `/// <cts-enable />
