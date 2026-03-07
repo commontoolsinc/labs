@@ -47,7 +47,10 @@ export class StorageManagerEmulator extends BaseStorageManager {
 
   override async close() {
     await super.close();
-    this.#session?.cancel();
+    if (this.#session) {
+      this.#session.close();
+      await this.#session.closed;
+    }
   }
 }
 
