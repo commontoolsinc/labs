@@ -5,14 +5,10 @@ import {
 } from "@commontools/schema-generator/cell-brand";
 
 /**
- * Brand-based detection: checks for the CELL_BRAND property on a type.
+ * Check if a type is a cell type by looking for the CELL_BRAND property.
  * This includes OpaqueCell, Cell, Stream, and other cell variants.
- *
- * Redundant with context-based detection for OpaqueRef (which is identified
- * via `isReactiveOriginCall`, `isRootOpaqueParameter`, etc.). Kept because
- * Cell, Stream, and Writable retain their brands after OpaqueRef debranding.
  */
-export function isCellBrandedType(
+export function isOpaqueRefType(
   type: ts.Type,
   checker: ts.TypeChecker,
 ): boolean {
@@ -21,12 +17,12 @@ export function isCellBrandedType(
   }
   if (type.flags & ts.TypeFlags.Union) {
     return (type as ts.UnionType).types.some((t) =>
-      isCellBrandedType(t, checker)
+      isOpaqueRefType(t, checker)
     );
   }
   if (type.flags & ts.TypeFlags.Intersection) {
     return (type as ts.IntersectionType).types.some((t) =>
-      isCellBrandedType(t, checker)
+      isOpaqueRefType(t, checker)
     );
   }
 
@@ -53,10 +49,6 @@ export function getCellKind(
   return utilGetCellKind(type, checker);
 }
 
-/**
- * Returns true when `expression` is a simple identifier or property-access
- * whose type is a branded cell type (Cell, Stream, Writable, …).
- */
 export function isSimpleOpaqueRefAccess(
   expression: ts.Expression,
   checker: ts.TypeChecker,
@@ -65,7 +57,7 @@ export function isSimpleOpaqueRefAccess(
     ts.isIdentifier(expression) || ts.isPropertyAccessExpression(expression)
   ) {
     const type = checker.getTypeAtLocation(expression);
-    return isCellBrandedType(type, checker);
+    return isOpaqueRefType(type, checker);
   }
   return false;
 }

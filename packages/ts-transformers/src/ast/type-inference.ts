@@ -1,6 +1,5 @@
 import ts from "typescript";
-import { isCellBrandedType } from "../transformers/opaque-ref/opaque-ref.ts";
-import { isReactiveOriginCall } from "./reactive-origin.ts";
+import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
 import {
   getTypeAtLocationWithFallback,
   isDefaultAliasSymbol,
@@ -260,7 +259,7 @@ export function unwrapOpaqueLikeType(
     // For OpaqueRef<T> = OpaqueCell<T> & OpaqueRefInner<T>, we want to extract T
     // Look for an OpaqueCell<T> part and extract its type argument
     for (const part of type.types) {
-      if (isCellBrandedType(part, checker)) {
+      if (isOpaqueRefType(part, checker)) {
         const inner = getTypeReferenceArgument(part);
         if (inner) {
           // Recursively unwrap in case T itself contains OpaqueRef types
@@ -281,7 +280,7 @@ export function unwrapOpaqueLikeType(
     return type;
   }
 
-  if (isCellBrandedType(type, checker)) {
+  if (isOpaqueRefType(type, checker)) {
     const inner = unwrapOpaqueLikeType(
       getTypeReferenceArgument(type),
       checker,
@@ -462,7 +461,7 @@ function findOpaqueRefInUnion(
   for (const member of unionType.types) {
     if (
       member.flags & ts.TypeFlags.Intersection ||
-      isCellBrandedType(member, checker)
+      isOpaqueRefType(member, checker)
     ) {
       return member;
     }
@@ -765,7 +764,7 @@ function isEffectiveArrayMember(
 
 /**
  * Helper to check if a type's type argument is an array.
- * Handles unions and intersections recursively, similar to isCellBrandedType.
+ * Handles unions and intersections recursively, similar to isOpaqueRefType.
  */
 export function hasArrayTypeArgument(
   type: ts.Type,
@@ -893,12 +892,6 @@ export function isReactiveArrayMapCall(
     return true;
   }
 
-  // Context-based fallback: if target is a reactive-origin call (computed(), etc.)
-  // treat the result as reactive even without the brand.
-  if (ts.isCallExpression(target) && isReactiveOriginCall(target, checker)) {
-    return true;
-  }
-
   const targetType = getTypeAtLocationWithFallback(
     target,
     checker,
@@ -909,7 +902,7 @@ export function isReactiveArrayMapCall(
     return false;
   }
 
-  // Brand-based check: target is a cell-branded array type
-  return isCellBrandedType(targetType, checker) &&
+  // Type-based check: target is OpaqueRef<T[]> or Cell<T[]>
+  return isOpaqueRefType(targetType, checker) &&
     hasArrayTypeArgument(targetType, checker);
 }

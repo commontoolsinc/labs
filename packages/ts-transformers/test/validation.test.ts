@@ -979,6 +979,62 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
 
 Deno.test("Pattern Context Validation - Map on Fallback", async (t) => {
   await t.step(
+    "legacy mode errors on .map() after ?? [] fallback with reactive left side",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern, UI } from "commontools";
+
+      interface Item { name: string; }
+
+      export default pattern<{ items?: Item[] }>(({ items }) => {
+        return {
+          [UI]: (
+            <div>
+              {(items ?? []).map((item) => <span>{item.name}</span>)}
+            </div>
+          ),
+        };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+        useLegacyOpaqueRefSemantics: true,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertEquals(errors[0]!.type, "pattern-context:map-on-fallback");
+    },
+  );
+
+  await t.step(
+    "legacy mode errors on .map() after || [] fallback with reactive left side",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern, UI } from "commontools";
+
+      interface Item { name: string; }
+
+      export default pattern<{ items?: Item[] }>(({ items }) => {
+        return {
+          [UI]: (
+            <div>
+              {(items || []).map((item) => <span>{item.name}</span>)}
+            </div>
+          ),
+        };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+        useLegacyOpaqueRefSemantics: true,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertEquals(errors[0]!.type, "pattern-context:map-on-fallback");
+    },
+  );
+
+  await t.step(
     "capability-first mode allows reactive fallback map",
     async () => {
       const source = `/// <cts-enable />
@@ -998,6 +1054,7 @@ Deno.test("Pattern Context Validation - Map on Fallback", async (t) => {
     `;
       const { diagnostics } = await validateSource(source, {
         types: COMMONTOOLS_TYPES,
+        useLegacyOpaqueRefSemantics: false,
       });
       const errors = getErrors(diagnostics).filter((error) =>
         error.type === "pattern-context:map-on-fallback"
@@ -1006,38 +1063,6 @@ Deno.test("Pattern Context Validation - Map on Fallback", async (t) => {
         errors.length,
         0,
         "Capability-first should allow reactive fallback map usage",
-      );
-    },
-  );
-
-  await t.step(
-    "capability-first mode allows reactive || [] fallback map",
-    async () => {
-      const source = `/// <cts-enable />
-      import { pattern, UI } from "commontools";
-
-      interface Item { name: string; }
-
-      export default pattern<{ items?: Item[] }>(({ items }) => {
-        return {
-          [UI]: (
-            <div>
-              {(items || []).map((item) => <span>{item.name}</span>)}
-            </div>
-          ),
-        };
-      });
-    `;
-      const { diagnostics } = await validateSource(source, {
-        types: COMMONTOOLS_TYPES,
-      });
-      const errors = getErrors(diagnostics).filter((error) =>
-        error.type === "pattern-context:map-on-fallback"
-      );
-      assertEquals(
-        errors.length,
-        0,
-        "Capability-first should allow reactive || [] fallback map usage",
       );
     },
   );

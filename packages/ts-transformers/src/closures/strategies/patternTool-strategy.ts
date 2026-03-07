@@ -8,6 +8,7 @@ import {
   groupCapturesByRoot,
 } from "../../utils/capture-tree.ts";
 import { createPropertyName } from "../../utils/identifiers.ts";
+import { isOpaqueRefType } from "../../transformers/opaque-ref/opaque-ref.ts";
 
 /**
  * PatternToolStrategy transforms patternTool() calls to capture closed-over variables.
@@ -517,17 +518,28 @@ function isModuleScopedDeclaration(decl: ts.Declaration): boolean {
 }
 
 /**
- * Check if a type is a Cell-like type (Cell, Writable, Stream).
+ * Check if a type is a CellLike type (Cell, Writable, OpaqueCell, Stream).
  *
  * This function is used to decide which module-scoped variables to capture
  * in patternTool() extraParams. In practice, module-scoped reactive variables
  * come from cell(), Cell.of(), Writable.of(), etc. — never OpaqueRef (which
  * is a proxy wrapper for pattern parameters, always pattern-scoped).
+ *
+ * The isOpaqueRefType brand check is included as a safety net; it shouldn't
+ * match in practice because isModuleScopedDeclaration filters first.
+ *
+ * See also: isCellLikeOrOpaqueRefType in pattern-context-validation.ts,
+ * which additionally matches OpaqueRef for validating .map() receivers.
  */
 function isCellLikeType(type: ts.Type, checker: ts.TypeChecker): boolean {
+  if (isOpaqueRefType(type, checker)) {
+    return true;
+  }
+
   const typeStr = checker.typeToString(type);
   const cellLikePatterns = [
     "Cell<",
+    "OpaqueCell<",
     "Writable<",
     "Stream<",
   ];

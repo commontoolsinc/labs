@@ -28,6 +28,7 @@ export class CommonToolsTransformerPipeline extends Pipeline {
       capabilitySummaryRegistry: new WeakMap(),
       ...options,
     };
+    const useLegacy = ops.useLegacyOpaqueRefSemantics ?? false;
 
     // Create a shared diagnostics collector
     const sharedOps: TransformationOptions = {
@@ -37,18 +38,30 @@ export class CommonToolsTransformerPipeline extends Pipeline {
 
     const transformers: Transformer[] = [
       // Validation transformers run first to catch errors early.
+      // PatternContextValidation runs in both modes. In capability-first mode
+      // it still enforces placement/standalone/get-call rules while skipping
+      // legacy computation/optional heuristics.
       new CastValidationTransformer(sharedOps),
       new EmptyArrayOfValidationTransformer(sharedOps),
       new OpaqueGetValidationTransformer(sharedOps),
       new PatternContextValidationTransformer(sharedOps),
+    ];
+
+    transformers.push(
       // Then the regular transformation pipeline
       new OpaqueRefJSXTransformer(sharedOps),
       new ComputedTransformer(sharedOps),
       new ClosureTransformer(sharedOps),
-      new CapabilityLoweringTransformer(sharedOps),
+    );
+
+    if (!useLegacy) {
+      transformers.push(new CapabilityLoweringTransformer(sharedOps));
+    }
+
+    transformers.push(
       new SchemaInjectionTransformer(sharedOps),
       new SchemaGeneratorTransformer(sharedOps),
-    ];
+    );
 
     super(transformers);
 

@@ -7,7 +7,7 @@ import { transformSource } from "../utils.ts";
 const staticCache = new StaticCacheFS();
 const commontools = await staticCache.getText("types/commontools.d.ts");
 
-const MAP_WITH_INDEX_AND_CAPTURES_SOURCE = `/// <cts-enable />
+const SOURCE = `/// <cts-enable />
 import { h, pattern, UI, ifElse, NAME } from "commontools";
 
 interface Charm {
@@ -96,19 +96,6 @@ export default pattern<State>((state) => {
 `;
 
 describe("OpaqueRef map callbacks", () => {
-  it("transforms map with index, NAME, outer captures, and ifElse", async () => {
-    const output = await transformSource(MAP_WITH_INDEX_AND_CAPTURES_SOURCE, {
-      types: { "commontools.d.ts": commontools },
-    });
-
-    // Map should be transformed to mapWithPattern
-    assertStringIncludes(output, "mapWithPattern(");
-    // Outer state.defaultName should be captured
-    assertStringIncludes(output, "defaultName");
-    // ifElse should remain (it's a helper call, not a raw ternary)
-    assertStringIncludes(output, "ifElse(");
-  });
-
   it("transforms wish<Default<Array<T>, []>>().result.map() to mapWithPattern", async () => {
     const output = await transformSource(WISH_DEFAULT_ARRAY_SOURCE, {
       types: { "commontools.d.ts": commontools },
@@ -141,5 +128,53 @@ describe("OpaqueRef map callbacks", () => {
     );
     // The captures object (last arg to mapWithPattern) must be empty
     assertStringIncludes(output, "), {})");
+  });
+
+  it("derives map callback parameters and unary negations", async () => {
+    const output = await transformSource(SOURCE, {
+      useLegacyOpaqueRefSemantics: true,
+      types: { "commontools.d.ts": commontools },
+    });
+
+    // Map callback should be transformed to pattern with function-first, then schema for captured defaultName
+    assertStringIncludes(
+      output,
+      "__ctHelpers.pattern(",
+    );
+    // Check for correct parameter destructuring
+    assertStringIncludes(
+      output,
+      "({ element: charm, index, params: { state } }) =>",
+    );
+    assertStringIncludes(
+      output,
+      "state: {\n                    defaultName: state.defaultName\n                }",
+    );
+    // Index parameter still gets derive wrapping for the arithmetic operation
+    assertStringIncludes(
+      output,
+      `__ctHelpers.derive({
+                type: "object",
+                properties: {
+                    index: {
+                        type: "number"
+                    }
+                },
+                required: ["index"]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "number"
+            } as const satisfies __ctHelpers.JSONSchema, { index: index }, ({ index }) => index + 1)`,
+    );
+    // element[NAME] || defaultName - since right side is not JSX, wraps whole expression in derive
+    // (unless optimization only applies when right side is expensive like JSX)
+    assertStringIncludes(
+      output,
+      "({ charm, state }) => charm[NAME] || state.defaultName",
+    );
+    // ifElse still gets derive for the negation and preserves callback body
+    assertStringIncludes(
+      output,
+      "({ state }) => !state.charms.length",
+    );
   });
 });

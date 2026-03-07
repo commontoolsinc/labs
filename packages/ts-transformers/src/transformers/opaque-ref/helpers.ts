@@ -234,8 +234,8 @@ export function filterRelevantDataFlows(
     ) {
       return false;
     }
-    // Keep all other dataflows, including builder parameters and map parameters.
-    // These are reactive refs that may need to be included in derive calls.
+    // Keep all other dataflows, including builder parameters and map parameters
+    // Both are OpaqueRefs that may need to be included in derive calls
     return true;
   });
 }

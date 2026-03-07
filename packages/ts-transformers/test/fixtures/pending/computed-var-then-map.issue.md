@@ -46,7 +46,7 @@ In `map-strategy.ts`, the checks for whether `.map()` needs transformation both 
 
 1. **`isDeriveCall(target)`** — Only detects *direct* `derive()` call expressions, not identifiers or complex expressions that evaluate to derive results
 
-2. **`isCellBrandedType(targetType)`** — The type registry stores the *unwrapped* callback return type (`Reaction[] | never[]`), not `OpaqueRef<T>`. So the type check fails.
+2. **`isOpaqueRefType(targetType)`** — The type registry stores the *unwrapped* callback return type (`Reaction[] | never[]`), not `OpaqueRef<T>`. So the type check fails.
 
 The `|| []` fallback expression gets wrapped in a derive by the transformer, but the resulting `.map()` call doesn't recognize its target as needing transformation.
 
@@ -77,6 +77,6 @@ To actually support this pattern (rather than just erroring), these approaches c
 
 1. **Track derive result identifiers**: When a variable is assigned from a derive call, mark it so `isDeriveCall()` can recognize the identifier
 
-2. **Store OpaqueRef type in registry**: Instead of storing the unwrapped callback return type, store `OpaqueRef<T>` so `isCellBrandedType()` works
+2. **Store OpaqueRef type in registry**: Instead of storing the unwrapped callback return type, store `OpaqueRef<T>` so `isOpaqueRefType()` works
 
 3. **Check parent expression**: When `.map()` target is a complex expression involving `||` or `??`, check if either operand is an opaque type

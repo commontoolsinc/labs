@@ -5,24 +5,46 @@
  * to catch common reactive programming mistakes.
  *
  * Rules:
+ * - Reading from opaques is NOT allowed in:
+ *   - pattern body (top-level reactive context)
+ *   - map functions bound to opaques/cells (mapWithPattern)
+ *
+ * - Reading from opaques IS allowed in:
+ *   - computed()
+ *   - action()
+ *   - derive()
+ *   - lift()
+ *   - handler()
+ *   - JSX expressions (handled by OpaqueRefJSXTransformer)
+ *
  * - Function creation is NOT allowed in pattern context (must be at module scope)
  * - lift() and handler() must be defined at module scope, not inside patterns
- * - Calling .get() on cells in reactive context: ERROR (must wrap in computed())
- * - Standalone functions cannot use computed()/derive()/.map() on reactive types
+ *
+ * Errors reported:
+ * - Property access used in computation: ERROR (must wrap in computed())
+ * - Optional chaining (?.): ERROR (not allowed in reactive context)
+ * - Calling .get() on cells: ERROR (must wrap in computed())
+ * - Function creation in pattern context: ERROR (move to module scope)
+ * - lift()/handler() inside pattern: ERROR (move to module scope)
+ * - .map() on fallback expression (x ?? [] or x || []): ERROR (use direct property access)
  */
 import ts from "typescript";
 import { TransformationContext, Transformer } from "../core/mod.ts";
 import {
+  createDataFlowAnalyzer,
   detectCallKind,
   isInRestrictedReactiveContext,
   isInsideRestrictedContext,
   isInsideSafeCallbackWrapper,
   isStandaloneFunctionDefinition,
 } from "../ast/mod.ts";
+import { isOpaqueRefType } from "./opaque-ref/opaque-ref.ts";
 
 export class PatternContextValidationTransformer extends Transformer {
   transform(context: TransformationContext): ts.SourceFile {
     const checker = context.checker;
+    const analyze = createDataFlowAnalyzer(checker);
+    const useLegacy = context.options.useLegacyOpaqueRefSemantics ?? false;
 
     const visit = (node: ts.Node): ts.Node => {
       // Skip JSX - OpaqueRefJSXTransformer handles those
@@ -44,10 +66,42 @@ export class PatternContextValidationTransformer extends Transformer {
         }
       }
 
+      // Check for optional chaining in reactive context
+      // Note: isInRestrictedReactiveContext returns false for JSX expressions
+      // (they are handled by OpaqueRefJSXTransformer), so this won't flag
+      // optional chaining inside JSX like <div>{user?.name}</div>
+      if (
+        useLegacy &&
+        ts.isPropertyAccessExpression(node) &&
+        node.questionDotToken
+      ) {
+        if (isInRestrictedReactiveContext(node, checker, context)) {
+          context.reportDiagnostic({
+            severity: "error",
+            type: "pattern-context:optional-chaining",
+            message:
+              `Optional chaining '?.' is not allowed in reactive context. ` +
+              `Use ifElse() or wrap in computed() for conditional access.`,
+            node,
+          });
+        }
+      }
+
       // Check for .get() calls and lift/handler placement in reactive context
       if (ts.isCallExpression(node)) {
         // Check for lift/handler inside pattern
         this.validateBuilderPlacement(node, context, checker);
+
+        // Check for .map() on fallback expressions (x ?? [] or x || [])
+        // Only in restricted context (pattern body) where this pattern causes runtime failures.
+        // Note: We use isInsideRestrictedContext, not isInRestrictedReactiveContext, because
+        // the map-on-fallback pattern fails even inside JSX expressions (which are "safe" for
+        // other validations but still need this check).
+        if (isInsideRestrictedContext(node, checker, context)) {
+          if (useLegacy) {
+            this.validateMapOnFallbackExpression(node, context, checker);
+          }
+        }
 
         // Check for .get() calls
         if (
@@ -63,6 +117,12 @@ export class PatternContextValidationTransformer extends Transformer {
             node,
           });
         }
+      }
+
+      // Check for property access used in computation (not just pass-through)
+      // This applies to expressions in binary operators, conditionals, etc.
+      if (useLegacy && this.isComputationExpression(node)) {
+        this.validateComputationExpression(node, context, checker, analyze);
       }
 
       return ts.visitEachChild(node, visit, context.tsContext);
@@ -84,6 +144,61 @@ export class PatternContextValidationTransformer extends Transformer {
   }
 
   /**
+   * Checks if this node is an expression that performs computation
+   * (binary expression, unary expression, conditional, etc.)
+   */
+  private isComputationExpression(node: ts.Node): boolean {
+    return (
+      ts.isBinaryExpression(node) ||
+      ts.isPrefixUnaryExpression(node) ||
+      ts.isPostfixUnaryExpression(node) ||
+      ts.isConditionalExpression(node)
+    );
+  }
+
+  /**
+   * Validates that a computation expression doesn't improperly use reactive values
+   */
+  private validateComputationExpression(
+    node: ts.Node,
+    context: TransformationContext,
+    checker: ts.TypeChecker,
+    analyze: ReturnType<typeof createDataFlowAnalyzer>,
+  ): void {
+    // Skip if not in restricted reactive context
+    if (!isInRestrictedReactiveContext(node, checker, context)) {
+      return;
+    }
+
+    // Skip if inside JSX
+    if (this.isInsideJsx(node)) {
+      return;
+    }
+
+    // Analyze the expression for reactive dependencies
+    const expression = node as ts.Expression;
+    const analysis = analyze(expression);
+
+    // If this computation contains reactive refs, it should be wrapped in computed()
+    if (analysis.containsOpaqueRef && analysis.requiresRewrite) {
+      // Find the specific property access that's causing the issue
+      const problemAccess = this.findProblematicAccess(node);
+      const accessText = problemAccess
+        ? `'${problemAccess.getText()}'`
+        : "property access";
+
+      context.reportDiagnostic({
+        severity: "error",
+        type: "pattern-context:computation",
+        message:
+          `Property access ${accessText} used in computation is not allowed in reactive context. ` +
+          `Wrap the computation in computed(() => ...) instead.`,
+        node,
+      });
+    }
+  }
+
+  /**
    * Checks if a node is inside a JSX element
    */
   private isInsideJsx(node: ts.Node): boolean {
@@ -99,6 +214,27 @@ export class PatternContextValidationTransformer extends Transformer {
       current = current.parent;
     }
     return false;
+  }
+
+  /**
+   * Finds the first property access expression in the computation
+   */
+  private findProblematicAccess(
+    node: ts.Node,
+  ): ts.PropertyAccessExpression | undefined {
+    let result: ts.PropertyAccessExpression | undefined;
+
+    const find = (n: ts.Node): void => {
+      if (result) return;
+      if (ts.isPropertyAccessExpression(n)) {
+        result = n;
+        return;
+      }
+      ts.forEachChild(n, find);
+    };
+
+    find(node);
+    return result;
   }
 
   /**
@@ -258,6 +394,58 @@ export class PatternContextValidationTransformer extends Transformer {
   }
 
   /**
+   * Validates that .map() is not called on a fallback expression like (x ?? []) or (x || [])
+   * where one side is reactive (OpaqueRef) and the other is not.
+   *
+   * This pattern fails at runtime because the transformer can't properly detect that
+   * the result needs mapWithPattern transformation.
+   */
+  private validateMapOnFallbackExpression(
+    node: ts.CallExpression,
+    context: TransformationContext,
+    checker: ts.TypeChecker,
+  ): void {
+    if (!ts.isPropertyAccessExpression(node.expression)) return;
+    if (node.expression.name.text !== "map") return;
+
+    let target: ts.Expression = node.expression.expression;
+
+    // Unwrap parentheses
+    while (ts.isParenthesizedExpression(target)) {
+      target = target.expression;
+    }
+
+    // Check if target is (x ?? y) or (x || y)
+    if (!ts.isBinaryExpression(target)) return;
+
+    const op = target.operatorToken.kind;
+    if (
+      op !== ts.SyntaxKind.QuestionQuestionToken &&
+      op !== ts.SyntaxKind.BarBarToken
+    ) {
+      return;
+    }
+
+    // Check if left side is OpaqueRef and right side is not
+    const leftType = checker.getTypeAtLocation(target.left);
+    const rightType = checker.getTypeAtLocation(target.right);
+
+    const leftIsOpaque = isOpaqueRefType(leftType, checker);
+    const rightIsOpaque = isOpaqueRefType(rightType, checker);
+
+    if (leftIsOpaque && !rightIsOpaque) {
+      context.reportDiagnostic({
+        severity: "error",
+        type: "pattern-context:map-on-fallback",
+        message:
+          `'.map()' on fallback expression with mixed reactive/non-reactive types is not supported. ` +
+          `Use direct property access: 'x.map(...)' rather than '(x ?? fallback).map(...)'`,
+        node,
+      });
+    }
+  }
+
+  /**
    * Validates that standalone functions don't use reactive operations like
    * computed(), derive(), or .map() on CellLike types.
    *
@@ -343,7 +531,7 @@ export class PatternContextValidationTransformer extends Transformer {
               const receiverType = checker.getTypeAtLocation(
                 node.expression.expression,
               );
-              if (this.isCellLikeType(receiverType, checker)) {
+              if (this.isCellLikeOrOpaqueRefType(receiverType, checker)) {
                 context.reportDiagnostic({
                   severity: "error",
                   type: "standalone-function:reactive-operation",
@@ -392,22 +580,31 @@ export class PatternContextValidationTransformer extends Transformer {
   }
 
   /**
-   * Checks if a type is a Cell-like type that would require reactive handling
-   * in .map() calls inside standalone functions.
+   * Checks if a type is a CellLike or OpaqueRef type that would require
+   * reactive handling in .map() calls inside standalone functions.
    *
-   * Uses string-based type-name matching for Cell/Stream/Writable which retain
-   * their brands. OpaqueRef is not checked here — it is detected via context
-   * (isRootOpaqueParameter, isReactiveOriginCall).
+   * Includes OpaqueRef/OpaqueRefMethods because standalone helper functions
+   * may accept pattern parameters (typed as OpaqueRef<T[]>) and call .map()
+   * on them.
    */
-  private isCellLikeType(
+  private isCellLikeOrOpaqueRefType(
     type: ts.Type,
     checker: ts.TypeChecker,
   ): boolean {
+    // Check if it's an OpaqueRef type
+    if (isOpaqueRefType(type, checker)) {
+      return true;
+    }
+
+    // Check the type name for Cell-like types
     const typeStr = checker.typeToString(type);
     const cellLikePatterns = [
       "Cell<",
+      "OpaqueCell<",
       "Writable<",
       "Stream<",
+      "OpaqueRef<",
+      "OpaqueRefMethods<",
     ];
 
     return cellLikePatterns.some((pattern) => typeStr.includes(pattern));

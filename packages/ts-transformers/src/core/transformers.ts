@@ -60,6 +60,10 @@ export interface TransformationOptions {
   readonly schemaHints?: SchemaHints;
   readonly capabilitySummaryRegistry?: CapabilitySummaryRegistry;
   /**
+   * Default false (new behavior enabled). Set true to opt-out into legacy OpaqueRef semantics.
+   */
+  readonly useLegacyOpaqueRefSemantics?: boolean;
+  /**
    * Shared diagnostics collector that accumulates diagnostics across all transformers.
    * If provided, diagnostics are pushed to this array in addition to the local context.
    */

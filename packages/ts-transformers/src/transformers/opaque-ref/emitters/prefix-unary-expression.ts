@@ -32,7 +32,7 @@ export const emitPrefixUnaryExpression: Emitter = ({
     context,
   );
 
-  if (relevantDataFlows.length === 0 && analysis.containsReactiveRef) {
+  if (relevantDataFlows.length === 0 && analysis.containsOpaqueRef) {
     const fallbackAnalysis = analyze(expression.operand);
     const fallbackDataFlows = normalizeDataFlows(
       fallbackAnalysis.graph,

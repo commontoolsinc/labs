@@ -8,7 +8,7 @@ import {
 } from "./utils.ts";
 import { isFunctionLikeExpression } from "./function-predicates.ts";
 import { symbolDeclaresCommonToolsDefault } from "../core/mod.ts";
-import { isCellBrandedType } from "../transformers/opaque-ref/opaque-ref.ts";
+import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
 import { detectCallKind } from "./call-kind.ts";
 
 export interface DataFlowScopeParameter {
@@ -44,7 +44,7 @@ export type RewriteHint =
   | undefined;
 
 export interface DataFlowAnalysis {
-  containsReactiveRef: boolean;
+  containsOpaqueRef: boolean;
   requiresRewrite: boolean;
   dataFlows: ts.Expression[];
   graph: DataFlowGraph;
@@ -60,14 +60,14 @@ interface AnalyzerContext {
 }
 
 interface InternalAnalysis {
-  containsReactiveRef: boolean;
+  containsOpaqueRef: boolean;
   requiresRewrite: boolean;
   dataFlows: ts.Expression[];
   rewriteHint?: RewriteHint;
 }
 
 const emptyAnalysis = (): InternalAnalysis => ({
-  containsReactiveRef: false,
+  containsOpaqueRef: false,
   requiresRewrite: false,
   dataFlows: [],
   rewriteHint: undefined,
@@ -79,12 +79,12 @@ const mergeAnalyses = (...analyses: InternalAnalysis[]): InternalAnalysis => {
   const dataFlows: ts.Expression[] = [];
   for (const analysis of analyses) {
     if (!analysis) continue;
-    contains ||= analysis.containsReactiveRef;
+    contains ||= analysis.containsOpaqueRef;
     requires ||= analysis.requiresRewrite;
     dataFlows.push(...analysis.dataFlows);
   }
   return {
-    containsReactiveRef: contains,
+    containsOpaqueRef: contains,
     requiresRewrite: requires,
     dataFlows,
     rewriteHint: undefined,
@@ -201,7 +201,7 @@ export function createDataFlowAnalyzer(
     // Default: CallExpressions require rewrite if they contain opaque refs
     return {
       ...merged,
-      requiresRewrite: merged.containsReactiveRef || merged.requiresRewrite,
+      requiresRewrite: merged.containsOpaqueRef || merged.requiresRewrite,
       rewriteHint,
     };
   };
@@ -309,7 +309,7 @@ export function createDataFlowAnalyzer(
     const isRootOpaqueParameter = (symbol: ts.Symbol | undefined): boolean =>
       getOpaqueParameterCallKind(symbol) !== undefined;
 
-    const isImplicitReactiveExpression = (
+    const isImplicitOpaqueRefExpression = (
       expr: ts.Expression,
     ): boolean => {
       const root = findRootIdentifier(expr);
@@ -364,7 +364,7 @@ export function createDataFlowAnalyzer(
       if (!symbol && isSynthetic(expression)) {
         recordDataFlow(expression, scope, null, true); // Explicit: synthetic opaque parameter
         return {
-          containsReactiveRef: true,
+          containsOpaqueRef: true,
           requiresRewrite: false,
           dataFlows: [expression],
         };
@@ -375,10 +375,10 @@ export function createDataFlowAnalyzer(
       }
 
       const type = tryGetType(expression);
-      if (type && isCellBrandedType(type, checker)) {
-        recordDataFlow(expression, scope, null, true); // Explicit: cell-branded type
+      if (type && isOpaqueRefType(type, checker)) {
+        recordDataFlow(expression, scope, null, true); // Explicit: direct OpaqueRef
         return {
-          containsReactiveRef: true,
+          containsOpaqueRef: true,
           requiresRewrite: false,
           dataFlows: [expression],
         };
@@ -386,17 +386,17 @@ export function createDataFlowAnalyzer(
       if (symbolDeclaresCommonToolsDefault(symbol, checker)) {
         recordDataFlow(expression, scope, null, true); // Explicit: CommonTools default
         return {
-          containsReactiveRef: true,
+          containsOpaqueRef: true,
           requiresRewrite: false,
           dataFlows: [expression],
         };
       }
-      // Check if this identifier is a parameter to a builder or array-map call (like pattern).
-      // These parameters are implicitly reactive even without a cell brand.
+      // Check if this identifier is a parameter to a builder or array-map call (like pattern)
+      // These parameters become implicitly opaque even though their type isn't OpaqueRef
       if (isRootOpaqueParameter(symbol)) {
         recordDataFlow(expression, scope, null, true); // Explicit: opaque parameter
         return {
-          containsReactiveRef: true,
+          containsOpaqueRef: true,
           requiresRewrite: false,
           dataFlows: [expression],
         };
@@ -408,25 +408,25 @@ export function createDataFlowAnalyzer(
       const target = analyzeExpression(expression.expression, scope, context);
       const propertyType = tryGetType(expression);
 
-      if (propertyType && isCellBrandedType(propertyType, checker)) {
+      if (propertyType && isOpaqueRefType(propertyType, checker)) {
         if (originatesFromIgnored(expression.expression)) {
           return emptyAnalysis();
         }
         const parentId =
           context.expressionToNodeId.get(expression.expression) ?? null;
-        recordDataFlow(expression, scope, parentId, true);
+        recordDataFlow(expression, scope, parentId, true); // Explicit: OpaqueRef property
 
         // If the target is a complex expression requiring rewrite (like ElementAccess),
         // propagate its dataFlows. Otherwise, add this property access as a dataFlow.
         if (target.requiresRewrite && target.dataFlows.length > 0) {
           return {
-            containsReactiveRef: true,
+            containsOpaqueRef: true,
             requiresRewrite: target.requiresRewrite,
             dataFlows: target.dataFlows,
           };
         } else {
           return {
-            containsReactiveRef: true,
+            containsOpaqueRef: true,
             requiresRewrite: target.requiresRewrite,
             dataFlows: [expression],
           };
@@ -441,12 +441,12 @@ export function createDataFlowAnalyzer(
           context.expressionToNodeId.get(expression.expression) ?? null;
         recordDataFlow(expression, scope, parentId, true); // Explicit: CommonTools property
         return {
-          containsReactiveRef: true,
+          containsOpaqueRef: true,
           requiresRewrite: true,
           dataFlows: [expression],
         };
       }
-      if (isImplicitReactiveExpression(expression)) {
+      if (isImplicitOpaqueRefExpression(expression)) {
         if (originatesFromIgnored(expression.expression)) {
           return emptyAnalysis();
         }
@@ -466,17 +466,17 @@ export function createDataFlowAnalyzer(
           // This is a computed expression - use the dependencies from the target
           recordDataFlow(expression, scope, parentId, false);
           return {
-            containsReactiveRef: true,
+            containsOpaqueRef: true,
             requiresRewrite: true,
             dataFlows: target.dataFlows,
           };
         }
 
-        // This is a direct property access on a reactive ref (like state.charms.length)
+        // This is a direct property access on an OpaqueRef (like state.charms.length)
         // It should be its own explicit dependency
         recordDataFlow(expression, scope, parentId, true);
         return {
-          containsReactiveRef: true,
+          containsOpaqueRef: true,
           requiresRewrite: true,
           dataFlows: [expression],
         };
@@ -496,7 +496,7 @@ export function createDataFlowAnalyzer(
                 context.expressionToNodeId.get(expression.expression) ?? null;
               recordDataFlow(expression, scope, parentId, true);
               return {
-                containsReactiveRef: true,
+                containsOpaqueRef: true,
                 requiresRewrite: true,
                 dataFlows: [expression],
               };
@@ -506,18 +506,18 @@ export function createDataFlowAnalyzer(
             // Skip __ctHelpers.* property accesses - these are helper functions
             if (root.text === "__ctHelpers") {
               return {
-                containsReactiveRef: target.containsReactiveRef,
+                containsOpaqueRef: target.containsOpaqueRef,
                 requiresRewrite: target.requiresRewrite ||
-                  target.containsReactiveRef,
+                  target.containsOpaqueRef,
                 dataFlows: target.dataFlows,
               };
             }
             // Skip method calls like element.trim()
             if (isMethodCall(expression)) {
               return {
-                containsReactiveRef: target.containsReactiveRef,
+                containsOpaqueRef: target.containsOpaqueRef,
                 requiresRewrite: target.requiresRewrite ||
-                  target.containsReactiveRef,
+                  target.containsOpaqueRef,
                 dataFlows: target.dataFlows,
               };
             }
@@ -526,7 +526,7 @@ export function createDataFlowAnalyzer(
               context.expressionToNodeId.get(expression.expression) ?? null;
             recordDataFlow(expression, scope, parentId, true);
             return {
-              containsReactiveRef: true,
+              containsOpaqueRef: true,
               requiresRewrite: true,
               dataFlows: [expression],
             };
@@ -535,8 +535,8 @@ export function createDataFlowAnalyzer(
       }
 
       return {
-        containsReactiveRef: target.containsReactiveRef,
-        requiresRewrite: target.requiresRewrite || target.containsReactiveRef,
+        containsOpaqueRef: target.containsOpaqueRef,
+        requiresRewrite: target.requiresRewrite || target.containsOpaqueRef,
         dataFlows: target.dataFlows,
       };
     }
@@ -557,7 +557,7 @@ export function createDataFlowAnalyzer(
       }
 
       if (
-        isImplicitReactiveExpression(expression.expression) &&
+        isImplicitOpaqueRefExpression(expression.expression) &&
         target.dataFlows.length === 0
       ) {
         if (originatesFromIgnored(expression.expression)) {
@@ -568,14 +568,14 @@ export function createDataFlowAnalyzer(
         // Element access on implicit opaque ref - this is likely an explicit dependency
         recordDataFlow(expression, scope, parentId, true);
         return {
-          containsReactiveRef: true,
+          containsOpaqueRef: true,
           requiresRewrite: true,
           dataFlows: [expression],
         };
       }
       return {
-        containsReactiveRef: target.containsReactiveRef ||
-          argument.containsReactiveRef,
+        containsOpaqueRef: target.containsOpaqueRef ||
+          argument.containsOpaqueRef,
         requiresRewrite: true,
         dataFlows: [...target.dataFlows, ...argument.dataFlows],
       };
@@ -602,9 +602,9 @@ export function createDataFlowAnalyzer(
       const whenTrue = analyzeExpression(expression.whenTrue, scope, context);
       const whenFalse = analyzeExpression(expression.whenFalse, scope, context);
       return {
-        containsReactiveRef: condition.containsReactiveRef ||
-          whenTrue.containsReactiveRef ||
-          whenFalse.containsReactiveRef,
+        containsOpaqueRef: condition.containsOpaqueRef ||
+          whenTrue.containsOpaqueRef ||
+          whenFalse.containsOpaqueRef,
         requiresRewrite: true,
         dataFlows: [
           ...condition.dataFlows,
@@ -620,7 +620,7 @@ export function createDataFlowAnalyzer(
       const merged = mergeAnalyses(left, right);
       return {
         ...merged,
-        requiresRewrite: left.containsReactiveRef || right.containsReactiveRef,
+        requiresRewrite: left.containsOpaqueRef || right.containsOpaqueRef,
       };
     }
 
@@ -630,8 +630,8 @@ export function createDataFlowAnalyzer(
     ) {
       const operand = analyzeExpression(expression.operand, scope, context);
       return {
-        containsReactiveRef: operand.containsReactiveRef,
-        requiresRewrite: operand.containsReactiveRef,
+        containsOpaqueRef: operand.containsOpaqueRef,
+        requiresRewrite: operand.containsOpaqueRef,
         dataFlows: operand.dataFlows,
       };
     }
@@ -643,7 +643,7 @@ export function createDataFlowAnalyzer(
       const merged = mergeAnalyses(...parts);
       return {
         ...merged,
-        requiresRewrite: parts.some((part) => part.containsReactiveRef),
+        requiresRewrite: parts.some((part) => part.containsOpaqueRef),
       };
     }
 
