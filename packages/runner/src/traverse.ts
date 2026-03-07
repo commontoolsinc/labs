@@ -61,11 +61,11 @@ const READ_NON_RECURSIVE: IReadOptions = {
   nonRecursive: true,
 };
 const READ_FOR_SCHEDULING: IReadOptions = {
-  onlyReadForScheduling: true,
+  trackReadWithoutLoad: true,
 };
 const READ_NON_RECURSIVE_FOR_SCHEDULING: IReadOptions = {
   nonRecursive: true,
-  onlyReadForScheduling: true,
+  trackReadWithoutLoad: true,
 };
 
 export type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
@@ -428,7 +428,7 @@ export class ManagedStorageTransaction implements IStorageTransaction {
     address: IMemorySpaceAddress,
     options?: IReadOptions,
   ): Result<IAttestation, ReadError> {
-    if (options?.onlyReadForScheduling === true) {
+    if (options?.trackReadWithoutLoad === true) {
       return { ok: { address, value: undefined } };
     }
     const source = this.manager.load(address) ??

@@ -70,7 +70,7 @@ export interface IReadOptions {
    * from storage. Use when caller already has the value and only needs
    * dependency tracking.
    */
-  onlyReadForScheduling?: boolean;
+  trackReadWithoutLoad?: boolean;
   /**
    * When true, the read is tracked as non-recursive for scheduler invalidation:
    * parent/same-path writes invalidate, child writes invalidate only on key add.

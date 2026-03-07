@@ -119,7 +119,7 @@ export const read = (
       },
     });
 
-    if (options?.onlyReadForScheduling === true) {
+    if (options?.trackReadWithoutLoad === true) {
       return {
         ok: {
           address,
