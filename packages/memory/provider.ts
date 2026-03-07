@@ -326,11 +326,8 @@ class MemoryProviderSession<
   private spaceSessionCache = new Map<MemorySpace, SpaceSession<Space>>();
   // Accumulated doc keys per space for debounced schema matching
   private pendingSchemaChanges = new Map<MemorySpace, Set<string>>();
-  // Whether a schema flush is already scheduled
+  // Whether a schema flush is already scheduled via queueMicrotask
   private schemaFlushScheduled = false;
-  // Generation counter: incremented on each commit that accumulates
-  // schema changes. Compared across yield points to detect new work.
-  private schemaChangeGeneration = 0;
   // Duration of the previous schema flush (ms), for batch logging
   private lastFlushMs = 0;
 
@@ -1077,38 +1074,26 @@ class MemoryProviderSession<
     for (const doc of changedDocs) {
       pending.add(doc);
     }
-    this.schemaChangeGeneration++;
   }
 
   /**
-   * Schedule a debounced schema flush. Uses a queueMicrotask loop
-   * that keeps yielding as long as new schema changes arrive.
-   * This naturally batches rapid commits without creating timer
-   * resources that leak in tests.
+   * Schedule a schema flush via queueMicrotask.
+   *
+   * Batching happens naturally: commits arriving while a previous
+   * flushSchemaChanges() is running accumulate into pendingSchemaChanges.
+   * When the flush finishes, scheduleSchemaFlush fires again and picks
+   * up the entire batch. Cross-session notifications are synchronous and
+   * all fire within a single macrotask, so they're also batched.
    */
   private scheduleSchemaFlush(): void {
     if (this.schemaFlushScheduled) return;
     if (this.pendingSchemaChanges.size === 0) return;
     this.schemaFlushScheduled = true;
-    queueMicrotask(() => this.debouncedFlush());
-  }
-
-  private async debouncedFlush(): Promise<void> {
-    if (!this.schemaFlushScheduled) return;
-
-    // Keep yielding as long as new changes arrive, up to a limit.
-    // This lets the stream pipe drain all buffered messages without
-    // starving the flush if commits arrive continuously.
-    let gen: number;
-    let yields = 0;
-    do {
-      gen = this.schemaChangeGeneration;
-      await Promise.resolve();
+    queueMicrotask(() => {
       if (!this.schemaFlushScheduled) return;
-    } while (this.schemaChangeGeneration !== gen && ++yields < 50);
-
-    this.schemaFlushScheduled = false;
-    await this.flushSchemaChanges();
+      this.schemaFlushScheduled = false;
+      this.flushSchemaChanges();
+    });
   }
 
   /**
@@ -1118,7 +1103,7 @@ class MemoryProviderSession<
   private async flushSchemaChanges(
     isConflict = false,
   ): Promise<void> {
-    // Cancel any pending debounced flush since we're flushing now
+    // Cancel any pending scheduled flush since we're flushing now
     this.schemaFlushScheduled = false;
 
     // Guard against flush after session disposal
