@@ -81,15 +81,12 @@ const FetchContactsPage: any = pattern<PageInput, PageOutput>(
       u.searchParams.set("personFields", personFields);
       u.searchParams.set("pageSize", String(Math.min(maxContacts, 100)));
       u.searchParams.set("sortOrder", "LAST_NAME_ASCENDING");
+      u.searchParams.set("access_token", String(token));
       if (pageToken) u.searchParams.set("pageToken", pageToken);
       return u.toString();
     });
 
-    const options = computed(() => ({
-      headers: { Authorization: `Bearer ${token}` },
-    }));
-
-    const page = fetchData({ url, options, mode: "json" });
+    const page = fetchData({ url, mode: "json", options: {} });
 
     return derive(
       {
@@ -147,6 +144,12 @@ const toggleShowContacts = handler<
 >(
   (_, { showContacts }) => {
     showContacts.set(!showContacts.get());
+  },
+);
+
+const startFetch = handler<unknown, { shouldFetch: Writable<boolean> }>(
+  (_, { shouldFetch }) => {
+    shouldFetch.set(true);
   },
 );
 
@@ -218,14 +221,8 @@ const GoogleContactsImporter = pattern<GoogleContactsImporterInput, Output>(
       personFields: PERSON_FIELDS,
     });
 
-    const contacts = computed(() => fetchResult.contacts || []);
-    const fetching = computed(() => fetchResult.pending || false);
-
-    const startFetch = handler<unknown, { shouldFetch: Writable<boolean> }>(
-      (_, { shouldFetch }) => {
-        shouldFetch.set(true);
-      },
-    );
+    const contacts = fetchResult.contacts;
+    const fetching = fetchResult.pending;
 
     const contactCount = derive(
       contacts,
@@ -271,7 +268,7 @@ const GoogleContactsImporter = pattern<GoogleContactsImporterInput, Output>(
               {fullUI}
 
               <h3 style={{ fontSize: "18px", fontWeight: "bold" }}>
-                Imported contact count: {computed(() => contacts.get().length)}
+                Imported contact count: {contactCount}
               </h3>
 
               <ct-vstack gap="4">
