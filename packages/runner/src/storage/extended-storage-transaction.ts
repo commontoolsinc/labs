@@ -55,10 +55,6 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     return this.tx.reader(space);
   }
 
-  private transformReadOptions(options?: IReadOptions): IReadOptions {
-    return options ?? {};
-  }
-
   read(
     address: IMemorySpaceAddress,
     options?: IReadOptions,

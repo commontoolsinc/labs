@@ -893,7 +893,7 @@ export abstract class BaseObjectTraverser {
  * we need to call tx.read to flag our usage.
  *
  * Our caller is responsible for registering reads on the returned attestation,
- * though we will have flagged a nonRecursirve read on any new docs.
+ * though we will have flagged a nonRecursive read on any new docs.
  *
  * @param manager - Storage manager for document access.
  * @param doc - IAttestation for the current document
@@ -1127,7 +1127,7 @@ function followPointer(
   // The path here is just the link path, but we may be interested in the deeper
   // contents and this could just be an intermediate link, so ignore this read
   // for scheduling. We'll have to tag it later.
-  // We use a nonRecursive read, because we
+  // We use a nonRecursive read, since we may not need everything at the target.
   const { ok: valueEntry, error } = tx.read(target, { nonRecursive: true });
 
   if (error !== undefined) {
