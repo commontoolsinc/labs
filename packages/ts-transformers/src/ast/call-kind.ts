@@ -43,6 +43,7 @@
 import ts from "typescript";
 
 import { isCommonToolsSymbol } from "../core/mod.ts";
+import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
 
 const BUILDER_SYMBOL_NAMES = new Set([
   "pattern",
@@ -173,8 +174,16 @@ function resolveExpressionKind(
 
   if (ts.isPropertyAccessExpression(target)) {
     const name = target.name.text;
+    // Fallback: classify as array-map only if the receiver is a reactive type.
+    // Name alone is insufficient — filter/flatMap/map are common on plain arrays.
     if (ARRAY_METHOD_NAMES.has(name)) {
-      return { kind: "array-map" };
+      const receiverType = checker.getTypeAtLocation(target.expression);
+      if (
+        !(receiverType.flags & ts.TypeFlags.Any) &&
+        isOpaqueRefType(receiverType, checker)
+      ) {
+        return { kind: "array-map" };
+      }
     }
     if (name === "derive") {
       return { kind: "derive" };
