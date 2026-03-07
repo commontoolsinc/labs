@@ -8,7 +8,6 @@ import { NativeTypeFormatter } from "./formatters/native-type-formatter.ts";
  * "Writable" is an alias for "Cell" that better expresses semantic meaning.
  */
 const CELL_LIKE_WRAPPER_NAMES = new Set(["Cell", "Writable"]);
-const CFC_WRAPPER_NAMES = new Set(["CFC", "Secret", "Confidential"]);
 
 /**
  * Safe wrapper for TypeScript checker APIs that may throw in reduced environments
@@ -329,19 +328,17 @@ export function getNamedTypeKey(
     const nodeTypeName = typeNode.typeName.text;
     if (
       nodeTypeName === "Default" || CELL_LIKE_WRAPPER_NAMES.has(nodeTypeName) ||
-      nodeTypeName === "Stream" || nodeTypeName === "OpaqueRef" ||
-      CFC_WRAPPER_NAMES.has(nodeTypeName)
+      nodeTypeName === "Stream" || nodeTypeName === "OpaqueRef"
     ) {
       return undefined;
     }
   }
 
-  // Check if this is a Default/Cell/Stream/OpaqueRef/CFC wrapper type via alias
+  // Check if this is a Default/Cell/Stream/OpaqueRef wrapper type via alias
   const aliasName = (type as TypeWithInternals).aliasSymbol?.name;
   if (
     aliasName === "Default" || CELL_LIKE_WRAPPER_NAMES.has(aliasName ?? "") ||
-    aliasName === "Stream" || aliasName === "OpaqueRef" ||
-    CFC_WRAPPER_NAMES.has(aliasName ?? "")
+    aliasName === "Stream" || aliasName === "OpaqueRef"
   ) {
     return undefined;
   }
@@ -693,7 +690,7 @@ export function isDefaultTypeRef(
 export function detectWrapperViaNode(
   typeNode: ts.TypeNode | undefined,
   typeChecker: ts.TypeChecker,
-): "Default" | "Cell" | "Stream" | "OpaqueRef" | "CFC" | undefined {
+): "Default" | "Cell" | "Stream" | "OpaqueRef" | undefined {
   const result = resolveWrapperNode(typeNode, typeChecker);
   return result?.kind;
 }
@@ -706,7 +703,7 @@ export function resolveWrapperNode(
   typeNode: ts.TypeNode | undefined,
   typeChecker: ts.TypeChecker,
 ): {
-  kind: "Default" | "Cell" | "Stream" | "OpaqueRef" | "CFC";
+  kind: "Default" | "Cell" | "Stream" | "OpaqueRef";
   node: ts.TypeReferenceNode;
 } | undefined {
   if (
@@ -733,11 +730,6 @@ export function resolveWrapperNode(
     };
   }
 
-  // CFC/Secret/Confidential: normalize to "CFC"
-  if (CFC_WRAPPER_NAMES.has(literalName)) {
-    return { kind: "CFC", node: typeNode };
-  }
-
   // Follow alias chain
   return followAliasToWrapperNode(typeNode, typeChecker, new Set());
 }
@@ -751,7 +743,7 @@ function followAliasToWrapperNode(
   typeChecker: ts.TypeChecker,
   visited: Set<string>,
 ): {
-  kind: "Default" | "Cell" | "Stream" | "OpaqueRef" | "CFC";
+  kind: "Default" | "Cell" | "Stream" | "OpaqueRef";
   node: ts.TypeReferenceNode;
 } | undefined {
   if (!ts.isIdentifier(typeNode.typeName)) {
@@ -780,11 +772,6 @@ function followAliasToWrapperNode(
       kind: kind as "Default" | "Cell" | "Stream" | "OpaqueRef",
       node: typeNode,
     };
-  }
-
-  // CFC/Secret/Confidential: normalize to "CFC"
-  if (CFC_WRAPPER_NAMES.has(typeName)) {
-    return { kind: "CFC", node: typeNode };
   }
 
   // Look up the symbol for this type name
