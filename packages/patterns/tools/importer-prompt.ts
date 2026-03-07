@@ -64,11 +64,12 @@ import {
   ifElse,
   NAME,
   pattern,
-  Secret,
   Stream,
   UI,
   Writable,
 } from "commontools";
+
+type Secret<T> = T;
 
 import { createRefreshFunction } from "../../auth/auth-refresh.ts";
 import {
@@ -2049,12 +2050,15 @@ All patterns start with:
 \`\`\`tsx
 /// <cts-enable />
 import {
-  computed, Default, handler, ifElse, NAME, pattern, Secret,
+  computed, Default, handler, ifElse, NAME, pattern,
   Stream, UI, Writable, getPatternEnvironment, wish, action, navigateTo,
 } from "commontools";
+
+// Local no-op type alias for marking sensitive fields
+type Secret<T> = T;
 \`\`\`
 
-Import only what you need from the above list.
+Import only what you need from the above list. Define \`type Secret<T> = T;\` locally when you need to mark fields as sensitive.
 
 ### Core Concepts
 
@@ -2081,7 +2085,7 @@ Import only what you need from the above list.
 - **\`[UI]\`** — Special symbol for the piece's rendered UI.
 - **\`Default<T, D>\`** — Type with a default value. For mutable arrays in schemas,
   the standard pattern is \`Writable<Default<T[], []>>\`.
-- **\`Secret<T>\`** — Type wrapper marking a value as secret.
+- **\`Secret<T>\`** — Local no-op type alias (\`type Secret<T> = T;\`) for marking sensitive fields.
 - **\`Stream<T>\`** — Stateless channel. Written via \`.send()\`. Used for handlers
   that can be called from other pieces.
 
