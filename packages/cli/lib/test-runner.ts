@@ -72,6 +72,41 @@ export interface NavigationEvent {
   afterActionIndex: number;
 }
 
+/** Performance metrics collected during a test run for tracking over time. */
+export interface TestPerfStats {
+  /** Whether pull-based scheduling was active */
+  pullMode: boolean;
+  /** Number of scheduler effects (sinks) */
+  effects: number;
+  /** Number of scheduler computations */
+  computations: number;
+  /** Scheduler timing: total time spent in execute() */
+  schedulerExecuteMs: TimingSummary | null;
+  /** Scheduler timing: total time spent in individual action runs */
+  schedulerRunMs: TimingSummary | null;
+  /** Scheduler timing: settle loop */
+  schedulerSettleMs: TimingSummary | null;
+  /** Scheduler timing: commit */
+  schedulerCommitMs: TimingSummary | null;
+  /** Top actions by total time */
+  topActions: {
+    id: string;
+    preview?: string;
+    runs: number;
+    totalMs: number;
+    avgMs: number;
+  }[];
+}
+
+export interface TimingSummary {
+  count: number;
+  min: number;
+  max: number;
+  average: number;
+  p50: number;
+  p95: number;
+}
+
 export interface TestRunResult {
   path: string;
   results: TestResult[];
@@ -87,6 +122,8 @@ export interface TestRunResult {
   nonIdempotent: string[];
   /** If true, non-idempotent computations are expected and should not fail the test */
   expectNonIdempotent?: boolean;
+  /** Performance metrics for tracking over time */
+  perf?: TestPerfStats;
 }
 
 export interface TestRunnerOptions {
@@ -489,6 +526,122 @@ function printActionStatsTable(runtime: Runtime): void {
       fmtMs(totalTimeMs).padStart(9)
     }`,
   );
+}
+
+/**
+ * Collect performance stats from the runtime for tracking over time.
+ */
+function collectPerfStats(runtime: Runtime): TestPerfStats {
+  const schedulerStats = runtime.scheduler.getStats();
+  const pullMode = runtime.scheduler.isPullModeEnabled();
+
+  // Extract timing summaries from the logger
+  const breakdown = getTimingStatsBreakdown();
+  const schedulerTimings = breakdown["scheduler"] ?? {};
+
+  function toSummary(
+    key: string,
+  ): TimingSummary | null {
+    const t = schedulerTimings[key];
+    if (!t || t.count === 0) return null;
+    return {
+      count: t.count,
+      min: t.min,
+      max: t.max,
+      average: t.average,
+      p50: t.p50,
+      p95: t.p95,
+    };
+  }
+
+  // Collect top actions by total time
+  const snapshot = runtime.scheduler.getGraphSnapshot();
+  const seen = new Map<
+    string,
+    {
+      stats: NonNullable<(typeof snapshot.nodes)[0]["stats"]>;
+      preview?: string;
+      childIds: Set<string>;
+    }
+  >();
+  for (const node of snapshot.nodes) {
+    if (!node.stats || node.stats.runCount === 0) continue;
+    const existing = seen.get(node.id);
+    if (!existing) {
+      seen.set(node.id, {
+        stats: node.stats,
+        preview: node.preview,
+        childIds: new Set(),
+      });
+    }
+  }
+  for (const node of snapshot.nodes) {
+    if (node.parentId && seen.has(node.parentId) && seen.has(node.id)) {
+      seen.get(node.parentId)!.childIds.add(node.id);
+    }
+  }
+  const allChildIds = new Set<string>();
+  for (const entry of seen.values()) {
+    for (const cid of entry.childIds) allChildIds.add(cid);
+  }
+
+  const topActions: TestPerfStats["topActions"] = [];
+  for (const [id, entry] of seen) {
+    if (allChildIds.has(id)) continue;
+    let totalMs = entry.stats.totalTime;
+    let runs = entry.stats.runCount;
+    for (const cid of entry.childIds) {
+      const child = seen.get(cid);
+      if (child) {
+        totalMs += child.stats.totalTime;
+        runs += child.stats.runCount;
+      }
+    }
+    topActions.push({
+      id,
+      preview: entry.preview,
+      runs,
+      totalMs,
+      avgMs: runs > 0 ? totalMs / runs : 0,
+    });
+  }
+  topActions.sort((a, b) => b.totalMs - a.totalMs);
+
+  return {
+    pullMode,
+    effects: schedulerStats.effects,
+    computations: schedulerStats.computations,
+    schedulerExecuteMs: toSummary("scheduler/execute"),
+    schedulerRunMs: toSummary("scheduler/run"),
+    schedulerSettleMs: toSummary("scheduler/execute/settle"),
+    schedulerCommitMs: toSummary("scheduler/run/commit"),
+    topActions: topActions.slice(0, 10),
+  };
+}
+
+/**
+ * Print a compact perf summary line for a test run.
+ */
+function printPerfSummary(perf: TestPerfStats, path: string): void {
+  const mode = perf.pullMode ? "pull" : "push";
+  const exec = perf.schedulerExecuteMs;
+  const run = perf.schedulerRunMs;
+  const parts = [
+    `mode=${mode}`,
+    `effects=${perf.effects}`,
+    `computations=${perf.computations}`,
+  ];
+  if (exec) {
+    parts.push(
+      `execute: n=${exec.count} p50=${fmtMs(exec.p50)} p95=${fmtMs(exec.p95)}`,
+    );
+  }
+  if (run) {
+    parts.push(
+      `run: n=${run.count} p50=${fmtMs(run.p50)} p95=${fmtMs(run.p95)}`,
+    );
+  }
+  console.log(`  [PERF] ${basename(path)}: ${parts.join(", ")}`);
 }
 
 /**
@@ -972,6 +1125,9 @@ export async function runTestPattern(
       printActionStatsTable(runtime);
     }
 
+    // Collect perf stats before cleanup
+    const perf = collectPerfStats(runtime);
+
     // Collect idempotency violations detected during normal execution
     const nonIdempotent = runtime.getIdempotencyViolations()
       .map((r) => r.actionInfo?.patternName ?? r.actionId);
@@ -986,6 +1142,7 @@ export async function runTestPattern(
       allowRuntimeErrors,
       nonIdempotent,
       expectNonIdempotent,
+      perf,
     };
   } catch (err) {
     let errorMessage = err instanceof Error ? err.message : String(err);
@@ -1113,6 +1270,15 @@ export async function runTests(
           }
         }
       }
+    }
+  }
+
+  // Performance summary
+  const resultsWithPerf = allResults.filter((r) => r.perf);
+  if (resultsWithPerf.length > 0) {
+    console.log(`\n--- Performance Summary ---`);
+    for (const result of resultsWithPerf) {
+      printPerfSummary(result.perf!, result.path);
     }
   }
 

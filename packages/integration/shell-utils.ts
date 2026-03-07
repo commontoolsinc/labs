@@ -165,6 +165,98 @@ export class ShellIntegration {
     }
   }
 
+  /**
+   * Collect scheduler timing stats from the worker via RuntimeClient IPC.
+   * Returns a summary object suitable for console.log or JSON serialization.
+   * Call this at the end of a test to capture performance data.
+   */
+  async collectWorkerTimingStats(): Promise<
+    {
+      pullMode: boolean;
+      scheduler: Record<
+        string,
+        { count: number; p50: number; p95: number; max: number }
+      >;
+      counts: Record<string, number>;
+    } | null
+  > {
+    this.checkIsOk();
+    const page = this.page();
+    try {
+      return await page.evaluate(async () => {
+        const rt = (globalThis as any).commontools?.rt;
+        if (!rt?.getLoggerCounts) return null;
+        const data = await rt.getLoggerCounts();
+
+        // Extract scheduler timings
+        const scheduler: Record<
+          string,
+          { count: number; p50: number; p95: number; max: number }
+        > = {};
+        const schedulerTimings = data.timing?.["scheduler"];
+        if (schedulerTimings) {
+          for (const [key, t] of Object.entries(schedulerTimings) as any) {
+            if (t.count > 0) {
+              scheduler[key] = {
+                count: t.count,
+                p50: t.p50,
+                p95: t.p95,
+                max: t.max,
+              };
+            }
+          }
+        }
+
+        // Extract total counts per logger
+        const counts: Record<string, number> = {};
+        if (data.counts) {
+          for (const [name, c] of Object.entries(data.counts) as any) {
+            if (name !== "total" && c.total > 0) counts[name] = c.total;
+          }
+        }
+
+        // Check pull mode
+        const pullMode = data.metadata?.["scheduler"]
+          ? true // metadata presence doesn't tell us, but we can infer
+          : false;
+
+        return { pullMode, scheduler, counts };
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Print a summary of worker timing stats to the console.
+   */
+  async printWorkerTimingStats(): Promise<void> {
+    const stats = await this.collectWorkerTimingStats();
+    if (!stats) {
+      console.log("[PERF] Could not collect worker timing stats");
+      return;
+    }
+
+    const parts: string[] = [];
+    for (const [key, t] of Object.entries(stats.scheduler)) {
+      parts.push(
+        `${key}: n=${t.count} p50=${t.p50.toFixed(1)}ms p95=${
+          t.p95.toFixed(1)
+        }ms`,
+      );
+    }
+    if (parts.length > 0) {
+      console.log(`[PERF] Scheduler: ${parts.join(", ")}`);
+    }
+    if (Object.keys(stats.counts).length > 0) {
+      const countParts = Object.entries(stats.counts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([k, v]) => `${k}=${v}`);
+      console.log(`[PERF] Log counts: ${countParts.join(", ")}`);
+    }
+  }
+
   #beforeAll = async () => {
     this.#browser = await Browser.launch({ headless: env.HEADLESS });
     this.#page = await this.#browser.newPage();
