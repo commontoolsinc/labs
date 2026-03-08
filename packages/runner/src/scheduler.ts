@@ -916,6 +916,12 @@ export class Scheduler {
               // Clear retries after successful commit.
               this.retries.delete(action);
             }
+          }).catch((error) => {
+            logger.error(
+              "schedule-error",
+              "Commit promise rejected in finalizeAction:",
+              error,
+            );
           });
           const log = txToReactivityLog(tx);
 
@@ -2690,6 +2696,12 @@ export class Scheduler {
                   }
                 }
               }
+            }).catch((error) => {
+              logger.error(
+                "schedule-error",
+                "Event handler commit promise rejected:",
+                error,
+              );
             });
           }
         };
