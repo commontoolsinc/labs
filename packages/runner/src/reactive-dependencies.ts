@@ -1,7 +1,7 @@
 import { isRecord } from "@commontools/utils/types";
 import { deepEqual } from "@commontools/utils/deep-equal";
 import type { StorableValue } from "@commontools/memory/interface";
-import { isArrayIndexPropertyName } from "@commontools/memory/storable-value";
+import { isPrimitiveCellLink } from "./link-utils.ts";
 import { arrayEqual } from "./path-utils.ts";
 import type { Action, SpaceAndURI } from "./scheduler.ts";
 import type {
@@ -179,11 +179,6 @@ export function determineTriggeredActions(
     const beforeCanReach = beforeLastObject + 1 >= targetPath.length;
     const afterCanReach = afterLastObject + 1 >= targetPath.length;
 
-    const isWriteOnReadOrParent = isPrefix(targetPath, startPath) ||
-      isPrefix(startPath, targetPath);
-    const isChildWrite = isPrefix(targetPath, startPath) &&
-      startPath.length > targetPath.length;
-
     // Determine if there was a change. For recursive reads, trigger if:
     // 1. Both paths are reachable and the values differ
     // 2. Reachability changed (one can reach, the other can't)
@@ -192,10 +187,17 @@ export function determineTriggeredActions(
     let hasChanged: boolean;
     if (beforeCanReach && afterCanReach) {
       // Both reachable - compare actual values
-      hasChanged = !deepEqual(
-        beforeValues[targetPath.length],
-        afterValues[targetPath.length],
-      );
+      if (options?.nonRecursive) {
+        hasChanged = !shallowEqual(
+          beforeValues[targetPath.length],
+          afterValues[targetPath.length],
+        );
+      } else {
+        hasChanged = !deepEqual(
+          beforeValues[targetPath.length],
+          afterValues[targetPath.length],
+        );
+      }
     } else if (beforeCanReach !== afterCanReach) {
       // Reachability changed - definitely a structural change
       hasChanged = true;
@@ -203,27 +205,6 @@ export function determineTriggeredActions(
       // Neither reachable - check if we can traverse to different depths
       // This detects when intermediate path segments appear/disappear
       hasChanged = beforeLastObject !== afterLastObject;
-    }
-
-    if (
-      options?.nonRecursive &&
-      startPath.length > 0 &&
-      isWriteOnReadOrParent
-    ) {
-      if (isChildWrite) {
-        // For non-recursive reads: child writes only invalidate when they add
-        // a new direct child key under the read path.
-        const childKey = startPath[targetPath.length];
-        hasChanged = childKey !== undefined &&
-          isChildKeyAdded(
-            beforeCanReach ? beforeValues[targetPath.length] : undefined,
-            afterCanReach ? afterValues[targetPath.length] : undefined,
-            childKey,
-          );
-      } else {
-        // Same-path and parent writes always invalidate non-recursive reads.
-        hasChanged = true;
-      }
     }
 
     if (hasChanged) {
@@ -272,32 +253,38 @@ function commonPrefixLength(
   return Math.min(a.length, b.length);
 }
 
-function isPrefix(
-  prefix: readonly MemoryAddressPathComponent[],
-  full: readonly MemoryAddressPathComponent[],
-): boolean {
-  if (prefix.length > full.length) return false;
-  return prefix.every((value, index) => value === full[index]);
-}
-
-function isChildKeyAdded(
+/**
+ * Returns true if the SHALLOW structure of `before` and `after` are the same.
+ *
+ * For non-recursive reads, only structural changes at the target level
+ * (key additions/removals, type changes, link identity changes) should
+ * trigger re-evaluation. Deep value changes inside existing keys should not.
+ *
+ * - Links: compared by identity (deepEqual), since a link IS the pointer.
+ * - Objects: changed iff the key set changed (not the values).
+ * - Arrays: changed iff the length changed.
+ * - Primitives: changed iff the value changed.
+ */
+function shallowEqual(
   before: StorableValue,
   after: StorableValue,
-  key: MemoryAddressPathComponent,
 ): boolean {
-  return !hasDirectChild(before, key) && hasDirectChild(after, key);
-}
-
-function hasDirectChild(
-  value: StorableValue,
-  key: MemoryAddressPathComponent,
-): boolean {
-  if (Array.isArray(value)) {
-    if (!isArrayIndexPropertyName(key)) return false;
-    const index = Number(key);
-    return Object.hasOwn(value, index);
+  // Links compare by full identity — a different link target matters.
+  if (isPrimitiveCellLink(before) || isPrimitiveCellLink(after)) {
+    return deepEqual(before, after);
   }
-  return isRecord(value) && Object.hasOwn(value, key);
+
+  if (isRecord(before) && isRecord(after)) {
+    const beforeKeys = Object.keys(before);
+    const afterKeys = Object.keys(after);
+    if (beforeKeys.length !== afterKeys.length) return false;
+    // if one is an array, both must be
+    if (Array.isArray(before) != Array.isArray(after)) return false;
+    return beforeKeys.every((k) => Object.hasOwn(after, k));
+  }
+
+  // Primitives (null, number, string, boolean, undefined)
+  return deepEqual(before, after);
 }
 
 function comparePaths(

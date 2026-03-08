@@ -1937,13 +1937,31 @@ describe("determineTriggeredActions", () => {
       expect(result).toEqual([action]);
     });
 
+    it("triggers when a child write removes a key for non-recursive reads", () => {
+      const action = createAction("nonRecursiveNewChildKey");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action, [["value", "a"]]],
+      ]);
+      const before = { value: { a: { existing: 1, added: 2 } } };
+      const after = { value: { a: { existing: 1 } } };
+
+      const result = determineTriggeredActions(
+        dependencies,
+        before as StorableDatum,
+        after as StorableDatum,
+        ["value", "a", "added"],
+        { nonRecursive: true },
+      );
+      expect(result).toEqual([action]);
+    });
+
     it("triggers on same-path write for non-recursive reads", () => {
       const action = createAction("nonRecursiveSamePathWrite");
       const dependencies = new Map<Action, SortedAndCompactPaths>([
         [action, [["value", "a"]]],
       ]);
-      const before = { value: { a: { b: 1 } } };
-      const after = { value: { a: { b: 2 } } };
+      const before = { value: { a: 1 } };
+      const after = { value: { a: 2 } };
 
       const result = determineTriggeredActions(
         dependencies,
@@ -1984,13 +2002,13 @@ describe("determineTriggeredActions", () => {
       expect(nonRecursiveResult).toEqual([]);
     });
 
-    it("still triggers on parent writes for non-recursive reads", () => {
+    it("still triggers on parent writes that change for non-recursive reads", () => {
       const action = createAction("nonRecursiveParentWrite");
       const dependencies = new Map<Action, SortedAndCompactPaths>([
         [action, [["value", "a"]]],
       ]);
       const before = { value: { a: { b: 1 }, x: 1 } };
-      const after = { value: { a: { b: 1 }, x: 2 } };
+      const after = { value: { a: [], x: 2 } };
 
       const result = determineTriggeredActions(
         dependencies,

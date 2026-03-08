@@ -431,8 +431,6 @@ describe("Schema - Examples", () => {
         "root",
         "cancelled",
         "root",
-        "cancelled",
-        "root",
       ]);
 
       // Change unrelated value should update root, but not the other cells
@@ -443,8 +441,6 @@ describe("Schema - Examples", () => {
       await runtime.idle();
 
       expect(rootValues).toEqual([
-        "root",
-        "cancelled",
         "root",
         "cancelled",
         "root",
@@ -470,10 +466,6 @@ describe("Schema - Examples", () => {
         "root",
         "cancelled",
         "root",
-        "cancelled",
-        "root",
-        "cancelled",
-        "root - updated",
         "cancelled",
         "root - updated",
       ]);
@@ -530,12 +522,6 @@ describe("Schema - Examples", () => {
         "root",
         "cancelled",
         "root",
-        "cancelled",
-        "root",
-        "cancelled",
-        "root - updated",
-        "cancelled",
-        "root - updated",
         "cancelled",
         "root - updated",
         "cancelled",

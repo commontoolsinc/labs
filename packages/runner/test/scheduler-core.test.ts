@@ -698,6 +698,166 @@ describe("scheduler", () => {
     expect(actionRunCount).toBe(2);
     expect(resultCell.get()).toEqual({ count: 2, lastRead: undefined });
   });
+
+  it("non-recursive read through link chain does not re-trigger on value update", async () => {
+    // docA holds a link to docB at path ["foo", "bar"]
+    // docB's root value is itself a link to docC
+    // docC holds { baz: 1 }
+    // Reading docA traverses docA → docB → docC and registers non-recursive
+    // reads at each link target.  Updating an existing key in docC must not
+    // trigger because the reads are non-recursive (only new keys trigger).
+    const docA = runtime.getCell<unknown>(
+      space,
+      "link-chain-docA",
+      undefined,
+      tx,
+    );
+    const docB = runtime.getCell<unknown>(
+      space,
+      "link-chain-docB",
+      undefined,
+      tx,
+    );
+    const docC = runtime.getCell<{ baz: number; newKey?: string }>(
+      space,
+      "link-chain-docC",
+      undefined,
+      tx,
+    );
+    const resultCell = runtime.getCell<number>(
+      space,
+      "link-chain-result",
+      undefined,
+      tx,
+    );
+
+    // docA links to docB at ["foo","bar"]
+    // docB.foo links to docC at []
+    // A read of docA will not cause us to react to a write of docC.baz
+    const docBDeepLink = docB.key("foo").key("bar").cellLink;
+    docA.withTx(tx).setRaw(docBDeepLink); // points to B.foo.bar (or C.bar)
+    docB.withTx(tx).setRaw({ foo: docC.cellLink }); // B.foo points to C
+    docC.withTx(tx).setRaw({ baz: 1, bar: 2 });
+    resultCell.withTx(tx).set(0);
+    tx.commit();
+    tx = runtime.edit();
+
+    const docALink = docA.getAsNormalizedFullLink();
+    const docBLink = docB.getAsNormalizedFullLink();
+    const docCLink = docC.getAsNormalizedFullLink();
+    const type = "application/json" as const;
+
+    let runCount = 0;
+    const action: Action = (actionTx) => {
+      runCount++;
+      // Mirror the non-recursive reads that followPointer (traverse.ts) registers
+      // when traversing docA → docB → docC through the link chain.
+      actionTx.read(
+        {
+          space: docALink.space,
+          id: docALink.id,
+          type,
+          path: ["value"],
+        },
+        { nonRecursive: true },
+      );
+      actionTx.read(
+        { space: docBLink.space, id: docBLink.id, type, path: ["value"] },
+        { nonRecursive: true },
+      );
+      // docC root: non-recursive and scheduling-only (value already loaded via
+      // the reads above; we just need to track the dependency).
+      actionTx.read(
+        { space: docCLink.space, id: docCLink.id, type, path: ["value"] },
+        { nonRecursive: true, trackReadWithoutLoad: true },
+      );
+      resultCell.withTx(actionTx).set(runCount);
+    };
+
+    runtime.scheduler.subscribe(action, { reads: [], writes: [] }, {});
+    await resultCell.pull();
+    expect(runCount).toBe(1);
+
+    // Update docC.baz (existing key, value change only) — must NOT trigger.
+    docC.withTx(tx).key("baz").set(2);
+    tx.commit();
+    tx = runtime.edit();
+    await resultCell.pull();
+    expect(runCount).toBe(1);
+
+    // Add a new direct key to docC — MUST trigger (non-recursive reads fire on key add).
+    docA.withTx(tx).set("hello");
+    tx.commit();
+    tx = runtime.edit();
+    await resultCell.pull();
+    expect(runCount).toBe(2);
+  });
+
+  it("cell.get on docA inside action does not add recursive scheduling deps for docC", async () => {
+    // Same link chain: docA → docB.foo.bar → docC
+    // The action only calls docA.get() — no manual actionTx.read calls.
+    // docA.get() should internally register only the reads it needs (non-recursive
+    // through the link chain) and must not add recursive deps on docC, so
+    // updating an existing key in docC must NOT re-trigger.
+    const docA = runtime.getCell<unknown>(
+      space,
+      "link-chain-get-docA",
+      undefined,
+      tx,
+    );
+    const docB = runtime.getCell<unknown>(
+      space,
+      "link-chain-get-docB",
+      undefined,
+      tx,
+    );
+    const docC = runtime.getCell<{ baz: number; newKey?: string }>(
+      space,
+      "link-chain-get-docC",
+      undefined,
+      tx,
+    );
+    const resultCell = runtime.getCell<number>(
+      space,
+      "link-chain-get-result",
+      undefined,
+      tx,
+    );
+
+    const docBDeepLink = docB.key("foo").key("bar").cellLink;
+    docA.withTx(tx).setRaw(docBDeepLink);
+    docB.withTx(tx).setRaw({ foo: docC.cellLink });
+    docC.withTx(tx).setRaw({ baz: 1, bar: 2 });
+    resultCell.withTx(tx).set(0);
+    tx.commit();
+    tx = runtime.edit();
+
+    let runCount = 0;
+    const action: Action = (actionTx) => {
+      runCount++;
+      // Only cell.get — all scheduling deps come from this single call.
+      docA.withTx(actionTx).get();
+      resultCell.withTx(actionTx).set(runCount);
+    };
+
+    runtime.scheduler.subscribe(action, { reads: [], writes: [] }, {});
+    await resultCell.pull();
+    expect(runCount).toBe(1);
+
+    // Update docC.baz (existing key, value change only) — must NOT trigger.
+    docC.withTx(tx).key("baz").set(2);
+    tx.commit();
+    tx = runtime.edit();
+    await resultCell.pull();
+    expect(runCount).toBe(1);
+
+    // Update docC.bar (existing key, value change only) — must trigger.
+    docC.withTx(tx).key("bar").set(3);
+    tx.commit();
+    tx = runtime.edit();
+    await resultCell.pull();
+    expect(runCount).toBe(2);
+  });
 });
 
 describe("event handling", () => {
