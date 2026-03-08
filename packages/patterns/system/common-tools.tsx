@@ -324,12 +324,23 @@ type ListPatternIndexInput = Record<string, never>;
 
 export const listPatternIndex = pattern<ListPatternIndexInput>(
   ({ _ }) => {
-    const patternIndexUrl = wish<{ url: string }>({ query: "#pattern-index" });
+    const patternIndexUrl = wish<{ url: Writable<string> }>({
+      query: "#pattern-index",
+    });
+
+    const resolvedUrl = Writable.of<string>("/api/patterns/index.md");
+    computed(() => {
+      const urlRef = patternIndexUrl?.result?.url;
+      const urlValue = typeof urlRef?.get === "function"
+        ? urlRef.get()
+        : (typeof urlRef === "string" ? urlRef : undefined);
+      if (typeof urlValue === "string" && urlValue.length > 0) {
+        resolvedUrl.set(urlValue);
+      }
+    });
 
     const { pending, result } = fetchData({
-      url: computed(() =>
-        patternIndexUrl?.result?.url ?? "/api/patterns/index.md"
-      ),
+      url: resolvedUrl,
       mode: "text",
     });
     return ifElse(computed(() => pending || !result), undefined, { result });
