@@ -13,7 +13,11 @@ import {
   StorableRegExp,
   UNSAFE_KEYS,
 } from "./storable-native-instances.ts";
-import { NATIVE_TAGS, tagFromNativeValue } from "./type-tags.ts";
+import {
+  NATIVE_TAGS,
+  type NativeTag,
+  tagFromNativeValue,
+} from "./type-tags.ts";
 
 /**
  * Shallow-clone a `StorableValueLayer` to achieve a desired frozenness.
@@ -37,8 +41,9 @@ import { NATIVE_TAGS, tagFromNativeValue } from "./type-tags.ts";
 function shallowCloneStorableValue(
   value: StorableValueLayer,
   frozen: boolean,
+  tag?: NativeTag | null,
 ): StorableValueLayer {
-  switch (tagFromNativeValue(value)) {
+  switch (tag ?? tagFromNativeValue(value)) {
     // Primitives (null, undefined, boolean, number, string, bigint) are
     // unaffected by frozenness.
     case NATIVE_TAGS.Primitive:
@@ -120,100 +125,96 @@ export function toRichStorableValue(
   value: unknown,
   freeze = true,
 ): StorableValueLayer {
-  // Special primitives (StorableEpochNsec, StorableEpochDays) are direct
-  // StorableDatum members -- always frozen, pass through as-is regardless
-  // of the `freeze` argument (they behave like true primitives).
-  if (value instanceof SpecialPrimitiveValue) {
-    return value as StorableValueLayer;
-  }
+  // Top-level type dispatch via tagFromNativeValue() -- O(1) constructor
+  // switch with fallbacks for exotic Error subclasses, cross-realm arrays,
+  // and null-prototype objects. Returns Primitive for non-objects.
+  const tag = tagFromNativeValue(value);
 
-  // StorableInstance values (including StorableError, UnknownStorable, etc.)
-  // are already valid StorableValue members. Delegate to
-  // shallowCloneStorableValue which calls the protocol's shallowClone method.
-  if (isStorableInstance(value)) {
-    return shallowCloneStorableValue(
-      value as StorableValueLayer,
-      freeze,
-    );
-  }
+  switch (tag) {
+    // Special primitives are direct StorableDatum members -- always frozen,
+    // pass through as-is regardless of the `freeze` argument.
+    case NATIVE_TAGS.EpochNsec:
+    case NATIVE_TAGS.EpochDays:
+    case NATIVE_TAGS.ContentId:
+      return value as StorableValueLayer;
 
-  // Object-type dispatch via tagFromNativeValue() -- a constructor switch
-  // (O(1)) with fallbacks for exotic Error subclasses, cross-realm arrays,
-  // and null-prototype objects.
-  if (typeof value === "object" && value !== null) {
-    const nativeTag = tagFromNativeValue(value);
+    case NATIVE_TAGS.Error: {
+      const wrapped = new StorableError(value as Error);
+      if (freeze) Object.freeze(wrapped);
+      return wrapped;
+    }
 
-    switch (nativeTag) {
-      case NATIVE_TAGS.Error: {
-        const wrapped = new StorableError(value as Error);
-        if (freeze) Object.freeze(wrapped);
-        return wrapped;
+    case NATIVE_TAGS.Date: {
+      // Date instances are converted to StorableEpochNsec (nanoseconds from
+      // epoch). Extra enumerable properties cause rejection ("death before
+      // confusion").
+      rejectExtraProperties(value as object, "Date");
+      const nsec = BigInt((value as Date).getTime()) * 1_000_000n;
+      const wrapped = new StorableEpochNsec(nsec);
+      if (freeze) Object.freeze(wrapped);
+      return wrapped;
+    }
+
+    case NATIVE_TAGS.RegExp: {
+      // RegExp instances are wrapped in StorableRegExp. Extra enumerable
+      // properties cause rejection ("death before confusion"). The
+      // rejectExtraProperties check is done inside StorableRegExp's
+      // DECONSTRUCT, but we also reject eagerly here at conversion time.
+      rejectExtraProperties(value as object, "RegExp");
+      const wrappedRegExp = new StorableRegExp(value as RegExp);
+      if (freeze) Object.freeze(wrappedRegExp);
+      return wrappedRegExp;
+    }
+
+    case NATIVE_TAGS.Array:
+    case NATIVE_TAGS.Object:
+      // Arrays and plain objects: delegate frozenness handling to
+      // shallowCloneStorableValue, passing the already-computed tag.
+      return shallowCloneStorableValue(
+        value as StorableValueLayer,
+        freeze,
+        tag,
+      );
+
+    case NATIVE_TAGS.HasToJSON: {
+      // Objects (or arrays/class instances) with a toJSON() method.
+      // Call toJSON() and validate the result.
+      const converted = (value as { toJSON: () => unknown }).toJSON();
+      if (!isRichStorableValue(converted)) {
+        throw new Error(
+          `\`toJSON()\` on ${typeof value} returned something other than a storable value`,
+        );
       }
+      return shallowCloneStorableValue(
+        converted as StorableValueLayer,
+        freeze,
+      );
+    }
 
-      case NATIVE_TAGS.Date: {
-        // Date instances are converted to StorableEpochNsec (nanoseconds from
-        // epoch). Extra enumerable properties cause rejection ("death before
-        // confusion").
-        rejectExtraProperties(value, "Date");
-        const nsec = BigInt((value as Date).getTime()) * 1_000_000n;
-        const wrapped = new StorableEpochNsec(nsec);
-        if (freeze) Object.freeze(wrapped);
-        return wrapped;
-      }
+    case NATIVE_TAGS.Primitive:
+      // `undefined` passes through as-is.
+      if (value === undefined) return undefined;
+      // Other primitives (boolean, string, number, bigint) and functions
+      // go through toRichStorableValueBase for validation and conversion.
+      return toRichStorableValueBase(value);
 
-      case NATIVE_TAGS.RegExp: {
-        // RegExp instances are wrapped in StorableRegExp. Extra enumerable
-        // properties cause rejection ("death before confusion"). The
-        // rejectExtraProperties check is done inside StorableRegExp's
-        // DECONSTRUCT, but we also reject eagerly here at conversion time.
-        rejectExtraProperties(value, "RegExp");
-        const wrappedRegExp = new StorableRegExp(value as RegExp);
-        if (freeze) Object.freeze(wrappedRegExp);
-        return wrappedRegExp;
-      }
-
-      case NATIVE_TAGS.Array:
-      case NATIVE_TAGS.Object: {
-        // Arrays and plain objects: delegate frozenness handling to
-        // shallowCloneStorableValue, which clones only when the current
-        // frozenness doesn't match the requested `freeze` flag.
+    default: {
+      // tag is null -- unrecognized class. StorableInstance values (which
+      // aren't in the native class registry) are handled via the protocol.
+      if (isStorableInstance(value)) {
         return shallowCloneStorableValue(
           value as StorableValueLayer,
           freeze,
+          tag,
         );
       }
-
-      case NATIVE_TAGS.HasToJSON: {
-        // Objects (or arrays/class instances) with a toJSON() method.
-        // Call toJSON() and validate the result.
-        const converted = (value as { toJSON: () => unknown }).toJSON();
-        if (!isRichStorableValue(converted)) {
-          throw new Error(
-            `\`toJSON()\` on ${typeof value} returned something other than a storable value`,
-          );
-        }
-        return shallowCloneStorableValue(
-          converted as StorableValueLayer,
-          freeze,
-        );
-      }
-
-      default:
-        // Other object types (Map, Set, Uint8Array, class instances, etc.)
-        // fall through to toRichStorableValueBase for rejection handling.
-        break;
+      // Unrecognized object types (Map, Set, Uint8Array, class instances
+      // without toJSON, etc.) fall through to toRichStorableValueBase for
+      // rejection handling.
+      const result = toRichStorableValueBase(value);
+      return shallowCloneStorableValue(result, freeze);
     }
   }
-
-  // `undefined` passes through as-is.
-  if (value === undefined) {
-    return undefined;
-  }
-
-  // Non-object types (primitives, bigint, functions) and unrecognized
-  // object types (class instances with toJSON, etc.).
-  const result = toRichStorableValueBase(value);
-  return shallowCloneStorableValue(result, freeze);
 }
 
 /**
