@@ -356,4 +356,32 @@ describe("Per-path reads - schema-selective sinks", () => {
     expect(itemsCounts).toEqual([2, 3]);
     expect(summaryLabels).toEqual(["test", "updated"]);
   });
+
+  it("reading array length creates a dependency: inserting an element triggers the sink", async () => {
+    const cell = runtime.getCell<{ items: Array<{ name: string }> }>(
+      space,
+      "per-path-array-length-reactivity",
+    );
+
+    cell.withTx(tx).set({ items: [{ name: "a" }, { name: "b" }] });
+    tx.commit();
+    tx = runtime.edit();
+
+    const lengths: number[] = [];
+    const lengthView = cell.key("items").key("length");
+    lengthView.sink((l) => {
+      lengths.push(l);
+    });
+
+    await runtime.idle();
+    expect(lengths).toEqual([2]);
+
+    // Insert a new element — the sink reads .length, so it must re-fire.
+    cell.withTx(tx).key("items").key(2).set({ name: "c" });
+    tx.commit();
+    tx = runtime.edit();
+    await runtime.idle();
+
+    expect(lengths).toEqual([2, 3]);
+  });
 });
