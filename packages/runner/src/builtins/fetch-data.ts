@@ -5,7 +5,7 @@ import { getPatternEnvironment } from "../builder/env.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { JSONSchema, Schema } from "../builder/types.ts";
 import {
-  computeInputHash,
+  computeInputHashFromValue,
   internalSchema,
   tryClaimMutex,
   tryWriteResult,
@@ -13,7 +13,7 @@ import {
 
 /** The shape of fetchData's input cell. */
 type FetchDataInputs = {
-  url: string;
+  url?: string;
   mode?: "text" | "json";
   options?: { body?: any; method?: string; headers?: Record<string, string> };
 };
@@ -41,6 +41,26 @@ const fetchDataInputSchema = {
     },
   },
 } as const satisfies JSONSchema;
+
+function snapshotFetchDataInputs(
+  cell: Cell<FetchDataInputs>,
+): FetchDataInputs {
+  const snapshot = cell.asSchema(fetchDataInputSchema).get() ??
+    ({} as FetchDataInputs);
+  const mode = snapshot.mode === "text" || snapshot.mode === "json"
+    ? snapshot.mode
+    : undefined;
+  const body = snapshot.options?.body;
+  const options = snapshot.options
+    ? {
+      ...snapshot.options,
+      body: body !== undefined && typeof body !== "string"
+        ? JSON.stringify(body)
+        : body,
+    }
+    : undefined;
+  return { url: snapshot.url, mode, options };
+}
 
 /**
  * Fetch data from a URL.
@@ -150,9 +170,8 @@ export function fetchData(
     // should be fine.
     sendResult(tx, { pending, result, error });
 
-    const { url } = inputsCell.getAsQueryResult([], tx);
-    const inputHash = computeInputHash(tx, inputsCell);
-
+    const inputsSnapshot = snapshotFetchDataInputs(inputsCell.withTx(tx));
+    const url = inputsSnapshot?.url;
     if (!url) {
       // Only update if values actually need to change to reduce transaction conflicts
       const currentPending = pending.withTx(tx).get();
@@ -174,6 +193,7 @@ export function fetchData(
       return;
     }
 
+    const inputHash = computeInputHashFromValue(inputsSnapshot);
     // Check if we're already working on or have the result for these inputs
     const currentInternal = internal.withTx(tx).get();
     const currentPending = pending.withTx(tx).get();
@@ -210,7 +230,6 @@ export function fetchData(
     // Start a new fetch if we don't have a result/error and aren't already fetching
     if (!hasValidResult && !hasError && !alreadyFetching) {
       const newRequestId = crypto.randomUUID();
-
       // Try to claim mutex - returns immediately if another tab is processing
       tryClaimMutex(
         runtime,
@@ -224,21 +243,7 @@ export function fetchData(
         // asSchema().get() returns a frozen plain snapshot with nested
         // properties (like options.headers) fully resolved, safe to use
         // after commit.
-        (cell) => {
-          const snapshot = cell.asSchema(fetchDataInputSchema).get();
-          // Stringify non-string bodies so startFetch receives ready-to-send
-          // options. Since .get() returns a frozen object, build a new one.
-          const body = snapshot.options?.body;
-          const options = snapshot.options
-            ? {
-              ...snapshot.options,
-              body: body !== undefined && typeof body !== "string"
-                ? JSON.stringify(body)
-                : body,
-            }
-            : undefined;
-          return { ...snapshot, options } as FetchDataInputs;
-        },
+        snapshotFetchDataInputs,
       ).then(
         ({ claimed, inputs, inputHash }) => {
           if (!claimed) {
@@ -330,11 +335,18 @@ async function startFetch(
     await runtime.idle();
 
     // Try to write result - any tab can write if inputs match
-    await tryWriteResult(runtime, internal, inputsCell, inputHash, (tx) => {
-      pending.withTx(tx).set(false);
-      result.withTx(tx).set(data);
-      error.withTx(tx).set(undefined);
-    });
+    await tryWriteResult(
+      runtime,
+      internal,
+      inputsCell,
+      inputHash,
+      (tx) => {
+        pending.withTx(tx).set(false);
+        result.withTx(tx).set(data);
+        error.withTx(tx).set(undefined);
+      },
+      snapshotFetchDataInputs,
+    );
   } catch (err) {
     // Don't write errors if request was aborted
     if (abortSignal.aborted) return;
@@ -343,7 +355,9 @@ async function startFetch(
 
     // Write error - but only update inputHash if inputs haven't changed
     await runtime.editWithRetry((tx) => {
-      const currentHash = computeInputHash(tx, inputsCell);
+      const currentHash = computeInputHashFromValue(
+        snapshotFetchDataInputs(inputsCell.withTx(tx)),
+      );
 
       // Always clear pending and result
       pending.withTx(tx).set(false);

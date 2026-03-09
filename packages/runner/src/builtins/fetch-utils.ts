@@ -1,4 +1,5 @@
 import { refer } from "@commontools/memory/reference";
+import { toDeepStorableValue } from "@commontools/memory/storable-value";
 import { type Cell } from "../cell.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
@@ -22,14 +23,26 @@ export const internalSchema = {
  * Excludes the 'result' field which is used only as a TypeScript type hint,
  * not as an actual input parameter.
  */
+export function computeInputHashFromValue<T extends Record<string, any>>(
+  inputs: T | undefined,
+): string {
+  const safeInputs = inputs ?? {};
+  // Exclude 'result' type hint from the hash - only hash actual fetch parameters
+  const inputsOnly = { ...(safeInputs as Record<string, unknown>) };
+  delete (inputsOnly as Record<string, unknown>).result;
+  // refer() cannot hash undefined values; normalize to a deep storable shape
+  // (omits undefined object props, converts undefined array elements to null).
+  const storableInputs = toDeepStorableValue(inputsOnly);
+  const normalized = storableInputs === undefined ? {} : storableInputs;
+  return refer(normalized as Record<string, unknown>).toString();
+}
+
 export function computeInputHash<T extends Record<string, any>>(
   tx: IExtendedStorageTransaction,
   inputsCell: Cell<T>,
 ): string {
-  const inputs = inputsCell.getAsQueryResult([], tx);
-  // Exclude 'result' type hint from the hash - only hash actual fetch parameters
-  const { result: _result, ...inputsOnly } = inputs;
-  return refer(inputsOnly).toString();
+  const inputs = inputsCell.getAsQueryResult([], tx) ?? {};
+  return computeInputHashFromValue(inputs);
 }
 
 /**
@@ -72,8 +85,9 @@ export async function tryClaimMutex<T extends Record<string, any>>(
     // a plain snapshot via the schema system, then does any additional
     // preprocessing (e.g. stringifying request bodies).
     inputs = snapshotInputs(inputsCell.withTx(tx));
-    inputHash = computeInputHash(tx, inputsCell);
-
+    // Hash the snapshot (plain object) to avoid proxy/undefined issues
+    // from partially-initialized reactive inputs.
+    inputHash = computeInputHashFromValue(inputs);
     // Can claim if:
     // 1. Nothing is pending, OR
     // 2. Previous request timed out
@@ -105,10 +119,14 @@ export async function tryWriteResult<T extends Record<string, any>>(
   inputsCell: Cell<T>,
   expectedHash: string,
   action: (tx: IExtendedStorageTransaction) => void,
+  snapshotInputs?: (cell: Cell<T>) => T,
 ): Promise<boolean> {
   let success = false;
   await runtime.editWithRetry((tx) => {
-    const currentHash = computeInputHash(tx, inputsCell);
+    const inputs = snapshotInputs
+      ? snapshotInputs(inputsCell.withTx(tx))
+      : inputsCell.getAsQueryResult([], tx);
+    const currentHash = computeInputHashFromValue(inputs);
 
     // Only write if inputs haven't changed since we started the request
     if (currentHash === expectedHash) {
