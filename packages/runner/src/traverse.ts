@@ -1,4 +1,5 @@
 import { refer } from "@commontools/memory/reference";
+import { canonicalHash } from "@commontools/memory/canonical-hash";
 import { MIME } from "@commontools/memory/interface";
 import type { JSONSchemaObj } from "@commontools/api";
 import type {
@@ -83,16 +84,66 @@ const enum TypeValidity {
  * @template V The type of values stored in the sets
  */
 /**
- * Produces a canonical string representation for use as a hash key.
- * Object keys are sorted for deterministic output so structurally-equal
- * objects always hash identically. Results are cached per object identity
- * via WeakMap, so repeated hashing of the same schema object is O(1).
+ * Produces a canonical hash string for use as a cache/dedup key.
+ * Delegates to `canonicalHash()` (SHA-256 based) with a WeakMap identity
+ * cache so repeated hashing of the same object reference is O(1).
+ *
+ * Falls back to a deterministic JSON-like stringification for values that
+ * `canonicalHash` rejects (NaN, Infinity, Date, RegExp). These don't
+ * appear in normal JSON Schema data but may surface in edge-case tests.
  */
-const _hashCache = new WeakMap<object, string>();
+// TODO(danfuzz): Remove fallbacks once the data model covers NaN, Infinity,
+// Date, and RegExp directly.
+//
+// TODO(danfuzz): Retire this cache once schema objects flowing through here
+// can be safely deep-frozen. At that point, canonicalHash()'s own
+// frozenObjectHashCache WeakMap would provide the same O(1) identity caching,
+// and this wrapper cache would be redundant.
+const _stableHashCache = new WeakMap<object, string>();
+
+export function stableHash(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    if (typeof value === "number" && !Number.isFinite(value)) {
+      return `h:num:${value}`;
+    }
+    return canonicalHash(value).toString();
+  }
+
+  const cached = _stableHashCache.get(value);
+  if (cached !== undefined) return cached;
+
+  let result: string;
+  try {
+    result = canonicalHash(value).toString();
+  } catch {
+    result = _legacyStringify(value);
+  }
+
+  _stableHashCache.set(value, result);
+  return result;
+}
+
+/** Deterministic string fallback for objects `canonicalHash` cannot handle. */
+function _legacyStringify(value: object): string {
+  if (Array.isArray(value)) {
+    return "[" + value.map(stableHash).join(",") + "]";
+  }
+  if (value instanceof Date) {
+    return `D${value.getTime()}`;
+  }
+  if (value instanceof RegExp) {
+    return `R${value.toString()}`;
+  }
+  const keys = Object.keys(value).sort();
+  return "{" +
+    keys.map((k) => k + ":" + stableHash((value as Record<string, unknown>)[k]))
+      .join(",") +
+    "}";
+}
 
 // Schema operation intern caches: memoize merge/combine results so
 // structurally-identical operations return the same object identity.
-// This ensures downstream stableStringify hits the _hashCache WeakMap
+// This ensures downstream stableHash hits the _stableHashCache WeakMap
 // (O(1) identity lookup) instead of re-walking the schema tree.
 // Capped to prevent unbounded growth in long-running servers.
 const INTERN_CACHE_MAX = 10_000;
@@ -110,55 +161,23 @@ function internSet(
   cache.set(key, value);
 }
 
-export function stableStringify(value: unknown): string {
-  if (value === null) return "n";
-  if (value === undefined) return "u";
-  const t = typeof value;
-  if (t === "boolean") return value ? "T" : "F";
-  if (t === "number") return `#${value}`;
-  if (t === "string") return `s${(value as string).length}:${value}`;
-
-  const obj = value as object;
-  const cached = _hashCache.get(obj);
-  if (cached !== undefined) return cached;
-
-  let result: string;
-  if (Array.isArray(obj)) {
-    result = "[" + obj.map(stableStringify).join(",") + "]";
-  } else if (obj instanceof Date) {
-    result = `D${(obj as Date).getTime()}`;
-  } else if (obj instanceof RegExp) {
-    result = `R${(obj as RegExp).toString()}`;
-  } else {
-    const keys = Object.keys(obj).sort();
-    result = "{" +
-      keys.map((k) =>
-        k + ":" + stableStringify((obj as Record<string, unknown>)[k])
-      ).join(",") +
-      "}";
-  }
-
-  _hashCache.set(obj, result);
-  return result;
-}
-
 /**
  * A data structure that maps keys to sets of values, allowing multiple values
  * to be associated with a single key without duplication.
  *
- * When `useStableStringify` is true, values are deduped using a canonical hash
- * (stableStringify with WeakMap identity cache) for O(1) add/hasValue.
+ * When `useStableHash` is true, values are deduped using a canonical hash
+ * (stableHash with WeakMap identity cache) for O(1) add/hasValue.
  * The hash path uses sorted object keys, so structurally-equal values always
  * produce the same hash.
  *
- * When `useStableStringify` is false, values are stored in a plain Set using
+ * When `useStableHash` is false, values are stored in a plain Set using
  * reference equality.
  *
  * @template K The type of keys in the map
  * @template V The type of values stored in the sets
  */
 export class MapSet<K, V> {
-  // When useStableStringify is true, use hash-based dedup: key → (hash → value)
+  // When useStableHash is true, use hash-based dedup: key → (hash → value)
   // When false, use plain Set: key → Set<value>
   private hashMap?: Map<K, Map<string, V>>;
   private setMap?: Map<K, Set<V>>;
@@ -167,8 +186,8 @@ export class MapSet<K, V> {
   deepEqualCalls = 0;
   deepEqualMs = 0;
 
-  constructor(useStableStringify = false) {
-    if (useStableStringify) {
+  constructor(useStableHash = false) {
+    if (useStableHash) {
       this.hashMap = new Map();
     } else {
       this.setMap = new Map();
@@ -207,7 +226,7 @@ export class MapSet<K, V> {
         m = new Map<string, V>();
         this.hashMap.set(key, m);
       }
-      const hash = stableStringify(value);
+      const hash = stableHash(value);
       if (!m.has(hash)) {
         m.set(hash, value);
       }
@@ -231,7 +250,7 @@ export class MapSet<K, V> {
     if (this.hashMap) {
       const m = this.hashMap.get(key);
       if (!m) return false;
-      return m.has(stableStringify(value));
+      return m.has(stableHash(value));
     }
     const values = this.setMap!.get(key);
     return values !== undefined && values.has(value);
@@ -241,7 +260,7 @@ export class MapSet<K, V> {
     if (this.hashMap) {
       const m = this.hashMap.get(key);
       if (!m) return false;
-      const hash = stableStringify(value);
+      const hash = stableHash(value);
       const rv = m.delete(hash);
       if (m.size === 0) this.hashMap.delete(key);
       return rv;
@@ -322,7 +341,7 @@ export class CompoundCycleTracker<EqualKey, ExtraKey, Value = unknown> {
 
   /**
    * Identity check on `partialKey`, hash-based check on `extraKey`.
-   * Uses stableStringify (with WeakMap identity cache) so schema objects
+   * Uses stableHash (with WeakMap identity cache) so schema objects
    * hash in O(1) amortized after the first stringify.
    */
   include(
@@ -336,7 +355,7 @@ export class CompoundCycleTracker<EqualKey, ExtraKey, Value = unknown> {
       existing = new Map();
       this.partial.set(partialKey, existing);
     }
-    const hash = stableStringify(extraKey);
+    const hash = stableHash(extraKey);
     if (existing.has(hash)) {
       return null;
     }
@@ -360,7 +379,7 @@ export class CompoundCycleTracker<EqualKey, ExtraKey, Value = unknown> {
     if (existing === undefined) {
       return undefined;
     }
-    const hash = stableStringify(extraKey);
+    const hash = stableHash(extraKey);
     return existing.get(hash);
   }
 }
@@ -1285,7 +1304,7 @@ function combineOptionalSchema(
 
 // Merge any schema flags like asCell or asStream from flagSchema into schema.
 export function mergeSchemaFlags(flagSchema: JSONSchema, schema: JSONSchema) {
-  const key = stableStringify(flagSchema) + "|" + stableStringify(schema);
+  const key = stableHash(flagSchema) + "|" + stableHash(schema);
   const cached = _mergeSchemaFlagsCache.get(key);
   if (cached !== undefined) return cached;
   const result = _mergeSchemaFlagsUncached(flagSchema, schema);
@@ -1347,7 +1366,7 @@ export function combineSchema(
   parentSchema: JSONSchema,
   linkSchema: JSONSchema,
 ): JSONSchema {
-  const key = stableStringify(parentSchema) + "|" + stableStringify(linkSchema);
+  const key = stableHash(parentSchema) + "|" + stableHash(linkSchema);
   const cached = _combineSchemaCache.get(key);
   if (cached !== undefined) return cached;
   const result = _combineSchemaUncached(parentSchema, linkSchema);
@@ -1897,7 +1916,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
       if (this.traverseCells) {
         const memo = this.activeMemo;
         const memoKey = docId + "|" + doc.address.path.join("/") + "|" +
-          stableStringify(schema);
+          stableHash(schema);
         const cached = memo.get(memoKey);
         if (cached !== undefined) {
           this.schemaMemoHits++;
@@ -2822,7 +2841,7 @@ function mergeSchemaOption(
   // JSONSchema rules should.
   // For example, `{type: "object", anyOf: [{type: "string"}]}` schema should
   // never match
-  const key = stableStringify(outerSchema) + "|" + stableStringify(innerSchema);
+  const key = stableHash(outerSchema) + "|" + stableHash(innerSchema);
   const cached = _mergeSchemaOptionCache.get(key);
   if (cached !== undefined) return cached;
   const result = isObject(innerSchema)
@@ -2931,8 +2950,8 @@ export function mergeAnyOfBranchSchemas(
 ): JSONSchema | null {
   if (branches.length < 2) return null;
 
-  const key = stableStringify(outerSchema) + "||" +
-    branches.map(stableStringify).join("|");
+  const key = stableHash(outerSchema) + "||" +
+    branches.map(stableHash).join("|");
   const cached = _mergeAnyOfBranchCache.get(key);
   if (cached !== undefined) return cached;
 
@@ -3010,10 +3029,10 @@ function _mergeAnyOfBranchSchemasUncached(
   // Build merged properties
   const mergedProperties: Record<string, JSONSchema> = {};
   for (const [propKey, schemas] of allProps) {
-    // Deduplicate schemas using stableStringify
+    // Deduplicate schemas using stableHash
     const uniqueHashes = new Map<string, JSONSchema>();
     for (const s of schemas) {
-      uniqueHashes.set(stableStringify(s), s);
+      uniqueHashes.set(stableHash(s), s);
     }
     if (uniqueHashes.size === 1) {
       // All branches agree on this property's schema
