@@ -1,0 +1,156 @@
+{
+  "rubric_version": "3.0",
+  "pattern": "parking-coordinator",
+  "run_id": "2026-03-05-parking-coordinator-qkmw",
+  "iteration_count": 2,
+  "iteration_modifier": -2,
+  "dimensions": {
+    "correctness": {
+      "score": 85,
+      "scoring_model": "deduction",
+      "ceiling": 85,
+      "pass_count": 6,
+      "fail_count": 0,
+      "na_count": 0,
+      "failures": [],
+      "positive_evidence": [
+        "Compiles cleanly with ct check --no-run (verified)",
+        "38/38 tests pass (verified)",
+        "All 16 acceptance criteria verified PASS by manual tester post-fix",
+        "Runtime error from undefined elements in computed filter was fixed (s != null guard added)",
+        "Edge cases handled: empty roster prompt, past date blocked, duplicate request rejected, denied status on full booking, long names truncated"
+      ],
+      "justification": "Clean compile, all tests pass, all handlers verified correct in browser. The one runtime error (undefined elements in weekGridData/todayStripData computed functions) was fixed in the single fix pass. Post-fix verification confirmed no remaining runtime errors. All spec edge cases handled at ceiling."
+    },
+    "code_craft": {
+      "score": 70,
+      "scoring_model": "deduction",
+      "ceiling": 85,
+      "pass_count": 9,
+      "fail_count": 2,
+      "na_count": 0,
+      "failures": [
+        {
+          "check_id": "CCR-1",
+          "description": "Inline arrow function handlers created per-item in .map() callbacks instead of handler() at module scope. Affects todayStripData.map() (lines 810, 822), weekGridData.map() (lines 1006-1011, 1043, 1073-1074), adminPeopleData.map() (lines 1171, 1211, 1219, 1226, 1233, 1259), adminSpotsData.map() (lines 1402, 1435, 1438, 1451). Each list render creates new closure objects per item.",
+          "line_number": 810,
+          "suggested_fix": "Define handler() functions at module scope with item-specific binding. Example: const cancelFromStrip = handler<void, { requestId: string }>((_, { requestId }) => { ... }); then in .map(): onClick={cancelFromStrip({ requestId: stripReq.id })}"
+        },
+        {
+          "check_id": "CCR-7",
+          "description": "46 instances of HTML elements (div, span) using string style syntax instead of required object syntax. Representative: line 730 <div slot='header' style='padding: 0.75rem 1rem; ...'>, line 895 <span style={`font-size: 0.875rem; color: ${color}; ...`}> (template literal is still string syntax). All ct-* elements correctly use string syntax.",
+          "line_number": 730,
+          "suggested_fix": "Convert all <div style='...'> to <div style={{ cssProperty: 'value' }}>. For dynamic values: style={{ color, backgroundColor: bg }} rather than template literal strings."
+        }
+      ],
+      "justification": "Strong domain modeling, clean allocation algorithm isolated in pure function at module scope, correct use of computed() for all derived values, correct $value/$checked bindings throughout, no Map/Set in cell data, no Stream.of or async. Two violations: inline arrow functions in .map() callbacks where handler() should be used (-10), and 46 pervasive string-style-on-HTML violations (-5 for the systemic pattern). The handler-per-map violations are mitigated by inner computed() wrappers that limit re-creation frequency."
+    },
+    "test_coverage": {
+      "score": 80,
+      "scoring_model": "deduction",
+      "ceiling": 85,
+      "pass_count": 4,
+      "fail_count": 1,
+      "na_count": 0,
+      "failures": [
+        {
+          "check_id": "TST-5",
+          "description": "editSpot action not directly tested (number changes, label/notes edits, deactivation). editPerson only tested via saveEditPerson UI path, not directly. The name-change cascade (updating personName on existing requests, lines 352-358 in main.tsx) is specifically identified as untested and is non-trivial.",
+          "line_number": null,
+          "suggested_fix": "Add Subject 9: test editPerson.send() with a name change and verify existing requests have their personName updated. Add Subject 10: test editSpot.send() with number change and verify existing request assignedSpot references are updated."
+        }
+      ],
+      "justification": "38/38 tests pass. Coverage is broad: people CRUD, priority swapping, spot CRUD, full allocation cascade (default spot -> preference -> any remaining -> denied), duplicate prevention, cancellation, admin override with conflict resolution, admin toggle. Pattern-as-test approach used correctly with len() helper. Missing direct tests for editPerson/editSpot side effects (name/number cascade to existing requests) which are non-trivial behaviors."
+    },
+    "spec_fidelity": {
+      "score": 85,
+      "scoring_model": "deduction",
+      "ceiling": 85,
+      "pass_count": 4,
+      "fail_count": 0,
+      "na_count": 0,
+      "failures": [],
+      "positive_evidence": [
+        "All 16 acceptance criteria verified PASS in manual test post-fix",
+        "All 13 user interactions from spec are implemented and accessible in the UI",
+        "Data model faithfully represents all three entity types with all specified fields",
+        "Allocation algorithm implements exact spec priority order: default spot -> ordered preferences -> any remaining",
+        "Admin manual override implemented with autoAllocated flag",
+        "Priority reorder via movePersonUp/movePersonDown",
+        "Deactivate spot preserves existing allocations per spec",
+        "Pattern loads with 3 default spots (#1, #5, #12) per spec acceptance criterion"
+      ],
+      "justification": "Complete spec implementation. All acceptance criteria pass post-fix. All specified user interactions available. Data model matches spec (spotNumber field name differs from spec 'number' but is a valid implementation choice to avoid TypeScript conflicts). Spec assumptions (no retroactive reallocation, priority ties by submission order, one request per person per date) all correctly implemented."
+    },
+    "ux_design": {
+      "score": 70,
+      "scoring_model": "evidence",
+      "baseline": 55,
+      "positive_evidence": [
+        "Clear single-screen information architecture: header (date + admin toggle), today strip (immediate status), request form (primary action), week grid (planning), admin section (conditionally shown). Each section has obvious purpose.",
+        "Core task (view parking status) requires 0 interactions — today strip is immediately visible on load.",
+        "Requesting a spot takes 1-3 interactions: person is pre-populated if returning user, date defaults to today, click Request Spot.",
+        "Admin section is hidden behind a clearly-labeled toggle, keeping primary view uncluttered (progressive disclosure).",
+        "Add Person and Add Spot forms are collapsed by default — further progressive disclosure.",
+        "All form inputs use ct-select, ct-input, ct-checkbox correctly (no native HTML inputs).",
+        "Color coding (green=available, blue=allocated, amber=today highlight) provides at-a-glance scanning in both today strip and week grid.",
+        "Empty roster state shows 'No team members yet. Add people in admin mode to get started.' — guides user explicitly.",
+        "Long name truncation with ellipsis in week grid cells handles edge case gracefully.",
+        "Week grid shows month boundary ('Jan / Feb') when the 7-day window crosses a month boundary."
+      ],
+      "negative_evidence": [
+        "Admin section when open is a long vertical scroll of person cards followed by spot cards with no visual grouping or section headers between the two sections.",
+        "The week grid is below the fold on most screen sizes — users who want the planning view must scroll past the request form.",
+        "Request form is always visible even in admin mode where it is less relevant, adding visual noise.",
+        "Spot label field ('Near entrance') displayed in the week grid header row but may not clearly communicate spot identity vs. spot number."
+      ],
+      "justification": "The layout reflects deliberate design intent (status board aesthetic, progressive disclosure of admin features). The two primary user tasks — checking status and requesting a spot — are immediately accessible. ct-* components used correctly throughout. Deductions for admin section organization and below-fold week grid prevent reaching 75+, but the overall IA is clear and the primary flow is genuinely well-designed."
+    },
+    "experience_quality": {
+      "score": 72,
+      "scoring_model": "evidence",
+      "baseline": 55,
+      "positive_evidence": [
+        "Request flow is 1-2 interactions for a returning user (person pre-populated, date defaults to today, click Request Spot). Genuinely efficient.",
+        "Result feedback is specific and immediate: 'Spot #5 allocated to Bob for Thu Mar 5.' and 'No spots available for Thu Mar 5 — all 3 spots are taken.' Not generic.",
+        "Today strip updates immediately after allocation — reactive feedback visible without page action.",
+        "The allocation algorithm genuinely provides value a spreadsheet cannot: auto-assigning based on priority, default spots, and preferences.",
+        "Week grid gives planning visibility that a simple allocation tracker would not provide.",
+        "Error prevention is strong: past date guard, duplicate detection with specific message, spot deactivation warning when existing allocations exist, admin override conflict detection.",
+        "Commute mode icons (car, bus, bike) provide quick visual scanning in the people list.",
+        "Cancel button visible inline on allocated spots in today strip and week grid — no navigation needed to cancel."
+      ],
+      "negative_evidence": [
+        "A brand-new user opening the tool for the first time sees an empty person dropdown and cannot request a spot without first switching to admin mode, adding themselves, then switching back. The path requires 5-6 interactions before the core task is possible.",
+        "The admin section, when open, competes visually with the primary request and status views — no clear visual separation.",
+        "The week grid shows spot numbers in row headers but the spot label (e.g., 'Near entrance') is not shown in the grid, requiring cross-referencing with the today strip or admin section."
+      ],
+      "justification": "The experience is genuinely good for a returning user: efficient request flow, specific feedback, strong error prevention, and clear status visualization. The auto-allocation algorithm with priority and preference rules genuinely justifies the tool's existence over a spreadsheet. The main friction is the first-time bootstrap path (add yourself before you can request), and the admin section competes with primary views when open. These prevent reaching 80 but the core experience is solid."
+    },
+    "first_run": {
+      "score": 68,
+      "scoring_model": "evidence",
+      "baseline": 55,
+      "positive_evidence": [
+        "Three default spots (#1 Near entrance, #5, #12 Compact only) pre-populated via Default<> type initialization. Fresh deploy immediately shows 3 available spots in the today strip and week grid.",
+        "No chicken-and-egg blocking: admin toggle is visible in the header, admin section includes Add Person form, the empty roster state explicitly says 'Add people in admin mode to get started.'",
+        "All UI elements render correctly on fresh deploy: today strip shows 3 green Available cards, week grid shows 7-day grid with 3 spot rows all showing 'Free'. Not a blank screen.",
+        "The admin toggle is discoverable in the header (always visible, clearly labeled).",
+        "The request form is pre-filled with today's date and will pre-populate the person dropdown once someone is added."
+      ],
+      "negative_evidence": [
+        "No default people pre-populated. A first-time user must enter admin mode and add themselves before they can request a spot. The core task requires 5-6 setup interactions before it becomes available.",
+        "The 'Add yourself to get started' path is implied by the 'No team members yet' message but there is no dedicated prominent call-to-action for first-time setup.",
+        "A non-admin team member opening the tool for the first time and not recognizing the Admin toggle may be confused by the empty person dropdown with no guidance specific to their situation (the guidance message is in the today strip, not near the request form)."
+      ],
+      "justification": "Significantly better than the reference run (which scored 30 with no defaults and invisible admin). The 3 default spots make the tool immediately visually useful and demonstrate what the pattern does. However the empty people roster still requires admin setup before the core task (spot requests) becomes possible. First-run is functional and self-explanatory for an admin, but a team member who opens the tool before setup has been done will see a confusing empty dropdown with no path forward except discovering admin mode."
+    }
+  },
+  "overall": {
+    "score": 73,
+    "raw_score": 75,
+    "iteration_modifier": -2,
+    "interpretation": "solid",
+    "summary": "A complete, well-implemented parking coordinator with a solid allocation algorithm, comprehensive test coverage, and a genuinely efficient request flow for returning users. The pattern compiles clean, all 16 acceptance criteria pass, and the DEFAULT_SPOTS fix means fresh deployments are immediately useful. The score of 73 reflects real strengths (correct reactive patterns, good progressive disclosure, specific feedback) against real gaps (handler-per-map instead of module-scope handlers, 46 string-style-on-HTML violations, an admin-scroll wall, and a first-run path that still requires self-registration before the core task is accessible). The 2-iteration penalty (-2) accounts for the fix pass needed to apply DEFAULT_SPOTS correctly."
+  }
+}
