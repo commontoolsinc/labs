@@ -178,6 +178,7 @@ Use the user context above to personalize your suggestions when relevant.`;
     model: "anthropic:claude-sonnet-4-5",
     context,
     resultSchema: toSchema<{ cell: Writable<any> }>(),
+    queue: "suggestions",
   });
 
   const llmResult = computed(() => suggestionResult?.cell);

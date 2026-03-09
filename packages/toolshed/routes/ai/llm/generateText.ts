@@ -454,7 +454,7 @@ export async function generateText(
             }) + "\n",
           ),
         );
-        controller.error(error);
+        controller.close();
       }
     },
   });

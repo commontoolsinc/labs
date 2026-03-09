@@ -344,7 +344,8 @@ export function llm(
     );
 
     const llmParams: LLMRequest = {
-      system: (system ?? "") + contextDocs,
+      system: ((system ?? "") + contextDocs).trim() ||
+        "You are a helpful assistant.",
       messages: (messages as unknown as readonly BuiltInLLMMessage[]) ?? [],
       stop: stop ?? "",
       maxTokens: maxTokens ?? 4096,
@@ -360,6 +361,9 @@ export function llm(
     };
 
     const hash = refer(llmParams).toString();
+    const queueName = inputs.key("queue").withTx(tx).get() as unknown as
+      | string
+      | undefined;
 
     // Return if the same request is being made again, either concurrently (same
     // as previousCallHash) or when rehydrated from storage (same as the
@@ -380,11 +384,14 @@ export function llm(
     partialWithLog.set(undefined);
     pendingWithLog.set(true);
 
+    // When queued, disable run cancellation — the queue manages lifecycle.
+    const getRunForCancellation = queueName ? () => thisRun : () => currentRun;
+
     const { callback: updatePartial, cleanup: cleanupPartial } =
       createUpdatePartialCallback(
         resultCell,
         runtime,
-        () => currentRun,
+        getRunForCancellation,
         thisRun,
       );
 
@@ -399,30 +406,37 @@ export function llm(
           ? llmToolExecutionHelpers.buildToolCatalog(toolsCell)
           : undefined;
 
-        await executeWithToolsLoop({
-          initialMessages:
-            (messages as unknown as readonly BuiltInLLMMessage[]) ?? [],
-          llmParams,
-          toolCatalog: toolCatalog!,
-          updatePartial,
-          runtime,
-          space: parentCell.space,
-          getCurrentRun: () => currentRun,
-          thisRun,
-          onComplete: async (llmResult) => {
-            await runtime.idle();
+        const doWork = () =>
+          executeWithToolsLoop({
+            initialMessages:
+              (messages as unknown as readonly BuiltInLLMMessage[]) ?? [],
+            llmParams,
+            toolCatalog: toolCatalog!,
+            updatePartial,
+            runtime,
+            space: parentCell.space,
+            getCurrentRun: getRunForCancellation,
+            thisRun,
+            onComplete: async (llmResult) => {
+              await runtime.idle();
 
-            await runtime.editWithRetry((tx) => {
-              resultCell.key("pending").withTx(tx).set(false);
-              resultCell.key("result").withTx(tx).set(llmResult.content);
-              resultCell.key("error").withTx(tx).set(undefined);
-              resultCell.key("partial").withTx(tx).set(
-                extractTextFromLLMResponse(llmResult),
-              );
-              resultCell.key("requestHash").withTx(tx).set(hash);
-            });
-          },
-        });
+              await runtime.editWithRetry((tx) => {
+                resultCell.key("pending").withTx(tx).set(false);
+                resultCell.key("result").withTx(tx).set(llmResult.content);
+                resultCell.key("error").withTx(tx).set(undefined);
+                resultCell.key("partial").withTx(tx).set(
+                  extractTextFromLLMResponse(llmResult),
+                );
+                resultCell.key("requestHash").withTx(tx).set(hash);
+              });
+            },
+          });
+
+        if (queueName) {
+          await runtime.getOrCreateQueue(queueName).enqueue(doWork);
+        } else {
+          await doWork();
+        }
       } finally {
         cleanupPartial();
       }
@@ -438,7 +452,7 @@ export function llm(
         resultCell.key("partial"),
         resultCell.key("requestHash"),
         hash,
-        () => currentRun,
+        getRunForCancellation,
         thisRun,
         () => {
           previousCallHash = undefined;
@@ -527,7 +541,8 @@ export function generateText(
     );
 
     const llmParams: LLMRequest = {
-      system: (system ?? "") + contextDocs,
+      system: ((system ?? "") + contextDocs).trim() ||
+        "You are a helpful assistant.",
       messages: requestMessages,
       stop: "",
       maxTokens: maxTokens ?? 4096,
@@ -541,6 +556,9 @@ export function generateText(
     };
 
     const hash = refer(llmParams).toString();
+    const queueName = inputs.key("queue").withTx(tx).get() as unknown as
+      | string
+      | undefined;
     const currentRequestHash = requestHashWithLog.get();
     const currentResult = resultWithLog.get();
     const currentError = errorWithLog.get();
@@ -573,11 +591,16 @@ export function generateText(
     partialWithLog.set(undefined);
     pendingWithLog.set(true);
 
+    // When queued, disable run cancellation — the queue manages lifecycle.
+    // Once enqueued, the job must run to completion to avoid abandoning
+    // HTTP streams (which causes ERR_INCOMPLETE_CHUNK_ENCODING).
+    const getRunForCancellation = queueName ? () => thisRun : () => currentRun;
+
     const { callback: updatePartial, cleanup: cleanupPartial } =
       createUpdatePartialCallback(
         resultCell,
         runtime,
-        () => currentRun,
+        getRunForCancellation,
         thisRun,
       );
 
@@ -592,29 +615,36 @@ export function generateText(
           ? llmToolExecutionHelpers.buildToolCatalog(toolsCell)
           : undefined;
 
-        await executeWithToolsLoop({
-          initialMessages: requestMessages,
-          llmParams,
-          toolCatalog: toolCatalog!,
-          updatePartial,
-          runtime,
-          space: parentCell.space,
-          getCurrentRun: () => currentRun,
-          thisRun,
-          onComplete: async (llmResult) => {
-            await runtime.idle();
+        const doWork = () =>
+          executeWithToolsLoop({
+            initialMessages: requestMessages,
+            llmParams,
+            toolCatalog: toolCatalog!,
+            updatePartial,
+            runtime,
+            space: parentCell.space,
+            getCurrentRun: getRunForCancellation,
+            thisRun,
+            onComplete: async (llmResult) => {
+              await runtime.idle();
 
-            const textResult = extractTextFromLLMResponse(llmResult);
+              const textResult = extractTextFromLLMResponse(llmResult);
 
-            await runtime.editWithRetry((tx) => {
-              resultCell.key("pending").withTx(tx).set(false);
-              resultCell.key("result").withTx(tx).set(textResult);
-              resultCell.key("error").withTx(tx).set(undefined);
-              resultCell.key("partial").withTx(tx).set(textResult);
-              resultCell.key("requestHash").withTx(tx).set(hash);
-            });
-          },
-        });
+              await runtime.editWithRetry((tx) => {
+                resultCell.key("pending").withTx(tx).set(false);
+                resultCell.key("result").withTx(tx).set(textResult);
+                resultCell.key("error").withTx(tx).set(undefined);
+                resultCell.key("partial").withTx(tx).set(textResult);
+                resultCell.key("requestHash").withTx(tx).set(hash);
+              });
+            },
+          });
+
+        if (queueName) {
+          await runtime.getOrCreateQueue(queueName).enqueue(doWork);
+        } else {
+          await doWork();
+        }
       } finally {
         cleanupPartial();
       }
@@ -630,7 +660,7 @@ export function generateText(
         resultCell.key("partial"),
         resultCell.key("requestHash"),
         hash,
-        () => currentRun,
+        getRunForCancellation,
         thisRun,
         () => {
           previousCallHash = undefined;
@@ -734,7 +764,8 @@ export function generateObject<T extends Record<string, unknown>>(
     if (hasTools) {
       // Use tool-calling path with presentResult builtin tool
       const llmParams: LLMRequest = {
-        system: (system ?? "") + contextDocs,
+        system: ((system ?? "") + contextDocs).trim() ||
+          "You are a helpful assistant.",
         messages: requestMessages,
         stop: "",
         maxTokens: maxTokens ?? 8192,
@@ -748,6 +779,9 @@ export function generateObject<T extends Record<string, unknown>>(
       };
 
       const hash = refer({ ...llmParams, schema }).toString();
+      const queueName = inputs.key("queue").withTx(tx).get() as unknown as
+        | string
+        | undefined;
       const currentRequestHash = requestHashWithLog.get();
       const currentResult = resultWithLog.get();
       const currentError = errorWithLog.get();
@@ -781,9 +815,14 @@ export function generateObject<T extends Record<string, unknown>>(
         createUpdatePartialCallback(
           resultCell,
           runtime,
-          () => currentRun,
+          queueName ? () => thisRun : () => currentRun,
           thisRun,
         );
+
+      // When queued, disable run cancellation — the queue manages lifecycle.
+      const isRunCancelled = queueName
+        ? () => false
+        : () => thisRun !== currentRun;
 
       // Build tool catalog with presentResult tool
       const resultPromise = (async () => {
@@ -818,7 +857,7 @@ export function generateObject<T extends Record<string, unknown>>(
           const executeRecursive = async (
             currentMessages: readonly BuiltInLLMMessage[],
           ): Promise<void> => {
-            if (thisRun !== currentRun) return;
+            if (isRunCancelled()) return;
 
             const requestParams: LLMRequest = {
               ...llmParams,
@@ -831,7 +870,7 @@ export function generateObject<T extends Record<string, unknown>>(
               updatePartial,
             );
 
-            if (thisRun !== currentRun) return;
+            if (isRunCancelled()) return;
 
             const toolCallParts = llmToolExecutionHelpers.extractToolCallParts(
               llmResult.content,
@@ -889,13 +928,21 @@ export function generateObject<T extends Record<string, unknown>>(
             }
           };
 
-          await executeRecursive(requestMessages);
+          const doWork = async () => {
+            await executeRecursive(requestMessages);
 
-          if (finalResult === undefined) {
-            throw new Error("presentResult was never called");
+            if (finalResult === undefined) {
+              throw new Error("presentResult was never called");
+            }
+
+            return finalResult;
+          };
+
+          if (queueName) {
+            return await runtime.getOrCreateQueue(queueName).enqueue(doWork);
+          } else {
+            return await doWork();
           }
-
-          return finalResult;
         } finally {
           cleanupPartial();
         }
@@ -903,7 +950,7 @@ export function generateObject<T extends Record<string, unknown>>(
 
       resultPromise
         .then(async (objectResult) => {
-          if (thisRun !== currentRun) return;
+          if (isRunCancelled()) return;
 
           await runtime.idle();
 
@@ -924,7 +971,7 @@ export function generateObject<T extends Record<string, unknown>>(
             resultCell.key("partial"),
             resultCell.key("requestHash"),
             hash,
-            () => currentRun,
+            queueName ? () => thisRun : () => currentRun,
             thisRun,
             () => {
               previousCallHash = undefined;
@@ -951,6 +998,9 @@ export function generateObject<T extends Record<string, unknown>>(
       generateObjectParams.system = (system ?? "") + contextDocs;
 
       const hash = refer(generateObjectParams).toString();
+      const queueName = inputs.key("queue").withTx(tx).get() as unknown as
+        | string
+        | undefined;
       const currentRequestHash = requestHashWithLog.get();
       const currentResult = resultWithLog.get();
       const currentError = errorWithLog.get();
@@ -983,15 +1033,24 @@ export function generateObject<T extends Record<string, unknown>>(
       partialWithLog.set(undefined);
       pendingWithLog.set(true);
 
-      const resultPromise = client.generateObject(
-        generateObjectParams,
-      ) as Promise<{
-        object: T;
-      }>;
+      const doWork = () =>
+        client.generateObject(
+          generateObjectParams,
+        ) as Promise<{
+          object: T;
+        }>;
+
+      const resultPromise = queueName
+        ? runtime.getOrCreateQueue(queueName).enqueue(doWork)
+        : doWork();
+
+      const isRunCancelled = queueName
+        ? () => false
+        : () => thisRun !== currentRun;
 
       resultPromise
         .then(async (response) => {
-          if (thisRun !== currentRun) return;
+          if (isRunCancelled()) return;
 
           await runtime.idle();
 
@@ -1012,7 +1071,7 @@ export function generateObject<T extends Record<string, unknown>>(
             resultCell.key("partial"),
             resultCell.key("requestHash"),
             hash,
-            () => currentRun,
+            queueName ? () => thisRun : () => currentRun,
             thisRun,
             () => {
               previousCallHash = undefined;

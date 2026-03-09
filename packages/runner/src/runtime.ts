@@ -31,6 +31,7 @@ import {
   setStorableValueConfig,
 } from "@commontools/memory/storable-value-dispatch";
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
+import { AsyncSemaphoreQueue, type QueueConfig } from "./queue.ts";
 import type {
   ChangeGroup,
   CommitError,
@@ -185,6 +186,7 @@ export class Runtime {
   readonly apiUrl: URL;
   readonly userIdentityDID: DID;
   private defaultFrame?: Frame;
+  private queues = new Map<string, AsyncSemaphoreQueue>();
 
   constructor(options: RuntimeOptions) {
     this.experimental = {
@@ -305,6 +307,30 @@ export class Runtime {
    */
   getIdempotencyViolations(): NonIdempotentReport[] {
     return this.scheduler.getIdempotencyViolations();
+  }
+
+  /**
+   * Get or create a named async queue for throttling concurrent operations.
+   * Queues are shared across all builtins that reference the same name.
+   */
+  getOrCreateQueue(
+    name: string,
+    config?: QueueConfig,
+  ): AsyncSemaphoreQueue {
+    let q = this.queues.get(name);
+    if (!q) {
+      q = new AsyncSemaphoreQueue(config ?? { maxConcurrency: 2 });
+      this.queues.set(name, q);
+    }
+    return q;
+  }
+
+  /**
+   * Configure a named queue's concurrency. Creates the queue if it doesn't exist.
+   */
+  configureQueue(name: string, config: QueueConfig): void {
+    const q = this.getOrCreateQueue(name, config);
+    q.setMaxConcurrency(config.maxConcurrency);
   }
 
   /**
