@@ -760,16 +760,26 @@ export class Scheduler {
     // In pull mode: When an action resubscribes, check if any non-throttled dirty
     // computations write to what it reads. If so, mark the action dirty so it can
     // pull those computations and see fresh data.
-    // This applies to both effects AND computations — computations may discover new
-    // dynamic dependencies at runtime (e.g., traversing a newly-created entity reference)
-    // and need to be re-dirtied if their new reads overlap with dirty upstream computations.
-    // Skip throttled computations - they'll trigger via storage changes when unthrottled.
+    //
+    // This applies to both effects AND computations. Within a settle iteration,
+    // actions run in topo order: if D runs before C and D's output is fresh,
+    // D's dirty flag is cleared before C resubscribes — so no false trigger.
+    // If D was re-dirtied (its own upstream was stale), D's dirty flag accurately
+    // signals that C should re-run too.
+    //
+    // The pendingDependencyCollection conservative path applies to all actions:
+    // when new child computations are created, their mightWrite isn't populated
+    // yet (collected at the start of the next settle iteration), so the explicit
+    // dirty-write overlap check can't find them.
     if (this.pullMode && this.dirty.size > 0) {
-      const actionReads = log.reads ?? [];
+      const actionReads = (log.shallowReads?.length ?? 0) > 0
+        ? [...(log.reads ?? []), ...log.shallowReads]
+        : (log.reads ?? []);
       let shouldMarkDirty = false;
 
-      // If there are pending computations whose dependencies haven't been collected yet,
-      // we can't know what they write. Be conservative and assume they might affect this action.
+      // If there are pending computations whose dependencies haven't been collected
+      // yet, we can't know what they write. Be conservative and assume they might
+      // affect this action.
       if (this.pendingDependencyCollection.size > 0) {
         shouldMarkDirty = true;
       }
@@ -1936,6 +1946,12 @@ export class Scheduler {
     this.collectStack.add(action);
 
     // Find dirty computations that write to entities this action reads
+    // Include both reads and shallowReads — shallowReads still represent
+    // dependencies that need to be pulled even though they don't trigger on
+    // child-level storage changes.
+    const allReads = log.shallowReads.length > 0
+      ? [...log.reads, ...log.shallowReads]
+      : log.reads;
     for (const computation of this.dirty) {
       if (workSet.has(computation)) continue; // Already added
       if (computation === action) continue;
@@ -1946,7 +1962,7 @@ export class Scheduler {
       // Check if computation writes to something action reads (with path overlap)
       let found = false;
       for (const write of computationWrites) {
-        for (const read of log.reads) {
+        for (const read of allReads) {
           if (
             write.space === read.space &&
             write.id === read.id &&
