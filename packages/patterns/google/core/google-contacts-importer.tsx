@@ -94,18 +94,28 @@ const FetchContactsPage: any = pattern<PageInput, PageOutput>(
         pageError: page.error,
         pagePending: page.pending,
         accumulated,
+        token,
+        maxContacts,
       },
       ({
         pageResult,
         pageError,
         pagePending,
         accumulated,
+        token: tokenVal,
+        maxContacts: maxVal,
       }: {
         pageResult: any;
         pageError: any;
         pagePending: boolean;
         accumulated: GoogleContact[];
+        token: string;
+        maxContacts: number;
       }): PageOutput => {
+        // No token means no fetch was initiated — not pending
+        if (!tokenVal) {
+          return { contacts: accumulated || [], pending: false };
+        }
         if (pagePending || !pageResult) {
           return { contacts: accumulated || [], pending: true };
         }
@@ -118,9 +128,9 @@ const FetchContactsPage: any = pattern<PageInput, PageOutput>(
         );
         const combined = [...(accumulated || []), ...connections];
 
-        if (combined.length >= maxContacts || !pageResult.nextPageToken) {
+        if (combined.length >= maxVal || !pageResult.nextPageToken) {
           return {
-            contacts: combined.slice(0, maxContacts),
+            contacts: combined.slice(0, maxVal),
             pending: false,
           };
         }

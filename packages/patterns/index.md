@@ -1222,3 +1222,52 @@ interface LinkPreviewInput {
   url: string;
 }
 ```
+
+## `google/core/google-contacts-importer.tsx`
+
+Imports Google Contacts via the People API. Authenticates with the `contacts`
+scope, fetches contacts with pagination, and exposes structured contact data
+including names, emails, phone numbers, organizations, and more.
+
+**Keywords:** google, contacts, people-api, import, google-auth
+
+### Input Schema
+
+```ts
+interface GoogleContactsImporterInput {
+  maxContacts?: Default<number, 500>;
+  debugMode?: Default<boolean, false>;
+  overrideAuth?: Auth;
+}
+```
+
+### Output Schema
+
+```ts
+interface GoogleContact {
+  resourceName: string;
+  displayName: string;
+  givenName: string;
+  familyName: string;
+  emails: Array<{ value: string; type: string }>;
+  phoneNumbers: Array<{ value: string; type: string }>;
+  addresses: Array<{
+    formattedValue: string;
+    type: string;
+    city: string;
+    region: string;
+    country: string;
+  }>;
+  organizations: Array<{ name: string; title: string }>;
+  birthdays: Array<{ date: { year: number; month: number; day: number } }>;
+  photos: Array<{ url: string }>;
+  biographies: Array<{ value: string }>;
+  relations: Array<{ person: string; type: string }>;
+}
+
+interface Output {
+  contacts: GoogleContact[];
+  contactCount: number;
+  summary: string;
+}
+```

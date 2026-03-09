@@ -13,6 +13,7 @@ packages/patterns/google/
 │   │   ├── gmail-send-client.ts
 │   │   ├── calendar-write-client.ts
 │   │   ├── google-auth-manager.tsx
+│   │   ├── google-contacts-client.ts
 │   │   ├── google-docs-client.ts
 │   │   ├── google-docs-markdown.ts
 │   │   └── agentic-tools.ts
@@ -22,6 +23,7 @@ packages/patterns/google/
 │   ├── google-auth-work.tsx      # Work account wrapper
 │   ├── gmail-importer.tsx        # Email fetching (heavily used)
 │   ├── google-calendar-importer.tsx
+│   ├── google-contacts-importer.tsx
 │   ├── imported-calendar.tsx
 │   ├── processing-status.tsx
 │   │
@@ -72,7 +74,8 @@ You need your own Google OAuth credentials:
 2. Create OAuth 2.0 Client ID (Web application)
 3. Add redirect URI:
    `http://localhost:8000/api/integrations/google-oauth/callback`
-4. Enable APIs: Gmail, Calendar, Drive (as needed)
+4. Enable the Google APIs you need (see
+   [Enabling Google APIs](#enabling-google-apis) below)
 5. Add to `packages/toolshed/.env`:
    ```
    GOOGLE_CLIENT_ID=your-client-id
@@ -188,6 +191,7 @@ Your Pattern
 | ----------------------------------- | -------------------------------------------- |
 | `core/gmail-importer.tsx`           | Import emails from Gmail with search queries |
 | `core/google-calendar-importer.tsx` | Import events from Google Calendar           |
+| `core/google-contacts-importer.tsx` | Import contacts via Google People API        |
 | `core/imported-calendar.tsx`        | Display local calendar events                |
 | `core/processing-status.tsx`        | Loading/progress UI component                |
 
@@ -241,7 +245,49 @@ The patterns request various scopes depending on their needs:
 - `https://www.googleapis.com/auth/gmail.modify` - Modify labels
 - `https://www.googleapis.com/auth/calendar.readonly` - Read calendar
 - `https://www.googleapis.com/auth/calendar.events` - Manage calendar events
+- `https://www.googleapis.com/auth/contacts.readonly` - Read contacts (People
+  API)
 - `https://www.googleapis.com/auth/documents.readonly` - Read Google Docs
+
+## Enabling Google APIs
+
+Having the correct OAuth **scope** in your token is necessary but not
+sufficient. Each Google API service must also be **enabled at the project
+level** in the Google Cloud Console. If the API is not enabled, requests will
+fail with a `403 PERMISSION_DENIED` error even though the OAuth token carries
+the right scope.
+
+### Required APIs by Pattern
+
+| Pattern                         | API to Enable                                                                                     |
+| ------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Gmail Importer                  | [Gmail API](https://console.cloud.google.com/apis/library/gmail.googleapis.com)                   |
+| Google Calendar Importer        | [Google Calendar API](https://console.cloud.google.com/apis/library/calendar-json.googleapis.com) |
+| Google Contacts Importer        | [People API](https://console.cloud.google.com/apis/library/people.googleapis.com)                 |
+| Google Docs Importer / Comments | [Google Docs API](https://console.cloud.google.com/apis/library/docs.googleapis.com)              |
+| Drive (read/write)              | [Google Drive API](https://console.cloud.google.com/apis/library/drive.googleapis.com)            |
+
+### How to Enable an API
+
+1. Open the link from the table above (or go to **APIs & Services > Library** in
+   the [Google Cloud Console](https://console.cloud.google.com))
+2. Select the project associated with your OAuth client ID
+3. Click **Enable**
+
+The API is available immediately after enabling.
+
+### Google Contacts / People API
+
+The Google Contacts Importer (`google-contacts-importer.tsx`) uses the **People
+API** (`people.googleapis.com`), not the older Contacts API. This is a common
+source of confusion:
+
+- The OAuth scope `contacts.readonly` grants permission in the **token**, but
+  the People API service must also be enabled in your Google Cloud project.
+- Direct link to enable:
+  https://console.cloud.google.com/apis/library/people.googleapis.com
+- Without this, fetching contacts will fail with `403 PERMISSION_DENIED` even
+  though the OAuth consent screen and token look correct.
 
 ## Manual Piece Linking
 
