@@ -2,7 +2,7 @@
 
 ## Status
 
-Draft
+Draft (revised per architect review)
 
 ## Overview
 
@@ -11,9 +11,11 @@ Telegram, Signal, Discord, iMessage, Slack). Some services have public APIs and
 can run server-side in toolshed. Others (iMessage, Signal) have no API and
 require a local daemon on the user's machine.
 
-Today the only precedent is a crude Deno script that shells out to `ct` CLI
-commands every 5 minutes to sync iMessage data. This document designs a proper
-architecture.
+Each platform is its own pattern with its own lossless types. Platform-specific
+adapters write platform-specific inbound types into platform-specific cells.
+Outbound messaging is via per-platform `sendMessage` Stream handlers. A
+higher-level "Unified Inbox" pattern can optionally normalize for display, but
+normalization is a consumer choice, not a transport requirement.
 
 ---
 
@@ -27,24 +29,25 @@ WhatsApp Business API
 **Architecture:** Toolshed integration modules, following the existing pattern at
 `packages/toolshed/routes/integrations/`. Each service gets:
 
-- A toolshed route (`/api/integrations/{service}/`) for OAuth/token setup and
-  message sending
+- A toolshed route (`/api/integrations/{service}/`) for OAuth/token setup
 - A webhook receiver endpoint for incoming messages (or polling adapter)
 - Integration with the existing **webhook ingress system**
-  (`/api/webhooks/:id`) to push inbound messages into pattern Stream cells
+  (`/api/webhooks/:id`) to push inbound messages into platform-specific Stream
+  cells
 - A **background-charm-service integration** for scheduled operations (see
   `packages/background-charm-service/CLAUDE.md` for the integration pattern)
+- A per-platform **`sendMessage` Stream handler** for outbound messages
 
 **Data flow (inbound):**
 
 ```
-External Service --> Toolshed webhook endpoint --> sendToStream() --> Pattern Stream cell --> handler
+External Service --> Toolshed webhook endpoint --> sendToStream() --> Platform-specific Stream cell --> handler
 ```
 
 **Data flow (outbound):**
 
 ```
-Pattern handler --> writes to outbox cell --> toolshed watches via cell.sink() --> External Service API
+Pattern --> calls platform sendMessage handler --> toolshed integration --> External Service API
 ```
 
 **Key existing code to reuse:**
@@ -64,7 +67,8 @@ inherently local)
 
 **Architecture:** A standalone Deno process ("Common Gateway") that runs on the
 user's machine, imports the CT runtime library directly, and bridges local data
-sources into the cell fabric.
+sources into the cell fabric. Each platform adapter is its own pattern with its
+own types and its own `sendMessage` handler.
 
 ---
 
@@ -77,8 +81,8 @@ sources into the cell fabric.
                     +----------------------------------+
                     |                                  |
                     |  +----------+  +--------------+  |
-                    |  | Channel  |  | CT Runtime   |  |
-                    |  | Adapters |  | Client       |  |
+                    |  | Platform |  | CT Runtime   |  |
+                    |  | Patterns |  | Client       |  |
   Local Data ------+--| iMessage |--| getCellFrom  |--+---- Toolshed API
   Sources          |  | Signal   |  | Link(), sync |  |     (storage)
   (chat.db,        |  | WhatsApp |  | editWithRetry|  |
@@ -124,31 +128,6 @@ const streamCell = cell.asSchema({ asStream: true });
 streamCell.withTx(tx).send(payload);
 ```
 
-### Channel Adapter Interface
-
-Each messaging platform implements a common adapter interface:
-
-```typescript
-interface ChannelAdapter {
-  id: string;           // "imessage", "signal", "whatsapp-local"
-  name: string;
-
-  // Lifecycle
-  initialize(config: ChannelConfig): Promise<void>;
-  start(): Promise<void>;
-  stop(): Promise<void>;
-
-  // Inbound: adapter calls this when messages arrive
-  onMessage: (msg: NormalizedMessage) => void;
-
-  // Outbound: gateway calls this to send
-  send(msg: OutboundMessage): Promise<SendResult>;
-
-  // Status
-  status(): ChannelStatus;
-}
-```
-
 ### Per-Platform Implementation Notes
 
 **iMessage:**
@@ -174,23 +153,21 @@ interface ChannelAdapter {
 
 ---
 
-## NormalizedMessage Schema
+## Message Schemas
 
-Both tiers normalize to the same message schema so patterns don't care where
-messages came from.
+Each platform defines its own lossless message type that preserves all
+platform-specific fields. A common base provides shared structure, but each
+platform type is a superset -- nothing is discarded at the transport layer.
+
+### Common Base
 
 ```typescript
-interface NormalizedMessage {
-  id: string;
-  platform: string;       // "imessage" | "signal" | "telegram" | ...
-  chatId: string;
-  senderId: string;
-  senderName?: string;
+// Shared fields that every platform message includes
+interface MessageBase {
   text: string | null;
   timestamp: string;       // ISO 8601
-  attachments?: Attachment[];
   isFromMe: boolean;
-  replyToId?: string;
+  attachments?: Attachment[];
 }
 
 interface Attachment {
@@ -199,44 +176,179 @@ interface Attachment {
   url?: string;            // data: URI or http URL
   size?: number;
 }
+```
 
-interface OutboundMessage {
-  id: string;              // client-generated for dedup
-  platform: string;
-  chatId: string;
-  text: string;
-  replyToId?: string;
-  attachments?: Attachment[];
+### Platform-Specific Message Types (Lossless)
+
+Each platform extends the base with all of its native fields:
+
+```typescript
+// iMessage -- preserves all chat.db columns
+interface IMessageMessage extends MessageBase {
+  rowId: number;              // chat.db ROWID
+  guid: string;               // iMessage GUID
+  handleId: string;
+  chatGuid: string;           // e.g. "iMessage;+;chat12345"
+  service: string;            // "iMessage" | "SMS"
+  isDelivered: boolean;
+  isRead: boolean;
+  dateSent: number;           // Core Data timestamp
+  threadOriginatorGuid?: string;
+  tapbackType?: number;
+  associatedMessageGuid?: string;
+  // ... all other chat.db fields as needed
 }
 
+// Signal -- preserves signal-cli JSON-RPC fields
+interface SignalMessage extends MessageBase {
+  envelope: {
+    source: string;           // phone number
+    sourceDevice: number;
+    timestamp: number;
+  };
+  groupId?: string;
+  groupName?: string;
+  expiresInSeconds?: number;
+  quote?: {
+    id: number;
+    author: string;
+    text: string;
+  };
+  reaction?: {
+    emoji: string;
+    targetTimestamp: number;
+    targetAuthor: string;
+  };
+  // ... all signal-cli fields
+}
+
+// Telegram -- preserves Bot API Update fields
+interface TelegramMessage extends MessageBase {
+  messageId: number;
+  from: { id: number; firstName: string; username?: string };
+  chat: { id: number; type: string; title?: string };
+  replyToMessage?: TelegramMessage;
+  forwardFrom?: { id: number; firstName: string };
+  editDate?: number;
+  entities?: Array<{ type: string; offset: number; length: number }>;
+  // ... all Telegram Bot API fields
+}
+
+// Discord -- preserves Discord API fields
+interface DiscordMessage extends MessageBase {
+  messageId: string;
+  channelId: string;
+  guildId?: string;
+  author: { id: string; username: string; discriminator: string };
+  embeds?: Array<Record<string, unknown>>;
+  reactions?: Array<{ emoji: string; count: number }>;
+  referencedMessage?: DiscordMessage;
+  // ... all Discord API fields
+}
+```
+
+### Per-Platform Cell Schemas
+
+Each platform is its own pattern with its own cell types. Entities (chats,
+messages, participants) are referenced via cell links, not string IDs.
+
+```typescript
+// === iMessage Pattern ===
+
+// Inbound: daemon pushes platform-specific messages here
+type IMessageInbox = Stream<IMessageMessage>;
+
+// Chat entity -- a fabric entity, referenced by cell link
+type IMessageChat = {
+  chatGuid: string;
+  displayName?: string;
+  participants: CellLink[];   // links to contact entities
+  messages: CellLink[];       // links to message entities
+  lastActivity: string;
+};
+
+// === Signal Pattern ===
+
+type SignalInbox = Stream<SignalMessage>;
+
+type SignalConversation = {
+  phoneNumber: string;        // direct message
+  groupId?: string;           // group chat
+  groupName?: string;
+  participants: CellLink[];
+  messages: CellLink[];
+  lastActivity: string;
+};
+
+// === Telegram Pattern ===
+
+type TelegramInbox = Stream<TelegramMessage>;
+
+type TelegramChat = {
+  chatEntity: CellLink;       // link to the telegram chat entity
+  messages: CellLink[];
+  lastActivity: string;
+};
+
+// (Discord, Slack, WhatsApp follow the same per-platform pattern)
+```
+
+---
+
+## Per-Platform Send Handlers
+
+Outbound messaging uses per-platform `sendMessage` Stream handlers instead of a
+shared outbox. Each platform exposes its own handler with platform-appropriate
+parameters. The handler interface is a Stream -- even if the implementation
+internally queues, the caller interacts with a handler, not a data structure.
+
+```typescript
+// === iMessage ===
+type IMessageSend = Stream<{
+  chat: CellLink;             // link to the iMessage chat entity
+  text: string;
+  replyTo?: CellLink;         // link to a message entity
+  attachments?: Attachment[];
+}>;
+
+// === Signal ===
+type SignalSend = Stream<{
+  conversation: CellLink;     // link to the Signal conversation entity
+  text: string;
+  replyTo?: CellLink;         // link to a message entity
+  attachments?: Attachment[];
+  expiresInSeconds?: number;  // platform-specific: disappearing messages
+}>;
+
+// === Telegram ===
+type TelegramSend = Stream<{
+  chat: CellLink;             // link to the Telegram chat entity
+  text: string;
+  replyTo?: CellLink;         // link to a message entity
+  parseMode?: "HTML" | "Markdown";  // platform-specific
+  attachments?: Attachment[];
+}>;
+
+// === Discord ===
+type DiscordSend = Stream<{
+  channel: CellLink;          // link to the Discord channel entity
+  text: string;
+  replyTo?: CellLink;         // link to a message entity
+  embeds?: Array<Record<string, unknown>>;  // platform-specific
+  attachments?: Attachment[];
+}>;
+```
+
+### Send Result
+
+Each handler returns a platform-specific result:
+
+```typescript
 interface SendResult {
   success: boolean;
   externalId?: string;     // platform-assigned message ID
   error?: string;
 }
-```
-
-### Cell Schema for Messaging
-
-Patterns that consume messages use standardized cell shapes:
-
-```typescript
-// Inbound message stream -- daemon/webhook pushes here
-type MessageInbox = Stream<NormalizedMessage>;
-
-// Outbox cell -- pattern writes here, daemon/toolshed watches
-type MessageOutbox = {
-  pending: OutboundMessage[];
-};
-
-// Conversation state -- pattern maintains
-type Conversation = {
-  chatId: string;
-  platform: string;
-  participants: Participant[];
-  messages: NormalizedMessage[];
-  lastActivity: string;
-};
 ```
 
 ---
@@ -249,26 +361,35 @@ falling back to polling when the data source demands it.
 ### Inbound messages (local source -> fabric)
 
 - **iMessage:** Poll `chat.db` via `fs.watch`/kqueue on the WAL file, or
-  short-interval poll (5-10s). Push new messages via `sendToStream()`.
+  short-interval poll (5-10s). Push new `IMessageMessage` entries via
+  `sendToStream()` to the iMessage inbox.
 - **Signal:** `signal-cli` JSON-RPC pushes messages as they arrive
-  (event-driven, no polling).
-- **WhatsApp/Baileys:** Event-driven WebSocket connection (no polling).
+  (event-driven, no polling). Pushed as `SignalMessage` to Signal inbox.
+- **WhatsApp/Baileys:** Event-driven WebSocket connection (no polling). Pushed
+  as platform-specific messages to WhatsApp inbox.
 
 ### Outbound messages (fabric -> local send)
 
-Daemon calls `cell.sink()` on the outbox cell for each channel. When a pattern
-writes an outbound message, the sink fires immediately and the daemon routes to
-the appropriate adapter's `send()`.
+Each platform's `sendMessage` Stream handler is watched by the daemon via
+`cell.sink()`. When a pattern sends a message through the handler, the sink
+fires and the daemon dispatches to the appropriate platform adapter.
 
 ```typescript
-// Reactive outbox watching
-outboxCell.sink((outbox) => {
-  for (const msg of outbox.pending) {
-    const adapter = adapters.get(msg.platform);
-    adapter?.send(msg).then(() => {
-      removePending(outboxCell, msg.id);
-    });
-  }
+// Per-platform handler watching (iMessage example)
+iMessageSendStream.sink((message) => {
+  const chat = resolveEntity(message.chat);  // resolve cell link to chat entity
+  const replyTo = message.replyTo
+    ? resolveEntity(message.replyTo)
+    : undefined;
+  iMessageAdapter.send(chat, message.text, replyTo);
+});
+
+// Signal example
+signalSendStream.sink((message) => {
+  const conversation = resolveEntity(message.conversation);
+  signalAdapter.send(conversation, message.text, {
+    expiresInSeconds: message.expiresInSeconds,
+  });
 });
 ```
 
@@ -285,10 +406,10 @@ one writer for local-source data.
 1. **First run:** Interactive setup -- prompts for toolshed URL, identity key
    path, space name. Saves config to `~/.common-gateway/config.json`.
 2. **Start:** Loads config, initializes runtime client, connects to storage,
-   starts enabled channel adapters, sets up `cell.sink()` watchers on outbox
-   cells.
-3. **Running:** Inbound messages flow reactively into Stream cells. Outbox
-   changes fire sink callbacks for outbound delivery.
+   starts enabled platform adapters, sets up `cell.sink()` watchers on each
+   platform's send handler.
+3. **Running:** Inbound messages flow reactively into per-platform Stream cells.
+   Send handler sinks fire callbacks for outbound delivery.
 4. **`--daemon` mode:** Runs as a background process. On macOS, can install as a
    launchd service.
 
@@ -338,26 +459,30 @@ common-tools-app/
 
 ---
 
-## Unified Messaging Pattern
+## Unified Inbox Pattern (Higher-Level Consumer)
 
-A single "Unified Inbox" pattern that works with both Tier 1 and Tier 2
-services:
+The Unified Inbox is a **consumer pattern** that optionally normalizes
+per-platform messages for display. It is not part of the transport layer --
+it subscribes to the per-platform inboxes and projects into a common view.
 
 ```
 +----------------------------------------------+
 |  Unified Inbox Pattern                       |
+|  (higher-level normalization consumer)       |
 |                                              |
 |  +-----------+  +-------------------------+  |
-|  | Server    |  | Local daemon            |  |
-|  | webhooks  |  | streams                 |  |
-|  | (Telegram |  | (iMessage, Signal,      |  |
-|  |  Discord) |  |  WhatsApp-local)        |  |
+|  | Telegram  |  | iMessage inbox          |  |
+|  | inbox     |  | Signal inbox            |  |
+|  | Discord   |  | WhatsApp inbox          |  |
+|  | inbox     |  | (platform-specific      |  |
+|  | (lossless)|  |  lossless types)        |  |
 |  +-----+-----+  +-----------+-------------+  |
 |        |                    |                |
 |        +--------+-----------+                |
 |                 v                             |
-|        NormalizedMessage[]                    |
-|        (unified cell)                         |
+|        normalize() -- project to             |
+|        common display fields                 |
+|        (consumer's choice, lossy)            |
 |                 |                             |
 |                 v                             |
 |        +----------------+                     |
@@ -365,11 +490,21 @@ services:
 |        | (conversation  |                     |
 |        |  list + detail)|                     |
 |        +----------------+                     |
+|                 |                             |
+|                 v (reply)                     |
+|        route to per-platform                  |
+|        sendMessage handler                    |
 +----------------------------------------------+
 ```
 
-Both tiers normalize to the same `NormalizedMessage` schema. The pattern doesn't
-care where messages came from.
+The Unified Inbox pattern:
+
+- Subscribes to each platform's inbox Stream cells
+- Projects platform-specific types into a common display format (lossy
+  normalization -- only for rendering, not storage)
+- Routes outbound replies to the correct per-platform `sendMessage` handler
+  based on which conversation the user is viewing
+- Individual platform patterns work independently without the Unified Inbox
 
 ---
 
@@ -386,16 +521,21 @@ care where messages came from.
 | iMessage | BlueBubbles bridge | Direct SQLite + AppleScript |
 | Signal | signal-cli JSON-RPC | signal-cli JSON-RPC (same) |
 | Packaging | Docker / systemd | Standalone binary / Tauri sidecar |
+| Message types | Normalized at transport | Per-platform lossless, normalize at consumer |
+| Outbound | Shared send queue | Per-platform Stream handlers |
 
 **Key architectural difference:** OpenClaw is a monolith -- everything runs in
 one process. CT's approach is distributed -- server-side services run in
 toolshed, local-only services run in the daemon, and they both write to the same
-cell fabric. This means:
+cell fabric. Each platform is its own pattern with its own lossless types and
+its own send handler. This means:
 
 - Server-side services work without the daemon running
 - The daemon only needs to handle truly local things
 - State is always available via the web (even if daemon is offline, you see
   last-synced messages)
+- No information is lost at the transport layer -- platform-specific features
+  (reactions, threads, disappearing messages) are preserved
 
 ---
 
@@ -419,30 +559,36 @@ cell fabric. This means:
 5. **Attachment storage:** Large media (images, videos) -- store in the cell
    fabric or reference externally?
 
+6. **Entity granularity:** Should each message be its own cell entity, or should
+   messages be stored as arrays within conversation entities? Per-message
+   entities enable fine-grained linking but increase cell count.
+
 ---
 
 ## Implementation Roadmap
 
 ### Phase 1: Foundation
 
-- [ ] Define `NormalizedMessage` schema and messaging cell conventions in
-      `packages/common-gateway/src/types.ts`
-- [ ] Build Common Gateway skeleton (Deno, runtime client, adapter interface)
-- [ ] iMessage adapter (read-only, based on existing SQLite approach)
-- [ ] Simple viewer pattern for testing
+- [ ] Define per-platform message types and cell schemas in
+      `packages/common-gateway/src/types/`
+- [ ] Build Common Gateway skeleton (Deno, runtime client)
+- [ ] iMessage adapter with lossless `IMessageMessage` type (read-only)
+- [ ] iMessage `sendMessage` Stream handler
+- [ ] Simple iMessage viewer pattern for testing
 
 ### Phase 2: Bidirectional
 
-- [ ] iMessage send via AppleScript
-- [ ] Outbox cell convention and daemon-side watcher
-- [ ] Chat UI pattern (conversation list + detail + compose)
+- [ ] iMessage send via AppleScript (wired to `sendMessage` handler)
+- [ ] Signal adapter with lossless `SignalMessage` type
+- [ ] Signal `sendMessage` Stream handler
+- [ ] Per-platform chat UI patterns
 
 ### Phase 3: More Channels
 
-- [ ] Signal adapter (signal-cli)
-- [ ] Telegram server-side integration in toolshed
-- [ ] Discord server-side integration (upgrade existing webhook-only)
-- [ ] WhatsApp local adapter (Baileys)
+- [ ] Telegram server-side integration in toolshed with `TelegramMessage` type
+- [ ] Discord server-side integration with `DiscordMessage` type
+- [ ] WhatsApp local adapter (Baileys) with lossless type
+- [ ] Each with its own `sendMessage` handler
 
 ### Phase 4: Tauri
 
@@ -451,9 +597,10 @@ cell fabric. This means:
 - [ ] Sidecar integration (start/stop gateway from Tauri)
 - [ ] QR code pairing UI for WhatsApp within Tauri
 
-### Phase 5: Polish
+### Phase 5: Unified Experience
 
-- [ ] Unified Inbox pattern
+- [ ] Unified Inbox pattern (higher-level normalization consumer)
+- [ ] Cross-platform reply routing via per-platform send handlers
 - [ ] Notification integration (Tauri native notifications)
 - [ ] Mobile Tauri plugins (Android SMS)
 - [ ] Auto-update for daemon/app
