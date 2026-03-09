@@ -902,8 +902,10 @@ export abstract class BaseObjectTraverser {
  * nonRecursive mode. While we have the data, if we use these deeper portions,
  * we need to call tx.read to flag our usage.
  *
- * Our caller is responsible for registering reads on the returned attestation,
- * though we will have flagged a nonRecursive read on any new docs.
+ * Our caller is responsible for registering further reads on the returned
+ * attestation, though we will have flagged a nonRecursive read on any linked
+ * docs, as well as deeper paths within a doc, and if we return the initial
+ * doc untouched, it should have been flagged before we were called.
  *
  * @param manager - Storage manager for document access.
  * @param doc - IAttestation for the current document
@@ -1054,7 +1056,7 @@ function getTrackerKey(
 /**
  * Resolves a pointer reference to its target value.
  *
- * This method works with `getAtPath`, with the link management and document
+ * This method works with @see getAtPath, with the link management and document
  * loading being handled in `followPointer`, while `getAtPath` handles the
  * path traversal.
  *
@@ -1892,7 +1894,6 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         selector,
         "writeRedirect",
       );
-      this.tx.read(nextDoc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
       if (nextDoc.value === undefined) {
         // While this is technically acceptable, log it
         logger.debug("traverse", () => [
@@ -2752,7 +2753,6 @@ export class SchemaObjectTraverser<V extends StorableDatum>
       selector,
       "writeRedirect",
     );
-    this.tx.read(redirDoc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
     if (redirDoc.value === undefined) {
       // This may be ok, but log it anyhow
       logger.info(
