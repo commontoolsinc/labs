@@ -16,23 +16,49 @@ export const DECONSTRUCT: unique symbol = Symbol.for("common.deconstruct");
 export const RECONSTRUCT: unique symbol = Symbol.for("common.reconstruct");
 
 /**
- * A value that knows how to deconstruct itself into essential state for
- * serialization. The presence of `[DECONSTRUCT]` serves as the brand -- no
- * separate marker is needed. See Section 2.3 of the formal spec.
+ * Abstract base class for values that participate in the storable protocol.
+ * The presence of `[DECONSTRUCT]` serves as the brand -- no separate marker
+ * is needed. See Section 2.3 of the formal spec.
+ *
+ * Subclasses must implement:
+ * - `[DECONSTRUCT]()` -- returns essential state for serialization.
+ * - `shallowUnfrozenClone()` -- returns a new unfrozen copy of this instance.
+ *
+ * `shallowClone(frozen)` is an effectively-final method that manages the
+ * frozenness contract:
+ * - `shallowClone(true)` on a frozen instance returns `this` (identity).
+ * - `shallowClone(true)` on an unfrozen instance returns a frozen clone.
+ * - `shallowClone(false)` always returns a new unfrozen clone -- even if the
+ *   instance is already unfrozen. The caller gets a distinct, mutable object.
  */
-export interface StorableInstance {
+export abstract class StorableInstance {
   /**
    * Returns the essential state of this instance as a `StorableValue`.
    * Implementations must NOT recursively deconstruct nested values -- the
    * serialization system handles that.
    */
-  [DECONSTRUCT](): StorableValue;
+  abstract [DECONSTRUCT](): StorableValue;
+
+  /**
+   * Returns a new unfrozen copy of this instance with the same data. Called
+   * by `shallowClone()` when a new instance is needed.
+   */
+  protected abstract shallowUnfrozenClone(): StorableInstance;
 
   /**
    * Returns a shallow clone of this instance with the requested frozenness.
-   * If the instance already has the desired frozenness, it may return `this`.
+   *
+   * When `frozen` is `true` and this instance is already frozen, returns
+   * `this` (identity optimization -- freezing is idempotent). In all other
+   * cases, creates a new instance via `shallowUnfrozenClone()` and freezes
+   * it if requested.
    */
-  shallowClone(frozen: boolean): StorableInstance;
+  shallowClone(frozen: boolean): StorableInstance {
+    if (frozen && Object.isFrozen(this)) return this;
+    const copy = this.shallowUnfrozenClone();
+    if (frozen) Object.freeze(copy);
+    return copy;
+  }
 }
 
 /**

@@ -4,7 +4,7 @@ import {
   isStorableInstance,
   RECONSTRUCT,
   type ReconstructionContext,
-  type StorableInstance,
+  StorableInstance,
 } from "./storable-protocol.ts";
 import { SpecialPrimitiveValue } from "./special-primitive-value.ts";
 import { NATIVE_TAGS, tagFromNativeValue, TAGS } from "./type-tags.ts";
@@ -118,9 +118,9 @@ function errorClassFromType(type: string): ErrorConstructor {
  * `instanceof StorableNativeWrapper` check.
  */
 export abstract class StorableNativeWrapper<T extends object>
-  implements StorableInstance {
+  extends StorableInstance {
   abstract readonly typeTag: string;
-  abstract [DECONSTRUCT](): StorableValue;
+  abstract override [DECONSTRUCT](): StorableValue;
 
   /** The wrapped native value, used by `toNativeValue` for freeze-state checks. */
   protected abstract get wrappedValue(): T;
@@ -137,8 +137,6 @@ export abstract class StorableNativeWrapper<T extends object>
     if (frozen === Object.isFrozen(value)) return value;
     return frozen ? this.toNativeFrozen() : this.toNativeThawed();
   }
-
-  abstract shallowClone(frozen: boolean): StorableInstance;
 }
 
 // ---------------------------------------------------------------------------
@@ -200,10 +198,8 @@ export class StorableError extends StorableNativeWrapper<Error> {
     return state as StorableValue;
   }
 
-  shallowClone(frozen: boolean): StorableInstance {
-    if (Object.isFrozen(this) === frozen) return this;
-    const copy = new StorableError(this.error);
-    return frozen ? Object.freeze(copy) : copy;
+  protected shallowUnfrozenClone(): StorableError {
+    return new StorableError(this.error);
   }
 
   protected get wrappedValue(): Error {
@@ -282,10 +278,8 @@ export class StorableMap
     throw new Error("StorableMap: not yet implemented");
   }
 
-  shallowClone(frozen: boolean): StorableInstance {
-    if (Object.isFrozen(this) === frozen) return this;
-    const copy = new StorableMap(this.map);
-    return frozen ? Object.freeze(copy) : copy;
+  protected shallowUnfrozenClone(): StorableMap {
+    return new StorableMap(this.map);
   }
 
   protected get wrappedValue(): Map<StorableValue, StorableValue> {
@@ -323,10 +317,8 @@ export class StorableSet extends StorableNativeWrapper<Set<StorableValue>> {
     throw new Error("StorableSet: not yet implemented");
   }
 
-  shallowClone(frozen: boolean): StorableInstance {
-    if (Object.isFrozen(this) === frozen) return this;
-    const copy = new StorableSet(this.set);
-    return frozen ? Object.freeze(copy) : copy;
+  protected shallowUnfrozenClone(): StorableSet {
+    return new StorableSet(this.set);
   }
 
   protected get wrappedValue(): Set<StorableValue> {
@@ -383,10 +375,8 @@ export class StorableRegExp extends StorableNativeWrapper<RegExp> {
     } as StorableValue;
   }
 
-  shallowClone(frozen: boolean): StorableInstance {
-    if (Object.isFrozen(this) === frozen) return this;
-    const copy = new StorableRegExp(this.regex, this.flavor);
-    return frozen ? Object.freeze(copy) : copy;
+  protected shallowUnfrozenClone(): StorableRegExp {
+    return new StorableRegExp(this.regex, this.flavor);
   }
 
   protected get wrappedValue(): RegExp {
@@ -484,10 +474,8 @@ export class StorableUint8Array
     throw new Error("StorableUint8Array: not yet implemented");
   }
 
-  shallowClone(frozen: boolean): StorableInstance {
-    if (Object.isFrozen(this) === frozen) return this;
-    const copy = new StorableUint8Array(this.bytes);
-    return frozen ? Object.freeze(copy) : copy;
+  protected shallowUnfrozenClone(): StorableUint8Array {
+    return new StorableUint8Array(this.bytes);
   }
 
   protected get wrappedValue(): Uint8Array {

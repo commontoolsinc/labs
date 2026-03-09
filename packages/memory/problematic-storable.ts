@@ -3,7 +3,6 @@ import {
   DECONSTRUCT,
   RECONSTRUCT,
   type ReconstructionContext,
-  type StorableInstance,
 } from "./storable-protocol.ts";
 import { ExplicitTagStorable } from "./explicit-tag-storable.ts";
 
@@ -13,8 +12,7 @@ import { ExplicitTagStorable } from "./explicit-tag-storable.ts";
  * mode to allow graceful degradation rather than hard failures.
  * See Section 3.5 of the formal spec.
  */
-export class ProblematicStorable extends ExplicitTagStorable
-  implements StorableInstance {
+export class ProblematicStorable extends ExplicitTagStorable {
   constructor(
     typeTag: string,
     state: StorableValue,
@@ -28,10 +26,8 @@ export class ProblematicStorable extends ExplicitTagStorable
     return { type: this.typeTag, state: this.state, error: this.error };
   }
 
-  shallowClone(frozen: boolean): StorableInstance {
-    if (Object.isFrozen(this) === frozen) return this;
-    const copy = new ProblematicStorable(this.typeTag, this.state, this.error);
-    return frozen ? Object.freeze(copy) : copy;
+  protected shallowUnfrozenClone(): ProblematicStorable {
+    return new ProblematicStorable(this.typeTag, this.state, this.error);
   }
 
   static [RECONSTRUCT](
