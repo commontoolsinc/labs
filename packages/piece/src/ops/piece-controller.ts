@@ -115,7 +115,7 @@ export class PieceController<T = unknown> {
     return pattern;
   }
 
-  async getPatternMeta(): Promise<PatternMeta> {
+  getPatternMeta(): Promise<PatternMeta> {
     const patternId = getPatternIdFromPiece(this.#cell);
     const space = this.#manager.getSpace();
     return this.#manager.runtime.patternManager.loadPatternMeta(
