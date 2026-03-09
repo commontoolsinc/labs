@@ -209,28 +209,33 @@ we have no way to detect code changes, so we shouldn't serve cached output.
 // Server fingerprint computation (Deno)
 // Returns undefined when not in a git repository.
 async function computeGitFingerprint(): Promise<string | undefined> {
-  const head = await exec("git rev-parse HEAD");
-  const dirty = await exec("git diff --name-only HEAD");
-  const untracked = await exec(
-    "git ls-files --others --exclude-standard"
-  );
-  const dirtyFiles = [...dirty.split("\n"), ...untracked.split("\n")]
-    .filter((f) => f.length > 0)
-    .sort();
-  let contentHash = "";
-  if (dirtyFiles.length > 0) {
-    const parts: string[] = [];
-    for (const f of dirtyFiles) {
-      try {
-        parts.push(f + ":" + await Deno.readTextFile(f));
-      } catch {
-        // File was deleted — include path so deletion changes the hash
-        parts.push(f + ":DELETED");
+  try {
+    const head = await exec("git rev-parse HEAD");
+    const dirty = await exec("git diff --name-only HEAD");
+    const untracked = await exec(
+      "git ls-files --others --exclude-standard"
+    );
+    const dirtyFiles = [...dirty.split("\n"), ...untracked.split("\n")]
+      .filter((f) => f.length > 0)
+      .sort();
+    let contentHash = "";
+    if (dirtyFiles.length > 0) {
+      const parts: string[] = [];
+      for (const f of dirtyFiles) {
+        try {
+          parts.push(f + ":" + await Deno.readTextFile(f));
+        } catch {
+          // File was deleted — include path so deletion changes the hash
+          parts.push(f + ":DELETED");
+        }
       }
+      contentHash = await sha256(parts.join("\n"));
     }
-    contentHash = await sha256(parts.join("\n"));
+    return sha256(head + contentHash);
+  } catch {
+    // Not in a git repository — cache disabled
+    return undefined;
   }
-  return sha256(head + contentHash);
 }
 ```
 
