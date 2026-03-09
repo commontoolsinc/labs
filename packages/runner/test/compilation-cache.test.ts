@@ -127,6 +127,45 @@ function storageTests(
       expect(await storage.count()).toBe(0);
     });
 
+    it("evictOldest removes oldest entries by cachedAt", async () => {
+      await storage.set("hash1", {
+        jsScript: testJsScript,
+        fingerprint: "fp",
+        cachedAt: 1000,
+      });
+      await storage.set("hash2", {
+        jsScript: testJsScript2,
+        fingerprint: "fp",
+        cachedAt: 3000,
+      });
+      await storage.set("hash3", {
+        jsScript: testJsScript,
+        fingerprint: "fp",
+        cachedAt: 2000,
+      });
+
+      const evicted = await storage.evictOldest(1);
+      expect(evicted).toBe(2);
+
+      // Only the newest (hash2, cachedAt=3000) should remain
+      expect(await storage.get("hash1")).toBeUndefined();
+      expect(await storage.get("hash2")).toBeDefined();
+      expect(await storage.get("hash3")).toBeUndefined();
+      expect(await storage.count()).toBe(1);
+    });
+
+    it("evictOldest returns 0 when under keepCount", async () => {
+      await storage.set("hash1", {
+        jsScript: testJsScript,
+        fingerprint: "fp",
+        cachedAt: 1000,
+      });
+
+      const evicted = await storage.evictOldest(5);
+      expect(evicted).toBe(0);
+      expect(await storage.count()).toBe(1);
+    });
+
     it("count returns the number of entries", async () => {
       expect(await storage.count()).toBe(0);
 
@@ -247,6 +286,35 @@ describe("CachedCompiler", () => {
 
   it("exposes the fingerprint", () => {
     expect(compiler.getFingerprint()).toBe("fingerprint-v1");
+  });
+
+  it("evicts oldest entries when exceeding maxEntries", async () => {
+    // Create a compiler with a cap of 2
+    const smallCompiler = new CachedCompiler(storage, "fp", 2);
+
+    // Add 3 entries — the third should trigger eviction of the oldest
+    await smallCompiler.set("hash1", testJsScript);
+    // Ensure distinct cachedAt by using the internal storage directly
+    // to control timestamps
+    await storage.set("hash2", {
+      jsScript: testJsScript2,
+      fingerprint: "fp",
+      cachedAt: Date.now() + 1000,
+    });
+    await storage.set("hash3", {
+      jsScript: testJsScript,
+      fingerprint: "fp",
+      cachedAt: Date.now() + 2000,
+    });
+
+    // Trigger eviction by setting a 4th entry
+    await smallCompiler.set("hash4", testJsScript2);
+
+    // Should have evicted down to 2
+    expect(await storage.count()).toBeLessThanOrEqual(2);
+
+    const stats = smallCompiler.getStats();
+    expect(stats.countEvictions).toBeGreaterThan(0);
   });
 
   it("clear removes everything", async () => {

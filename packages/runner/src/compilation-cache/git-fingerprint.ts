@@ -10,6 +10,8 @@
  */
 export async function computeGitFingerprint(): Promise<string | undefined> {
   try {
+    // Resolve repo root so dirty file reads work regardless of CWD
+    const repoRoot = await exec("git", ["rev-parse", "--show-toplevel"]);
     const head = await exec("git", ["rev-parse", "HEAD"]);
     const dirty = await exec("git", ["diff", "--name-only", "HEAD"]);
     const untracked = await exec("git", [
@@ -27,7 +29,8 @@ export async function computeGitFingerprint(): Promise<string | undefined> {
       const parts: string[] = [];
       for (const f of dirtyFiles) {
         try {
-          parts.push(f + ":" + await Deno.readTextFile(f));
+          // git returns paths relative to repo root
+          parts.push(f + ":" + await Deno.readTextFile(`${repoRoot}/${f}`));
         } catch {
           // File was deleted — include path so deletion changes the hash
           parts.push(f + ":DELETED");

@@ -29,6 +29,17 @@ export class MemoryCompilationCache implements CompilationCacheStorage {
     return Promise.resolve(evicted);
   }
 
+  evictOldest(keepCount: number): Promise<number> {
+    if (this.store.size <= keepCount) return Promise.resolve(0);
+    const sorted = [...this.store.entries()]
+      .sort((a, b) => a[1].cachedAt - b[1].cachedAt);
+    const toRemove = sorted.slice(0, sorted.length - keepCount);
+    for (const [key] of toRemove) {
+      this.store.delete(key);
+    }
+    return Promise.resolve(toRemove.length);
+  }
+
   clear(): Promise<void> {
     this.store.clear();
     return Promise.resolve();

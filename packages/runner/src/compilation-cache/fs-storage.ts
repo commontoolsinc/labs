@@ -58,6 +58,39 @@ export class FileSystemCompilationCache implements CompilationCacheStorage {
     return evicted;
   }
 
+  async evictOldest(keepCount: number): Promise<number> {
+    const entries: { name: string; cachedAt: number }[] = [];
+    try {
+      for await (const dirEntry of Deno.readDir(this.cacheDir)) {
+        if (!dirEntry.isFile || !dirEntry.name.endsWith(".json")) continue;
+        const filePath = `${this.cacheDir}/${dirEntry.name}`;
+        try {
+          const text = await Deno.readTextFile(filePath);
+          const entry = JSON.parse(text) as CompilationCacheEntry;
+          entries.push({ name: dirEntry.name, cachedAt: entry.cachedAt });
+        } catch {
+          // Corrupt — treat as oldest
+          entries.push({ name: dirEntry.name, cachedAt: 0 });
+        }
+      }
+    } catch {
+      return 0;
+    }
+
+    if (entries.length <= keepCount) return 0;
+
+    entries.sort((a, b) => a.cachedAt - b.cachedAt);
+    const toRemove = entries.slice(0, entries.length - keepCount);
+    let evicted = 0;
+    for (const { name } of toRemove) {
+      try {
+        await Deno.remove(`${this.cacheDir}/${name}`);
+        evicted++;
+      } catch { /* already gone */ }
+    }
+    return evicted;
+  }
+
   async clear(): Promise<void> {
     try {
       await Deno.remove(this.cacheDir, { recursive: true });

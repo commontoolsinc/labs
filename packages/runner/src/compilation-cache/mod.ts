@@ -8,6 +8,7 @@ export type {
 } from "./storage.ts";
 export { MemoryCompilationCache } from "./memory-storage.ts";
 export { FileSystemCompilationCache } from "./fs-storage.ts";
+export { IDBCompilationCache } from "./idb-storage.ts";
 export { computeGitFingerprint } from "./git-fingerprint.ts";
 
 const logger = getLogger("compilation-cache");
@@ -97,7 +98,10 @@ export class CachedCompiler {
 
   /** Get current stats snapshot. */
   getStats(): Readonly<CachedCompilerStats> {
-    return { ...this.stats };
+    return {
+      ...this.stats,
+      missReasons: { ...this.stats.missReasons },
+    };
   }
 
   /** Get the fingerprint in use. */
@@ -109,11 +113,15 @@ export class CachedCompiler {
     const count = await this.cache.count();
     if (count <= this.maxEntries) return;
 
-    // For count-based eviction, we re-evict stale first (cheap),
-    // then if still over, the storage implementations can handle
-    // oldest-first deletion. For now, stale eviction is sufficient
-    // since the primary growth vector is fingerprint changes.
-    const evicted = await this.cache.evictStale(this.fingerprint);
+    // First try stale eviction (cheap — removes wrong-fingerprint entries)
+    let evicted = await this.cache.evictStale(this.fingerprint);
+
+    // If still over cap, evict oldest entries by cachedAt
+    const remaining = await this.cache.count();
+    if (remaining > this.maxEntries) {
+      evicted += await this.cache.evictOldest(this.maxEntries);
+    }
+
     if (evicted > 0) {
       this.stats.countEvictions += evicted;
       logger.warn(

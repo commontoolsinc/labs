@@ -92,6 +92,28 @@ export class IDBCompilationCache implements CompilationCacheStorage {
     return evicted;
   }
 
+  async evictOldest(keepCount: number): Promise<number> {
+    const db = await this.getDB();
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const store = tx.objectStore(STORE_NAME);
+    const allKeys = await reqPromise(store.getAllKeys());
+    const allValues = await reqPromise(store.getAll());
+
+    if (allKeys.length <= keepCount) return 0;
+
+    const entries = allKeys.map((key, i) => ({
+      key,
+      cachedAt: (allValues[i] as CompilationCacheEntry).cachedAt,
+    }));
+    entries.sort((a, b) => a.cachedAt - b.cachedAt);
+    const toRemove = entries.slice(0, entries.length - keepCount);
+    for (const { key } of toRemove) {
+      store.delete(key);
+    }
+    await txPromise(tx);
+    return toRemove.length;
+  }
+
   async clear(): Promise<void> {
     const db = await this.getDB();
     const tx = db.transaction(STORE_NAME, "readwrite");
