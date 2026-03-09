@@ -36,15 +36,6 @@ const KNOWN_PATH_TERMINAL_METHODS = new Set([
   "flatMapWithPattern",
 ]);
 
-// Method names that should only be treated as terminal when called (not when
-// accessed as properties). Unlike `map`, names like `filter` are commonly used
-// as state property names, so `.filter` as property access must still lower to
-// `.key("filter")`.
-const CALL_ONLY_TERMINAL_METHODS = new Set([
-  "filter",
-  "flatMap",
-]);
-
 const WILDCARD_OBJECT_METHODS = new Set(["keys", "values", "entries"]);
 
 function isSelfPathSegment(
@@ -467,11 +458,7 @@ function rewritePatternBody(
         const isCallParent = !!parent && ts.isCallExpression(parent) &&
           parent.expression === visited;
 
-        const isTerminal = KNOWN_PATH_TERMINAL_METHODS.has(visited.name.text) ||
-          (isCallParent &&
-            CALL_ONLY_TERMINAL_METHODS.has(visited.name.text));
-
-        if (isTerminal) {
+        if (KNOWN_PATH_TERMINAL_METHODS.has(visited.name.text)) {
           if (!isCallParent) {
             return visited;
           }

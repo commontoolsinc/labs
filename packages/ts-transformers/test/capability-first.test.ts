@@ -1394,3 +1394,79 @@ const h = handler((event: { id: string }, state: Writable<{ foo: string; bar: st
     assertStringIncludes(output, '"bar"');
   },
 );
+
+// ── Property names that collide with method names ──────────────────────────
+
+Deno.test(
+  "Capability-first: state property named 'filter' is lowered to .key()",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern, UI } from "commontools";
+interface State { filter: string; items: string[] }
+const p = pattern<State>((state) => ({
+  [UI]: <div>{state.filter}</div>,
+}));
+`;
+    const output = await transformSource(source, { types: COMMONTOOLS_TYPES });
+    assertStringIncludes(output, 'state.key("filter")');
+    assert(!output.includes("filterWithPattern"));
+  },
+);
+
+// TODO(CT-1301): state properties named 'map' or 'set' are not lowered to
+// .key() because they're in KNOWN_PATH_TERMINAL_METHODS. The capability-
+// lowering transformer can't distinguish property access from method calls
+// on synthetic nodes (which lack parent pointers). Fixing this requires
+// either setting parent pointers during transformation or tracking call
+// targets through a pre-visit WeakSet.
+Deno.test({
+  name: "Capability-first: state property named 'map' is lowered to .key()",
+  ignore: true,
+  fn: async () => {
+    const source = `/// <cts-enable />
+import { pattern, UI } from "commontools";
+interface State { map: string }
+const p = pattern<State>((state) => ({
+  [UI]: <div>{state.map}</div>,
+}));
+`;
+    const output = await transformSource(source, { types: COMMONTOOLS_TYPES });
+    assertStringIncludes(output, 'state.key("map")');
+  },
+});
+
+Deno.test({
+  name: "Capability-first: state property named 'set' is lowered to .key()",
+  ignore: true,
+  fn: async () => {
+    const source = `/// <cts-enable />
+import { pattern, UI } from "commontools";
+interface State { set: string }
+const p = pattern<State>((state) => ({
+  [UI]: <div>{state.set}</div>,
+}));
+`;
+    const output = await transformSource(source, { types: COMMONTOOLS_TYPES });
+    assertStringIncludes(output, 'state.key("set")');
+  },
+});
+
+// ── Unsupported array methods in JSX ───────────────────────────────────────
+
+Deno.test(
+  "Capability-first: .find() on reactive array in JSX is lowered to .key()",
+  async () => {
+    const source = `/// <cts-enable />
+import { pattern, UI } from "commontools";
+interface Item { id: number; name: string }
+interface State { items: Item[] }
+const p = pattern<State>((state) => ({
+  [UI]: <div>{state.items.find((item) => item.id === 1)?.name}</div>,
+}));
+`;
+    const output = await transformSource(source, { types: COMMONTOOLS_TYPES });
+    // find is not a supported reactive method — it should not be
+    // transformed to findWithPattern
+    assert(!output.includes("findWithPattern"));
+  },
+);
