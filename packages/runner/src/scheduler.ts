@@ -109,7 +109,7 @@ type PopulateDependenciesEntry = PopulateDependencies | ReactivityLog;
 export type ReactivityLog = {
   reads: IMemorySpaceAddress[];
   /** Reads that should not invalidate on child writes unless they add a new key */
-  nonRecursiveReads?: IMemorySpaceAddress[];
+  shallowReads: IMemorySpaceAddress[];
   writes: IMemorySpaceAddress[];
   /** Reads marked as potential writes (e.g., for diffAndUpdate which reads then conditionally writes) */
   potentialWrites?: IMemorySpaceAddress[];
@@ -665,7 +665,7 @@ export class Scheduler {
     // If a ReactivityLog was provided directly, set up dependencies immediately.
     // This ensures writes are tracked right away for reverse dependency graph.
     if (immediateLog) {
-      const { reads, nonRecursiveReads } = this.setDependencies(
+      const { reads, shallowReads } = this.setDependencies(
         action,
         immediateLog,
       );
@@ -673,7 +673,7 @@ export class Scheduler {
       const { entities } = this.addTriggerPaths(
         action,
         reads,
-        nonRecursiveReads,
+        shallowReads,
       );
 
       // Register the cancel function for the latest trigger set.
@@ -722,7 +722,7 @@ export class Scheduler {
 
     this.updateChangeGroup(action, options);
 
-    const { reads, nonRecursiveReads } = this.setDependencies(action, log);
+    const { reads, shallowReads } = this.setDependencies(action, log);
 
     // Update reverse dependency graph
     if (this.pullMode) this.updateDependents(action, log);
@@ -739,7 +739,7 @@ export class Scheduler {
     const { entities, pathsWithValuesByEntity } = this.addTriggerPaths(
       action,
       reads,
-      nonRecursiveReads,
+      shallowReads,
     );
 
     logger.debug("schedule-resubscribe", () => [
@@ -1263,15 +1263,12 @@ export class Scheduler {
     log: ReactivityLog,
   ): {
     reads: IMemorySpaceAddress[];
-    nonRecursiveReads: IMemorySpaceAddress[];
+    shallowReads: IMemorySpaceAddress[];
   } {
     const reads = sortAndCompactPaths(log.reads);
-    const nonRecursiveReads = sortAndCompactPaths(
-      log.nonRecursiveReads ?? [],
-      false,
-    );
+    const shallowReads = sortAndCompactPaths(log.shallowReads, false);
     const writes = sortAndCompactPaths(log.writes);
-    this.dependencies.set(action, { reads, nonRecursiveReads, writes });
+    this.dependencies.set(action, { reads, shallowReads, writes });
 
     // Initialize/update mightWrite with declared writes
     // This ensures dependency chain can be built even before action runs
@@ -1323,13 +1320,13 @@ export class Scheduler {
       this.backfillDependentsForNewWrites(action, addedWrites);
     }
 
-    return { reads, nonRecursiveReads };
+    return { reads, shallowReads };
   }
 
   private addTriggerPaths(
     action: Action,
     reads: IMemorySpaceAddress[],
-    nonRecursiveReads: IMemorySpaceAddress[],
+    shallowReads: IMemorySpaceAddress[],
   ): {
     entities: Set<SpaceAndURI>;
     pathsWithValuesByEntity: Map<SpaceAndURI, SortedAndCompactPaths>;
@@ -1337,7 +1334,7 @@ export class Scheduler {
     this.clearActionTriggers(action);
     const pathsByEntity = addressesToPathByEntity(reads);
     const nonRecursivePathsByEntity = addressesToPathByEntity(
-      nonRecursiveReads,
+      shallowReads,
     );
     const entities = new Set<SpaceAndURI>();
     const pathsWithValuesByEntity = new Map<
@@ -1427,19 +1424,19 @@ export class Scheduler {
       log = populateDependencies;
     }
 
-    const { reads, nonRecursiveReads } = this.setDependencies(action, log);
+    const { reads, shallowReads } = this.setDependencies(action, log);
     if (options.updateDependents ?? true) {
       this.updateDependents(action, log);
     }
 
     const readsForTriggers = options.useRawReadsForTriggers ? log.reads : reads;
-    const nonRecursiveReadsForTriggers = options.useRawReadsForTriggers
-      ? (log.nonRecursiveReads ?? [])
-      : nonRecursiveReads;
+    const shallowReadsForTriggers = options.useRawReadsForTriggers
+      ? log.shallowReads
+      : shallowReads;
     const { entities } = this.addTriggerPaths(
       action,
       readsForTriggers,
-      nonRecursiveReadsForTriggers,
+      shallowReadsForTriggers,
     );
     this.setCancelForEntities(action, entities);
 
@@ -1477,7 +1474,7 @@ export class Scheduler {
       entityReads.push(read);
     }
     const nonRecursiveByEntity = new Map<SpaceAndURI, IMemorySpaceAddress[]>();
-    for (const read of log.nonRecursiveReads ?? []) {
+    for (const read of log.shallowReads) {
       const entity: SpaceAndURI = `${read.space}/${read.id}`;
       let entityReads = nonRecursiveByEntity.get(entity);
       if (!entityReads) {
@@ -1535,7 +1532,7 @@ export class Scheduler {
     this.runtime.telemetry.submit({
       type: "scheduler.dependencies.update",
       actionId,
-      reads: this.getAllReads(log).map((r) =>
+      reads: [...log.reads, ...log.shallowReads].map((r) =>
         `${r.space}/${r.id}/${r.path.join("/")}`
       ),
       writes: log.writes.map((w) => `${w.space}/${w.id}/${w.path.join("/")}`),
@@ -1569,13 +1566,9 @@ export class Scheduler {
     const scanAction = (action: Action) => {
       if (action === writer) return;
       const log = this.dependencies.get(action);
-      if (!log?.reads?.length && !log?.nonRecursiveReads?.length) return;
+      if (!log?.reads?.length && !log?.shallowReads.length) return;
       if (
-        !this.readsOverlapWrites(
-          log.reads,
-          log.nonRecursiveReads ?? [],
-          writes,
-        )
+        !this.readsOverlapWrites(log.reads, log.shallowReads, writes)
       ) return;
       this.registerDependentEdge(writer, action);
     };
@@ -1586,7 +1579,7 @@ export class Scheduler {
 
   private readsOverlapWrites(
     reads: IMemorySpaceAddress[],
-    nonRecursiveReads: IMemorySpaceAddress[],
+    shallowReads: IMemorySpaceAddress[],
     writes: IMemorySpaceAddress[],
   ): boolean {
     for (const read of reads) {
@@ -1602,7 +1595,7 @@ export class Scheduler {
     }
     // For non-recursive reads, only same/ancestor path or direct child writes
     // create a dependency. Deep descendant writes cannot affect shallow structure.
-    for (const read of nonRecursiveReads) {
+    for (const read of shallowReads) {
       for (const write of writes) {
         if (
           read.space === write.space &&
@@ -1615,10 +1608,6 @@ export class Scheduler {
       }
     }
     return false;
-  }
-
-  private getAllReads(log: ReactivityLog): IMemorySpaceAddress[] {
-    return [...log.reads, ...(log.nonRecursiveReads ?? [])];
   }
 
   /**
@@ -3397,7 +3386,7 @@ function topologicalSort(
 export function txToReactivityLog(
   tx: IExtendedStorageTransaction,
 ): ReactivityLog {
-  const log: ReactivityLog = { reads: [], writes: [] };
+  const log: ReactivityLog = { reads: [], shallowReads: [], writes: [] };
   for (const activity of tx.journal.activity()) {
     if ("read" in activity && activity.read) {
       if (activity.read.meta?.[ignoreReadForSchedulingMarker]) continue;
@@ -3408,10 +3397,7 @@ export function txToReactivityLog(
         path: activity.read.path.slice(1), // Remove the "value" prefix
       };
       if (activity.read.nonRecursive === true) {
-        if (!log.nonRecursiveReads) {
-          log.nonRecursiveReads = [];
-        }
-        log.nonRecursiveReads.push(address);
+        log.shallowReads.push(address);
       } else {
         log.reads.push(address);
       }

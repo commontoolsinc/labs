@@ -76,7 +76,11 @@ describe("scheduler", () => {
         a.withTx(tx).get() + b.withTx(tx).get(),
       );
     };
-    runtime.scheduler.subscribe(adder, { reads: [], writes: [] }, {});
+    runtime.scheduler.subscribe(adder, {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+    }, {});
     await c.pull();
     expect(runCount).toBe(1);
     expect(c.get()).toBe(3);
@@ -124,6 +128,7 @@ describe("scheduler", () => {
         a.getAsNormalizedFullLink(),
         b.getAsNormalizedFullLink(),
       ],
+      shallowReads: [],
       writes: [c.getAsNormalizedFullLink()],
     }, {});
     expect(runCount).toBe(0);
@@ -167,7 +172,11 @@ describe("scheduler", () => {
         a.withTx(tx).get() + b.withTx(tx).get(),
       );
     };
-    runtime.scheduler.subscribe(adder, { reads: [], writes: [] }, {});
+    runtime.scheduler.subscribe(adder, {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+    }, {});
     await c.pull();
     expect(runCount).toBe(1);
     expect(c.get()).toBe(3);
@@ -224,6 +233,7 @@ describe("scheduler", () => {
         a.getAsNormalizedFullLink(),
         b.getAsNormalizedFullLink(),
       ],
+      shallowReads: [],
       writes: [c.getAsNormalizedFullLink()],
     }, {});
     expect(runCount).toBe(0);
@@ -294,9 +304,17 @@ describe("scheduler", () => {
         c.withTx(tx).get() + d.withTx(tx).get(),
       );
     };
-    runtime.scheduler.subscribe(adder1, { reads: [], writes: [] }, {});
+    runtime.scheduler.subscribe(adder1, {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+    }, {});
     await e.pull();
-    runtime.scheduler.subscribe(adder2, { reads: [], writes: [] }, {});
+    runtime.scheduler.subscribe(adder2, {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+    }, {});
     await e.pull();
     expect(runs.join(",")).toBe("adder1,adder2");
     expect(c.get()).toBe(3);
@@ -381,11 +399,23 @@ describe("scheduler", () => {
     const stopped = spy(stopper, "stop");
     runtime.scheduler.onError(() => stopper.stop());
 
-    runtime.scheduler.subscribe(adder1, { reads: [], writes: [] }, {});
+    runtime.scheduler.subscribe(adder1, {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+    }, {});
     await e.pull();
-    runtime.scheduler.subscribe(adder2, { reads: [], writes: [] }, {});
+    runtime.scheduler.subscribe(adder2, {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+    }, {});
     await e.pull();
-    runtime.scheduler.subscribe(adder3, { reads: [], writes: [] }, {});
+    runtime.scheduler.subscribe(adder3, {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+    }, {});
     await e.pull();
 
     await e.pull();
@@ -422,7 +452,11 @@ describe("scheduler", () => {
     const stopped = spy(stopper, "stop");
     runtime.scheduler.onError(() => stopper.stop());
 
-    runtime.scheduler.subscribe(inc, { reads: [], writes: [] }, {});
+    runtime.scheduler.subscribe(inc, {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+    }, {});
     await counter.pull();
     expect(counter.get()).toBe(1);
     await counter.pull();
@@ -440,7 +474,11 @@ describe("scheduler", () => {
   it("should immediately run actions that have no dependencies", async () => {
     let runs = 0;
     const inc: Action = () => runs++;
-    runtime.scheduler.subscribe(inc, { reads: [], writes: [] }, {
+    runtime.scheduler.subscribe(inc, {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+    }, {
       isEffect: true,
     });
     await runtime.idle();
@@ -490,7 +528,7 @@ describe("scheduler", () => {
     // Run the action initially
     runtime.scheduler.subscribe(
       ignoredReadAction,
-      { reads: [], writes: [] },
+      { reads: [], shallowReads: [], writes: [] },
       {},
     );
     await resultCell.pull();
@@ -634,9 +672,8 @@ describe("scheduler", () => {
     testCell.withTx(readTx).key("value").getRaw({ nonRecursive: true });
 
     const log = txToReactivityLog(readTx);
-    expect(log.nonRecursiveReads).toBeDefined();
-    expect(log.nonRecursiveReads!.length).toBeGreaterThanOrEqual(1);
-    expect(log.nonRecursiveReads!.some((addr) => addr.path[0] === "value"))
+    expect(log.shallowReads.length).toBeGreaterThanOrEqual(1);
+    expect(log.shallowReads.some((addr) => addr.path[0] === "value"))
       .toBe(true);
 
     await readTx.commit();
@@ -684,7 +721,11 @@ describe("scheduler", () => {
       });
     };
 
-    runtime.scheduler.subscribe(action, { reads: [], writes: [] }, {});
+    runtime.scheduler.subscribe(action, {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+    }, {});
     await resultCell.pull();
     expect(actionRunCount).toBe(1);
     expect(resultCell.get()).toEqual({ count: 1, lastRead: undefined });
@@ -774,7 +815,11 @@ describe("scheduler", () => {
       resultCell.withTx(actionTx).set(runCount);
     };
 
-    runtime.scheduler.subscribe(action, { reads: [], writes: [] }, {});
+    runtime.scheduler.subscribe(action, {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+    }, {});
     await resultCell.pull();
     expect(runCount).toBe(1);
 
@@ -840,7 +885,11 @@ describe("scheduler", () => {
       resultCell.withTx(actionTx).set(runCount);
     };
 
-    runtime.scheduler.subscribe(action, { reads: [], writes: [] }, {});
+    runtime.scheduler.subscribe(action, {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+    }, {});
     await resultCell.pull();
     expect(runCount).toBe(1);
 
@@ -1050,7 +1099,11 @@ describe("event handling", () => {
       actionCount++;
       lastEventSeen = eventResultCell.withTx(tx).get();
     };
-    runtime.scheduler.subscribe(action, { reads: [], writes: [] }, {});
+    runtime.scheduler.subscribe(action, {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+    }, {});
     await eventResultCell.pull();
 
     runtime.scheduler.addEventHandler(
@@ -1195,7 +1248,7 @@ describe("reactive retries", () => {
       // Subscribe and run immediately
       runtime.scheduler.subscribe(
         reactiveAction,
-        { reads: [], writes: [] },
+        { reads: [], shallowReads: [], writes: [] },
         { isEffect: true },
       );
 
@@ -1291,6 +1344,7 @@ describe("reactive retries", () => {
         action1,
         {
           reads: [source.getAsNormalizedFullLink()],
+          shallowReads: [],
           writes: [intermediate.getAsNormalizedFullLink()],
         },
         {},
@@ -1299,6 +1353,7 @@ describe("reactive retries", () => {
         action2,
         {
           reads: [intermediate.getAsNormalizedFullLink()],
+          shallowReads: [],
           writes: [output.getAsNormalizedFullLink()],
         },
         {},
