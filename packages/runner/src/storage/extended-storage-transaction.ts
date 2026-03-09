@@ -30,6 +30,7 @@ import { toThrowable } from "./interface.ts";
 
 import { ignoreReadForScheduling } from "../scheduler.ts";
 import { isArrayIndexPropertyName } from "@commontools/memory/storable-value";
+import { shallowCloneIfNecessary } from "@commontools/memory/rich-storable-value";
 
 const logger = getLogger("extended-storage-transaction", {
   enabled: false,
@@ -139,11 +140,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         }
         // When richStorableValues is ON, stored objects are deep-frozen by
         // toDeepRichStorableValue(). Shallow-clone before mutation to avoid
-        // TypeError on frozen objects. Note: a proper type-preserving clone
-        // via shallowCloneStorableValue() is planned as a follow-up.
-        valueObj = Object.isFrozen(currentValue)
-          ? { ...currentValue } as StorableObject
-          : currentValue as StorableObject;
+        // TypeError on frozen objects.
+        valueObj = shallowCloneIfNecessary(
+          currentValue,
+          false,
+        ) as StorableObject;
       }
       const remainingPath = address.path.slice(lastExistingPath.length);
       if (remainingPath.length === 0) {
