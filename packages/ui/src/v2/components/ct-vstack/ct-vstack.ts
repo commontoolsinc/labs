@@ -155,9 +155,11 @@ export class CTVStack extends BaseElement {
       padding: 6rem;
     }
 
-    /* Direct children styling */
+    /* Allow children to shrink naturally (default flexbox behavior).
+       Use min-height: 0 to let children shrink properly instead of
+       overflowing the container. */
     ::slotted(*) {
-      flex-shrink: 0;
+      min-height: 0;
     }
   `;
 

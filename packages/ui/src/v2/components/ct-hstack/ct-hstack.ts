@@ -164,9 +164,11 @@ export class CTHStack extends BaseElement {
       padding: 6rem;
     }
 
-    /* Direct children styling */
+    /* Allow children to shrink naturally (default flexbox behavior).
+       Use min-width: 0 to let text-based children truncate properly
+       instead of overflowing the container. */
     ::slotted(*) {
-      flex-shrink: 0;
+      min-width: 0;
     }
   `;
 
