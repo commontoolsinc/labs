@@ -11,20 +11,15 @@ export function encodePath(path: readonly string[]): string {
 }
 
 /**
- * Decodes a serialized path key.
- * Falls back to legacy dotted-path decoding when needed.
+ * Decodes a serialized path key produced by {@link encodePath}.
  */
 export function decodePath(path: string): readonly string[] {
   if (!path) return [];
-  try {
-    const parsed = JSON.parse(path);
-    if (isStringArray(parsed)) {
-      return parsed;
-    }
-  } catch (_e: unknown) {
-    // Support legacy dotted encoding during transition.
+  const parsed = JSON.parse(path);
+  if (isStringArray(parsed)) {
+    return parsed;
   }
-  return path.split(".");
+  return [];
 }
 
 export function uniquePaths(

@@ -377,622 +377,625 @@ export function analyzeFunctionCapabilities(
     return { params: [], recursive: true };
   }
   inProgress.add(fn);
+  try {
+    const checker = options?.checker;
+    const interprocedural = !!options?.interprocedural && !!checker;
 
-  const checker = options?.checker;
-  const interprocedural = !!options?.interprocedural && !!checker;
-
-  if (!fn.body) {
-    const empty = { params: [] };
-    summaryCache.set(fn, empty);
-    inProgress.delete(fn);
-    return empty;
-  }
-
-  const states = new Map<string, MutableCapabilityState>();
-  const aliases = new Map<string, SourceRef>();
-  const parameterStateKeys: string[] = [];
-
-  const ensureState = (name: string): MutableCapabilityState => {
-    let state = states.get(name);
-    if (!state) {
-      state = {
-        reads: new Set<string>(),
-        writes: new Set<string>(),
-        passthrough: false,
-        wildcard: false,
-      };
-      states.set(name, state);
-    }
-    return state;
-  };
-
-  const trackRead = (name: string, path: readonly string[]): void => {
-    ensureState(name).reads.add(encodePath(path));
-  };
-
-  const trackWrite = (name: string, path: readonly string[]): void => {
-    ensureState(name).writes.add(encodePath(path));
-  };
-
-  const markWildcard = (name: string): void => {
-    ensureState(name).wildcard = true;
-  };
-
-  const markPassthrough = (name: string): void => {
-    ensureState(name).passthrough = true;
-  };
-
-  for (let index = 0; index < fn.parameters.length; index++) {
-    const parameter = fn.parameters[index]!;
-    const stateKey = ts.isIdentifier(parameter.name)
-      ? parameter.name.text
-      : `${PARAMETER_SUMMARY_PREFIX}${index}`;
-    parameterStateKeys[index] = stateKey;
-    ensureState(stateKey);
-
-    if (ts.isIdentifier(parameter.name)) {
-      aliases.set(parameter.name.text, {
-        root: stateKey,
-        path: [],
-        dynamic: false,
-      });
-      continue;
+    if (!fn.body) {
+      const empty = { params: [] };
+      summaryCache.set(fn, empty);
+      return empty;
     }
 
-    assignParameterBindingAlias(
-      parameter.name,
-      {
-        root: stateKey,
-        path: [],
-        dynamic: false,
-      },
-      aliases,
-      markWildcard,
-    );
-  }
+    const states = new Map<string, MutableCapabilityState>();
+    const aliases = new Map<string, SourceRef>();
+    const parameterStateKeys: string[] = [];
 
-  if (parameterStateKeys.length === 0) {
-    const empty = { params: [] };
-    summaryCache.set(fn, empty);
-    inProgress.delete(fn);
-    return empty;
-  }
-
-  const resolveFromAccess = (
-    expression: ts.Expression,
-  ): SourceRef | undefined => {
-    const info = extractAccessPath(expression);
-    if (!info) return undefined;
-    const alias = aliases.get(info.root);
-    if (!alias) return undefined;
-    return {
-      root: alias.root,
-      path: [...alias.path, ...info.path],
-      dynamic: alias.dynamic || info.dynamic,
-    };
-  };
-
-  const resolveSourceRef = (
-    expression: ts.Expression,
-  ): SourceRef | undefined => {
-    const current = unwrapExpression(expression);
-    const byAccess = resolveFromAccess(current);
-    if (byAccess) return byAccess;
-
-    if (
-      ts.isCallExpression(current) &&
-      ts.isPropertyAccessExpression(current.expression)
-    ) {
-      const receiverRef = resolveSourceRef(current.expression.expression);
-      if (!receiverRef) return undefined;
-
-      const methodName = current.expression.name.text;
-      if (methodName === "get" && current.arguments.length === 0) {
-        return receiverRef;
-      }
-      if (methodName === "key") {
-        const argPath = extractLiteralPathArguments(current.arguments);
-        if (argPath.dynamic) {
-          return { ...receiverRef, dynamic: true };
-        }
-        return {
-          root: receiverRef.root,
-          path: [...receiverRef.path, ...argPath.path],
-          dynamic: receiverRef.dynamic,
+    const ensureState = (name: string): MutableCapabilityState => {
+      let state = states.get(name);
+      if (!state) {
+        state = {
+          reads: new Set<string>(),
+          writes: new Set<string>(),
+          passthrough: false,
+          wildcard: false,
         };
+        states.set(name, state);
       }
-    }
+      return state;
+    };
 
-    return undefined;
-  };
+    const trackRead = (name: string, path: readonly string[]): void => {
+      ensureState(name).reads.add(encodePath(path));
+    };
 
-  const trackReadRef = (ref: SourceRef): void => {
-    if (ref.dynamic) {
-      markWildcard(ref.root);
-      return;
-    }
-    trackRead(ref.root, ref.path);
-  };
+    const trackWrite = (name: string, path: readonly string[]): void => {
+      ensureState(name).writes.add(encodePath(path));
+    };
 
-  const trackWriteRef = (ref: SourceRef): void => {
-    if (ref.dynamic) {
-      markWildcard(ref.root);
-      return;
-    }
-    trackWrite(ref.root, ref.path);
-  };
+    const markWildcard = (name: string): void => {
+      ensureState(name).wildcard = true;
+    };
 
-  const assignBindingAlias = (
-    name: ts.BindingName,
-    source: SourceRef | undefined,
-  ): void => {
-    if (ts.isIdentifier(name)) {
-      if (source) {
-        aliases.set(name.text, source);
-      } else {
-        aliases.delete(name.text);
-      }
-      return;
-    }
+    const markPassthrough = (name: string): void => {
+      ensureState(name).passthrough = true;
+    };
 
-    if (!source) {
-      clearBindingAliases(name, aliases);
-      return;
-    }
+    for (let index = 0; index < fn.parameters.length; index++) {
+      const parameter = fn.parameters[index]!;
+      const stateKey = ts.isIdentifier(parameter.name)
+        ? parameter.name.text
+        : `${PARAMETER_SUMMARY_PREFIX}${index}`;
+      parameterStateKeys[index] = stateKey;
+      ensureState(stateKey);
 
-    if (ts.isArrayBindingPattern(name)) {
-      markWildcard(source.root);
-      clearBindingAliases(name, aliases);
-      return;
-    }
-
-    for (const element of name.elements) {
-      if (ts.isOmittedExpression(element)) continue;
-
-      if (element.dotDotDotToken || element.initializer) {
-        markWildcard(source.root);
-        clearBindingAliases(element.name, aliases);
+      if (ts.isIdentifier(parameter.name)) {
+        aliases.set(parameter.name.text, {
+          root: stateKey,
+          path: [],
+          dynamic: false,
+        });
         continue;
       }
 
-      let key: string | undefined;
-      if (!element.propertyName) {
-        if (ts.isIdentifier(element.name)) {
-          key = element.name.text;
+      assignParameterBindingAlias(
+        parameter.name,
+        {
+          root: stateKey,
+          path: [],
+          dynamic: false,
+        },
+        aliases,
+        markWildcard,
+      );
+    }
+
+    if (parameterStateKeys.length === 0) {
+      const empty = { params: [] };
+      summaryCache.set(fn, empty);
+      return empty;
+    }
+
+    const resolveFromAccess = (
+      expression: ts.Expression,
+    ): SourceRef | undefined => {
+      const info = extractAccessPath(expression);
+      if (!info) return undefined;
+      const alias = aliases.get(info.root);
+      if (!alias) return undefined;
+      return {
+        root: alias.root,
+        path: [...alias.path, ...info.path],
+        dynamic: alias.dynamic || info.dynamic,
+      };
+    };
+
+    const resolveSourceRef = (
+      expression: ts.Expression,
+    ): SourceRef | undefined => {
+      const current = unwrapExpression(expression);
+      const byAccess = resolveFromAccess(current);
+      if (byAccess) return byAccess;
+
+      if (
+        ts.isCallExpression(current) &&
+        ts.isPropertyAccessExpression(current.expression)
+      ) {
+        const receiverRef = resolveSourceRef(current.expression.expression);
+        if (!receiverRef) return undefined;
+
+        const methodName = current.expression.name.text;
+        if (methodName === "get" && current.arguments.length === 0) {
+          return receiverRef;
         }
-      } else if (ts.isIdentifier(element.propertyName)) {
-        key = element.propertyName.text;
-      } else if (ts.isStringLiteral(element.propertyName)) {
-        key = element.propertyName.text;
-      } else if (ts.isNumericLiteral(element.propertyName)) {
-        key = element.propertyName.text;
-      } else {
-        markWildcard(source.root);
-      }
-
-      if (!key) {
-        clearBindingAliases(element.name, aliases);
-        continue;
-      }
-
-      trackRead(source.root, [...source.path, key]);
-      assignBindingAlias(element.name, {
-        root: source.root,
-        path: [...source.path, key],
-        dynamic: source.dynamic,
-      });
-    }
-  };
-
-  const assignExpressionPatternAlias = (
-    pattern: ts.Expression,
-    source: SourceRef | undefined,
-  ): void => {
-    if (ts.isParenthesizedExpression(pattern)) {
-      assignExpressionPatternAlias(pattern.expression, source);
-      return;
-    }
-
-    if (ts.isIdentifier(pattern)) {
-      if (source) {
-        aliases.set(pattern.text, source);
-      } else {
-        aliases.delete(pattern.text);
-      }
-      return;
-    }
-
-    if (ts.isObjectLiteralExpression(pattern)) {
-      if (!source) {
-        for (const property of pattern.properties) {
-          if (ts.isShorthandPropertyAssignment(property)) {
-            aliases.delete(property.name.text);
-          } else if (ts.isPropertyAssignment(property)) {
-            assignExpressionPatternAlias(property.initializer, undefined);
+        if (methodName === "key") {
+          const argPath = extractLiteralPathArguments(current.arguments);
+          if (argPath.dynamic) {
+            return { ...receiverRef, dynamic: true };
           }
+          return {
+            root: receiverRef.root,
+            path: [...receiverRef.path, ...argPath.path],
+            dynamic: receiverRef.dynamic,
+          };
+        }
+      }
+
+      return undefined;
+    };
+
+    const trackReadRef = (ref: SourceRef): void => {
+      if (ref.dynamic) {
+        markWildcard(ref.root);
+        return;
+      }
+      trackRead(ref.root, ref.path);
+    };
+
+    const trackWriteRef = (ref: SourceRef): void => {
+      if (ref.dynamic) {
+        markWildcard(ref.root);
+        return;
+      }
+      trackWrite(ref.root, ref.path);
+    };
+
+    const assignBindingAlias = (
+      name: ts.BindingName,
+      source: SourceRef | undefined,
+    ): void => {
+      if (ts.isIdentifier(name)) {
+        if (source) {
+          aliases.set(name.text, source);
+        } else {
+          aliases.delete(name.text);
         }
         return;
       }
 
-      for (const property of pattern.properties) {
-        if (ts.isSpreadAssignment(property)) {
+      if (!source) {
+        clearBindingAliases(name, aliases);
+        return;
+      }
+
+      if (ts.isArrayBindingPattern(name)) {
+        markWildcard(source.root);
+        clearBindingAliases(name, aliases);
+        return;
+      }
+
+      for (const element of name.elements) {
+        if (ts.isOmittedExpression(element)) continue;
+
+        if (element.dotDotDotToken || element.initializer) {
           markWildcard(source.root);
-          continue;
-        }
-
-        if (ts.isShorthandPropertyAssignment(property)) {
-          trackRead(source.root, [...source.path, property.name.text]);
-          aliases.set(property.name.text, {
-            root: source.root,
-            path: [...source.path, property.name.text],
-            dynamic: source.dynamic,
-          });
-          continue;
-        }
-
-        if (!ts.isPropertyAssignment(property)) {
+          clearBindingAliases(element.name, aliases);
           continue;
         }
 
         let key: string | undefined;
-        if (ts.isIdentifier(property.name)) {
-          key = property.name.text;
-        } else if (ts.isStringLiteral(property.name)) {
-          key = property.name.text;
-        } else if (ts.isNumericLiteral(property.name)) {
-          key = property.name.text;
+        if (!element.propertyName) {
+          if (ts.isIdentifier(element.name)) {
+            key = element.name.text;
+          }
+        } else if (ts.isIdentifier(element.propertyName)) {
+          key = element.propertyName.text;
+        } else if (ts.isStringLiteral(element.propertyName)) {
+          key = element.propertyName.text;
+        } else if (ts.isNumericLiteral(element.propertyName)) {
+          key = element.propertyName.text;
         } else {
           markWildcard(source.root);
         }
 
         if (!key) {
-          assignExpressionPatternAlias(property.initializer, undefined);
+          clearBindingAliases(element.name, aliases);
           continue;
         }
 
         trackRead(source.root, [...source.path, key]);
-        assignExpressionPatternAlias(property.initializer, {
+        assignBindingAlias(element.name, {
           root: source.root,
           path: [...source.path, key],
           dynamic: source.dynamic,
         });
       }
-      return;
-    }
+    };
 
-    if (ts.isArrayLiteralExpression(pattern)) {
-      if (source) {
-        markWildcard(source.root);
-      }
-      for (const element of pattern.elements) {
-        if (ts.isSpreadElement(element)) {
-          continue;
-        }
-        assignExpressionPatternAlias(element, undefined);
-      }
-    }
-  };
-
-  const markWildcardFromExpression = (expression: ts.Expression): void => {
-    const ref = resolveSourceRef(expression);
-    if (!ref) return;
-    markWildcard(ref.root);
-  };
-
-  const markFromExpression = (
-    expression: ts.Expression,
-    marker: (name: string, path: readonly string[]) => void,
-  ): void => {
-    const ref = resolveSourceRef(expression);
-    if (!ref) return;
-    if (ref.dynamic) {
-      markWildcard(ref.root);
-      return;
-    }
-    marker(ref.root, ref.path);
-  };
-
-  const resolveInterproceduralSummary = (
-    call: ts.CallExpression,
-  ): FunctionCapabilitySummary | undefined => {
-    if (!interprocedural || !checker) return undefined;
-    const signature = checker.getResolvedSignature(call);
-    if (!signature) return undefined;
-    const declaration = signature.declaration;
-    if (!isCapabilityAnalyzableFunction(declaration)) {
-      return undefined;
-    }
-
-    return analyzeFunctionCapabilities(declaration, {
-      checker,
-      interprocedural: true,
-      summaryCache,
-      inProgress,
-    });
-  };
-
-  const visit = (node: ts.Node): void => {
-    if (
-      ts.isBinaryExpression(node) &&
-      isAssignmentOperator(node.operatorToken.kind)
-    ) {
-      // Process RHS first so alias rebinding happens after reads in the assignment expression.
-      visit(node.right);
-      if (!ts.isIdentifier(node.left)) {
-        visit(node.left);
+    const assignExpressionPatternAlias = (
+      pattern: ts.Expression,
+      source: SourceRef | undefined,
+    ): void => {
+      if (ts.isParenthesizedExpression(pattern)) {
+        assignExpressionPatternAlias(pattern.expression, source);
+        return;
       }
 
-      const operator = node.operatorToken.kind;
-      if (operator === ts.SyntaxKind.EqualsToken) {
-        if (ts.isIdentifier(node.left)) {
-          const nextRef = resolveSourceRef(node.right);
-          if (nextRef) {
-            aliases.set(node.left.text, nextRef);
-          } else {
-            aliases.delete(node.left.text);
-          }
-        } else if (
-          ts.isObjectLiteralExpression(node.left) ||
-          ts.isArrayLiteralExpression(node.left)
-        ) {
-          const nextRef = resolveSourceRef(node.right);
-          assignExpressionPatternAlias(node.left, nextRef);
+      if (ts.isIdentifier(pattern)) {
+        if (source) {
+          aliases.set(pattern.text, source);
         } else {
-          markFromExpression(node.left, trackWrite);
+          aliases.delete(pattern.text);
         }
-      } else {
-        if (ts.isIdentifier(node.left)) {
-          aliases.delete(node.left.text);
-        } else {
-          markFromExpression(node.left, trackWrite);
-          markFromExpression(node.left, trackRead);
-        }
+        return;
       }
 
-      return;
-    }
-
-    if (ts.isIdentifier(node)) {
-      if (isDeclarationIdentifier(node)) {
-        // Ignore declaration sites.
-      } else if (isNonValueIdentifierUsage(node)) {
-        // Ignore key names and non-value positions.
-      } else {
-        const source = aliases.get(node.text);
-        if (source && !isMemberRootIdentifier(node)) {
-          const usage = unwrapIdentifierUsageSite(node);
-          const parent = usage.parent;
-          if (!parent) {
-            // Synthetic identifiers can temporarily be detached from parent links.
-            // Preserve narrowed-path reads while avoiding false root-read expansion.
-            if (!source.dynamic && source.path.length === 0) {
-              markPassthrough(source.root);
-            } else {
-              trackReadRef(source);
-            }
-          } else if (
-            !(
-              parent &&
-              ts.isPropertyAccessExpression(parent) &&
-              parent.name === usage
-            ) && !(
-              parent &&
-              ts.isBinaryExpression(parent) &&
-              parent.left === usage &&
-              isAssignmentOperator(parent.operatorToken.kind)
-            ) && !(
-              parent &&
-              (ts.isPrefixUnaryExpression(parent) ||
-                ts.isPostfixUnaryExpression(parent)) &&
-              parent.operand === usage &&
-              (
-                parent.operator === ts.SyntaxKind.PlusPlusToken ||
-                parent.operator === ts.SyntaxKind.MinusMinusToken
-              )
-            )
-          ) {
-            if (
-              isCallOrNewArgumentUsage(usage) ||
-              isPassThroughIdentifierUsage(node)
-            ) {
-              if (source.path.length === 0 && !source.dynamic) {
-                markPassthrough(source.root);
-              } else {
-                trackReadRef(source);
-              }
-            } else {
-              trackReadRef(source);
+      if (ts.isObjectLiteralExpression(pattern)) {
+        if (!source) {
+          for (const property of pattern.properties) {
+            if (ts.isShorthandPropertyAssignment(property)) {
+              aliases.delete(property.name.text);
+            } else if (ts.isPropertyAssignment(property)) {
+              assignExpressionPatternAlias(property.initializer, undefined);
             }
           }
+          return;
         }
-      }
-    }
 
-    if (
-      ts.isPropertyAccessExpression(node) ||
-      ts.isElementAccessExpression(node)
-    ) {
-      if (isTopmostMemberNode(node)) {
-        const parent = node.parent;
-        if (
-          !(parent && ts.isCallExpression(parent) && parent.expression === node)
-        ) {
-          const ref = resolveSourceRef(node);
-          if (ref) {
-            trackReadRef(ref);
-          }
-        }
-      }
-    }
-
-    if (ts.isCallExpression(node)) {
-      const interproceduralHandledArgs = new Set<number>();
-      const calleeSummary = resolveInterproceduralSummary(node);
-      if (calleeSummary) {
-        const count = Math.min(
-          calleeSummary.params.length,
-          node.arguments.length,
-        );
-        for (let index = 0; index < count; index++) {
-          const paramSummary = calleeSummary.params[index];
-          const argument = node.arguments[index];
-          if (!paramSummary || !argument) continue;
-
-          const source = resolveSourceRef(argument);
-          if (!source) continue;
-          interproceduralHandledArgs.add(index);
-
-          if (source.dynamic || paramSummary.wildcard) {
+        for (const property of pattern.properties) {
+          if (ts.isSpreadAssignment(property)) {
             markWildcard(source.root);
             continue;
           }
 
-          for (const readPath of paramSummary.readPaths) {
-            trackRead(source.root, [...source.path, ...readPath]);
-          }
-          for (const writePath of paramSummary.writePaths) {
-            trackWrite(source.root, [...source.path, ...writePath]);
+          if (ts.isShorthandPropertyAssignment(property)) {
+            trackRead(source.root, [...source.path, property.name.text]);
+            aliases.set(property.name.text, {
+              root: source.root,
+              path: [...source.path, property.name.text],
+              dynamic: source.dynamic,
+            });
+            continue;
           }
 
-          if (paramSummary.passthrough && source.path.length === 0) {
-            markPassthrough(source.root);
+          if (!ts.isPropertyAssignment(property)) {
+            continue;
           }
+
+          let key: string | undefined;
+          if (ts.isIdentifier(property.name)) {
+            key = property.name.text;
+          } else if (ts.isStringLiteral(property.name)) {
+            key = property.name.text;
+          } else if (ts.isNumericLiteral(property.name)) {
+            key = property.name.text;
+          } else {
+            markWildcard(source.root);
+          }
+
+          if (!key) {
+            assignExpressionPatternAlias(property.initializer, undefined);
+            continue;
+          }
+
+          trackRead(source.root, [...source.path, key]);
+          assignExpressionPatternAlias(property.initializer, {
+            root: source.root,
+            path: [...source.path, key],
+            dynamic: source.dynamic,
+          });
         }
+        return;
       }
 
-      // Optional-call forms are non-lowerable; treat as wildcard usage.
-      if (node.questionDotToken && ts.isExpression(node.expression)) {
-        const source = resolveSourceRef(node.expression);
+      if (ts.isArrayLiteralExpression(pattern)) {
         if (source) {
           markWildcard(source.root);
         }
+        for (const element of pattern.elements) {
+          if (ts.isSpreadElement(element)) {
+            continue;
+          }
+          assignExpressionPatternAlias(element, undefined);
+        }
+      }
+    };
+
+    const markWildcardFromExpression = (expression: ts.Expression): void => {
+      const ref = resolveSourceRef(expression);
+      if (!ref) return;
+      markWildcard(ref.root);
+    };
+
+    const markFromExpression = (
+      expression: ts.Expression,
+      marker: (name: string, path: readonly string[]) => void,
+    ): void => {
+      const ref = resolveSourceRef(expression);
+      if (!ref) return;
+      if (ref.dynamic) {
+        markWildcard(ref.root);
+        return;
+      }
+      marker(ref.root, ref.path);
+    };
+
+    const resolveInterproceduralSummary = (
+      call: ts.CallExpression,
+    ): FunctionCapabilitySummary | undefined => {
+      if (!interprocedural || !checker) return undefined;
+      const signature = checker.getResolvedSignature(call);
+      if (!signature) return undefined;
+      const declaration = signature.declaration;
+      if (!isCapabilityAnalyzableFunction(declaration)) {
+        return undefined;
       }
 
-      if (ts.isPropertyAccessExpression(node.expression)) {
-        const receiver = resolveSourceRef(node.expression.expression);
-        if (receiver) {
-          const methodName = node.expression.name.text;
-          if (methodName === "key") {
-            const argPath = extractLiteralPathArguments(node.arguments);
-            if (argPath.dynamic) {
-              markWildcard(receiver.root);
+      return analyzeFunctionCapabilities(declaration, {
+        checker,
+        interprocedural: true,
+        summaryCache,
+        inProgress,
+      });
+    };
+
+    const visit = (node: ts.Node): void => {
+      if (
+        ts.isBinaryExpression(node) &&
+        isAssignmentOperator(node.operatorToken.kind)
+      ) {
+        // Process RHS first so alias rebinding happens after reads in the assignment expression.
+        visit(node.right);
+        if (!ts.isIdentifier(node.left)) {
+          visit(node.left);
+        }
+
+        const operator = node.operatorToken.kind;
+        if (operator === ts.SyntaxKind.EqualsToken) {
+          if (ts.isIdentifier(node.left)) {
+            const nextRef = resolveSourceRef(node.right);
+            if (nextRef) {
+              aliases.set(node.left.text, nextRef);
+            } else {
+              aliases.delete(node.left.text);
             }
-          } else if (WRITER_METHODS.has(methodName)) {
-            trackWriteRef(receiver);
-          } else if (READER_METHODS.has(methodName)) {
-            trackReadRef(receiver);
+          } else if (
+            ts.isObjectLiteralExpression(node.left) ||
+            ts.isArrayLiteralExpression(node.left)
+          ) {
+            const nextRef = resolveSourceRef(node.right);
+            assignExpressionPatternAlias(node.left, nextRef);
           } else {
-            // Unknown method call over a tracked source reads at least the receiver path.
-            trackReadRef(receiver);
+            markFromExpression(node.left, trackWrite);
+          }
+        } else {
+          if (ts.isIdentifier(node.left)) {
+            aliases.delete(node.left.text);
+          } else {
+            markFromExpression(node.left, trackWrite);
+            markFromExpression(node.left, trackRead);
+          }
+        }
+
+        return;
+      }
+
+      if (ts.isIdentifier(node)) {
+        if (isDeclarationIdentifier(node)) {
+          // Ignore declaration sites.
+        } else if (isNonValueIdentifierUsage(node)) {
+          // Ignore key names and non-value positions.
+        } else {
+          const source = aliases.get(node.text);
+          if (source && !isMemberRootIdentifier(node)) {
+            const usage = unwrapIdentifierUsageSite(node);
+            const parent = usage.parent;
+            if (!parent) {
+              // Synthetic identifiers can temporarily be detached from parent links.
+              // Preserve narrowed-path reads while avoiding false root-read expansion.
+              if (!source.dynamic && source.path.length === 0) {
+                markPassthrough(source.root);
+              } else {
+                trackReadRef(source);
+              }
+            } else if (
+              !(
+                parent &&
+                ts.isPropertyAccessExpression(parent) &&
+                parent.name === usage
+              ) && !(
+                parent &&
+                ts.isBinaryExpression(parent) &&
+                parent.left === usage &&
+                isAssignmentOperator(parent.operatorToken.kind)
+              ) && !(
+                parent &&
+                (ts.isPrefixUnaryExpression(parent) ||
+                  ts.isPostfixUnaryExpression(parent)) &&
+                parent.operand === usage &&
+                (
+                  parent.operator === ts.SyntaxKind.PlusPlusToken ||
+                  parent.operator === ts.SyntaxKind.MinusMinusToken
+                )
+              )
+            ) {
+              if (
+                isCallOrNewArgumentUsage(usage) ||
+                isPassThroughIdentifierUsage(node)
+              ) {
+                if (source.path.length === 0 && !source.dynamic) {
+                  markPassthrough(source.root);
+                } else {
+                  trackReadRef(source);
+                }
+              } else {
+                trackReadRef(source);
+              }
+            }
           }
         }
       }
 
-      // Passing a tracked root object into an opaque helper can conceal
-      // indirect traversal/mutation; conservatively disable shrinking.
-      for (let index = 0; index < node.arguments.length; index++) {
-        if (interproceduralHandledArgs.has(index)) {
-          continue;
-        }
-        const argument = node.arguments[index];
-        if (!argument) continue;
-        const unwrappedArgument = unwrapExpression(argument);
-        if (!ts.isIdentifier(unwrappedArgument)) continue;
-        const source = resolveSourceRef(unwrappedArgument);
-        if (!source) continue;
-        if (source.dynamic || source.path.length > 0) continue;
-        markWildcard(source.root);
-      }
-
-      // Full-shape operations.
       if (
-        ts.isPropertyAccessExpression(node.expression) &&
-        ts.isIdentifier(node.expression.expression) &&
-        node.expression.expression.text === "Object" &&
-        WILDCARD_OBJECT_METHODS.has(node.expression.name.text)
+        ts.isPropertyAccessExpression(node) ||
+        ts.isElementAccessExpression(node)
       ) {
-        const firstArg = node.arguments[0];
-        if (firstArg) {
-          markWildcardFromExpression(firstArg);
+        if (isTopmostMemberNode(node)) {
+          const parent = node.parent;
+          if (
+            !(parent && ts.isCallExpression(parent) &&
+              parent.expression === node)
+          ) {
+            const ref = resolveSourceRef(node);
+            if (ref) {
+              trackReadRef(ref);
+            }
+          }
         }
       }
 
-      if (
-        ts.isPropertyAccessExpression(node.expression) &&
-        ts.isIdentifier(node.expression.expression) &&
-        node.expression.expression.text === "JSON" &&
-        node.expression.name.text === "stringify"
-      ) {
-        const firstArg = node.arguments[0];
-        if (firstArg) {
-          markWildcardFromExpression(firstArg);
+      if (ts.isCallExpression(node)) {
+        const interproceduralHandledArgs = new Set<number>();
+        const calleeSummary = resolveInterproceduralSummary(node);
+        if (calleeSummary) {
+          const count = Math.min(
+            calleeSummary.params.length,
+            node.arguments.length,
+          );
+          for (let index = 0; index < count; index++) {
+            const paramSummary = calleeSummary.params[index];
+            const argument = node.arguments[index];
+            if (!paramSummary || !argument) continue;
+
+            const source = resolveSourceRef(argument);
+            if (!source) continue;
+            interproceduralHandledArgs.add(index);
+
+            if (source.dynamic || paramSummary.wildcard) {
+              markWildcard(source.root);
+              continue;
+            }
+
+            for (const readPath of paramSummary.readPaths) {
+              trackRead(source.root, [...source.path, ...readPath]);
+            }
+            for (const writePath of paramSummary.writePaths) {
+              trackWrite(source.root, [...source.path, ...writePath]);
+            }
+
+            if (paramSummary.passthrough && source.path.length === 0) {
+              markPassthrough(source.root);
+            }
+          }
+        }
+
+        // Optional-call forms are non-lowerable; treat as wildcard usage.
+        if (node.questionDotToken && ts.isExpression(node.expression)) {
+          const source = resolveSourceRef(node.expression);
+          if (source) {
+            markWildcard(source.root);
+          }
+        }
+
+        if (ts.isPropertyAccessExpression(node.expression)) {
+          const receiver = resolveSourceRef(node.expression.expression);
+          if (receiver) {
+            const methodName = node.expression.name.text;
+            if (methodName === "key") {
+              const argPath = extractLiteralPathArguments(node.arguments);
+              if (argPath.dynamic) {
+                markWildcard(receiver.root);
+              }
+            } else if (WRITER_METHODS.has(methodName)) {
+              trackWriteRef(receiver);
+            } else if (READER_METHODS.has(methodName)) {
+              trackReadRef(receiver);
+            } else {
+              // Unknown method call over a tracked source reads at least the receiver path.
+              trackReadRef(receiver);
+            }
+          }
+        }
+
+        // Passing a tracked root object into an opaque helper can conceal
+        // indirect traversal/mutation; conservatively disable shrinking.
+        for (let index = 0; index < node.arguments.length; index++) {
+          if (interproceduralHandledArgs.has(index)) {
+            continue;
+          }
+          const argument = node.arguments[index];
+          if (!argument) continue;
+          const unwrappedArgument = unwrapExpression(argument);
+          if (!ts.isIdentifier(unwrappedArgument)) continue;
+          const source = resolveSourceRef(unwrappedArgument);
+          if (!source) continue;
+          if (source.dynamic || source.path.length > 0) continue;
+          markWildcard(source.root);
+        }
+
+        // Full-shape operations.
+        if (
+          ts.isPropertyAccessExpression(node.expression) &&
+          ts.isIdentifier(node.expression.expression) &&
+          node.expression.expression.text === "Object" &&
+          WILDCARD_OBJECT_METHODS.has(node.expression.name.text)
+        ) {
+          const firstArg = node.arguments[0];
+          if (firstArg) {
+            markWildcardFromExpression(firstArg);
+          }
+        }
+
+        if (
+          ts.isPropertyAccessExpression(node.expression) &&
+          ts.isIdentifier(node.expression.expression) &&
+          node.expression.expression.text === "JSON" &&
+          node.expression.name.text === "stringify"
+        ) {
+          const firstArg = node.arguments[0];
+          if (firstArg) {
+            markWildcardFromExpression(firstArg);
+          }
         }
       }
-    }
 
-    if (ts.isVariableDeclaration(node)) {
-      const initRef = node.initializer && ts.isExpression(node.initializer)
-        ? resolveSourceRef(node.initializer)
-        : undefined;
-      assignBindingAlias(node.name, initRef);
-    }
+      if (ts.isVariableDeclaration(node)) {
+        const initRef = node.initializer && ts.isExpression(node.initializer)
+          ? resolveSourceRef(node.initializer)
+          : undefined;
+        assignBindingAlias(node.name, initRef);
+      }
 
-    if (ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) {
       if (
-        node.operator === ts.SyntaxKind.PlusPlusToken ||
-        node.operator === ts.SyntaxKind.MinusMinusToken
+        ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)
       ) {
-        markFromExpression(node.operand, trackWrite);
-        markFromExpression(node.operand, trackRead);
+        if (
+          node.operator === ts.SyntaxKind.PlusPlusToken ||
+          node.operator === ts.SyntaxKind.MinusMinusToken
+        ) {
+          markFromExpression(node.operand, trackWrite);
+          markFromExpression(node.operand, trackRead);
+        }
       }
-    }
 
-    if (
-      ts.isSpreadElement(node) ||
-      ts.isSpreadAssignment(node)
-    ) {
-      const spreadExpr = node.expression;
-      if (spreadExpr) {
-        markWildcardFromExpression(spreadExpr);
+      if (
+        ts.isSpreadElement(node) ||
+        ts.isSpreadAssignment(node)
+      ) {
+        const spreadExpr = node.expression;
+        if (spreadExpr) {
+          markWildcardFromExpression(spreadExpr);
+        }
       }
+
+      if (ts.isForInStatement(node) || ts.isForOfStatement(node)) {
+        markWildcardFromExpression(node.expression);
+      }
+
+      ts.forEachChild(node, visit);
+    };
+
+    if (ts.isBlock(fn.body)) {
+      for (const statement of fn.body.statements) {
+        visit(statement);
+      }
+    } else {
+      visit(fn.body);
     }
 
-    if (ts.isForInStatement(node) || ts.isForOfStatement(node)) {
-      markWildcardFromExpression(node.expression);
+    const params: CapabilityParamSummary[] = [];
+    for (let index = 0; index < fn.parameters.length; index++) {
+      const parameter = fn.parameters[index];
+      if (!parameter) continue;
+      const summaryName = ts.isIdentifier(parameter.name)
+        ? parameter.name.text
+        : `${PARAMETER_SUMMARY_PREFIX}${index}`;
+      const state = states.get(summaryName);
+      if (!state) continue;
+      params.push({
+        name: summaryName,
+        capability: toCapability(state),
+        readPaths: Array.from(state.reads).map(decodePath),
+        writePaths: Array.from(state.writes).map(decodePath),
+        passthrough: state.passthrough,
+        wildcard: state.wildcard,
+      });
     }
 
-    ts.forEachChild(node, visit);
-  };
-
-  if (ts.isBlock(fn.body)) {
-    for (const statement of fn.body.statements) {
-      visit(statement);
-    }
-  } else {
-    visit(fn.body);
+    const result = { params };
+    summaryCache.set(fn, result);
+    return result;
+  } finally {
+    inProgress.delete(fn);
   }
-
-  const params: CapabilityParamSummary[] = [];
-  for (let index = 0; index < fn.parameters.length; index++) {
-    const parameter = fn.parameters[index];
-    if (!parameter) continue;
-    const summaryName = ts.isIdentifier(parameter.name)
-      ? parameter.name.text
-      : `${PARAMETER_SUMMARY_PREFIX}${index}`;
-    const state = states.get(summaryName);
-    if (!state) continue;
-    params.push({
-      name: summaryName,
-      capability: toCapability(state),
-      readPaths: Array.from(state.reads).map(decodePath),
-      writePaths: Array.from(state.writes).map(decodePath),
-      passthrough: state.passthrough,
-      wildcard: state.wildcard,
-    });
-  }
-
-  const result = { params };
-  summaryCache.set(fn, result);
-  inProgress.delete(fn);
-  return result;
 }

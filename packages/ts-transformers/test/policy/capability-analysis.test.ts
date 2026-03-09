@@ -391,3 +391,50 @@ Deno.test("Capability analysis marks for...of over tracked sub-path as wildcard"
   assertEquals(input.wildcard, true);
   assert(input.readPaths.includes("items"));
 });
+
+Deno.test(
+  "Capability analysis handles deeply nested mutual recursion without hanging",
+  () => {
+    const source = `
+const f = (a) => g(a);
+const g = (b) => h(b);
+const h = (c) => f(c);
+const main = (input) => f(input);`;
+    const { program, sourceFile } = createProgramWithSource(source);
+    const checker = program.getTypeChecker();
+    const main = findArrowByVariableName(sourceFile, "main");
+
+    const summary = analyzeFunctionCapabilities(main, {
+      checker,
+      interprocedural: true,
+    });
+
+    // The cycle should be detected — `f` is recursive, so the interprocedural
+    // analysis bails out with { recursive: true } for `f`, which means
+    // `main`'s argument falls through to the conservative wildcard path.
+    const input = getPaths(summary, "input");
+    assertEquals(input.wildcard, true);
+  },
+);
+
+Deno.test(
+  "Capability analysis interprocedural with default parameters does not corrupt paths",
+  () => {
+    const source = `
+const callee = (x, y = 0) => x.foo;
+const caller = (input) => callee(input);`;
+    const { program, sourceFile } = createProgramWithSource(source);
+    const checker = program.getTypeChecker();
+    const caller = findArrowByVariableName(sourceFile, "caller");
+
+    const summary = analyzeFunctionCapabilities(caller, {
+      checker,
+      interprocedural: true,
+    });
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.capability, "readonly");
+    assert(input.readPaths.includes("foo"));
+    assertEquals(input.wildcard, false);
+  },
+);
