@@ -94,6 +94,11 @@ const enum TypeValidity {
  */
 // TODO(danfuzz): Remove fallbacks once the data model covers NaN, Infinity,
 // Date, and RegExp directly.
+//
+// TODO(danfuzz): Retire this cache once schema objects flowing through here
+// can be safely deep-frozen. At that point, canonicalHash()'s own
+// frozenObjectHashCache WeakMap would provide the same O(1) identity caching,
+// and this wrapper cache would be redundant.
 const _stableHashCache = new WeakMap<object, string>();
 
 export function stableHash(value: unknown): string {
