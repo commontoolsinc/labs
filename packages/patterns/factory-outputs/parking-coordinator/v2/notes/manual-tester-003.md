@@ -36,9 +36,7 @@ Targeted retest of two UI fixes in the parking coordinator pattern:
 
 - Opened pattern URL -- shows Register/Login (not yet authenticated)
 - Clicked Register -> Generate Passphrase
-- Mnemonic: coil list artefact verb supply chunk bottom fortune match bronze
-  year click beef inner maid poem dragon adult produce evoke frown salmon chase
-  beef
+- Mnemonic: [REDACTED]
 - Derived key: deno task ct id derive "{mnemonic}" >
   /tmp/browser-identity-003.key
 - Clicked "I've Saved It - Continue" to complete registration
