@@ -7,9 +7,8 @@ Draft (revised per architect review)
 ## Overview
 
 Common Tools needs bidirectional integration with messaging platforms (WhatsApp,
-Telegram, Signal, Discord, iMessage, Slack). Some services have public APIs and
-can run server-side in toolshed. Others (iMessage, Signal) have no API and
-require a local daemon on the user's machine.
+Telegram, Signal, Discord, iMessage, Slack). Some services can authenticate from
+a server. Others (iMessage, Signal) can only connect from the user's machine.
 
 Each platform is its own pattern with its own lossless types. Platform-specific
 adapters write platform-specific inbound types into platform-specific cells.
@@ -19,60 +18,95 @@ normalization is a consumer choice, not a transport requirement.
 
 ---
 
-## Two Tiers of Integration
+## Two Axes of Integration
 
-### Tier 1: Server-Side (API-Accessible Services)
+The architecture is determined by two independent axes:
 
-**Services:** Telegram (Bot API), Discord (Bot API/webhooks), Slack (Bot API),
-WhatsApp Business API
+| | Server can authenticate | Only user's machine can connect |
+|---|---|---|
+| **Webhook/push** | Telegram (webhook), Discord, Slack | -- |
+| **Polling** | Telegram (getUpdates) | iMessage (chat.db), Signal, WhatsApp/Baileys |
 
-**Architecture:** Toolshed integration modules, following the existing pattern at
-`packages/toolshed/routes/integrations/`. Each service gets:
+### Axis 1: Where does the connection live?
 
-- A toolshed route (`/api/integrations/{service}/`) for OAuth/token setup
-- A webhook receiver endpoint for incoming messages (or polling adapter)
-- Integration with the existing **webhook ingress system**
-  (`/api/webhooks/:id`) to push inbound messages into platform-specific Stream
-  cells
-- A **background-charm-service integration** for scheduled operations (see
-  `packages/background-charm-service/CLAUDE.md` for the integration pattern)
-- A per-platform **`sendMessage` Stream handler** for outbound messages
+**Server-side** (toolshed): Telegram bot tokens, Discord bot tokens, Slack bot
+tokens, WhatsApp Business API tokens can all be stored and used server-side.
+These use the existing infrastructure -- no new architecture needed.
 
-**Data flow (inbound):**
+**User's machine** (local daemon): iMessage requires macOS filesystem access.
+Signal requires local phone registration via signal-cli. WhatsApp/Baileys
+requires local QR code pairing. Only the user's machine can connect.
 
-```
-External Service --> Toolshed webhook endpoint --> sendToStream() --> Platform-specific Stream cell --> handler
-```
+### Axis 2: What is the connection model?
 
-**Data flow (outbound):**
+**Push/webhook**: External service POSTs to a toolshed webhook endpoint. Uses
+the existing webhook ingress system (`/api/webhooks/:id` -> `sendToStream()`).
+Near-instant delivery.
 
-```
-Pattern --> calls platform sendMessage handler --> toolshed integration --> External Service API
-```
+**Polling**: Adapter periodically checks for new data. Server-side polling uses
+`bgUpdater` (60s interval). Local polling uses `fs.watch` or short-interval
+timers.
 
-**Key existing code to reuse:**
-
-| Code | Role |
-|------|------|
-| `packages/toolshed/routes/webhooks/` | Webhook ingress system |
-| `packages/toolshed/routes/integrations/discord/` | Existing Discord integration model |
-| `packages/toolshed/routes/integrations/google-oauth/` | OAuth flow model |
-| `packages/background-charm-service/` | Server-side charm execution with `bgUpdater` |
-| `packages/ui/src/v2/components/ct-webhook/` | Webhook UI component |
-
-### Tier 2: Local Daemon (No-API Services)
-
-**Services:** iMessage, Signal (via signal-cli), WhatsApp (via Baileys/QR --
-inherently local)
-
-**Architecture:** A standalone Deno process ("Common Gateway") that runs on the
-user's machine, imports the CT runtime library directly, and bridges local data
-sources into the cell fabric. Each platform adapter is its own pattern with its
-own types and its own `sendMessage` handler.
+**Persistent connection**: Some protocols (Discord gateway WebSocket, Signal
+JSON-RPC, Baileys WebSocket) need a long-lived connection. These cannot use
+`bgUpdater` (which is fire-and-forget per tick). They need a dedicated process --
+either a toolshed long-running service or the local daemon.
 
 ---
 
-## Common Gateway: Local Daemon Design
+## Server-Side Integrations (Existing Infrastructure)
+
+Server-side messaging follows the **same pattern as the Google OAuth
+integration** (`packages/toolshed/routes/integrations/google-oauth/`). No new
+architecture is needed -- just new integration modules using existing primitives:
+
+1. **Auth/setup**: Toolshed route at `/api/integrations/{service}/` handles bot
+   token or OAuth configuration
+2. **Inbound (push)**: Register a webhook via the existing webhook ingress
+   system. External service POSTs to `/api/webhooks/:id`, toolshed calls
+   `sendToStream()` into the pattern's inbox stream cell
+3. **Inbound (poll)**: Register the pattern for background updates via
+   `setBGCharm()`. The `bgUpdater` handler fetches new messages every 60 seconds
+4. **Outbound**: Toolshed integration route proxies send requests to the
+   external API
+
+**Example: Telegram webhook mode**
+
+```
+1. Toolshed route stores bot token, calls Telegram setWebhook pointing to /api/webhooks/:id
+2. Telegram POSTs updates to /api/webhooks/:id
+3. Webhook handler calls sendToStream() into the Telegram pattern's inbox
+4. Pattern's sendMessage handler calls toolshed route to proxy to Telegram sendMessage API
+```
+
+**Example: Telegram polling mode**
+
+```
+1. Toolshed route stores bot token, registers charm via setBGCharm()
+2. Every 60s, bgUpdater fires, charm calls getUpdates with stored offset
+3. New messages pushed to inbox stream
+4. Outbound same as webhook mode
+```
+
+**Key existing code:**
+
+| Code | Role |
+|------|------|
+| `packages/toolshed/routes/webhooks/` | Webhook ingress (`sendToStream()`) |
+| `packages/toolshed/routes/integrations/google-oauth/` | Auth + `setBGCharm()` template |
+| `packages/toolshed/routes/integrations/discord/` | Existing Discord integration |
+| `packages/background-charm-service/` | `bgUpdater` polling (60s) |
+
+---
+
+## Common Gateway: Local Daemon (User's Machine Only)
+
+For platforms that can only connect from the user's machine, a standalone Deno
+process ("Common Gateway") runs locally, imports the CT runtime library directly,
+and bridges local data sources into the cell fabric.
+
+The daemon is scoped strictly to local-only services. Server-side services use
+the existing toolshed infrastructure described above.
 
 ### Core Architecture
 
@@ -82,7 +116,7 @@ own types and its own `sendMessage` handler.
                     |                                  |
                     |  +----------+  +--------------+  |
                     |  | Platform |  | CT Runtime   |  |
-                    |  | Patterns |  | Client       |  |
+                    |  | Adapters |  | Client       |  |
   Local Data ------+--| iMessage |--| getCellFrom  |--+---- Toolshed API
   Sources          |  | Signal   |  | Link(), sync |  |     (storage)
   (chat.db,        |  | WhatsApp |  | editWithRetry|  |
@@ -92,7 +126,7 @@ own types and its own `sendMessage` handler.
                     |  | Gateway API (localhost:18790) ||
                     |  | - Status / health             ||
                     |  | - QR code display (WhatsApp)  ||
-                    |  | - Channel management          ||
+                    |  | - Adapter management          ||
                     |  +------------------------------+|
                     +----------------------------------+
 ```
@@ -128,7 +162,7 @@ const streamCell = cell.asSchema({ asStream: true });
 streamCell.withTx(tx).send(payload);
 ```
 
-### Per-Platform Implementation Notes
+### Per-Platform Adapter Notes
 
 **iMessage:**
 
@@ -140,67 +174,65 @@ streamCell.withTx(tx).send(payload);
 
 **Signal:**
 
-- Read/Write: `signal-cli` subprocess with JSON-RPC over stdio
+- Read/Write: `signal-cli` subprocess with JSON-RPC over stdio (event-driven,
+  persistent connection)
 - Requires phone number registration and verification
 - Cross-platform (Linux/macOS/Windows)
 
 **WhatsApp (local):**
 
-- Read/Write: Baileys library (WhatsApp Web protocol)
+- Read/Write: Baileys library (WhatsApp Web protocol, persistent WebSocket)
 - Requires QR code pairing (gateway API serves a QR endpoint)
 - Stores credentials locally in `~/.common-gateway/credentials/`
-- Note: WhatsApp Business API is Tier 1 (server-side), Baileys is Tier 2
+- Note: WhatsApp Business API is server-side, Baileys is local-only
 
 ---
 
 ## Message Schemas
 
 Each platform defines its own lossless message type that preserves all
-platform-specific fields. A common base provides shared structure, but each
-platform type is a superset -- nothing is discarded at the transport layer.
+platform-specific fields. There is no shared base interface -- each type is fully
+self-contained, following the established pattern convention (e.g., how
+`gmail-importer.tsx` defines a flat `Email` type with all Gmail-specific fields).
 
-### Common Base
+Normalization, if desired, happens at a higher consumer layer.
 
-```typescript
-// Shared fields that every platform message includes
-interface MessageBase {
-  text: string | null;
-  timestamp: string;       // ISO 8601
-  isFromMe: boolean;
-  attachments?: Attachment[];
-}
-
-interface Attachment {
-  mimeType: string;
-  filename?: string;
-  url?: string;            // data: URI or http URL
-  size?: number;
-}
-```
-
-### Platform-Specific Message Types (Lossless)
-
-Each platform extends the base with all of its native fields:
+### Platform-Specific Message Types
 
 ```typescript
 // iMessage -- preserves all chat.db columns
-interface IMessageMessage extends MessageBase {
+interface IMessageMessage {
   rowId: number;              // chat.db ROWID
   guid: string;               // iMessage GUID
+  text: string | null;
   handleId: string;
   chatGuid: string;           // e.g. "iMessage;+;chat12345"
   service: string;            // "iMessage" | "SMS"
+  isFromMe: boolean;
   isDelivered: boolean;
   isRead: boolean;
+  timestamp: string;          // ISO 8601
   dateSent: number;           // Core Data timestamp
   threadOriginatorGuid?: string;
   tapbackType?: number;
   associatedMessageGuid?: string;
+  attachments?: IMessageAttachment[];
   // ... all other chat.db fields as needed
 }
 
+interface IMessageAttachment {
+  filename: string;
+  mimeType: string;
+  transferName: string;
+  totalBytes: number;
+  // iMessage-specific attachment fields from chat.db
+}
+
 // Signal -- preserves signal-cli JSON-RPC fields
-interface SignalMessage extends MessageBase {
+interface SignalMessage {
+  text: string | null;
+  timestamp: number;
+  isFromMe: boolean;
   envelope: {
     source: string;           // phone number
     sourceDevice: number;
@@ -219,38 +251,66 @@ interface SignalMessage extends MessageBase {
     targetTimestamp: number;
     targetAuthor: string;
   };
+  attachments?: SignalAttachment[];
   // ... all signal-cli fields
 }
 
+interface SignalAttachment {
+  contentType: string;
+  filename?: string;
+  size: number;
+  id: string;
+  // signal-cli attachment fields
+}
+
 // Telegram -- preserves Bot API Update fields
-interface TelegramMessage extends MessageBase {
+interface TelegramMessage {
   messageId: number;
+  text: string | null;
+  timestamp: number;          // unix epoch from date field
+  isFromMe: boolean;
   from: { id: number; firstName: string; username?: string };
   chat: { id: number; type: string; title?: string };
   replyToMessage?: TelegramMessage;
   forwardFrom?: { id: number; firstName: string };
   editDate?: number;
   entities?: Array<{ type: string; offset: number; length: number }>;
+  photo?: Array<{ fileId: string; width: number; height: number }>;
   // ... all Telegram Bot API fields
 }
 
 // Discord -- preserves Discord API fields
-interface DiscordMessage extends MessageBase {
+interface DiscordMessage {
   messageId: string;
+  text: string | null;
+  timestamp: string;
+  isFromMe: boolean;
   channelId: string;
   guildId?: string;
   author: { id: string; username: string; discriminator: string };
   embeds?: Array<Record<string, unknown>>;
   reactions?: Array<{ emoji: string; count: number }>;
   referencedMessage?: DiscordMessage;
+  attachments?: DiscordAttachment[];
   // ... all Discord API fields
+}
+
+interface DiscordAttachment {
+  id: string;
+  filename: string;
+  contentType: string;
+  size: number;
+  url: string;
+  proxyUrl: string;
 }
 ```
 
 ### Per-Platform Cell Schemas
 
-Each platform is its own pattern with its own cell types. Entities (chats,
-messages, participants) are referenced via cell links, not string IDs.
+Each platform is its own pattern with its own cell types. Messages are stored as
+inline data arrays within conversation entities, following the established
+pattern convention (e.g., how `chatbot.tsx` stores `messages: BuiltInLLMMessage[]`
+inline).
 
 ```typescript
 // === iMessage Pattern ===
@@ -258,12 +318,12 @@ messages, participants) are referenced via cell links, not string IDs.
 // Inbound: daemon pushes platform-specific messages here
 type IMessageInbox = Stream<IMessageMessage>;
 
-// Chat entity -- a fabric entity, referenced by cell link
+// Chat entity -- messages stored inline
 type IMessageChat = {
   chatGuid: string;
   displayName?: string;
-  participants: CellLink[];   // links to contact entities
-  messages: CellLink[];       // links to message entities
+  participants: string[];       // handle IDs
+  messages: IMessageMessage[];  // inline array, not links
   lastActivity: string;
 };
 
@@ -272,11 +332,11 @@ type IMessageChat = {
 type SignalInbox = Stream<SignalMessage>;
 
 type SignalConversation = {
-  phoneNumber: string;        // direct message
-  groupId?: string;           // group chat
+  phoneNumber: string;          // direct message
+  groupId?: string;             // group chat
   groupName?: string;
-  participants: CellLink[];
-  messages: CellLink[];
+  participants: string[];       // phone numbers
+  messages: SignalMessage[];
   lastActivity: string;
 };
 
@@ -285,8 +345,10 @@ type SignalConversation = {
 type TelegramInbox = Stream<TelegramMessage>;
 
 type TelegramChat = {
-  chatEntity: CellLink;       // link to the telegram chat entity
-  messages: CellLink[];
+  chatId: number;
+  chatType: string;
+  title?: string;
+  messages: TelegramMessage[];
   lastActivity: string;
 };
 
@@ -297,101 +359,108 @@ type TelegramChat = {
 
 ## Per-Platform Send Handlers
 
-Outbound messaging uses per-platform `sendMessage` Stream handlers instead of a
-shared outbox. Each platform exposes its own handler with platform-appropriate
-parameters. The handler interface is a Stream -- even if the implementation
-internally queues, the caller interacts with a handler, not a data structure.
+Outbound messaging uses per-platform `sendMessage` Stream handlers. Each
+platform exposes its own handler with platform-appropriate parameters. The
+handler interface is a Stream -- callers call `.send()` which is fire-and-forget.
+
+Stream `.send()` returns `void`. If delivery confirmation is needed, it flows
+back through a separate delivery-status cell, not as a return value.
 
 ```typescript
 // === iMessage ===
 type IMessageSend = Stream<{
-  chat: CellLink;             // link to the iMessage chat entity
+  chatGuid: string;             // which chat to send to
   text: string;
-  replyTo?: CellLink;         // link to a message entity
-  attachments?: Attachment[];
+  replyToGuid?: string;         // iMessage GUID of message to reply to
+  attachments?: IMessageAttachment[];
 }>;
 
 // === Signal ===
 type SignalSend = Stream<{
-  conversation: CellLink;     // link to the Signal conversation entity
+  phoneNumber?: string;         // direct message recipient
+  groupId?: string;             // or group chat
   text: string;
-  replyTo?: CellLink;         // link to a message entity
-  attachments?: Attachment[];
-  expiresInSeconds?: number;  // platform-specific: disappearing messages
+  quoteTimestamp?: number;      // Signal quote by timestamp
+  expiresInSeconds?: number;    // disappearing messages
+  attachments?: SignalAttachment[];
 }>;
 
 // === Telegram ===
 type TelegramSend = Stream<{
-  chat: CellLink;             // link to the Telegram chat entity
+  chatId: number;               // Telegram chat ID
   text: string;
-  replyTo?: CellLink;         // link to a message entity
-  parseMode?: "HTML" | "Markdown";  // platform-specific
-  attachments?: Attachment[];
+  replyToMessageId?: number;    // Telegram message ID
+  parseMode?: "HTML" | "Markdown";
 }>;
 
 // === Discord ===
 type DiscordSend = Stream<{
-  channel: CellLink;          // link to the Discord channel entity
+  channelId: string;            // Discord channel ID
   text: string;
-  replyTo?: CellLink;         // link to a message entity
-  embeds?: Array<Record<string, unknown>>;  // platform-specific
-  attachments?: Attachment[];
+  replyToMessageId?: string;    // Discord message ID
+  embeds?: Array<Record<string, unknown>>;
 }>;
 ```
 
-### Send Result
+### Delivery Status (Optional)
 
-Each handler returns a platform-specific result:
+Since Stream sends are fire-and-forget, patterns that need delivery confirmation
+observe a separate status cell updated by the daemon or toolshed after the
+external API call completes:
 
 ```typescript
-interface SendResult {
-  success: boolean;
-  externalId?: string;     // platform-assigned message ID
-  error?: string;
-}
+type DeliveryStatus = {
+  pending: number;
+  lastError?: string;
+  lastDelivered?: string;       // ISO 8601
+};
 ```
 
 ---
 
 ## Reactive Data Flow
 
-The daemon uses **`cell.sink()`** for reactive watching wherever possible, only
-falling back to polling when the data source demands it.
-
-### Inbound messages (local source -> fabric)
+### Inbound (local source -> fabric, daemon only)
 
 - **iMessage:** Poll `chat.db` via `fs.watch`/kqueue on the WAL file, or
   short-interval poll (5-10s). Push new `IMessageMessage` entries via
   `sendToStream()` to the iMessage inbox.
 - **Signal:** `signal-cli` JSON-RPC pushes messages as they arrive
-  (event-driven, no polling). Pushed as `SignalMessage` to Signal inbox.
-- **WhatsApp/Baileys:** Event-driven WebSocket connection (no polling). Pushed
-  as platform-specific messages to WhatsApp inbox.
+  (event-driven, persistent connection). Pushed as `SignalMessage` to inbox.
+- **WhatsApp/Baileys:** Event-driven WebSocket (persistent connection). Pushed
+  as platform-specific messages to inbox.
 
-### Outbound messages (fabric -> local send)
+### Inbound (server-side, existing infrastructure)
+
+- **Telegram (webhook):** External service POSTs to `/api/webhooks/:id`,
+  toolshed calls `sendToStream()`.
+- **Telegram (poll):** `bgUpdater` fires every 60s, charm calls `getUpdates`.
+- **Discord/Slack:** Webhook ingress or long-running service.
+
+### Outbound (fabric -> external, daemon)
 
 Each platform's `sendMessage` Stream handler is watched by the daemon via
-`cell.sink()`. When a pattern sends a message through the handler, the sink
-fires and the daemon dispatches to the appropriate platform adapter.
+`cell.sink()`. When a pattern sends a message, the sink fires and the daemon
+dispatches to the appropriate adapter.
 
 ```typescript
-// Per-platform handler watching (iMessage example)
+// iMessage example
 iMessageSendStream.sink((message) => {
-  const chat = resolveEntity(message.chat);  // resolve cell link to chat entity
-  const replyTo = message.replyTo
-    ? resolveEntity(message.replyTo)
-    : undefined;
-  iMessageAdapter.send(chat, message.text, replyTo);
+  iMessageAdapter.send(message.chatGuid, message.text, message.replyToGuid);
 });
 
 // Signal example
 signalSendStream.sink((message) => {
-  const conversation = resolveEntity(message.conversation);
-  signalAdapter.send(conversation, message.text, {
+  signalAdapter.send(message.phoneNumber, message.text, {
     expiresInSeconds: message.expiresInSeconds,
   });
 });
 ```
+
+### Outbound (fabric -> external, server-side)
+
+Pattern's `sendMessage` handler calls a toolshed integration route that proxies
+to the external API (same model as existing Discord integration).
 
 ### Single-Machine Assumption
 
@@ -499,7 +568,7 @@ it subscribes to the per-platform inboxes and projects into a common view.
 
 The Unified Inbox pattern:
 
-- Subscribes to each platform's inbox Stream cells
+- Subscribes to each platform's inbox Stream cells (discovered via `wish()`)
 - Projects platform-specific types into a common display format (lossy
   normalization -- only for rendering, not storage)
 - Routes outbound replies to the correct per-platform `sendMessage` handler
@@ -512,8 +581,8 @@ The Unified Inbox pattern:
 
 | Aspect | OpenClaw | Common Tools |
 |--------|----------|-------------|
-| Runtime | Single Node.js Gateway process | Split: server-side (toolshed) + local daemon |
-| API services | All local | Server-side in toolshed |
+| Runtime | Single Node.js Gateway process | Split: toolshed (server) + daemon (local) |
+| Server services | All local | Existing toolshed infra (webhooks, bgUpdater) |
 | Local services | Same process | Local daemon (Common Gateway) |
 | Communication | Internal function calls | Cell fabric (runtime library) |
 | State | In-memory + local DB | Reactive cells in shared storage |
@@ -525,13 +594,14 @@ The Unified Inbox pattern:
 | Outbound | Shared send queue | Per-platform Stream handlers |
 
 **Key architectural difference:** OpenClaw is a monolith -- everything runs in
-one process. CT's approach is distributed -- server-side services run in
-toolshed, local-only services run in the daemon, and they both write to the same
-cell fabric. Each platform is its own pattern with its own lossless types and
-its own send handler. This means:
+one process. CT's approach is distributed -- server-side services use existing
+toolshed infrastructure (webhook ingress, `setBGCharm()`, integration routes),
+local-only services run in the daemon, and they both write to the same cell
+fabric. Each platform is its own pattern with its own lossless types and its own
+send handler. This means:
 
 - Server-side services work without the daemon running
-- The daemon only needs to handle truly local things
+- The daemon only handles truly local things (filesystem, local subprocesses)
 - State is always available via the web (even if daemon is offline, you see
   last-synced messages)
 - No information is lost at the transport layer -- platform-specific features
@@ -541,9 +611,9 @@ its own send handler. This means:
 
 ## Open Questions
 
-1. **WhatsApp: Tier 1 or Tier 2?** WhatsApp Business API is server-side but
-   requires a business account. Baileys (WhatsApp Web protocol) is local but
-   more accessible to individual users. Likely support both.
+1. **WhatsApp: server-side or local?** WhatsApp Business API can authenticate
+   server-side but requires a business account. Baileys requires local QR
+   pairing but is more accessible to individual users. Likely support both.
 
 2. **Rate limiting and backpressure:** How to handle high-volume channels
    without overwhelming the cell fabric?
@@ -559,9 +629,15 @@ its own send handler. This means:
 5. **Attachment storage:** Large media (images, videos) -- store in the cell
    fabric or reference externally?
 
-6. **Entity granularity:** Should each message be its own cell entity, or should
-   messages be stored as arrays within conversation entities? Per-message
-   entities enable fine-grained linking but increase cell count.
+6. **Entity granularity:** Should each message be its own cell entity (using
+   `asCell` in the schema), or should messages be stored as inline arrays within
+   conversation entities? Existing patterns strongly favor inline arrays, but
+   per-message entities enable fine-grained addressability.
+
+7. **Persistent connections server-side:** Discord gateway and Slack socket mode
+   need long-lived connections that don't fit the `bgUpdater` model. Should
+   these run as dedicated toolshed services, or should webhook mode be the
+   default for server-side?
 
 ---
 
@@ -569,26 +645,23 @@ its own send handler. This means:
 
 ### Phase 1: Foundation
 
-- [ ] Define per-platform message types and cell schemas in
-      `packages/common-gateway/src/types/`
-- [ ] Build Common Gateway skeleton (Deno, runtime client)
+- [ ] Define per-platform message types (flat, self-contained, lossless)
+- [ ] Build Common Gateway skeleton (Deno, runtime client, adapter interface)
 - [ ] iMessage adapter with lossless `IMessageMessage` type (read-only)
-- [ ] iMessage `sendMessage` Stream handler
 - [ ] Simple iMessage viewer pattern for testing
 
 ### Phase 2: Bidirectional
 
-- [ ] iMessage send via AppleScript (wired to `sendMessage` handler)
-- [ ] Signal adapter with lossless `SignalMessage` type
-- [ ] Signal `sendMessage` Stream handler
+- [ ] iMessage `sendMessage` Stream handler + AppleScript send
+- [ ] Signal adapter with lossless `SignalMessage` type + send handler
 - [ ] Per-platform chat UI patterns
 
-### Phase 3: More Channels
+### Phase 3: Server-Side Channels
 
-- [ ] Telegram server-side integration in toolshed with `TelegramMessage` type
-- [ ] Discord server-side integration with `DiscordMessage` type
-- [ ] WhatsApp local adapter (Baileys) with lossless type
-- [ ] Each with its own `sendMessage` handler
+- [ ] Telegram integration in toolshed (webhook ingress + `setBGCharm()` +
+      send route, following Google OAuth model)
+- [ ] Discord integration upgrade (currently webhook-only, add full messaging)
+- [ ] WhatsApp local adapter (Baileys) with lossless type and send handler
 
 ### Phase 4: Tauri
 
@@ -611,10 +684,10 @@ its own send handler. This means:
 
 | File | Role |
 |------|------|
-| `packages/toolshed/routes/webhooks/webhooks.utils.ts` | Runtime cell read/write primitives (sendToStream, getCellFromLink) |
+| `packages/toolshed/routes/webhooks/webhooks.utils.ts` | Runtime cell primitives (`sendToStream`, `getCellFromLink`) |
 | `packages/toolshed/routes/webhooks/webhooks.handlers.ts` | Webhook ingress API |
-| `packages/toolshed/routes/webhooks/webhooks.routes.ts` | Webhook route definitions |
-| `packages/toolshed/routes/integrations/discord/` | Existing server-side integration model |
-| `packages/background-charm-service/` | Server-side charm execution (bgUpdater pattern) |
+| `packages/toolshed/routes/integrations/google-oauth/` | Auth + `setBGCharm()` template for server-side integrations |
+| `packages/toolshed/routes/integrations/discord/` | Existing server-side integration |
+| `packages/background-charm-service/` | `bgUpdater` polling (60s interval) |
 | `packages/ui/src/v2/components/ct-webhook/` | Webhook UI component |
 | `docs/specs/webhook-ingress/README.md` | Webhook system design spec |
