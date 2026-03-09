@@ -13,15 +13,18 @@ export * from "./cache.ts";
 export class StorageManagerEmulator extends BaseStorageManager {
   #session?: Consumer.MemoryConsumer<MemorySpace>;
   #subscription = StorageSubscription.create();
+  #memoryProvider?: ReturnType<typeof MemoryProvider.emulate>;
 
   #providers: Map<string, Provider> = new Map();
 
   session() {
     if (!this.#session) {
-      const provider = MemoryProvider.emulate({ serviceDid: this.as.did() });
+      this.#memoryProvider = MemoryProvider.emulate({
+        serviceDid: this.as.did(),
+      });
       this.#session = Consumer.open({
         as: this.as,
-        session: provider.session(),
+        session: this.#memoryProvider.session(),
       });
     }
     return this.#session;
@@ -47,6 +50,10 @@ export class StorageManagerEmulator extends BaseStorageManager {
 
   override async close() {
     await super.close();
+    // Dispose provider sessions to clear pending schema flush timers,
+    // without closing the ReadableStream pipe (which would prevent
+    // runtime.dispose() → scheduler.idle() from settling).
+    this.#memoryProvider?.disposeSessions();
     if (this.#session) {
       this.#session.close();
       await this.#session.closed;
