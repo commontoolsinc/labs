@@ -46,7 +46,7 @@ export class MapStrategy implements ClosureTransformationStrategy {
   ): boolean {
     return ts.isCallExpression(node) &&
       ts.isPropertyAccessExpression(node.expression) &&
-      node.expression.name.text in METHOD_TO_WITH_PATTERN;
+      Object.hasOwn(METHOD_TO_WITH_PATTERN, node.expression.name.text);
   }
 
   transform(
@@ -103,7 +103,7 @@ function shouldTransformMap(
   if (!ts.isPropertyAccessExpression(mapCall.expression)) return false;
 
   const methodName = mapCall.expression.name.text;
-  if (!(methodName in METHOD_TO_WITH_PATTERN)) {
+  if (!Object.hasOwn(METHOD_TO_WITH_PATTERN, methodName)) {
     return false;
   }
 
@@ -311,7 +311,7 @@ function isReactiveCollectionCallbackParameter(
 
   const methodName = call.expression.name.text;
   if (
-    !(methodName in METHOD_TO_WITH_PATTERN) &&
+    !Object.hasOwn(METHOD_TO_WITH_PATTERN, methodName) &&
     methodName !== "mapWithPattern" &&
     methodName !== "filterWithPattern" &&
     methodName !== "flatMapWithPattern"
@@ -374,7 +374,7 @@ function isReactiveMapOrigin(
     // of a reactive array method call is still reactive.
     if (
       ts.isPropertyAccessExpression(current.expression) &&
-      current.expression.name.text in METHOD_TO_WITH_PATTERN
+      Object.hasOwn(METHOD_TO_WITH_PATTERN, current.expression.name.text)
     ) {
       return isReactiveMapOrigin(
         current.expression.expression,
