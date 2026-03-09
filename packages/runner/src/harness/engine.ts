@@ -1,6 +1,7 @@
 import { Pattern } from "../builder/types.ts";
 import { Console } from "./console.ts";
 import {
+  type Exports,
   Harness,
   HarnessedFunction,
   RuntimeProgram,
@@ -37,8 +38,6 @@ const INJECTED_SCRIPT =
 declare global {
   var [RUNTIME_ENGINE_CONSOLE_HOOK]: any;
 }
-
-type Exports = Record<string, any>;
 
 // Extends a TypeScript program with 3P module types, if referenced.
 export class EngineProgramResolver extends InMemoryProgram {

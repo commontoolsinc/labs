@@ -262,7 +262,7 @@ describe("Engine compile + evaluate equivalence with process", () => {
     expect(result.main!["default"]).toBeDefined();
   });
 
-  it("compile-only does not produce side effects in the isolate", async () => {
+  it("compile returns JS, evaluate executes it", async () => {
     const program: RuntimeProgram = {
       main: "/main.tsx",
       files: [

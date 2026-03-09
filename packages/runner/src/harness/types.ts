@@ -30,7 +30,7 @@ export interface TypeScriptHarnessProcessOptions {
   verboseErrors?: boolean;
 }
 
-type Exports = Record<string, any>;
+export type Exports = Record<string, any>;
 
 // A `Harness` wraps a flow of compiling, bundling, and executing typescript.
 export interface Harness extends EventTarget {
