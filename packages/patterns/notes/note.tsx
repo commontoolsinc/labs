@@ -352,6 +352,7 @@ const Note = pattern<NoteInput, NoteOutput>(
         mode="prose"
         wordWrap
         tabIndent
+        placeholder="Start writing..."
       />
     );
 
