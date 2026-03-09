@@ -52,6 +52,7 @@ import type {
   SchedulerGraphNode,
   SchedulerGraphSnapshot,
 } from "./telemetry.ts";
+import { SchedulerTiming } from "./scheduler-timing.ts";
 import { ensureNotRenderThread } from "@commontools/utils/env";
 ensureNotRenderThread();
 
@@ -153,15 +154,6 @@ export interface SettleStats {
 const MAX_ITERATIONS_PER_RUN = 100;
 const DEFAULT_RETRIES_FOR_EVENTS = 5;
 const MAX_RETRIES_FOR_REACTIVE = 10;
-const AUTO_DEBOUNCE_THRESHOLD_MS = 50;
-const AUTO_DEBOUNCE_MIN_RUNS = 3;
-const AUTO_DEBOUNCE_DELAY_MS = 100;
-
-// Cycle-aware debounce: applies adaptive debounce to actions cycling within one execute()
-const CYCLE_DEBOUNCE_THRESHOLD_MS = 100; // Min iteration time to trigger cycle debounce
-const CYCLE_DEBOUNCE_MIN_RUNS = 3; // Action must run this many times to be considered cycling
-const CYCLE_DEBOUNCE_MULTIPLIER = 2; // Debounce delay = multiplier × iteration time
-
 export class Scheduler {
   private eventQueue: {
     action: Action;
@@ -189,17 +181,12 @@ export class Scheduler {
   private dirty = new Set<Action>();
   private pullMode = false;
 
-  // Compute time tracking for cycle-aware scheduling
-  // Keyed by action ID (source location) to persist stats across action recreation
-  private actionStats = new Map<string, ActionStats>();
+  readonly timing: SchedulerTiming;
+
   private anonymousActionIds = new WeakMap<Action | EventHandler, string>();
   private anonymousActionCounter = 0;
   // Cycle detection during dependency collection
   private collectStack = new Set<Action>();
-
-  // Cycle-aware debounce: track runs per action within current execute() call
-  private runsThisExecute = new Map<Action, number>();
-  private executeStartTime = 0;
 
   // Non-settling heuristic (Phase 1): detects when the system is churning
   private settlingTracker = {
@@ -240,20 +227,7 @@ export class Scheduler {
   }[] = [];
   private changeGroupToActionId = new Map<ChangeGroup, string>();
 
-  // Debounce infrastructure for throttling slow actions
-  private debounceTimers = new WeakMap<
-    Action,
-    ReturnType<typeof setTimeout>
-  >();
-  // Track all active debounce timers for cleanup during dispose
-  private activeDebounceTimers = new Set<ReturnType<typeof setTimeout>>();
   private pendingQueueTaskTimer: ReturnType<typeof setTimeout> | null = null;
-  private actionDebounce = new WeakMap<Action, number>();
-  // Actions that opt out of auto-debounce (inverted: true means NO auto-debounce)
-  private noDebounce = new WeakMap<Action, boolean>();
-
-  // Throttle infrastructure - "value can be stale by T ms"
-  private actionThrottle = new WeakMap<Action, number>();
 
   // Track what each action has ever written (grows over time, includes potentialWrites).
   // Unlike dependencies.writes (current run only), mightWrite is cumulative and used
@@ -344,6 +318,12 @@ export class Scheduler {
     if (errorHandlers) {
       errorHandlers.forEach((handler) => this.errorHandlers.add(handler));
     }
+
+    this.timing = new SchedulerTiming(
+      (a) => this.getActionId(a),
+      (a) => this.pending.add(a),
+      () => this.queueExecution(),
+    );
 
     // Subscribe to storage notifications
     this.runtime.storageManager.subscribe(this.createStorageSubscription());
@@ -771,7 +751,7 @@ export class Scheduler {
             if (writer === action) continue;
             if (!this.dirty.has(writer)) continue;
             if (this.effects.has(writer)) continue; // Only check computations
-            if (this.isThrottled(writer)) continue; // Skip throttled - they trigger via storage
+            if (this.timing.isThrottled(writer)) continue; // Skip throttled - they trigger via storage
 
             // Check path overlap
             const writerWrites = this.mightWrite.get(writer) ?? [];
@@ -840,7 +820,7 @@ export class Scheduler {
     // when parent is re-running). They'll be cleaned up when parent is
     // garbage collected (WeakMap).
     // Cancel any pending debounce timer
-    this.cancelDebounceTimer(action);
+    this.timing.cancelDebounceTimer(action);
     // Clean up dependency collection tracking
     this.populateDependenciesCallbacks.delete(action);
     this.pendingDependencyCollection.delete(action);
@@ -870,7 +850,7 @@ export class Scheduler {
       const finalizeAction = (error?: unknown) => {
         // Record action execution time for cycle-aware scheduling
         const elapsed = performance.now() - actionStartTime;
-        this.recordActionTime(action, elapsed);
+        this.timing.recordActionTime(action, elapsed);
 
         try {
           if (error) {
@@ -1188,7 +1168,7 @@ export class Scheduler {
                 if (this.pullMode) {
                   // Pull mode: only schedule effects, mark computations as dirty
                   if (this.effects.has(action)) {
-                    this.scheduleWithDebounce(action);
+                    this.timing.scheduleWithDebounce(action);
                   } else {
                     // Mark computation as dirty and schedule affected effects
                     this.markDirty(action);
@@ -1196,7 +1176,7 @@ export class Scheduler {
                   }
                 } else {
                   // Push mode: existing behavior - schedule all triggered actions
-                  this.scheduleWithDebounce(action);
+                  this.timing.scheduleWithDebounce(action);
                 }
               }
             } else {
@@ -1564,13 +1544,13 @@ export class Scheduler {
       );
 
       // Get timing controls
-      const debounceMs = this.actionDebounce.get(action);
-      const throttleMs = this.actionThrottle.get(action);
+      const debounceMs = this.timing.getDebounce(action);
+      const throttleMs = this.timing.getThrottle(action);
 
       nodes.push({
         id,
         type: this.effects.has(action) ? "effect" : "computation",
-        stats: this.actionStats.get(id),
+        stats: this.timing.getActionStats(id),
         isDirty: this.dirty.has(action),
         isPending: this.pending.has(action),
         parentId,
@@ -1671,7 +1651,7 @@ export class Scheduler {
 
     // Add inactive nodes for actions that have stats but are no longer registered
     // This preserves visibility of actions that were unsubscribed
-    for (const [actionId, stats] of this.actionStats) {
+    for (const [actionId, stats] of this.timing.allStats()) {
       if (!actionById.has(actionId)) {
         nodes.push({
           id: actionId,
@@ -1889,218 +1869,42 @@ export class Scheduler {
     findEffects(computation);
 
     for (const effect of toSchedule) {
-      this.scheduleWithDebounce(effect);
+      this.timing.scheduleWithDebounce(effect);
     }
   }
 
-  // ── Timing: Action Stats ─────────────────────────────────────────────
+  // ── Timing (forwarded to this.timing delegate) ─────────────────────
 
-  /**
-   * Records the execution time for an action.
-   * Updates running statistics including run count, total time, and average time.
-   * Stats are keyed by action ID (source location) to persist across action recreation.
-   */
-  private recordActionTime(action: Action, elapsed: number): void {
-    const now = performance.now();
-    const actionId = this.getActionId(action);
-    const existing = this.actionStats.get(actionId);
-    if (existing) {
-      existing.runCount++;
-      existing.totalTime += elapsed;
-      existing.averageTime = existing.totalTime / existing.runCount;
-      existing.lastRunTime = elapsed;
-      existing.lastRunTimestamp = now;
-    } else {
-      this.actionStats.set(actionId, {
-        runCount: 1,
-        totalTime: elapsed,
-        averageTime: elapsed,
-        lastRunTime: elapsed,
-        lastRunTimestamp: now,
-      });
-    }
-
-    // Check if action should be auto-debounced based on performance
-    this.maybeAutoDebounce(action);
-  }
-
-  /**
-   * Returns the execution statistics for an action, if available.
-   * Useful for diagnostics and determining cycle convergence strategy.
-   * Accepts either an Action or an action ID string.
-   */
   getActionStats(action: Action | string): ActionStats | undefined {
-    const actionId = typeof action === "string"
-      ? action
-      : this.getActionId(action);
-    return this.actionStats.get(actionId);
+    return this.timing.getActionStats(action);
   }
 
-  // ── Timing: Debounce ─────────────────────────────────────────────────
-
-  /**
-   * Sets a debounce delay for an action.
-   * When the action is triggered, it will wait for the specified delay before running.
-   * If triggered again during the delay, the timer resets.
-   */
   setDebounce(action: Action, ms: number): void {
-    if (ms <= 0) {
-      this.actionDebounce.delete(action);
-    } else {
-      this.actionDebounce.set(action, ms);
-    }
+    this.timing.setDebounce(action, ms);
   }
 
-  /**
-   * Gets the current debounce delay for an action, if set.
-   */
   getDebounce(action: Action): number | undefined {
-    return this.actionDebounce.get(action);
+    return this.timing.getDebounce(action);
   }
 
-  /**
-   * Clears the debounce setting for an action.
-   */
   clearDebounce(action: Action): void {
-    this.actionDebounce.delete(action);
-    this.cancelDebounceTimer(action);
+    this.timing.clearDebounce(action);
   }
 
-  /**
-   * Enables or disables auto-debounce detection for an action.
-   * When set to true, this action opts OUT of auto-debounce.
-   * By default, slow actions (> 50ms avg after 3 runs) will automatically get debounced.
-   */
   setNoDebounce(action: Action, optOut: boolean): void {
-    if (optOut) {
-      this.noDebounce.set(action, true);
-    } else {
-      this.noDebounce.delete(action);
-    }
+    this.timing.setNoDebounce(action, optOut);
   }
 
-  /**
-   * Cancels any pending debounce timer for an action.
-   */
-  private cancelDebounceTimer(action: Action): void {
-    const timer = this.debounceTimers.get(action);
-    if (timer) {
-      clearTimeout(timer);
-      this.debounceTimers.delete(action);
-      this.activeDebounceTimers.delete(timer);
-    }
-  }
-
-  /**
-   * Schedules an action with debounce support.
-   * If the action has a debounce delay, it will wait before being added to pending.
-   * Otherwise, it's added immediately.
-   */
-  private scheduleWithDebounce(action: Action): void {
-    const debounceMs = this.actionDebounce.get(action);
-
-    if (!debounceMs || debounceMs <= 0) {
-      // No debounce - add immediately
-      this.pending.add(action);
-      this.queueExecution();
-      return;
-    }
-
-    // Clear existing timer if any
-    this.cancelDebounceTimer(action);
-
-    // Set new timer
-    const timer = setTimeout(() => {
-      this.debounceTimers.delete(action);
-      this.activeDebounceTimers.delete(timer);
-      this.pending.add(action);
-      this.queueExecution();
-    }, debounceMs);
-
-    this.debounceTimers.set(action, timer);
-    this.activeDebounceTimers.add(timer);
-
-    logger.debug("schedule-debounce", () => [
-      `[DEBOUNCE] Action ${
-        this.getActionId(action)
-      } debounced for ${debounceMs}ms`,
-    ]);
-  }
-
-  /**
-   * Checks if an action should be auto-debounced based on its performance stats.
-   * Called after recording action time to potentially enable debouncing for slow actions.
-   * Auto-debounce is enabled by default; use noDebounce to opt out.
-   */
-  private maybeAutoDebounce(action: Action): void {
-    // Check if action has opted out of auto-debounce
-    if (this.noDebounce.get(action)) return;
-
-    // Check if already has a manual debounce set
-    if (this.actionDebounce.has(action)) return;
-
-    const stats = this.actionStats.get(this.getActionId(action));
-    if (!stats) return;
-
-    // Need minimum runs before auto-detecting
-    if (stats.runCount < AUTO_DEBOUNCE_MIN_RUNS) return;
-
-    // Check if action is slow enough to warrant debouncing
-    if (stats.averageTime >= AUTO_DEBOUNCE_THRESHOLD_MS) {
-      this.actionDebounce.set(action, AUTO_DEBOUNCE_DELAY_MS);
-      const actionId = this.getActionId(action);
-      logger.debug("schedule-debounce", () => [
-        `[AUTO-DEBOUNCE] Action ${actionId} ` +
-        `auto-debounced (avg ${
-          stats.averageTime.toFixed(1)
-        }ms >= ${AUTO_DEBOUNCE_THRESHOLD_MS}ms)`,
-      ]);
-    }
-  }
-
-  // ── Timing: Throttle ─────────────────────────────────────────────────
-
-  /**
-   * Sets a throttle period for an action.
-   * The action won't run if it ran within the last `ms` milliseconds.
-   * Unlike debounce, throttled actions stay dirty and will be pulled
-   * by effects when the throttle period expires.
-   */
   setThrottle(action: Action, ms: number): void {
-    if (ms <= 0) {
-      this.actionThrottle.delete(action);
-    } else {
-      this.actionThrottle.set(action, ms);
-    }
+    this.timing.setThrottle(action, ms);
   }
 
-  /**
-   * Gets the current throttle period for an action, if set.
-   */
   getThrottle(action: Action): number | undefined {
-    return this.actionThrottle.get(action);
+    return this.timing.getThrottle(action);
   }
 
-  /**
-   * Clears the throttle setting for an action.
-   */
   clearThrottle(action: Action): void {
-    this.actionThrottle.delete(action);
-  }
-
-  /**
-   * Checks if an action is currently throttled (ran too recently).
-   * Returns true if the action should be skipped this execution cycle.
-   */
-  private isThrottled(action: Action): boolean {
-    const throttleMs = this.actionThrottle.get(action);
-    if (!throttleMs) return false;
-
-    const stats = this.actionStats.get(this.getActionId(action));
-    if (!stats) return false; // No stats yet, action hasn't run
-
-    const elapsed = performance.now() - stats.lastRunTimestamp;
-    return elapsed < throttleMs;
+    this.timing.clearThrottle(action);
   }
 
   // ── Pull: Filtering & Stats ──────────────────────────────────────────
@@ -2512,8 +2316,7 @@ export class Scheduler {
     if (this.runningPromise) await this.runningPromise;
 
     // Track timing for cycle-aware debounce
-    this.executeStartTime = performance.now();
-    this.runsThisExecute.clear();
+    this.timing.beginExecuteCycle();
 
     // Non-settling heuristic: record execute() start
     const tracker = this.settlingTracker;
@@ -2923,7 +2726,7 @@ export class Scheduler {
 
         // Check throttle: skip recently-run actions but keep them dirty
         // They'll be pulled next time an effect needs them (if throttle expired)
-        if (this.isThrottled(fn)) {
+        if (this.timing.isThrottled(fn)) {
           logger.debug("schedule-throttle", () => [
             `[THROTTLE] Skipping throttled action: ${this.getActionId(fn)}`,
           ]);
@@ -2946,7 +2749,7 @@ export class Scheduler {
         iterActionsRun++;
         this.loopCounter.set(fn, (this.loopCounter.get(fn) || 0) + 1);
         // Track runs for cycle-aware debounce
-        this.runsThisExecute.set(fn, (this.runsThisExecute.get(fn) ?? 0) + 1);
+        this.timing.recordRunInCycle(fn);
         if (this.loopCounter.get(fn)! > MAX_ITERATIONS_PER_RUN) {
           this.handleError(
             new Error(
@@ -3010,7 +2813,7 @@ export class Scheduler {
       for (const comp of earlyIterationComputations) {
         if (
           lastWorkSet.has(comp) && this.dirty.has(comp) &&
-          !this.isThrottled(comp)
+          !this.timing.isThrottled(comp)
         ) {
           logger.debug("schedule-cycle", () => [
             `[CYCLE-BREAK] Clearing cyclic computation: ${
@@ -3025,7 +2828,7 @@ export class Scheduler {
       // Run all remaining dirty effects - these shouldn't be lost
       // But skip throttled effects - they should stay dirty for later
       for (const effect of this.effects) {
-        if (this.dirty.has(effect) && !this.isThrottled(effect)) {
+        if (this.dirty.has(effect) && !this.timing.isThrottled(effect)) {
           logger.debug("schedule-cycle", () => [
             `[CYCLE-BREAK] Running dirty effect: ${this.getActionId(effect)}`,
           ]);
@@ -3039,26 +2842,7 @@ export class Scheduler {
     }
 
     // Apply cycle-aware debounce to actions that ran multiple times this execute()
-    const executeElapsed = performance.now() - this.executeStartTime;
-    if (this.pullMode && executeElapsed >= CYCLE_DEBOUNCE_THRESHOLD_MS) {
-      for (const [action, runs] of this.runsThisExecute) {
-        if (runs >= CYCLE_DEBOUNCE_MIN_RUNS && !this.noDebounce.get(action)) {
-          // This action is cycling - apply adaptive debounce
-          const adaptiveDelay = Math.round(
-            CYCLE_DEBOUNCE_MULTIPLIER * executeElapsed,
-          );
-          const currentDebounce = this.actionDebounce.get(action) ?? 0;
-          if (adaptiveDelay > currentDebounce) {
-            this.actionDebounce.set(action, adaptiveDelay);
-            logger.debug("schedule-cycle-debounce", () => [
-              `[CYCLE-DEBOUNCE] Action ${this.getActionId(action)} ` +
-              `ran ${runs}x in ${executeElapsed.toFixed(1)}ms, ` +
-              `setting debounce to ${adaptiveDelay}ms`,
-            ]);
-          }
-        }
-      }
-    }
+    this.timing.applyCycleDebounce(this.pullMode);
 
     // Non-settling heuristic: accumulate busy time at end of execute()
     {
@@ -3143,11 +2927,7 @@ export class Scheduler {
    */
   dispose(): void {
     this.disposed = true;
-    // Clear all active debounce timers
-    for (const timer of this.activeDebounceTimers) {
-      clearTimeout(timer);
-    }
-    this.activeDebounceTimers.clear();
+    this.timing.dispose();
     if (this.pendingQueueTaskTimer !== null) {
       clearTimeout(this.pendingQueueTaskTimer);
       this.pendingQueueTaskTimer = null;
