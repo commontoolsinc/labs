@@ -138,7 +138,7 @@ export default pattern<ParkingInput, ParkingOutput>(
     const editSpotNotes = Writable.of("");
     const editPersonDefaultSpot = Writable.of(0);
     // ---- Computed ----
-    const hasSpots = computed(() => spots.get().length > 0);
+    const _hasSpots = computed(() => spots.get().length > 0);
     const hasPeople = computed(() => people.get().length > 0);
     const isParking = computed(() => currentTab.get() === "parking");
     const isRequests = computed(() => currentTab.get() === "requests");
@@ -263,7 +263,12 @@ export default pattern<ParkingInput, ParkingOutput>(
         people.push({
           name: trimmed,
           email: email.trim(),
-          commuteMode: (commuteMode || "drive") as "drive" | "transit" | "bike" | "wfh" | "other",
+          commuteMode: (commuteMode || "drive") as
+            | "drive"
+            | "transit"
+            | "bike"
+            | "wfh"
+            | "other",
           defaultSpot: 0,
           spotPreferences: [],
         });
@@ -481,7 +486,12 @@ export default pattern<ParkingInput, ParkingOutput>(
             <ct-hstack justify="between" align="center">
               <ct-heading level={4}>Parking Coordinator</ct-heading>
               <ct-hstack gap="2" align="center">
-                <span style={{ fontSize: "0.8rem", color: "var(--ct-color-gray-500)" }}>
+                <span
+                  style={{
+                    fontSize: "0.8rem",
+                    color: "var(--ct-color-gray-500)",
+                  }}
+                >
                   Admin
                 </span>
                 <ct-checkbox $checked={adminMode} />
@@ -508,7 +518,13 @@ export default pattern<ParkingInput, ParkingOutput>(
                   />
                 )
                 : (
-                  <span style={{ fontSize: "0.8rem", color: "var(--ct-color-gray-500)", fontStyle: "italic" }}>
+                  <span
+                    style={{
+                      fontSize: "0.8rem",
+                      color: "var(--ct-color-gray-500)",
+                      fontStyle: "italic",
+                    }}
+                  >
                     No team members added yet.
                   </span>
                 )}
@@ -551,7 +567,13 @@ export default pattern<ParkingInput, ParkingOutput>(
                     {/* No spots message */}
                     {noSpots
                       ? (
-                        <div style={{ textAlign: "center", color: "var(--ct-color-gray-500)", padding: "2rem" }}>
+                        <div
+                          style={{
+                            textAlign: "center",
+                            color: "var(--ct-color-gray-500)",
+                            padding: "2rem",
+                          }}
+                        >
                           No parking spots configured. An admin needs to add
                           spots in Admin mode.
                         </div>
@@ -562,11 +584,21 @@ export default pattern<ParkingInput, ParkingOutput>(
                           <ct-card>
                             <ct-vstack gap="2">
                               <ct-hstack justify="between" align="center">
-                                <span style={{ fontWeight: "600", fontSize: "1.1rem" }}>
+                                <span
+                                  style={{
+                                    fontWeight: "600",
+                                    fontSize: "1.1rem",
+                                  }}
+                                >
                                   Today - {formatDay(todayDate)}{" "}
                                   {formatDate(todayDate)}
                                 </span>
-                                <span style={{ fontSize: "0.875rem", color: "var(--ct-color-gray-500)" }}>
+                                <span
+                                  style={{
+                                    fontSize: "0.875rem",
+                                    color: "var(--ct-color-gray-500)",
+                                  }}
+                                >
                                   {computed(() => {
                                     const total = spots.get().length;
                                     const taken = requests
@@ -622,7 +654,12 @@ export default pattern<ParkingInput, ParkingOutput>(
                                     <span style={{ flex: "1" }}>
                                       {spot.label
                                         ? (
-                                          <span style={{ fontSize: "0.8rem", color: "var(--ct-color-gray-500)" }}>
+                                          <span
+                                            style={{
+                                              fontSize: "0.8rem",
+                                              color: "var(--ct-color-gray-500)",
+                                            }}
+                                          >
                                             {spot.label}
                                           </span>
                                         )
@@ -664,9 +701,10 @@ export default pattern<ParkingInput, ParkingOutput>(
                                         (req.status === "allocated" ||
                                           req.status === "pending")
                                       ) {
-                                        const statusText = req.status === "allocated"
-                                          ? `Allocated - Spot #${req.assignedSpot}`
-                                          : "Pending";
+                                        const statusText =
+                                          req.status === "allocated"
+                                            ? `Allocated - Spot #${req.assignedSpot}`
+                                            : "Pending";
                                         return (
                                           <ct-hstack gap="2" align="center">
                                             <span
@@ -685,8 +723,8 @@ export default pattern<ParkingInput, ParkingOutput>(
                                               variant="ghost"
                                               onClick={() =>
                                                 cancelRequest.send({
-                                                  personName:
-                                                    selectedPerson.get(),
+                                                  personName: selectedPerson
+                                                    .get(),
                                                   date: todayDate,
                                                 })}
                                             >
@@ -716,8 +754,7 @@ export default pattern<ParkingInput, ParkingOutput>(
                                           variant="primary"
                                           onClick={() =>
                                             requestSpot.send({
-                                              personName:
-                                                selectedPerson.get(),
+                                              personName: selectedPerson.get(),
                                               date: todayDate,
                                             })}
                                         >
@@ -728,7 +765,13 @@ export default pattern<ParkingInput, ParkingOutput>(
                                   </ct-hstack>
                                 )
                                 : (
-                                  <div style={{ padding: "8px", color: "var(--ct-color-gray-500)", fontStyle: "italic" }}>
+                                  <div
+                                    style={{
+                                      padding: "8px",
+                                      color: "var(--ct-color-gray-500)",
+                                      fontStyle: "italic",
+                                    }}
+                                  >
                                     Select yourself above to make requests.
                                   </div>
                                 )}
@@ -762,7 +805,9 @@ export default pattern<ParkingInput, ParkingOutput>(
                               const totalSpots = computed(
                                 () => spots.get().length,
                               );
-                              const dayLabel = `${formatDay(dateStr)} ${formatDate(dateStr)}`;
+                              const dayLabel = `${formatDay(dateStr)} ${
+                                formatDate(dateStr)
+                              }`;
                               const userStatus = computed(() => {
                                 const sel = selectedPerson.get();
                                 if (!sel) return "none";
@@ -776,8 +821,9 @@ export default pattern<ParkingInput, ParkingOutput>(
                                 if (
                                   req.status === "allocated" ||
                                   req.status === "pending"
-                                )
+                                ) {
                                   return "active";
+                                }
                                 if (req.status === "denied") return "denied";
                                 return "none";
                               });
@@ -799,10 +845,21 @@ export default pattern<ParkingInput, ParkingOutput>(
                                   align="center"
                                   style="padding: 8px; border-bottom: 1px solid #f3f4f6;"
                                 >
-                                  <span style={{ width: "100px", fontWeight: "500" }}>
+                                  <span
+                                    style={{
+                                      width: "100px",
+                                      fontWeight: "500",
+                                    }}
+                                  >
                                     {dayLabel}
                                   </span>
-                                  <span style={{ flex: "1", fontSize: "0.875rem", color: "var(--ct-color-gray-500)" }}>
+                                  <span
+                                    style={{
+                                      flex: "1",
+                                      fontSize: "0.875rem",
+                                      color: "var(--ct-color-gray-500)",
+                                    }}
+                                  >
                                     {free} of {totalSpots} free
                                   </span>
                                   {computed(() => {
@@ -820,16 +877,14 @@ export default pattern<ParkingInput, ParkingOutput>(
                                               color: "#22c55e",
                                             }}
                                           >
-                                            {userSpot
-                                              ? userSpot
-                                              : "Pending"}
+                                            {userSpot ? userSpot : "Pending"}
                                           </span>
                                           <ct-button
                                             variant="ghost"
                                             onClick={() =>
                                               cancelRequest.send({
-                                                personName:
-                                                  selectedPerson.get(),
+                                                personName: selectedPerson
+                                                  .get(),
                                                 date: dateStr,
                                               })}
                                           >
@@ -858,8 +913,7 @@ export default pattern<ParkingInput, ParkingOutput>(
                                         variant="secondary"
                                         onClick={() =>
                                           requestSpot.send({
-                                            personName:
-                                              selectedPerson.get(),
+                                            personName: selectedPerson.get(),
                                             date: dateStr,
                                           })}
                                       >
@@ -883,7 +937,13 @@ export default pattern<ParkingInput, ParkingOutput>(
                   <ct-vstack gap="3">
                     {computed(() => !selectedPerson.get())
                       ? (
-                        <div style={{ textAlign: "center", color: "var(--ct-color-gray-500)", padding: "2rem" }}>
+                        <div
+                          style={{
+                            textAlign: "center",
+                            color: "var(--ct-color-gray-500)",
+                            padding: "2rem",
+                          }}
+                        >
                           Select who you are on the Parking tab to see your
                           requests.
                         </div>
@@ -894,98 +954,110 @@ export default pattern<ParkingInput, ParkingOutput>(
                           <ct-vstack gap="1">
                             <span style={{ fontWeight: "600" }}>Upcoming</span>
                             {computed(
-                              () => myUpcoming.length === 0,
-                            )
+                                () => myUpcoming.length === 0,
+                              )
                               ? (
-                                <div style={{ color: "var(--ct-color-gray-500)", padding: "1rem", fontStyle: "italic" }}>
+                                <div
+                                  style={{
+                                    color: "var(--ct-color-gray-500)",
+                                    padding: "1rem",
+                                    fontStyle: "italic",
+                                  }}
+                                >
                                   No upcoming requests.
                                 </div>
                               )
                               : myUpcoming.map((req: SpotRequest) => (
-                                  <ct-card>
-                                    <ct-hstack
-                                      gap="2"
-                                      align="center"
-                                      justify="between"
-                                    >
-                                      <ct-vstack gap="0">
-                                        <span style={{ fontWeight: "500" }}>
-                                          {formatDay(req.requestedDate)}{" "}
-                                          {formatDate(req.requestedDate)}
-                                        </span>
-                                        <span
-                                          style={{
-                                            padding: "2px 8px",
-                                            borderRadius: "12px",
-                                            fontSize: "0.75rem",
-                                            fontWeight: "500",
-                                            backgroundColor:
-                                              statusColor(req.status) + "20",
-                                            color: statusColor(req.status),
-                                          }}
-                                        >
-                                          {req.status === "allocated"
-                                            ? `Allocated - Spot #${req.assignedSpot}`
-                                            : req.status}
-                                        </span>
-                                      </ct-vstack>
-                                      <ct-button
-                                        variant="ghost"
-                                        onClick={() =>
-                                          cancelRequest.send({
-                                            personName: selectedPerson.get(),
-                                            date: req.requestedDate,
-                                          })}
+                                <ct-card>
+                                  <ct-hstack
+                                    gap="2"
+                                    align="center"
+                                    justify="between"
+                                  >
+                                    <ct-vstack gap="0">
+                                      <span style={{ fontWeight: "500" }}>
+                                        {formatDay(req.requestedDate)}{" "}
+                                        {formatDate(req.requestedDate)}
+                                      </span>
+                                      <span
+                                        style={{
+                                          padding: "2px 8px",
+                                          borderRadius: "12px",
+                                          fontSize: "0.75rem",
+                                          fontWeight: "500",
+                                          backgroundColor:
+                                            statusColor(req.status) + "20",
+                                          color: statusColor(req.status),
+                                        }}
                                       >
-                                        Cancel
-                                      </ct-button>
-                                    </ct-hstack>
-                                  </ct-card>
-                                ))}
+                                        {req.status === "allocated"
+                                          ? `Allocated - Spot #${req.assignedSpot}`
+                                          : req.status}
+                                      </span>
+                                    </ct-vstack>
+                                    <ct-button
+                                      variant="ghost"
+                                      onClick={() =>
+                                        cancelRequest.send({
+                                          personName: selectedPerson.get(),
+                                          date: req.requestedDate,
+                                        })}
+                                    >
+                                      Cancel
+                                    </ct-button>
+                                  </ct-hstack>
+                                </ct-card>
+                              ))}
                           </ct-vstack>
 
                           {/* Past */}
                           <ct-vstack gap="1">
                             <span style={{ fontWeight: "600" }}>Past</span>
                             {computed(
-                              () => myPast.length === 0,
-                            )
+                                () => myPast.length === 0,
+                              )
                               ? (
-                                <div style={{ color: "var(--ct-color-gray-500)", padding: "1rem", fontStyle: "italic" }}>
+                                <div
+                                  style={{
+                                    color: "var(--ct-color-gray-500)",
+                                    padding: "1rem",
+                                    fontStyle: "italic",
+                                  }}
+                                >
                                   No past requests.
                                 </div>
                               )
                               : myPast.map((req: SpotRequest) => (
-                                  <ct-card>
-                                    <ct-hstack
-                                      gap="2"
-                                      align="center"
-                                      justify="between"
-                                    >
-                                      <ct-vstack gap="0">
-                                        <span>
-                                          {formatDay(req.requestedDate)}{" "}
-                                          {formatDate(req.requestedDate)}
-                                        </span>
-                                        <span
-                                          style={{
-                                            padding: "2px 8px",
-                                            borderRadius: "12px",
-                                            fontSize: "0.75rem",
-                                            fontWeight: "500",
-                                            backgroundColor:
-                                              statusColor(req.status) + "20",
-                                            color: statusColor(req.status),
-                                          }}
-                                        >
-                                          {req.status === "allocated"
-                                            ? `Spot #${req.assignedSpot}`
-                                            : req.status}
-                                        </span>
-                                      </ct-vstack>
-                                    </ct-hstack>
-                                  </ct-card>
-                                ))}
+                                <ct-card>
+                                  <ct-hstack
+                                    gap="2"
+                                    align="center"
+                                    justify="between"
+                                  >
+                                    <ct-vstack gap="0">
+                                      <span>
+                                        {formatDay(req.requestedDate)}{" "}
+                                        {formatDate(req.requestedDate)}
+                                      </span>
+                                      <span
+                                        style={{
+                                          padding: "2px 8px",
+                                          borderRadius: "12px",
+                                          fontSize: "0.75rem",
+                                          fontWeight: "500",
+                                          backgroundColor:
+                                            statusColor(req.status) + "20",
+                                          color: statusColor(req.status),
+                                        }}
+                                      >
+                                        {req.status === "allocated"
+                                          ? `Spot #${req.assignedSpot}`
+                                          : req.status}
+                                      </span>
+                                    </ct-vstack>
+                                  </ct-hstack>
+                                </ct-card>
+                              ))}
                           </ct-vstack>
                         </ct-vstack>
                       )}
@@ -1005,177 +1077,227 @@ export default pattern<ParkingInput, ParkingOutput>(
 
                       {noPeople
                         ? (
-                          <div style={{ color: "var(--ct-color-gray-500)", padding: "1rem" }}>
+                          <div
+                            style={{
+                              color: "var(--ct-color-gray-500)",
+                              padding: "1rem",
+                            }}
+                          >
                             No team members yet. Add the first person below.
                           </div>
                         )
                         : people.map((person) => {
-                            const isEditingThis = computed(
-                              () => editingPerson.get() === person.name,
-                            );
-                            return (
-                              <ct-card>
-                                <ct-vstack gap="2">
-                                  <ct-hstack gap="2" align="center">
-                                    <ct-vstack gap="0" style="width: 24px;">
-                                      <ct-button
-                                        variant="ghost"
-                                        onClick={() =>
-                                          movePersonUp.send({
-                                            name: person.name,
-                                          })}
-                                      >
-                                        ^
-                                      </ct-button>
-                                      <ct-button
-                                        variant="ghost"
-                                        onClick={() =>
-                                          movePersonDown.send({
-                                            name: person.name,
-                                          })}
-                                      >
-                                        v
-                                      </ct-button>
-                                    </ct-vstack>
-                                    <ct-vstack gap="0" style="flex: 1;">
-                                      <span style={{ fontWeight: "500" }}>
-                                        {person.name}
-                                      </span>
-                                      <span style={{ fontSize: "0.8rem", color: "var(--ct-color-gray-500)" }}>
-                                        {person.email}
-                                      </span>
-                                    </ct-vstack>
-                                    <span
-                                      style={{
-                                        padding: "2px 8px",
-                                        borderRadius: "12px",
-                                        fontSize: "0.75rem",
-                                        backgroundColor: "#f3f4f6",
-                                      }}
-                                    >
-                                      {COMMUTE_LABELS[person.commuteMode] ||
-                                        person.commuteMode}
-                                    </span>
-                                    {computed(() => person.defaultSpot > 0)
-                                      ? (
-                                        <span style={{ fontSize: "0.8rem", color: "var(--ct-color-gray-500)" }}>
-                                          Default: #{person.defaultSpot}
-                                        </span>
-                                      )
-                                      : null}
+                          const isEditingThis = computed(
+                            () => editingPerson.get() === person.name,
+                          );
+                          return (
+                            <ct-card>
+                              <ct-vstack gap="2">
+                                <ct-hstack gap="2" align="center">
+                                  <ct-vstack gap="0" style="width: 24px;">
                                     <ct-button
                                       variant="ghost"
-                                      onClick={() => {
-                                        if (
-                                          editingPerson.get() === person.name
-                                        ) {
-                                          editingPerson.set("");
-                                        } else {
-                                          editingPerson.set(person.name);
-                                          editPersonDefaultSpot.set(
-                                            person.defaultSpot || 0,
-                                          );
-                                        }
-                                      }}
+                                      onClick={() =>
+                                        movePersonUp.send({
+                                          name: person.name,
+                                        })}
                                     >
-                                      {isEditingThis ? "Close" : "Edit"}
+                                      ^
                                     </ct-button>
                                     <ct-button
                                       variant="ghost"
                                       onClick={() =>
-                                        removePerson.send({
+                                        movePersonDown.send({
                                           name: person.name,
                                         })}
                                     >
-                                      Remove
+                                      v
                                     </ct-button>
-                                  </ct-hstack>
-
-                                  {isEditingThis
+                                  </ct-vstack>
+                                  <ct-vstack gap="0" style="flex: 1;">
+                                    <span style={{ fontWeight: "500" }}>
+                                      {person.name}
+                                    </span>
+                                    <span
+                                      style={{
+                                        fontSize: "0.8rem",
+                                        color: "var(--ct-color-gray-500)",
+                                      }}
+                                    >
+                                      {person.email}
+                                    </span>
+                                  </ct-vstack>
+                                  <span
+                                    style={{
+                                      padding: "2px 8px",
+                                      borderRadius: "12px",
+                                      fontSize: "0.75rem",
+                                      backgroundColor: "#f3f4f6",
+                                    }}
+                                  >
+                                    {COMMUTE_LABELS[person.commuteMode] ||
+                                      person.commuteMode}
+                                  </span>
+                                  {computed(() => person.defaultSpot > 0)
                                     ? (
-                                      <ct-vstack
-                                        gap="2"
-                                        style="padding: 8px; background: #f9fafb; border-radius: 8px;"
+                                      <span
+                                        style={{
+                                          fontSize: "0.8rem",
+                                          color: "var(--ct-color-gray-500)",
+                                        }}
                                       >
-                                        <ct-hstack gap="2" align="center">
-                                          <span style={{ fontSize: "0.875rem", width: "100px" }}>
-                                            Default Spot:
-                                          </span>
-                                          <ct-select
-                                            $value={editPersonDefaultSpot}
-                                            items={computed(() => [
-                                              { label: "None", value: 0 },
-                                              ...spots.get().map((s) => ({
-                                                label: `#${s.number}${s.label ? ` (${s.label})` : ""}`,
-                                                value: s.number,
-                                              })),
-                                            ])}
-                                          />
-                                          <ct-button
-                                            variant="primary"
-                                            onClick={() =>
-                                              setDefaultSpot.send({
-                                                personName: person.name,
-                                                spotNumber:
-                                                  editPersonDefaultSpot.get(),
-                                              })}
-                                          >
-                                            Save
-                                          </ct-button>
-                                        </ct-hstack>
-                                        <span style={{ fontSize: "0.8rem", color: "var(--ct-color-gray-500)" }}>
-                                          Preferences:{" "}
-                                          {computed(() => {
-                                            const prefs =
-                                              person.spotPreferences || [];
-                                            return prefs.length > 0
-                                              ? prefs
-                                                  .map((p: number) => `#${p}`)
-                                                  .join(", ")
-                                              : "None set";
-                                          })}
-                                        </span>
-                                        <ct-vstack gap="1">
-                                          <span style={{ fontSize: "0.8rem", fontWeight: "500" }}>
-                                            Set Spot Preferences:
-                                          </span>
-                                          {spots.map((s) => {
-                                            const isSelected = computed(() =>
-                                              (person.spotPreferences || []).some((p: number) => p === s.number)
-                                            );
-                                            return (
-                                              <ct-hstack gap="1" align="center">
-                                                <ct-checkbox
-                                                  $checked={isSelected}
-                                                  onct-change={() => {
-                                                    const currentPrefs = person.spotPreferences || [];
-                                                    const spotNum = s.number;
-                                                    let newPrefs: number[];
-                                                    if (currentPrefs.some((p: number) => p === spotNum)) {
-                                                      newPrefs = currentPrefs.filter((p: number) => p !== spotNum);
-                                                    } else {
-                                                      newPrefs = [...currentPrefs, spotNum];
-                                                    }
-                                                    setSpotPreferences.send({
-                                                      personName: person.name,
-                                                      preferences: newPrefs,
-                                                    });
-                                                  }}
-                                                />
-                                                <span style={{ fontSize: "0.8rem" }}>
-                                                  #{s.number}{s.label ? ` (${s.label})` : ""}
-                                                </span>
-                                              </ct-hstack>
-                                            );
-                                          })}
-                                        </ct-vstack>
-                                      </ct-vstack>
+                                        Default: #{person.defaultSpot}
+                                      </span>
                                     )
                                     : null}
-                                </ct-vstack>
-                              </ct-card>
-                            );
-                          })}
+                                  <ct-button
+                                    variant="ghost"
+                                    onClick={() => {
+                                      if (
+                                        editingPerson.get() === person.name
+                                      ) {
+                                        editingPerson.set("");
+                                      } else {
+                                        editingPerson.set(person.name);
+                                        editPersonDefaultSpot.set(
+                                          person.defaultSpot || 0,
+                                        );
+                                      }
+                                    }}
+                                  >
+                                    {isEditingThis ? "Close" : "Edit"}
+                                  </ct-button>
+                                  <ct-button
+                                    variant="ghost"
+                                    onClick={() =>
+                                      removePerson.send({
+                                        name: person.name,
+                                      })}
+                                  >
+                                    Remove
+                                  </ct-button>
+                                </ct-hstack>
+
+                                {isEditingThis
+                                  ? (
+                                    <ct-vstack
+                                      gap="2"
+                                      style="padding: 8px; background: #f9fafb; border-radius: 8px;"
+                                    >
+                                      <ct-hstack gap="2" align="center">
+                                        <span
+                                          style={{
+                                            fontSize: "0.875rem",
+                                            width: "100px",
+                                          }}
+                                        >
+                                          Default Spot:
+                                        </span>
+                                        <ct-select
+                                          $value={editPersonDefaultSpot}
+                                          items={computed(() => [
+                                            { label: "None", value: 0 },
+                                            ...spots.get().map((s) => ({
+                                              label: `#${s.number}${
+                                                s.label ? ` (${s.label})` : ""
+                                              }`,
+                                              value: s.number,
+                                            })),
+                                          ])}
+                                        />
+                                        <ct-button
+                                          variant="primary"
+                                          onClick={() =>
+                                            setDefaultSpot.send({
+                                              personName: person.name,
+                                              spotNumber: editPersonDefaultSpot
+                                                .get(),
+                                            })}
+                                        >
+                                          Save
+                                        </ct-button>
+                                      </ct-hstack>
+                                      <span
+                                        style={{
+                                          fontSize: "0.8rem",
+                                          color: "var(--ct-color-gray-500)",
+                                        }}
+                                      >
+                                        Preferences: {computed(() => {
+                                          const prefs =
+                                            person.spotPreferences || [];
+                                          return prefs.length > 0
+                                            ? prefs
+                                              .map((p: number) => `#${p}`)
+                                              .join(", ")
+                                            : "None set";
+                                        })}
+                                      </span>
+                                      <ct-vstack gap="1">
+                                        <span
+                                          style={{
+                                            fontSize: "0.8rem",
+                                            fontWeight: "500",
+                                          }}
+                                        >
+                                          Set Spot Preferences:
+                                        </span>
+                                        {spots.map((s) => {
+                                          const isSelected = computed(() =>
+                                            (person.spotPreferences || []).some(
+                                              (p: number) => p === s.number,
+                                            )
+                                          );
+                                          return (
+                                            <ct-hstack gap="1" align="center">
+                                              <ct-checkbox
+                                                $checked={isSelected}
+                                                onct-change={() => {
+                                                  const currentPrefs =
+                                                    person.spotPreferences ||
+                                                    [];
+                                                  const spotNum = s.number;
+                                                  let newPrefs: number[];
+                                                  if (
+                                                    currentPrefs.some((
+                                                      p: number,
+                                                    ) =>
+                                                      p === spotNum
+                                                    )
+                                                  ) {
+                                                    newPrefs = currentPrefs
+                                                      .filter((p: number) =>
+                                                        p !== spotNum
+                                                      );
+                                                  } else {
+                                                    newPrefs = [
+                                                      ...currentPrefs,
+                                                      spotNum,
+                                                    ];
+                                                  }
+                                                  setSpotPreferences.send({
+                                                    personName: person.name,
+                                                    preferences: newPrefs,
+                                                  });
+                                                }}
+                                              />
+                                              <span
+                                                style={{ fontSize: "0.8rem" }}
+                                              >
+                                                #{s.number}
+                                                {s.label ? ` (${s.label})` : ""}
+                                              </span>
+                                            </ct-hstack>
+                                          );
+                                        })}
+                                      </ct-vstack>
+                                    </ct-vstack>
+                                  )
+                                  : null}
+                              </ct-vstack>
+                            </ct-card>
+                          );
+                        })}
 
                       {/* Add person form */}
                       {computed(() => showAddPerson.get())
@@ -1240,7 +1362,12 @@ export default pattern<ParkingInput, ParkingOutput>(
                         )}
                     </ct-vstack>
 
-                    <div style={{ borderTop: "1px solid #e5e7eb", margin: "8px 0" }} />
+                    <div
+                      style={{
+                        borderTop: "1px solid #e5e7eb",
+                        margin: "8px 0",
+                      }}
+                    />
 
                     {/* ---- Spots Section ---- */}
                     <ct-vstack gap="2">
@@ -1250,111 +1377,131 @@ export default pattern<ParkingInput, ParkingOutput>(
 
                       {noSpots
                         ? (
-                          <div style={{ color: "var(--ct-color-gray-500)", padding: "1rem" }}>
+                          <div
+                            style={{
+                              color: "var(--ct-color-gray-500)",
+                              padding: "1rem",
+                            }}
+                          >
                             No spots configured.
                           </div>
                         )
                         : spots.map((spot) => {
-                            const isEditingThis = computed(
-                              () => editingSpot.get() === spot.number,
-                            );
+                          const isEditingThis = computed(
+                            () => editingSpot.get() === spot.number,
+                          );
 
-                            return (
-                              <ct-card>
-                                <ct-vstack gap="1">
-                                  <ct-hstack gap="2" align="center">
+                          return (
+                            <ct-card>
+                              <ct-vstack gap="1">
+                                <ct-hstack gap="2" align="center">
+                                  <span
+                                    style={{
+                                      fontWeight: "600",
+                                      fontSize: "1rem",
+                                    }}
+                                  >
+                                    #{spot.number}
+                                  </span>
+                                  <span
+                                    style={{
+                                      flex: "1",
+                                      color: "var(--ct-color-gray-500)",
+                                      fontSize: "0.875rem",
+                                    }}
+                                  >
+                                    {spot.label}
+                                  </span>
+                                  <ct-button
+                                    variant="ghost"
+                                    onClick={() => {
+                                      if (
+                                        editingSpot.get() === spot.number
+                                      ) {
+                                        editingSpot.set(-1);
+                                      } else {
+                                        editingSpot.set(spot.number);
+                                        editSpotLabel.set(spot.label || "");
+                                        editSpotNotes.set(spot.notes || "");
+                                      }
+                                    }}
+                                  >
+                                    {isEditingThis ? "Close" : "Edit"}
+                                  </ct-button>
+                                  <ct-button
+                                    variant="ghost"
+                                    onClick={() =>
+                                      removeSpot.send({
+                                        number: spot.number,
+                                      })}
+                                  >
+                                    Remove
+                                  </ct-button>
+                                </ct-hstack>
+                                {spot.notes
+                                  ? (
                                     <span
                                       style={{
-                                        fontWeight: "600",
-                                        fontSize: "1rem",
+                                        fontSize: "0.8rem",
+                                        color: "var(--ct-color-gray-400)",
                                       }}
                                     >
-                                      #{spot.number}
+                                      {spot.notes}
                                     </span>
-                                    <span style={{ flex: "1", color: "var(--ct-color-gray-500)", fontSize: "0.875rem" }}>
-                                      {spot.label}
-                                    </span>
-                                    <ct-button
-                                      variant="ghost"
-                                      onClick={() => {
-                                        if (
-                                          editingSpot.get() === spot.number
-                                        ) {
-                                          editingSpot.set(-1);
-                                        } else {
-                                          editingSpot.set(spot.number);
-                                          editSpotLabel.set(spot.label || "");
-                                          editSpotNotes.set(spot.notes || "");
-                                        }
-                                      }}
-                                    >
-                                      {isEditingThis ? "Close" : "Edit"}
-                                    </ct-button>
-                                    <ct-button
-                                      variant="ghost"
-                                      onClick={() =>
-                                        removeSpot.send({
-                                          number: spot.number,
-                                        })}
-                                    >
-                                      Remove
-                                    </ct-button>
-                                  </ct-hstack>
-                                  {spot.notes
-                                    ? (
-                                      <span style={{ fontSize: "0.8rem", color: "var(--ct-color-gray-400)" }}>
-                                        {spot.notes}
-                                      </span>
-                                    )
-                                    : null}
+                                  )
+                                  : null}
 
-                                  {isEditingThis
-                                    ? (
-                                      <ct-vstack
-                                        gap="2"
-                                        style="padding: 8px; background: #f9fafb; border-radius: 8px;"
+                                {isEditingThis
+                                  ? (
+                                    <ct-vstack
+                                      gap="2"
+                                      style="padding: 8px; background: #f9fafb; border-radius: 8px;"
+                                    >
+                                      <span
+                                        style={{
+                                          fontSize: "0.8rem",
+                                          color: "var(--ct-color-gray-500)",
+                                        }}
                                       >
-                                        <span style={{ fontSize: "0.8rem", color: "var(--ct-color-gray-500)" }}>
-                                          Spot #{spot.number} (number cannot be
-                                          changed)
-                                        </span>
-                                        <ct-input
-                                          $value={editSpotLabel}
-                                          placeholder="Label (e.g., Near entrance)"
-                                        />
-                                        <ct-input
-                                          $value={editSpotNotes}
-                                          placeholder="Notes"
-                                        />
-                                        <ct-hstack gap="2">
-                                          <ct-button
-                                            variant="primary"
-                                            onClick={() => {
-                                              editSpot.send({
-                                                number: spot.number,
-                                                label: editSpotLabel.get(),
-                                                notes: editSpotNotes.get(),
-                                              });
-                                              editingSpot.set(-1);
-                                            }}
-                                          >
-                                            Save
-                                          </ct-button>
-                                          <ct-button
-                                            variant="ghost"
-                                            onClick={() =>
-                                              editingSpot.set(-1)}
-                                          >
-                                            Cancel
-                                          </ct-button>
-                                        </ct-hstack>
-                                      </ct-vstack>
-                                    )
-                                    : null}
-                                </ct-vstack>
-                              </ct-card>
-                            );
-                          })}
+                                        Spot #{spot.number}{" "}
+                                        (number cannot be changed)
+                                      </span>
+                                      <ct-input
+                                        $value={editSpotLabel}
+                                        placeholder="Label (e.g., Near entrance)"
+                                      />
+                                      <ct-input
+                                        $value={editSpotNotes}
+                                        placeholder="Notes"
+                                      />
+                                      <ct-hstack gap="2">
+                                        <ct-button
+                                          variant="primary"
+                                          onClick={() => {
+                                            editSpot.send({
+                                              number: spot.number,
+                                              label: editSpotLabel.get(),
+                                              notes: editSpotNotes.get(),
+                                            });
+                                            editingSpot.set(-1);
+                                          }}
+                                        >
+                                          Save
+                                        </ct-button>
+                                        <ct-button
+                                          variant="ghost"
+                                          onClick={() => editingSpot.set(-1)}
+                                        >
+                                          Cancel
+                                        </ct-button>
+                                      </ct-hstack>
+                                    </ct-vstack>
+                                  )
+                                  : null}
+                              </ct-vstack>
+                            </ct-card>
+                          );
+                        })}
 
                       {/* Add spot form */}
                       {computed(() => showAddSpot.get())
@@ -1416,7 +1563,12 @@ export default pattern<ParkingInput, ParkingOutput>(
                         )}
                     </ct-vstack>
 
-                    <div style={{ borderTop: "1px solid #e5e7eb", margin: "8px 0" }} />
+                    <div
+                      style={{
+                        borderTop: "1px solid #e5e7eb",
+                        margin: "8px 0",
+                      }}
+                    />
 
                     {/* ---- Manual Assign Section ---- */}
                     <ct-vstack gap="2">
@@ -1425,11 +1577,16 @@ export default pattern<ParkingInput, ParkingOutput>(
                       </span>
                       {computed(() => {
                         const pendingReqs = requests.get().filter(
-                          (r) => r.status === "pending"
+                          (r) => r.status === "pending",
                         );
                         if (pendingReqs.length === 0) {
                           return (
-                            <div style={{ color: "var(--ct-color-gray-500)", padding: "1rem" }}>
+                            <div
+                              style={{
+                                color: "var(--ct-color-gray-500)",
+                                padding: "1rem",
+                              }}
+                            >
                               No pending requests to assign.
                             </div>
                           );
@@ -1445,23 +1602,34 @@ export default pattern<ParkingInput, ParkingOutput>(
                             )
                             .map((r) => r.assignedSpot);
                           const freeSpots = spots.get().filter(
-                            (s) => !taken.includes(s.number)
+                            (s) => !taken.includes(s.number),
                           );
                           const spotItems = [
                             { label: "Select spot...", value: 0 },
                             ...freeSpots.map((s) => ({
-                              label: `#${s.number}${s.label ? ` (${s.label})` : ""}`,
+                              label: `#${s.number}${
+                                s.label ? ` (${s.label})` : ""
+                              }`,
                               value: s.number,
                             })),
                           ];
                           return (
                             <ct-card>
-                              <ct-hstack gap="2" align="center" justify="between">
+                              <ct-hstack
+                                gap="2"
+                                align="center"
+                                justify="between"
+                              >
                                 <ct-vstack gap="0">
                                   <span style={{ fontWeight: "500" }}>
                                     {req.personName}
                                   </span>
-                                  <span style={{ fontSize: "0.8rem", color: "var(--ct-color-gray-500)" }}>
+                                  <span
+                                    style={{
+                                      fontSize: "0.8rem",
+                                      color: "var(--ct-color-gray-500)",
+                                    }}
+                                  >
                                     {formatDay(req.requestedDate)}{" "}
                                     {formatDate(req.requestedDate)}
                                   </span>

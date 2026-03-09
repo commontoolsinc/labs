@@ -3,6 +3,7 @@
 ## Artifacts Gathered
 
 **All required files present and read:**
+
 - brief.md ✓ (checked into queue, 49 lines)
 - spec.md ✓ (expanded spec, 165 lines)
 - pattern/main.tsx ✓ (code file, ~1550 lines)
@@ -34,20 +35,31 @@
 ## Key Findings
 
 ### Brief Assessment
-Clear, well-specified brief with exact requirements (spots #1, #5, #12), 4 data entities, 15 user interactions, concrete acceptance criteria, detailed edge cases. Spec interpreter rated it Intermediate tier.
+
+Clear, well-specified brief with exact requirements (spots #1, #5, #12), 4 data
+entities, 15 user interactions, concrete acceptance criteria, detailed edge
+cases. Spec interpreter rated it Intermediate tier.
 
 ### Build Process
+
 - 5 iterations used (max allowed)
 - Compilation: PASS
-- Tests: 60 pass, 4 fail (pre-existing test harness limitations with toSpliced/reactive detection)
+- Tests: 60 pass, 4 fail (pre-existing test harness limitations with
+  toSpliced/reactive detection)
 - No logic regressions; failures are harness-level artifacts
 
 ### Specification Phase
-- Complexity: Intermediate (3 entities, multiple relationships, auto-allocation logic, priority ordering, admin role separation)
+
+- Complexity: Intermediate (3 entities, multiple relationships, auto-allocation
+  logic, priority ordering, admin role separation)
 - Reference exemplars: budget-tracker, kanban-board
-- 13 assumptions documented (auth-free toggle, person selection from list, allocation collapse, auto-allocation timing, priority determinism, date range, default spot sharing, email display-only, spot number immutable, ordering UI, initial state, cancellation limits, admin override)
+- 13 assumptions documented (auth-free toggle, person selection from list,
+  allocation collapse, auto-allocation timing, priority determinism, date range,
+  default spot sharing, email display-only, spot number immutable, ordering UI,
+  initial state, cancellation limits, admin override)
 
 ### Fix Pass
+
 - MAJOR issue (missing admin UI for default spot + preferences) fully resolved
 - Added complete edit-person view with form state, actions, and UI binding
 - MINOR duplication (hasActiveRequest) extracted to module scope
@@ -56,30 +68,42 @@ Clear, well-specified brief with exact requirements (spots #1, #5, #12), 4 data 
 ### Quality Issues Found
 
 #### CRITICAL (Manual Testing)
-1. **INITIAL_SPOTS not seeded** - Violates first acceptance criterion; pattern starts empty
-2. **Request result message always shows "Denied"** - UI displays same message for success and failure
+
+1. **INITIAL_SPOTS not seeded** - Violates first acceptance criterion; pattern
+   starts empty
+2. **Request result message always shows "Denied"** - UI displays same message
+   for success and failure
 
 #### HIGH
-3. **Runtime errors in computed values** - Stale references during reactive cycle (doesn't prevent completion)
-4. **Week-ahead grid incomplete rows** - Shows only 1 row when all spots allocated for today
+
+3. **Runtime errors in computed values** - Stale references during reactive
+   cycle (doesn't prevent completion)
+4. **Week-ahead grid incomplete rows** - Shows only 1 row when all spots
+   allocated for today
 
 #### MEDIUM
+
 5. **Horizontal layout overflow** - Admin tabs clip content
 6. **Spots tab permanently highlighted** - Tab state not tracking correctly
 
 #### LOW
+
 7. Date wrapping in My Requests
 8. Status not explicitly labeled for active allocations
 
 ### Critic Review Summary
 
-**Pass 1**: 4 FAILS (major: missing edit UI for interactions 10, 11; minor: 6 inline arrow handlers; logic duplication; static TODAY; date constraints)
+**Pass 1**: 4 FAILS (major: missing edit UI for interactions 10, 11; minor: 6
+inline arrow handlers; logic duplication; static TODAY; date constraints)
 
-**Pass 2**: 51 PASS, 3 FAIL (MAJOR resolved to PASS; duplicate resolved; inline arrows count grew to 10 due to new view but deferred; static TODAY/date constraints unchanged as NOTEs)
+**Pass 2**: 51 PASS, 3 FAIL (MAJOR resolved to PASS; duplicate resolved; inline
+arrows count grew to 10 due to new view but deferred; static TODAY/date
+constraints unchanged as NOTEs)
 
 ### Test Coverage
 
 **Passing (60/64)**:
+
 - Initial state verification
 - Full CRUD for persons/spots
 - Request allocation, denial (implicit), cancellation
@@ -87,56 +111,86 @@ Clear, well-specified brief with exact requirements (spots #1, #5, #12), 4 data 
 - Cascading removals, manual override
 
 **Failing (4/64)**:
-- 3 editSpot assertion failures (reactive change detection after push)
-- 1 manualOverride timing issue (insufficient warmup)
-All failures attributable to test harness, not logic bugs.
 
-**Not tested**: Past-date rejection, blank name rejection (cause test harness timeouts), spot editing mechanics (same-length array issue), complete denial scenario with 5+ persons.
+- 3 editSpot assertion failures (reactive change detection after push)
+- 1 manualOverride timing issue (insufficient warmup) All failures attributable
+  to test harness, not logic bugs.
+
+**Not tested**: Past-date rejection, blank name rejection (cause test harness
+timeouts), spot editing mechanics (same-length array issue), complete denial
+scenario with 5+ persons.
 
 ### Manual Testing Results
 
 13/19 acceptance criteria pass (some partial). Critical failures:
-- First load has no spots (INITIAL_SPOTS unused) - FAILS first criterion entirely
+
+- First load has no spots (INITIAL_SPOTS unused) - FAILS first criterion
+  entirely
 - Request result message misleading - FAILS criterion 3 & 5
 - Week grid incomplete when full - FAILS criterion 10 (partial)
 
-All 14 handlers work at CLI level; issue is UI display logic and initial state seeding.
+All 14 handlers work at CLI level; issue is UI display logic and initial state
+seeding.
 
 ### System-Level Discovery
 
-Found and documented detailed bug report on same-length array mutations via `.set(toSpliced())` after `.push()` not being detected by reactive system. Root cause spans normalizeAndDiff, recursivelyAddIDIfNeeded, and scheduler.idle(). Affects multiple patterns potentially. Suggests 4 fix options at platform level.
+Found and documented detailed bug report on same-length array mutations via
+`.set(toSpliced())` after `.push()` not being detected by reactive system. Root
+cause spans normalizeAndDiff, recursivelyAddIDIfNeeded, and scheduler.idle().
+Affects multiple patterns potentially. Suggests 4 fix options at platform level.
 
 ## Summary for Report
 
-Pattern is architecturally sound with correct business logic throughout. All state-level operations work correctly, all entity relationships function properly, auto-allocation priority logic works, cascading operations work, priority ordering works. 60/64 tests pass; 4 failures are test harness artifacts.
+Pattern is architecturally sound with correct business logic throughout. All
+state-level operations work correctly, all entity relationships function
+properly, auto-allocation priority logic works, cascading operations work,
+priority ordering works. 60/64 tests pass; 4 failures are test harness
+artifacts.
 
-However, **two CRITICAL UI bugs prevent the pattern from being production-ready**:
+However, **two CRITICAL UI bugs prevent the pattern from being
+production-ready**:
+
 1. Initial spots not seeded (first impression is empty tool)
 2. Request result message doesn't change (user can't tell if request succeeded)
 
-These are simple bugs to fix (one-liner seed, message update logic) but they block acceptance criteria.
+These are simple bugs to fix (one-liner seed, message update logic) but they
+block acceptance criteria.
 
-Manual test shows 13/19 acceptance pass. Missing: initial spots, correct request feedback, week grid when full. Additional medium issues: layout, tab state. These are UX quality issues, not core logic issues.
+Manual test shows 13/19 acceptance pass. Missing: initial spots, correct request
+feedback, week grid when full. Additional medium issues: layout, tab state.
+These are UX quality issues, not core logic issues.
 
-The pattern demonstrates excellent spec compliance in hidden ways (priority allocation works, preferences work, cascading works) but fails visible user-facing acceptance criteria.
+The pattern demonstrates excellent spec compliance in hidden ways (priority
+allocation works, preferences work, cascading works) but fails visible
+user-facing acceptance criteria.
 
-**Recommendation**: Pattern should NOT pass with current critical issues visible in manual testing, but the fixes are straightforward. This is a case where the pattern logic is solid but delivery/integration has gaps.
+**Recommendation**: Pattern should NOT pass with current critical issues visible
+in manual testing, but the fixes are straightforward. This is a case where the
+pattern logic is solid but delivery/integration has gaps.
 
 ## Grading Input Availability
 
-No grader output exists yet (phase = grade, but no grader.md notes or score.json). Will summarize as "pending grading" with manual test and critic evidence as basis for likely outcome.
+No grader output exists yet (phase = grade, but no grader.md notes or
+score.json). Will summarize as "pending grading" with manual test and critic
+evidence as basis for likely outcome.
 
 ## Notable Patterns
 
-1. **Agent diligence**: Pattern-maker thoroughly documented test limitations with specific evidence
-2. **Critic consistency**: Both passes found issues; second pass showed fix was effective (MAJOR resolved)
-3. **Manual testing rigor**: Browser session went through 7 user flows, found real user-facing bugs that unit tests missed
-4. **System discovery**: Reactivity bug report shows deep investigation of framework behavior
-5. **Spec fidelity gap**: Pattern implements 16/18 spec requirements perfectly but fails visible 1st impression
+1. **Agent diligence**: Pattern-maker thoroughly documented test limitations
+   with specific evidence
+2. **Critic consistency**: Both passes found issues; second pass showed fix was
+   effective (MAJOR resolved)
+3. **Manual testing rigor**: Browser session went through 7 user flows, found
+   real user-facing bugs that unit tests missed
+4. **System discovery**: Reactivity bug report shows deep investigation of
+   framework behavior
+5. **Spec fidelity gap**: Pattern implements 16/18 spec requirements perfectly
+   but fails visible 1st impression
 
 ## Dates and Timing
 
 Run started 2026-02-24T18:03:03Z. Phases appear to have taken:
+
 - Spec: ~3 minutes (spec complete by ~18:06)
 - Build: ~80 minutes (5 iterations, final by ~19:30)
 - Critic: ~60 minutes (pass 1 complete, fix made, pass 2 complete by ~19:30+)

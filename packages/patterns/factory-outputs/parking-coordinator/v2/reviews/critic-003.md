@@ -1,17 +1,17 @@
 # Pattern Review: main.tsx (Critic Pass 3)
 
-**Pattern**: Parking Coordinator
-**File**: workspace/2026-02-24-parking-coordinator-k21l/pattern/main.tsx
-**Spec**: workspace/2026-02-24-parking-coordinator-k21l/spec.md
-**Prior reviews**: critic-001.md, critic-002.md
+**Pattern**: Parking Coordinator **File**:
+workspace/2026-02-24-parking-coordinator-k21l/pattern/main.tsx **Spec**:
+workspace/2026-02-24-parking-coordinator-k21l/spec.md **Prior reviews**:
+critic-001.md, critic-002.md
 
 ---
 
 ## Focus of This Pass
 
 Targeted validation of 4 specific bug fixes applied after critic-002. This is
-not a full re-scan of all 13 convention categories (those were thoroughly covered
-in critic-001 and critic-002). The scope is:
+not a full re-scan of all 13 convention categories (those were thoroughly
+covered in critic-001 and critic-002). The scope is:
 
 1. **Fix 1** — `Default<ParkingSpot[], typeof INITIAL_SPOTS>`: Is the seeding
    mechanism correct and idiomatic?
@@ -38,16 +38,17 @@ Additionally: are there any regressions from these changes?
 
 ### 2. Reactivity
 
-- [PASS] **Fix 3 null guards** — All null-guard additions (`spot && spot.id !=
-  null`, `p && p.name != null`, `s && s.number != null`, optional chaining
-  `r?.date`, `r?.status`, `p?.id`) are inside `computed()` bodies where they
-  belong. No reactive values are accessed outside computed or action bodies as a
-  result of these changes.
+- [PASS] **Fix 3 null guards** — All null-guard additions
+  (`spot && spot.id !=
+  null`, `p && p.name != null`, `s && s.number != null`,
+  optional chaining `r?.date`, `r?.status`, `p?.id`) are inside `computed()`
+  bodies where they belong. No reactive values are accessed outside computed or
+  action bodies as a result of these changes.
 - [PASS] **Fix 4 weekDays no-change** — `const days: string[] = weekDays` at
   line 559 continues to correctly auto-unwrap the computed value inside another
-  computed body. This is the CT-idiomatic access pattern for computed-in-computed
-  usage. The dependency is tracked correctly. The no-change decision is confirmed
-  correct.
+  computed body. This is the CT-idiomatic access pattern for
+  computed-in-computed usage. The dependency is tracked correctly. The no-change
+  decision is confirmed correct.
 - [NOTE] **Unchanged from prior reviews**: `const TODAY = getTodayDate()` at
   line 193 remains a static snapshot. The today panel and week-ahead grid will
   drift if the tool stays open past midnight. This is not introduced by the fix
@@ -59,12 +60,14 @@ Additionally: are there any regressions from these changes?
 
 ### 4. Type System
 
-- [PASS] **Fix 1 type annotation** — `Writable<Default<ParkingSpot[], typeof
-  INITIAL_SPOTS>>` at line 82 is **correct and idiomatic CT usage**. The
-  pattern `Default<T[], typeof MODULE_CONST>` where `MODULE_CONST` is a
-  module-scope array literal is the established CT mechanism for seeding a cell
-  with complex initial data. This is confirmed by production exemplar
-  `card-piles.tsx` which uses `Default<Card[], typeof defaultPile1>` and
+- [PASS] **Fix 1 type annotation** —
+  `Writable<Default<ParkingSpot[], typeof
+  INITIAL_SPOTS>>` at line 82 is
+  **correct and idiomatic CT usage**. The pattern
+  `Default<T[], typeof MODULE_CONST>` where `MODULE_CONST` is a module-scope
+  array literal is the established CT mechanism for seeding a cell with complex
+  initial data. This is confirmed by production exemplar `card-piles.tsx` which
+  uses `Default<Card[], typeof defaultPile1>` and
   `Default<Card[], typeof defaultPile2>` in exactly the same way (with array
   literals as the named constants).
 - [PASS] `INITIAL_SPOTS` is defined at lines 73-77 as a module-scope const with
@@ -130,8 +133,8 @@ Additionally: are there any regressions from these changes?
   action that performs the mutation, display the result. This avoids the
   anti-pattern of trying to read reactive state synchronously after an
   asynchronous dispatch. The pre-compute and the actual allocation run on
-  identical state snapshots (same `.get()` calls, no mutations between them),
-  so the displayed result correctly mirrors the actual allocation.
+  identical state snapshots (same `.get()` calls, no mutations between them), so
+  the displayed result correctly mirrors the actual allocation.
 - [PASS] **Fix 3 design intent** — Adding null guards to computeds is defensive
   and appropriate for patterns whose reactive inputs may deliver partially
   initialized arrays during update cycles. The guards do not change the behavior
@@ -140,26 +143,29 @@ Additionally: are there any regressions from these changes?
 ### 13. Regression Check
 
 - [PASS] **Fix 1 — Input type change**: The only change is the default type
-  annotation from `Default<ParkingSpot[], []>` to `Default<ParkingSpot[], typeof
-  INITIAL_SPOTS>`. The base type `ParkingSpot[]` is unchanged. The output
-  interface's `spots: ParkingSpot[]` is unchanged. Any caller providing a
-  `spots` value explicitly will not be affected by the new default. No
-  regression.
+  annotation from `Default<ParkingSpot[], []>` to
+  `Default<ParkingSpot[], typeof
+  INITIAL_SPOTS>`. The base type
+  `ParkingSpot[]` is unchanged. The output interface's `spots: ParkingSpot[]` is
+  unchanged. Any caller providing a `spots` value explicitly will not be
+  affected by the new default. No regression.
 - [PASS] **Fix 2 — submitRequest addition**: The added `allocateSpot()` call is
   purely additive. The `requestParking.send()` call is unchanged. The message
   display logic was already present (`reqMessage.set(...)`), now it uses the
   pre-computed result instead of a post-send read attempt. All prior behavior
   (duplicate check, date validation, guard clauses) is preserved unchanged at
   lines 656-670. No regression.
-- [PASS] **Fix 3 — Null guard additions**: All null-guard additions are
-  additive filters. For well-formed data (no null/undefined items in arrays),
-  the behavior is identical to the pre-fix version. The `.filter(spot => spot &&
-  spot.id != null)` passes all valid ParkingSpot objects through unchanged.
-  Optional chaining `r?.field` returns the same value as `r.field` when `r` is
-  non-null. The sort comparator using `b?.date ?? ""` produces the same ordering
-  as `b.date` when all items have dates. No regression for valid data.
-- [PASS] **Fix 4 — No-change confirmed**: The `weekDays` reference in
-  `weekGrid` at line 559 was already correct before and remains correct.
+- [PASS] **Fix 3 — Null guard additions**: All null-guard additions are additive
+  filters. For well-formed data (no null/undefined items in arrays), the
+  behavior is identical to the pre-fix version. The
+  `.filter(spot => spot &&
+  spot.id != null)` passes all valid ParkingSpot
+  objects through unchanged. Optional chaining `r?.field` returns the same value
+  as `r.field` when `r` is non-null. The sort comparator using `b?.date ?? ""`
+  produces the same ordering as `b.date` when all items have dates. No
+  regression for valid data.
+- [PASS] **Fix 4 — No-change confirmed**: The `weekDays` reference in `weekGrid`
+  at line 559 was already correct before and remains correct.
 
 ---
 
@@ -175,9 +181,10 @@ Additionally: are there any regressions from these changes?
   the seed value at runtime. This is not a workaround — it is the documented
   approach for non-trivial initial data.
 
-- [PASS] `INITIAL_SPOTS` is declared as `export const INITIAL_SPOTS: ParkingSpot[]`
-  at lines 73-77 with explicit type annotation and three fully-populated objects
-  (id, number, label, notes all present). The seed data is structurally correct.
+- [PASS] `INITIAL_SPOTS` is declared as
+  `export const INITIAL_SPOTS: ParkingSpot[]` at lines 73-77 with explicit type
+  annotation and three fully-populated objects (id, number, label, notes all
+  present). The seed data is structurally correct.
 
 - [PASS] The spec acceptance criterion "On first load, the today panel shows all
   three parking spots (#1, #5, #12) as available" is now correctly implemented
@@ -197,10 +204,10 @@ Additionally: are there any regressions from these changes?
 
 - [PASS] **No state divergence scenario**: The only risk of mismatch would be if
   another concurrent action mutated `requests`, `spots`, or `persons` between
-  the two `allocateSpot()` calls. In CT's single-threaded reactive model, actions
-  run to completion without interleaving. Since `submitRequest` is a single
-  action body, no other action can execute between the pre-compute and the send.
-  The displayed result is always accurate.
+  the two `allocateSpot()` calls. In CT's single-threaded reactive model,
+  actions run to completion without interleaving. Since `submitRequest` is a
+  single action body, no other action can execute between the pre-compute and
+  the send. The displayed result is always accurate.
 
 - [PASS] **Spot lookup for message** at line 687 uses `allSpots` (the pre-send
   snapshot). Since `requestParking` does not mutate spots, the spot object found
@@ -224,8 +231,8 @@ Additionally: are there any regressions from these changes?
   `undefined`, which is not equal to any date string, so the predicate returns
   false — the null item is skipped. This is the correct behavior.
 
-- [PASS] **`p?.id === req.personId` in person lookup** at lines 535 and 572:
-  If `p` is null/undefined, `p?.id` is undefined, which is not equal to any
+- [PASS] **`p?.id === req.personId` in person lookup** at lines 535 and 572: If
+  `p` is null/undefined, `p?.id` is undefined, which is not equal to any
   personId string. The find() returns undefined, and the `?.name ?? "Unknown"`
   chain provides the fallback. Correct.
 
@@ -246,10 +253,10 @@ Additionally: are there any regressions from these changes?
 ### Fix 4: weekDays Auto-Unwrap Confirmation
 
 - [PASS] The CT platform auto-unwraps computed values when accessed directly
-  inside another computed body. `const days: string[] = weekDays` at line 559
-  is inside the `weekGrid = computed(...)` body. The value of `weekDays`
-  (a `string[]`) is assigned to `days`. The reactive dependency on `weekDays`
-  is automatically registered. This is correct CT idiom and matches the usage
+  inside another computed body. `const days: string[] = weekDays` at line 559 is
+  inside the `weekGrid = computed(...)` body. The value of `weekDays` (a
+  `string[]`) is assigned to `days`. The reactive dependency on `weekDays` is
+  automatically registered. This is correct CT idiom and matches the usage
   documented in the debugging guides and confirmed in critic-001 and critic-002.
   No change was needed here.
 
@@ -266,10 +273,10 @@ Additionally: are there any regressions from these changes?
 
 ## Spec Compliance Update
 
-| Criterion | Status | Change from critic-002 |
-|-----------|--------|------------------------|
-| On first load, today panel shows spots #1, #5, #12 as available | **PASS** | **FIXED by Fix 1** — was previously uncertain (empty Default) |
-| All other acceptance criteria from critic-002 | PASS/PARTIAL/unchanged | No change |
+| Criterion                                                       | Status                 | Change from critic-002                                        |
+| --------------------------------------------------------------- | ---------------------- | ------------------------------------------------------------- |
+| On first load, today panel shows spots #1, #5, #12 as available | **PASS**               | **FIXED by Fix 1** — was previously uncertain (empty Default) |
+| All other acceptance criteria from critic-002                   | PASS/PARTIAL/unchanged | No change                                                     |
 
 The one spec criterion that was implicitly failing (initial spots not seeded) is
 now correctly addressed by Fix 1.
@@ -279,12 +286,12 @@ now correctly addressed by Fix 1.
 ## Summary
 
 | Category | Count |
-|----------|-------|
-| Passed | 22 |
-| Failed | 0 |
-| Warnings | 0 |
-| Notes | 3 |
-| N/A | 2 |
+| -------- | ----- |
+| Passed   | 22    |
+| Failed   | 0     |
+| Warnings | 0     |
+| Notes    | 3     |
+| N/A      | 2     |
 
 **All 4 bug fixes are correct, complete, and idiomatic. No regressions
 introduced. No new violations.**
@@ -293,12 +300,12 @@ introduced. No new violations.**
 
 ## Fix Validation Verdicts
 
-| Fix | Verdict | Severity if Wrong |
-|-----|---------|-------------------|
-| Fix 1: `Default<ParkingSpot[], typeof INITIAL_SPOTS>` | **CORRECT** — confirmed idiomatic CT via card-piles.tsx exemplar | Would have been MAJOR (wrong initial state) |
-| Fix 2: submitRequest pre-computed allocation | **CORRECT** — state snapshots are consistent; double-allocation is safe; message accurately mirrors actual result | Would have been MAJOR (misleading UI feedback) |
-| Fix 3: Null guards in computeds | **CORRECT** — standard defensive TypeScript; no CT convention violations; no behavior change for valid data | Would have been MINOR (defensive gap) |
-| Fix 4: weekDays no-change | **CORRECT** — auto-unwrap is the CT idiom; compiler confirmation aligns with platform behavior documented in critic-001/002 | Would have been NOTE (no actual bug) |
+| Fix                                                   | Verdict                                                                                                                     | Severity if Wrong                              |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| Fix 1: `Default<ParkingSpot[], typeof INITIAL_SPOTS>` | **CORRECT** — confirmed idiomatic CT via card-piles.tsx exemplar                                                            | Would have been MAJOR (wrong initial state)    |
+| Fix 2: submitRequest pre-computed allocation          | **CORRECT** — state snapshots are consistent; double-allocation is safe; message accurately mirrors actual result           | Would have been MAJOR (misleading UI feedback) |
+| Fix 3: Null guards in computeds                       | **CORRECT** — standard defensive TypeScript; no CT convention violations; no behavior change for valid data                 | Would have been MINOR (defensive gap)          |
+| Fix 4: weekDays no-change                             | **CORRECT** — auto-unwrap is the CT idiom; compiler confirmation aligns with platform behavior documented in critic-001/002 | Would have been NOTE (no actual bug)           |
 
 ---
 
@@ -307,15 +314,16 @@ introduced. No new violations.**
 No new priority fixes from this pass. The standing issues from critic-002 carry
 forward unchanged:
 
-**Standing Priority 1 — MINOR (unchanged from critic-002):** **Lines 1223,
-1229, 1237, 1244, 1304, 1311, 1176-1177, 1479, 1486, 1493** — 10 inline arrow
+**Standing Priority 1 — MINOR (unchanged from critic-002):** **Lines 1223, 1229,
+1237, 1244, 1304, 1311, 1176-1177, 1479, 1486, 1493** — 10 inline arrow
 functions in `.map()` loops. Fix: extract module-scope `handler()` instances
 with per-item ID bindings.
 
 **Standing Priority 2 — NOTE (unchanged from critic-001):** **Line 193** —
-`const TODAY = getTodayDate()` static snapshot. Fix: `const TODAY = computed(() =>
+`const TODAY = getTodayDate()` static snapshot. Fix:
+`const TODAY = computed(() =>
 getTodayDate())` with `.get()` at all usage sites.
 
-**Standing Priority 3 — NOTE (unchanged from critic-001):** **Line 1093** —
-Date input lacks `min`/`max` constraints; past-date validation only at submit
-time. Fix: add `min` and `max` attributes to the date `<ct-input>`.
+**Standing Priority 3 — NOTE (unchanged from critic-001):** **Line 1093** — Date
+input lacks `min`/`max` constraints; past-date validation only at submit time.
+Fix: add `min` and `max` attributes to the date `<ct-input>`.

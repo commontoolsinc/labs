@@ -2,12 +2,9 @@
 import {
   action,
   computed,
-  Default,
   NAME,
   pattern,
-  Stream,
   UI,
-  type VNode,
   Writable,
 } from "commontools";
 import type {
@@ -222,9 +219,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
 
         // Update request status to cancelled
         const updatedRequests = currentRequests.map((r, i) =>
-          i === reqIdx
-            ? { ...r, status: "cancelled" as RequestStatus }
-            : r
+          i === reqIdx ? { ...r, status: "cancelled" as RequestStatus } : r
         );
         requests.set(updatedRequests);
 
@@ -559,7 +554,12 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
             <span style={{ fontWeight: "600", fontSize: "1.1rem" }}>
               Today: {formatDate(todayDate)}
             </span>
-            <span style={{ fontSize: "0.875rem", color: "var(--ct-color-gray-500)" }}>
+            <span
+              style={{
+                fontSize: "0.875rem",
+                color: "var(--ct-color-gray-500)",
+              }}
+            >
               {currentSpots.length} spots
             </span>
           </ct-hstack>
@@ -751,7 +751,13 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
 
           {selectedEmail && personRequests.length === 0
             ? (
-              <span style={{ color: "var(--ct-color-gray-500)", padding: "1rem", textAlign: "center" }}>
+              <span
+                style={{
+                  color: "var(--ct-color-gray-500)",
+                  padding: "1rem",
+                  textAlign: "center",
+                }}
+              >
                 No requests yet.
               </span>
             )
@@ -928,8 +934,17 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                       </ct-button>
                     </ct-hstack>
                     <ct-vstack gap="1">
-                      <ct-hstack gap="1" align="center" style="flex-wrap: wrap;">
-                        <span style={{ fontSize: "0.75rem", color: "var(--ct-color-gray-500)" }}>
+                      <ct-hstack
+                        gap="1"
+                        align="center"
+                        style="flex-wrap: wrap;"
+                      >
+                        <span
+                          style={{
+                            fontSize: "0.75rem",
+                            color: "var(--ct-color-gray-500)",
+                          }}
+                        >
                           Default:
                         </span>
                         {person.defaultSpot > 0
@@ -967,13 +982,26 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                             </ct-button>
                           ))}
                       </ct-hstack>
-                      <ct-hstack gap="1" align="center" style="flex-wrap: wrap;">
-                        <span style={{ fontSize: "0.75rem", color: "var(--ct-color-gray-500)" }}>
+                      <ct-hstack
+                        gap="1"
+                        align="center"
+                        style="flex-wrap: wrap;"
+                      >
+                        <span
+                          style={{
+                            fontSize: "0.75rem",
+                            color: "var(--ct-color-gray-500)",
+                          }}
+                        >
                           Prefs:
                         </span>
                         {(person.spotPreferences || []).map(
                           (prefNum: number, prefIdx: number) => (
-                            <ct-hstack gap="0" align="center" style="display: inline-flex;">
+                            <ct-hstack
+                              gap="0"
+                              align="center"
+                              style="display: inline-flex;"
+                            >
                               {prefIdx > 0
                                 ? (
                                   <ct-button
@@ -1014,7 +1042,8 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                   #{prefNum} x
                                 </span>
                               </ct-button>
-                              {prefIdx < (person.spotPreferences || []).length - 1
+                              {prefIdx <
+                                  (person.spotPreferences || []).length - 1
                                 ? (
                                   <ct-button
                                     variant="ghost"
@@ -1137,8 +1166,14 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                   $value={newSpotNumber}
                   placeholder="Spot number"
                 />
-                <ct-input $value={newSpotLabel} placeholder="Label (optional)" />
-                <ct-input $value={newSpotNotes} placeholder="Notes (optional)" />
+                <ct-input
+                  $value={newSpotLabel}
+                  placeholder="Label (optional)"
+                />
+                <ct-input
+                  $value={newSpotNotes}
+                  placeholder="Notes (optional)"
+                />
                 <ct-button
                   variant="primary"
                   onClick={() =>
