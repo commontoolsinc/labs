@@ -719,9 +719,20 @@ export abstract class BaseObjectTraverser {
           const [linkDoc, _selector] = this.nextLink(redirDoc, redirSelector);
           // our item link should point one past the last redirect, but it may
           // be invalid (in which case, we should base the link on redirDoc).
-          arrayElementLink = getNormalizedLink(
-            linkDoc.value !== undefined ? linkDoc.address : redirDoc.address,
-          );
+          const linkAddress = linkDoc.value !== undefined
+            ? linkDoc.address
+            : redirDoc.address;
+          if (
+            linkAddress.path.length === 0 || linkAddress.path[0] !== "value"
+          ) {
+            logger.warn("traverse", () => [
+              "Broken cell link in array element, skipping",
+              { id: linkAddress.id, path: linkAddress.path },
+            ]);
+            newValue[index] = null;
+            return; // continue forEach
+          }
+          arrayElementLink = getNormalizedLink(linkAddress);
           // We can follow all the links, since we don't need to track cells
           const [valueDoc, _] = this.getDocAtPath(linkDoc, [], DefaultSelector);
           docItem = valueDoc;
@@ -793,6 +804,16 @@ export abstract class BaseObjectTraverser {
           return null;
         }
         // our item link should point to the target of the last redirect
+        if (
+          redirDoc.address.path.length === 0 ||
+          redirDoc.address.path[0] !== "value"
+        ) {
+          logger.warn("traverse", () => [
+            "Broken cell link in record value, skipping",
+            { id: redirDoc.address.id, path: redirDoc.address.path },
+          ]);
+          return null;
+        }
         itemLink = getNormalizedLink(redirDoc.address, true);
         // We can follow all the links, since we don't need to track cells
         const [valueDoc, _] = this.getDocAtPath(redirDoc, [], DefaultSelector);
