@@ -207,10 +207,13 @@ export function toRichStorableValue(
 
     // deno-lint-ignore no-fallthrough
     case NATIVE_TAGS.Primitive: {
-      // Non-object types: null, undefined, boolean, string, number,
-      // bigint, symbol, function.
-      if (value === null) return null;
+      // Primitives: null, undefined, boolean, string, number, bigint,
+      // symbol, function. null is the only value here with typeof "object"
+      // (actual objects are routed to other tags by tagFromNativeValue).
       switch (typeof value) {
+        case "object":
+          // Only null reaches here (typeof null === "object").
+          return null;
         case "undefined":
           return undefined;
         case "boolean":
