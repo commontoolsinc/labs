@@ -200,9 +200,15 @@ This covers:
 Computed once at process startup. Cost is negligible: one `git` invocation plus
 reading a handful of dirty files (typically 0-5 in practice).
 
+If git is not available (e.g., Docker deployment with no `.git` directory),
+`computeGitFingerprint()` returns `undefined`. No fallback — the cache is
+simply disabled for that process. This is the correct behavior: without git
+we have no way to detect code changes, so we shouldn't serve cached output.
+
 ```typescript
 // Server fingerprint computation (Deno)
-async function computeGitFingerprint(): Promise<string> {
+// Returns undefined when not in a git repository.
+async function computeGitFingerprint(): Promise<string | undefined> {
   const head = await exec("git rev-parse HEAD");
   const dirty = await exec("git diff --name-only HEAD");
   const untracked = await exec(
@@ -372,10 +378,9 @@ const cachedCompiler = data.buildHash
 
 // Server (in toolshed startup):
 const fingerprint = await computeGitFingerprint();
-const cachedCompiler = new CachedCompiler(
-  new FileSystemCompilationCache(cacheDir),
-  fingerprint,
-);
+const cachedCompiler = fingerprint
+  ? new CachedCompiler(new FileSystemCompilationCache(cacheDir), fingerprint)
+  : undefined;
 ```
 
 ### Engine Refactor
@@ -425,9 +430,12 @@ async evaluate(
   jsScript: JsScript,
   options?: TypeScriptHarnessProcessOptions,
 ): Promise<{ main?: Exports; exportMap?: Record<string, Exports> }> {
+  // Recompute id from program — deterministic, same as compile() would produce.
+  // Needed to strip the /${id} prefix from export filenames in the export map.
+  const id = options?.identifier ?? computeId(program);
   const { isolate, runtimeExports, exportsCallback } = await this.getInternals();
   const result = isolate.execute(jsScript).invoke(runtimeExports).inner();
-  // ... handle exports mapping (existing code from process()) ...
+  // ... handle exports mapping using id prefix (existing code from process()) ...
 }
 
 // Existing method: refactored to use compile + evaluate
@@ -483,9 +491,32 @@ async compilePattern(input: string | RuntimeProgram): Promise<Pattern> {
 }
 ```
 
-Note: `compileOrGetPattern()` continues to check the in-memory LRU first. The
-persistent cache is only consulted on an in-memory miss. This means the hot
-path (same pattern used multiple times in a session) never touches IndexedDB.
+**Call chain**: `compileOrGetPattern()` checks the in-memory LRU first. On a
+miss, it calls `compilePattern()`, which is where the persistent cache lives.
+So the full lookup order is:
+
+1. `compileOrGetPattern()` — in-memory LRU hit? → return cached `Pattern`
+2. `compilePattern()` — persistent cache hit? → `evaluate()` → `Pattern`
+3. `compilePattern()` — persistent cache miss → `Engine.compile()` → cache →
+   `evaluate()` → `Pattern`
+
+The hot path (same pattern used multiple times in a session) never touches
+IndexedDB.
+
+### Compatibility with compile-and-run Builtin
+
+The `compileAndRun` builtin (`packages/runner/src/builtins/compile-and-run.ts`)
+uses its own `refer(program)` hash (line 136) to avoid re-triggering compilation
+when the same inputs arrive. This is a higher-level dedup — it short-circuits
+before calling `compileOrGetPattern()` at all. The compilation cache sits inside
+`compilePattern()`, which is called by `compileOrGetPattern()` on an in-memory
+miss. These two dedup mechanisms are independent and compose correctly:
+
+1. `compileAndRun` dedup: "have I already dispatched this program?" → skip
+2. `compileOrGetPattern` in-memory LRU: "is the Pattern in memory?" → return it
+3. `compilePattern` persistent cache: "is the JsScript on disk?" → evaluate it
+
+No changes needed to `compile-and-run.ts`.
 
 ### Harness Interface Change
 
@@ -625,11 +656,18 @@ observability stats above so growth can be monitored.
 5. Implement `MemoryCompilationCache` (for tests).
 6. Implement `computeGitFingerprint()` for server-side fingerprint.
 
+After Phase 2, the server has a working persistent cache (fingerprint via git).
+The browser has the `IDBCompilationCache` implementation ready but no
+fingerprint source yet — caching is inactive in the browser until Phase 3.
+
 ### Phase 3: Browser Fingerprint
 
 1. Add post-build manifest generation to Felt's `Builder.build()`.
 2. Add `buildHash` field to `InitializationData`.
 3. Shell reads manifest at startup, passes hash to worker.
+
+After Phase 3, the browser cache is active — the build manifest provides the
+fingerprint that was missing.
 
 ### Phase 4: Integration
 
