@@ -41,7 +41,7 @@ import {
  * This centralizes the clone-for-frozenness logic that was previously
  * sprinkled across `toRichStorableValue`.
  */
-function shallowCloneStorableValue(
+function shallowCloneIfNecessary(
   value: StorableValueLayer,
   frozen: boolean,
   tag?: NativeTag | null,
@@ -84,7 +84,7 @@ function shallowCloneStorableValue(
 
     case NATIVE_TAGS.HasToJSON:
       // HasToJSON is nascently deprecated; callers should resolve toJSON()
-      // before reaching shallowCloneStorableValue. Death before confusion!
+      // before reaching shallowCloneIfNecessary. Death before confusion!
       throw new Error("Cannot shallow-clone HasToJSON values");
 
     default:
@@ -172,8 +172,8 @@ export function toRichStorableValue(
     case NATIVE_TAGS.Array:
     case NATIVE_TAGS.Object:
       // Arrays and plain objects: delegate frozenness handling to
-      // shallowCloneStorableValue, passing the already-computed tag.
-      return shallowCloneStorableValue(
+      // shallowCloneIfNecessary, passing the already-computed tag.
+      return shallowCloneIfNecessary(
         value as StorableValueLayer,
         freeze,
         tag,
@@ -188,7 +188,7 @@ export function toRichStorableValue(
           `\`toJSON()\` on ${typeof value} returned something other than a storable value`,
         );
       }
-      return shallowCloneStorableValue(
+      return shallowCloneIfNecessary(
         converted as StorableValueLayer,
         freeze,
       );
@@ -198,7 +198,7 @@ export function toRichStorableValue(
       // StorableInstance values (StorableError, UnknownStorable, etc.)
       // are already valid StorableValue members. Delegate frozenness to
       // the protocol's shallowClone method.
-      return shallowCloneStorableValue(
+      return shallowCloneIfNecessary(
         value as StorableValueLayer,
         freeze,
         tag,
@@ -209,9 +209,10 @@ export function toRichStorableValue(
     case NATIVE_TAGS.Primitive: {
       // Non-object types: null, undefined, boolean, string, number,
       // bigint, symbol, function.
-      if (value === undefined) return undefined;
       if (value === null) return null;
       switch (typeof value) {
+        case "undefined":
+          return undefined;
         case "boolean":
         case "string":
           return value;
