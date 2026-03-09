@@ -1,5 +1,9 @@
 import { type Pattern } from "../builder/types.ts";
-import type { Program, ProgramResolver } from "@commontools/js-compiler";
+import type {
+  JsScript,
+  Program,
+  ProgramResolver,
+} from "@commontools/js-compiler";
 
 export type HarnessedFunction = (input: any) => void;
 
@@ -26,6 +30,8 @@ export interface TypeScriptHarnessProcessOptions {
   verboseErrors?: boolean;
 }
 
+type Exports = Record<string, any>;
+
 // A `Harness` wraps a flow of compiling, bundling, and executing typescript.
 export interface Harness extends EventTarget {
   // Compiles and executes `source`, returning the default export
@@ -34,6 +40,19 @@ export interface Harness extends EventTarget {
     source: RuntimeProgram,
     options?: TypeScriptHarnessProcessOptions,
   ): Promise<Pattern>;
+
+  // Compiles `source` to JS without evaluation.
+  compile(
+    source: RuntimeProgram,
+    options?: TypeScriptHarnessProcessOptions,
+  ): Promise<JsScript>;
+
+  // Evaluates pre-compiled JS, returning exports.
+  evaluate(
+    source: RuntimeProgram,
+    jsScript: JsScript,
+    options?: TypeScriptHarnessProcessOptions,
+  ): Promise<{ main?: Exports; exportMap?: Record<string, Exports> }>;
 
   // Resolves a `ProgramResolver` into a `Program` using the engine's
   // configuration.

@@ -143,14 +143,11 @@ export class Engine extends EventTarget implements Harness {
     return exports![exportName] as Pattern;
   }
 
-  // Compile and run a `Program` with options, returning the compiled
-  // result and evaluated exports.
-  async process(
+  // Compile source to JS without evaluation.
+  async compile(
     program: RuntimeProgram,
     options: TypeScriptHarnessProcessOptions = {},
-  ): Promise<
-    { main?: Exports; exportMap?: Record<string, Exports>; output: JsScript }
-  > {
+  ): Promise<JsScript> {
     const id = options.identifier ?? computeId(program);
     const filename = options.filename ?? `${id}.js`;
     const mappedProgram = pretransformProgram(program, id);
@@ -159,16 +156,14 @@ export class Engine extends EventTarget implements Harness {
       this.ctRuntime.staticCache,
     );
 
-    const { compiler, isolate, runtimeExports, exportsCallback } = await this
-      .getInternals();
+    const { compiler } = await this.getInternals();
     const resolvedProgram = await this.resolve(resolver);
 
-    // Create diagnostic message transformer for clearer error messages
     const diagnosticMessageTransformer = new OpaqueRefErrorTransformer({
       verbose: options.verboseErrors,
     });
 
-    const output = await compiler.compile(resolvedProgram, {
+    return compiler.compile(resolvedProgram, {
       filename,
       noCheck: options.noCheck,
       injectedScript: INJECTED_SCRIPT,
@@ -184,40 +179,71 @@ export class Engine extends EventTarget implements Harness {
         };
       },
     });
+  }
+
+  // Evaluate pre-compiled JS, returning exports.
+  async evaluate(
+    program: RuntimeProgram,
+    jsScript: JsScript,
+    options: TypeScriptHarnessProcessOptions = {},
+  ): Promise<{ main?: Exports; exportMap?: Record<string, Exports> }> {
+    // Recompute id from program — deterministic, same as compile() produces.
+    // Needed to strip the /${id} prefix from export filenames in the export map.
+    const id = options.identifier ?? computeId(program);
+    const { isolate, runtimeExports, exportsCallback } = await this
+      .getInternals();
+
+    const result = isolate.execute(jsScript).invoke(runtimeExports).inner();
+    if (
+      result && typeof result === "object" && "main" in result &&
+      "exportMap" in result
+    ) {
+      const main = result.main as Exports;
+      const exportMap = result.exportMap as Record<string, Exports>;
+
+      // Create a map from exported values to `RuntimeProgram` that can
+      // generate them and pass to the callback from the exports.
+      const exportsByValue = new Map<any, RuntimeProgram>();
+      const prefix = `/${id}`;
+      for (let [fileName, exports] of Object.entries(exportMap)) {
+        if (fileName.startsWith(prefix)) {
+          fileName = fileName.substring(prefix.length);
+        }
+        for (const [exportName, exportValue] of Object.entries(exports)) {
+          exportsByValue.set(exportValue, {
+            main: fileName,
+            mainExport: exportName,
+            // TODO(seefeld): Sending all `program.files` is sub-optimal, as
+            // it is the super set of files actually needed by main. We should
+            // only send the files actually needed by main.
+            files: program.files,
+          });
+        }
+      }
+      exportsCallback(exportsByValue);
+
+      return { main, exportMap };
+    }
+    return {};
+  }
+
+  // Compile and run a `Program` with options, returning the compiled
+  // result and evaluated exports.
+  async process(
+    program: RuntimeProgram,
+    options: TypeScriptHarnessProcessOptions = {},
+  ): Promise<
+    { main?: Exports; exportMap?: Record<string, Exports>; output: JsScript }
+  > {
+    const output = await this.compile(program, options);
 
     if (!options.noRun) {
-      const result = isolate.execute(output).invoke(runtimeExports)
-        .inner();
-      if (
-        result && typeof result === "object" && "main" in result &&
-        "exportMap" in result
-      ) {
-        const main = result.main as Exports;
-        const exportMap = result.exportMap as Record<string, Exports>;
-
-        // Create a map from exported values to `RuntimeProgram` that can
-        // generate them and pass to the callback from the exports.
-        const exportsByValue = new Map<any, RuntimeProgram>();
-        const prefix = `/${id}`;
-        for (let [fileName, exports] of Object.entries(exportMap)) {
-          if (fileName.startsWith(prefix)) {
-            fileName = fileName.substring(prefix.length);
-          }
-          for (const [exportName, exportValue] of Object.entries(exports)) {
-            exportsByValue.set(exportValue, {
-              main: fileName,
-              mainExport: exportName,
-              // TODO(seefeld): Sending all `program.files` is sub-optimal, as
-              // it is the super set of files actually needed by main. We should
-              // only send the files actually needed by main.
-              files: program.files,
-            });
-          }
-        }
-        exportsCallback(exportsByValue);
-
-        return { output, main, exportMap };
-      }
+      const { main, exportMap } = await this.evaluate(
+        program,
+        output,
+        options,
+      );
+      return { output, main, exportMap };
     }
     return { output };
   }
