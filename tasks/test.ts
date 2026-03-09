@@ -16,7 +16,9 @@ export async function testPackage(
       result: await new Deno.Command(Deno.execPath(), {
         args: ["task", "test"],
         cwd: packagePath,
+        env: { ENV: "test" },
         stdout: "piped",
+        stderr: "piped",
       }).output(),
     };
   } catch (e) {
