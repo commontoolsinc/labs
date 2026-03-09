@@ -177,17 +177,24 @@ fingerprint = hash(HEAD_sha + sorted_hash(dirty .ts file contents))
 Specifically:
 1. `git rev-parse HEAD` — captures all committed changes.
 2. `git diff --name-only HEAD` — lists uncommitted changed files (staged and
-   unstaged) vs the current commit.
-3. `git ls-files --others --exclude-standard '*.ts'` — lists untracked `.ts`
-   files (new files not yet committed).
-4. Filter both lists to `.ts` files, read their contents, sort by path, and
-   hash.
+   unstaged) vs the current commit. This includes modified, added, and deleted
+   files.
+3. `git ls-files --others --exclude-standard` — lists untracked files (new
+   files not yet committed).
+4. For each dirty/untracked file that still exists on disk, read its contents.
+   For deleted files, include the path name in the hash (the deletion itself is
+   a change). Sort all entries by path for determinism.
 5. Concatenate HEAD SHA + dirty file hash → final fingerprint.
+
+We do not filter by file extension — consistent with the design principle that
+any code change invalidates the cache. A change to `deno.json`, `.tsx`, or any
+other file type is treated as potentially output-affecting.
 
 This covers:
 - `git pull` with new commits → HEAD changes → cache invalidated.
-- Uncommitted edits to any `.ts` file → dirty hash changes → cache invalidated.
-- New untracked `.ts` files → included in dirty hash → cache invalidated.
+- Uncommitted edits to any file → dirty hash changes → cache invalidated.
+- New untracked files → included in dirty hash → cache invalidated.
+- Deleted files → path included in hash → cache invalidated.
 - Clean working tree → fingerprint = hash(HEAD) → stable across restarts.
 
 Computed once at process startup. Cost is negligible: one `git` invocation plus
@@ -199,17 +206,23 @@ async function computeGitFingerprint(): Promise<string> {
   const head = await exec("git rev-parse HEAD");
   const dirty = await exec("git diff --name-only HEAD");
   const untracked = await exec(
-    "git ls-files --others --exclude-standard '*.ts'"
+    "git ls-files --others --exclude-standard"
   );
-  const dirtyTs = [...dirty.split("\n"), ...untracked.split("\n")]
-    .filter((f) => f.endsWith(".ts"))
+  const dirtyFiles = [...dirty.split("\n"), ...untracked.split("\n")]
+    .filter((f) => f.length > 0)
     .sort();
   let contentHash = "";
-  if (dirtyTs.length > 0) {
-    const contents = await Promise.all(
-      dirtyTs.map((f) => Deno.readTextFile(f))
-    );
-    contentHash = await sha256(contents.join(""));
+  if (dirtyFiles.length > 0) {
+    const parts: string[] = [];
+    for (const f of dirtyFiles) {
+      try {
+        parts.push(f + ":" + await Deno.readTextFile(f));
+      } catch {
+        // File was deleted — include path so deletion changes the hash
+        parts.push(f + ":DELETED");
+      }
+    }
+    contentHash = await sha256(parts.join("\n"));
   }
   return sha256(head + contentHash);
 }
