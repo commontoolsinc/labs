@@ -383,24 +383,26 @@ describe("Schema - Examples", () => {
       });
       const log = txToReactivityLog(tx);
       const reads = sortAndCompactPaths(log.reads);
-      expect(reads).toContainEqual({
-        space,
-        id: toURI(linkEntityId),
-        path: [],
-        type: "application/json",
-      });
-      expect(reads).toContainEqual({
-        space,
-        id: toURI(docCell.entityId!),
-        path: ["current"],
-        type: "application/json",
-      });
-      expect(reads).toContainEqual({
-        space,
-        id: toURI(initialEntityId),
-        path: ["foo"],
-        type: "application/json",
-      });
+      // Per-path reads: link resolution reads are now non-scheduling,
+      // only sigil probe reads and fine-grained traversal reads remain.
+      // The linkEntity has probe reads at sigil sub-paths.
+      expect(
+        reads.some((r) => r.id === toURI(linkEntityId)),
+      ).toBe(true);
+      // The docCell has a probe read at the "current" sub-path.
+      expect(
+        reads.some((r) =>
+          r.id === toURI(docCell.entityId!) &&
+          r.path[0] === "current"
+        ),
+      ).toBe(true);
+      // The initial entity is read via followPointer at the "foo" sub-path.
+      expect(
+        reads.some((r) =>
+          r.id === toURI(initialEntityId) &&
+          r.path[0] === "foo"
+        ),
+      ).toBe(true);
 
       // Then update it
       initial.withTx(tx).set({ foo: { label: "first - update" } });

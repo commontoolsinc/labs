@@ -1810,6 +1810,8 @@ export class SchemaObjectTraverser<V extends StorableDatum>
 
     logger.timeStart("traverse");
     this.schemaTracker.add(getTrackerKey(doc.address), this.selector);
+    // Flag the top level read of doc for the scheduler
+    this.tx.readOrThrow(doc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
     const rv = this.traverseWithSelector(
       doc,
       this.selector,
