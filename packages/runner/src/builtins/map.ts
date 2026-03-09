@@ -95,6 +95,9 @@ export function map(
     // distinguish empty inputs from undefined inputs?
     if (list === undefined) {
       resultWithLog.set([]);
+      for (const entry of elementRuns.values()) {
+        runtime.runner.stop(entry.resultCell);
+      }
       elementRuns.clear();
       return;
     }
@@ -136,7 +139,7 @@ export function map(
       } else {
         const resultCell = runtime.getCell(
           parentCell.space,
-          { result, elementKey },
+          { map: result, elementKey },
           undefined,
           tx,
         );

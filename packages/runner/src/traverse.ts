@@ -1,4 +1,5 @@
 import { refer } from "@commontools/memory/reference";
+import { canonicalHash } from "@commontools/memory/canonical-hash";
 import { MIME } from "@commontools/memory/interface";
 import type { JSONSchemaObj } from "@commontools/api";
 import type {
@@ -55,6 +56,17 @@ import type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
 
 const logger = getLogger("traverse", { enabled: true, level: "warn" });
 
+const READ_NON_RECURSIVE: IReadOptions = {
+  nonRecursive: true,
+};
+const READ_FOR_SCHEDULING: IReadOptions = {
+  trackReadWithoutLoad: true,
+};
+const READ_NON_RECURSIVE_FOR_SCHEDULING: IReadOptions = {
+  nonRecursive: true,
+  trackReadWithoutLoad: true,
+};
+
 export type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
 export type { SchemaPathSelector };
 
@@ -83,16 +95,66 @@ const enum TypeValidity {
  * @template V The type of values stored in the sets
  */
 /**
- * Produces a canonical string representation for use as a hash key.
- * Object keys are sorted for deterministic output so structurally-equal
- * objects always hash identically. Results are cached per object identity
- * via WeakMap, so repeated hashing of the same schema object is O(1).
+ * Produces a canonical hash string for use as a cache/dedup key.
+ * Delegates to `canonicalHash()` (SHA-256 based) with a WeakMap identity
+ * cache so repeated hashing of the same object reference is O(1).
+ *
+ * Falls back to a deterministic JSON-like stringification for values that
+ * `canonicalHash` rejects (NaN, Infinity, Date, RegExp). These don't
+ * appear in normal JSON Schema data but may surface in edge-case tests.
  */
-const _hashCache = new WeakMap<object, string>();
+// TODO(danfuzz): Remove fallbacks once the data model covers NaN, Infinity,
+// Date, and RegExp directly.
+//
+// TODO(danfuzz): Retire this cache once schema objects flowing through here
+// can be safely deep-frozen. At that point, canonicalHash()'s own
+// frozenObjectHashCache WeakMap would provide the same O(1) identity caching,
+// and this wrapper cache would be redundant.
+const _stableHashCache = new WeakMap<object, string>();
+
+export function stableHash(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    if (typeof value === "number" && !Number.isFinite(value)) {
+      return `h:num:${value}`;
+    }
+    return canonicalHash(value).toString();
+  }
+
+  const cached = _stableHashCache.get(value);
+  if (cached !== undefined) return cached;
+
+  let result: string;
+  try {
+    result = canonicalHash(value).toString();
+  } catch {
+    result = _legacyStringify(value);
+  }
+
+  _stableHashCache.set(value, result);
+  return result;
+}
+
+/** Deterministic string fallback for objects `canonicalHash` cannot handle. */
+function _legacyStringify(value: object): string {
+  if (Array.isArray(value)) {
+    return "[" + value.map(stableHash).join(",") + "]";
+  }
+  if (value instanceof Date) {
+    return `D${value.getTime()}`;
+  }
+  if (value instanceof RegExp) {
+    return `R${value.toString()}`;
+  }
+  const keys = Object.keys(value).sort();
+  return "{" +
+    keys.map((k) => k + ":" + stableHash((value as Record<string, unknown>)[k]))
+      .join(",") +
+    "}";
+}
 
 // Schema operation intern caches: memoize merge/combine results so
 // structurally-identical operations return the same object identity.
-// This ensures downstream stableStringify hits the _hashCache WeakMap
+// This ensures downstream stableHash hits the _stableHashCache WeakMap
 // (O(1) identity lookup) instead of re-walking the schema tree.
 // Capped to prevent unbounded growth in long-running servers.
 const INTERN_CACHE_MAX = 10_000;
@@ -110,55 +172,23 @@ function internSet(
   cache.set(key, value);
 }
 
-export function stableStringify(value: unknown): string {
-  if (value === null) return "n";
-  if (value === undefined) return "u";
-  const t = typeof value;
-  if (t === "boolean") return value ? "T" : "F";
-  if (t === "number") return `#${value}`;
-  if (t === "string") return `s${(value as string).length}:${value}`;
-
-  const obj = value as object;
-  const cached = _hashCache.get(obj);
-  if (cached !== undefined) return cached;
-
-  let result: string;
-  if (Array.isArray(obj)) {
-    result = "[" + obj.map(stableStringify).join(",") + "]";
-  } else if (obj instanceof Date) {
-    result = `D${(obj as Date).getTime()}`;
-  } else if (obj instanceof RegExp) {
-    result = `R${(obj as RegExp).toString()}`;
-  } else {
-    const keys = Object.keys(obj).sort();
-    result = "{" +
-      keys.map((k) =>
-        k + ":" + stableStringify((obj as Record<string, unknown>)[k])
-      ).join(",") +
-      "}";
-  }
-
-  _hashCache.set(obj, result);
-  return result;
-}
-
 /**
  * A data structure that maps keys to sets of values, allowing multiple values
  * to be associated with a single key without duplication.
  *
- * When `useStableStringify` is true, values are deduped using a canonical hash
- * (stableStringify with WeakMap identity cache) for O(1) add/hasValue.
+ * When `useStableHash` is true, values are deduped using a canonical hash
+ * (stableHash with WeakMap identity cache) for O(1) add/hasValue.
  * The hash path uses sorted object keys, so structurally-equal values always
  * produce the same hash.
  *
- * When `useStableStringify` is false, values are stored in a plain Set using
+ * When `useStableHash` is false, values are stored in a plain Set using
  * reference equality.
  *
  * @template K The type of keys in the map
  * @template V The type of values stored in the sets
  */
 export class MapSet<K, V> {
-  // When useStableStringify is true, use hash-based dedup: key → (hash → value)
+  // When useStableHash is true, use hash-based dedup: key → (hash → value)
   // When false, use plain Set: key → Set<value>
   private hashMap?: Map<K, Map<string, V>>;
   private setMap?: Map<K, Set<V>>;
@@ -167,8 +197,8 @@ export class MapSet<K, V> {
   deepEqualCalls = 0;
   deepEqualMs = 0;
 
-  constructor(useStableStringify = false) {
-    if (useStableStringify) {
+  constructor(useStableHash = false) {
+    if (useStableHash) {
       this.hashMap = new Map();
     } else {
       this.setMap = new Map();
@@ -207,7 +237,7 @@ export class MapSet<K, V> {
         m = new Map<string, V>();
         this.hashMap.set(key, m);
       }
-      const hash = stableStringify(value);
+      const hash = stableHash(value);
       if (!m.has(hash)) {
         m.set(hash, value);
       }
@@ -231,7 +261,7 @@ export class MapSet<K, V> {
     if (this.hashMap) {
       const m = this.hashMap.get(key);
       if (!m) return false;
-      return m.has(stableStringify(value));
+      return m.has(stableHash(value));
     }
     const values = this.setMap!.get(key);
     return values !== undefined && values.has(value);
@@ -241,7 +271,7 @@ export class MapSet<K, V> {
     if (this.hashMap) {
       const m = this.hashMap.get(key);
       if (!m) return false;
-      const hash = stableStringify(value);
+      const hash = stableHash(value);
       const rv = m.delete(hash);
       if (m.size === 0) this.hashMap.delete(key);
       return rv;
@@ -322,7 +352,7 @@ export class CompoundCycleTracker<EqualKey, ExtraKey, Value = unknown> {
 
   /**
    * Identity check on `partialKey`, hash-based check on `extraKey`.
-   * Uses stableStringify (with WeakMap identity cache) so schema objects
+   * Uses stableHash (with WeakMap identity cache) so schema objects
    * hash in O(1) amortized after the first stringify.
    */
   include(
@@ -336,7 +366,7 @@ export class CompoundCycleTracker<EqualKey, ExtraKey, Value = unknown> {
       existing = new Map();
       this.partial.set(partialKey, existing);
     }
-    const hash = stableStringify(extraKey);
+    const hash = stableHash(extraKey);
     if (existing.has(hash)) {
       return null;
     }
@@ -360,7 +390,7 @@ export class CompoundCycleTracker<EqualKey, ExtraKey, Value = unknown> {
     if (existing === undefined) {
       return undefined;
     }
-    const hash = stableStringify(extraKey);
+    const hash = stableHash(extraKey);
     return existing.get(hash);
   }
 }
@@ -385,7 +415,7 @@ class ManagedStorageJournal implements ITransactionJournal {
 
 /**
  * Implementation of IStorageTransaction that is backed by an ObjectManager
- * This is a read-only transaction, and is only used by the traverse code.
+ * This is a read-only transaction, and is only used by the query traversal.
  */
 export class ManagedStorageTransaction implements IStorageTransaction {
   constructor(
@@ -400,8 +430,11 @@ export class ManagedStorageTransaction implements IStorageTransaction {
 
   read(
     address: IMemorySpaceAddress,
-    _options?: IReadOptions,
+    options?: IReadOptions,
   ): Result<IAttestation, ReadError> {
+    if (options?.trackReadWithoutLoad === true) {
+      return { ok: { address, value: undefined } };
+    }
     const source = this.manager.load(address) ??
       { address: { ...address, path: [] } };
     return resolve(source, address);
@@ -614,7 +647,10 @@ export abstract class BaseObjectTraverser {
    * Otherwise, it will return the fully traversed object.
    * If a cycle is detected, it will not traverse the cyclic element
    *
-   * @param doc
+   * Our reactivity mark strategy is to mark the doc read before calling this,
+   * and any time we follow a link, also mark that returned doc read.
+   *
+   * @param doc a doc whose value has been read recursively
    * @param defaultValue optional default value
    * @param itemLink optinal item link to use when creating links
    * @returns
@@ -640,7 +676,6 @@ export abstract class BaseObjectTraverser {
         return cached;
       }
     }
-
     if (doc.value === undefined) {
       // If we have a default, annotate it and return it
       // Otherwise, return undefined
@@ -690,6 +725,7 @@ export abstract class BaseObjectTraverser {
           // We can follow all the links, since we don't need to track cells
           const [valueDoc, _] = this.getDocAtPath(linkDoc, [], DefaultSelector);
           docItem = valueDoc;
+          this.tx.read(docItem.address, READ_FOR_SCHEDULING);
           if (docItem.value === undefined) {
             logger.debug(
               "traverse",
@@ -734,6 +770,7 @@ export abstract class BaseObjectTraverser {
           DefaultSelector,
           "writeRedirect",
         );
+        this.tx.read(redirDoc.address, READ_FOR_SCHEDULING);
         if (redirDoc.value === undefined) {
           logger.debug(
             "traverse",
@@ -759,6 +796,7 @@ export abstract class BaseObjectTraverser {
         itemLink = getNormalizedLink(redirDoc.address, true);
         // We can follow all the links, since we don't need to track cells
         const [valueDoc, _] = this.getDocAtPath(redirDoc, [], DefaultSelector);
+        this.tx.read(valueDoc.address, READ_FOR_SCHEDULING);
         return this.traverseDAG(valueDoc, defaultValue, itemLink);
       } else {
         const newValue: Record<string, Immutable<StorableValue>> = {};
@@ -833,7 +871,7 @@ export abstract class BaseObjectTraverser {
    * If the doc value has a link, we will follow that link one step and return
    * the result. Otherwise, we will just return the current doc.
    *
-   * @param doc
+   * @param doc doc which has been read with nonRecursive
    * @param selector
    * @returns
    */
@@ -841,8 +879,8 @@ export abstract class BaseObjectTraverser {
     doc: IMemorySpaceAttestation,
     selector?: SchemaPathSelector,
   ): [IMemorySpaceAttestation, SchemaPathSelector | undefined] {
-    const link = parseLink(doc.value, doc.address);
-    if (link !== undefined) {
+    if (isPrimitiveCellLink(doc.value)) {
+      this.tx.read(doc.address, READ_FOR_SCHEDULING);
       return followPointer(
         this.tx,
         doc,
@@ -854,14 +892,24 @@ export abstract class BaseObjectTraverser {
         this.traverseCells,
         "top",
       );
+    } else {
+      return [doc, selector];
     }
-    return [doc, selector];
   }
 }
 
 /**
  * Traverses a data structure following a path and resolves any pointers.
  * If we load any additional documents, we will also let the helper know.
+ *
+ * We are passed a doc with a value, but this read has only been read in
+ * nonRecursive mode. While we have the data, if we use these deeper portions,
+ * we need to call tx.read to flag our usage.
+ *
+ * Our caller is responsible for registering further reads on the returned
+ * attestation, though we will have flagged a nonRecursive read on any linked
+ * docs, as well as deeper paths within a doc, and if we return the initial
+ * doc untouched, it should have been flagged before we were called.
  *
  * @param manager - Storage manager for document access.
  * @param doc - IAttestation for the current document
@@ -898,6 +946,8 @@ export function getAtPath(
 
   while (true) {
     if (isPrimitiveCellLink(curDoc.value)) {
+      // We've only done a nonRecursive read on curDoc, so promote that
+      tx.read(curDoc.address, READ_FOR_SCHEDULING);
       // we follow links when we point to a child of the link, since we need
       // them to resolve the link.
       // we follow all links when the lastNode is value
@@ -943,8 +993,12 @@ export function getAtPath(
           value: elementAt(curDoc.value, part),
         };
       }
+      tx.read(curDoc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
     } else if (isString(curDoc.value) && part === "length") {
-      // Handle native property access on string primitives (e.g., .length)
+      // Handle native property access on string primitives (e.g., .length).
+      // Intentionally do not call tx.read here: string length changes only when
+      // the string value itself is replaced, and the parent string read already
+      // captures that invalidation.
       curDoc = {
         ...curDoc,
         address: { ...curDoc.address, path: [...curDoc.address.path, part] },
@@ -959,6 +1013,7 @@ export function getAtPath(
         address: { ...curDoc.address, path: [...curDoc.address.path, part] },
         value: cursorObj[part] as Immutable<StorableDatum>,
       };
+      tx.read(curDoc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
     } else {
       // we can only descend into pointers, objects, and arrays
       // this can happen when things aren't set up yet, so it's just debug.
@@ -976,6 +1031,9 @@ export function getAtPath(
         },
         value: undefined,
       };
+      // go ahead and register this read -- a subsequent write
+      // at this location should re-trigger us
+      tx.read(curDoc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
       return [curDoc, selector];
     }
   }
@@ -983,7 +1041,7 @@ export function getAtPath(
 
 function notFound(address: IMemorySpaceAddress): IMemorySpaceAttestation {
   return {
-    address: { ...address, path: [] },
+    address,
     value: undefined,
   };
 }
@@ -1002,7 +1060,7 @@ function getTrackerKey(
 /**
  * Resolves a pointer reference to its target value.
  *
- * This method works with `getAtPath`, with the link management and document
+ * This method works with @see getAtPath, with the link management and document
  * loading being handled in `followPointer`, while `getAtPath` handles the
  * path traversal.
  *
@@ -1082,7 +1140,11 @@ function followPointer(
   // Attempt to read the actual link location. This will often fail because
   // there is an intermediate link, but we'll handle that below
   // Load the data from the manager.
-  const { ok: valueEntry, error } = tx.read(target);
+  // The path here is just the link path, but we may be interested in the deeper
+  // contents and this could just be an intermediate link, so ignore this read
+  // for scheduling. We'll have to tag it later.
+  // We use a nonRecursive read, since we may not need everything at the target.
+  const { ok: valueEntry, error } = tx.read(target, READ_NON_RECURSIVE);
 
   if (error !== undefined) {
     // If we had an unexpected error, or didn't find the doc at all, return.
@@ -1243,6 +1305,7 @@ export function loadSource(
     type: "application/json",
     path: [],
   };
+  // This only happens in the query path, so don't worry about scheduler
   const { ok: entry, error } = tx.read(address);
   if (error) {
     return;
@@ -1285,7 +1348,7 @@ function combineOptionalSchema(
 
 // Merge any schema flags like asCell or asStream from flagSchema into schema.
 export function mergeSchemaFlags(flagSchema: JSONSchema, schema: JSONSchema) {
-  const key = stableStringify(flagSchema) + "|" + stableStringify(schema);
+  const key = stableHash(flagSchema) + "|" + stableHash(schema);
   const cached = _mergeSchemaFlagsCache.get(key);
   if (cached !== undefined) return cached;
   const result = _mergeSchemaFlagsUncached(flagSchema, schema);
@@ -1347,7 +1410,7 @@ export function combineSchema(
   parentSchema: JSONSchema,
   linkSchema: JSONSchema,
 ): JSONSchema {
-  const key = stableStringify(parentSchema) + "|" + stableStringify(linkSchema);
+  const key = stableHash(parentSchema) + "|" + stableHash(linkSchema);
   const cached = _combineSchemaCache.get(key);
   if (cached !== undefined) return cached;
   const result = _combineSchemaUncached(parentSchema, linkSchema);
@@ -1512,6 +1575,7 @@ function _combineSchemaUncached(
 
 // Load the linked pattern from the doc ()
 // We don't recurse, since that's not required for pattern links
+// We don't mark anything for reactivity, since this is for queries
 function loadLinkedPattern(
   tx: IExtendedStorageTransaction,
   valueEntry: IMemorySpaceAttestation,
@@ -1554,6 +1618,7 @@ function loadLinkedPattern(
   if (address === undefined) {
     return;
   }
+  // This only happens in the query path, so don't worry about scheduler
   const result = tx.read(address);
   if (result.error) {
     return;
@@ -1575,6 +1640,7 @@ function loadLinkedPattern(
       type: "application/json" as MIME,
       path: [],
     };
+    // This only happens in the query path, so don't worry about scheduler
     const legacyResult = tx.read(legacyAddress);
     if (!legacyResult.error) {
       entry = legacyResult.ok;
@@ -1750,6 +1816,8 @@ export class SchemaObjectTraverser<V extends StorableDatum>
 
     logger.timeStart("traverse");
     this.schemaTracker.add(getTrackerKey(doc.address), this.selector);
+    // Flag the top level read of doc for the scheduler
+    this.tx.readOrThrow(doc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
     const rv = this.traverseWithSelector(
       doc,
       this.selector,
@@ -1799,12 +1867,14 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     return rv;
   }
 
-  // Traverse the specified doc with the selector.
-  // The selector should have been re-rooted if needed to be relative to the
-  // specified doc. This generally means that its path starts with value.
-  // The selector must have a valid (defined) schema
-  // Once we've gotten the path of our doc to match the path of our selector,
-  // we can call traverseWithSchema instead.
+  /**
+   * Traverse the specified doc with the selector.
+   * The selector should have been re-rooted if needed to be relative to the
+   * specified doc. This generally means that its path starts with value.
+   * The selector must have a valid (defined) schema
+   * Once we've gotten the path of our doc to match the path of our selector,
+   * we can call traverseWithSchema instead.
+   */
   traverseWithSelector(
     doc: IMemorySpaceAttestation,
     selector: SchemaPathSelector,
@@ -1870,6 +1940,8 @@ export class SchemaObjectTraverser<V extends StorableDatum>
   /**
    * Traverse the doc with the specified schema.
    *
+   * Our doc parameter has been read in nonRecursive mode.
+   *
    * @param doc
    * @param schema
    * @param link optional top level link information that we may need to
@@ -1897,7 +1969,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
       if (this.traverseCells) {
         const memo = this.activeMemo;
         const memoKey = docId + "|" + doc.address.path.join("/") + "|" +
-          stableStringify(schema);
+          stableHash(schema);
         const cached = memo.get(memoKey);
         if (cached !== undefined) {
           this.schemaMemoHits++;
@@ -1946,31 +2018,19 @@ export class SchemaObjectTraverser<V extends StorableDatum>
           ...anyOf.filter(SchemaObjectTraverser.asCellOrStream),
         ];
 
-        // Layer 1: Fast-reject branches that clearly can't match the value
-        const survivingBranches: JSONSchema[] = [];
+        // Branch-by-branch traversal; fast-reject after merge so canBranchMatch
+        // sees the full merged constraints (type/required from restSchema too).
+        const matches: Immutable<StorableValue>[] = [];
         for (const optionSchema of sortedAnyOf) {
           this.anyOfBranches++;
           if (ContextualFlowControl.isFalseSchema(optionSchema)) {
             continue;
           }
-          if (!canBranchMatch(optionSchema, doc.value, restSchema)) {
+          const mergedSchema = mergeSchemaOption(restSchema, optionSchema);
+          if (!canBranchMatch(mergedSchema, doc.value)) {
             this.anyOfFastRejects++;
             continue;
           }
-          survivingBranches.push(optionSchema);
-        }
-
-        // Layer 2 (mergeAnyOfBranchSchemas — merge surviving object branches
-        // into a single schema and traverse once) is disabled. It caused
-        // regressions with link resolution during traversal because the merged
-        // schema loses per-branch context that followPointer relies on.
-        // The helper and its tests are retained for future use.
-
-        // Branch-by-branch traversal on surviving branches
-        const matches: Immutable<StorableValue>[] = [];
-        for (const optionSchema of survivingBranches) {
-          this.anyOfBranches++;
-          const mergedSchema = mergeSchemaOption(restSchema, optionSchema);
           // TODO(@ubik2): do i need to merge the link schema?
           const { ok: val, error } = this.traverseWithSchema(
             doc,
@@ -2106,6 +2166,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
       const defaultValue = isObject(resolved) ? resolved["default"] : undefined;
       // A value of true or {} means we match anything
       // Resolve the rest of the doc, and return
+      this.tx.read(doc.address, READ_FOR_SCHEDULING); // recursively read this doc
       return { ok: this.traverseDAG(doc, defaultValue, link) };
     } else if (
       ContextualFlowControl.isFalseSchema(resolved) &&
@@ -2178,6 +2239,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
       return { ok: this.objectCreator.createObject(newLink, newValue) };
     } else if (isObject(doc.value)) {
       if (isPrimitiveCellLink(doc.value)) {
+        this.tx.read(doc.address, READ_FOR_SCHEDULING);
         // When traversing a pointer, use the unresolved schema, so we have
         // the same values in the schema tracker.
         return this.traversePointerWithSchema(doc, schema, link);
@@ -2355,6 +2417,8 @@ export class SchemaObjectTraverser<V extends StorableDatum>
    * Traverse an an array according to the specified schema, returning
    * a new array that includes the elements that matched the schema.
    *
+   * We are passed a doc that has been read with the nonRecursive flag.
+   *
    * @param doc doc with address and value to traverse
    * @param schema schema that applies to this object
    * @param link optional link to pass to createObject callback
@@ -2369,9 +2433,9 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     this.traverseArrayCalls++;
     const docArray = doc.value as Immutable<StorableDatum>[];
     const arrayObj = new Array<Immutable<StorableValue>>(docArray.length);
-    for (let index = 0; index < docArray.length; index++) {
-      if (!(index in docArray)) continue; // preserve sparse holes
-      const item = docArray[index];
+
+    // We use `every` here so if our input is a sparse array, so is our output.
+    const valid = docArray.every((item, index) => {
       const itemSchema = this.cfc.schemaAtPath(schema, [index.toString()]);
       let curDoc: IMemorySpaceAttestation = {
         address: {
@@ -2380,6 +2444,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         },
         value: item,
       };
+      this.tx.read(curDoc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
       let curSelector: SchemaPathSelector = {
         path: curDoc.address.path,
         schema: itemSchema,
@@ -2408,6 +2473,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
       // let createdDataURI = false;
       // const maybeLink = parseLink(item, arrayLink);
       if (isPrimitiveCellLink(item)) {
+        this.tx.read(curDoc.address, READ_FOR_SCHEDULING);
         const [redirDoc, selector] = this.getDocAtPath(
           curDoc,
           [],
@@ -2416,12 +2482,14 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         );
         curDoc = redirDoc;
         curSelector = selector!;
+        // call to nextLink will mark curDoc read recursively
         // redirDoc has only followed redirects.
         // If our redirDoc is a link, resolve one step, and use that value instead
         // because arrays dereference one more link.
         const [linkDoc, linkSelector] = this.nextLink(redirDoc, curSelector);
         curDoc = linkDoc;
         curSelector = linkSelector!;
+        this.tx.read(curDoc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
         if (curDoc.value === undefined) {
           logger.info(
             "traverse",
@@ -2439,6 +2507,8 @@ export class SchemaObjectTraverser<V extends StorableDatum>
           curSelector.schema,
         );
         // Replace doc with a DataCellURI style doc
+        // Need to read recursively here
+        this.tx.read(curDoc.address, READ_FOR_SCHEDULING);
         // TODO(@ubik2): ideally, we wouldn't use this path in query traversal.
         // Right now, we aren't passing both the link info and doc info, so we
         // will override the doc here.
@@ -2471,7 +2541,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
             "traverse",
             () => ["Encountered broken redirect", doc, curDoc],
           );
-          return undefined;
+          return false;
         }
         // For my cell link, curDoc currently points to the last
         // redirect target, but we want cell properties to be based on the
@@ -2479,7 +2549,9 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         // link if available.
         // If we have a value instead of a link, create a link to the element
         // We don't traverse and validate, since this is an asCell boundary.
-        const cellLink = isPrimitiveCellLink(curDoc.value)
+        const isLink = isPrimitiveCellLink(curDoc.value);
+        if (isLink) this.tx.read(curDoc.address, READ_FOR_SCHEDULING);
+        const cellLink = isLink
           ? getNextCellLink(curDoc, curSelector.schema!)
           : getNormalizedLink(curDoc.address, curSelector.schema);
         const val = this.objectCreator.createObject(cellLink, undefined);
@@ -2511,8 +2583,9 @@ export class SchemaObjectTraverser<V extends StorableDatum>
           arrayObj[index] = val;
         }
       }
-    }
-    return arrayObj;
+      return true;
+    });
+    return valid ? arrayObj : undefined;
   }
 
   /**
@@ -2578,6 +2651,9 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         SchemaObjectTraverser.asCellOrStream(propSchema) &&
         !isPrimitiveCellLink(propValue)
       ) {
+        // Intentionally treat asCell/asStream as an opaque boundary in
+        // traverseCells=false mode for inline object values. We create a cell
+        // link and do not descend/read nested properties from this value here.
         // If we have a value instead of a link, create a link to the value
         // We don't traverse and validate, since this is an asCell boundary.
         const cellLink = getNormalizedLink(propAddress, propSchema);
@@ -2585,6 +2661,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         filteredObj[propKey] = val;
       } else {
         const propDoc = { address: propAddress, value: propValue };
+        this.tx.read(propDoc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
         const { ok: val, error } = this.traverseWithSchema(propDoc, propSchema);
         if (error === undefined) {
           filteredObj[propKey] = val;
@@ -2664,7 +2741,8 @@ export class SchemaObjectTraverser<V extends StorableDatum>
 
   // This just has a schema, since the doc.address.path should match the
   // selector.path.
-  // The doc.value should be a primitive cell link.
+  // The doc.value should be a primitive cell link, and we've already
+  // done a nonRecursive read on it.
   private traversePointerWithSchema(
     doc: IMemorySpaceAttestation,
     schema: JSONSchema,
@@ -2719,6 +2797,9 @@ export class SchemaObjectTraverser<V extends StorableDatum>
       // For my cell link, redirDoc currently points to the last redirect
       // target, but we want cell properties to be based on the link value at
       // that location, so we effectively follow one more link if available.
+      if (isPrimitiveCellLink(redirDoc.value)) {
+        this.tx.read(redirDoc.address, READ_FOR_SCHEDULING);
+      }
       const cellLink = getNextCellLink(redirDoc, combinedSchema);
       logger.debug(
         "traverse",
@@ -2834,7 +2915,7 @@ function mergeSchemaOption(
   // JSONSchema rules should.
   // For example, `{type: "object", anyOf: [{type: "string"}]}` schema should
   // never match
-  const key = stableStringify(outerSchema) + "|" + stableStringify(innerSchema);
+  const key = stableHash(outerSchema) + "|" + stableHash(innerSchema);
   const cached = _mergeSchemaOptionCache.get(key);
   if (cached !== undefined) return cached;
   const result = isObject(innerSchema)
@@ -2861,7 +2942,6 @@ function mergeSchemaOption(
 export function canBranchMatch(
   branch: JSONSchema,
   value: unknown,
-  outerSchema?: JSONSchemaObj,
 ): boolean {
   // Boolean schemas: true matches everything, false matches nothing
   if (!isObject(branch)) return branch !== false;
@@ -2876,17 +2956,9 @@ export function canBranchMatch(
     return true;
   }
 
-  // Resolve top-level $ref if present. When an outerSchema is provided (e.g.
-  // the restSchema from anyOf destructuring), merge first so that $defs are
-  // available for resolution. mergeSchemaOption is cached, so the later merge
-  // in the traversal loop will hit the cache.
   let resolved: JSONSchema | undefined = branch;
   if ("$ref" in branch) {
-    const toResolve = outerSchema
-      ? mergeSchemaOption(outerSchema, branch)
-      : branch;
-    if (!isObject(toResolve)) return toResolve !== false;
-    resolved = ContextualFlowControl.resolveSchemaRefs(toResolve);
+    resolved = ContextualFlowControl.resolveSchemaRefs(branch);
     if (resolved === undefined || !isObject(resolved)) return true;
   }
 
@@ -2952,8 +3024,8 @@ export function mergeAnyOfBranchSchemas(
 ): JSONSchema | null {
   if (branches.length < 2) return null;
 
-  const key = stableStringify(outerSchema) + "||" +
-    branches.map(stableStringify).join("|");
+  const key = stableHash(outerSchema) + "||" +
+    branches.map(stableHash).join("|");
   const cached = _mergeAnyOfBranchCache.get(key);
   if (cached !== undefined) return cached;
 
@@ -3031,10 +3103,10 @@ function _mergeAnyOfBranchSchemasUncached(
   // Build merged properties
   const mergedProperties: Record<string, JSONSchema> = {};
   for (const [propKey, schemas] of allProps) {
-    // Deduplicate schemas using stableStringify
+    // Deduplicate schemas using stableHash
     const uniqueHashes = new Map<string, JSONSchema>();
     for (const s of schemas) {
-      uniqueHashes.set(stableStringify(s), s);
+      uniqueHashes.set(stableHash(s), s);
     }
     if (uniqueHashes.size === 1) {
       // All branches agree on this property's schema

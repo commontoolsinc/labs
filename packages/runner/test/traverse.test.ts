@@ -2979,6 +2979,69 @@ describe("SchemaObjectTraverser unknown type handling", () => {
     ).toBe(true);
   });
 
+  it("treats inline asCell object properties as opaque when traverseCells=false", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const targetUri = "of:doc-ascell-inline-target" as URI;
+    const outerUri = "of:doc-ascell-inline-outer" as URI;
+
+    store.set(`${targetUri}/${type}`, {
+      the: type,
+      of: targetUri as Entity,
+      is: { value: { shouldNotLoad: true } },
+      cause: refer({ the: type, of: targetUri as Entity }),
+      since: 1,
+    });
+
+    const outerValue = {
+      inner: {
+        ref: { "/": { [LINK_V1_TAG]: { id: targetUri, path: [] } } },
+        local: 123,
+      },
+    };
+    store.set(`${outerUri}/${type}`, {
+      the: type,
+      of: outerUri as Entity,
+      is: { value: outerValue },
+      cause: refer({ the: type, of: outerUri as Entity }),
+      since: 2,
+    });
+
+    const schema = {
+      type: "object",
+      properties: {
+        inner: { type: "object", asCell: true },
+      },
+      required: ["inner"],
+      additionalProperties: false,
+    } as JSONSchema;
+
+    const manager = new StoreObjectManager(store);
+    const managedTx = new ManagedStorageTransaction(manager);
+    const tx = new ExtendedStorageTransaction(managedTx);
+    const traverser = new SchemaObjectTraverser(
+      tx,
+      { path: ["value"], schema },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      false,
+    );
+
+    const { ok: result, error } = traverser.traverse({
+      address: { space: "did:null:null", id: outerUri, type, path: ["value"] },
+      value: outerValue,
+    });
+
+    expect(error).toBeUndefined();
+    expect(result).toEqual({ inner: undefined });
+    expect(
+      [...manager.getReadDocs()].some((att) => att.address.id === targetUri),
+    )
+      .toBe(false);
+  });
+
   it("type union [unknown, string] treats object value as opaque", () => {
     const store = new Map<string, Revision<State>>();
     const type = "application/json" as const;

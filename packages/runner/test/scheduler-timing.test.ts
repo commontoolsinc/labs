@@ -75,7 +75,7 @@ describe("debounce and throttling", () => {
     // Subscribe with proper writes for pull mode
     runtime.scheduler.subscribe(
       action,
-      { reads: [], writes: [cell.getAsNormalizedFullLink()] },
+      { reads: [], shallowReads: [], writes: [cell.getAsNormalizedFullLink()] },
       {},
     );
 
@@ -116,7 +116,11 @@ describe("debounce and throttling", () => {
     for (let i = 0; i < 5; i++) {
       runtime.scheduler.subscribe(
         action,
-        { reads: [], writes: [cell.getAsNormalizedFullLink()] },
+        {
+          reads: [],
+          shallowReads: [],
+          writes: [cell.getAsNormalizedFullLink()],
+        },
         {},
       );
       await new Promise((resolve) => setTimeout(resolve, 10));
@@ -153,7 +157,7 @@ describe("debounce and throttling", () => {
     // Subscribe with debounce option (and proper writes for pull mode)
     runtime.scheduler.subscribe(
       action,
-      { reads: [], writes: [cell.getAsNormalizedFullLink()] },
+      { reads: [], shallowReads: [], writes: [cell.getAsNormalizedFullLink()] },
       { debounce: 50 },
     );
 
@@ -193,7 +197,7 @@ describe("debounce and throttling", () => {
     // Subscribe with default scheduling (runs immediately)
     const cancel = runtime.scheduler.subscribe(
       action,
-      { reads: [], writes: [] },
+      { reads: [], shallowReads: [], writes: [] },
       {},
     );
 
@@ -227,7 +231,12 @@ describe("debounce and throttling", () => {
       cell.withTx(actionTx).send(val + 1);
     };
 
-    runtime.scheduler.subscribe(action, { reads: [], writes: [] }, {});
+    // Subscribe (auto-debounce is enabled by default)
+    runtime.scheduler.subscribe(action, {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+    }, {});
     await cell.pull();
 
     // Fast actions should not get auto-debounced — requires >50ms avg after 3+ runs
@@ -264,6 +273,7 @@ describe("debounce and throttling", () => {
         action,
         {
           reads: [cell.getAsNormalizedFullLink()],
+          shallowReads: [],
           writes: [cell.getAsNormalizedFullLink()],
         },
         { isEffect: true },
@@ -296,6 +306,7 @@ describe("debounce and throttling", () => {
       action,
       {
         reads: [cell.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [cell.getAsNormalizedFullLink()],
       },
       {},
@@ -308,6 +319,7 @@ describe("debounce and throttling", () => {
         action,
         {
           reads: [cell.getAsNormalizedFullLink()],
+          shallowReads: [],
           writes: [cell.getAsNormalizedFullLink()],
         },
         {},
@@ -361,6 +373,7 @@ describe("debounce and throttling", () => {
       effect,
       {
         reads: [source.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [result.getAsNormalizedFullLink()],
       },
       { isEffect: true },
@@ -564,7 +577,7 @@ describe("debounce and throttling", () => {
 
     runtime.scheduler.subscribe(
       action,
-      { reads: [], writes: [cell.getAsNormalizedFullLink()] },
+      { reads: [], shallowReads: [], writes: [cell.getAsNormalizedFullLink()] },
       {},
     );
 
@@ -792,7 +805,7 @@ describe("throttle - staleness tolerance", () => {
     // Subscribe with throttle option
     runtime.scheduler.subscribe(
       action,
-      { reads: [], writes: [] },
+      { reads: [], shallowReads: [], writes: [] },
       { throttle: 200 },
     );
 
@@ -823,6 +836,7 @@ describe("throttle - staleness tolerance", () => {
       action,
       {
         reads: [cell.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [cell.getAsNormalizedFullLink()],
       },
       {},
@@ -838,6 +852,7 @@ describe("throttle - staleness tolerance", () => {
       action,
       {
         reads: [cell.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [cell.getAsNormalizedFullLink()],
       },
       {},
@@ -872,6 +887,7 @@ describe("throttle - staleness tolerance", () => {
       action,
       {
         reads: [cell.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [cell.getAsNormalizedFullLink()],
       },
       {},
@@ -884,6 +900,7 @@ describe("throttle - staleness tolerance", () => {
       action,
       {
         reads: [cell.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [cell.getAsNormalizedFullLink()],
       },
       {},
@@ -899,6 +916,7 @@ describe("throttle - staleness tolerance", () => {
       action,
       {
         reads: [cell.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [cell.getAsNormalizedFullLink()],
       },
       {},
@@ -939,6 +957,7 @@ describe("throttle - staleness tolerance", () => {
       computation,
       {
         reads: [source.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [result.getAsNormalizedFullLink()],
       },
       {},
@@ -994,6 +1013,7 @@ describe("throttle - staleness tolerance", () => {
       effect,
       {
         reads: [source.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [result.getAsNormalizedFullLink()],
       },
       { throttle: 50, isEffect: true },
@@ -1034,7 +1054,7 @@ describe("throttle - staleness tolerance", () => {
     // Run action
     runtime.scheduler.subscribe(
       action,
-      { reads: [], writes: [] },
+      { reads: [], shallowReads: [], writes: [] },
       { isEffect: true },
     );
     await runtime.idle();
@@ -1069,7 +1089,7 @@ describe("throttle - staleness tolerance", () => {
     // First run should still execute (no previous timestamp to throttle against)
     runtime.scheduler.subscribe(
       action,
-      { reads: [], writes: [cell.getAsNormalizedFullLink()] },
+      { reads: [], shallowReads: [], writes: [cell.getAsNormalizedFullLink()] },
       {},
     );
     await cell.pull();

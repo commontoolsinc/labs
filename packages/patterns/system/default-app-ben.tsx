@@ -29,7 +29,6 @@ import OmniboxFAB from "./omnibox-fab.tsx";
 import DoList from "../do-list/do-list.tsx";
 import Notebook from "../notes/notebook.tsx";
 import DailyJournal from "../notes/daily-journal.tsx";
-import NotesImportExport from "../notes/notes-import-export.tsx";
 import PieceGrid from "./piece-grid.tsx";
 
 type MinimalPiece = {
@@ -158,28 +157,6 @@ const menuDailyJournal = handler<
     return navigateTo(existing as any);
   }
   return navigateTo(DailyJournal({ title: "Daily Journal" }));
-});
-
-// Helper to find existing All Notes piece
-const findAllNotebooksPiece = (allPieces: Writable<MinimalPiece[]>) => {
-  const pieces = allPieces.get();
-  return pieces.find((piece: any) => {
-    const name = piece?.[NAME];
-    return typeof name === "string" && name.startsWith("All Notes");
-  });
-};
-
-// Menu: All Notes
-const menuAllNotebooks = handler<
-  void,
-  { menuOpen: Writable<boolean>; allPieces: Writable<MinimalPiece[]> }
->((_, { menuOpen, allPieces }) => {
-  menuOpen.set(false);
-  const existing = findAllNotebooksPiece(allPieces);
-  if (existing) {
-    return navigateTo(existing);
-  }
-  return navigateTo(NotesImportExport({ importMarkdown: "" }));
 });
 
 // Handler: Add piece to allPieces if not already present
@@ -440,13 +417,6 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                   margin: "4px 8px",
                 }}
               />
-              <ct-button
-                variant="ghost"
-                onClick={menuAllNotebooks({ menuOpen, allPieces })}
-                style={{ justifyContent: "flex-start" }}
-              >
-                {"\u00A0\u00A0"}📁 All Notes
-              </ct-button>
             </ct-vstack>
           </div>
         </ct-toolbar>

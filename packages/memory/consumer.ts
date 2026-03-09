@@ -62,6 +62,7 @@ import * as Subscription from "./subscription.ts";
 import { toStringStream } from "./ucan.ts";
 import { fromStringStream } from "./receipt.ts";
 import * as Settings from "./settings.ts";
+import { toDeepStorableValue } from "./storable-value.ts";
 export * from "./interface.ts";
 import { toRevision } from "./commit.ts";
 import { getLogger } from "@commontools/utils/logger";
@@ -111,9 +112,27 @@ export const open = ({
   ttl?: Seconds;
 }) => {
   const consumer = create({ as, clock, ttl });
-  session.readable.pipeThrough(consumer).pipeTo(
+  // The pipeTo() promise is captured as `consumer.closed` so that callers
+  // (specifically StorageManagerEmulator.close()) can await full pipeline
+  // shutdown before resetting ambient state like the canonical hash config.
+  // Without this, Runtime.dispose() could reset the hash config while
+  // in-flight messages were still being delivered from consumer to provider,
+  // causing hash format mismatches in Access.claim().
+  //
+  // pipeTo() rejects when the TransformStream is terminated during teardown
+  // (consumer.close() calls cancel() then controller.terminate()). That
+  // rejection is an expected consequence of intentional shutdown -- the
+  // stream was told to stop, and it did. The catch below suppresses only
+  // that expected case (identified by isCancelled being true) and rethrows
+  // everything else so that unexpected pipeline errors propagate to the
+  // caller via `await consumer.closed`.
+  consumer.closed = session.readable.pipeThrough(consumer).pipeTo(
     session.writable as WritableStream<Protocol>,
-  );
+  ).catch((error) => {
+    if (!consumer.isCancelled) {
+      throw error;
+    }
+  });
   return consumer;
 };
 
@@ -150,6 +169,11 @@ class MemoryConsumerSession<
   private batchStartTime: number | null = null;
   private lastFlushTime: number | null = null;
   private cancelled = false;
+  closed: Promise<void> = Promise.resolve();
+
+  get isCancelled(): boolean {
+    return this.cancelled;
+  }
 
   constructor(
     public as: Signer,
@@ -453,7 +477,10 @@ export interface MemoryConsumer<Space extends MemorySpace>
       UCAN<ConsumerCommandInvocation<Protocol>>
     > {
   as: Signer;
+  readonly isCancelled: boolean;
   cancel(): void;
+  close(): void;
+  closed: Promise<void>;
 }
 
 export interface MemorySpaceSession<Space extends MemorySpace = MemorySpace> {
@@ -584,8 +611,10 @@ class ConsumerInvocation<Ability extends string, Protocol extends Proto> {
   }
 
   constructor(source: ConsumerInvocationFor<Ability, Protocol>) {
-    // JSON.parse(JSON.stringify) is used to strip `undefined` values and ensure consistent serialization
-    this.source = JSON.parse(JSON.stringify(source));
+    // Deep-clone the source to ensure consistent serialization.
+    this.source = toDeepStorableValue(
+      source,
+    ) as ConsumerInvocationFor<Ability, Protocol>;
     this.#reference = refer(this.source);
     let receive;
     this.promise = new Promise<ConsumerResultFor<Ability, Protocol>>(
@@ -798,64 +827,72 @@ class QuerySubscriptionInvocation<
     const selection = this.selection[this.space];
     // Here we will collect subset of changes that match the query.
     const differential: OfTheCause<{ is?: StorableDatum; since: number }> = {};
-    const fact = toRevision(commit.commit);
 
-    const { the, of, is } = fact;
-    const cause = fact.cause.toString() as CauseString;
-    const { transaction, since } = is;
-    const matchCommit = this.patterns.some((pattern) =>
-      (!pattern.of || pattern.of === of) &&
-      (!pattern.the || pattern.the === the) &&
-      (!pattern.cause || pattern.cause === cause)
-    );
+    // A revision-only commit (empty commit payload) carries deferred schema
+    // traversal results. Skip commit parsing — just deliver revisions.
+    const hasCommitPayload = Object.keys(commit.commit).length > 0;
+    if (hasCommitPayload) {
+      const fact = toRevision(commit.commit);
 
-    if (matchCommit) {
-      // Update the main application/commit+json record for the space
-      setRevision(differential, of, the, cause, { is, since });
-    }
-    for (const [k1, attributes] of Object.entries(transaction.args.changes)) {
-      const of = k1 as URI;
-      for (const [k2, changes] of Object.entries(attributes)) {
-        const the = k2 as MIME;
-        const causeEntries = Object.entries(changes);
-        if (causeEntries.length === 0) {
-          // A classified object will not have a cause/change pair
-          const matchDoc = this.patterns.some((pattern) =>
-            (!pattern.of || pattern.of === of) &&
-            (!pattern.the || pattern.the === the) && !pattern.cause
-          );
-          if (matchDoc) {
-            setEmptyObj(differential, of, the);
-          }
-        } else {
-          const [[k3, change]] = causeEntries;
-          const cause = k3 as CauseString;
-          if (change !== true) {
-            const state = Object.entries(
-              selection?.[of]?.[the] ?? {},
+      const { the, of, is } = fact;
+      const cause = fact.cause.toString() as CauseString;
+      const { transaction, since } = is;
+      const matchCommit = this.patterns.some((pattern) =>
+        (!pattern.of || pattern.of === of) &&
+        (!pattern.the || pattern.the === the) &&
+        (!pattern.cause || pattern.cause === cause)
+      );
+
+      if (matchCommit) {
+        // Update the main application/commit+json record for the space
+        setRevision(differential, of, the, cause, { is, since });
+      }
+      for (
+        const [k1, attributes] of Object.entries(transaction.args.changes)
+      ) {
+        const of = k1 as URI;
+        for (const [k2, changes] of Object.entries(attributes)) {
+          const the = k2 as MIME;
+          const causeEntries = Object.entries(changes);
+          if (causeEntries.length === 0) {
+            // A classified object will not have a cause/change pair
+            const matchDoc = this.patterns.some((pattern) =>
+              (!pattern.of || pattern.of === of) &&
+              (!pattern.the || pattern.the === the) && !pattern.cause
             );
-            const [current] = state.length > 0 ? state[0] : [];
-            if (cause !== current) {
-              const matchDoc = this.patterns.some((pattern) =>
-                (!pattern.of || pattern.of === of) &&
-                (!pattern.the || pattern.the === the) &&
-                (!pattern.cause || pattern.cause === cause)
+            if (matchDoc) {
+              setEmptyObj(differential, of, the);
+            }
+          } else {
+            const [[k3, change]] = causeEntries;
+            const cause = k3 as CauseString;
+            if (change !== true) {
+              const state = Object.entries(
+                selection?.[of]?.[the] ?? {},
               );
+              const [current] = state.length > 0 ? state[0] : [];
+              if (cause !== current) {
+                const matchDoc = this.patterns.some((pattern) =>
+                  (!pattern.of || pattern.of === of) &&
+                  (!pattern.the || pattern.the === the) &&
+                  (!pattern.cause || pattern.cause === cause)
+                );
 
-              if (matchDoc) {
-                const value = change.is
-                  ? { is: change.is, since: since }
-                  : { since: since };
-                setRevision(differential, of, the, cause, value);
+                if (matchDoc) {
+                  const value = change.is
+                    ? { is: change.is, since: since }
+                    : { since: since };
+                  setRevision(differential, of, the, cause, value);
+                }
               }
             }
           }
         }
       }
-    }
 
-    if (Object.keys(differential).length !== 0) {
-      this.query.integrate(differential);
+      if (Object.keys(differential).length !== 0) {
+        this.query.integrate(differential);
+      }
     }
     this.integrate(commit);
     // This is a bit strange, but the revisions in here aren't proper

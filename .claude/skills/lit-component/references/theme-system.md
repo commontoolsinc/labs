@@ -125,6 +125,7 @@ After calling `applyThemeToElement()`, the following CSS variables are available
 **Typography:**
 - `--ct-theme-font-family`
 - `--ct-theme-mono-font-family`
+- `--ct-theme-font-size`
 - `--ct-theme-border-radius`
 - `--ct-theme-animation-duration`
 

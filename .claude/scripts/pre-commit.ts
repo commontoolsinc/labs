@@ -28,11 +28,27 @@ if (!/\bgit\s+commit\b/.test(cmd) || /--no-verify/.test(cmd)) {
   Deno.exit(0);
 }
 
+// Resolve the repo root so all paths are consistent, even when CWD is a
+// subdirectory (e.g. packages/runner/).  Without this, git returns paths
+// relative to the repo root while deno resolves them relative to CWD,
+// doubling the prefix (packages/runner/packages/runner/...).
+const repoRoot = new TextDecoder()
+  .decode(
+    (await new Deno.Command("git", {
+      args: ["rev-parse", "--show-toplevel"],
+      stdout: "piped",
+      stderr: "piped",
+    }).output()).stdout,
+  )
+  .trim();
+if (!repoRoot) Deno.exit(0);
+
 // --- Determine which files will be committed ---
 
 async function git(...args: string[]): Promise<string[]> {
   const { stdout } = await new Deno.Command("git", {
     args,
+    cwd: repoRoot,
     stdout: "piped",
     stderr: "piped",
   }).output();
@@ -52,8 +68,10 @@ async function getFilesToCommit(): Promise<string[]> {
   // Start with files already staged from prior `git add` calls
   const files = await git("diff", "--cached", "--name-only", "--diff-filter=d");
 
-  // Add any files from a `git add <paths>` in this command (not yet staged)
-  const addMatch = cmd.match(/\bgit\s+add\s+(.+?)(?:\s*&&|$)/);
+  // Add any files from a `git add <paths>` in this command (not yet staged).
+  // Only search before `git commit` to avoid false-matching inside commit messages.
+  const preCommit = cmd.split(/\bgit\s+commit\b/)[0] ?? "";
+  const addMatch = preCommit.match(/\bgit\s+add\s+(.+?)(?:\s*&&|$)/);
   if (addMatch) {
     for (const arg of addMatch[1].trim().split(/\s+/)) {
       if (!arg.startsWith("-")) files.push(arg);
@@ -74,6 +92,7 @@ async function run(
 ): Promise<string | null> {
   const result = await new Deno.Command("deno", {
     args,
+    cwd: repoRoot,
     stdout: "piped",
     stderr: "piped",
   }).output();
@@ -102,6 +121,7 @@ const fmtErr = await run("Formatting failed", ["fmt", ...files]);
 if (safeToRestage.length > 0) {
   await new Deno.Command("git", {
     args: ["add", ...safeToRestage],
+    cwd: repoRoot,
     stdout: "piped",
     stderr: "piped",
   }).output();
