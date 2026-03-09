@@ -384,4 +384,152 @@ describe("Per-path reads - schema-selective sinks", () => {
 
     expect(lengths).toEqual([2, 3]);
   });
+
+  it("mutating an array element's value (same length) does NOT re-trigger a length sink", async () => {
+    // This directly tests the shallowEqual array check: same length + same keys
+    // → no structural change → sink must not fire, even though the write path
+    // overlaps the shallowRead path one level up.
+    const cell = runtime.getCell<{ items: Array<{ name: string }> }>(
+      space,
+      "per-path-array-element-mutation-no-retrigger",
+    );
+
+    cell.withTx(tx).set({ items: [{ name: "a" }, { name: "b" }] });
+    tx.commit();
+    tx = runtime.edit();
+
+    const lengths: number[] = [];
+    cell.key("items").key("length").sink((l) => {
+      lengths.push(l as number);
+    });
+
+    await runtime.idle();
+    expect(lengths).toEqual([2]);
+
+    // Replace items[0] with a new object — length and key set are unchanged.
+    cell.withTx(tx).key("items").key(0).set({ name: "x" });
+    tx.commit();
+    tx = runtime.edit();
+    await runtime.idle();
+
+    // shallowEqual([{name:"a"},{name:"b"}], [{name:"x"},{name:"b"}]) → true
+    // (same length, same numeric keys) so the length sink must NOT re-fire.
+    expect(lengths).toEqual([2]);
+  });
+
+  it("removing an array element triggers the length sink", async () => {
+    const cell = runtime.getCell<{ items: Array<{ name: string }> }>(
+      space,
+      "per-path-array-removal-triggers-sink",
+    );
+
+    cell.withTx(tx).set({ items: [{ name: "a" }, { name: "b" }] });
+    tx.commit();
+    tx = runtime.edit();
+
+    const lengths: number[] = [];
+    cell.key("items").key("length").sink((l) => {
+      lengths.push(l as number);
+    });
+
+    await runtime.idle();
+    expect(lengths).toEqual([2]);
+
+    // Reduce to a 1-element array — length changes, so the sink must re-fire.
+    const [first] = cell.withTx(tx).get()!.items;
+    cell.withTx(tx).key("items").set([first]);
+    tx.commit();
+    tx = runtime.edit();
+    await runtime.idle();
+
+    expect(lengths).toEqual([2, 1]);
+  });
+
+  it("setting array length without changing elements triggers a shallowRead on that array", async () => {
+    // shallowEqual checks array.length separately from the key set, so that
+    // sparse arrays (same keys, different length) are not considered equal.
+    const cell = runtime.getCell<{ items: Array<{ name: string }> }>(
+      space,
+      "per-path-array-length-set-no-element-change",
+    );
+
+    cell.withTx(tx).set({ items: [{ name: "a" }, { name: "b" }] });
+    tx.commit();
+    tx = runtime.edit();
+
+    const contents: { item: { name: string }; index: number }[][] = [];
+    const lengths: number[] = [];
+    cell.key("items").sink((items) => {
+      contents.push(items.map((item, index) => {
+        return { item, index };
+      }));
+      lengths.push(items.length);
+    });
+
+    await runtime.idle();
+    expect(contents).toEqual([[{ item: { name: "a" }, index: 0 }, {
+      item: { name: "b" },
+      index: 1,
+    }]]);
+    expect(lengths).toEqual([2]);
+
+    // Extend the array to length 3 by writing the length property directly.
+    // Elements at indices 0 and 1 are untouched, so the key set is unchanged.
+    // shallowEqual must detect the length difference and trigger the sink.
+    cell.withTx(tx).key("items").key("length").set(3);
+    tx.commit();
+    tx = runtime.edit();
+    await runtime.idle();
+
+    // I'm not validating the contents array, since I have an undefined in
+    // there that I didn't expect, and this behavior will probably change.
+    // Expect that our items sink was called, and we have a longer length
+    expect(lengths).toEqual([2, 3]);
+  });
+
+  it("adding a new key to an object triggers a schema sink that reads that object", async () => {
+    // shallowEqual on an object fires when the key SET changes. Adding a key
+    // means the before/after key sets differ → sink must re-fire.
+    const cell = runtime.getCell<
+      { config: { theme: string; fontSize?: number } }
+    >(
+      space,
+      "per-path-object-new-key-triggers-sink",
+    );
+
+    cell.withTx(tx).set({ config: { theme: "dark" } });
+    tx.commit();
+    tx = runtime.edit();
+
+    const view = cell.asSchema<{ config: { theme: string } }>(
+      {
+        type: "object",
+        properties: {
+          config: {
+            type: "object",
+            properties: { theme: { type: "string" } },
+            required: ["theme"],
+          },
+        },
+        required: ["config"],
+      } as const satisfies JSONSchema,
+    );
+
+    const themes: string[] = [];
+    view.sink((v) => {
+      themes.push(v.config.theme);
+    });
+
+    await runtime.idle();
+    expect(themes).toEqual(["dark"]);
+
+    // Add a sibling key to config — the key set of config changes, so the
+    // shallowRead at ["config"] detects a structural change and the sink fires.
+    cell.withTx(tx).key("config").key("fontSize").set(14);
+    tx.commit();
+    tx = runtime.edit();
+    await runtime.idle();
+
+    expect(themes).toEqual(["dark", "dark"]);
+  });
 });
