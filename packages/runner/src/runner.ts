@@ -1503,10 +1503,19 @@ export class Runner {
         };
 
         try {
-          // CT-1316: If the process cell has no committed data yet (e.g.
-          // when a sub-pattern was created inside an action whose TX hasn't
-          // committed), skip execution. The action will be re-triggered
-          // when the storage notification arrives after commit.
+          // CT-1316: When a derive action creates a sub-pattern via
+          // this.run(), the sub-pattern's process cell data is written in the
+          // parent's TX. Because replica.commit() is always async, the
+          // sub-pattern's action can be scheduled and run before the parent's
+          // TX commits — at which point the process cell has no data yet.
+          // The action sees argument={} and writes a plain value to its
+          // output, which overwrites the result-cell link and re-dirties the
+          // action, causing a self-reinforcing cycle until the loop counter
+          // stops it at MAX_ITERATIONS_PER_RUN.
+          //
+          // We use ignoreReadForScheduling so this check does NOT create a
+          // reactive subscription — the action will be naturally re-triggered
+          // via storage notifications when the parent TX commits.
           const processCellRaw = processCell.withTx(tx).getRaw({
             meta: ignoreReadForScheduling,
           });
