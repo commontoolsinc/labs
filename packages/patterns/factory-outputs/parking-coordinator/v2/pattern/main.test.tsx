@@ -22,11 +22,10 @@
  */
 import { action, computed, pattern } from "commontools";
 import ParkingCoordinator, {
-  INITIAL_SPOTS,
   type CommuteMode,
+  INITIAL_SPOTS,
   type ParkingSpot,
   type Person,
-  type RequestStatus,
   type SpotRequest,
 } from "./main.tsx";
 
@@ -167,7 +166,7 @@ export default pattern(() => {
   });
 
   // Dave requests today after cancellation -> should succeed now
-  const action_dave_request_today_after_cancel = action(() => {
+  const _action_dave_request_today_after_cancel = action(() => {
     const dave = subject.persons.find((p: Person) => p.name === "Dave");
     if (dave) {
       subject.requestParking.send({ personId: dave.id, date: TODAY });
@@ -184,7 +183,7 @@ export default pattern(() => {
   });
 
   // Move Alice down (from position 1 to position 2)
-  const action_move_alice_down = action(() => {
+  const _action_move_alice_down = action(() => {
     const alice = subject.persons.find((p: Person) => p.name === "Alice");
     if (alice) {
       subject.movePriorityDown.send({ personId: alice.id });
@@ -339,10 +338,10 @@ export default pattern(() => {
   );
 
   // --- Duplicate spot rejected ---
-  const assert_still_4_spots = computed(() => len(subject.spots) === 4);
+  const _assert_still_4_spots = computed(() => len(subject.spots) === 4);
 
   // --- Blank spot number rejected ---
-  const assert_still_4_spots_2 = computed(() => len(subject.spots) === 4);
+  const _assert_still_4_spots_2 = computed(() => len(subject.spots) === 4);
 
   // --- Edit spot ---
   const assert_spot_1_label_covered = computed(() => {
@@ -422,7 +421,7 @@ export default pattern(() => {
   });
 
   // --- Alice duplicate request blocked ---
-  const assert_still_4_requests = computed(() => len(subject.requests) === 4);
+  const _assert_still_4_requests = computed(() => len(subject.requests) === 4);
 
   // --- Alice requests tomorrow: succeeds ---
   const assert_5_requests = computed(() => len(subject.requests) === 5);
@@ -620,7 +619,7 @@ export default pattern(() => {
       // Alice requests TOMORROW (also tests duplicate today request is silently blocked)
       // The action sends both a duplicate today (blocked) and valid tomorrow request
       { action: action_alice_request_tomorrow },
-      { assertion: assert_5_requests },       // only 1 new request (duplicate blocked)
+      { assertion: assert_5_requests }, // only 1 new request (duplicate blocked)
       { assertion: assert_alice_tomorrow_allocated },
 
       // === Cancel Alice's today request ===

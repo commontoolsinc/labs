@@ -1,5 +1,16 @@
 /// <cts-enable />
-import { action, computed, Default, NAME, pattern, Stream, UI, type VNode, wish, Writable } from "commontools";
+import {
+  action,
+  computed,
+  Default,
+  NAME,
+  pattern,
+  Stream,
+  UI,
+  type VNode,
+  wish,
+  Writable,
+} from "commontools";
 
 // ============================================================
 // Domain Types
@@ -39,11 +50,18 @@ export interface SpotRequest {
 // ============================================================
 
 export interface ParkingCoordinatorInput {
-  spots: Writable<Default<ParkingSpot[], [
-    { spotNumber: "1"; label: "Near entrance"; notes: ""; active: true },
-    { spotNumber: "5"; label: ""; notes: ""; active: true },
-    { spotNumber: "12"; label: "Compact only"; notes: "Tight, no large vehicles"; active: true },
-  ]>>;
+  spots: Writable<
+    Default<ParkingSpot[], [
+      { spotNumber: "1"; label: "Near entrance"; notes: ""; active: true },
+      { spotNumber: "5"; label: ""; notes: ""; active: true },
+      {
+        spotNumber: "12";
+        label: "Compact only";
+        notes: "Tight, no large vehicles";
+        active: true;
+      },
+    ]>
+  >;
   people: Writable<Default<Person[], []>>;
   requests: Writable<Default<SpotRequest[], []>>;
 }
@@ -62,20 +80,39 @@ export interface ParkingCoordinatorOutput {
   submitRequest: Stream<{ personName: string; date: string }>;
   cancelRequest: Stream<{ requestId: string }>;
   addPerson: Stream<{
-    name: string; email: string; commuteMode: CommuteMode;
-    priorityRank: number; defaultSpot: string; preferences: string;
+    name: string;
+    email: string;
+    commuteMode: CommuteMode;
+    priorityRank: number;
+    defaultSpot: string;
+    preferences: string;
   }>;
   editPerson: Stream<{
-    originalName: string; name: string; email: string; commuteMode: CommuteMode;
-    priorityRank: number; defaultSpot: string; preferences: string;
+    originalName: string;
+    name: string;
+    email: string;
+    commuteMode: CommuteMode;
+    priorityRank: number;
+    defaultSpot: string;
+    preferences: string;
   }>;
   removePerson: Stream<{ name: string }>;
   movePersonUp: Stream<{ name: string }>;
   movePersonDown: Stream<{ name: string }>;
   addSpot: Stream<{ spotNumber: string; label: string; notes: string }>;
-  editSpot: Stream<{ originalNumber: string; spotNumber: string; label: string; notes: string; active: boolean }>;
+  editSpot: Stream<
+    {
+      originalNumber: string;
+      spotNumber: string;
+      label: string;
+      notes: string;
+      active: boolean;
+    }
+  >;
   removeSpot: Stream<{ spotNumber: string }>;
-  adminOverride: Stream<{ spotNumber: string; date: string; personName: string }>;
+  adminOverride: Stream<
+    { spotNumber: string; date: string; personName: string }
+  >;
 }
 
 // ============================================================
@@ -84,7 +121,9 @@ export interface ParkingCoordinatorOutput {
 
 const toLocalDateStr = (ts: number): string => {
   const d = new Date(ts);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${
+    String(d.getDate()).padStart(2, "0")
+  }`;
 };
 
 const getWeekDates = (todayStr: string): string[] => {
@@ -98,9 +137,24 @@ const getWeekDates = (todayStr: string): string[] => {
 };
 
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const MONTH_NAMES = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
 
-const formatDateShort = (dateStr: string): { shortName: string; dayNum: string; monthLabel: string } => {
+const formatDateShort = (
+  dateStr: string,
+): { shortName: string; dayNum: string; monthLabel: string } => {
   const d = new Date(dateStr + "T00:00:00");
   return {
     shortName: DAY_NAMES[d.getDay()],
@@ -122,7 +176,11 @@ const parsePreferences = (s: string): string[] =>
 
 const commuteIcon = (mode: CommuteMode): string => {
   const icons: Record<CommuteMode, string> = {
-    drive: "🚗", transit: "🚌", bike: "🚲", wfh: "🏠", other: "•",
+    drive: "🚗",
+    transit: "🚌",
+    bike: "🚲",
+    wfh: "🏠",
+    other: "•",
   };
   return icons[mode] ?? "•";
 };
@@ -148,7 +206,9 @@ function runAutoAllocation(
     }
   }
 
-  const activeSpotNumbers = activeSpots.filter((s) => s.active).map((s) => s.spotNumber);
+  const activeSpotNumbers = activeSpots.filter((s) => s.active).map((s) =>
+    s.spotNumber
+  );
   const availableSpots = activeSpotNumbers.filter((n) => !takenSpots.has(n));
   if (availableSpots.length === 0) return "";
 
@@ -172,7 +232,12 @@ function runAutoAllocation(
 export const DEFAULT_SPOTS: ParkingSpot[] = [
   { spotNumber: "1", label: "Near entrance", notes: "", active: true },
   { spotNumber: "5", label: "", notes: "", active: true },
-  { spotNumber: "12", label: "Compact only", notes: "Tight, no large vehicles", active: true },
+  {
+    spotNumber: "12",
+    label: "Compact only",
+    notes: "Tight, no large vehicles",
+    active: true,
+  },
 ];
 
 // ============================================================
@@ -182,7 +247,9 @@ export const DEFAULT_SPOTS: ParkingSpot[] = [
 export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
   ({ spots, people, requests }) => {
     const nowTimestamp = wish<number>({ query: "#now" });
-    const todayStr = computed(() => toLocalDateStr(nowTimestamp.result || Date.now()));
+    const todayStr = computed(() =>
+      toLocalDateStr(nowTimestamp.result || Date.now())
+    );
     const weekDatesArr = computed(() => getWeekDates(todayStr));
 
     // UI state
@@ -241,62 +308,101 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       adminMode.set(!adminMode.get());
     });
 
-    const submitRequest = action<{ personName: string; date: string }>(({ personName: pNameArg, date: dateArg }) => {
-      // Use provided args, or fall back to form state
-      const pName = pNameArg || selectedPersonName.get();
-      const date = dateArg || requestDate.get();
+    const submitRequest = action<{ personName: string; date: string }>(
+      ({ personName: pNameArg, date: dateArg }) => {
+        // Use provided args, or fall back to form state
+        const pName = pNameArg || selectedPersonName.get();
+        const date = dateArg || requestDate.get();
 
-      if (!pName || !date || date < todayStr) {
-        requestResult.set("Please select a person and a valid date.");
-        return;
-      }
+        if (!pName || !date || date < todayStr) {
+          requestResult.set("Please select a person and a valid date.");
+          return;
+        }
 
-      const allPeople = people.get();
-      const person = allPeople.find((p) => p.name === pName);
-      if (!person) {
-        requestResult.set("Selected person not found.");
-        return;
-      }
+        const allPeople = people.get();
+        const person = allPeople.find((p) => p.name === pName);
+        if (!person) {
+          requestResult.set("Selected person not found.");
+          return;
+        }
 
-      const existingReqs = requests.get();
-      const duplicate = existingReqs.find(
-        (r) => r.personName === pName && r.date === date && r.status !== "cancelled"
-      );
-      if (duplicate) {
-        const spotInfo = duplicate.assignedSpot ? ` (Spot #${duplicate.assignedSpot})` : "";
-        requestResult.set(`You already have an active request for ${formatDateDisplay(date)}${spotInfo}.`);
-        return;
-      }
+        const existingReqs = requests.get();
+        const duplicate = existingReqs.find(
+          (r) =>
+            r.personName === pName && r.date === date &&
+            r.status !== "cancelled",
+        );
+        if (duplicate) {
+          const spotInfo = duplicate.assignedSpot
+            ? ` (Spot #${duplicate.assignedSpot})`
+            : "";
+          requestResult.set(
+            `You already have an active request for ${
+              formatDateDisplay(date)
+            }${spotInfo}.`,
+          );
+          return;
+        }
 
-      const allSpotsArr = [...spots.get()];
-      const assignedSpot = runAutoAllocation(pName, date, [...allPeople], allSpotsArr, [...existingReqs]);
+        const allSpotsArr = [...spots.get()];
+        const assignedSpot = runAutoAllocation(
+          pName,
+          date,
+          [...allPeople],
+          allSpotsArr,
+          [...existingReqs],
+        );
 
-      const newReq: SpotRequest = {
-        id: genId(),
-        personName: pName,
-        date,
-        status: assignedSpot ? "allocated" : "denied",
-        assignedSpot,
-        autoAllocated: true,
-      };
+        const newReq: SpotRequest = {
+          id: genId(),
+          personName: pName,
+          date,
+          status: assignedSpot ? "allocated" : "denied",
+          assignedSpot,
+          autoAllocated: true,
+        };
 
-      requests.set([...existingReqs, newReq]);
+        requests.set([...existingReqs, newReq]);
 
-      if (assignedSpot) {
-        requestResult.set(`Spot #${assignedSpot} allocated to ${pName} for ${formatDateDisplay(date)}.`);
-      } else {
-        const activeCount = allSpotsArr.filter((s) => s.active).length;
-        requestResult.set(`No spots available for ${formatDateDisplay(date)} — all ${activeCount} spots are taken.`);
-      }
-    });
+        if (assignedSpot) {
+          requestResult.set(
+            `Spot #${assignedSpot} allocated to ${pName} for ${
+              formatDateDisplay(date)
+            }.`,
+          );
+        } else {
+          const activeCount = allSpotsArr.filter((s) => s.active).length;
+          requestResult.set(
+            `No spots available for ${
+              formatDateDisplay(date)
+            } — all ${activeCount} spots are taken.`,
+          );
+        }
+      },
+    );
 
     const cancelRequest = action<{ requestId: string }>(({ requestId }) => {
       requests.set(
-        requests.get().map((r) => r.id === requestId ? { ...r, status: "cancelled" as RequestStatus } : r)
+        requests.get().map((r) =>
+          r.id === requestId
+            ? { ...r, status: "cancelled" as RequestStatus }
+            : r
+        ),
       );
     });
 
-    const addPerson = action<{ name: string; email: string; commuteMode: CommuteMode; priorityRank: number; defaultSpot: string; preferences: string }>(({ name, email, commuteMode, priorityRank, defaultSpot, preferences }) => {
+    const addPerson = action<
+      {
+        name: string;
+        email: string;
+        commuteMode: CommuteMode;
+        priorityRank: number;
+        defaultSpot: string;
+        preferences: string;
+      }
+    >((
+      { name, email, commuteMode, priorityRank, defaultSpot, preferences },
+    ) => {
       const trimName = name.trim();
       const trimEmail = email.trim();
       if (!trimName || !trimEmail) return;
@@ -331,13 +437,35 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       addPersonFormOpen.set(false);
     });
 
-    const editPerson = action<{ originalName: string; name: string; email: string; commuteMode: CommuteMode; priorityRank: number; defaultSpot: string; preferences: string }>(({ originalName, name, email, commuteMode, priorityRank, defaultSpot, preferences }) => {
+    const editPerson = action<
+      {
+        originalName: string;
+        name: string;
+        email: string;
+        commuteMode: CommuteMode;
+        priorityRank: number;
+        defaultSpot: string;
+        preferences: string;
+      }
+    >((
+      {
+        originalName,
+        name,
+        email,
+        commuteMode,
+        priorityRank,
+        defaultSpot,
+        preferences,
+      },
+    ) => {
       const trimName = name.trim();
       const trimEmail = email.trim();
       if (!trimName || !trimEmail) return;
 
       const current = people.get();
-      if (trimName !== originalName && current.some((p) => p.name === trimName)) return;
+      if (
+        trimName !== originalName && current.some((p) => p.name === trimName)
+      ) return;
 
       people.set(current.map((p) =>
         p.name === originalName
@@ -361,7 +489,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
         requests.set(
           requests.get().map((r) =>
             r.personName === originalName ? { ...r, personName: trimName } : r
-          )
+          ),
         );
       }
 
@@ -378,7 +506,9 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     });
 
     const movePersonUp = action<{ name: string }>(({ name }) => {
-      const sorted = [...people.get()].sort((a, b) => a.priorityRank - b.priorityRank);
+      const sorted = [...people.get()].sort((a, b) =>
+        a.priorityRank - b.priorityRank
+      );
       const idx = sorted.findIndex((p) => p.name === name);
       if (idx <= 0) return;
       const above = sorted[idx - 1];
@@ -390,12 +520,14 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
           if (p.name === above.name) return { ...p, priorityRank: currentRank };
           if (p.name === current.name) return { ...p, priorityRank: aboveRank };
           return p;
-        })
+        }),
       );
     });
 
     const movePersonDown = action<{ name: string }>(({ name }) => {
-      const sorted = [...people.get()].sort((a, b) => a.priorityRank - b.priorityRank);
+      const sorted = [...people.get()].sort((a, b) =>
+        a.priorityRank - b.priorityRank
+      );
       const idx = sorted.findIndex((p) => p.name === name);
       if (idx < 0 || idx >= sorted.length - 1) return;
       const below = sorted[idx + 1];
@@ -407,11 +539,13 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
           if (p.name === below.name) return { ...p, priorityRank: currentRank };
           if (p.name === current.name) return { ...p, priorityRank: belowRank };
           return p;
-        })
+        }),
       );
     });
 
-    const addSpot = action<{ spotNumber: string; label: string; notes: string }>(({ spotNumber: spotNumArg, label, notes }) => {
+    const addSpot = action<
+      { spotNumber: string; label: string; notes: string }
+    >(({ spotNumber: spotNumArg, label, notes }) => {
       const trimNum = spotNumArg.trim();
       if (!trimNum) return;
       const current = spots.get();
@@ -420,68 +554,109 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
         return;
       }
       addSpotError.set("");
-      spots.set([...current, { spotNumber: trimNum, label: label.trim(), notes: notes.trim(), active: true }]);
+      spots.set([...current, {
+        spotNumber: trimNum,
+        label: label.trim(),
+        notes: notes.trim(),
+        active: true,
+      }]);
       newSpotNumber.set("");
       newSpotLabel.set("");
       newSpotNotes.set("");
       addSpotFormOpen.set(false);
     });
 
-    const editSpot = action<{ originalNumber: string; spotNumber: string; label: string; notes: string; active: boolean }>(({ originalNumber, spotNumber: spotNumArg2, label, notes, active }) => {
+    const editSpot = action<
+      {
+        originalNumber: string;
+        spotNumber: string;
+        label: string;
+        notes: string;
+        active: boolean;
+      }
+    >(({ originalNumber, spotNumber: spotNumArg2, label, notes, active }) => {
       const trimNum = spotNumArg2.trim();
       if (!trimNum) return;
       const current = spots.get();
-      if (trimNum !== originalNumber && current.some((s) => s.spotNumber === trimNum)) return;
+      if (
+        trimNum !== originalNumber &&
+        current.some((s) => s.spotNumber === trimNum)
+      ) return;
 
-      spots.set(current.map((s) =>
-        s.spotNumber === originalNumber
-          ? { ...s, spotNumber: trimNum, label: label.trim(), notes: notes.trim(), active }
-          : s
-      ));
+      spots.set(
+        current.map((s) =>
+          s.spotNumber === originalNumber
+            ? {
+              ...s,
+              spotNumber: trimNum,
+              label: label.trim(),
+              notes: notes.trim(),
+              active,
+            }
+            : s
+        ),
+      );
 
       if (trimNum !== originalNumber) {
         requests.set(
           requests.get().map((r) =>
-            r.assignedSpot === originalNumber ? { ...r, assignedSpot: trimNum } : r
-          )
+            r.assignedSpot === originalNumber
+              ? { ...r, assignedSpot: trimNum }
+              : r
+          ),
         );
       }
       editingSpotNumber.set(null);
     });
 
-    const removeSpot = action<{ spotNumber: string }>(({ spotNumber: spotNumArg3 }) => {
-      spots.set(spots.get().filter((s) => s.spotNumber !== spotNumArg3));
-      removeSpotConfirmTarget.set(null);
-    });
+    const removeSpot = action<{ spotNumber: string }>(
+      ({ spotNumber: spotNumArg3 }) => {
+        spots.set(spots.get().filter((s) => s.spotNumber !== spotNumArg3));
+        removeSpotConfirmTarget.set(null);
+      },
+    );
 
-    const adminOverride = action<{ spotNumber: string; date: string; personName: string }>(({ spotNumber, date, personName }) => {
+    const adminOverride = action<
+      { spotNumber: string; date: string; personName: string }
+    >(({ spotNumber, date, personName }) => {
       if (!personName || !spotNumber || !date) return;
 
       const existingReqs = requests.get();
 
       const spotExisting = existingReqs.find(
-        (r) => r.assignedSpot === spotNumber && r.date === date && r.status === "allocated"
+        (r) =>
+          r.assignedSpot === spotNumber && r.date === date &&
+          r.status === "allocated",
       );
 
       if (spotExisting && spotExisting.personName !== personName) {
         requests.set(
           existingReqs.map((r) =>
-            r.id === spotExisting.id ? { ...r, status: "cancelled" as RequestStatus } : r
-          )
+            r.id === spotExisting.id
+              ? { ...r, status: "cancelled" as RequestStatus }
+              : r
+          ),
         );
       }
 
       const personExisting = requests.get().find(
-        (r) => r.personName === personName && r.date === date && r.status !== "cancelled"
+        (r) =>
+          r.personName === personName && r.date === date &&
+          r.status !== "cancelled",
       );
 
       if (personExisting) {
         requests.set(
           requests.get().map((r) =>
             r.id === personExisting.id
-              ? { ...r, assignedSpot: spotNumber, status: "allocated" as RequestStatus, autoAllocated: false }
+              ? {
+                ...r,
+                assignedSpot: spotNumber,
+                status: "allocated" as RequestStatus,
+                autoAllocated: false,
+              }
               : r
-          )
+          ),
         );
       } else {
         requests.set([
@@ -517,57 +692,69 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
 
     const cancelEditPerson = action(() => editingPersonName.set(null));
 
-    const saveEditPerson = action<{ originalName: string }>(({ originalName }) => {
-      editPerson.send({
-        originalName,
-        name: editName.get(),
-        email: editEmail.get(),
-        commuteMode: editCommuteMode.get(),
-        priorityRank: parseInt(editPriorityRank.get()) || 1,
-        defaultSpot: editDefaultSpot.get(),
-        preferences: editPreferences.get(),
-      });
-    });
+    const saveEditPerson = action<{ originalName: string }>(
+      ({ originalName }) => {
+        editPerson.send({
+          originalName,
+          name: editName.get(),
+          email: editEmail.get(),
+          commuteMode: editCommuteMode.get(),
+          priorityRank: parseInt(editPriorityRank.get()) || 1,
+          defaultSpot: editDefaultSpot.get(),
+          preferences: editPreferences.get(),
+        });
+      },
+    );
 
     const initiateRemovePerson = action<{ name: string }>(({ name }) => {
       removePersonConfirmTarget.set(name);
     });
 
-    const cancelRemovePerson = action(() => removePersonConfirmTarget.set(null));
+    const cancelRemovePerson = action(() =>
+      removePersonConfirmTarget.set(null)
+    );
 
-    const startEditSpot = action<{ spotNumber: string }>(({ spotNumber: spotNumArg4 }) => {
-      const s = spots.get().find((x) => x.spotNumber === spotNumArg4);
-      if (!s) return;
-      editingSpotNumber.set(spotNumArg4);
-      editSpotNum.set(s.spotNumber);
-      editSpotLabel.set(s.label);
-      editSpotNotes.set(s.notes);
-      editSpotActive.set(s.active);
-    });
+    const startEditSpot = action<{ spotNumber: string }>(
+      ({ spotNumber: spotNumArg4 }) => {
+        const s = spots.get().find((x) => x.spotNumber === spotNumArg4);
+        if (!s) return;
+        editingSpotNumber.set(spotNumArg4);
+        editSpotNum.set(s.spotNumber);
+        editSpotLabel.set(s.label);
+        editSpotNotes.set(s.notes);
+        editSpotActive.set(s.active);
+      },
+    );
 
     const cancelEditSpot = action(() => editingSpotNumber.set(null));
 
-    const saveEditSpot = action<{ originalNumber: string }>(({ originalNumber }) => {
-      editSpot.send({
-        originalNumber,
-        spotNumber: editSpotNum.get(),
-        label: editSpotLabel.get(),
-        notes: editSpotNotes.get(),
-        active: editSpotActive.get(),
-      });
-    });
+    const saveEditSpot = action<{ originalNumber: string }>(
+      ({ originalNumber }) => {
+        editSpot.send({
+          originalNumber,
+          spotNumber: editSpotNum.get(),
+          label: editSpotLabel.get(),
+          notes: editSpotNotes.get(),
+          active: editSpotActive.get(),
+        });
+      },
+    );
 
-    const initiateRemoveSpot = action<{ spotNumber: string }>(({ spotNumber: spotNumArg5 }) => {
-      removeSpotConfirmTarget.set(spotNumArg5);
-    });
+    const initiateRemoveSpot = action<{ spotNumber: string }>(
+      ({ spotNumber: spotNumArg5 }) => {
+        removeSpotConfirmTarget.set(spotNumArg5);
+      },
+    );
 
     const cancelRemoveSpot = action(() => removeSpotConfirmTarget.set(null));
 
-    const openGridOverride = action<{ spotNumber: string; date: string }>(({ spotNumber, date }) => {
-      gridOverrideSpot.set(spotNumber);
-      gridOverrideDate.set(date);
-      overridePersonName.set(people.get()[0]?.name ?? "");
-    });
+    const openGridOverride = action<{ spotNumber: string; date: string }>(
+      ({ spotNumber, date }) => {
+        gridOverrideSpot.set(spotNumber);
+        gridOverrideDate.set(date);
+        overridePersonName.set(people.get()[0]?.name ?? "");
+      },
+    );
 
     const cancelOverride = action(() => {
       gridOverrideSpot.set("");
@@ -593,20 +780,26 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       });
     });
 
-    const toggleAddPersonForm = action(() => addPersonFormOpen.set(!addPersonFormOpen.get()));
-    const toggleAddSpotForm = action(() => addSpotFormOpen.set(!addSpotFormOpen.get()));
+    const toggleAddPersonForm = action(() =>
+      addPersonFormOpen.set(!addPersonFormOpen.get())
+    );
+    const toggleAddSpotForm = action(() =>
+      addSpotFormOpen.set(!addSpotFormOpen.get())
+    );
 
     // --------------------------------------------------------
     // Helper computeds for UI (keep action closures using .get())
     // --------------------------------------------------------
 
-    const isDateInPast = computed(() => requestDate.get() < todayStr);
+    const _isDateInPast = computed(() => requestDate.get() < todayStr);
 
     const spotDeactivateWarning = computed(() => {
       const editNum = editingSpotNumber.get();
       if (!editNum || editSpotActive.get()) return false;
       return requests.get().some(
-        (r) => r.assignedSpot === editNum && r.status === "allocated" && r.date >= todayStr
+        (r) =>
+          r.assignedSpot === editNum && r.status === "allocated" &&
+          r.date >= todayStr,
       );
     });
 
@@ -664,13 +857,18 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
         const spotNum = spot.spotNumber;
         const cells = weekDatesArr.map((dateStr) => {
           const req = allRequests.find(
-            (r) => r.date === dateStr && r.status === "allocated" && r.assignedSpot === spotNum
+            (r) =>
+              r.date === dateStr && r.status === "allocated" &&
+              r.assignedSpot === spotNum,
           ) ?? null;
           const isAllocated = req !== null;
           const isOwn = req !== null && req.personName === currentPerson;
           const isManual = req !== null && req.autoAllocated === false;
-          const isOverride = overrideSpot === spotNum && overrideDate === dateStr;
-          const conflictName = req && req.personName !== overridePerson ? req.personName : null;
+          const isOverride = overrideSpot === spotNum &&
+            overrideDate === dateStr;
+          const conflictName = req && req.personName !== overridePerson
+            ? req.personName
+            : null;
           const isToday = dateStr === todayStr;
           const bgColor = isAllocated
             ? (isToday ? "#dbeafe" : "#eff6ff")
@@ -703,7 +901,9 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
 
       return allSpots.map((spot) => {
         const req = allRequests.find(
-          (r) => r.date === todayStr && r.status === "allocated" && r.assignedSpot === spot.spotNumber
+          (r) =>
+            r.date === todayStr && r.status === "allocated" &&
+            r.assignedSpot === spot.spotNumber,
         ) ?? null;
         return {
           spotNumber: spot.spotNumber,
@@ -718,7 +918,9 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
 
     // Pre-compute sorted people list for admin panel
     const adminPeopleData = computed(() => {
-      const sorted = [...people.get()].sort((a, b) => a.priorityRank - b.priorityRank);
+      const sorted = [...people.get()].sort((a, b) =>
+        a.priorityRank - b.priorityRank
+      );
       return sorted.map((p, idx) => ({
         name: p.name,
         email: p.email,
@@ -760,7 +962,9 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                 {todayFormatted}
               </span>
               <ct-button
-                variant={computed(() => adminMode.get() ? "primary" : "secondary")}
+                variant={computed(() =>
+                  adminMode.get() ? "primary" : "secondary"
+                )}
                 size="sm"
                 onClick={() => toggleAdminMode.send()}
               >
@@ -771,7 +975,6 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
 
           <ct-vscroll flex showScrollbar>
             <ct-vstack gap="3" style="padding: 1rem;">
-
               {/* === Section A: Today Strip === */}
               <ct-vstack gap="1">
                 <ct-heading level={6}>Today — {todayFormatted}</ct-heading>
@@ -795,7 +998,9 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                   const stripShowAdmin = stripCell.showAdmin;
                   return (
                     <ct-card
-                      style={`padding: 0.625rem 0.875rem; border-left: 3px solid ${stripIsAvailable ? "#22c55e" : "#93c5fd"};`}
+                      style={`padding: 0.625rem 0.875rem; border-left: 3px solid ${
+                        stripIsAvailable ? "#22c55e" : "#93c5fd"
+                      };`}
                     >
                       <ct-hstack justify="between" align="center" gap="2" wrap>
                         <ct-hstack gap="2" align="center">
@@ -816,7 +1021,9 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                             display: "inline-block",
                             padding: "2px 10px",
                             borderRadius: "9999px",
-                            backgroundColor: stripIsAvailable ? "#dcfce7" : "#dbeafe",
+                            backgroundColor: stripIsAvailable
+                              ? "#dcfce7"
+                              : "#dbeafe",
                             color: stripIsAvailable ? "#166534" : "#1e40af",
                             fontSize: "0.75rem",
                             fontWeight: "500",
@@ -831,7 +1038,10 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                               <ct-button
                                 variant="secondary"
                                 size="sm"
-                                onClick={() => cancelRequest.send({ requestId: stripReq.id })}
+                                onClick={() =>
+                                  cancelRequest.send({
+                                    requestId: stripReq.id,
+                                  })}
                               >
                                 Cancel
                               </ct-button>
@@ -843,7 +1053,11 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                               <ct-button
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => openGridOverride.send({ spotNumber: stripSpotNumber, date: todayStr })}
+                                onClick={() =>
+                                  openGridOverride.send({
+                                    spotNumber: stripSpotNumber,
+                                    date: todayStr,
+                                  })}
                               >
                                 Assign
                               </ct-button>
@@ -863,7 +1077,9 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
 
                   <ct-hstack gap="2" align="end" wrap>
                     <ct-vstack gap="1" style="flex: 1; min-width: 140px;">
-                      <span style="font-size: 0.75rem; font-weight: 500;">Person</span>
+                      <span style="font-size: 0.75rem; font-weight: 500;">
+                        Person
+                      </span>
                       {noPeople
                         ? (
                           <span style="font-size: 0.875rem; color: var(--ct-color-gray-500);">
@@ -880,14 +1096,24 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                     </ct-vstack>
 
                     <ct-vstack gap="1" style="min-width: 140px;">
-                      <span style="font-size: 0.75rem; font-weight: 500;">Date</span>
-                      <ct-input $value={requestDate} type="date" style="width: 100%;" />
+                      <span style="font-size: 0.75rem; font-weight: 500;">
+                        Date
+                      </span>
+                      <ct-input
+                        $value={requestDate}
+                        type="date"
+                        style="width: 100%;"
+                      />
                     </ct-vstack>
 
                     <ct-button
                       variant="primary"
                       disabled={requestDisabled}
-                      onClick={() => submitRequest.send({ personName: selectedPersonName.get(), date: requestDate.get() })}
+                      onClick={() =>
+                        submitRequest.send({
+                          personName: selectedPersonName.get(),
+                          date: requestDate.get(),
+                        })}
                     >
                       Request Spot
                     </ct-button>
@@ -925,20 +1151,24 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
 
                 {weekMonthInfo
                   ? (
-                    <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">{weekMonthInfo}</span>
+                    <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
+                      {weekMonthInfo}
+                    </span>
                   )
                   : null}
 
-                <div
-                  style="display: grid; grid-template-columns: 5rem repeat(7, 1fr); gap: 2px; overflow-x: auto;"
-                >
+                <div style="display: grid; grid-template-columns: 5rem repeat(7, 1fr); gap: 2px; overflow-x: auto;">
                   {/* Corner spacer */}
                   <div />
 
                   {/* Date headers */}
                   {weekDatesArr.map((dateStr) => {
-                    const shortName = computed(() => formatDateShort(dateStr).shortName);
-                    const dayNum = computed(() => formatDateShort(dateStr).dayNum);
+                    const shortName = computed(() =>
+                      formatDateShort(dateStr).shortName
+                    );
+                    const dayNum = computed(() =>
+                      formatDateShort(dateStr).dayNum
+                    );
                     const isToday = computed(() => dateStr === todayStr);
                     return (
                       <div
@@ -949,7 +1179,9 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                           fontWeight: isToday ? "700" : "400",
                           backgroundColor: isToday ? "#fef9c3" : "transparent",
                           borderRadius: "4px 4px 0 0",
-                          color: isToday ? "#92400e" : "var(--ct-color-gray-600)",
+                          color: isToday
+                            ? "#92400e"
+                            : "var(--ct-color-gray-600)",
                         }}
                       >
                         <span style="display: block;">{shortName}</span>
@@ -1008,13 +1240,19 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                 >
                                   <ct-select
                                     $value={overridePersonName}
-                                    items={computed(() => people.get().map((p) => ({ label: p.name, value: p.name })))}
+                                    items={computed(() =>
+                                      people.get().map((p) => ({
+                                        label: p.name,
+                                        value: p.name,
+                                      }))
+                                    )}
                                     style="font-size: 0.6875rem;"
                                   />
                                   {gridConflictName
                                     ? (
                                       <span style="font-size: 0.625rem; color: var(--ct-color-red-600);">
-                                        Already assigned to {gridConflictName}. Overwrite?
+                                        Already assigned to{" "}
+                                        {gridConflictName}. Overwrite?
                                       </span>
                                     )
                                     : null}
@@ -1031,7 +1269,11 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                     >
                                       OK
                                     </ct-button>
-                                    <ct-button variant="ghost" size="sm" onClick={() => cancelOverride.send()}>
+                                    <ct-button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => cancelOverride.send()}
+                                    >
                                       ×
                                     </ct-button>
                                   </ct-hstack>
@@ -1059,7 +1301,10 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                         variant="ghost"
                                         size="sm"
                                         style="padding: 0; font-size: 0.625rem; line-height: 1; min-height: unset; color: var(--ct-color-red-500);"
-                                        onClick={() => cancelRequest.send({ requestId: gridReq.id })}
+                                        onClick={() =>
+                                          cancelRequest.send({
+                                            requestId: gridReq.id,
+                                          })}
                                       >
                                         ×
                                       </ct-button>
@@ -1067,9 +1312,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                     : null}
                                   {gridIsManual
                                     ? (
-                                      <span
-                                        style="position: absolute; top: 2px; right: 3px; font-size: 0.5rem; color: var(--ct-color-gray-400); font-weight: 700;"
-                                      >
+                                      <span style="position: absolute; top: 2px; right: 3px; font-size: 0.5rem; color: var(--ct-color-gray-400); font-weight: 700;">
                                         M
                                       </span>
                                     )
@@ -1079,7 +1322,11 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                               : (
                                 <>
                                   <span
-                                    style={`color: ${gridIsToday ? "#92400e" : "var(--ct-color-green-500)"}; font-size: 0.625rem;`}
+                                    style={`color: ${
+                                      gridIsToday
+                                        ? "#92400e"
+                                        : "var(--ct-color-green-500)"
+                                    }; font-size: 0.625rem;`}
                                   >
                                     Free
                                   </span>
@@ -1090,7 +1337,10 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                         size="sm"
                                         style="font-size: 0.625rem; opacity: 0.6; padding: 0;"
                                         onClick={() =>
-                                          openGridOverride.send({ spotNumber: gridSpotNumber, date: gridDateStr })}
+                                          openGridOverride.send({
+                                            spotNumber: gridSpotNumber,
+                                            date: gridDateStr,
+                                          })}
                                       >
                                         +
                                       </ct-button>
@@ -1114,7 +1364,11 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                     <ct-vstack gap="2">
                       <ct-hstack justify="between" align="center">
                         <ct-heading level={6}>People</ct-heading>
-                        <ct-button variant="primary" size="sm" onClick={() => toggleAddPersonForm.send()}>
+                        <ct-button
+                          variant="primary"
+                          size="sm"
+                          onClick={() => toggleAddPersonForm.send()}
+                        >
                           + Add Person
                         </ct-button>
                       </ct-hstack>
@@ -1133,42 +1387,109 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                         : null}
 
                       {adminPeopleData.map((person) => {
-                        const { name: personName, email, commuteMode, priorityRank, defaultSpot, spotPreferences, isFirst, isLast } = person;
-                        const isEditing = computed(() => editingPersonName.get() === personName);
-                        const isRemoveConfirm = computed(() => removePersonConfirmTarget.get() === personName);
-                        const activeSpotOpts = computed(() => spots.get()
-                          .filter((s) => s.active)
-                          .map((s) => ({ label: `#${s.spotNumber}${s.label ? " — " + s.label : ""}`, value: s.spotNumber })));
-                        const editSpotItems = computed(() => [{ label: "None", value: "" }, ...activeSpotOpts]);
+                        const {
+                          name: personName,
+                          email,
+                          commuteMode,
+                          priorityRank,
+                          defaultSpot,
+                          spotPreferences,
+                          isFirst,
+                          isLast,
+                        } = person;
+                        const isEditing = computed(() =>
+                          editingPersonName.get() === personName
+                        );
+                        const isRemoveConfirm = computed(() =>
+                          removePersonConfirmTarget.get() === personName
+                        );
+                        const activeSpotOpts = computed(() =>
+                          spots.get()
+                            .filter((s) => s.active)
+                            .map((s) => ({
+                              label: `#${s.spotNumber}${
+                                s.label ? " — " + s.label : ""
+                              }`,
+                              value: s.spotNumber,
+                            }))
+                        );
+                        const editSpotItems = computed(
+                          () => [
+                            { label: "None", value: "" },
+                            ...activeSpotOpts,
+                          ],
+                        );
 
                         return (
                           <ct-card
-                            style={computed(() => isEditing ? "border: 2px solid var(--ct-color-blue-300);" : "")}
+                            style={computed(() =>
+                              isEditing
+                                ? "border: 2px solid var(--ct-color-blue-300);"
+                                : ""
+                            )}
                           >
                             {isEditing
                               ? (
                                 <ct-vstack gap="2">
                                   <ct-hstack gap="2" wrap>
-                                    <ct-vstack gap="1" style="flex: 1; min-width: 120px;">
-                                      <span style="font-size: 0.75rem; font-weight: 500;">Name *</span>
-                                      <ct-input $value={editName} placeholder="Full name" style="width: 100%;" />
+                                    <ct-vstack
+                                      gap="1"
+                                      style="flex: 1; min-width: 120px;"
+                                    >
+                                      <span style="font-size: 0.75rem; font-weight: 500;">
+                                        Name *
+                                      </span>
+                                      <ct-input
+                                        $value={editName}
+                                        placeholder="Full name"
+                                        style="width: 100%;"
+                                      />
                                     </ct-vstack>
-                                    <ct-vstack gap="1" style="flex: 1; min-width: 120px;">
-                                      <span style="font-size: 0.75rem; font-weight: 500;">Email *</span>
-                                      <ct-input $value={editEmail} placeholder="email@company.com" style="width: 100%;" />
+                                    <ct-vstack
+                                      gap="1"
+                                      style="flex: 1; min-width: 120px;"
+                                    >
+                                      <span style="font-size: 0.75rem; font-weight: 500;">
+                                        Email *
+                                      </span>
+                                      <ct-input
+                                        $value={editEmail}
+                                        placeholder="email@company.com"
+                                        style="width: 100%;"
+                                      />
                                     </ct-vstack>
                                   </ct-hstack>
                                   <ct-hstack gap="2" wrap>
-                                    <ct-vstack gap="1" style="min-width: 100px;">
-                                      <span style="font-size: 0.75rem; font-weight: 500;">Commute</span>
-                                      <ct-select $value={editCommuteMode} items={commuteModeOptions} style="width: 100%;" />
+                                    <ct-vstack
+                                      gap="1"
+                                      style="min-width: 100px;"
+                                    >
+                                      <span style="font-size: 0.75rem; font-weight: 500;">
+                                        Commute
+                                      </span>
+                                      <ct-select
+                                        $value={editCommuteMode}
+                                        items={commuteModeOptions}
+                                        style="width: 100%;"
+                                      />
                                     </ct-vstack>
                                     <ct-vstack gap="1" style="min-width: 80px;">
-                                      <span style="font-size: 0.75rem; font-weight: 500;">Priority *</span>
-                                      <ct-input $value={editPriorityRank} type="number" style="width: 5rem;" />
+                                      <span style="font-size: 0.75rem; font-weight: 500;">
+                                        Priority *
+                                      </span>
+                                      <ct-input
+                                        $value={editPriorityRank}
+                                        type="number"
+                                        style="width: 5rem;"
+                                      />
                                     </ct-vstack>
-                                    <ct-vstack gap="1" style="min-width: 100px;">
-                                      <span style="font-size: 0.75rem; font-weight: 500;">Default Spot</span>
+                                    <ct-vstack
+                                      gap="1"
+                                      style="min-width: 100px;"
+                                    >
+                                      <span style="font-size: 0.75rem; font-weight: 500;">
+                                        Default Spot
+                                      </span>
                                       <ct-select
                                         $value={editDefaultSpot}
                                         items={editSpotItems}
@@ -1180,17 +1501,28 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                     <span style="font-size: 0.75rem; font-weight: 500;">
                                       Preferences (comma-separated spot numbers)
                                     </span>
-                                    <ct-input $value={editPreferences} placeholder="e.g. 1, 5, 12" style="width: 100%;" />
+                                    <ct-input
+                                      $value={editPreferences}
+                                      placeholder="e.g. 1, 5, 12"
+                                      style="width: 100%;"
+                                    />
                                   </ct-vstack>
                                   <ct-hstack gap="2">
                                     <ct-button
                                       variant="primary"
                                       size="sm"
-                                      onClick={() => saveEditPerson.send({ originalName: personName })}
+                                      onClick={() =>
+                                        saveEditPerson.send({
+                                          originalName: personName,
+                                        })}
                                     >
                                       Save
                                     </ct-button>
-                                    <ct-button variant="secondary" size="sm" onClick={() => cancelEditPerson.send()}>
+                                    <ct-button
+                                      variant="secondary"
+                                      size="sm"
+                                      onClick={() => cancelEditPerson.send()}
+                                    >
                                       Cancel
                                     </ct-button>
                                   </ct-hstack>
@@ -1198,10 +1530,17 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                               )
                               : (
                                 <ct-vstack gap="1">
-                                  <ct-hstack justify="between" align="start" gap="2" wrap>
+                                  <ct-hstack
+                                    justify="between"
+                                    align="start"
+                                    gap="2"
+                                    wrap
+                                  >
                                     <ct-vstack gap="0">
                                       <ct-hstack gap="2" align="center" wrap>
-                                        <span style="font-weight: 600;">{personName}</span>
+                                        <span style="font-weight: 600;">
+                                          {personName}
+                                        </span>
                                         <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
                                           #{priorityRank}
                                         </span>
@@ -1226,7 +1565,10 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                         variant="ghost"
                                         size="sm"
                                         disabled={isFirst}
-                                        onClick={() => movePersonUp.send({ name: personName })}
+                                        onClick={() =>
+                                          movePersonUp.send({
+                                            name: personName,
+                                          })}
                                       >
                                         ↑
                                       </ct-button>
@@ -1234,21 +1576,30 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                         variant="ghost"
                                         size="sm"
                                         disabled={isLast}
-                                        onClick={() => movePersonDown.send({ name: personName })}
+                                        onClick={() =>
+                                          movePersonDown.send({
+                                            name: personName,
+                                          })}
                                       >
                                         ↓
                                       </ct-button>
                                       <ct-button
                                         variant="ghost"
                                         size="sm"
-                                        onClick={() => startEditPerson.send({ name: personName })}
+                                        onClick={() =>
+                                          startEditPerson.send({
+                                            name: personName,
+                                          })}
                                       >
                                         Edit
                                       </ct-button>
                                       <ct-button
                                         variant="ghost"
                                         size="sm"
-                                        onClick={() => initiateRemovePerson.send({ name: personName })}
+                                        onClick={() =>
+                                          initiateRemovePerson.send({
+                                            name: personName,
+                                          })}
                                       >
                                         Remove
                                       </ct-button>
@@ -1258,7 +1609,9 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                   {spotPreferences.length > 0
                                     ? (
                                       <span style="font-size: 0.75rem; color: var(--ct-color-gray-400);">
-                                        Prefers: {spotPreferences.map((n) => "#" + n).join(", ")}
+                                        Prefers: {spotPreferences.map((n) =>
+                                          "#" + n
+                                        ).join(", ")}
                                       </span>
                                     )
                                     : null}
@@ -1268,17 +1621,27 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                       <ct-card style="background: #fef2f2; border: 1px solid #fecaca;">
                                         <ct-vstack gap="1">
                                           <span style="font-size: 0.75rem; color: var(--ct-color-red-700);">
-                                            This person has upcoming requests. They will be preserved. Remove anyway?
+                                            This person has upcoming requests.
+                                            They will be preserved. Remove
+                                            anyway?
                                           </span>
                                           <ct-hstack gap="2">
                                             <ct-button
                                               variant="primary"
                                               size="sm"
-                                              onClick={() => removePerson.send({ name: personName })}
+                                              onClick={() =>
+                                                removePerson.send({
+                                                  name: personName,
+                                                })}
                                             >
                                               Remove
                                             </ct-button>
-                                            <ct-button variant="ghost" size="sm" onClick={() => cancelRemovePerson.send()}>
+                                            <ct-button
+                                              variant="ghost"
+                                              size="sm"
+                                              onClick={() =>
+                                                cancelRemovePerson.send()}
+                                            >
                                               Cancel
                                             </ct-button>
                                           </ct-hstack>
@@ -1298,33 +1661,69 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                             <ct-vstack gap="2">
                               <ct-heading level={6}>Add Person</ct-heading>
                               <ct-hstack gap="2" wrap>
-                                <ct-vstack gap="1" style="flex: 1; min-width: 120px;">
-                                  <span style="font-size: 0.75rem; font-weight: 500;">Name *</span>
-                                  <ct-input $value={newPersonName} placeholder="Full name" style="width: 100%;" />
+                                <ct-vstack
+                                  gap="1"
+                                  style="flex: 1; min-width: 120px;"
+                                >
+                                  <span style="font-size: 0.75rem; font-weight: 500;">
+                                    Name *
+                                  </span>
+                                  <ct-input
+                                    $value={newPersonName}
+                                    placeholder="Full name"
+                                    style="width: 100%;"
+                                  />
                                 </ct-vstack>
-                                <ct-vstack gap="1" style="flex: 1; min-width: 120px;">
-                                  <span style="font-size: 0.75rem; font-weight: 500;">Email *</span>
-                                  <ct-input $value={newPersonEmail} placeholder="email@company.com" style="width: 100%;" />
+                                <ct-vstack
+                                  gap="1"
+                                  style="flex: 1; min-width: 120px;"
+                                >
+                                  <span style="font-size: 0.75rem; font-weight: 500;">
+                                    Email *
+                                  </span>
+                                  <ct-input
+                                    $value={newPersonEmail}
+                                    placeholder="email@company.com"
+                                    style="width: 100%;"
+                                  />
                                 </ct-vstack>
                               </ct-hstack>
                               <ct-hstack gap="2" wrap>
                                 <ct-vstack gap="1" style="min-width: 100px;">
-                                  <span style="font-size: 0.75rem; font-weight: 500;">Commute</span>
-                                  <ct-select $value={newPersonCommuteMode} items={commuteModeOptions} style="width: 100%;" />
+                                  <span style="font-size: 0.75rem; font-weight: 500;">
+                                    Commute
+                                  </span>
+                                  <ct-select
+                                    $value={newPersonCommuteMode}
+                                    items={commuteModeOptions}
+                                    style="width: 100%;"
+                                  />
                                 </ct-vstack>
                                 <ct-vstack gap="1" style="min-width: 80px;">
-                                  <span style="font-size: 0.75rem; font-weight: 500;">Priority *</span>
-                                  <ct-input $value={newPersonPriority} type="number" placeholder="1" style="width: 5rem;" />
+                                  <span style="font-size: 0.75rem; font-weight: 500;">
+                                    Priority *
+                                  </span>
+                                  <ct-input
+                                    $value={newPersonPriority}
+                                    type="number"
+                                    placeholder="1"
+                                    style="width: 5rem;"
+                                  />
                                 </ct-vstack>
                                 <ct-vstack gap="1" style="min-width: 100px;">
-                                  <span style="font-size: 0.75rem; font-weight: 500;">Default Spot</span>
+                                  <span style="font-size: 0.75rem; font-weight: 500;">
+                                    Default Spot
+                                  </span>
                                   <ct-select
                                     $value={newPersonDefaultSpot}
                                     items={computed(() => [
                                       { label: "None", value: "" },
                                       ...spots.get()
                                         .filter((s) => s.active)
-                                        .map((s) => ({ label: `#${s.spotNumber}`, value: s.spotNumber })),
+                                        .map((s) => ({
+                                          label: `#${s.spotNumber}`,
+                                          value: s.spotNumber,
+                                        })),
                                     ])}
                                     style="width: 100%;"
                                   />
@@ -1344,7 +1743,9 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                 const err = addPersonError.get();
                                 if (!err) return null;
                                 return (
-                                  <span style="font-size: 0.75rem; color: var(--ct-color-red-600);">{err}</span>
+                                  <span style="font-size: 0.75rem; color: var(--ct-color-red-600);">
+                                    {err}
+                                  </span>
                                 );
                               })}
                               <ct-hstack gap="2">
@@ -1356,7 +1757,11 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                 >
                                   Add Person
                                 </ct-button>
-                                <ct-button variant="ghost" size="sm" onClick={() => toggleAddPersonForm.send()}>
+                                <ct-button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => toggleAddPersonForm.send()}
+                                >
                                   Cancel
                                 </ct-button>
                               </ct-hstack>
@@ -1370,7 +1775,11 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                     <ct-vstack gap="2">
                       <ct-hstack justify="between" align="center">
                         <ct-heading level={6}>Parking Spots</ct-heading>
-                        <ct-button variant="primary" size="sm" onClick={() => toggleAddSpotForm.send()}>
+                        <ct-button
+                          variant="primary"
+                          size="sm"
+                          onClick={() => toggleAddSpotForm.send()}
+                        >
                           + Add Spot
                         </ct-button>
                       </ct-hstack>
@@ -1380,8 +1789,12 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                         const spotLabel2 = spot.label;
                         const spotNotes2 = spot.notes;
                         const spotActive2 = spot.active;
-                        const isEditingSpot = computed(() => editingSpotNumber.get() === spotNum2);
-                        const isRemoveSpotConfirm = computed(() => removeSpotConfirmTarget.get() === spotNum2);
+                        const isEditingSpot = computed(() =>
+                          editingSpotNumber.get() === spotNum2
+                        );
+                        const isRemoveSpotConfirm = computed(() =>
+                          removeSpotConfirmTarget.get() === spotNum2
+                        );
 
                         return (
                           <ct-card style={spotActive2 ? "" : "opacity: 0.65;"}>
@@ -1390,33 +1803,65 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                 <ct-vstack gap="2">
                                   <ct-hstack gap="2" wrap>
                                     <ct-vstack gap="1" style="min-width: 60px;">
-                                      <span style="font-size: 0.75rem; font-weight: 500;">Number *</span>
-                                      <ct-input $value={editSpotNum} placeholder="e.g. 12" style="width: 4rem;" />
+                                      <span style="font-size: 0.75rem; font-weight: 500;">
+                                        Number *
+                                      </span>
+                                      <ct-input
+                                        $value={editSpotNum}
+                                        placeholder="e.g. 12"
+                                        style="width: 4rem;"
+                                      />
                                     </ct-vstack>
                                     <ct-vstack gap="1" style="flex: 1;">
-                                      <span style="font-size: 0.75rem; font-weight: 500;">Label</span>
-                                      <ct-input $value={editSpotLabel} placeholder="e.g. Near entrance" style="width: 100%;" />
+                                      <span style="font-size: 0.75rem; font-weight: 500;">
+                                        Label
+                                      </span>
+                                      <ct-input
+                                        $value={editSpotLabel}
+                                        placeholder="e.g. Near entrance"
+                                        style="width: 100%;"
+                                      />
                                     </ct-vstack>
                                   </ct-hstack>
                                   <ct-vstack gap="1">
-                                    <span style="font-size: 0.75rem; font-weight: 500;">Notes</span>
-                                    <ct-input $value={editSpotNotes} placeholder="e.g. Tight, no large vehicles" style="width: 100%;" />
+                                    <span style="font-size: 0.75rem; font-weight: 500;">
+                                      Notes
+                                    </span>
+                                    <ct-input
+                                      $value={editSpotNotes}
+                                      placeholder="e.g. Tight, no large vehicles"
+                                      style="width: 100%;"
+                                    />
                                   </ct-vstack>
                                   <ct-hstack gap="2" align="center">
-                                    <ct-checkbox $checked={editSpotActive}>Active</ct-checkbox>
+                                    <ct-checkbox $checked={editSpotActive}>
+                                      Active
+                                    </ct-checkbox>
                                     {spotDeactivateWarning
                                       ? (
                                         <span style="font-size: 0.75rem; color: var(--ct-color-amber-600);">
-                                          Has upcoming allocations — they will remain.
+                                          Has upcoming allocations — they will
+                                          remain.
                                         </span>
                                       )
                                       : null}
                                   </ct-hstack>
                                   <ct-hstack gap="2">
-                                    <ct-button variant="primary" size="sm" onClick={() => saveEditSpot.send({ originalNumber: spotNum2 })}>
+                                    <ct-button
+                                      variant="primary"
+                                      size="sm"
+                                      onClick={() =>
+                                        saveEditSpot.send({
+                                          originalNumber: spotNum2,
+                                        })}
+                                    >
                                       Save
                                     </ct-button>
-                                    <ct-button variant="secondary" size="sm" onClick={() => cancelEditSpot.send()}>
+                                    <ct-button
+                                      variant="secondary"
+                                      size="sm"
+                                      onClick={() => cancelEditSpot.send()}
+                                    >
                                       Cancel
                                     </ct-button>
                                   </ct-hstack>
@@ -1424,17 +1869,42 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                               )
                               : (
                                 <>
-                                  <ct-hstack justify="between" align="center" gap="2" wrap>
+                                  <ct-hstack
+                                    justify="between"
+                                    align="center"
+                                    gap="2"
+                                    wrap
+                                  >
                                     <ct-hstack gap="2" align="center" wrap>
-                                      <span style={`font-weight: 700; font-size: 1rem; color: ${spotActive2 ? "var(--ct-color-gray-800)" : "var(--ct-color-gray-400)"};`}>
+                                      <span
+                                        style={`font-weight: 700; font-size: 1rem; color: ${
+                                          spotActive2
+                                            ? "var(--ct-color-gray-800)"
+                                            : "var(--ct-color-gray-400)"
+                                        };`}
+                                      >
                                         #{spotNum2}
                                       </span>
                                       <ct-vstack gap="0">
-                                        <span style={`font-size: 0.875rem; color: ${spotActive2 ? "var(--ct-color-gray-700)" : "var(--ct-color-gray-400)"}; text-decoration: ${spotActive2 ? "none" : "line-through"};`}>
+                                        <span
+                                          style={`font-size: 0.875rem; color: ${
+                                            spotActive2
+                                              ? "var(--ct-color-gray-700)"
+                                              : "var(--ct-color-gray-400)"
+                                          }; text-decoration: ${
+                                            spotActive2
+                                              ? "none"
+                                              : "line-through"
+                                          };`}
+                                        >
                                           {spotLabel2 || "(no label)"}
                                         </span>
                                         {spotNotes2
-                                          ? <span style="font-size: 0.75rem; color: var(--ct-color-gray-400);">{spotNotes2}</span>
+                                          ? (
+                                            <span style="font-size: 0.75rem; color: var(--ct-color-gray-400);">
+                                              {spotNotes2}
+                                            </span>
+                                          )
                                           : null}
                                       </ct-vstack>
                                       {!spotActive2
@@ -1446,10 +1916,24 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                         : null}
                                     </ct-hstack>
                                     <ct-hstack gap="1">
-                                      <ct-button variant="ghost" size="sm" onClick={() => startEditSpot.send({ spotNumber: spotNum2 })}>
+                                      <ct-button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() =>
+                                          startEditSpot.send({
+                                            spotNumber: spotNum2,
+                                          })}
+                                      >
                                         Edit
                                       </ct-button>
-                                      <ct-button variant="ghost" size="sm" onClick={() => initiateRemoveSpot.send({ spotNumber: spotNum2 })}>
+                                      <ct-button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() =>
+                                          initiateRemoveSpot.send({
+                                            spotNumber: spotNum2,
+                                          })}
+                                      >
                                         Remove
                                       </ct-button>
                                     </ct-hstack>
@@ -1459,13 +1943,27 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                       <ct-card style="background: #fef2f2; border: 1px solid #fecaca; margin-top: 0.5rem;">
                                         <ct-vstack gap="1">
                                           <span style="font-size: 0.75rem; color: var(--ct-color-red-700);">
-                                            Spot #{spotNum2} has upcoming allocations. They will be preserved. Remove anyway?
+                                            Spot #{spotNum2}{" "}
+                                            has upcoming allocations. They will
+                                            be preserved. Remove anyway?
                                           </span>
                                           <ct-hstack gap="2">
-                                            <ct-button variant="primary" size="sm" onClick={() => removeSpot.send({ spotNumber: spotNum2 })}>
+                                            <ct-button
+                                              variant="primary"
+                                              size="sm"
+                                              onClick={() =>
+                                                removeSpot.send({
+                                                  spotNumber: spotNum2,
+                                                })}
+                                            >
                                               Remove
                                             </ct-button>
-                                            <ct-button variant="ghost" size="sm" onClick={() => cancelRemoveSpot.send()}>
+                                            <ct-button
+                                              variant="ghost"
+                                              size="sm"
+                                              onClick={() =>
+                                                cancelRemoveSpot.send()}
+                                            >
                                               Cancel
                                             </ct-button>
                                           </ct-hstack>
@@ -1486,23 +1984,43 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                               <ct-heading level={6}>Add Spot</ct-heading>
                               <ct-hstack gap="2" wrap>
                                 <ct-vstack gap="1" style="min-width: 60px;">
-                                  <span style="font-size: 0.75rem; font-weight: 500;">Number *</span>
-                                  <ct-input $value={newSpotNumber} placeholder="e.g. 12" style="width: 4rem;" />
+                                  <span style="font-size: 0.75rem; font-weight: 500;">
+                                    Number *
+                                  </span>
+                                  <ct-input
+                                    $value={newSpotNumber}
+                                    placeholder="e.g. 12"
+                                    style="width: 4rem;"
+                                  />
                                 </ct-vstack>
                                 <ct-vstack gap="1" style="flex: 1;">
-                                  <span style="font-size: 0.75rem; font-weight: 500;">Label</span>
-                                  <ct-input $value={newSpotLabel} placeholder="e.g. Near entrance" style="width: 100%;" />
+                                  <span style="font-size: 0.75rem; font-weight: 500;">
+                                    Label
+                                  </span>
+                                  <ct-input
+                                    $value={newSpotLabel}
+                                    placeholder="e.g. Near entrance"
+                                    style="width: 100%;"
+                                  />
                                 </ct-vstack>
                               </ct-hstack>
                               <ct-vstack gap="1">
-                                <span style="font-size: 0.75rem; font-weight: 500;">Notes</span>
-                                <ct-input $value={newSpotNotes} placeholder="e.g. Compact only" style="width: 100%;" />
+                                <span style="font-size: 0.75rem; font-weight: 500;">
+                                  Notes
+                                </span>
+                                <ct-input
+                                  $value={newSpotNotes}
+                                  placeholder="e.g. Compact only"
+                                  style="width: 100%;"
+                                />
                               </ct-vstack>
                               {computed(() => {
                                 const err = addSpotError.get();
                                 if (!err) return null;
                                 return (
-                                  <span style="font-size: 0.75rem; color: var(--ct-color-red-600);">{err}</span>
+                                  <span style="font-size: 0.75rem; color: var(--ct-color-red-600);">
+                                    {err}
+                                  </span>
                                 );
                               })}
                               <ct-hstack gap="2">
@@ -1514,7 +2032,11 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                 >
                                   Add Spot
                                 </ct-button>
-                                <ct-button variant="ghost" size="sm" onClick={() => toggleAddSpotForm.send()}>
+                                <ct-button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => toggleAddSpotForm.send()}
+                                >
                                   Cancel
                                 </ct-button>
                               </ct-hstack>
@@ -1526,7 +2048,6 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                   </>
                 )
                 : null}
-
             </ct-vstack>
           </ct-vscroll>
         </ct-screen>

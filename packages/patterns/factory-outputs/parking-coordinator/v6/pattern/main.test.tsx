@@ -26,12 +26,7 @@
  */
 import { action, computed, pattern } from "commontools";
 import ParkingCoordinator from "./main.tsx";
-import type {
-  Allocation,
-  Person,
-  ParkingSpot,
-  SpotRequest,
-} from "./main.tsx";
+import type { Allocation, ParkingSpot, Person, SpotRequest } from "./main.tsx";
 
 // Helper to get array length with proper reactivity tracking
 const len = <T,>(arr: T[]): number => arr.filter(() => true).length;
@@ -56,11 +51,19 @@ export default pattern(() => {
 
   // --- Setup: Add spots ---
   const action_add_spot_1 = action(() => {
-    subject.addSpot.send({ spotNumber: "1", label: "Closest to door", notes: "" });
+    subject.addSpot.send({
+      spotNumber: "1",
+      label: "Closest to door",
+      notes: "",
+    });
   });
 
   const action_add_spot_5 = action(() => {
-    subject.addSpot.send({ spotNumber: "5", label: "", notes: "Tight turning radius" });
+    subject.addSpot.send({
+      spotNumber: "5",
+      label: "",
+      notes: "Tight turning radius",
+    });
   });
 
   const action_add_spot_12 = action(() => {
@@ -109,15 +112,15 @@ export default pattern(() => {
     subject.selectUser.send({ name: "Alice" });
   });
 
-  const action_select_bob = action(() => {
+  const _action_select_bob = action(() => {
     subject.selectUser.send({ name: "Bob" });
   });
 
-  const action_select_carol = action(() => {
+  const _action_select_carol = action(() => {
     subject.selectUser.send({ name: "Carol" });
   });
 
-  const action_select_dave = action(() => {
+  const _action_select_dave = action(() => {
     subject.selectUser.send({ name: "Dave" });
   });
 
@@ -143,7 +146,7 @@ export default pattern(() => {
     subject.cancelRequest.send({ personName: "Alice", date: today });
   });
 
-  const action_bob_cancel_today = action(() => {
+  const _action_bob_cancel_today = action(() => {
     subject.cancelRequest.send({ personName: "Bob", date: today });
   });
 
@@ -222,7 +225,9 @@ export default pattern(() => {
   // --- Initial state ---
   const assert_initial_no_spots = computed(() => len(subject.spots) === 0);
   const assert_initial_no_people = computed(() => len(subject.people) === 0);
-  const assert_initial_no_requests = computed(() => len(subject.requests) === 0);
+  const assert_initial_no_requests = computed(() =>
+    len(subject.requests) === 0
+  );
   const assert_initial_no_allocations = computed(
     () => len(subject.allocations) === 0,
   );
@@ -338,8 +343,7 @@ export default pattern(() => {
   // --- Alice cancels her request ---
   const assert_alice_cancelled = computed(() => {
     const reqs = subject.requests.filter(
-      (r: SpotRequest) =>
-        r.personName === "Alice" && r.date === today,
+      (r: SpotRequest) => r.personName === "Alice" && r.date === today,
     );
     // The last request for Alice today should be cancelled
     const allocatedReqs = reqs.filter(
@@ -361,7 +365,8 @@ export default pattern(() => {
   const assert_alice_reallocated = computed(() => {
     const reqs = subject.requests.filter(
       (r: SpotRequest) =>
-        r.personName === "Alice" && r.date === today && r.status === "allocated",
+        r.personName === "Alice" && r.date === today &&
+        r.status === "allocated",
     );
     return len(reqs) === 1;
   });
@@ -434,8 +439,7 @@ export default pattern(() => {
   // --- Remove spot #12 ---
   const assert_2_spots_after_remove = computed(() => len(subject.spots) === 2);
   const assert_spot_12_gone = computed(
-    () =>
-      !subject.spots.some((s: ParkingSpot) => s.spotNumber === "12"),
+    () => !subject.spots.some((s: ParkingSpot) => s.spotNumber === "12"),
   );
 
   // --- Edit Alice ---

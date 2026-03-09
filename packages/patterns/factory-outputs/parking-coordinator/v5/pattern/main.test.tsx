@@ -55,7 +55,11 @@ export default pattern(() => {
   });
 
   const action_edit_spot_1 = action(() => {
-    subject.editSpot.send({ number: 1, label: "VIP entrance", notes: "Reserved" });
+    subject.editSpot.send({
+      number: 1,
+      label: "VIP entrance",
+      notes: "Reserved",
+    });
   });
 
   const action_remove_spot_20 = action(() => {
@@ -64,27 +68,51 @@ export default pattern(() => {
 
   // -- People --
   const action_add_alice = action(() => {
-    subject.addPerson.send({ name: "Alice", email: "alice@co.com", commuteMode: "drive" });
+    subject.addPerson.send({
+      name: "Alice",
+      email: "alice@co.com",
+      commuteMode: "drive",
+    });
   });
 
   const action_add_bob = action(() => {
-    subject.addPerson.send({ name: "Bob", email: "bob@co.com", commuteMode: "transit" });
+    subject.addPerson.send({
+      name: "Bob",
+      email: "bob@co.com",
+      commuteMode: "transit",
+    });
   });
 
   const action_add_charlie = action(() => {
-    subject.addPerson.send({ name: "Charlie", email: "charlie@co.com", commuteMode: "bike" });
+    subject.addPerson.send({
+      name: "Charlie",
+      email: "charlie@co.com",
+      commuteMode: "bike",
+    });
   });
 
   const action_add_diana = action(() => {
-    subject.addPerson.send({ name: "Diana", email: "diana@co.com", commuteMode: "drive" });
+    subject.addPerson.send({
+      name: "Diana",
+      email: "diana@co.com",
+      commuteMode: "drive",
+    });
   });
 
   const action_add_empty_person = action(() => {
-    subject.addPerson.send({ name: "  ", email: "x@x.com", commuteMode: "drive" });
+    subject.addPerson.send({
+      name: "  ",
+      email: "x@x.com",
+      commuteMode: "drive",
+    });
   });
 
   const action_add_duplicate_alice = action(() => {
-    subject.addPerson.send({ name: "Alice", email: "alice2@co.com", commuteMode: "drive" });
+    subject.addPerson.send({
+      name: "Alice",
+      email: "alice2@co.com",
+      commuteMode: "drive",
+    });
   });
 
   // -- Priority reordering --
@@ -106,7 +134,10 @@ export default pattern(() => {
   });
 
   const action_set_alice_prefs = action(() => {
-    subject.setSpotPreferences.send({ personName: "Alice", preferences: [5, 12] });
+    subject.setSpotPreferences.send({
+      personName: "Alice",
+      preferences: [5, 12],
+    });
   });
 
   // -- Requesting spots --
@@ -138,7 +169,11 @@ export default pattern(() => {
   // -- Manual assign --
   // Manual assign Alice to spot #5 (after her spot #1 is removed and she's pending)
   const action_manual_assign_alice_spot_5 = action(() => {
-    subject.manualAssign.send({ personName: "Alice", date: todayDate, spotNumber: 5 });
+    subject.manualAssign.send({
+      personName: "Alice",
+      date: todayDate,
+      spotNumber: 5,
+    });
   });
 
   // -- Remove person --
@@ -165,7 +200,9 @@ export default pattern(() => {
     );
   });
   const assert_initial_no_people = computed(() => len(subject.people) === 0);
-  const assert_initial_no_requests = computed(() => len(subject.requests) === 0);
+  const assert_initial_no_requests = computed(() =>
+    len(subject.requests) === 0
+  );
 
   // -- After adding spot 20 --
   const assert_4_spots = computed(() => len(subject.spots) === 4);
@@ -203,7 +240,9 @@ export default pattern(() => {
 
   // -- Priority reorder: move Bob up --
   const assert_bob_first = computed(() => subject.people[0]?.name === "Bob");
-  const assert_alice_second = computed(() => subject.people[1]?.name === "Alice");
+  const assert_alice_second = computed(() =>
+    subject.people[1]?.name === "Alice"
+  );
 
   // -- Move Alice down --
   const assert_alice_third_after_down = computed(
@@ -292,7 +331,9 @@ export default pattern(() => {
   const assert_charlie_removed = computed(() =>
     !subject.people.some((p) => p.name === "Charlie")
   );
-  const assert_3_people_after_remove = computed(() => len(subject.people) === 3);
+  const assert_3_people_after_remove = computed(() =>
+    len(subject.people) === 3
+  );
   const assert_charlie_requests_cancelled = computed(() => {
     const charlieReqs = subject.requests.filter(
       (r) => r.personName === "Charlie",

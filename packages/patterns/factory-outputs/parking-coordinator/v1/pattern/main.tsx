@@ -261,7 +261,9 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
 
       // Remove from priority order
       const currentPriority = priorityOrder.get();
-      priorityOrder.set(currentPriority.filter((id: string) => id !== personId));
+      priorityOrder.set(
+        currentPriority.filter((id: string) => id !== personId),
+      );
 
       // Cancel upcoming allocated requests for this person
       const currentRequests = requests.get();
@@ -273,7 +275,11 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
           r.status === "allocated"
         ) {
           requestsChanged = true;
-          return { ...r, status: "cancelled" as RequestStatus, assignedSpotId: "" };
+          return {
+            ...r,
+            status: "cancelled" as RequestStatus,
+            assignedSpotId: "",
+          };
         }
         return r;
       });
@@ -287,9 +293,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
         const currentPersons = persons.get();
         persons.set(
           currentPersons.map((p: Person) =>
-            p.id === event.personId
-              ? { ...p, defaultSpotId: event.spotId }
-              : p
+            p.id === event.personId ? { ...p, defaultSpotId: event.spotId } : p
           ),
         );
       },
@@ -372,8 +376,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       const updatedPersons = currentPersons.map((p: Person) => {
         const prefs = (p.spotPreferences as string[]) ?? [];
         const defaultId = (p.defaultSpotId as string) ?? "";
-        const needsUpdate =
-          prefs.includes(spotId) || defaultId === spotId;
+        const needsUpdate = prefs.includes(spotId) || defaultId === spotId;
         if (needsUpdate) {
           personsChanged = true;
           return {
@@ -485,14 +488,14 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
           requests.set(
             currentRequests.map((r: SpotRequest) =>
               r.personId === personId &&
-              r.date === date &&
-              (r.status === "allocated" || r.status === "pending")
+                r.date === date &&
+                (r.status === "allocated" || r.status === "pending")
                 ? {
-                    ...r,
-                    status: "allocated" as RequestStatus,
-                    assignedSpotId: spotId,
-                    autoAllocated: false,
-                  }
+                  ...r,
+                  status: "allocated" as RequestStatus,
+                  assignedSpotId: spotId,
+                  autoAllocated: false,
+                }
                 : r
             ),
           );
@@ -529,7 +532,8 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
             (r.assignedSpotId as string) === spot.id,
         );
         const personName = req
-          ? (allPersons.find((p: Person) => p.id === req.personId)?.name ?? "Unknown")
+          ? (allPersons.find((p: Person) => p.id === req.personId)?.name ??
+            "Unknown")
           : null;
         return {
           spot,
@@ -590,9 +594,10 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
             spotNumber: spot?.number ?? "-",
           };
         })
-        .sort((a: SpotRequest & { spotNumber: string }, b: SpotRequest & { spotNumber: string }) =>
-          b.date.localeCompare(a.date)
-        );
+        .sort((
+          a: SpotRequest & { spotNumber: string },
+          b: SpotRequest & { spotNumber: string },
+        ) => b.date.localeCompare(a.date));
     });
 
     // Priority list: persons in priority order with names
@@ -657,7 +662,9 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       // Check duplicate
       const currentRequests = requests.get();
       if (hasActiveRequest(currentRequests, personId, date)) {
-        reqMessage.set("This person already has an active request for this date.");
+        reqMessage.set(
+          "This person already has an active request for this date.",
+        );
         return;
       }
       requestParking.send({ personId, date });
@@ -665,7 +672,8 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       const updatedRequests = requests.get();
       const newReq = updatedRequests.find(
         (r: SpotRequest) =>
-          r.personId === personId && r.date === date && r.status !== "cancelled",
+          r.personId === personId && r.date === date &&
+          r.status !== "cancelled",
       );
       if (newReq && newReq.status === "allocated") {
         const spot = spots
@@ -802,7 +810,9 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     // ---- View computed flags ----
     const isMainView = computed(() => currentView.get() === "main");
     const isRequestForm = computed(() => currentView.get() === "request-form");
-    const isAdminPersons = computed(() => currentView.get() === "admin-persons");
+    const isAdminPersons = computed(() =>
+      currentView.get() === "admin-persons"
+    );
     const isAdminSpots = computed(() => currentView.get() === "admin-spots");
     const isAddPerson = computed(() => currentView.get() === "add-person");
     const isAddSpot = computed(() => currentView.get() === "add-spot");
@@ -841,9 +851,17 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       return prefs
         .map((spotId: string) => {
           const spot = allSpots.find((s: ParkingSpot) => s.id === spotId);
-          return spot ? { id: spot.id, number: spot.number, label: (spot.label as string) ?? "" } : null;
+          return spot
+            ? {
+              id: spot.id,
+              number: spot.number,
+              label: (spot.label as string) ?? "",
+            }
+            : null;
         })
-        .filter((s: { id: string; number: string; label: string } | null): s is { id: string; number: string; label: string } => !!s);
+        .filter((
+          s: { id: string; number: string; label: string } | null,
+        ): s is { id: string; number: string; label: string } => !!s);
     });
 
     // ---- UI ----
@@ -866,7 +884,10 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
               </ct-hstack>
             </ct-hstack>
             {/* Nav tabs */}
-            <ct-hstack gap="0" style="border-bottom: 1px solid var(--ct-color-gray-200);">
+            <ct-hstack
+              gap="0"
+              style="border-bottom: 1px solid var(--ct-color-gray-200);"
+            >
               <ct-button
                 variant={isMainView ? "primary" : "ghost"}
                 onClick={() => currentView.set("main")}
@@ -935,7 +956,12 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                               </span>
                               {(alloc.spot.label as string)
                                 ? (
-                                  <span style={{ fontSize: "0.75rem", color: "var(--ct-color-gray-500)" }}>
+                                  <span
+                                    style={{
+                                      fontSize: "0.75rem",
+                                      color: "var(--ct-color-gray-500)",
+                                    }}
+                                  >
                                     {alloc.spot.label}
                                   </span>
                                 )
@@ -944,9 +970,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                             <span
                               style={{
                                 fontWeight: "500",
-                                color: alloc.occupied
-                                  ? "#dc2626"
-                                  : "#16a34a",
+                                color: alloc.occupied ? "#dc2626" : "#16a34a",
                               }}
                             >
                               {alloc.occupied ? alloc.personName : "Available"}
@@ -973,7 +997,8 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                             style={{
                               padding: "6px 8px",
                               textAlign: "left",
-                              borderBottom: "2px solid var(--ct-color-gray-300)",
+                              borderBottom:
+                                "2px solid var(--ct-color-gray-300)",
                               fontWeight: "600",
                             }}
                           >
@@ -984,12 +1009,12 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                               style={{
                                 padding: "6px 4px",
                                 textAlign: "center",
-                                borderBottom: "2px solid var(--ct-color-gray-300)",
+                                borderBottom:
+                                  "2px solid var(--ct-color-gray-300)",
                                 fontWeight: day === TODAY ? "700" : "500",
-                                backgroundColor:
-                                  day === TODAY
-                                    ? "var(--ct-color-gray-100)"
-                                    : "transparent",
+                                backgroundColor: day === TODAY
+                                  ? "var(--ct-color-gray-100)"
+                                  : "transparent",
                               }}
                             >
                               {formatShortDate(day)}
@@ -1033,8 +1058,8 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                       backgroundColor: cell.occupied
                                         ? "#fee2e2"
                                         : cell.day === TODAY
-                                          ? "var(--ct-color-gray-50)"
-                                          : "transparent",
+                                        ? "var(--ct-color-gray-50)"
+                                        : "transparent",
                                       fontSize: "0.75rem",
                                       color: cell.occupied
                                         ? "#dc2626"
@@ -1063,8 +1088,15 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
 
                   {hasNoPersons
                     ? (
-                      <div style={{ color: "var(--ct-color-gray-500)", padding: "1rem", textAlign: "center" }}>
-                        No people registered yet. Ask an admin to add team members.
+                      <div
+                        style={{
+                          color: "var(--ct-color-gray-500)",
+                          padding: "1rem",
+                          textAlign: "center",
+                        }}
+                      >
+                        No people registered yet. Ask an admin to add team
+                        members.
                       </div>
                     )
                     : null}
@@ -1138,21 +1170,20 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                             <span
                               style={{
                                 fontSize: "0.75rem",
-                                color:
-                                  r.status === "allocated"
-                                    ? "#16a34a"
-                                    : r.status === "denied"
-                                      ? "#dc2626"
-                                      : "var(--ct-color-gray-500)",
+                                color: r.status === "allocated"
+                                  ? "#16a34a"
+                                  : r.status === "denied"
+                                  ? "#dc2626"
+                                  : "var(--ct-color-gray-500)",
                               }}
                             >
                               {r.status === "allocated"
                                 ? `Spot #${r.spotNumber}`
                                 : r.status === "denied"
-                                  ? "Denied"
-                                  : r.status === "cancelled"
-                                    ? "Cancelled"
-                                    : "Pending"}
+                                ? "Denied"
+                                : r.status === "cancelled"
+                                ? "Cancelled"
+                                : "Pending"}
                             </span>
                           </ct-vstack>
                           {r.status === "allocated" && r.date >= TODAY
@@ -1196,7 +1227,12 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                           <span style={{ fontWeight: "500" }}>
                             {person.name}
                           </span>
-                          <span style={{ fontSize: "0.75rem", color: "var(--ct-color-gray-500)" }}>
+                          <span
+                            style={{
+                              fontSize: "0.75rem",
+                              color: "var(--ct-color-gray-500)",
+                            }}
+                          >
                             {person.email || ""}
                             {person.email ? " | " : ""}
                             {person.usualCommuteMode}
@@ -1239,7 +1275,13 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
 
                   {hasNoPersons
                     ? (
-                      <div style={{ textAlign: "center", color: "var(--ct-color-gray-500)", padding: "2rem" }}>
+                      <div
+                        style={{
+                          textAlign: "center",
+                          color: "var(--ct-color-gray-500)",
+                          padding: "2rem",
+                        }}
+                      >
                         No people added yet. Add team members to get started.
                       </div>
                     )
@@ -1270,14 +1312,24 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                           </span>
                           {(spot.label as string)
                             ? (
-                              <span style={{ fontSize: "0.75rem", color: "var(--ct-color-gray-500)" }}>
+                              <span
+                                style={{
+                                  fontSize: "0.75rem",
+                                  color: "var(--ct-color-gray-500)",
+                                }}
+                              >
                                 {spot.label}
                               </span>
                             )
                             : null}
                           {(spot.notes as string)
                             ? (
-                              <span style={{ fontSize: "0.75rem", color: "var(--ct-color-gray-400)" }}>
+                              <span
+                                style={{
+                                  fontSize: "0.75rem",
+                                  color: "var(--ct-color-gray-400)",
+                                }}
+                              >
                                 {spot.notes}
                               </span>
                             )
@@ -1293,8 +1345,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                           </ct-button>
                           <ct-button
                             variant="ghost"
-                            onClick={() =>
-                              removeSpot.send({ spotId: spot.id })}
+                            onClick={() => removeSpot.send({ spotId: spot.id })}
                             style="color: #dc2626;"
                           >
                             Remove
@@ -1398,11 +1449,17 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                   <ct-heading level={5}>Edit Parking Spot</ct-heading>
                   <ct-vstack gap="1">
                     <label>Label</label>
-                    <ct-input $value={editSpotLabel} placeholder="Optional label" />
+                    <ct-input
+                      $value={editSpotLabel}
+                      placeholder="Optional label"
+                    />
                   </ct-vstack>
                   <ct-vstack gap="1">
                     <label>Notes</label>
-                    <ct-input $value={editSpotNotes} placeholder="Optional notes" />
+                    <ct-input
+                      $value={editSpotNotes}
+                      placeholder="Optional notes"
+                    />
                   </ct-vstack>
                   <ct-hstack gap="2">
                     <ct-button
@@ -1438,15 +1495,26 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                       $value={editPersonDefaultSpot}
                       items={spotOptions}
                     />
-                    <span style={{ fontSize: "0.75rem", color: "var(--ct-color-gray-500)" }}>
-                      This spot is tried first when this person requests parking.
+                    <span
+                      style={{
+                        fontSize: "0.75rem",
+                        color: "var(--ct-color-gray-500)",
+                      }}
+                    >
+                      This spot is tried first when this person requests
+                      parking.
                     </span>
                   </ct-vstack>
 
                   {/* Spot Preferences */}
                   <ct-vstack gap="1">
                     <label>Spot Preferences (in order)</label>
-                    <span style={{ fontSize: "0.75rem", color: "var(--ct-color-gray-500)" }}>
+                    <span
+                      style={{
+                        fontSize: "0.75rem",
+                        color: "var(--ct-color-gray-500)",
+                      }}
+                    >
                       Tried in order when the default spot is unavailable.
                     </span>
 
