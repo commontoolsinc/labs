@@ -26,7 +26,6 @@ export class CTHStack extends BaseElement {
   static override styles = css`
     :host {
       display: block;
-      container-type: inline-size;
     }
 
     .stack {
