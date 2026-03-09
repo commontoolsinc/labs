@@ -1558,6 +1558,9 @@ export class Scheduler {
       if (action === writer) return;
       const log = this.dependencies.get(action);
       if (!log?.reads?.length && !log?.nonRecursiveReads?.length) return;
+      // For this test, we treat recursive and non-recursive reads the same
+      // Determining the overlap of a write with a non-recursive read properly
+      // would require knowing the previous set of keys on an object/array.
       if (!this.readsOverlapWrites(this.getAllReads(log), writes)) return;
       this.registerDependentEdge(writer, action);
     };

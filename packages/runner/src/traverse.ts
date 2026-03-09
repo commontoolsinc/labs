@@ -2428,6 +2428,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     const docArray = doc.value as Immutable<StorableDatum>[];
     const arrayObj = new Array<Immutable<StorableValue>>(docArray.length);
 
+    // We use `every` here so if our input is a sparse array, so is our output.
     const valid = docArray.every((item, index) => {
       const itemSchema = this.cfc.schemaAtPath(schema, [index.toString()]);
       let curDoc: IMemorySpaceAttestation = {

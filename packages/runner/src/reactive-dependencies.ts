@@ -262,7 +262,7 @@ function commonPrefixLength(
  *
  * - Links: compared by identity (deepEqual), since a link IS the pointer.
  * - Objects: changed iff the key set changed (not the values).
- * - Arrays: changed iff the length changed.
+ * - Arrays: changed iff the key set changed (not the values).
  * - Primitives: changed iff the value changed.
  */
 function shallowEqual(
