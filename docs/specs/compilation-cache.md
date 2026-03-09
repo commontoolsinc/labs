@@ -171,7 +171,7 @@ The server runs Deno directly from source (no bundle). At process startup,
 compute a fingerprint from the git state:
 
 ```
-fingerprint = hash(HEAD_sha + sorted_hash(dirty .ts file contents))
+fingerprint = hash(HEAD_sha + sorted_hash(dirty file contents))
 ```
 
 Specifically:
