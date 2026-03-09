@@ -1036,3 +1036,235 @@ describe("throttle - staleness tolerance", () => {
     expect(runCount).toBe(1);
   });
 });
+
+describe("action stats", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    // Use push mode for action stats tests
+    runtime.scheduler.disablePullMode();
+    tx = runtime.edit();
+  });
+
+  afterEach(async () => {
+    await tx.commit();
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("should track action execution time", async () => {
+    const cell = runtime.getCell<number>(
+      space,
+      "action-timing-test",
+      undefined,
+      tx,
+    );
+    cell.set(1);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const action: Action = () => {
+      // Simulate some work
+      let sum = 0;
+      for (let i = 0; i < 1000; i++) {
+        sum += i;
+      }
+      return sum;
+    };
+
+    runtime.scheduler.subscribe(
+      action,
+      { reads: [], writes: [] },
+      {},
+    );
+    runtime.scheduler.queueExecution();
+    await runtime.idle();
+
+    // Should have stats recorded
+    const stats = runtime.scheduler.getActionStats(action);
+    expect(stats).toBeDefined();
+    expect(stats!.runCount).toBe(1);
+    expect(stats!.totalTime).toBeGreaterThanOrEqual(0);
+    expect(stats!.averageTime).toBe(stats!.totalTime);
+    expect(stats!.lastRunTime).toBe(stats!.totalTime);
+  });
+
+  it("should accumulate action stats across multiple runs", async () => {
+    const trigger = runtime.getCell<number>(
+      space,
+      "action-stats-trigger",
+      undefined,
+      tx,
+    );
+    trigger.set(1);
+    const output = runtime.getCell<number>(
+      space,
+      "action-stats-output",
+      undefined,
+      tx,
+    );
+    output.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const action: Action = (actionTx) => {
+      const val = trigger.withTx(actionTx).get();
+      output.withTx(actionTx).send(val * 2);
+    };
+
+    runtime.scheduler.subscribe(
+      action,
+      { reads: [], writes: [] },
+      {},
+    );
+    await output.pull();
+
+    // First run
+    let stats = runtime.scheduler.getActionStats(action);
+    expect(stats!.runCount).toBe(1);
+    const firstRunTime = stats!.totalTime;
+
+    // Trigger another run
+    trigger.withTx(tx).send(2);
+    await tx.commit();
+    tx = runtime.edit();
+    await output.pull();
+
+    // Second run - stats should accumulate
+    stats = runtime.scheduler.getActionStats(action);
+    expect(stats!.runCount).toBe(2);
+    expect(stats!.totalTime).toBeGreaterThanOrEqual(firstRunTime);
+    expect(stats!.averageTime).toBe(stats!.totalTime / 2);
+  });
+
+  it("should return undefined for unknown action stats", () => {
+    const unknownAction: Action = () => {};
+    const stats = runtime.scheduler.getActionStats(unknownAction);
+    expect(stats).toBeUndefined();
+  });
+
+  it("should record stats even when action throws", async () => {
+    let errorCaught = false;
+    runtime.scheduler.onError(() => {
+      errorCaught = true;
+    });
+
+    const errorAction: Action = () => {
+      throw new Error("Test error");
+    };
+
+    runtime.scheduler.subscribe(
+      errorAction,
+      { reads: [], writes: [] },
+      {},
+    );
+
+    runtime.scheduler.queueExecution();
+    await runtime.idle();
+
+    // Error should have been caught
+    expect(errorCaught).toBe(true);
+
+    // Stats should still be recorded
+    const stats = runtime.scheduler.getActionStats(errorAction);
+    expect(stats).toBeDefined();
+    expect(stats!.runCount).toBe(1);
+  });
+
+  it("should correctly calculate average time", async () => {
+    const cell = runtime.getCell<number>(
+      space,
+      "avg-time-cell",
+      undefined,
+      tx,
+    );
+    cell.set(1);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const action: Action = (actionTx) => {
+      // Do some work to ensure measurable time
+      let sum = 0;
+      for (let i = 0; i < 100; i++) sum += i;
+      cell.withTx(actionTx).send(sum);
+    };
+
+    // Run action multiple times
+    for (let i = 0; i < 3; i++) {
+      runtime.scheduler.subscribe(
+        action,
+        { reads: [], writes: [] },
+        {},
+      );
+      await cell.pull();
+    }
+
+    const stats = runtime.scheduler.getActionStats(action);
+    expect(stats).toBeDefined();
+    expect(stats!.runCount).toBe(3);
+    // Average should be total / count
+    expect(stats!.averageTime).toBeCloseTo(stats!.totalTime / 3, 5);
+  });
+
+  it("should preserve action stats across multiple scheduling cycles", async () => {
+    const cell = runtime.getCell<number>(
+      space,
+      "preserve-stats-cell",
+      undefined,
+      tx,
+    );
+    cell.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const action: Action = (actionTx) => {
+      const val = cell.withTx(actionTx).get();
+      cell.withTx(actionTx).send(val + 1);
+    };
+
+    // First scheduling cycle
+    runtime.scheduler.subscribe(
+      action,
+      {
+        reads: [cell.getAsNormalizedFullLink()],
+        writes: [cell.getAsNormalizedFullLink()],
+      },
+      {},
+    );
+    await cell.pull();
+
+    let stats = runtime.scheduler.getActionStats(action);
+    expect(stats!.runCount).toBe(1);
+    const firstRunTime = stats!.lastRunTime;
+
+    // Trigger another run by updating cell externally
+    cell.withTx(tx).send(10);
+    await tx.commit();
+    tx = runtime.edit();
+
+    runtime.scheduler.subscribe(
+      action,
+      {
+        reads: [cell.getAsNormalizedFullLink()],
+        writes: [cell.getAsNormalizedFullLink()],
+      },
+      {},
+    );
+    await cell.pull();
+
+    // Stats should persist and accumulate. The action reads and writes the
+    // same cell, so a fast commit path (batch signing with immediate flush)
+    // may cause one extra re-trigger before cycle detection kicks in.
+    stats = runtime.scheduler.getActionStats(action);
+    expect(stats!.runCount).toBeGreaterThanOrEqual(2);
+    expect(stats!.runCount).toBeLessThanOrEqual(3);
+    expect(stats!.totalTime).toBeGreaterThanOrEqual(firstRunTime);
+  });
+});

@@ -414,7 +414,7 @@ export class Scheduler {
     return typeof name === "string" ? name : undefined;
   }
 
-  // ── Inline idempotency check mode ──────────────────────────────────
+  // ── Diagnosis: Inline Idempotency Check ─────────────────────────────
 
   enableIdempotencyCheck(): void {
     this.idempotencyCheckMode = true;
@@ -516,6 +516,8 @@ export class Scheduler {
       }
     }
   }
+
+  // ── Core: Subscription Lifecycle ─────────────────────────────────────
 
   private updateActionType(
     action: Action,
@@ -1209,6 +1211,8 @@ export class Scheduler {
     } satisfies IStorageSubscription;
   }
 
+  // ── Core: Execution ──────────────────────────────────────────────────
+
   queueExecution(): void {
     if (this.scheduled || this.disposed) return;
     this.pendingQueueTaskTimer = queueTask(() => {
@@ -1217,6 +1221,8 @@ export class Scheduler {
     });
     this.scheduled = true;
   }
+
+  // ── Dependencies: Tracking & Triggers ────────────────────────────────
 
   private setDependencies(
     action: Action,
@@ -1374,6 +1380,8 @@ export class Scheduler {
     return { log, entities };
   }
 
+  // ── Dependencies: Reverse Dependency Graph ────────────────────────────
+
   /**
    * Updates the reverse dependency graph (dependents map).
    * For each action that writes to paths this action reads, add this action as a dependent.
@@ -1510,6 +1518,8 @@ export class Scheduler {
     return false;
   }
 
+  // ── Core: Introspection ──────────────────────────────────────────────
+
   /**
    * Returns diagnostic statistics about the scheduler state.
    * Useful for debugging and monitoring pull-based scheduling behavior.
@@ -1521,6 +1531,8 @@ export class Scheduler {
       pending: this.pending.size,
     };
   }
+
+  // ── Diagnosis: Graph Snapshot ─────────────────────────────────────────
 
   /**
    * Returns a snapshot of the current dependency graph for visualization.
@@ -1723,9 +1735,7 @@ export class Scheduler {
     return this.dependents.get(action) ?? new Set();
   }
 
-  // ============================================================
-  // Pull-based scheduling methods
-  // ============================================================
+  // ── Pull: Mode & Dirty Propagation ───────────────────────────────────
 
   /**
    * Enables pull-based scheduling mode.
@@ -1883,9 +1893,7 @@ export class Scheduler {
     }
   }
 
-  // ============================================================
-  // Compute time tracking for cycle-aware scheduling
-  // ============================================================
+  // ── Timing: Action Stats ─────────────────────────────────────────────
 
   /**
    * Records the execution time for an action.
@@ -1928,9 +1936,7 @@ export class Scheduler {
     return this.actionStats.get(actionId);
   }
 
-  // ============================================================
-  // Debounce infrastructure for throttling slow actions
-  // ============================================================
+  // ── Timing: Debounce ─────────────────────────────────────────────────
 
   /**
    * Sets a debounce delay for an action.
@@ -2052,9 +2058,7 @@ export class Scheduler {
     }
   }
 
-  // ============================================================
-  // Throttle infrastructure - "value can be stale by T ms"
-  // ============================================================
+  // ── Timing: Throttle ─────────────────────────────────────────────────
 
   /**
    * Sets a throttle period for an action.
@@ -2099,9 +2103,7 @@ export class Scheduler {
     return elapsed < throttleMs;
   }
 
-  // ============================================================
-  // Push-triggered filtering
-  // ============================================================
+  // ── Pull: Filtering & Stats ──────────────────────────────────────────
 
   /**
    * Returns the accumulated "might write" set for an action.
@@ -2139,9 +2141,7 @@ export class Scheduler {
     return this.lastSettleStats;
   }
 
-  // ============================================================
-  // Non-settling detection API
-  // ============================================================
+  // ── Diagnosis: Non-settling Detection ─────────────────────────────────
 
   /**
    * Returns whether the scheduler has detected a non-settling condition.
@@ -2160,9 +2160,7 @@ export class Scheduler {
     this.autoTriggerDiagnosis = enabled;
   }
 
-  // ============================================================
-  // Idempotency diagnosis API (Phase 2 + 3)
-  // ============================================================
+  // ── Diagnosis: Idempotency Diagnosis (Phase 2 + 3) ───────────────────
 
   /**
    * Starts diagnosis mode: captures read/write values and causal edges.
@@ -2463,6 +2461,8 @@ export class Scheduler {
     return cycles;
   }
 
+  // ── Core: Error Handling ─────────────────────────────────────────────
+
   private handleError(error: Error, action: any) {
     const { pieceId, spellId, patternId, space } = getPieceMetadataFromFrame(
       (error as Error & { frame?: Frame }).frame,
@@ -2501,6 +2501,8 @@ export class Scheduler {
       ...(error.stack ? [`\n${error.stack}`] : []),
     );
   }
+
+  // ── Core: Execute Loop ──────────────────────────────────────────────
 
   private async execute(): Promise<void> {
     if (this.disposed) return;
@@ -3132,6 +3134,8 @@ export class Scheduler {
     }
     logger.timeEnd("scheduler", "execute");
   }
+
+  // ── Core: Cleanup ────────────────────────────────────────────────────
 
   /**
    * Clean up all pending timers and resources.

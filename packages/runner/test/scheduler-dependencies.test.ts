@@ -1,11 +1,16 @@
-// Effect and computation tracking tests: verifying that effects are scheduled
-// correctly and computations are re-run when dependencies change.
+// Dependency tracking tests: effect/computation classification, reverse
+// dependency graph, backfill, and dependency metadata (ignoreReadForScheduling,
+// potentialWrites).
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { Runtime } from "../src/runtime.ts";
-import { type Action } from "../src/scheduler.ts";
+import {
+  type Action,
+  ignoreReadForScheduling,
+  txToReactivityLog,
+} from "../src/scheduler.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 
@@ -375,5 +380,200 @@ describe("effect/computation tracking", () => {
 
     const updatedDependents = runtime.scheduler.getDependents(computation);
     expect(updatedDependents.has(effect)).toBe(true);
+  });
+});
+
+describe("dependency metadata", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    // Use push mode for dependency metadata tests
+    runtime.scheduler.disablePullMode();
+    tx = runtime.edit();
+  });
+
+  afterEach(async () => {
+    await tx.commit();
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("should not create dependencies when using getRaw with ignoreReadForScheduling", async () => {
+    // Create a source cell that will be read with ignored metadata
+    const sourceCell = runtime.getCell<{ value: number }>(
+      space,
+      "source-cell-for-ignore-test",
+      undefined,
+      tx,
+    );
+    sourceCell.set({ value: 1 });
+
+    // Create a result cell to track action runs (avoiding self-dependencies)
+    const resultCell = runtime.getCell<{ count: number; lastValue: any }>(
+      space,
+      "result-cell-for-ignore-test",
+      undefined,
+      tx,
+    );
+    resultCell.set({ count: 0, lastValue: null });
+    tx.commit();
+    tx = runtime.edit();
+
+    let actionRunCount = 0;
+    let lastReadValue: any;
+
+    // Action that ONLY uses ignored reads
+    const ignoredReadAction: Action = (actionTx) => {
+      actionRunCount++;
+
+      // Read with ignoreReadForScheduling - should NOT create dependency
+      lastReadValue = sourceCell.withTx(actionTx).getRaw({
+        meta: ignoreReadForScheduling,
+      });
+
+      // Write to result cell to track that the action ran
+      resultCell.withTx(actionTx).set({
+        count: actionRunCount,
+        lastValue: lastReadValue,
+      });
+    };
+
+    // Run the action initially
+    runtime.scheduler.subscribe(
+      ignoredReadAction,
+      { reads: [], writes: [] },
+      {},
+    );
+    await resultCell.pull();
+    expect(actionRunCount).toBe(1);
+    expect(lastReadValue).toEqual({ value: 1 });
+    expect(resultCell.get()).toEqual({ count: 1, lastValue: { value: 1 } });
+
+    // Change the source cell
+    sourceCell.withTx(tx).set({ value: 5 });
+    tx.commit();
+    tx = runtime.edit();
+    await resultCell.pull();
+
+    // Action should NOT run again because the read was ignored
+    expect(actionRunCount).toBe(1); // Still 1!
+    expect(resultCell.get()).toEqual({ count: 1, lastValue: { value: 1 } }); // Unchanged
+
+    // Change the source cell again to be extra sure
+    sourceCell.withTx(tx).set({ value: 10 });
+    tx.commit();
+    tx = runtime.edit();
+    await resultCell.pull();
+
+    // Still should not have run
+    expect(actionRunCount).toBe(1);
+    expect(resultCell.get()).toEqual({ count: 1, lastValue: { value: 1 } });
+  });
+
+  it("should track potentialWrites via Cell.set on nested path", async () => {
+    // Create a cell with nested structure
+    const testCell = runtime.getCell<{ nested: { a: number; b: string } }>(
+      space,
+      "potential-writes-cell-set-test",
+      undefined,
+      tx,
+    );
+    testCell.set({ nested: { a: 1, b: "hello" } });
+    tx.commit();
+    tx = runtime.edit();
+
+    // In a new transaction, set nested values where `a` stays the same but `b` changes
+    const setTx = runtime.edit();
+    testCell.withTx(setTx).key("nested").set({ a: 1, b: "world" });
+
+    const log = txToReactivityLog(setTx);
+
+    // key("nested").set() reads the nested object to compare
+    // The "nested" path should appear in potentialWrites
+    expect(log.potentialWrites).toBeDefined();
+    expect(
+      log.potentialWrites!.some((addr) => addr.path[0] === "nested"),
+    ).toBe(true);
+
+    // Only `b` changed within nested, so nested.b should be in writes
+    expect(
+      log.writes.some((w) => w.path[0] === "nested" && w.path[1] === "b"),
+    ).toBe(true);
+    // nested.a should NOT be in writes (value didn't change)
+    expect(
+      log.writes.some((w) => w.path[0] === "nested" && w.path[1] === "a"),
+    ).toBe(false);
+
+    await setTx.commit();
+  });
+
+  it("should include nested path in potentialWrites when using key().set()", async () => {
+    // Create a cell with nested structure
+    const testCell = runtime.getCell<{
+      data: { unchanged: number; changed: number };
+    }>(
+      space,
+      "diff-update-potential-writes-cell",
+      undefined,
+      tx,
+    );
+    testCell.set({ data: { unchanged: 42, changed: 1 } });
+    tx.commit();
+    tx = runtime.edit();
+
+    // In a new transaction, set nested values where only one property changes
+    const setTx = runtime.edit();
+    testCell.withTx(setTx).key("data").set({ unchanged: 42, changed: 999 });
+
+    const log = txToReactivityLog(setTx);
+
+    // The "data" path should be in potentialWrites because diffAndUpdate
+    // reads the nested object to compare
+    expect(log.potentialWrites).toBeDefined();
+    expect(log.potentialWrites!.some((addr) => addr.path[0] === "data")).toBe(
+      true,
+    );
+
+    // Only changed property within data should be in writes
+    expect(
+      log.writes.some((w) => w.path[0] === "data" && w.path[1] === "changed"),
+    ).toBe(true);
+    // unchanged property should NOT be in writes (value didn't change)
+    expect(
+      log.writes.some((w) => w.path[0] === "data" && w.path[1] === "unchanged"),
+    ).toBe(false);
+
+    await setTx.commit();
+  });
+
+  it("should not have potentialWrites when using getRaw without metadata", async () => {
+    const testCell = runtime.getCell<{ value: number }>(
+      space,
+      "no-potential-writes-cell",
+      undefined,
+      tx,
+    );
+    testCell.set({ value: 1 });
+    tx.commit();
+    tx = runtime.edit();
+
+    // getRaw without metadata should not create potentialWrites
+    const readTx = runtime.edit();
+    testCell.withTx(readTx).key("value").getRaw();
+
+    const log = txToReactivityLog(readTx);
+
+    // Should have reads but no potentialWrites
+    expect(log.reads.length).toBeGreaterThanOrEqual(1);
+    expect(log.potentialWrites).toBeUndefined();
+
+    await readTx.commit();
   });
 });

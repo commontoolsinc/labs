@@ -6,12 +6,7 @@ import { expect } from "@std/expect";
 import { assertSpyCall, assertSpyCalls, spy } from "@std/testing/mock";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { Runtime } from "../src/runtime.ts";
-import {
-  type Action,
-  type EventHandler,
-  ignoreReadForScheduling,
-  txToReactivityLog,
-} from "../src/scheduler.ts";
+import { type Action, type EventHandler } from "../src/scheduler.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import type { Entity } from "@commontools/memory/interface";
@@ -445,178 +440,6 @@ describe("scheduler", () => {
     });
     await runtime.idle();
     expect(runs).toBe(1);
-  });
-
-  it("should not create dependencies when using getRaw with ignoreReadForScheduling", async () => {
-    // Create a source cell that will be read with ignored metadata
-    const sourceCell = runtime.getCell<{ value: number }>(
-      space,
-      "source-cell-for-ignore-test",
-      undefined,
-      tx,
-    );
-    sourceCell.set({ value: 1 });
-
-    // Create a result cell to track action runs (avoiding self-dependencies)
-    const resultCell = runtime.getCell<{ count: number; lastValue: any }>(
-      space,
-      "result-cell-for-ignore-test",
-      undefined,
-      tx,
-    );
-    resultCell.set({ count: 0, lastValue: null });
-    tx.commit();
-    tx = runtime.edit();
-
-    let actionRunCount = 0;
-    let lastReadValue: any;
-
-    // Action that ONLY uses ignored reads
-    const ignoredReadAction: Action = (actionTx) => {
-      actionRunCount++;
-
-      // Read with ignoreReadForScheduling - should NOT create dependency
-      lastReadValue = sourceCell.withTx(actionTx).getRaw({
-        meta: ignoreReadForScheduling,
-      });
-
-      // Write to result cell to track that the action ran
-      resultCell.withTx(actionTx).set({
-        count: actionRunCount,
-        lastValue: lastReadValue,
-      });
-    };
-
-    // Run the action initially
-    runtime.scheduler.subscribe(
-      ignoredReadAction,
-      { reads: [], writes: [] },
-      {},
-    );
-    await resultCell.pull();
-    expect(actionRunCount).toBe(1);
-    expect(lastReadValue).toEqual({ value: 1 });
-    expect(resultCell.get()).toEqual({ count: 1, lastValue: { value: 1 } });
-
-    // Change the source cell
-    sourceCell.withTx(tx).set({ value: 5 });
-    tx.commit();
-    tx = runtime.edit();
-    await resultCell.pull();
-
-    // Action should NOT run again because the read was ignored
-    expect(actionRunCount).toBe(1); // Still 1!
-    expect(resultCell.get()).toEqual({ count: 1, lastValue: { value: 1 } }); // Unchanged
-
-    // Change the source cell again to be extra sure
-    sourceCell.withTx(tx).set({ value: 10 });
-    tx.commit();
-    tx = runtime.edit();
-    await resultCell.pull();
-
-    // Still should not have run
-    expect(actionRunCount).toBe(1);
-    expect(resultCell.get()).toEqual({ count: 1, lastValue: { value: 1 } });
-  });
-
-  it("should track potentialWrites via Cell.set on nested path", async () => {
-    // Create a cell with nested structure
-    const testCell = runtime.getCell<{ nested: { a: number; b: string } }>(
-      space,
-      "potential-writes-cell-set-test",
-      undefined,
-      tx,
-    );
-    testCell.set({ nested: { a: 1, b: "hello" } });
-    tx.commit();
-    tx = runtime.edit();
-
-    // In a new transaction, set nested values where `a` stays the same but `b` changes
-    const setTx = runtime.edit();
-    testCell.withTx(setTx).key("nested").set({ a: 1, b: "world" });
-
-    const log = txToReactivityLog(setTx);
-
-    // key("nested").set() reads the nested object to compare
-    // The "nested" path should appear in potentialWrites
-    expect(log.potentialWrites).toBeDefined();
-    expect(
-      log.potentialWrites!.some((addr) => addr.path[0] === "nested"),
-    ).toBe(true);
-
-    // Only `b` changed within nested, so nested.b should be in writes
-    expect(
-      log.writes.some((w) => w.path[0] === "nested" && w.path[1] === "b"),
-    ).toBe(true);
-    // nested.a should NOT be in writes (value didn't change)
-    expect(
-      log.writes.some((w) => w.path[0] === "nested" && w.path[1] === "a"),
-    ).toBe(false);
-
-    await setTx.commit();
-  });
-
-  it("should include nested path in potentialWrites when using key().set()", async () => {
-    // Create a cell with nested structure
-    const testCell = runtime.getCell<{
-      data: { unchanged: number; changed: number };
-    }>(
-      space,
-      "diff-update-potential-writes-cell",
-      undefined,
-      tx,
-    );
-    testCell.set({ data: { unchanged: 42, changed: 1 } });
-    tx.commit();
-    tx = runtime.edit();
-
-    // In a new transaction, set nested values where only one property changes
-    const setTx = runtime.edit();
-    testCell.withTx(setTx).key("data").set({ unchanged: 42, changed: 999 });
-
-    const log = txToReactivityLog(setTx);
-
-    // The "data" path should be in potentialWrites because diffAndUpdate
-    // reads the nested object to compare
-    expect(log.potentialWrites).toBeDefined();
-    expect(log.potentialWrites!.some((addr) => addr.path[0] === "data")).toBe(
-      true,
-    );
-
-    // Only changed property within data should be in writes
-    expect(
-      log.writes.some((w) => w.path[0] === "data" && w.path[1] === "changed"),
-    ).toBe(true);
-    // unchanged property should NOT be in writes (value didn't change)
-    expect(
-      log.writes.some((w) => w.path[0] === "data" && w.path[1] === "unchanged"),
-    ).toBe(false);
-
-    await setTx.commit();
-  });
-
-  it("should not have potentialWrites when using getRaw without metadata", async () => {
-    const testCell = runtime.getCell<{ value: number }>(
-      space,
-      "no-potential-writes-cell",
-      undefined,
-      tx,
-    );
-    testCell.set({ value: 1 });
-    tx.commit();
-    tx = runtime.edit();
-
-    // getRaw without metadata should not create potentialWrites
-    const readTx = runtime.edit();
-    testCell.withTx(readTx).key("value").getRaw();
-
-    const log = txToReactivityLog(readTx);
-
-    // Should have reads but no potentialWrites
-    expect(log.reads.length).toBeGreaterThanOrEqual(1);
-    expect(log.potentialWrites).toBeUndefined();
-
-    await readTx.commit();
   });
 });
 
@@ -1084,4 +907,324 @@ describe("reactive retries", () => {
       expect(output.get()).toBe(15); // 10 + 5
     },
   );
+});
+
+describe("parent-child action ordering", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    // Use push mode for parent-child ordering tests since these test
+    // execution ordering when all pending actions run in the same cycle
+    runtime.scheduler.disablePullMode();
+    tx = runtime.edit();
+  });
+
+  afterEach(async () => {
+    await tx.commit();
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("should execute parent actions before child actions", async () => {
+    const executionOrder: string[] = [];
+
+    const source = runtime.getCell<number>(
+      space,
+      "parent-child-order-source",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    await tx.commit();
+    tx = runtime.edit();
+
+    // Parent action that subscribes a child during execution
+    const parentAction: Action = (actionTx) => {
+      executionOrder.push("parent");
+      const val = source.withTx(actionTx).get();
+
+      // Subscribe child action during parent execution
+      runtime.scheduler.subscribe(
+        childAction,
+        { reads: [], writes: [] },
+        { isEffect: true },
+      );
+
+      return val;
+    };
+
+    const childAction: Action = (_actionTx) => {
+      executionOrder.push("child");
+    };
+
+    // Subscribe parent
+    runtime.scheduler.subscribe(
+      parentAction,
+      { reads: [], writes: [] },
+      { isEffect: true },
+    );
+    await runtime.idle();
+
+    // Parent should execute first, then child
+    expect(executionOrder).toEqual(["parent", "child"]);
+  });
+
+  it("should skip child if parent unsubscribes it", async () => {
+    const executionOrder: string[] = [];
+
+    const source = runtime.getCell<number>(
+      space,
+      "parent-child-unsubscribe-source",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    const toggle = runtime.getCell<boolean>(
+      space,
+      "parent-child-unsubscribe-toggle",
+      undefined,
+      tx,
+    );
+    toggle.set(true);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let childCanceler: (() => void) | null = null;
+
+    // Parent action that conditionally subscribes/unsubscribes child
+    const parentAction: Action = (actionTx) => {
+      executionOrder.push("parent");
+      const shouldHaveChild = toggle.withTx(actionTx).get();
+
+      if (shouldHaveChild && !childCanceler) {
+        childCanceler = runtime.scheduler.subscribe(
+          childAction,
+          { reads: [], writes: [] },
+          {},
+        );
+      } else if (!shouldHaveChild && childCanceler) {
+        childCanceler();
+        childCanceler = null;
+      }
+    };
+
+    const childAction: Action = (_actionTx) => {
+      executionOrder.push("child");
+    };
+
+    // Subscribe parent as an effect (so it re-runs when toggle changes)
+    runtime.scheduler.subscribe(
+      parentAction,
+      { reads: [toggle.getAsNormalizedFullLink()], writes: [] },
+      { isEffect: true },
+    );
+    await runtime.idle();
+
+    expect(executionOrder).toEqual(["parent", "child"]);
+
+    // Now toggle to false - parent should unsubscribe child
+    executionOrder.length = 0;
+    toggle.withTx(tx).send(false);
+    await tx.commit();
+    tx = runtime.edit();
+    await runtime.idle();
+
+    // Parent runs (and unsubscribes child), child should NOT run
+    expect(executionOrder).toEqual(["parent"]);
+  });
+
+  it("should order parent before child even when both become dirty", async () => {
+    const executionOrder: string[] = [];
+
+    const source = runtime.getCell<number>(
+      space,
+      "parent-child-both-dirty-source",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let childSubscribed = false;
+
+    // Parent reads source and subscribes child on first run
+    const parentAction: Action = (actionTx) => {
+      executionOrder.push("parent");
+      const val = source.withTx(actionTx).get();
+
+      if (!childSubscribed) {
+        childSubscribed = true;
+        // Subscribe child as an effect too (so it re-runs when source changes)
+        runtime.scheduler.subscribe(
+          childAction,
+          { reads: [], writes: [] },
+          { isEffect: true },
+        );
+      }
+
+      return val;
+    };
+
+    // Child also reads source (so both become dirty when source changes)
+    const childAction: Action = (actionTx) => {
+      executionOrder.push("child");
+      source.withTx(actionTx).get();
+    };
+
+    // Mark parent as effect so it re-runs when source changes
+    runtime.scheduler.subscribe(
+      parentAction,
+      { reads: [], writes: [] },
+      { isEffect: true },
+    );
+    await runtime.idle();
+
+    expect(executionOrder).toEqual(["parent", "child"]);
+
+    // Change source - both parent and child should become dirty
+    executionOrder.length = 0;
+    source.withTx(tx).send(2);
+    await tx.commit();
+    tx = runtime.edit();
+    await runtime.idle();
+
+    // Parent should still execute before child
+    expect(executionOrder).toEqual(["parent", "child"]);
+  });
+
+  it("should handle nested parent-child-grandchild ordering", async () => {
+    const executionOrder: string[] = [];
+
+    const source = runtime.getCell<number>(
+      space,
+      "parent-child-grandchild-source",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let childSubscribed = false;
+    let grandchildSubscribed = false;
+
+    const grandparentAction: Action = (actionTx) => {
+      executionOrder.push("grandparent");
+      source.withTx(actionTx).get();
+
+      if (!childSubscribed) {
+        childSubscribed = true;
+        // Subscribe parent as effect so it re-runs when source changes
+        runtime.scheduler.subscribe(
+          parentAction,
+          { reads: [], writes: [] },
+          { isEffect: true },
+        );
+      }
+    };
+
+    const parentAction: Action = (actionTx) => {
+      executionOrder.push("parent");
+      source.withTx(actionTx).get();
+
+      if (!grandchildSubscribed) {
+        grandchildSubscribed = true;
+        // Subscribe child as effect so it re-runs when source changes
+        runtime.scheduler.subscribe(
+          childAction,
+          { reads: [], writes: [] },
+          { isEffect: true },
+        );
+      }
+    };
+
+    const childAction: Action = (actionTx) => {
+      executionOrder.push("child");
+      source.withTx(actionTx).get();
+    };
+
+    // Mark grandparent as effect so the chain re-runs when source changes
+    runtime.scheduler.subscribe(
+      grandparentAction,
+      { reads: [], writes: [] },
+      { isEffect: true },
+    );
+    await runtime.idle();
+
+    // Should execute in order: grandparent -> parent -> child
+    expect(executionOrder).toEqual(["grandparent", "parent", "child"]);
+
+    // Change source - all three should become dirty and re-execute in order
+    executionOrder.length = 0;
+    source.withTx(tx).send(2);
+    await tx.commit();
+    tx = runtime.edit();
+    await runtime.idle();
+
+    expect(executionOrder).toEqual(["grandparent", "parent", "child"]);
+  });
+
+  it("should clean up parent-child relationships on unsubscribe", async () => {
+    const source = runtime.getCell<number>(
+      space,
+      "parent-child-cleanup-source",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let childCanceler: (() => void) | undefined;
+    let childRunCount = 0;
+
+    const parentAction: Action = (actionTx) => {
+      source.withTx(actionTx).get();
+
+      if (!childCanceler) {
+        childCanceler = runtime.scheduler.subscribe(
+          childAction,
+          { reads: [source.getAsNormalizedFullLink()], writes: [] },
+          {},
+        );
+      }
+    };
+
+    const childAction: Action = (actionTx) => {
+      childRunCount++;
+      source.withTx(actionTx).get();
+    };
+
+    const parentCanceler = runtime.scheduler.subscribe(
+      parentAction,
+      { reads: [source.getAsNormalizedFullLink()], writes: [] },
+      { isEffect: true },
+    );
+    await runtime.idle();
+
+    expect(childRunCount).toBe(1);
+
+    // Unsubscribe the parent - this should clean up the relationship
+    parentCanceler();
+
+    // Also unsubscribe child to prevent it from running independently
+    if (childCanceler) childCanceler();
+
+    // Change source and verify neither runs
+    childRunCount = 0;
+    source.withTx(tx).send(2);
+    await tx.commit();
+    tx = runtime.edit();
+    await runtime.idle();
+
+    expect(childRunCount).toBe(0);
+  });
 });
