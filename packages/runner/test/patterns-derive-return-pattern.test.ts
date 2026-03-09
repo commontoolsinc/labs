@@ -60,7 +60,7 @@ describe("Pattern Runner - Derive returning pattern (CT-1316)", () => {
     });
 
     const outerPattern = pattern<{ value: number }>(({ value }) => {
-      return derive({ value }, ({ value: v }) => {
+      return derive({ value }, ({ value: v }: { value: number }) => {
         return innerPattern({ value: v });
       });
     });

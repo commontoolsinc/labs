@@ -1453,6 +1453,12 @@ export class Runner {
       // This will break if we altered the process cell to point to a
       // different result, so don't do that.
       let previousResultCell: Cell<any> | undefined;
+      // Track the previous result pattern string in the closure to avoid
+      // re-running unchanged sub-patterns. We use a closure-local variable
+      // instead of this.resultPatternCache because the map-based cache gets
+      // invalidated by storage notifications from this.run() below — the
+      // very call it's meant to deduplicate (CT-1316).
+      let previousResultPatternString: string | undefined;
 
       let previouslyInvalidArgument = false;
 
@@ -1494,6 +1500,17 @@ export class Runner {
         };
 
         try {
+          // CT-1316: If the process cell has no committed data yet (e.g.
+          // when a sub-pattern was created inside an action whose TX hasn't
+          // committed), skip execution. The action will be re-triggered
+          // when the storage notification arrives after commit.
+          const processCellRaw = processCell.withTx(tx).getRaw({
+            meta: ignoreReadForScheduling,
+          });
+          if (processCellRaw === undefined) {
+            return;
+          }
+
           const argument = module.argumentSchema !== undefined
             ? inputsCell.asSchema(module.argumentSchema).withTx(tx).get()
             : inputsCell.getAsQueryResult([], tx);
@@ -1583,18 +1600,11 @@ export class Runner {
               // the output binding points to the result cell (it may have been
               // overwritten by a plain value in a previous run)
               const resultPatternAsString = JSON.stringify(resultPattern);
-              const previousResultPatternAsString = this.resultPatternCache.get(
-                `${resultCell.space}/${resultCell.sourceURI}`,
-              );
               const patternUnchanged =
-                previousResultPatternAsString === resultPatternAsString;
+                previousResultPatternString === resultPatternAsString;
+              previousResultPatternString = resultPatternAsString;
 
               if (!patternUnchanged) {
-                this.resultPatternCache.set(
-                  `${resultCell.space}/${resultCell.sourceURI}`,
-                  resultPatternAsString,
-                );
-
                 this.run(
                   tx,
                   resultPattern,
