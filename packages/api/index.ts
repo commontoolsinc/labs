@@ -1327,6 +1327,10 @@ export interface BuiltInLLMParams {
    * dialog state's `result` field. Can be called multiple times (overwrites previous).
    */
   resultSchema?: JSONSchema;
+  /**
+   * Optional named queue to route async operations through.
+   */
+  queue?: string;
 }
 
 export interface BuiltInLLMState {
@@ -1369,6 +1373,7 @@ export type BuiltInGenerateObjectParams =
     maxTokens?: number;
     metadata?: Record<string, string | undefined | object>;
     tools?: Record<string, BuiltInLLMTool>;
+    queue?: string;
   }
   | {
     model?: string;
@@ -1381,6 +1386,7 @@ export type BuiltInGenerateObjectParams =
     maxTokens?: number;
     metadata?: Record<string, string | undefined | object>;
     tools?: Record<string, BuiltInLLMTool>;
+    queue?: string;
   };
 
 export type BuiltInGenerateTextParams =
@@ -1392,6 +1398,7 @@ export type BuiltInGenerateTextParams =
     model?: string;
     maxTokens?: number;
     tools?: Record<string, BuiltInLLMTool>;
+    queue?: string;
   }
   | {
     prompt?: never;
@@ -1401,6 +1408,7 @@ export type BuiltInGenerateTextParams =
     model?: string;
     maxTokens?: number;
     tools?: Record<string, BuiltInLLMTool>;
+    queue?: string;
   };
 
 export interface BuiltInGenerateTextState {
