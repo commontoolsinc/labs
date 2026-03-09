@@ -18,6 +18,7 @@ export async function testPackage(
         cwd: packagePath,
         env: { ENV: "test" },
         stdout: "piped",
+        stderr: "piped",
       }).output(),
     };
   } catch (e) {
