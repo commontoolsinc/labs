@@ -120,7 +120,6 @@ function errorClassFromType(type: string): ErrorConstructor {
 export abstract class StorableNativeWrapper<T extends object>
   extends StorableInstance {
   abstract readonly typeTag: string;
-  abstract override [DECONSTRUCT](): StorableValue;
 
   /** The wrapped native value, used by `toNativeValue` for freeze-state checks. */
   protected abstract get wrappedValue(): T;

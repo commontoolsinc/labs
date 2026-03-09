@@ -56,8 +56,9 @@ export abstract class StorableInstance {
   shallowClone(frozen: boolean): StorableInstance {
     if (frozen && Object.isFrozen(this)) return this;
     const copy = this.shallowUnfrozenClone();
-    if (frozen) Object.freeze(copy);
-    return copy;
+    // Cast needed: Object.freeze() returns Readonly<T>, which TS considers
+    // incompatible with abstract class types due to protected members.
+    return frozen ? Object.freeze(copy) as StorableInstance : copy;
   }
 }
 
@@ -105,13 +106,11 @@ export interface ReconstructionContext {
 }
 
 /**
- * Type guard: checks whether a value implements the storable protocol. The
- * presence of `[DECONSTRUCT]` is the brand. See Section 2.6 of the formal spec.
+ * Type guard: checks whether a value implements the storable protocol.
+ * See Section 2.6 of the formal spec.
  */
 export function isStorableInstance(value: unknown): value is StorableInstance {
-  return value != null &&
-    typeof value === "object" &&
-    DECONSTRUCT in value;
+  return value instanceof StorableInstance;
 }
 
 /**
