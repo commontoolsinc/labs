@@ -4,7 +4,10 @@ import type {
   StorableValue,
   StorableValueLayer,
 } from "./interface.ts";
-import { isStorableInstance } from "./storable-protocol.ts";
+import {
+  isStorableInstance,
+  type StorableInstance,
+} from "./storable-protocol.ts";
 import { SpecialPrimitiveValue } from "./special-primitive-value.ts";
 import {
   isConvertibleNativeInstance,
@@ -72,27 +75,27 @@ function shallowCloneStorableValue(
       return frozen ? Object.freeze(copy) : copy;
     }
 
+    case NATIVE_TAGS.StorableInstance:
+      // StorableInstance values delegate to the protocol's shallowClone
+      // method, which handles frozenness per each concrete class.
+      return (value as StorableInstance).shallowClone(
+        frozen,
+      ) as StorableValueLayer;
+
     case NATIVE_TAGS.HasToJSON:
       // HasToJSON is nascently deprecated; callers should resolve toJSON()
       // before reaching shallowCloneStorableValue. Death before confusion!
       throw new Error("Cannot shallow-clone HasToJSON values");
 
-    default: {
-      // tagFromNativeValue returns null for StorableInstance values (they
-      // aren't in the native class registry). Delegate to the protocol's
-      // shallowClone method.
-      if (isStorableInstance(value)) {
-        return value.shallowClone(frozen) as StorableValueLayer;
-      }
+    default:
       // Convertible native instances (Error, Map, Set, etc.) should never
       // reach here -- they are wrapped before being stored as
       // StorableValueLayer. If they do, something is wrong.
       throw new Error(
-        `Cannot shallow-clone native instance: ${
+        `Cannot shallow-clone: ${
           (value as object).constructor?.name ?? "unknown"
         }`,
       );
-    }
   }
 }
 
@@ -191,29 +194,63 @@ export function toRichStorableValue(
       );
     }
 
-    case NATIVE_TAGS.Primitive:
-      // `undefined` passes through as-is.
-      if (value === undefined) return undefined;
-      // Other primitives (boolean, string, number, bigint) and functions
-      // go through toRichStorableValueBase for validation and conversion.
-      return toRichStorableValueBase(value);
+    case NATIVE_TAGS.StorableInstance:
+      // StorableInstance values (StorableError, UnknownStorable, etc.)
+      // are already valid StorableValue members. Delegate frozenness to
+      // the protocol's shallowClone method.
+      return shallowCloneStorableValue(
+        value as StorableValueLayer,
+        freeze,
+        tag,
+      );
 
-    default: {
-      // tag is null -- unrecognized class. StorableInstance values (which
-      // aren't in the native class registry) are handled via the protocol.
-      if (isStorableInstance(value)) {
-        return shallowCloneStorableValue(
-          value as StorableValueLayer,
-          freeze,
-          tag,
-        );
+    case NATIVE_TAGS.Primitive: {
+      // Non-object types: null, undefined, boolean, string, number,
+      // bigint, symbol, function.
+      if (value === undefined) return undefined;
+      if (value === null) return null;
+      switch (typeof value) {
+        case "boolean":
+        case "string":
+          return value;
+        case "number":
+          if (Number.isFinite(value)) {
+            return Object.is(value, -0) ? 0 : value;
+          }
+          throw new Error("Cannot store non-finite number");
+        case "bigint":
+          return value;
+        case "function":
+          if (hasToJSONMethod(value)) {
+            const converted = value.toJSON();
+            if (!isRichStorableValue(converted)) {
+              throw new Error(
+                `\`toJSON()\` on function returned something other than a storable value`,
+              );
+            }
+            return converted;
+          }
+          throw new Error(
+            "Cannot store function per se (needs to have a `toJSON()` method)",
+          );
+        case "symbol":
+          throw new Error(`Cannot store ${typeof value}`);
+        default:
+          throw new Error(
+            `Shouldn't happen: Unrecognized type ${typeof value}`,
+          );
       }
-      // Unrecognized object types (Map, Set, Uint8Array, class instances
-      // without toJSON, etc.) fall through to toRichStorableValueBase for
-      // rejection handling.
-      const result = toRichStorableValueBase(value);
-      return shallowCloneStorableValue(result, freeze);
     }
+
+    default:
+      // Unrecognized object types (Map, Set, Uint8Array, class instances
+      // without toJSON, etc.) -- not valid StorableValue. Death before
+      // confusion!
+      throw new Error(
+        `Cannot store ${
+          (value as object).constructor?.name ?? typeof value
+        } (not a recognized storable type)`,
+      );
   }
 }
 
@@ -231,79 +268,6 @@ function hasToJSONMethod(
     "toJSON" in (value as object) &&
     typeof (value as { toJSON: unknown }).toJSON === "function"
   );
-}
-
-/**
- * Handles the non-Error, non-undefined, non-array cases for `toRichStorableValue`.
- * Mirrors the logic of `toStorableValueLegacy` for these types.
- */
-function toRichStorableValueBase(value: unknown): StorableValueLayer {
-  switch (typeof value) {
-    case "boolean":
-    case "string": {
-      return value;
-    }
-
-    case "number": {
-      if (Number.isFinite(value)) {
-        return Object.is(value, -0) ? 0 : value;
-      } else {
-        throw new Error("Cannot store non-finite number");
-      }
-    }
-
-    case "function": {
-      if (hasToJSONMethod(value)) {
-        const converted = value.toJSON();
-        if (!isRichStorableValue(converted)) {
-          throw new Error(
-            `\`toJSON()\` on ${typeof value} returned something other than a storable value`,
-          );
-        }
-        return converted;
-      }
-      throw new Error(
-        "Cannot store function per se (needs to have a `toJSON()` method)",
-      );
-    }
-
-    case "object": {
-      if (value === null) {
-        return null;
-      }
-
-      if (hasToJSONMethod(value)) {
-        const converted = value.toJSON();
-        if (!isRichStorableValue(converted)) {
-          throw new Error(
-            `\`toJSON()\` on ${typeof value} returned something other than a storable value`,
-          );
-        }
-        return converted;
-      } else if (isInstance(value)) {
-        // Error and StorableInstance are handled above in toRichStorableValue;
-        // any other instance without toJSON is not storable.
-        throw new Error(
-          "Cannot store instance per se (needs to have a `toJSON()` method)",
-        );
-      } else {
-        // Plain object -- pass through.
-        return value;
-      }
-    }
-
-    case "bigint": {
-      return value;
-    }
-
-    case "symbol": {
-      throw new Error(`Cannot store ${typeof value}`);
-    }
-
-    default: {
-      throw new Error(`Shouldn't happen: Unrecognized type ${typeof value}`);
-    }
-  }
 }
 
 // Sentinel value used to indicate an object is currently being processed

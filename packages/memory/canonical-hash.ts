@@ -13,7 +13,11 @@ import { createHasher, type IncrementalHasher } from "./hash-impl.ts";
 import { isDeepFrozen } from "./deep-freeze.ts";
 import { StorableContentId } from "./storable-content-id.ts";
 import { StorableUint8Array } from "./storable-native-instances.ts";
-import { DECONSTRUCT, isStorableInstance } from "./storable-protocol.ts";
+import {
+  DECONSTRUCT,
+  isStorableInstance,
+  type StorableInstance,
+} from "./storable-protocol.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./type-tags.ts";
 import { encodeULEB128 } from "@commontools/leb128";
 import { bigintToMinimalTwosComplement } from "./bigint-encoding.ts";
@@ -210,26 +214,26 @@ function feedObjectValue(
       feedPlainObject(hasher, value as Record<string, unknown>);
       return;
 
+    case NATIVE_TAGS.StorableInstance: {
+      // StorableInstance (generic protocol path via DECONSTRUCT).
+      hasher.update(TAG_INSTANCE_BYTES);
+      const typeTag = (value as { typeTag?: unknown }).typeTag;
+      if (typeof typeTag !== "string") {
+        throw new Error(
+          `canonicalHash: StorableInstance missing typeTag property`,
+        );
+      }
+      const typeTagUtf8 = encoder.encode(typeTag);
+      feedLength(hasher, typeTagUtf8.length);
+      hasher.update(typeTagUtf8);
+      const state = (value as StorableInstance)[DECONSTRUCT]();
+      feedValue(hasher, state);
+      return;
+    }
+
       // Error, Map, Set, Date, HasToJSON: not valid StorableValue types for
       // hashing -- they should have been converted before reaching here.
-      // Fall through to the StorableInstance / error path below.
-  }
-
-  // StorableInstance (generic protocol path via DECONSTRUCT).
-  if (isStorableInstance(value)) {
-    hasher.update(TAG_INSTANCE_BYTES);
-    const typeTag = (value as { typeTag?: unknown }).typeTag;
-    if (typeof typeTag !== "string") {
-      throw new Error(
-        `canonicalHash: StorableInstance missing typeTag property`,
-      );
-    }
-    const typeTagUtf8 = encoder.encode(typeTag);
-    feedLength(hasher, typeTagUtf8.length);
-    hasher.update(typeTagUtf8);
-    const state = value[DECONSTRUCT]();
-    feedValue(hasher, state);
-    return;
+      // Fall through to the error path below.
   }
 
   throw new Error(

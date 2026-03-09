@@ -3,6 +3,7 @@ import {
   StorableEpochNsec,
 } from "./storable-native-instances.ts";
 import { StorableContentId } from "./storable-content-id.ts";
+import { isStorableInstance } from "./storable-protocol.ts";
 
 /**
  * Canonical type tags for the `/<Type>@<Version>` wire format. Collected in a
@@ -70,6 +71,7 @@ export const NATIVE_TAGS = Object.freeze(
     EpochDays: "EpochDays",
     ContentId: "ContentId",
     HasToJSON: "HasToJSON",
+    StorableInstance: "StorableInstance",
     Primitive: "Primitive",
   } as const,
 );
@@ -187,6 +189,9 @@ export function tagFromNativeValue(value: unknown): NativeTag | null {
   if (tag === null) {
     // Exotic Error subclasses (e.g. DOMException).
     if (Error.isError(value)) return NATIVE_TAGS.Error;
+
+    // StorableInstance values (protocol types with [DECONSTRUCT]).
+    if (isStorableInstance(value)) return NATIVE_TAGS.StorableInstance;
 
     // Cross-realm arrays may have a different constructor.
     if (Array.isArray(value)) tag = NATIVE_TAGS.Array;
