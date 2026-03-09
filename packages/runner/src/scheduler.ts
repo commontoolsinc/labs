@@ -3058,14 +3058,18 @@ export class Scheduler {
         // Track runs for cycle-aware debounce
         this.runsThisExecute.set(fn, (this.runsThisExecute.get(fn) ?? 0) + 1);
         if (this.loopCounter.get(fn)! > MAX_ITERATIONS_PER_RUN) {
-          this.handleError(
-            new Error(
-              `Too many iterations: ${this.loopCounter.get(fn)} ${
-                this.getActionId(fn)
-              }`,
-            ),
-            fn,
+          const error = new Error(
+            `Too many iterations: ${this.loopCounter.get(fn)} ${
+              this.getActionId(fn)
+            }`,
           );
+          // Attach the last frame from the action so handleError can
+          // extract piece/spell metadata (CT-1316: fixes message:null).
+          const lastFrame = (fn as Action & { lastFrame?: Frame }).lastFrame;
+          if (lastFrame) {
+            (error as Error & { frame?: Frame }).frame = lastFrame;
+          }
+          this.handleError(error, fn);
         } else {
           await this.run(fn);
         }

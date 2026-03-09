@@ -570,7 +570,12 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    *
    * @param callback - Function to call after commit
    */
-  addCommitCallback(callback: (tx: IExtendedStorageTransaction) => void): void;
+  addCommitCallback(
+    callback: (
+      tx: IExtendedStorageTransaction,
+      result: Result<Unit, CommitError>,
+    ) => void,
+  ): void;
 
   /**
    * Reads a value from a (local) memory address and throws on error, except for
