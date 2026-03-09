@@ -1605,6 +1605,17 @@ export class Runner {
                   resultCell,
                 );
                 addCancel(() => this.stop(resultCell));
+
+                // CT-1316: If the TX commit fails (e.g. session cancel,
+                // conflict), the sub-pattern's process cell data will be
+                // reverted. Stop the sub-pattern so its actions don't run
+                // with empty/stale data and create new commits that also
+                // get reverted — preventing an infinite cycle.
+                tx.addCommitCallback((_committedTx, result) => {
+                  if (result.error) {
+                    this.stop(resultCell);
+                  }
+                });
               }
 
               if (!previousResultCell) {

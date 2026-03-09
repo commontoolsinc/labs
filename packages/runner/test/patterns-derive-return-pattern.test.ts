@@ -60,7 +60,7 @@ describe("Pattern Runner - Derive returning pattern (CT-1316)", () => {
     });
 
     const outerPattern = pattern<{ value: number }>(({ value }) => {
-      return derive({ value }, ({ value: v }) => {
+      return derive({ value }, ({ value: v }: { value: number }) => {
         return innerPattern({ value: v });
       });
     });
@@ -74,6 +74,7 @@ describe("Pattern Runner - Derive returning pattern (CT-1316)", () => {
 
     const result = runtime.run(tx, outerPattern, { value: 5 }, resultCell);
     await tx.commit();
+    await runtime.storageManager.synced();
 
     const value = await result.pull();
     expect(value.result).toBe(10);
@@ -141,6 +142,7 @@ describe("Pattern Runner - Derive returning pattern (CT-1316)", () => {
       resultCell,
     );
     await tx.commit();
+    await runtime.storageManager.synced();
 
     const value = await result.pull();
     expect(value.done).toBe(true);
@@ -191,6 +193,7 @@ describe("Pattern Runner - Derive returning pattern (CT-1316)", () => {
       resultCell1,
     );
     await tx.commit();
+    await runtime.storageManager.synced();
     tx = runtime.edit();
 
     const value1 = await result1.pull();
@@ -210,6 +213,7 @@ describe("Pattern Runner - Derive returning pattern (CT-1316)", () => {
       resultCell2,
     );
     await tx.commit();
+    await runtime.storageManager.synced();
 
     const value2 = await result2.pull();
     expect(value2.result).toBe(15);
