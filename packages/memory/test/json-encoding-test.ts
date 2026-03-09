@@ -2,7 +2,11 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { JsonEncodingContext } from "../json-encoding.ts";
 import type { ReconstructionContext } from "../storable-protocol.ts";
-import { DECONSTRUCT, isStorableInstance } from "../storable-protocol.ts";
+import {
+  DECONSTRUCT,
+  isStorableInstance,
+  StorableInstance,
+} from "../storable-protocol.ts";
 import type { StorableValue } from "../interface.ts";
 import type { JsonWireValue } from "../json-type-handlers.ts";
 import { UnknownStorable } from "../unknown-storable.ts";
@@ -1263,12 +1267,16 @@ describe("json encoding", () => {
       expect(isStorableInstance(ps)).toBe(true);
     });
 
-    it("returns true for custom StorableInstance", () => {
-      const instance = {
-        [DECONSTRUCT]() {
+    it("returns true for custom StorableInstance subclass", () => {
+      class CustomStorable extends StorableInstance {
+        [DECONSTRUCT](): StorableValue {
           return { value: 42 };
-        },
-      };
+        }
+        protected shallowUnfrozenClone(): CustomStorable {
+          return new CustomStorable();
+        }
+      }
+      const instance = new CustomStorable();
       expect(isStorableInstance(instance)).toBe(true);
     });
 

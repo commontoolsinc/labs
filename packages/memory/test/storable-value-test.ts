@@ -991,6 +991,84 @@ describe("storable-value", () => {
           "converted fn";
         expect(toStorableValue(fn)).toBe("converted fn");
       });
+
+      it("returns mutable shallow copy of frozen plain object when freeze=false", () => {
+        const frozen = Object.freeze({ a: 1, b: "two" });
+        const result = toStorableValue(frozen, false) as Record<
+          string,
+          unknown
+        >;
+        expect(Object.isFrozen(result)).toBe(false);
+        expect(result).not.toBe(frozen);
+        expect(result).toEqual({ a: 1, b: "two" });
+        // Verify the copy is actually mutable.
+        result.c = 3;
+        expect(result.c).toBe(3);
+      });
+
+      it("returns mutable shallow copy of frozen array when freeze=false", () => {
+        const frozen = Object.freeze([1, 2, 3]);
+        const result = toStorableValue(frozen, false) as unknown[];
+        expect(Object.isFrozen(result)).toBe(false);
+        expect(result).not.toBe(frozen);
+        expect(Array.isArray(result)).toBe(true);
+        expect(result).toEqual([1, 2, 3]);
+        // Verify the copy is actually mutable.
+        result.push(4);
+        expect(result.length).toBe(4);
+      });
+
+      it("preserves sparse holes in frozen array copy when freeze=false", () => {
+        const arr = [1, , 3]; // sparse array with hole at index 1
+        Object.freeze(arr);
+        const result = toStorableValue(arr, false) as unknown[];
+        expect(Object.isFrozen(result)).toBe(false);
+        expect(result.length).toBe(3);
+        expect(0 in result).toBe(true);
+        expect(1 in result).toBe(false); // hole preserved
+        expect(2 in result).toBe(true);
+      });
+
+      it("returns frozen shallow copy of mutable plain object when freeze=true", () => {
+        const mutable = { x: 1, y: 2 };
+        const result = toStorableValue(mutable, true);
+        expect(Object.isFrozen(result)).toBe(true);
+        expect(result).not.toBe(mutable);
+        // Original stays mutable.
+        expect(Object.isFrozen(mutable)).toBe(false);
+      });
+
+      it("returns frozen shallow copy of mutable array when freeze=true", () => {
+        const mutable = [10, 20, 30];
+        const result = toStorableValue(mutable, true);
+        expect(Object.isFrozen(result)).toBe(true);
+        expect(result).not.toBe(mutable);
+        expect(Object.isFrozen(mutable)).toBe(false);
+      });
+
+      it("returns already-frozen object as-is when freeze=true", () => {
+        const frozen = Object.freeze({ a: 1 });
+        const result = toStorableValue(frozen, true);
+        expect(result).toBe(frozen); // identity -- no copy needed
+      });
+
+      it("returns already-frozen array as-is when freeze=true", () => {
+        const frozen = Object.freeze([1, 2]);
+        const result = toStorableValue(frozen, true);
+        expect(result).toBe(frozen); // identity -- no copy needed
+      });
+
+      it("returns mutable object as-is when freeze=false", () => {
+        const mutable = { a: 1 };
+        const result = toStorableValue(mutable, false);
+        expect(result).toBe(mutable); // identity -- no copy needed
+      });
+
+      it("returns mutable array as-is when freeze=false", () => {
+        const mutable = [1, 2];
+        const result = toStorableValue(mutable, false);
+        expect(result).toBe(mutable); // identity -- no copy needed
+      });
     });
 
     describe("toDeepStorableValue", () => {
