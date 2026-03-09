@@ -17,8 +17,7 @@ export const RECONSTRUCT: unique symbol = Symbol.for("common.reconstruct");
 
 /**
  * Abstract base class for values that participate in the storable protocol.
- * The presence of `[DECONSTRUCT]` serves as the brand -- no separate marker
- * is needed. See Section 2.3 of the formal spec.
+ * See Section 2.3 of the formal spec.
  *
  * Subclasses must implement:
  * - `[DECONSTRUCT]()` -- returns essential state for serialization.
