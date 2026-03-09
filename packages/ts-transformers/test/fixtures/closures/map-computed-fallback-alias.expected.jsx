@@ -53,20 +53,10 @@ export default pattern((__ct_pattern_input) => {
                         }
                     }
                 } as const satisfies __ctHelpers.JSONSchema, {
-                    anyOf: [{
-                            anyOf: [{
-                                    type: "undefined"
-                                }, {
-                                    type: "array",
-                                    items: {
-                                        $ref: "#/$defs/Reaction"
-                                    }
-                                }],
-                            asOpaque: true
-                        }, {
-                            type: "array",
-                            items: false
-                        }],
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/Reaction"
+                    },
                     $defs: {
                         Reaction: {
                             type: "object",
@@ -80,7 +70,7 @@ export default pattern((__ct_pattern_input) => {
                     }
                 } as const satisfies __ctHelpers.JSONSchema, { msg: {
                         reactions: msg.key("reactions")
-                    } }, ({ msg }) => (msg.reactions) || []);
+                    } }, ({ msg }) => (msg.reactions ?? []) as Reaction[]);
                 return (<div>
               {messageReactions.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                         const reaction = __ct_pattern_input.key("element");
@@ -92,20 +82,7 @@ export default pattern((__ct_pattern_input) => {
                         type: "object",
                         properties: {
                             element: {
-                                anyOf: [{
-                                        anyOf: [{
-                                                type: "undefined"
-                                            }, {
-                                                type: "array",
-                                                items: {
-                                                    $ref: "#/$defs/Reaction"
-                                                }
-                                            }],
-                                        asOpaque: true
-                                    }, {
-                                        type: "array",
-                                        items: false
-                                    }]
+                                $ref: "#/$defs/Reaction"
                             },
                             params: {
                                 type: "object",
