@@ -52,7 +52,7 @@ describe("push-triggered filtering", () => {
     // Run action
     runtime.scheduler.subscribe(
       action,
-      { reads: [], writes: [cell.getAsNormalizedFullLink()] },
+      { reads: [], shallowReads: [], writes: [cell.getAsNormalizedFullLink()] },
       {},
     );
     await cell.pull();
@@ -82,7 +82,11 @@ describe("push-triggered filtering", () => {
     // First run - writes only to cell1
     runtime.scheduler.subscribe(
       action,
-      { reads: [], writes: [cell1.getAsNormalizedFullLink()] },
+      {
+        reads: [],
+        shallowReads: [],
+        writes: [cell1.getAsNormalizedFullLink()],
+      },
       {},
     );
     await cell1.pull();
@@ -96,6 +100,7 @@ describe("push-triggered filtering", () => {
       action,
       {
         reads: [],
+        shallowReads: [],
         writes: [
           cell1.getAsNormalizedFullLink(),
           cell2.getAsNormalizedFullLink(),
@@ -124,7 +129,7 @@ describe("push-triggered filtering", () => {
 
     runtime.scheduler.subscribe(
       action,
-      { reads: [], writes: [] },
+      { reads: [], shallowReads: [], writes: [] },
       {},
     );
     await cell.pull();
@@ -157,7 +162,7 @@ describe("push-triggered filtering", () => {
     // First run with default scheduling should work
     runtime.scheduler.subscribe(
       action,
-      { reads: [], writes: [cell.getAsNormalizedFullLink()] },
+      { reads: [], shallowReads: [], writes: [cell.getAsNormalizedFullLink()] },
       {},
     );
     await cell.pull();
@@ -193,6 +198,7 @@ describe("push-triggered filtering", () => {
       action,
       {
         reads: [cell.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [cell.getAsNormalizedFullLink()],
       },
       { isEffect: true },
@@ -238,7 +244,7 @@ describe("push-triggered filtering", () => {
     // Run once to establish mightWrite
     runtime.scheduler.subscribe(
       action,
-      { reads: [], writes: [cell.getAsNormalizedFullLink()] },
+      { reads: [], shallowReads: [], writes: [cell.getAsNormalizedFullLink()] },
       {},
     );
     await cell.pull();
@@ -249,7 +255,7 @@ describe("push-triggered filtering", () => {
     // Run again with default scheduling - should bypass filter
     runtime.scheduler.subscribe(
       action,
-      { reads: [], writes: [cell.getAsNormalizedFullLink()] },
+      { reads: [], shallowReads: [], writes: [cell.getAsNormalizedFullLink()] },
       {},
     );
     await cell.pull();
@@ -311,7 +317,7 @@ describe("parent-child action ordering", () => {
       // Subscribe child action during parent execution
       runtime.scheduler.subscribe(
         childAction,
-        { reads: [], writes: [] },
+        { reads: [], shallowReads: [], writes: [] },
         { isEffect: true },
       );
 
@@ -325,7 +331,7 @@ describe("parent-child action ordering", () => {
     // Subscribe parent
     runtime.scheduler.subscribe(
       parentAction,
-      { reads: [], writes: [] },
+      { reads: [], shallowReads: [], writes: [] },
       { isEffect: true },
     );
     await runtime.idle();
@@ -364,7 +370,7 @@ describe("parent-child action ordering", () => {
       if (shouldHaveChild && !childCanceler) {
         childCanceler = runtime.scheduler.subscribe(
           childAction,
-          { reads: [], writes: [] },
+          { reads: [], shallowReads: [], writes: [] },
           {},
         );
       } else if (!shouldHaveChild && childCanceler) {
@@ -380,7 +386,11 @@ describe("parent-child action ordering", () => {
     // Subscribe parent as an effect (so it re-runs when toggle changes)
     runtime.scheduler.subscribe(
       parentAction,
-      { reads: [toggle.getAsNormalizedFullLink()], writes: [] },
+      {
+        reads: [toggle.getAsNormalizedFullLink()],
+        shallowReads: [],
+        writes: [],
+      },
       { isEffect: true },
     );
     await runtime.idle();
@@ -423,7 +433,7 @@ describe("parent-child action ordering", () => {
         // Subscribe child as an effect too (so it re-runs when source changes)
         runtime.scheduler.subscribe(
           childAction,
-          { reads: [], writes: [] },
+          { reads: [], shallowReads: [], writes: [] },
           { isEffect: true },
         );
       }
@@ -440,7 +450,7 @@ describe("parent-child action ordering", () => {
     // Mark parent as effect so it re-runs when source changes
     runtime.scheduler.subscribe(
       parentAction,
-      { reads: [], writes: [] },
+      { reads: [], shallowReads: [], writes: [] },
       { isEffect: true },
     );
     await runtime.idle();
@@ -483,7 +493,7 @@ describe("parent-child action ordering", () => {
         // Subscribe parent as effect so it re-runs when source changes
         runtime.scheduler.subscribe(
           parentAction,
-          { reads: [], writes: [] },
+          { reads: [], shallowReads: [], writes: [] },
           { isEffect: true },
         );
       }
@@ -498,7 +508,7 @@ describe("parent-child action ordering", () => {
         // Subscribe child as effect so it re-runs when source changes
         runtime.scheduler.subscribe(
           childAction,
-          { reads: [], writes: [] },
+          { reads: [], shallowReads: [], writes: [] },
           { isEffect: true },
         );
       }
@@ -512,7 +522,7 @@ describe("parent-child action ordering", () => {
     // Mark grandparent as effect so the chain re-runs when source changes
     runtime.scheduler.subscribe(
       grandparentAction,
-      { reads: [], writes: [] },
+      { reads: [], shallowReads: [], writes: [] },
       { isEffect: true },
     );
     await runtime.idle();
@@ -550,7 +560,11 @@ describe("parent-child action ordering", () => {
       if (!childCanceler) {
         childCanceler = runtime.scheduler.subscribe(
           childAction,
-          { reads: [source.getAsNormalizedFullLink()], writes: [] },
+          {
+            reads: [source.getAsNormalizedFullLink()],
+            shallowReads: [],
+            writes: [],
+          },
           {},
         );
       }
@@ -563,7 +577,11 @@ describe("parent-child action ordering", () => {
 
     const parentCanceler = runtime.scheduler.subscribe(
       parentAction,
-      { reads: [source.getAsNormalizedFullLink()], writes: [] },
+      {
+        reads: [source.getAsNormalizedFullLink()],
+        shallowReads: [],
+        writes: [],
+      },
       { isEffect: true },
     );
     await runtime.idle();
