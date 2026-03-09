@@ -2,158 +2,163 @@
 
 ## Description
 
-A coordination tool for a small team to manage access to shared office parking spots. Team members can request a spot for today or a future date and see what is available and who has what. Admins can manage the list of people and parking spots, set priority ordering among people, and configure each person's default spot and preferences. When a request is made, the system automatically assigns the best available spot based on the person's default preference, then their ordered preference list, then any free spot, and marks the request as denied if no spots remain. The week-ahead view gives everyone a quick read on parking for the next seven days.
+A practical coordination tool for a small office team to manage shared parking spots. Team members can request a parking spot for today or a future date; the tool auto-allocates a spot when a request is made, following each person's preferences and priority order. An admin view lets designated coordinators manage the list of people, set priority ordering, assign default spots, and update the set of available parking spots. The main screen shows today's allocation at a glance — which spots are taken, which are free, who has each one — plus a week-ahead view for planning. Designed to be simple and practical for daily use by a small team.
 
 ## Complexity Assessment
 
-- **Tier**: Intermediate
-- **Reference exemplars**: `todo-list/` (list CRUD with status and filtering), `budget-tracker/` (multiple related entities, computed views, admin-level management)
-- **Rationale**: The pattern involves three entity types (ParkingSpot, Person, SpotRequest) with relationships between them, auto-allocation business logic that runs on request creation, multiple computed views (today's status, week-ahead calendar, per-person history), and two distinct operational modes (team member and admin). It does not involve LLM integration, multi-step wizards, or complex concurrent state machines, placing it firmly in the Intermediate tier.
+- **Tier:** Intermediate
+- **Reference exemplars:** `budget-tracker/` (multiple entities with relationships, computed derived views, CRUD across entity types), `kanban-board/` (visual status indicators, clear state display, operational constraints)
+- **Rationale:** The pattern has three core entities (ParkingSpot, Person, SpotRequest) with multiple relationships between them, meaningful derived views (today's status panel, week-ahead calendar), auto-allocation logic that runs on request creation, priority-based ordering, and separate admin controls for data management. There is no LLM integration, no multi-step wizard, and the allocation logic is a simple deterministic rule (default spot → first preference → any available). This places it firmly in the Intermediate tier.
 
 ## Data Model
 
-### Entities
+### Entity: Parking Spot
 
-**Parking Spot**
+Represents a single numbered parking space in the office lot.
 
-Represents one physical parking space in the office lot.
+- **number** — The parking spot's identifier as it appears on the physical lot (e.g., "1", "5", "12"). Required. Must be unique across all spots.
+- **label** — An optional friendly name for the spot (e.g., "Near entrance", "Covered"). Optional; defaults to empty.
+- **notes** — Any relevant operational notes about the spot (e.g., "Van accessible", "Do not block door"). Optional; defaults to empty.
 
-| Field | Description | Optional | Default |
-|-------|-------------|----------|---------|
-| `number` | The spot's identifying number as displayed on the lot (e.g., 1, 5, 12). Used to refer to the spot everywhere in the UI. | No | — |
-| `label` | A short human-readable name for the spot (e.g., "Near entrance", "Covered"). Supplementary display name. | Yes | — |
-| `notes` | Freeform notes about the spot visible to admins (e.g., "Compact cars only"). | Yes | — |
+### Entity: Person
 
-**Person**
+Represents a team member who may request parking. Managed by the admin.
 
-Represents one team member who may use the parking coordinator.
+- **name** — The person's display name. Required.
+- **email** — The person's email address, shown as contact information. Optional.
+- **usualCommuteMode** — How the person typically gets to the office. One of: "drive", "transit", "bike", "wfh", or "other". Required; defaults to "drive".
+- **spotPreferences** — An ordered list of parking spots indicating this person's preferred spots, from most to least preferred. Optional; defaults to empty (no preferences set).
+- **defaultSpot** — The specific parking spot the admin has designated as this person's default. When this person makes a request, this spot is tried first during auto-allocation. Optional; defaults to none.
 
-| Field | Description | Optional | Default |
-|-------|-------------|----------|---------|
-| `name` | The person's full name, used throughout the UI. | No | — |
-| `email` | The person's email address, shown in the person list for identification. | No | — |
-| `commuteMode` | How this person usually gets to work. One of: drive, transit, bike, wfh, other. Contextual information only — any person can still make a parking request regardless of their usual mode. | No | drive |
-| `spotPreferences` | An ordered list of parking spots this person prefers, from most to least preferred. Used by auto-allocation when their default spot is unavailable. May be empty. | Yes | empty list |
-| `defaultSpot` | The spot this person is assigned by default (first choice in auto-allocation before consulting preferences). Set by an admin. | Yes | — |
+### Entity: Spot Request
 
-Priority among people is determined by their order in the people list: the person at the top of the list has the highest priority. Admins can reorder the people list to change priority.
+Represents a single request by one person for a parking spot on a specific date. Created when a team member requests parking. Updated by auto-allocation and by cancellation.
 
-**Spot Request**
+- **person** — The team member making the request. References an existing Person. Required.
+- **date** — The calendar date for which parking is being requested. Required.
+- **status** — The current state of the request. One of: "pending" (just created, awaiting allocation), "allocated" (a spot has been assigned), "denied" (no spot was available at allocation time), "cancelled" (the person cancelled the request). Starts as "pending" and is immediately updated by the auto-allocation process.
+- **assignedSpot** — The parking spot assigned to this request. Present only when status is "allocated"; empty otherwise.
+- **autoAllocated** — Whether the spot was assigned automatically by the system (true) or by an admin manual override (false). Defaults to true.
 
-Represents one person's request to park on a specific date.
+### Priority Ordering
 
-| Field | Description | Optional | Default |
-|-------|-------------|----------|---------|
-| `person` | The person who made the request. | No | — |
-| `requestedDate` | The date for which parking is requested (a calendar date, not a datetime). | No | — |
-| `status` | Current state of the request. One of: pending, allocated, denied, cancelled. | No | pending |
-| `assignedSpot` | The parking spot assigned to this request. Set when status becomes "allocated". | Yes | — |
-| `autoAllocated` | Whether the spot assignment was made automatically by the system (true) or manually by an admin (false). | No | true |
+The system maintains a global priority list — an ordered ranking of all Persons. The person at the top of the list has the highest priority and is allocated first when multiple people have requested the same date. This list is managed by the admin.
 
 ### Relationships
 
-- A **Person** may have one **Parking Spot** designated as their `defaultSpot` (optional many-to-one reference).
-- A **Person's** `spotPreferences` is an ordered list of **Parking Spots** they prefer (ordered reference list).
-- A **Spot Request** belongs to exactly one **Person** and targets exactly one date.
-- A **Spot Request**, when allocated, references exactly one **Parking Spot** as its `assignedSpot`.
-- Multiple **Spot Requests** may target the same date, but no two allocated requests for the same date may share the same `assignedSpot` (each physical spot can only be used by one person per day).
-- The people list is ordered; position in the list determines allocation priority (index 0 = highest priority).
+- A ParkingSpot may be referenced by many Persons (as default spot or in preferences), and may be assigned to many SpotRequests across different dates.
+- A Person has at most one SpotRequest per date. A second request for the same person on the same date is not permitted if an active (non-cancelled) request already exists.
+- A SpotRequest belongs to exactly one Person and, when allocated, exactly one ParkingSpot.
+- The priority ordering is a separate ranked list of all Persons. Every Person appears exactly once in this list.
+- A spot is "available" on a given date if it has no SpotRequest with status "allocated" for that date.
+
+### Initial State
+
+The system starts with the three office parking spots pre-loaded: spot #1, spot #5, and spot #12 (no labels or notes). No persons are pre-loaded; the admin adds them. The priority list starts empty and grows as persons are added.
 
 ## User Interactions
 
 ### Team Member Interactions
 
-1. **View today's parking status**: The user sees all parking spots and their status for today: which spots are taken (and by whom), which are free, and how many spots remain. This is the primary at-a-glance view.
+1. **View today's parking status** — On the main screen, the user sees a prominent "Today" panel showing all parking spots. Each spot is clearly marked as either occupied (showing the name of the person who has it) or available (shown as free). The panel provides an at-a-glance answer to "where can I park today?"
 
-2. **Request a parking spot**: The user selects a date (defaulting to today) and submits a spot request. Upon submission, auto-allocation runs: the system checks whether the person's default spot is available on that date, then checks their ordered preferences, then assigns any available spot. If no spots are free, the request is marked as denied. The user sees immediate feedback: whether they got a spot and which one.
+2. **View the week-ahead schedule** — Below the today panel, the user sees a 7-day grid spanning today through 6 days ahead. Columns are days; rows are parking spots (or vice versa). Each cell shows who has that spot on that day, or indicates the spot is free. This lets team members plan whether to drive in on upcoming days.
 
-3. **Cancel a parking request**: The user can cancel any of their own active requests (status: pending or allocated). When cancelled, the request status becomes "cancelled" and the spot is freed for others. The user sees their request list update immediately.
+3. **Request a parking spot** — The user opens a request form by clicking a "Request Parking" button. They select:
+   - Their name from a list of all registered persons
+   - The date they need parking (defaults to today; can select any date from today up to 30 days ahead)
+   They submit the form. The system immediately runs auto-allocation: it assigns the person's default spot if it is available on that date; if not, it tries the person's spots in preference order; if none are available, it assigns any free spot; if no spots are free, the request is denied. The result (allocated spot or denied) is shown to the user immediately after submission. The today panel and week-ahead grid update to reflect the new allocation.
 
-4. **View the week-ahead**: The user sees a 7-day view starting from today showing all allocations for each day: which spots are taken, by whom, and which are free. Days with no allocations show as fully available.
+4. **Cancel a parking request** — The user can find their active (allocated) request in the "My Requests" section or on the today/week view, and cancel it. The spot becomes available again immediately. The today panel and week-ahead grid update to reflect the freed spot.
 
-5. **View personal request history**: The user can see a list of their own past and upcoming requests with their statuses (pending, allocated, denied, cancelled) and which spot was assigned (if any).
+5. **View my requests** — The user can see a list of their own past and upcoming requests, filtered by their selected name. Each entry shows the date, assigned spot (or "denied"), and status. This lets them review their history and find upcoming allocations to cancel.
 
 ### Admin Interactions
 
-6. **Add a person**: The admin can add a new person to the system by providing their name, email, and commute mode. The new person is added to the bottom of the priority list (lowest priority by default).
+6. **Enter admin mode** — A clearly labeled "Admin" button or section reveals the admin controls. No password is required (this is a trust-based internal tool). The admin controls are visually distinct from the team member interface.
 
-7. **Remove a person**: The admin can remove a person from the system. Any pending or allocated requests for that person are cancelled and their spots freed.
+7. **Add a person** — The admin fills in a form with the person's name, optional email, and usual commute mode. The new person is added to the bottom of the priority list. They immediately appear as an option in the request form.
 
-8. **Reorder people (set priority)**: The admin can reorder the people list to change who has higher priority in spot allocation. The person at the top of the list has the highest priority.
+8. **Remove a person** — The admin can remove a person from the system. If the person has any upcoming allocated requests, those allocations are cancelled and the spots become available. The person is removed from the priority list.
 
-9. **Set a person's default spot**: The admin can assign a specific parking spot as a person's default. When that person makes a request, the system tries to allocate this spot first. The admin can also clear the default spot assignment.
+9. **Set priority order** — The admin sees a ranked list of all persons, ordered from highest to lowest priority. They can move any person up or down in the list using up/down controls. The new priority order takes effect immediately for any future allocation runs. Existing allocations are not retroactively changed.
 
-10. **Set a person's spot preferences**: The admin can set and reorder the list of preferred spots for a person. The preferences are consulted in order during auto-allocation when the default spot is unavailable.
+10. **Assign a default spot to a person** — When viewing or editing a person, the admin can select any parking spot as that person's default. Only one spot can be a person's default at a time. The admin can also clear the default (leaving the person with no default). Multiple people may share the same default spot (in which case the higher-priority person gets it first when both request the same day).
 
-11. **Add a parking spot**: The admin can add a new parking spot to the system by specifying its number. Optionally, the admin can add a label and notes for the spot.
+11. **Set spot preferences for a person** — The admin can edit a person's preference list: adding spots to the list, removing them, and reordering them. The preference list is used as a fallback when the person's default spot is unavailable.
 
-12. **Edit a parking spot**: The admin can edit the label and notes of an existing spot. The spot number cannot be changed (it is the physical lot number).
+12. **Add a parking spot** — The admin opens an add-spot form and enters the spot number (required), an optional label, and optional notes. The new spot is immediately available for allocation and appears in the today panel, week-ahead grid, and preference lists.
 
-13. **Remove a parking spot**: The admin can remove a parking spot from the system. Any allocated requests for that spot are cleared of their spot assignment and reverted to "pending" for reallocation, or the admin is warned before removal.
+13. **Remove a parking spot** — The admin can remove a parking spot. If the spot has any upcoming allocated requests, those allocations are cancelled (status becomes denied) and the affected persons are notified visually (their allocations show as lost). The spot is removed from all persons' preference lists and default assignments.
 
-14. **Manually override an allocation**: The admin can directly assign a specific spot to an existing pending request, bypassing auto-allocation. The request status becomes "allocated" with `autoAllocated` set to false.
+14. **Edit a parking spot's details** — The admin can update a spot's label and notes at any time. The spot number cannot be changed after creation.
 
-15. **Toggle admin mode**: A simple toggle switches the interface between the team-member view and the admin management view. No login is required — this is a trusted small-team tool.
+15. **Manually override an allocation** — The admin can directly assign any available spot to any person for a specific date, bypassing the auto-allocation rules. This creates an allocated SpotRequest (or updates an existing one) with autoAllocated set to false. The admin can also manually move an existing allocation to a different spot if the target spot is free.
 
 ## Acceptance Criteria
 
-- [ ] On initial load, the pattern shows today's date and the status of all three parking spots (#1, #5, #12).
-- [ ] The today view clearly shows each spot as either free or taken, and displays the occupant's name when taken.
-- [ ] A team member can submit a request for today or a future date and receive immediate feedback: the assigned spot number or a "denied" message if all spots are full.
-- [ ] Auto-allocation checks the person's default spot first, then their preferences in order, then any free spot, and denies if all spots are taken.
-- [ ] A team member can cancel their own request; the request status changes to "cancelled" and the spot is freed.
-- [ ] The week-ahead view shows 7 days starting from today, with allocations displayed per day.
-- [ ] The week-ahead view clearly shows which spots are free vs. taken on each day.
-- [ ] An admin can add a new person with name, email, and commute mode.
-- [ ] An admin can remove a person; their pending/allocated requests are cancelled.
-- [ ] An admin can reorder the people list; the new order is reflected immediately.
-- [ ] An admin can set or clear a person's default spot.
-- [ ] An admin can set and reorder a person's spot preferences.
-- [ ] An admin can add a new parking spot with a required number and optional label and notes.
-- [ ] An admin can edit the label and notes of an existing spot.
-- [ ] An admin can remove a parking spot; affected requests are handled (reverted to pending or cancelled).
-- [ ] An admin can manually assign a spot to a pending request, overriding auto-allocation.
-- [ ] The admin mode toggle switches between the team-member view and admin management controls.
-- [ ] No two allocated requests for the same date share the same spot.
-- [ ] Requests with status "cancelled" or "denied" do not block spot availability for other people on that date.
-- [ ] A person can request a spot regardless of their usual commute mode.
-- [ ] Submitting a request for a date that already has an active (non-cancelled) request from the same person is disallowed or handled gracefully (no duplicates).
+- On first load, the today panel shows all three parking spots (#1, #5, #12) as available.
+- The week-ahead grid shows 7 days starting from today, with all spots shown as free initially.
+- A team member can select their name and request parking for today; if a spot is free, it is allocated immediately and the today panel updates.
+- After a successful allocation, the allocated spot shows as occupied in the today panel with the person's name.
+- If all spots are occupied for a requested date, the request status shows as "denied" with a clear message that no spots were available.
+- A person cannot have more than one active (non-cancelled) request for the same date. Attempting to request again for a date with an existing allocation shows an error.
+- Cancelling a request returns the spot to "available" immediately in the today panel and week-ahead grid.
+- Auto-allocation follows the priority: default spot first → spots in preference order → any free spot.
+- If a person has no default spot and no preferences set, the system assigns any available spot.
+- The week-ahead grid correctly shows allocations for future dates after requests are made.
+- Admin mode reveals add/remove/edit controls for persons and spots.
+- Adding a person via admin makes them immediately available in the request form's name selector.
+- Removing a person cancels any upcoming allocated requests for that person.
+- The priority list in admin mode shows all persons in ranked order. Moving a person up/down updates their position immediately.
+- Adding a spot via admin makes it appear in the today panel, week-ahead grid, and preference selection lists.
+- Removing a spot cancels any upcoming allocated requests for that spot; affected persons see their allocations as lost.
+- A spot's label and notes can be edited; updates appear immediately everywhere the spot is displayed.
+- Persons with usual commute mode of "transit", "bike", "wfh", or "other" can still make parking requests — their commute mode is informational only, not a restriction.
+- The "My Requests" view shows the current user's requests filtered by their selected name, including status and assigned spot.
 
 ## Edge Cases
 
-- **No spots defined**: If no parking spots exist, the today view and week-ahead show a message that no spots are configured, and the request form is disabled. Admin must add spots first.
-- **No people defined**: If no people exist, the admin view shows an empty list with a prompt to add the first person.
-- **All spots taken for a requested date**: The request is marked as "denied" immediately. The user sees a clear message that no spots are available on that date.
-- **Requesting today vs. a past date**: Requests for dates before today should be disallowed. The date picker should not allow past dates.
-- **Same person requests the same date twice**: The system should detect an existing active request for that date and prevent a duplicate, showing a message that the person already has a request for that date.
-- **Cancelling an allocated request frees the spot**: Subsequent requests from others for that date should now see the freed spot as available.
-- **Removing a person with active requests**: All their pending and allocated requests are cancelled, freeing spots for other people.
-- **Removing a spot with active allocations**: Requests allocated to that spot should be reverted to "pending" status and have their `assignedSpot` cleared. An admin warning before removal is appropriate.
-- **A person has no default spot and no preferences**: Auto-allocation assigns any free spot (or denies if none are available).
-- **A person's default spot is already taken**: Allocation falls through to preferences, then any free spot.
-- **Very long names or emails**: Text should wrap or truncate gracefully in the people list and spot assignment display.
-- **Large number of requests**: The week-ahead view should remain readable with many requests per day.
-- **Priority with only one person**: The priority list still shows that person; reordering is a no-op.
-- **Initial load with no data**: Show the three default spots (#1, #5, #12) already in the system with no people and no requests.
+- **No persons registered (initial admin setup):** The request form cannot be submitted until at least one person exists. The today and week-ahead panels show only spots with no names. The admin should see a prompt to add people.
+- **All spots occupied for a requested date:** The request is created with status "denied." The user sees a clear message. The today panel shows all spots as occupied.
+- **Person requests a date that already has an active request for them:** The system prevents creating a duplicate request and shows an informative message.
+- **Person's default spot is occupied on the requested date:** Auto-allocation falls through to preferences. If all preferences are also occupied, any free spot is assigned. If no spots are free, the request is denied.
+- **Two people with the same default spot request the same date simultaneously:** The higher-priority person (earlier in the priority list) gets their default spot; the lower-priority person falls through to their next preference or any available spot.
+- **Person with no preferences and no default:** Any available spot is assigned. If no spot is available, the request is denied.
+- **Admin removes a spot that has upcoming allocations:** The affected SpotRequests are updated to denied status. The persons whose allocations were cancelled see their requests as lost.
+- **Admin removes a person who has upcoming allocations:** The allocated requests are cancelled; spots become available again.
+- **Requesting a date in the past:** The form does not allow selecting past dates. Only today and future dates (up to 30 days ahead) are selectable.
+- **Very long person name:** The name truncates or wraps gracefully in the today panel, week-ahead grid, and person lists without breaking the layout.
+- **Spot with a very long label or notes:** Text wraps within the display without breaking the layout.
+- **Week-ahead grid at end of month:** The grid correctly handles month boundaries (e.g., showing March 30 through April 5 with correct dates).
+- **All persons in the system have a commute mode that is not "drive":** They should still be able to request spots — commute mode is informational.
+- **Admin reorders the priority list when some requests for today already exist:** Existing allocations are not changed. The new priority order applies only to future allocation runs.
+- **Empty week-ahead (no requests at all):** Every cell in the grid shows the spot as free. A helpful message or visual indicator clarifies that no bookings have been made.
 
 ## Assumptions
 
-1. **Default spots pre-populated**: The three spots (#1, #5, #12) are treated as the initial starting state of the pattern. They are loaded as defaults so the tool is immediately useful without admin setup for spots. The admin can add more or remove them.
+1. **No authentication; admin mode is a toggle.** The brief does not describe a login system. Since this is a small internal team tool, admin controls are accessible via a visible toggle on the interface. All users see the same data; only admin controls are gated behind the toggle. The brief says "as an admin" but does not imply a separate login.
 
-2. **Allocation entity merged into SpotRequest**: The brief describes both a "SpotRequest" and an "Allocation" as separate entities. Since a SpotRequest already tracks the assigned spot, status, and auto-allocated flag, a separate Allocation entity would be redundant. All allocation information lives on the SpotRequest. This simplifies the data model without losing any required information.
+2. **Person selection for requests.** Because there is no user identity in the pattern, team members select their own name from the registered persons list when making a request. This is a standard simplification for internal team patterns.
 
-3. **Priority operates at request time**: "Higher priority people get allocated first" is interpreted as: when auto-allocation runs for a new request, it uses the available spots at that moment. It does not retroactively reassign spots from lower-priority people. If a lower-priority person requested first and got their spot, a later higher-priority request gets whatever remains. Re-allocation on priority change is out of scope.
+3. **Allocation entity collapsed into SpotRequest.** The brief describes both "SpotRequest" (person-centric) and "Allocation" (spot-centric) as separate entities. In this spec they are unified: a SpotRequest, when allocated, carries the assigned spot and the autoAllocated flag. The today and week-ahead views derive their display from allocated SpotRequests. This simplification avoids redundant data without losing any required information.
 
-4. **No authentication or login**: The pattern uses a simple admin mode toggle. Any user of the pattern can switch to admin mode. This is appropriate for a trusted small-team internal tool, as the brief specifies.
+4. **Auto-allocation runs immediately on request submission.** The brief says "auto-allocation should run when a request is created." The request transitions from "pending" to "allocated" or "denied" within the same action — users never see a prolonged pending state. Pending status is an internal transitional state during the allocation process.
 
-5. **Requests are per-person, per-date unique**: Only one active request (non-cancelled) per person per date is allowed. Submitting a second request for the same date the same person already has a request for is an error condition, not silently overwritten.
+5. **Priority order determines allocation sequence, not real-time competition.** When multiple people have requested the same date, they are allocated in priority order: the highest-priority person's preferences are satisfied first, then the next, and so on. This applies when viewing the week-ahead (all existing requests are already allocated or denied in priority order at the time each was submitted).
 
-6. **Past date requests disallowed**: The brief does not explicitly say whether past-date requests are allowed, but for a practical coordination tool, only today and future dates make sense for new requests. Past dates are read-only in the week-ahead and history views.
+6. **Date range for requests: today to 30 days ahead.** The brief does not specify a date range. 30 days ahead is a practical window for a small office team's planning needs. Past dates cannot be requested.
 
-7. **Commute mode is informational only**: The brief explicitly says "people who usually take transit or bike should still be able to request a spot." The `commuteMode` field is displayed for context (e.g., admins can see who normally drives vs. takes transit) but never blocks a request.
+7. **Multiple people may share the same default spot.** The brief does not restrict this. If two people have the same default, the higher-priority person gets it when both request the same day.
 
-8. **Spot number is immutable**: The physical lot number (#1, #5, #12) is set once and cannot be edited. Only the label and notes can be changed. This is reflected in the "edit a parking spot" interaction.
+8. **Email is display-only.** The brief lists email as a person field. In this pattern, email is stored and displayed as contact information but is not used for notifications (no email sending capability in the pattern).
 
-9. **Auto-allocation denial is immediate**: If all spots are taken when a request is submitted, the request immediately gets status "denied" rather than entering a "pending" queue. For a small team with 3 spots, a pending queue would be confusing. Users can check the week-ahead and request a different date.
+9. **Spot number is immutable after creation.** The spot number is the physical identifier on the lot. Labels and notes can be updated; the number cannot, to avoid confusion with physical spots.
 
-10. **Week-ahead starts from today**: The 7-day view always shows today through today+6. It does not allow scrolling to future or past weeks. This keeps the pattern focused and practical.
+10. **Up/down controls for preference and priority ordering.** The brief does not specify the UI mechanism for ordering. Up/down arrow buttons per row are assumed rather than drag-and-drop, as they are simpler to implement and accessible.
+
+11. **Initial spots pre-loaded; no persons pre-loaded.** The three spots (#1, #5, #12) from the brief are present on first load as the "known" office spots. No persons are pre-loaded — the admin adds their team. This matches the brief's description of the spots as fixed, real lot numbers.
+
+12. **Cancellation is only available for upcoming/today requests.** Past requests (dates in the past) are shown in history but cannot be cancelled. Only future or today's allocated requests can be cancelled.
+
+13. **Admin can manually override allocations.** The brief says admin can "occasionally update" things. A manual override interaction is added for the admin to directly assign or reassign a spot, as this is a natural expectation for a coordination tool admin.
