@@ -904,6 +904,114 @@ describe("Journal", () => {
     });
   });
 
+  describe("nonRecursive reads", () => {
+    it("records nonRecursive: true in activity when option is set", () => {
+      const { ok: reader } = journal.reader(space);
+      const address = {
+        id: "test:nonrecursive",
+        type: "application/json",
+        path: ["value", "a"],
+      } as const;
+
+      reader!.read(address, { nonRecursive: true });
+
+      const activity = [...journal.activity()];
+      expect(activity).toHaveLength(1);
+      expect(activity[0].read).toEqual({
+        ...address,
+        space,
+        meta: {},
+        nonRecursive: true,
+      });
+    });
+
+    it("omits nonRecursive from activity for a regular read", () => {
+      const { ok: reader } = journal.reader(space);
+      const address = {
+        id: "test:recursive",
+        type: "application/json",
+        path: ["value", "a"],
+      } as const;
+
+      reader!.read(address);
+
+      const activity = [...journal.activity()];
+      expect(activity).toHaveLength(1);
+      expect(activity[0].read).not.toHaveProperty("nonRecursive");
+    });
+
+    it("omits nonRecursive from activity when option is false", () => {
+      const { ok: reader } = journal.reader(space);
+      const address = {
+        id: "test:nonrecursive-false",
+        type: "application/json",
+        path: ["value", "a"],
+      } as const;
+
+      reader!.read(address, { nonRecursive: false });
+
+      const activity = [...journal.activity()];
+      expect(activity).toHaveLength(1);
+      expect(activity[0].read).not.toHaveProperty("nonRecursive");
+    });
+
+    it("distinguishes nonRecursive reads from regular reads in activity", () => {
+      const { ok: reader } = journal.reader(space);
+      const address = {
+        id: "test:mixed",
+        type: "application/json",
+        path: ["value", "a"],
+      } as const;
+
+      reader!.read(address, { nonRecursive: true });
+      reader!.read(address);
+
+      const activity = [...journal.activity()];
+      expect(activity).toHaveLength(2);
+      expect(activity[0].read).toHaveProperty("nonRecursive", true);
+      expect(activity[1].read).not.toHaveProperty("nonRecursive");
+    });
+  });
+
+  describe("trackReadWithoutLoad reads", () => {
+    it("records read activity but skips loading from storage", async () => {
+      const replica = storage.open(space).replica;
+      await replica.commit({
+        facts: [
+          assert({
+            the: "application/json",
+            of: "test:track-without-load",
+            is: { present: true },
+          }),
+        ],
+        claims: [],
+      });
+
+      const freshJournal = Journal.open(storage);
+      const { ok: reader } = freshJournal.reader(space);
+      const address = {
+        id: "test:track-without-load",
+        type: "application/json",
+        path: [],
+      } as const;
+
+      const result = reader!.read(address, { trackReadWithoutLoad: true });
+      expect(result.error).toBeUndefined();
+      // Value exists in replica, but should not be loaded when tracking only.
+      expect(result.ok?.value).toBeUndefined();
+
+      const activity = [...freshJournal.activity()];
+      expect(activity).toHaveLength(1);
+      expect(activity[0].read).toEqual({
+        ...address,
+        space,
+        meta: {},
+      });
+      // No load means no history invariant captured.
+      expect([...freshJournal.history(space)]).toHaveLength(0);
+    });
+  });
+
   describe("Edge Cases", () => {
     it("should handle empty paths correctly", () => {
       const { ok: writer } = journal.writer(space);

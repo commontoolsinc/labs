@@ -56,7 +56,7 @@ describe("cycle-aware convergence", () => {
 
     runtime.scheduler.subscribe(
       action,
-      { reads: [], writes: [] },
+      { reads: [], shallowReads: [], writes: [] },
       {},
     );
     runtime.scheduler.queueExecution();
@@ -96,7 +96,7 @@ describe("cycle-aware convergence", () => {
 
     runtime.scheduler.subscribe(
       action,
-      { reads: [], writes: [] },
+      { reads: [], shallowReads: [], writes: [] },
       {},
     );
     await output.pull();
@@ -181,6 +181,7 @@ describe("cycle-aware convergence", () => {
       actionA,
       {
         reads: [cellA.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [cellB.getAsNormalizedFullLink()],
       },
       {},
@@ -190,6 +191,7 @@ describe("cycle-aware convergence", () => {
       actionB,
       {
         reads: [cellB.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [cellA.getAsNormalizedFullLink()],
       },
       {},
@@ -200,6 +202,7 @@ describe("cycle-aware convergence", () => {
       effect,
       {
         reads: [cellB.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [output.getAsNormalizedFullLink()],
       },
       { isEffect: true },
@@ -250,6 +253,7 @@ describe("cycle-aware convergence", () => {
       computation,
       {
         reads: [counter.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [doubled.getAsNormalizedFullLink()],
       },
       {},
@@ -269,6 +273,7 @@ describe("cycle-aware convergence", () => {
       computation,
       {
         reads: [counter.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [doubled.getAsNormalizedFullLink()],
       },
       {},
@@ -335,6 +340,7 @@ describe("cycle-aware convergence", () => {
       actionA,
       {
         reads: [cellB.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [cellA.getAsNormalizedFullLink()],
       },
       {},
@@ -344,6 +350,7 @@ describe("cycle-aware convergence", () => {
       actionB,
       {
         reads: [cellA.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [cellB.getAsNormalizedFullLink()],
       },
       {},
@@ -354,6 +361,7 @@ describe("cycle-aware convergence", () => {
       effect,
       {
         reads: [cellB.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [output.getAsNormalizedFullLink()],
       },
       { isEffect: true },
@@ -408,6 +416,7 @@ describe("cycle-aware convergence", () => {
       computation,
       {
         reads: [source.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [result.getAsNormalizedFullLink()],
       },
       {},
@@ -427,6 +436,7 @@ describe("cycle-aware convergence", () => {
       computation,
       {
         reads: [source.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [result.getAsNormalizedFullLink()],
       },
       {},
@@ -490,6 +500,7 @@ describe("cycle-aware convergence", () => {
       actionA,
       {
         reads: [cellC.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [cellA.getAsNormalizedFullLink()],
       },
       {},
@@ -500,6 +511,7 @@ describe("cycle-aware convergence", () => {
       actionB,
       {
         reads: [cellA.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [cellB.getAsNormalizedFullLink()],
       },
       {},
@@ -510,6 +522,7 @@ describe("cycle-aware convergence", () => {
       actionC,
       {
         reads: [cellB.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [cellC.getAsNormalizedFullLink()],
       },
       {},
@@ -543,7 +556,7 @@ describe("cycle-aware convergence", () => {
 
     runtime.scheduler.subscribe(
       errorAction,
-      { reads: [], writes: [] },
+      { reads: [], shallowReads: [], writes: [] },
       {},
     );
 
@@ -581,7 +594,7 @@ describe("cycle-aware convergence", () => {
     for (let i = 0; i < 3; i++) {
       runtime.scheduler.subscribe(
         action,
-        { reads: [], writes: [] },
+        { reads: [], shallowReads: [], writes: [] },
         {},
       );
       await cell.pull();
@@ -637,7 +650,7 @@ describe("cycle-aware convergence", () => {
     for (const action of [actionA, actionB, actionC, actionD]) {
       runtime.scheduler.subscribe(
         action,
-        { reads: [], writes: [] },
+        { reads: [], shallowReads: [], writes: [] },
         {},
       );
       await cellD.pull();
@@ -680,7 +693,7 @@ describe("cycle-aware convergence", () => {
 
     runtime.scheduler.subscribe(
       selfRefAction,
-      { reads: [], writes: [] },
+      { reads: [], shallowReads: [], writes: [] },
       {},
     );
 
@@ -717,6 +730,7 @@ describe("cycle-aware convergence", () => {
       action,
       {
         reads: [cell.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [cell.getAsNormalizedFullLink()],
       },
       {},
@@ -736,6 +750,7 @@ describe("cycle-aware convergence", () => {
       action,
       {
         reads: [cell.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [cell.getAsNormalizedFullLink()],
       },
       {},
@@ -812,6 +827,7 @@ describe("cycle-aware convergence", () => {
       acyclicAction,
       {
         reads: [source.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [computed.getAsNormalizedFullLink()],
       },
       {},
@@ -822,6 +838,7 @@ describe("cycle-aware convergence", () => {
       cycleActionA,
       {
         reads: [cycleA.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [cycleB.getAsNormalizedFullLink()],
       },
       {},
@@ -832,6 +849,7 @@ describe("cycle-aware convergence", () => {
       cycleActionB,
       {
         reads: [cycleB.getAsNormalizedFullLink()],
+        shallowReads: [],
         writes: [cycleA.getAsNormalizedFullLink()],
       },
       {},

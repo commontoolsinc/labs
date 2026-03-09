@@ -56,6 +56,17 @@ import type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
 
 const logger = getLogger("traverse", { enabled: true, level: "warn" });
 
+const READ_NON_RECURSIVE: IReadOptions = {
+  nonRecursive: true,
+};
+const READ_FOR_SCHEDULING: IReadOptions = {
+  trackReadWithoutLoad: true,
+};
+const READ_NON_RECURSIVE_FOR_SCHEDULING: IReadOptions = {
+  nonRecursive: true,
+  trackReadWithoutLoad: true,
+};
+
 export type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
 export type { SchemaPathSelector };
 
@@ -404,7 +415,7 @@ class ManagedStorageJournal implements ITransactionJournal {
 
 /**
  * Implementation of IStorageTransaction that is backed by an ObjectManager
- * This is a read-only transaction, and is only used by the traverse code.
+ * This is a read-only transaction, and is only used by the query traversal.
  */
 export class ManagedStorageTransaction implements IStorageTransaction {
   constructor(
@@ -419,8 +430,11 @@ export class ManagedStorageTransaction implements IStorageTransaction {
 
   read(
     address: IMemorySpaceAddress,
-    _options?: IReadOptions,
+    options?: IReadOptions,
   ): Result<IAttestation, ReadError> {
+    if (options?.trackReadWithoutLoad === true) {
+      return { ok: { address, value: undefined } };
+    }
     const source = this.manager.load(address) ??
       { address: { ...address, path: [] } };
     return resolve(source, address);
@@ -633,7 +647,10 @@ export abstract class BaseObjectTraverser {
    * Otherwise, it will return the fully traversed object.
    * If a cycle is detected, it will not traverse the cyclic element
    *
-   * @param doc
+   * Our reactivity mark strategy is to mark the doc read before calling this,
+   * and any time we follow a link, also mark that returned doc read.
+   *
+   * @param doc a doc whose value has been read recursively
    * @param defaultValue optional default value
    * @param itemLink optinal item link to use when creating links
    * @returns
@@ -659,7 +676,6 @@ export abstract class BaseObjectTraverser {
         return cached;
       }
     }
-
     if (doc.value === undefined) {
       // If we have a default, annotate it and return it
       // Otherwise, return undefined
@@ -709,6 +725,7 @@ export abstract class BaseObjectTraverser {
           // We can follow all the links, since we don't need to track cells
           const [valueDoc, _] = this.getDocAtPath(linkDoc, [], DefaultSelector);
           docItem = valueDoc;
+          this.tx.read(docItem.address, READ_FOR_SCHEDULING);
           if (docItem.value === undefined) {
             logger.debug(
               "traverse",
@@ -753,6 +770,7 @@ export abstract class BaseObjectTraverser {
           DefaultSelector,
           "writeRedirect",
         );
+        this.tx.read(redirDoc.address, READ_FOR_SCHEDULING);
         if (redirDoc.value === undefined) {
           logger.debug(
             "traverse",
@@ -778,6 +796,7 @@ export abstract class BaseObjectTraverser {
         itemLink = getNormalizedLink(redirDoc.address, true);
         // We can follow all the links, since we don't need to track cells
         const [valueDoc, _] = this.getDocAtPath(redirDoc, [], DefaultSelector);
+        this.tx.read(valueDoc.address, READ_FOR_SCHEDULING);
         return this.traverseDAG(valueDoc, defaultValue, itemLink);
       } else {
         const newValue: Record<string, Immutable<StorableValue>> = {};
@@ -852,7 +871,7 @@ export abstract class BaseObjectTraverser {
    * If the doc value has a link, we will follow that link one step and return
    * the result. Otherwise, we will just return the current doc.
    *
-   * @param doc
+   * @param doc doc which has been read with nonRecursive
    * @param selector
    * @returns
    */
@@ -860,8 +879,8 @@ export abstract class BaseObjectTraverser {
     doc: IMemorySpaceAttestation,
     selector?: SchemaPathSelector,
   ): [IMemorySpaceAttestation, SchemaPathSelector | undefined] {
-    const link = parseLink(doc.value, doc.address);
-    if (link !== undefined) {
+    if (isPrimitiveCellLink(doc.value)) {
+      this.tx.read(doc.address, READ_FOR_SCHEDULING);
       return followPointer(
         this.tx,
         doc,
@@ -873,14 +892,24 @@ export abstract class BaseObjectTraverser {
         this.traverseCells,
         "top",
       );
+    } else {
+      return [doc, selector];
     }
-    return [doc, selector];
   }
 }
 
 /**
  * Traverses a data structure following a path and resolves any pointers.
  * If we load any additional documents, we will also let the helper know.
+ *
+ * We are passed a doc with a value, but this read has only been read in
+ * nonRecursive mode. While we have the data, if we use these deeper portions,
+ * we need to call tx.read to flag our usage.
+ *
+ * Our caller is responsible for registering further reads on the returned
+ * attestation, though we will have flagged a nonRecursive read on any linked
+ * docs, as well as deeper paths within a doc, and if we return the initial
+ * doc untouched, it should have been flagged before we were called.
  *
  * @param manager - Storage manager for document access.
  * @param doc - IAttestation for the current document
@@ -917,6 +946,8 @@ export function getAtPath(
 
   while (true) {
     if (isPrimitiveCellLink(curDoc.value)) {
+      // We've only done a nonRecursive read on curDoc, so promote that
+      tx.read(curDoc.address, READ_FOR_SCHEDULING);
       // we follow links when we point to a child of the link, since we need
       // them to resolve the link.
       // we follow all links when the lastNode is value
@@ -962,8 +993,12 @@ export function getAtPath(
           value: elementAt(curDoc.value, part),
         };
       }
+      tx.read(curDoc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
     } else if (isString(curDoc.value) && part === "length") {
-      // Handle native property access on string primitives (e.g., .length)
+      // Handle native property access on string primitives (e.g., .length).
+      // Intentionally do not call tx.read here: string length changes only when
+      // the string value itself is replaced, and the parent string read already
+      // captures that invalidation.
       curDoc = {
         ...curDoc,
         address: { ...curDoc.address, path: [...curDoc.address.path, part] },
@@ -978,6 +1013,7 @@ export function getAtPath(
         address: { ...curDoc.address, path: [...curDoc.address.path, part] },
         value: cursorObj[part] as Immutable<StorableDatum>,
       };
+      tx.read(curDoc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
     } else {
       // we can only descend into pointers, objects, and arrays
       // this can happen when things aren't set up yet, so it's just debug.
@@ -995,6 +1031,9 @@ export function getAtPath(
         },
         value: undefined,
       };
+      // go ahead and register this read -- a subsequent write
+      // at this location should re-trigger us
+      tx.read(curDoc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
       return [curDoc, selector];
     }
   }
@@ -1002,7 +1041,7 @@ export function getAtPath(
 
 function notFound(address: IMemorySpaceAddress): IMemorySpaceAttestation {
   return {
-    address: { ...address, path: [] },
+    address,
     value: undefined,
   };
 }
@@ -1021,7 +1060,7 @@ function getTrackerKey(
 /**
  * Resolves a pointer reference to its target value.
  *
- * This method works with `getAtPath`, with the link management and document
+ * This method works with @see getAtPath, with the link management and document
  * loading being handled in `followPointer`, while `getAtPath` handles the
  * path traversal.
  *
@@ -1101,7 +1140,11 @@ function followPointer(
   // Attempt to read the actual link location. This will often fail because
   // there is an intermediate link, but we'll handle that below
   // Load the data from the manager.
-  const { ok: valueEntry, error } = tx.read(target);
+  // The path here is just the link path, but we may be interested in the deeper
+  // contents and this could just be an intermediate link, so ignore this read
+  // for scheduling. We'll have to tag it later.
+  // We use a nonRecursive read, since we may not need everything at the target.
+  const { ok: valueEntry, error } = tx.read(target, READ_NON_RECURSIVE);
 
   if (error !== undefined) {
     // If we had an unexpected error, or didn't find the doc at all, return.
@@ -1262,6 +1305,7 @@ export function loadSource(
     type: "application/json",
     path: [],
   };
+  // This only happens in the query path, so don't worry about scheduler
   const { ok: entry, error } = tx.read(address);
   if (error) {
     return;
@@ -1531,6 +1575,7 @@ function _combineSchemaUncached(
 
 // Load the linked pattern from the doc ()
 // We don't recurse, since that's not required for pattern links
+// We don't mark anything for reactivity, since this is for queries
 function loadLinkedPattern(
   tx: IExtendedStorageTransaction,
   valueEntry: IMemorySpaceAttestation,
@@ -1573,6 +1618,7 @@ function loadLinkedPattern(
   if (address === undefined) {
     return;
   }
+  // This only happens in the query path, so don't worry about scheduler
   const result = tx.read(address);
   if (result.error) {
     return;
@@ -1594,6 +1640,7 @@ function loadLinkedPattern(
       type: "application/json" as MIME,
       path: [],
     };
+    // This only happens in the query path, so don't worry about scheduler
     const legacyResult = tx.read(legacyAddress);
     if (!legacyResult.error) {
       entry = legacyResult.ok;
@@ -1769,6 +1816,8 @@ export class SchemaObjectTraverser<V extends StorableDatum>
 
     logger.timeStart("traverse");
     this.schemaTracker.add(getTrackerKey(doc.address), this.selector);
+    // Flag the top level read of doc for the scheduler
+    this.tx.readOrThrow(doc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
     const rv = this.traverseWithSelector(
       doc,
       this.selector,
@@ -1818,12 +1867,14 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     return rv;
   }
 
-  // Traverse the specified doc with the selector.
-  // The selector should have been re-rooted if needed to be relative to the
-  // specified doc. This generally means that its path starts with value.
-  // The selector must have a valid (defined) schema
-  // Once we've gotten the path of our doc to match the path of our selector,
-  // we can call traverseWithSchema instead.
+  /**
+   * Traverse the specified doc with the selector.
+   * The selector should have been re-rooted if needed to be relative to the
+   * specified doc. This generally means that its path starts with value.
+   * The selector must have a valid (defined) schema
+   * Once we've gotten the path of our doc to match the path of our selector,
+   * we can call traverseWithSchema instead.
+   */
   traverseWithSelector(
     doc: IMemorySpaceAttestation,
     selector: SchemaPathSelector,
@@ -1888,6 +1939,8 @@ export class SchemaObjectTraverser<V extends StorableDatum>
   // TODO(@ubik2): Need to break this up -- it's too long
   /**
    * Traverse the doc with the specified schema.
+   *
+   * Our doc parameter has been read in nonRecursive mode.
    *
    * @param doc
    * @param schema
@@ -2113,6 +2166,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
       const defaultValue = isObject(resolved) ? resolved["default"] : undefined;
       // A value of true or {} means we match anything
       // Resolve the rest of the doc, and return
+      this.tx.read(doc.address, READ_FOR_SCHEDULING); // recursively read this doc
       return { ok: this.traverseDAG(doc, defaultValue, link) };
     } else if (
       ContextualFlowControl.isFalseSchema(resolved) &&
@@ -2185,6 +2239,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
       return { ok: this.objectCreator.createObject(newLink, newValue) };
     } else if (isObject(doc.value)) {
       if (isPrimitiveCellLink(doc.value)) {
+        this.tx.read(doc.address, READ_FOR_SCHEDULING);
         // When traversing a pointer, use the unresolved schema, so we have
         // the same values in the schema tracker.
         return this.traversePointerWithSchema(doc, schema, link);
@@ -2362,6 +2417,8 @@ export class SchemaObjectTraverser<V extends StorableDatum>
    * Traverse an an array according to the specified schema, returning
    * a new array that includes the elements that matched the schema.
    *
+   * We are passed a doc that has been read with the nonRecursive flag.
+   *
    * @param doc doc with address and value to traverse
    * @param schema schema that applies to this object
    * @param link optional link to pass to createObject callback
@@ -2376,9 +2433,9 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     this.traverseArrayCalls++;
     const docArray = doc.value as Immutable<StorableDatum>[];
     const arrayObj = new Array<Immutable<StorableValue>>(docArray.length);
-    for (let index = 0; index < docArray.length; index++) {
-      if (!(index in docArray)) continue; // preserve sparse holes
-      const item = docArray[index];
+
+    // We use `every` here so if our input is a sparse array, so is our output.
+    const valid = docArray.every((item, index) => {
       const itemSchema = this.cfc.schemaAtPath(schema, [index.toString()]);
       let curDoc: IMemorySpaceAttestation = {
         address: {
@@ -2387,6 +2444,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         },
         value: item,
       };
+      this.tx.read(curDoc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
       let curSelector: SchemaPathSelector = {
         path: curDoc.address.path,
         schema: itemSchema,
@@ -2415,6 +2473,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
       // let createdDataURI = false;
       // const maybeLink = parseLink(item, arrayLink);
       if (isPrimitiveCellLink(item)) {
+        this.tx.read(curDoc.address, READ_FOR_SCHEDULING);
         const [redirDoc, selector] = this.getDocAtPath(
           curDoc,
           [],
@@ -2423,12 +2482,14 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         );
         curDoc = redirDoc;
         curSelector = selector!;
+        // call to nextLink will mark curDoc read recursively
         // redirDoc has only followed redirects.
         // If our redirDoc is a link, resolve one step, and use that value instead
         // because arrays dereference one more link.
         const [linkDoc, linkSelector] = this.nextLink(redirDoc, curSelector);
         curDoc = linkDoc;
         curSelector = linkSelector!;
+        this.tx.read(curDoc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
         if (curDoc.value === undefined) {
           logger.info(
             "traverse",
@@ -2446,6 +2507,8 @@ export class SchemaObjectTraverser<V extends StorableDatum>
           curSelector.schema,
         );
         // Replace doc with a DataCellURI style doc
+        // Need to read recursively here
+        this.tx.read(curDoc.address, READ_FOR_SCHEDULING);
         // TODO(@ubik2): ideally, we wouldn't use this path in query traversal.
         // Right now, we aren't passing both the link info and doc info, so we
         // will override the doc here.
@@ -2478,7 +2541,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
             "traverse",
             () => ["Encountered broken redirect", doc, curDoc],
           );
-          return undefined;
+          return false;
         }
         // For my cell link, curDoc currently points to the last
         // redirect target, but we want cell properties to be based on the
@@ -2486,7 +2549,9 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         // link if available.
         // If we have a value instead of a link, create a link to the element
         // We don't traverse and validate, since this is an asCell boundary.
-        const cellLink = isPrimitiveCellLink(curDoc.value)
+        const isLink = isPrimitiveCellLink(curDoc.value);
+        if (isLink) this.tx.read(curDoc.address, READ_FOR_SCHEDULING);
+        const cellLink = isLink
           ? getNextCellLink(curDoc, curSelector.schema!)
           : getNormalizedLink(curDoc.address, curSelector.schema);
         const val = this.objectCreator.createObject(cellLink, undefined);
@@ -2518,8 +2583,9 @@ export class SchemaObjectTraverser<V extends StorableDatum>
           arrayObj[index] = val;
         }
       }
-    }
-    return arrayObj;
+      return true;
+    });
+    return valid ? arrayObj : undefined;
   }
 
   /**
@@ -2585,6 +2651,9 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         SchemaObjectTraverser.asCellOrStream(propSchema) &&
         !isPrimitiveCellLink(propValue)
       ) {
+        // Intentionally treat asCell/asStream as an opaque boundary in
+        // traverseCells=false mode for inline object values. We create a cell
+        // link and do not descend/read nested properties from this value here.
         // If we have a value instead of a link, create a link to the value
         // We don't traverse and validate, since this is an asCell boundary.
         const cellLink = getNormalizedLink(propAddress, propSchema);
@@ -2592,6 +2661,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         filteredObj[propKey] = val;
       } else {
         const propDoc = { address: propAddress, value: propValue };
+        this.tx.read(propDoc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
         const { ok: val, error } = this.traverseWithSchema(propDoc, propSchema);
         if (error === undefined) {
           filteredObj[propKey] = val;
@@ -2671,7 +2741,8 @@ export class SchemaObjectTraverser<V extends StorableDatum>
 
   // This just has a schema, since the doc.address.path should match the
   // selector.path.
-  // The doc.value should be a primitive cell link.
+  // The doc.value should be a primitive cell link, and we've already
+  // done a nonRecursive read on it.
   private traversePointerWithSchema(
     doc: IMemorySpaceAttestation,
     schema: JSONSchema,
@@ -2726,6 +2797,9 @@ export class SchemaObjectTraverser<V extends StorableDatum>
       // For my cell link, redirDoc currently points to the last redirect
       // target, but we want cell properties to be based on the link value at
       // that location, so we effectively follow one more link if available.
+      if (isPrimitiveCellLink(redirDoc.value)) {
+        this.tx.read(redirDoc.address, READ_FOR_SCHEDULING);
+      }
       const cellLink = getNextCellLink(redirDoc, combinedSchema);
       logger.debug(
         "traverse",
