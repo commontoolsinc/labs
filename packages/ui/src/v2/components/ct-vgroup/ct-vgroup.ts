@@ -23,7 +23,6 @@ export class CTVGroup extends BaseElement {
   static override styles = css`
     :host {
       display: block;
-      container-type: inline-size;
     }
 
     .group {
