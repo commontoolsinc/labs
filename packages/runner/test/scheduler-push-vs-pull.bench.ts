@@ -81,6 +81,7 @@ function buildChain(
     runtime.scheduler.subscribe(
       action,
       {
+        shallowReads: [],
         reads: [input.getAsNormalizedFullLink()],
         writes: [output.getAsNormalizedFullLink()],
       },
@@ -284,6 +285,7 @@ for (const mode of ["push", "pull"] as const) {
         runtime.scheduler.subscribe(
           action,
           {
+            shallowReads: [],
             reads: [source.getAsNormalizedFullLink()],
             writes: [out.getAsNormalizedFullLink()],
           },
@@ -336,6 +338,7 @@ for (const mode of ["push", "pull"] as const) {
         runtime.scheduler.subscribe(
           action,
           {
+            shallowReads: [],
             reads: [source.getAsNormalizedFullLink()],
             writes: [out.getAsNormalizedFullLink()],
           },
@@ -393,6 +396,7 @@ for (const mode of ["push", "pull"] as const) {
         runtime.scheduler.subscribe(
           action,
           {
+            shallowReads: [],
             reads: [source.getAsNormalizedFullLink()],
             writes: [out.getAsNormalizedFullLink()],
           },
@@ -465,6 +469,7 @@ for (const mode of ["push", "pull"] as const) {
           runtime.scheduler.subscribe(
             action,
             {
+              shallowReads: [],
               reads: [input.getAsNormalizedFullLink()],
               writes: [output.getAsNormalizedFullLink()],
             },
@@ -533,6 +538,7 @@ for (const mode of ["push", "pull"] as const) {
           runtime.scheduler.subscribe(
             action,
             {
+              shallowReads: [],
               reads: [input.getAsNormalizedFullLink()],
               writes: [output.getAsNormalizedFullLink()],
             },
@@ -629,6 +635,7 @@ for (const mode of ["push", "pull"] as const) {
         runtime.scheduler.subscribe(
           actionAB,
           {
+            shallowReads: [],
             reads: [a.getAsNormalizedFullLink()],
             writes: [b.getAsNormalizedFullLink()],
           },
@@ -642,6 +649,7 @@ for (const mode of ["push", "pull"] as const) {
         runtime.scheduler.subscribe(
           actionAC,
           {
+            shallowReads: [],
             reads: [a.getAsNormalizedFullLink()],
             writes: [c.getAsNormalizedFullLink()],
           },
@@ -657,6 +665,7 @@ for (const mode of ["push", "pull"] as const) {
         runtime.scheduler.subscribe(
           actionBCD,
           {
+            shallowReads: [],
             reads: [
               b.getAsNormalizedFullLink(),
               c.getAsNormalizedFullLink(),

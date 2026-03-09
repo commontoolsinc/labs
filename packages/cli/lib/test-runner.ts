@@ -1281,6 +1281,11 @@ export async function runTestPattern(
       .map((r) => r.actionInfo?.patternName ?? r.actionId);
 
     const errorMessages = runtimeErrors.map((e) => String(e));
+    if (uncaughtErrors.length > 0) {
+      errorMessages.push(
+        ...uncaughtErrors.map((e) => `[uncaught async] ${e}`),
+      );
+    }
     return {
       path: testPath,
       results,
@@ -1306,6 +1311,11 @@ export async function runTestPattern(
     }
 
     const errorMessages = runtimeErrors.map((e) => String(e));
+    if (uncaughtErrors.length > 0) {
+      errorMessages.push(
+        ...uncaughtErrors.map((e) => `[uncaught async] ${e}`),
+      );
+    }
     return {
       path: testPath,
       results: [],

@@ -215,10 +215,8 @@ export class ShellIntegration {
           }
         }
 
-        // Check pull mode
-        const pullMode = data.metadata?.["scheduler"]
-          ? true // metadata presence doesn't tell us, but we can infer
-          : false;
+        // Check pull mode from scheduler metadata
+        const pullMode = data.metadata?.["scheduler"]?.pullMode === true;
 
         return { pullMode, scheduler, counts };
       });
