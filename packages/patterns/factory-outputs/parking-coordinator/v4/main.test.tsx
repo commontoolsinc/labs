@@ -46,7 +46,7 @@ const getFutureDate = (daysAhead: number): string => {
 
 const todayDate = getTodayDate();
 const tomorrowDate = getFutureDate(1);
-const dayAfterDate = getFutureDate(2);
+const _dayAfterDate = getFutureDate(2);
 
 export default pattern(() => {
   // Instantiate with empty data - spots will be seeded by the pattern

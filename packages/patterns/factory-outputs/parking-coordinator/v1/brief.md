@@ -19,8 +19,8 @@ given day.
   people get first pick)
 - As an admin, I can assign default spots to people (their preferred spot if
   available)
-- As an admin, I can occasionally update the list of available parking spots
-  as our team acquires new ones
+- As an admin, I can occasionally update the list of available parking spots as
+  our team acquires new ones
 - As a team member, I can see a week-ahead view of parking allocations
 
 ## Data Shape

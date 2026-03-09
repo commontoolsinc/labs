@@ -123,8 +123,18 @@ const formatDateLabel = (dateStr: string): string => {
   const d = new Date(dateStr + "T12:00:00");
   const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const months = [
-    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
   ];
   return `${days[d.getDay()]} ${months[d.getMonth()]} ${d.getDate()}`;
 };
@@ -375,34 +385,36 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       editingSpotId.set("");
     });
 
-    const removeSpot = action<{ spotNumber: string }>(({ spotNumber: rawSpot }) => {
-      const spotNumber = rawSpot.trim().replace(/^#/, "");
-      const current = [...spots.get()];
-      spots.set(
-        current.filter((s: ParkingSpot) => s.spotNumber !== spotNumber),
-      );
+    const removeSpot = action<{ spotNumber: string }>(
+      ({ spotNumber: rawSpot }) => {
+        const spotNumber = rawSpot.trim().replace(/^#/, "");
+        const current = [...spots.get()];
+        spots.set(
+          current.filter((s: ParkingSpot) => s.spotNumber !== spotNumber),
+        );
 
-      const curAllocs = [...allocations.get()];
-      allocations.set(
-        curAllocs.filter(
-          (a: Allocation) =>
-            !(a.spotNumber === spotNumber && a.date >= todayDate),
-        ),
-      );
+        const curAllocs = [...allocations.get()];
+        allocations.set(
+          curAllocs.filter(
+            (a: Allocation) =>
+              !(a.spotNumber === spotNumber && a.date >= todayDate),
+          ),
+        );
 
-      const curReqs = [...requests.get()];
-      requests.set(
-        curReqs.map((r: SpotRequest) =>
-          r.assignedSpot === spotNumber &&
-          r.date >= todayDate &&
-          r.status === "allocated"
-            ? { ...r, status: "cancelled" as RequestStatus }
-            : r
-        ),
-      );
+        const curReqs = [...requests.get()];
+        requests.set(
+          curReqs.map((r: SpotRequest) =>
+            r.assignedSpot === spotNumber &&
+              r.date >= todayDate &&
+              r.status === "allocated"
+              ? { ...r, status: "cancelled" as RequestStatus }
+              : r
+          ),
+        );
 
-      confirmRemoveSpot.set("");
-    });
+        confirmRemoveSpot.set("");
+      },
+    );
 
     const addPerson = action<{
       name: string;
@@ -451,12 +463,12 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
         current.map((p: Person) =>
           p.name === name
             ? {
-                ...p,
-                email,
-                commuteMode: commuteMode as CommuteMode,
-                defaultSpot: cleanDefault,
-                isAdmin,
-              }
+              ...p,
+              email,
+              commuteMode: commuteMode as CommuteMode,
+              defaultSpot: cleanDefault,
+              isAdmin,
+            }
             : p
         ),
       );
@@ -469,13 +481,14 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       const sorted = [...remaining].sort(
         (a: Person, b: Person) => a.priorityRank - b.priorityRank,
       );
-      people.set(sorted.map((p: Person, i: number) => ({ ...p, priorityRank: i + 1 })));
+      people.set(
+        sorted.map((p: Person, i: number) => ({ ...p, priorityRank: i + 1 })),
+      );
 
       const curAllocs = [...allocations.get()];
       allocations.set(
         curAllocs.filter(
-          (a: Allocation) =>
-            !(a.personName === name && a.date >= todayDate),
+          (a: Allocation) => !(a.personName === name && a.date >= todayDate),
         ),
       );
 
@@ -483,8 +496,8 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       requests.set(
         curReqs.map((r: SpotRequest) =>
           r.personName === name &&
-          r.date >= todayDate &&
-          r.status === "allocated"
+            r.date >= todayDate &&
+            r.status === "allocated"
             ? { ...r, status: "cancelled" as RequestStatus }
             : r
         ),
@@ -532,7 +545,10 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       // Identify the displaced person from allocations
       const displacedNames: string[] = [];
       for (const a of curAllocs) {
-        if (a.spotNumber === spotNumber && a.date === date && a.personName !== personName) {
+        if (
+          a.spotNumber === spotNumber && a.date === date &&
+          a.personName !== personName
+        ) {
           displacedNames.push(a.personName);
         }
       }
@@ -550,7 +566,10 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       // the displaced person's request
       const updatedReqs = curReqs.map((r: SpotRequest) => {
         // Cancel the new assignee's prior allocated request for this date
-        if (r.personName === personName && r.date === date && r.status === "allocated") {
+        if (
+          r.personName === personName && r.date === date &&
+          r.status === "allocated"
+        ) {
           return { ...r, status: "cancelled" as RequestStatus };
         }
         // Cancel the displaced person's allocated request for this date
@@ -604,9 +623,9 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       requests.set(
         curReqs.map((r: SpotRequest) =>
           r.personName === alloc.personName &&
-          r.date === date &&
-          r.assignedSpot === spotNumber &&
-          r.status === "allocated"
+            r.date === date &&
+            r.assignedSpot === spotNumber &&
+            r.status === "allocated"
             ? { ...r, status: "cancelled" as RequestStatus }
             : r
         ),
@@ -816,8 +835,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                         <ct-hstack
                           gap="2"
                           align="center"
-                          onClick={() =>
-                            selectUser.send({ name: person.name })}
+                          onClick={() => selectUser.send({ name: person.name })}
                           style="cursor: pointer;"
                         >
                           <span style={{ fontWeight: "500" }}>
@@ -891,9 +909,9 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                         <span style={{ fontWeight: "600", fontSize: "1rem" }}>
                           {myTodayAllocation
                             ? computed(
-                                () =>
-                                  `You have Spot #${myTodayAllocation.spotNumber} today`,
-                              )
+                              () =>
+                                `You have Spot #${myTodayAllocation.spotNumber} today`,
+                            )
                             : myTodayRequest &&
                                 myTodayRequest.status === "denied"
                             ? "No spots are available today."
@@ -922,8 +940,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                     </ct-button>
                                     <ct-button
                                       variant="secondary"
-                                      onClick={() =>
-                                        confirmCancelDate.set("")}
+                                      onClick={() => confirmCancelDate.set("")}
                                     >
                                       Keep it
                                     </ct-button>
@@ -972,8 +989,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                     {spots.map((spot: ParkingSpot) => {
                       const alloc = computed(() =>
                         todayAllocations.find(
-                          (a: Allocation) =>
-                            a.spotNumber === spot.spotNumber,
+                          (a: Allocation) => a.spotNumber === spot.spotNumber,
                         )
                       );
                       const isFree = computed(() => !alloc);
@@ -1021,11 +1037,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                   : "var(--ct-color-gray-700, #374151)",
                               }}
                             >
-                              {isFree
-                                ? "Free"
-                                : alloc
-                                ? alloc.personName
-                                : ""}
+                              {isFree ? "Free" : alloc ? alloc.personName : ""}
                             </span>
                             {isManual
                               ? (
@@ -1069,8 +1081,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                       );
                       const myAlloc = computed(() =>
                         dayAllocs.find(
-                          (a: Allocation) =>
-                            a.personName === currentUser.get(),
+                          (a: Allocation) => a.personName === currentUser.get(),
                         )
                       );
                       const myReq = computed(() => {
@@ -1082,9 +1093,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                               r.date === date &&
                               r.status !== "cancelled",
                           );
-                        return reqs.length > 0
-                          ? reqs[reqs.length - 1]
-                          : null;
+                        return reqs.length > 0 ? reqs[reqs.length - 1] : null;
                       });
                       const freeCount = computed(
                         () =>
@@ -1121,8 +1130,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                 <span
                                   style={{
                                     fontSize: "0.75rem",
-                                    color:
-                                      "var(--ct-color-gray-500, #6b7280)",
+                                    color: "var(--ct-color-gray-500, #6b7280)",
                                   }}
                                 >
                                   {freeCount} free of {daySpotTotal}
@@ -1227,8 +1235,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                                     "var(--ct-color-yellow-100, #fef9c3)",
                                                   color:
                                                     "var(--ct-color-yellow-800, #854d0e)",
-                                                  padding:
-                                                    "0.125rem 0.375rem",
+                                                  padding: "0.125rem 0.375rem",
                                                   borderRadius: "4px",
                                                   fontWeight: "600",
                                                 }}
@@ -1323,10 +1330,10 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                           <ct-button
                                             variant="primary"
                                             onClick={() => {
-                                              const p =
-                                                manualAssignPersonField.get();
-                                              const s =
-                                                manualAssignSpotField.get();
+                                              const p = manualAssignPersonField
+                                                .get();
+                                              const s = manualAssignSpotField
+                                                .get();
                                               if (p && s) {
                                                 manualAssign.send({
                                                   spotNumber: s,
@@ -1375,8 +1382,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
 
                     {myRequests.map((req: SpotRequest) => {
                       const isFuture = req.date >= todayDate;
-                      const canCancel =
-                        isFuture &&
+                      const canCancel = isFuture &&
                         (req.status === "allocated" ||
                           req.status === "pending");
                       const statusColor = computed(() => {
@@ -1451,8 +1457,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                           () => editingPersonId.get() === person.name,
                         );
                         const isConfirmingRemove = computed(
-                          () =>
-                            confirmRemovePerson.get() === person.name,
+                          () => confirmRemovePerson.get() === person.name,
                         );
 
                         return (
@@ -1503,22 +1508,19 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                       onClick={() =>
                                         editPerson.send({
                                           name: person.name,
-                                          email:
-                                            editPersonEmailField.get(),
-                                          commuteMode:
-                                            editPersonCommuteField.get(),
+                                          email: editPersonEmailField.get(),
+                                          commuteMode: editPersonCommuteField
+                                            .get(),
                                           defaultSpot:
                                             editPersonDefaultSpotField.get(),
-                                          isAdmin:
-                                            editPersonIsAdminField.get(),
+                                          isAdmin: editPersonIsAdminField.get(),
                                         })}
                                     >
                                       Save
                                     </ct-button>
                                     <ct-button
                                       variant="secondary"
-                                      onClick={() =>
-                                        editingPersonId.set("")}
+                                      onClick={() => editingPersonId.set("")}
                                     >
                                       Cancel
                                     </ct-button>
@@ -1579,8 +1581,8 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                             onClick={() =>
                                               reorderPriority.send({
                                                 name: person.name,
-                                                newRank:
-                                                  person.priorityRank - 1,
+                                                newRank: person.priorityRank -
+                                                  1,
                                               })}
                                           >
                                             Up
@@ -1594,8 +1596,8 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                             onClick={() =>
                                               reorderPriority.send({
                                                 name: person.name,
-                                                newRank:
-                                                  person.priorityRank + 1,
+                                                newRank: person.priorityRank +
+                                                  1,
                                               })}
                                           >
                                             Down
@@ -1641,8 +1643,9 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                         <span
                                           style={{ fontSize: "0.875rem" }}
                                         >
-                                          Remove {person.name}? Future
-                                          allocations will be cancelled.
+                                          Remove{" "}
+                                          {person.name}? Future allocations will
+                                          be cancelled.
                                         </span>
                                         <ct-button
                                           variant="primary"
@@ -1713,16 +1716,14 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                       name: newPersonName.get(),
                                       email: newPersonEmail.get(),
                                       commuteMode: newPersonCommute.get(),
-                                      defaultSpot:
-                                        newPersonDefaultSpot.get(),
+                                      defaultSpot: newPersonDefaultSpot.get(),
                                     })}
                                 >
                                   Save
                                 </ct-button>
                                 <ct-button
                                   variant="secondary"
-                                  onClick={() =>
-                                    addPersonFormOpen.set(false)}
+                                  onClick={() => addPersonFormOpen.set(false)}
                                 >
                                   Cancel
                                 </ct-button>
@@ -1748,8 +1749,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                           () => editingSpotId.get() === spot.spotNumber,
                         );
                         const isConfirmingRemoveSpot = computed(
-                          () =>
-                            confirmRemoveSpot.get() === spot.spotNumber,
+                          () => confirmRemoveSpot.get() === spot.spotNumber,
                         );
                         const futureAllocCount = computed(
                           () =>
@@ -1793,8 +1793,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                     </ct-button>
                                     <ct-button
                                       variant="secondary"
-                                      onClick={() =>
-                                        editingSpotId.set("")}
+                                      onClick={() => editingSpotId.set("")}
                                     >
                                       Cancel
                                     </ct-button>
@@ -1874,10 +1873,10 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                                   "var(--ct-color-yellow-700, #a16207)",
                                               }}
                                             >
-                                              This spot has{" "}
-                                              {futureAllocCount}{" "}
-                                              upcoming allocation(s). They
-                                              will be cancelled.
+                                              This spot has {futureAllocCount}
+                                              {" "}
+                                              upcoming allocation(s). They will
+                                              be cancelled.
                                             </span>
                                           )
                                           : null}
@@ -1886,8 +1885,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                             variant="primary"
                                             onClick={() =>
                                               removeSpot.send({
-                                                spotNumber:
-                                                  spot.spotNumber,
+                                                spotNumber: spot.spotNumber,
                                               })}
                                           >
                                             Yes, Remove
@@ -1941,8 +1939,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                 </ct-button>
                                 <ct-button
                                   variant="secondary"
-                                  onClick={() =>
-                                    addSpotFormOpen.set(false)}
+                                  onClick={() => addSpotFormOpen.set(false)}
                                 >
                                   Cancel
                                 </ct-button>
