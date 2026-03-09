@@ -1,3 +1,8 @@
+---
+name: deno-memory-profiler
+description: Analyze memory in a running Deno process via the V8 inspector CDP protocol. Use when the user asks about memory usage, memory leaks, heap analysis, heap snapshots, allocation profiling, or object retention in a Deno process running with --inspect.
+---
+
 # Deno Memory Profiler
 
 Analyze memory in a running Deno process via the V8 inspector CDP protocol.
