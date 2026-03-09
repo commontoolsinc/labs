@@ -280,6 +280,8 @@ function shallowEqual(
     if (beforeKeys.length !== afterKeys.length) return false;
     // if one is an array, both must be
     if (Array.isArray(before) != Array.isArray(after)) return false;
+    // if our array length changed, we've changed
+    if (Array.isArray(before) && before.length !== after.length) return false;
     return beforeKeys.every((k) => Object.hasOwn(after, k));
   }
 
