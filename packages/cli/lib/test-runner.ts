@@ -1110,8 +1110,119 @@ export async function runTestPattern(
           const assertCell = testsCell.key(i).key("assertion") as Cell<unknown>;
           const value = assertCell.get();
           passed = value === true;
+          // Debug: on failure, also read the raw cell to see what state it's in
+          if (!passed && options.verbose) {
+            const stepCell = testsCell.key(i) as Cell<unknown>;
+            const stepVal = stepCell.get();
+            console.log(
+              `    [CELL] step[${i}] = ${
+                JSON.stringify(stepVal, null, 0)?.slice(0, 200)
+              }`,
+            );
+          }
           if (!passed) {
             error = `Expected true, got ${JSON.stringify(value)}`;
+            // Debug: dump assertion computation state and dirty actions
+            if (options.verbose && runtime.scheduler.isPullModeEnabled()) {
+              const snap = runtime.scheduler.getGraphSnapshot();
+              const shortenPath = (p: string) => {
+                const ofIdx = p.indexOf("/of:");
+                if (ofIdx < 0) return p.slice(-50);
+                const rest = p.slice(ofIdx + 4);
+                const slashIdx = rest.indexOf("/");
+                if (slashIdx < 0) return rest.slice(-30);
+                return rest.slice(0, 10) + "…" + rest.slice(slashIdx);
+              };
+              // Find assertion computation (writes to tests/N/assertion)
+              const assertCompNode = snap.nodes.find((n) =>
+                n.writes?.some((w) => w.includes(`tests/${i}/assertion`))
+              );
+              if (assertCompNode) {
+                console.log(
+                  `    [DEBUG] assert comp: dirty=${assertCompNode.isDirty} pending=${assertCompNode.isPending} type=${assertCompNode.type}`,
+                );
+                console.log(
+                  `      reads: [${
+                    (assertCompNode.reads ?? []).map(shortenPath).join(", ")
+                  }]`,
+                );
+                console.log(
+                  `      writes: [${
+                    (assertCompNode.writes ?? []).map(shortenPath).join(", ")
+                  }]`,
+                );
+              } else {
+                console.log(
+                  `    [DEBUG] assert comp NOT FOUND for tests/${i}/assertion`,
+                );
+                // Dump all nodes that write to anything with "assertion"
+                const assertionWriters = snap.nodes.filter((n) =>
+                  n.writes?.some((w) => w.includes("assertion"))
+                );
+                console.log(
+                  `      ${assertionWriters.length} nodes write to *assertion*`,
+                );
+                for (const c of assertionWriters.slice(0, 5)) {
+                  console.log(
+                    `      ${c.type} d=${c.isDirty} p=${c.isPending} w=[${
+                      (c.writes ?? []).map(shortenPath).join(", ")
+                    }]`,
+                  );
+                }
+                // Also check if ANY node mentions tests/
+                const testsWriters = snap.nodes.filter((n) =>
+                  n.writes?.some((w) => w.includes("tests/"))
+                );
+                console.log(
+                  `      ${testsWriters.length} nodes write to *tests/*`,
+                );
+              }
+              // Show dirty/pending count and total
+              const dirtyCount = snap.nodes.filter((n) => n.isDirty).length;
+              const pendingCount = snap.nodes.filter((n) => n.isPending).length;
+              console.log(
+                `    [DEBUG] ${snap.nodes.length} total nodes, ${dirtyCount} dirty, ${pendingCount} pending`,
+              );
+              // Find the assertion sink and what entity/path it reads
+              const assertSink = snap.nodes.find((n) =>
+                n.type === "effect" &&
+                n.reads?.some((r) => r.includes(`tests/${i}/`))
+              );
+              if (assertSink) {
+                // Extract the internal path from the sink's reads
+                const internalReads = assertSink.reads?.filter((r) =>
+                  r.includes("/internal/")
+                ) ?? [];
+                for (const ir of internalReads.slice(0, 3)) {
+                  // Find who writes to this path
+                  const writer = snap.nodes.find((n) =>
+                    n.writes?.some((w) => ir.startsWith(w) || w.startsWith(ir))
+                  );
+                  console.log(
+                    `    [DEBUG] sink reads ${shortenPath(ir)}`,
+                  );
+                  if (writer) {
+                    console.log(
+                      `      writer: ${writer.type} d=${writer.isDirty} p=${writer.isPending} id=${
+                        writer.id.slice(0, 50)
+                      }`,
+                    );
+                    console.log(
+                      `        w=[${
+                        (writer.writes ?? []).map(shortenPath).join(", ")
+                      }]`,
+                    );
+                    console.log(
+                      `        r=[${
+                        (writer.reads ?? []).map(shortenPath).join(", ")
+                      }]`,
+                    );
+                  } else {
+                    console.log(`      NO WRITER FOUND`);
+                  }
+                }
+              }
+            }
           }
         } catch (err) {
           passed = false;

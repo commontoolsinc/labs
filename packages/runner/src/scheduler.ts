@@ -757,24 +757,26 @@ export class Scheduler {
 
     this.setCancelForEntities(action, entities);
 
-    // In pull mode: When an effect resubscribes, check if any non-throttled dirty
-    // computations write to what it reads. If so, mark the effect dirty so it can
+    // In pull mode: When an action resubscribes, check if any non-throttled dirty
+    // computations write to what it reads. If so, mark the action dirty so it can
     // pull those computations and see fresh data.
+    // This applies to both effects AND computations — computations may discover new
+    // dynamic dependencies at runtime (e.g., traversing a newly-created entity reference)
+    // and need to be re-dirtied if their new reads overlap with dirty upstream computations.
     // Skip throttled computations - they'll trigger via storage changes when unthrottled.
-    // Use isEffectAction instead of effects because unsubscribe() clears effects before run()
-    if (this.pullMode && actionIsEffect && this.dirty.size > 0) {
-      const effectReads = log.reads ?? [];
+    if (this.pullMode && this.dirty.size > 0) {
+      const actionReads = log.reads ?? [];
       let shouldMarkDirty = false;
 
       // If there are pending computations whose dependencies haven't been collected yet,
-      // we can't know what they write. Be conservative and assume they might affect this effect.
+      // we can't know what they write. Be conservative and assume they might affect this action.
       if (this.pendingDependencyCollection.size > 0) {
         shouldMarkDirty = true;
       }
 
       // Use writersByEntity index for efficient lookup
       if (!shouldMarkDirty) {
-        for (const read of effectReads) {
+        for (const read of actionReads) {
           const entity = `${read.space}/${read.id}` as SpaceAndURI;
           const writers = this.writersByEntity.get(entity);
           if (!writers) continue;
@@ -805,7 +807,13 @@ export class Scheduler {
 
       if (shouldMarkDirty && !this.dirty.has(action)) {
         this.dirty.add(action);
-        this.pending.add(action);
+        if (actionIsEffect) {
+          this.pending.add(action);
+        }
+        // For computations: propagate dirty to downstream effects so they get scheduled
+        if (!actionIsEffect) {
+          this.scheduleAffectedEffects(action);
+        }
         this.queueExecution();
       }
     }
