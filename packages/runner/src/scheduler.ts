@@ -1463,12 +1463,11 @@ export class Scheduler {
       this.reverseDependencies.delete(action);
     }
 
-    const reads = this.getAllReads(log);
     const newDependencies = new Set<Action>();
 
     // Group reads by entity for efficient lookup
     const readsByEntity = new Map<SpaceAndURI, IMemorySpaceAddress[]>();
-    for (const read of reads) {
+    for (const read of log.reads) {
       const entity: SpaceAndURI = `${read.space}/${read.id}`;
       let entityReads = readsByEntity.get(entity);
       if (!entityReads) {
@@ -1477,11 +1476,28 @@ export class Scheduler {
       }
       entityReads.push(read);
     }
+    const nonRecursiveByEntity = new Map<SpaceAndURI, IMemorySpaceAddress[]>();
+    for (const read of log.nonRecursiveReads ?? []) {
+      const entity: SpaceAndURI = `${read.space}/${read.id}`;
+      let entityReads = nonRecursiveByEntity.get(entity);
+      if (!entityReads) {
+        entityReads = [];
+        nonRecursiveByEntity.set(entity, entityReads);
+      }
+      entityReads.push(read);
+    }
+    const allEntities = new Set([
+      ...readsByEntity.keys(),
+      ...nonRecursiveByEntity.keys(),
+    ]);
 
     // For each entity we read from, find actions that write to it
-    for (const [entity, entityReads] of readsByEntity) {
+    for (const entity of allEntities) {
       const writers = this.writersByEntity.get(entity);
       if (!writers) continue;
+
+      const entityReads = readsByEntity.get(entity) ?? [];
+      const entityNonRecursiveReads = nonRecursiveByEntity.get(entity) ?? [];
 
       for (const otherAction of writers) {
         if (otherAction === action) continue;
@@ -1491,25 +1507,21 @@ export class Scheduler {
         // Get paths this action writes to
         const otherWrites = this.mightWrite.get(otherAction) ?? [];
 
-        // Check if any write path overlaps with any read path
-        outer: for (const read of entityReads) {
-          for (const write of otherWrites) {
-            if (
-              read.space === write.space &&
-              read.id === write.id &&
-              arraysOverlap(write.path, read.path)
-            ) {
-              // otherAction writes → this action reads, so this action depends on otherAction
-              let deps = this.dependents.get(otherAction);
-              if (!deps) {
-                deps = new Set();
-                this.dependents.set(otherAction, deps);
-              }
-              deps.add(action);
-              newDependencies.add(otherAction);
-              break outer; // Found a match, no need to check more paths
-            }
+        if (
+          this.readsOverlapWrites(
+            entityReads,
+            entityNonRecursiveReads,
+            otherWrites,
+          )
+        ) {
+          // otherAction writes → this action reads, so this action depends on otherAction
+          let deps = this.dependents.get(otherAction);
+          if (!deps) {
+            deps = new Set();
+            this.dependents.set(otherAction, deps);
           }
+          deps.add(action);
+          newDependencies.add(otherAction);
         }
       }
     }
@@ -1558,10 +1570,13 @@ export class Scheduler {
       if (action === writer) return;
       const log = this.dependencies.get(action);
       if (!log?.reads?.length && !log?.nonRecursiveReads?.length) return;
-      // For this test, we treat recursive and non-recursive reads the same
-      // Determining the overlap of a write with a non-recursive read properly
-      // would require knowing the previous set of keys on an object/array.
-      if (!this.readsOverlapWrites(this.getAllReads(log), writes)) return;
+      if (
+        !this.readsOverlapWrites(
+          log.reads,
+          log.nonRecursiveReads ?? [],
+          writes,
+        )
+      ) return;
       this.registerDependentEdge(writer, action);
     };
 
@@ -1571,6 +1586,7 @@ export class Scheduler {
 
   private readsOverlapWrites(
     reads: IMemorySpaceAddress[],
+    nonRecursiveReads: IMemorySpaceAddress[],
     writes: IMemorySpaceAddress[],
   ): boolean {
     for (const read of reads) {
@@ -1578,6 +1594,20 @@ export class Scheduler {
         if (
           read.space === write.space &&
           read.id === write.id &&
+          arraysOverlap(write.path, read.path)
+        ) {
+          return true;
+        }
+      }
+    }
+    // For non-recursive reads, only same/ancestor path or direct child writes
+    // create a dependency. Deep descendant writes cannot affect shallow structure.
+    for (const read of nonRecursiveReads) {
+      for (const write of writes) {
+        if (
+          read.space === write.space &&
+          read.id === write.id &&
+          write.path.length <= read.path.length + 1 &&
           arraysOverlap(write.path, read.path)
         ) {
           return true;
