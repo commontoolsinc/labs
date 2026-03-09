@@ -16,6 +16,7 @@ import { type RuntimeClient } from "@commontools/runtime-client";
 import { type DID } from "@commontools/identity";
 import { RuntimeInternals } from "../lib/runtime.ts";
 import { createVDomDebugHelpers } from "@commontools/html/debug";
+import { createDebugUtils } from "../lib/debug-utils.ts";
 import { runtimeContext, spaceContext } from "@commontools/ui";
 import { provide } from "@lit/context";
 
@@ -127,6 +128,16 @@ export class XRootView extends BaseView {
           console.log("Cycles:", result.cycles);
           return result;
         };
+
+        // Debug utilities for inspecting cell values from the console
+        globalThis.commontools.space = this.space;
+        const debugUtils = createDebugUtils(
+          () => this.space as DID,
+          () => this.runtime,
+        );
+        globalThis.commontools.readCell = debugUtils.readCell;
+        globalThis.commontools.readArgumentCell = debugUtils.readArgumentCell;
+        globalThis.commontools.subscribeToCell = debugUtils.subscribeToCell;
 
         return rt;
       },

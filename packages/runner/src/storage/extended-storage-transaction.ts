@@ -194,6 +194,12 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
           logger.error("storage-error", "Error in commit callback:", error);
         }
       }
+    }).catch((error) => {
+      logger.error(
+        "storage-error",
+        "Transaction commit promise rejected:",
+        error,
+      );
     });
 
     return promise;

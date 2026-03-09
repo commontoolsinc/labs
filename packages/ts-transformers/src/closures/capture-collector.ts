@@ -214,6 +214,15 @@ export class CaptureCollector {
       return undefined;
     }
 
+    // Skip if this identifier is the property name in a destructuring binding
+    // (e.g., 'spotNumber' in 'const { spotNumber: sn } = obj')
+    // The property name identifies which property to extract, it's not a variable reference
+    if (
+      ts.isBindingElement(node.parent) && node.parent.propertyName === node
+    ) {
+      return undefined;
+    }
+
     // For shorthand property assignments (e.g., {id} instead of {id: id}), we need special handling
     // because getSymbolAtLocation returns the property symbol, not the variable being referenced
     if (ts.isShorthandPropertyAssignment(node.parent)) {

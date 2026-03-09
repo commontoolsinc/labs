@@ -62,6 +62,7 @@ import * as Subscription from "./subscription.ts";
 import { toStringStream } from "./ucan.ts";
 import { fromStringStream } from "./receipt.ts";
 import * as Settings from "./settings.ts";
+import { toDeepStorableValue } from "./storable-value.ts";
 export * from "./interface.ts";
 import { toRevision } from "./commit.ts";
 import { getLogger } from "@commontools/utils/logger";
@@ -111,9 +112,27 @@ export const open = ({
   ttl?: Seconds;
 }) => {
   const consumer = create({ as, clock, ttl });
-  session.readable.pipeThrough(consumer).pipeTo(
+  // The pipeTo() promise is captured as `consumer.closed` so that callers
+  // (specifically StorageManagerEmulator.close()) can await full pipeline
+  // shutdown before resetting ambient state like the canonical hash config.
+  // Without this, Runtime.dispose() could reset the hash config while
+  // in-flight messages were still being delivered from consumer to provider,
+  // causing hash format mismatches in Access.claim().
+  //
+  // pipeTo() rejects when the TransformStream is terminated during teardown
+  // (consumer.close() calls cancel() then controller.terminate()). That
+  // rejection is an expected consequence of intentional shutdown -- the
+  // stream was told to stop, and it did. The catch below suppresses only
+  // that expected case (identified by isCancelled being true) and rethrows
+  // everything else so that unexpected pipeline errors propagate to the
+  // caller via `await consumer.closed`.
+  consumer.closed = session.readable.pipeThrough(consumer).pipeTo(
     session.writable as WritableStream<Protocol>,
-  );
+  ).catch((error) => {
+    if (!consumer.isCancelled) {
+      throw error;
+    }
+  });
   return consumer;
 };
 
@@ -150,6 +169,11 @@ class MemoryConsumerSession<
   private batchStartTime: number | null = null;
   private lastFlushTime: number | null = null;
   private cancelled = false;
+  closed: Promise<void> = Promise.resolve();
+
+  get isCancelled(): boolean {
+    return this.cancelled;
+  }
 
   constructor(
     public as: Signer,
@@ -453,7 +477,10 @@ export interface MemoryConsumer<Space extends MemorySpace>
       UCAN<ConsumerCommandInvocation<Protocol>>
     > {
   as: Signer;
+  readonly isCancelled: boolean;
   cancel(): void;
+  close(): void;
+  closed: Promise<void>;
 }
 
 export interface MemorySpaceSession<Space extends MemorySpace = MemorySpace> {
@@ -584,8 +611,10 @@ class ConsumerInvocation<Ability extends string, Protocol extends Proto> {
   }
 
   constructor(source: ConsumerInvocationFor<Ability, Protocol>) {
-    // JSON.parse(JSON.stringify) is used to strip `undefined` values and ensure consistent serialization
-    this.source = JSON.parse(JSON.stringify(source));
+    // Deep-clone the source to ensure consistent serialization.
+    this.source = toDeepStorableValue(
+      source,
+    ) as ConsumerInvocationFor<Ability, Protocol>;
     this.#reference = refer(this.source);
     let receive;
     this.promise = new Promise<ConsumerResultFor<Ability, Protocol>>(
