@@ -403,7 +403,11 @@ export class PatternContextValidationTransformer extends Transformer {
     analyze: ReturnType<typeof createDataFlowAnalyzer>,
   ): void {
     if (!ts.isPropertyAccessExpression(node.expression)) return;
-    if (node.expression.name.text !== "map") return;
+    const methodName = node.expression.name.text;
+    if (
+      methodName !== "map" && methodName !== "filter" &&
+      methodName !== "flatMap"
+    ) return;
 
     let target: ts.Expression = node.expression.expression;
 
@@ -432,8 +436,8 @@ export class PatternContextValidationTransformer extends Transformer {
         severity: "error",
         type: "pattern-context:map-on-fallback",
         message:
-          `'.map()' on fallback expression with mixed reactive/non-reactive types is not supported. ` +
-          `Use direct property access: 'x.map(...)' rather than '(x ?? fallback).map(...)'`,
+          `'.${methodName}()' on fallback expression with mixed reactive/non-reactive types is not supported. ` +
+          `Use direct property access: 'x.${methodName}(...)' rather than '(x ?? fallback).${methodName}(...)'`,
         node,
       });
     }

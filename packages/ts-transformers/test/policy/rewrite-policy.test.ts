@@ -74,10 +74,43 @@ Deno.test("Rewrite policy: map rewrite matrix", () => {
     ),
     false,
   );
+  // filter and flatMap follow the same rewrite policy as map.
   assertEquals(
     shouldRewriteCollectionMethod(
       "pattern",
       "filter",
+      "celllike_requires_rewrite",
+    ),
+    true,
+  );
+  assertEquals(
+    shouldRewriteCollectionMethod(
+      "pattern",
+      "flatMap",
+      "celllike_requires_rewrite",
+    ),
+    true,
+  );
+  assertEquals(
+    shouldRewriteCollectionMethod(
+      "pattern",
+      "filter",
+      "plain",
+    ),
+    false,
+  );
+  assertEquals(
+    shouldRewriteCollectionMethod(
+      "compute",
+      "filter",
+      "opaque_autounwrapped",
+    ),
+    false,
+  );
+  assertEquals(
+    shouldRewriteCollectionMethod(
+      "neutral",
+      "flatMap",
       "celllike_requires_rewrite",
     ),
     false,

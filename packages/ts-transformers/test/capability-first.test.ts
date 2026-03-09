@@ -160,8 +160,9 @@ const p = pattern<{ list: Item[] }>(({ list }) => (
       diagnostic.type === "pattern-context:function-creation"
     );
     assertEquals(creationDiagnostics.length, 0);
-    assertStringIncludes(output, ".filter((entry) => entry.active)");
-    assert(!output.includes('entry.key("active")'));
+    // With filter/flatMap generalization, .filter() on reactive arrays
+    // is now transformed to .filterWithPattern()
+    assertStringIncludes(output, "filterWithPattern");
   },
 );
 

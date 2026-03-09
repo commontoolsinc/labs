@@ -47,7 +47,9 @@ export function shouldRewriteCollectionMethod(
   methodName: string,
   receiverKind: ReactiveReceiverKind,
 ): boolean {
-  if (methodName !== "map") {
+  if (
+    methodName !== "map" && methodName !== "filter" && methodName !== "flatMap"
+  ) {
     return false;
   }
 

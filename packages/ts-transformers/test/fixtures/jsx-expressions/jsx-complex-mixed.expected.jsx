@@ -66,7 +66,61 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.key("items"),
                 filter: state.key("filter")
-            } }, ({ state }) => state.items.filter((i) => i.name.includes(state.filter)).length)}
+            } }, ({ state }) => state.key("items").filterWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+            const i = __ct_pattern_input.key("element");
+            const state = __ct_pattern_input.key("params", "state");
+            return i.name.includes(state.key("filter"));
+        }, {
+            type: "object",
+            properties: {
+                element: {
+                    $ref: "#/$defs/Item"
+                },
+                params: {
+                    type: "object",
+                    properties: {
+                        state: {
+                            type: "object",
+                            properties: {
+                                filter: {
+                                    type: "string",
+                                    asOpaque: true
+                                }
+                            },
+                            required: ["filter"]
+                        }
+                    },
+                    required: ["state"]
+                }
+            },
+            required: ["element", "params"],
+            $defs: {
+                Item: {
+                    type: "object",
+                    properties: {
+                        id: {
+                            type: "number"
+                        },
+                        name: {
+                            type: "string"
+                        },
+                        price: {
+                            type: "number"
+                        },
+                        active: {
+                            type: "boolean"
+                        }
+                    },
+                    required: ["id", "name", "price", "active"]
+                }
+            }
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema), {
+            state: {
+                filter: state.filter
+            }
+        }).length)}
         </p>
 
         <h3>Array with Complex Expressions</h3>
@@ -280,7 +334,41 @@ export default pattern((state) => {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.key("items")
-            } }, ({ state }) => state.items.filter((i) => i.active).length)}</p>
+            } }, ({ state }) => state.key("items").filterWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+            const i = __ct_pattern_input.key("element");
+            return i.key("active");
+        }, {
+            type: "object",
+            properties: {
+                element: {
+                    $ref: "#/$defs/Item"
+                }
+            },
+            required: ["element"],
+            $defs: {
+                Item: {
+                    type: "object",
+                    properties: {
+                        id: {
+                            type: "number"
+                        },
+                        name: {
+                            type: "string"
+                        },
+                        price: {
+                            type: "number"
+                        },
+                        active: {
+                            type: "boolean"
+                        }
+                    },
+                    required: ["id", "name", "price", "active"]
+                }
+            }
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "boolean",
+            asOpaque: true
+        } as const satisfies __ctHelpers.JSONSchema), {}).length)}</p>
 
         <h3>Simple Operations</h3>
         <p>Discount percent: {__ctHelpers.derive({

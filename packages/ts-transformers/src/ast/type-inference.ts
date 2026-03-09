@@ -864,23 +864,26 @@ export function isDeriveCall(expr: ts.Expression): boolean {
   return false;
 }
 
+const REACTIVE_ARRAY_METHODS = new Set(["map", "filter", "flatMap"]);
+
 /**
- * Checks if a call expression is a .map() call on a reactive array (OpaqueRef<T[]> or Cell<T[]>).
- * This is used to determine if the map will be transformed to mapWithPattern.
+ * Checks if a call expression is a .map()/.filter()/.flatMap() call on a reactive array
+ * (OpaqueRef<T[]> or Cell<T[]>). Used to determine if the call will be transformed to
+ * mapWithPattern/filterWithPattern/flatMapWithPattern.
  *
  * Used by both:
- * - ClosureTransformer to decide whether to transform map to mapWithPattern
- * - OpaqueRefJSXTransformer to decide whether to skip derive wrapping (since mapWithPattern is already reactive)
+ * - ClosureTransformer to decide whether to transform to *WithPattern
+ * - OpaqueRefJSXTransformer to decide whether to skip derive wrapping
  */
-export function isReactiveArrayMapCall(
+export function isReactiveArrayMethodCall(
   node: ts.CallExpression,
   checker: ts.TypeChecker,
   typeRegistry?: WeakMap<ts.Node, ts.Type>,
   logger?: (message: string) => void,
 ): boolean {
-  // Check if this is a property access expression with name "map"
+  // Check if this is a property access expression with a reactive array method name
   if (!ts.isPropertyAccessExpression(node.expression)) return false;
-  if (node.expression.name.text !== "map") return false;
+  if (!REACTIVE_ARRAY_METHODS.has(node.expression.name.text)) return false;
 
   // Get the type of the target (what we're calling .map on)
   const target = node.expression.expression;
@@ -906,3 +909,6 @@ export function isReactiveArrayMapCall(
   return isOpaqueRefType(targetType, checker) &&
     hasArrayTypeArgument(targetType, checker);
 }
+
+/** @deprecated Use isReactiveArrayMethodCall */
+export const isReactiveArrayMapCall = isReactiveArrayMethodCall;

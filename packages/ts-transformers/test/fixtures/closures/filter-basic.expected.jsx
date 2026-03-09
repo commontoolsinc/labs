@@ -1,19 +1,19 @@
 import * as __ctHelpers from "commontools";
 import { pattern, UI } from "commontools";
 interface Item {
+    id: number;
     name: string;
     active: boolean;
 }
-export default pattern((__ct_pattern_input) => {
-    const list = __ct_pattern_input.key("list");
+interface State {
+    items: Item[];
+}
+export default pattern((state) => {
     return {
         [UI]: (<div>
-        {list.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        {state.key("items").filterWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                 const item = __ct_pattern_input.key("element");
-                return ({
-                    name: item.key("name"),
-                    active: item.key("active"),
-                });
+                return item.key("active");
             }, {
                 type: "object",
                 properties: {
@@ -26,6 +26,9 @@ export default pattern((__ct_pattern_input) => {
                     Item: {
                         type: "object",
                         properties: {
+                            id: {
+                                type: "number"
+                            },
                             name: {
                                 type: "string"
                             },
@@ -33,70 +36,41 @@ export default pattern((__ct_pattern_input) => {
                                 type: "boolean"
                             }
                         },
-                        required: ["name", "active"]
+                        required: ["id", "name", "active"]
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "object",
-                properties: {
-                    name: {
-                        type: "string",
-                        asOpaque: true
-                    },
-                    active: {
-                        type: "boolean",
-                        asOpaque: true
-                    }
-                },
-                required: ["name", "active"]
-            } as const satisfies __ctHelpers.JSONSchema), {}).filterWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
-                const entry = __ct_pattern_input.key("element");
-                return entry.key("active");
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        type: "object",
-                        properties: {
-                            name: {
-                                type: "string",
-                                asOpaque: true
-                            },
-                            active: {
-                                type: "boolean",
-                                asOpaque: true
-                            }
-                        },
-                        required: ["name", "active"]
-                    }
-                },
-                required: ["element"]
             } as const satisfies __ctHelpers.JSONSchema, {
                 type: "boolean",
                 asOpaque: true
             } as const satisfies __ctHelpers.JSONSchema), {}).mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
-                const entry = __ct_pattern_input.key("element");
-                return <span>{entry.key("name")}</span>;
+                const item = __ct_pattern_input.key("element");
+                return (<div>Item #{item.key("id")}: {item.key("name")}</div>);
             }, {
                 type: "object",
                 properties: {
                     element: {
-                        type: "object",
-                        properties: {
-                            name: {
-                                type: "string",
-                                asOpaque: true
-                            },
-                            active: {
-                                type: "boolean",
-                                asOpaque: true
-                            }
-                        },
-                        required: ["name", "active"],
+                        $ref: "#/$defs/Item",
                         asOpaque: true
                     }
                 },
-                required: ["element"]
+                required: ["element"],
+                $defs: {
+                    Item: {
+                        type: "object",
+                        properties: {
+                            id: {
+                                type: "number"
+                            },
+                            name: {
+                                type: "string"
+                            },
+                            active: {
+                                type: "boolean"
+                            }
+                        },
+                        required: ["id", "name", "active"]
+                    }
+                }
             } as const satisfies __ctHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
@@ -124,18 +98,21 @@ export default pattern((__ct_pattern_input) => {
 }, {
     type: "object",
     properties: {
-        list: {
+        items: {
             type: "array",
             items: {
                 $ref: "#/$defs/Item"
             }
         }
     },
-    required: ["list"],
+    required: ["items"],
     $defs: {
         Item: {
             type: "object",
             properties: {
+                id: {
+                    type: "number"
+                },
                 name: {
                     type: "string"
                 },
@@ -143,7 +120,7 @@ export default pattern((__ct_pattern_input) => {
                     type: "boolean"
                 }
             },
-            required: ["name", "active"]
+            required: ["id", "name", "active"]
         }
     }
 } as const satisfies __ctHelpers.JSONSchema, {

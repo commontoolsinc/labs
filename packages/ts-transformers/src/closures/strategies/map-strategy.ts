@@ -7,7 +7,6 @@ import {
   getTypeAtLocationWithFallback,
   isDeriveCall,
   isFunctionLikeExpression,
-  isReactiveArrayMapCall,
   registerSyntheticCallType,
 } from "../../ast/mod.ts";
 import {
@@ -34,6 +33,12 @@ import {
   isFallbackOperator,
 } from "../../utils/reactive-keys.ts";
 
+const METHOD_TO_WITH_PATTERN: Record<string, string> = {
+  map: "mapWithPattern",
+  filter: "filterWithPattern",
+  flatMap: "flatMapWithPattern",
+};
+
 export class MapStrategy implements ClosureTransformationStrategy {
   canTransform(
     node: ts.Node,
@@ -41,7 +46,7 @@ export class MapStrategy implements ClosureTransformationStrategy {
   ): boolean {
     return ts.isCallExpression(node) &&
       ts.isPropertyAccessExpression(node.expression) &&
-      node.expression.name.text === "map";
+      node.expression.name.text in METHOD_TO_WITH_PATTERN;
   }
 
   transform(
@@ -59,22 +64,6 @@ export class MapStrategy implements ClosureTransformationStrategy {
     }
     return undefined;
   }
-}
-
-/**
- * Checks if this is an OpaqueRef<T[]> or Cell<T[]> map call.
- * Only transforms map calls on reactive arrays (OpaqueRef/Cell), not plain arrays.
- *
- * @deprecated Use isReactiveArrayMapCall from ast/mod.ts instead.
- * This is kept for backwards compatibility but delegates to the shared implementation.
- */
-export function isOpaqueRefArrayMapCall(
-  node: ts.CallExpression,
-  checker: ts.TypeChecker,
-  typeRegistry?: WeakMap<ts.Node, ts.Type>,
-  logger?: (message: string) => void,
-): boolean {
-  return isReactiveArrayMapCall(node, checker, typeRegistry, logger);
 }
 
 /**
@@ -114,7 +103,7 @@ function shouldTransformMap(
   if (!ts.isPropertyAccessExpression(mapCall.expression)) return false;
 
   const methodName = mapCall.expression.name.text;
-  if (methodName !== "map") {
+  if (!(methodName in METHOD_TO_WITH_PATTERN)) {
     return false;
   }
 
@@ -321,7 +310,12 @@ function isReactiveCollectionCallbackParameter(
   }
 
   const methodName = call.expression.name.text;
-  if (methodName !== "map" && methodName !== "mapWithPattern") {
+  if (
+    !(methodName in METHOD_TO_WITH_PATTERN) &&
+    methodName !== "mapWithPattern" &&
+    methodName !== "filterWithPattern" &&
+    methodName !== "flatMapWithPattern"
+  ) {
     return false;
   }
 
@@ -374,6 +368,19 @@ function isReactiveMapOrigin(
     }
     if (kind?.kind === "builder" && kind.builderName === "computed") {
       return true;
+    }
+
+    // Syntactic chaining detection: .filter().map() — the intermediate result
+    // of a reactive array method call is still reactive.
+    if (
+      ts.isPropertyAccessExpression(current.expression) &&
+      current.expression.name.text in METHOD_TO_WITH_PATTERN
+    ) {
+      return isReactiveMapOrigin(
+        current.expression.expression,
+        context,
+        seenSymbols,
+      );
     }
   }
 
@@ -641,9 +648,13 @@ function createPatternCallWithParams(
     context,
   );
 
+  const originalMethodName =
+    (mapCall.expression as ts.PropertyAccessExpression).name.text;
+  const targetMethodName = METHOD_TO_WITH_PATTERN[originalMethodName] ??
+    "mapWithPattern";
   const mapWithPatternAccess = factory.createPropertyAccessExpression(
     loweredArrayExpr,
-    factory.createIdentifier("mapWithPattern"),
+    factory.createIdentifier(targetMethodName),
   );
 
   const args: ts.Expression[] = [patternCall, paramsObject];
