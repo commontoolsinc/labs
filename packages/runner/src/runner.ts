@@ -1473,6 +1473,9 @@ export class Runner {
             tx,
           },
         );
+        // Store the frame on the action so the scheduler can attach it to
+        // errors created outside the action (e.g. "Too many iterations").
+        (action as Action & { lastFrame?: Frame }).lastFrame = frame;
 
         const handleErrorOutput = (error: unknown) => {
           if (
