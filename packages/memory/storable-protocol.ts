@@ -27,6 +27,12 @@ export interface StorableInstance {
    * serialization system handles that.
    */
   [DECONSTRUCT](): StorableValue;
+
+  /**
+   * Returns a shallow clone of this instance with the requested frozenness.
+   * If the instance already has the desired frozenness, it may return `this`.
+   */
+  shallowClone(frozen: boolean): StorableInstance;
 }
 
 /**

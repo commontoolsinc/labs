@@ -162,7 +162,7 @@ export function tagFromNativeClass(
  * `tagFromNativeClass` are returned as-is.
  */
 export function tagFromNativeValue(value: unknown): NativeTag | null {
-  if (value === null || value === undefined || typeof value !== "object") {
+  if (value === null || typeof value !== "object") {
     return NATIVE_TAGS.Primitive;
   }
   // Guard: null-prototype objects or exotic objects may not have a function

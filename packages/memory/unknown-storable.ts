@@ -23,6 +23,12 @@ export class UnknownStorable extends ExplicitTagStorable
     return { type: this.typeTag, state: this.state };
   }
 
+  shallowClone(frozen: boolean): StorableInstance {
+    if (Object.isFrozen(this) === frozen) return this;
+    const copy = new UnknownStorable(this.typeTag, this.state);
+    return frozen ? Object.freeze(copy) : copy;
+  }
+
   static [RECONSTRUCT](
     state: { type: string; state: StorableValue },
     _context: ReconstructionContext,

@@ -24,11 +24,12 @@ import { NATIVE_TAGS, tagFromNativeValue } from "./type-tags.ts";
  *
  * - Primitives (including `SpecialPrimitiveValue`) are returned as-is --
  *   frozenness does not apply.
- * - `StorableInstance` values: returned as-is. These are protocol types whose
- *   frozenness is managed by the protocol, not by the conversion layer.
+ * - `StorableInstance` values: delegated to the protocol's `shallowClone`
+ *   method, which handles frozenness per each concrete class.
  * - Arrays: shallow-copied (preserving sparse holes) when frozenness differs.
  * - Plain objects: shallow-copied via spread when frozenness differs.
- * - Anything else: returned as-is.
+ * - `HasToJSON` and raw native instances: throw. These should not reach here;
+ *   callers must resolve them before calling this function.
  *
  * This centralizes the clone-for-frozenness logic that was previously
  * sprinkled across `toRichStorableValue`.
@@ -66,11 +67,27 @@ function shallowCloneStorableValue(
       return frozen ? Object.freeze(copy) : copy;
     }
 
-    default:
-      // StorableInstance values, HasToJSON results, and anything else:
-      // return as-is. StorableInstance frozenness is managed by the
-      // protocol, not the conversion layer.
-      return value;
+    case NATIVE_TAGS.HasToJSON:
+      // HasToJSON is nascently deprecated; callers should resolve toJSON()
+      // before reaching shallowCloneStorableValue. Death before confusion!
+      throw new Error("Cannot shallow-clone HasToJSON values");
+
+    default: {
+      // tagFromNativeValue returns null for StorableInstance values (they
+      // aren't in the native class registry). Delegate to the protocol's
+      // shallowClone method.
+      if (isStorableInstance(value)) {
+        return value.shallowClone(frozen) as StorableValueLayer;
+      }
+      // Convertible native instances (Error, Map, Set, etc.) should never
+      // reach here -- they are wrapped before being stored as
+      // StorableValueLayer. If they do, something is wrong.
+      throw new Error(
+        `Cannot shallow-clone native instance: ${
+          (value as object).constructor?.name ?? "unknown"
+        }`,
+      );
+    }
   }
 }
 
@@ -111,9 +128,8 @@ export function toRichStorableValue(
   }
 
   // StorableInstance values (including StorableError, UnknownStorable, etc.)
-  // are already valid StorableValue members. Use shallowCloneStorableValue
-  // to handle frozenness (it returns StorableInstance as-is since their
-  // frozenness is managed by the protocol).
+  // are already valid StorableValue members. Delegate to
+  // shallowCloneStorableValue which calls the protocol's shallowClone method.
   if (isStorableInstance(value)) {
     return shallowCloneStorableValue(
       value as StorableValueLayer,

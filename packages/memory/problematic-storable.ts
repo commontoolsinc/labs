@@ -28,6 +28,12 @@ export class ProblematicStorable extends ExplicitTagStorable
     return { type: this.typeTag, state: this.state, error: this.error };
   }
 
+  shallowClone(frozen: boolean): StorableInstance {
+    if (Object.isFrozen(this) === frozen) return this;
+    const copy = new ProblematicStorable(this.typeTag, this.state, this.error);
+    return frozen ? Object.freeze(copy) : copy;
+  }
+
   static [RECONSTRUCT](
     state: { type: string; state: StorableValue; error: string },
     _context: ReconstructionContext,
