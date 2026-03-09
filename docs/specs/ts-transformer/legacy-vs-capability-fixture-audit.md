@@ -1,5 +1,9 @@
 # Legacy vs Capability Fixture Audit
 
+> **Historical document.** The `useLegacyOpaqueRefSemantics` flag has been
+> removed and the legacy transform path no longer exists. This audit is
+> retained for reference only.
+
 Generated from direct transform diffing of fixture inputs with:
 - `useLegacyOpaqueRefSemantics: true`
 - `useLegacyOpaqueRefSemantics: false`

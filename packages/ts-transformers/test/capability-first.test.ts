@@ -2,7 +2,6 @@ import {
   assert,
   assertEquals,
   assertGreater,
-  assertNotEquals,
   assertStringIncludes,
 } from "@std/assert";
 import { transformSource, validateSource } from "./utils.ts";
@@ -960,30 +959,6 @@ const fn = lift((input: Writable<{ foo: string; bar: string }>) => {
 );
 
 Deno.test(
-  "Default mode uses capability-first transform output",
-  async () => {
-    const source = `/// <cts-enable />
-import { pattern } from "commontools";
-const p = pattern(({ foo, bar }) => <div>{foo && bar}</div>);
-`;
-
-    const defaultOutput = await transformSource(source, {
-      types: COMMONTOOLS_TYPES,
-    });
-    const explicitCapabilityOutput = await transformSource(source, {
-      types: COMMONTOOLS_TYPES,
-    });
-    const explicitLegacyOutput = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: true,
-      types: COMMONTOOLS_TYPES,
-    });
-
-    assertEquals(defaultOutput, explicitCapabilityOutput);
-    assertNotEquals(defaultOutput, explicitLegacyOutput);
-  },
-);
-
-Deno.test(
   "Default mode uses capability-first diagnostics",
   async () => {
     const source = `/// <cts-enable />
@@ -1015,27 +990,6 @@ const p = pattern((input) => input.get());
       toComparable(explicitCapabilityResult.diagnostics),
       toComparable(defaultResult.diagnostics),
     );
-  },
-);
-
-Deno.test(
-  "Legacy opt-out parity: legacy mode keeps full-shape action state schema",
-  async () => {
-    const source = `/// <cts-enable />
-import { action, pattern, type Writable } from "commontools";
-const p = pattern((input: Writable<{ foo: string; bar: string }>) => {
-  const a = action(() => input.key("foo").get());
-  return a;
-});
-`;
-
-    const output = await transformSource(source, {
-      useLegacyOpaqueRefSemantics: true,
-      types: COMMONTOOLS_TYPES,
-    });
-
-    assertStringIncludes(output, '"foo"');
-    assertStringIncludes(output, '"bar"');
   },
 );
 

@@ -18,7 +18,8 @@ behavior and open follow-up work.
 ## Implementation Snapshot (March 4, 2026)
 
 - Landed:
-  - `useLegacyOpaqueRefSemantics` option with capability-first default
+  - capability-first transform pipeline (legacy `useLegacyOpaqueRefSemantics`
+    flag removed)
   - unified context classifier (`pattern` / `compute` / `neutral`)
   - deterministic JSX logical lowering policy (`&&` / `||`) by context
   - `.map` rewrite matrix by `{context, receiverKind}`
@@ -36,9 +37,7 @@ behavior and open follow-up work.
   - schema shrink coverage validation (`schema:unknown-type-access`,
     `schema:path-not-in-type`)
 - Partially landed:
-  - diagnostics migration (legacy codes preserved; some legacy validation
-    remains)
-  - legacy cleanup and helper deprecation
+  - diagnostics migration (some legacy validation remains)
   - compute-context interprocedural capability summaries (MVP scope)
 - Open:
   - standalone-function `.map` policy finalization
@@ -201,7 +200,9 @@ to runtime contract support).
    `key(...)`) is deterministic and semantics-preserving.
 6. Optional-call forms (for example `foo?.bar()`) are explicitly out of scope
    for key-lowering until modeled separately.
-7. A feature gate exists for rollout and A/B fixture validation.
+7. ~~A feature gate exists for rollout and A/B fixture validation.~~
+   (Completed: `useLegacyOpaqueRefSemantics` gate has been removed; capability-first
+   is the only path.)
 8. Destructured callback parameters in pattern-style contexts are lowered to
    non-destructured receiver parameters with explicit `key(...)` bindings.
 9. Alias/nested destructuring (for example `{ bar: b }`, `{ user: { name } }`)
@@ -649,11 +650,13 @@ logic.
 
 ## Phase 6: Cleanup
 
-**Status:** Partially landed
+**Status:** Landed
 
-1. Remove superseded heuristic branches.
+1. ~~Remove superseded heuristic branches.~~
+   Done — `useLegacyOpaqueRefSemantics` and all legacy heuristic branches removed.
 2. Delete or deprecate old context helper names once all consumers migrate.
-3. Update behavior and goals specs to final terminology/policy.
+3. ~~Update behavior and goals specs to final terminology/policy.~~
+   Done.
 
 **Exit criteria:** no dead-path fallback logic for replaced policies.
 
@@ -778,11 +781,14 @@ without major compile-time regression.
 
 ## Phase D8: Default-On And Legacy Cleanup
 
-**Status:** Partially landed
+**Status:** Landed
 
-1. Flip `capabilityDataflowV1` to default after stabilization window.
-2. Remove legacy branches tied to old `OpaqueRef` heuristics.
-3. Update behavior spec to reflect new default behavior.
+1. ~~Flip `capabilityDataflowV1` to default after stabilization window.~~
+   Done — capability-first is the only path.
+2. ~~Remove legacy branches tied to old `OpaqueRef` heuristics.~~
+   Done — `useLegacyOpaqueRefSemantics` flag and all legacy branches removed.
+3. ~~Update behavior spec to reflect new default behavior.~~
+   Done.
 4. Retire or reduce legacy pattern-context validation passes once lowerability
    diagnostics are complete.
 

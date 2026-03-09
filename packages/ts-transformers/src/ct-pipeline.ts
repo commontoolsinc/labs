@@ -28,8 +28,6 @@ export class CommonToolsTransformerPipeline extends Pipeline {
       capabilitySummaryRegistry: new WeakMap(),
       ...options,
     };
-    const useLegacy = ops.useLegacyOpaqueRefSemantics ?? false;
-
     // Create a shared diagnostics collector
     const sharedOps: TransformationOptions = {
       ...ops,
@@ -54,9 +52,7 @@ export class CommonToolsTransformerPipeline extends Pipeline {
       new ClosureTransformer(sharedOps),
     );
 
-    if (!useLegacy) {
-      transformers.push(new CapabilityLoweringTransformer(sharedOps));
-    }
+    transformers.push(new CapabilityLoweringTransformer(sharedOps));
 
     transformers.push(
       new SchemaInjectionTransformer(sharedOps),

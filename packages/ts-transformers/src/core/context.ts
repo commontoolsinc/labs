@@ -9,7 +9,6 @@ import { CTHelpers } from "./ct-helpers.ts";
 const DEFAULT_OPTIONS: TransformationOptions = {
   mode: "transform",
   debug: false,
-  useLegacyOpaqueRefSemantics: false,
 };
 
 export interface TransformationContextConfig {

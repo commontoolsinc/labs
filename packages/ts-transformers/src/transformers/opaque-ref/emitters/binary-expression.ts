@@ -20,16 +20,6 @@ import { isFallbackOperator } from "../../../utils/reactive-keys.ts";
  * Check if an expression is JSX (element, fragment, or self-closing).
  * Also handles parenthesized JSX like `(<div>...</div>)`.
  */
-function isJsxExpression(expr: ts.Expression): boolean {
-  // Unwrap parentheses
-  while (ts.isParenthesizedExpression(expr)) {
-    expr = expr.expression;
-  }
-  return ts.isJsxElement(expr) ||
-    ts.isJsxFragment(expr) ||
-    ts.isJsxSelfClosingElement(expr);
-}
-
 function isMapReceiverBinary(expression: ts.BinaryExpression): boolean {
   let current: ts.Node = expression;
 
@@ -69,9 +59,10 @@ export const emitBinaryExpression: Emitter = ({
 }) => {
   if (!ts.isBinaryExpression(expression)) return undefined;
   const operator = expression.operatorToken.kind;
-  const useLegacySemantics = context.options.useLegacyOpaqueRefSemantics;
-  const shouldLowerByContextPolicy = !useLegacySemantics &&
-    shouldLowerLogicalInJsx(reactiveContextKind, operator);
+  const shouldLowerByContextPolicy = shouldLowerLogicalInJsx(
+    reactiveContextKind,
+    operator,
+  );
 
   // Check if the left side of && or || has an OpaqueRef type.
   // This is important for cases like `computed(() => plainValue) && <JSX>`
@@ -100,8 +91,8 @@ export const emitBinaryExpression: Emitter = ({
   // If the right side is simple (not JSX, no reactive deps), using when/unless is just
   // overhead - better to wrap the whole expression in derive.
   if (operator === ts.SyntaxKind.AmpersandAmpersandToken) {
-    if (!useLegacySemantics && !shouldLowerByContextPolicy) {
-      // New policy: outside pattern context we do not lower && in JSX.
+    if (!shouldLowerByContextPolicy) {
+      // Outside pattern context we do not lower && in JSX.
       if (inSafeContext) return undefined;
     }
 
@@ -109,20 +100,8 @@ export const emitBinaryExpression: Emitter = ({
       dataFlows,
       expression.left,
     );
-    const rightDataFlows = selectDataFlowsReferencedIn(
-      dataFlows,
-      expression.right,
-    );
 
-    // Check if right side is "expensive" - JSX or has reactive dependencies that need derive
-    const rightIsJsx = isJsxExpression(expression.right);
-    const rightNeedsDerive = rightDataFlows.length > 0 &&
-      !isSimpleOpaqueRefAccess(expression.right, context.checker);
-    const rightIsExpensive = rightIsJsx || rightNeedsDerive;
-    const shouldLower = shouldLowerByContextPolicy ||
-      (useLegacySemantics && (rightIsExpensive || leftIsOpaqueRef));
-
-    if (shouldLower) {
+    if (shouldLowerByContextPolicy) {
       // Process left side - derive if it has reactive deps, otherwise pass as-is
       let condition: ts.Expression = expression.left;
       if (leftDataFlows.length > 0) {
@@ -174,8 +153,8 @@ export const emitBinaryExpression: Emitter = ({
   //
   // Same rationale as &&: only beneficial when right side is expensive.
   if (operator === ts.SyntaxKind.BarBarToken) {
-    if (!useLegacySemantics && !shouldLowerByContextPolicy) {
-      // New policy: outside pattern context we do not lower || in JSX.
+    if (!shouldLowerByContextPolicy) {
+      // Outside pattern context we do not lower || in JSX.
       if (inSafeContext) return undefined;
     }
 
@@ -183,24 +162,8 @@ export const emitBinaryExpression: Emitter = ({
       dataFlows,
       expression.left,
     );
-    const rightDataFlows = selectDataFlowsReferencedIn(
-      dataFlows,
-      expression.right,
-    );
 
-    // Check if right side is "expensive" - JSX or has reactive dependencies that need derive
-    const rightIsJsx = isJsxExpression(expression.right);
-    const rightNeedsDerive = rightDataFlows.length > 0 &&
-      !isSimpleOpaqueRefAccess(expression.right, context.checker);
-    const rightIsExpensive = rightIsJsx || rightNeedsDerive;
-    const shouldLower = shouldLowerByContextPolicy ||
-      (useLegacySemantics && (rightIsExpensive || leftIsOpaqueRef));
-
-    // Use unless() transformation if:
-    // 1. Right side is expensive (JSX or needs derive) - original optimization
-    // 2. OR left side is an OpaqueRef type - needed because OpaqueRefs are always truthy objects
-    //    so `computed(...) || <Fallback>` would never render fallback without unless()
-    if (shouldLower) {
+    if (shouldLowerByContextPolicy) {
       // Process left side - derive if it has reactive deps, otherwise pass as-is
       let condition: ts.Expression = expression.left;
       if (leftDataFlows.length > 0) {

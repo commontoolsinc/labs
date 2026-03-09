@@ -130,51 +130,31 @@ describe("OpaqueRef map callbacks", () => {
     assertStringIncludes(output, "), {})");
   });
 
-  it("derives map callback parameters and unary negations", async () => {
+  it("derives map callback parameters and unary negations (capability-first)", async () => {
     const output = await transformSource(SOURCE, {
-      useLegacyOpaqueRefSemantics: true,
       types: { "commontools.d.ts": commontools },
     });
 
-    // Map callback should be transformed to pattern with function-first, then schema for captured defaultName
-    assertStringIncludes(
-      output,
-      "__ctHelpers.pattern(",
-    );
-    // Check for correct parameter destructuring
-    assertStringIncludes(
-      output,
-      "({ element: charm, index, params: { state } }) =>",
-    );
-    assertStringIncludes(
-      output,
-      "state: {\n                    defaultName: state.defaultName\n                }",
-    );
-    // Index parameter still gets derive wrapping for the arithmetic operation
-    assertStringIncludes(
-      output,
-      `__ctHelpers.derive({
-                type: "object",
-                properties: {
-                    index: {
-                        type: "number"
-                    }
-                },
-                required: ["index"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "number"
-            } as const satisfies __ctHelpers.JSONSchema, { index: index }, ({ index }) => index + 1)`,
-    );
-    // element[NAME] || defaultName - since right side is not JSX, wraps whole expression in derive
-    // (unless optimization only applies when right side is expensive like JSX)
-    assertStringIncludes(
-      output,
-      "({ charm, state }) => charm[NAME] || state.defaultName",
-    );
-    // ifElse still gets derive for the negation and preserves callback body
-    assertStringIncludes(
-      output,
-      "({ state }) => !state.charms.length",
-    );
+    // Map callback should be transformed to mapWithPattern with pattern()
+    assertStringIncludes(output, "mapWithPattern(");
+    assertStringIncludes(output, "__ctHelpers.pattern(");
+
+    // Capability-first uses .key() accessors for element/index/params
+    assertStringIncludes(output, '__ct_pattern_input.key("element")');
+    assertStringIncludes(output, '__ct_pattern_input.key("index")');
+    assertStringIncludes(output, '__ct_pattern_input.key("params", "state")');
+
+    // Captures object passes state.defaultName via .key()
+    assertStringIncludes(output, "defaultName: state.key(");
+
+    // Index arithmetic still gets derive wrapping
+    assertStringIncludes(output, "({ index }) => index + 1)");
+
+    // charm[NAME] || defaultName lowered to unless()
+    assertStringIncludes(output, "__ctHelpers.unless(");
+    assertStringIncludes(output, "({ charm }) => charm[NAME]");
+
+    // ifElse negation still gets derive
+    assertStringIncludes(output, "({ state }) => !state.charms.length");
   });
 });

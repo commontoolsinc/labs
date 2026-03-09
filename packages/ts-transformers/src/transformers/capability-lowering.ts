@@ -1299,8 +1299,7 @@ function registerBuilderSummariesInSubtree(
 
 export class CapabilityLoweringTransformer extends Transformer {
   override filter(context: TransformationContext): boolean {
-    return context.ctHelpers.sourceHasHelpers() &&
-      !context.options.useLegacyOpaqueRefSemantics;
+    return context.ctHelpers.sourceHasHelpers();
   }
 
   transform(context: TransformationContext): ts.SourceFile {

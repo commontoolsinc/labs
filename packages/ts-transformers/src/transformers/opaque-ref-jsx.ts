@@ -62,14 +62,13 @@ function transform(context: TransformationContext): ts.SourceFile {
 
       const contextInfo = classifyReactiveContext(node, checker, context);
       const inSafeContext = contextInfo.kind === "compute";
-      const isLegacy = context.options.useLegacyOpaqueRefSemantics;
 
       const analysis = analyze(node.expression);
 
       // Check if expression contains && or || that may need when/unless transformation
       const hasLogicalOps = containsLogicalBinaryOperator(node.expression);
 
-      if (!isLegacy && contextInfo.kind === "compute") {
+      if (contextInfo.kind === "compute") {
         // New policy: compute JSX does not lower && / || and does not add wrappers.
         return visitEachChildWithJsx(node, visit, context.tsContext);
       }

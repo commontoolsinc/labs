@@ -56,14 +56,13 @@ Transformers always run in this order:
 5. `OpaqueRefJSXTransformer`
 6. `ComputedTransformer`
 7. `ClosureTransformer`
-8. `CapabilityLoweringTransformer` (only when
-   `useLegacyOpaqueRefSemantics !== true`)
+8. `CapabilityLoweringTransformer`
 9. `SchemaInjectionTransformer`
 10. `SchemaGeneratorTransformer`
 
 The order is behaviorally significant.
 
-## 4. Global Modes And Legacy Flag
+## 4. Global Modes
 
 `TransformationOptions.mode` supports:
 
@@ -76,13 +75,6 @@ Current mode-sensitive behavior:
   rewriting JSX expressions that would require opaque-ref rewrites in
   non-compute contexts.
 - Other transformers currently do not branch on mode.
-
-`TransformationOptions.useLegacyOpaqueRefSemantics` supports:
-
-- `false` (default): capability-first behavior enabled;
-  `CapabilityLoweringTransformer` runs and legacy heuristic checks are
-  reduced/disabled.
-- `true`: legacy OpaqueRef semantics path; capability lowering is skipped.
 
 ## 5. Call Kind Detection Contract
 
@@ -248,10 +240,6 @@ Diagnostics emitted in all modes:
     `computed(...)`, `derive(...)`, or `.map(...)` on reactive receivers
   - `.map(...)` diagnostic includes guidance that eager `<cell>.get().map(...)`
     is acceptable for explicit eager mapping
-
-Additional diagnostics emitted only in legacy mode
-(`useLegacyOpaqueRefSemantics: true`):
-
 - **Error** `pattern-context:optional-chaining`
   - optional property access `?.` in restricted reactive context (outside JSX)
 - **Error** `pattern-context:computation`
@@ -304,9 +292,8 @@ For each `JsxExpression`:
 - in compute context:
   - only semantic logical rewrites (`&&`/`||`) are considered
   - derive/computed wrapping is skipped
-- in capability-first mode (`useLegacyOpaqueRefSemantics: false`):
-  - compute-context JSX does not lower `&&` / `||`
-  - pattern-context JSX lowers `&&` / `||` deterministically
+- compute-context JSX does not lower `&&` / `||`
+- pattern-context JSX lowers `&&` / `||` deterministically
 - in `mode: "error"`:
   - report `opaque-ref:jsx-expression` for non-compute contexts requiring
     rewrite
@@ -327,13 +314,8 @@ The rewriter uses normalized data-flow dependencies and ordered emitters:
 
 Key rewrite rules:
 
-- `a && b`:
-  - capability-first: lowers to `when(condition, value)` only in pattern context
-  - legacy: may lower based on expensive-RHS / opaque-left heuristics
-- `a || b`:
-  - capability-first: lowers to `unless(condition, fallback)` only in pattern
-    context
-  - legacy: may lower based on expensive-RHS / opaque-left heuristics
+- `a && b`: lowers to `when(condition, value)` only in pattern context
+- `a || b`: lowers to `unless(condition, fallback)` only in pattern context
 - ternary `cond ? x : y`:
   - becomes `ifElse(cond, x, y)` with branch/predicate processing
 - non-compute contexts:
@@ -452,10 +434,9 @@ values:
 
 If no qualifying captures exist, call is unchanged.
 
-### 9.7 Capability lowering (capability-first mode only)
+### 9.7 Capability lowering
 
-`CapabilityLoweringTransformer` runs after closure transformation when
-`useLegacyOpaqueRefSemantics` is `false`.
+`CapabilityLoweringTransformer` runs after closure transformation.
 
 Primary behaviors:
 

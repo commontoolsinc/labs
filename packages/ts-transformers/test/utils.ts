@@ -16,7 +16,6 @@ let sourceFileCache: Map<string, ts.SourceFile> | undefined;
 
 export interface TransformOptions {
   mode?: "transform" | "error";
-  useLegacyOpaqueRefSemantics?: boolean;
   types?: Record<string, string>;
   logger?: (message: string) => void;
   typeCheck?: boolean;
@@ -262,7 +261,6 @@ export async function transformFiles(
 ): Promise<Record<string, string>> {
   const {
     mode = "transform",
-    useLegacyOpaqueRefSemantics = false,
     types = {},
     logger,
     typeCheck = false,
@@ -518,7 +516,6 @@ export async function transformFiles(
   const pipeline = new CommonToolsTransformerPipeline({
     mode,
     logger,
-    useLegacyOpaqueRefSemantics,
   });
 
   const out: Record<string, string> = {};
@@ -598,7 +595,6 @@ export async function validateFiles(
 }> {
   const {
     mode = "transform",
-    useLegacyOpaqueRefSemantics = false,
     types = {},
     logger,
   } = options;
@@ -759,7 +755,6 @@ export async function validateFiles(
   const pipeline = new CommonToolsTransformerPipeline({
     mode,
     logger,
-    useLegacyOpaqueRefSemantics,
   });
 
   const outputs: Record<string, string> = {};
