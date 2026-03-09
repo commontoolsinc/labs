@@ -11,1511 +11,1567 @@ import {
   Writable,
 } from "commontools";
 
-// ===== Helpers (module scope) =====
+// ===== Utility =====
 
+/** Today's date as YYYY-MM-DD */
 const getTodayDate = (): string => new Date().toISOString().split("T")[0];
 
-const getDateOffset = (offset: number): string => {
+/** Get date string N days from today */
+const getDateOffset = (days: number): string => {
   const d = new Date();
-  d.setDate(d.getDate() + offset);
+  d.setDate(d.getDate() + days);
   return d.toISOString().split("T")[0];
 };
 
-const formatDay = (dateStr: string): string => {
+/** Format a YYYY-MM-DD date for display (e.g. "Mon 2/24") */
+const formatShortDate = (dateStr: string): string => {
   const d = new Date(dateStr + "T12:00:00");
-  return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getDay()];
+  const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  return `${days[d.getDay()]} ${d.getMonth() + 1}/${d.getDate()}`;
 };
 
-const formatDate = (dateStr: string): string => {
-  const d = new Date(dateStr + "T12:00:00");
-  return `${d.getMonth() + 1}/${d.getDate()}`;
-};
-
-const statusColor = (status: string): string => {
-  const colors: Record<string, string> = {
-    allocated: "#22c55e",
-    pending: "#f59e0b",
-    denied: "#ef4444",
-    cancelled: "#9ca3af",
-  };
-  return colors[status] || "#9ca3af";
-};
-
-const COMMUTE_LABELS: Record<string, string> = {
-  drive: "Car",
-  transit: "Transit",
-  bike: "Bike",
-  wfh: "WFH",
-  other: "Other",
-};
+let _idCounter = 0;
+const genId = (prefix: string): string =>
+  `${prefix}-${Date.now()}-${++_idCounter}`;
 
 // ===== Types =====
 
-interface ParkingSpot {
-  number: number;
+export interface ParkingSpot {
+  id: string;
+  number: string;
   label: Default<string, "">;
   notes: Default<string, "">;
 }
 
-interface Person {
+export type CommuteMode = "drive" | "transit" | "bike" | "wfh" | "other";
+
+export interface Person {
+  id: string;
   name: string;
-  email: string;
-  commuteMode: Default<"drive" | "transit" | "bike" | "wfh" | "other", "drive">;
-  defaultSpot: Default<number, 0>;
-  spotPreferences: Default<number[], []>;
+  email: Default<string, "">;
+  usualCommuteMode: Default<CommuteMode, "drive">;
+  /** Ordered list of preferred spot IDs */
+  spotPreferences: Default<string[], []>;
+  /** Default spot ID, or empty string for none */
+  defaultSpotId: Default<string, "">;
 }
 
-interface SpotRequest {
-  personName: string;
-  requestedDate: string;
-  status: Default<"pending" | "allocated" | "denied" | "cancelled", "pending">;
-  assignedSpot: Default<number, 0>;
+export type RequestStatus = "pending" | "allocated" | "denied" | "cancelled";
+
+export interface SpotRequest {
+  id: string;
+  personId: string;
+  date: string; // YYYY-MM-DD
+  status: RequestStatus;
+  /** Spot ID when allocated */
+  assignedSpotId: Default<string, "">;
   autoAllocated: Default<boolean, true>;
 }
 
-// ===== Input / Output =====
+// ===== Initial Data =====
 
-interface ParkingInput {
-  spots: Writable<Default<ParkingSpot[], []>>;
-  people: Writable<Default<Person[], []>>;
-  requests: Writable<Default<SpotRequest[], []>>;
+export const INITIAL_SPOTS: ParkingSpot[] = [
+  { id: "spot-1", number: "1", label: "", notes: "" },
+  { id: "spot-5", number: "5", label: "", notes: "" },
+  { id: "spot-12", number: "12", label: "", notes: "" },
+];
+
+// ===== Pattern Input / Output =====
+
+interface ParkingCoordinatorInput {
+  spots?: Writable<Default<ParkingSpot[], typeof INITIAL_SPOTS>>;
+  persons?: Writable<Default<Person[], []>>;
+  requests?: Writable<Default<SpotRequest[], []>>;
+  /** Priority ordering: list of person IDs from highest to lowest priority */
+  priorityOrder?: Writable<Default<string[], []>>;
 }
 
-interface ParkingOutput {
+interface ParkingCoordinatorOutput {
   [NAME]: string;
   [UI]: VNode;
+
+  // Exposed state
   spots: ParkingSpot[];
-  people: Person[];
+  persons: Person[];
   requests: SpotRequest[];
-  requestSpot: Stream<{ personName: string; date: string }>;
-  cancelRequest: Stream<{ personName: string; date: string }>;
-  addPerson: Stream<{ name: string; email: string; commuteMode: string }>;
-  removePerson: Stream<{ name: string }>;
-  movePersonUp: Stream<{ name: string }>;
-  movePersonDown: Stream<{ name: string }>;
-  setDefaultSpot: Stream<{ personName: string; spotNumber: number }>;
-  setSpotPreferences: Stream<{
-    personName: string;
-    preferences: number[];
+  priorityOrder: string[];
+
+  // Person CRUD
+  addPerson: Stream<{
+    name: string;
+    email: string;
+    usualCommuteMode: CommuteMode;
   }>;
-  addSpot: Stream<{ number: number; label: string; notes: string }>;
-  editSpot: Stream<{ number: number; label: string; notes: string }>;
-  removeSpot: Stream<{ number: number }>;
-  manualAssign: Stream<{
-    personName: string;
+  removePerson: Stream<{ personId: string }>;
+  setDefaultSpot: Stream<{ personId: string; spotId: string }>;
+  setSpotPreferences: Stream<{ personId: string; spotIds: string[] }>;
+  movePriorityUp: Stream<{ personId: string }>;
+  movePriorityDown: Stream<{ personId: string }>;
+
+  // Spot CRUD
+  addSpot: Stream<{ number: string; label: string; notes: string }>;
+  removeSpot: Stream<{ spotId: string }>;
+  editSpot: Stream<{ spotId: string; label: string; notes: string }>;
+
+  // Request actions
+  requestParking: Stream<{ personId: string; date: string }>;
+  cancelRequest: Stream<{ requestId: string }>;
+  manualOverride: Stream<{
+    personId: string;
     date: string;
-    spotNumber: number;
+    spotId: string;
   }>;
 }
 
-// ===== Pattern =====
+// ===== Helpers (module scope) =====
 
-export default pattern<ParkingInput, ParkingOutput>(
-  ({ spots, people, requests }) => {
-    const todayDate = getTodayDate();
-    const weekDates: string[] = [];
-    for (let i = 0; i < 7; i++) {
-      weekDates.push(getDateOffset(i));
+/** Check if a person already has a non-cancelled request for a date */
+const hasActiveRequest = (
+  allRequests: readonly SpotRequest[],
+  personId: string,
+  date: string,
+): boolean =>
+  allRequests.some(
+    (r) =>
+      r.personId === personId &&
+      r.date === date &&
+      (r.status === "allocated" || r.status === "pending"),
+  );
+
+// ===== Helper: auto-allocation logic (module scope) =====
+
+const allocateSpot = (
+  personId: string,
+  date: string,
+  allSpots: readonly ParkingSpot[],
+  allPersons: readonly Person[],
+  allRequests: readonly SpotRequest[],
+): string => {
+  // Find spots already allocated for this date
+  const allocatedSpotIds = new Set(
+    allRequests
+      .filter(
+        (r) =>
+          r.date === date &&
+          r.status === "allocated" &&
+          (r.assignedSpotId ?? "") !== "",
+      )
+      .map((r) => r.assignedSpotId as string),
+  );
+
+  const availableSpotIds = allSpots
+    .filter((s) => !allocatedSpotIds.has(s.id))
+    .map((s) => s.id);
+
+  if (availableSpotIds.length === 0) return ""; // No spots free
+
+  const person = allPersons.find((p) => p.id === personId);
+  if (!person) return "";
+
+  // 1. Try default spot
+  const defaultId = (person.defaultSpotId as string) ?? "";
+  if (defaultId && availableSpotIds.includes(defaultId)) {
+    return defaultId;
+  }
+
+  // 2. Try preferences in order
+  const prefs = (person.spotPreferences as string[]) ?? [];
+  for (const prefId of prefs) {
+    if (availableSpotIds.includes(prefId)) {
+      return prefId;
     }
+  }
 
-    // ---- UI State ----
-    const currentTab = Writable.of("parking");
+  // 3. Any free spot
+  return availableSpotIds[0];
+};
+
+// ===== Main Pattern =====
+
+export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
+  ({ spots, persons, requests, priorityOrder }) => {
+    const TODAY = getTodayDate();
+
+
+    // ---- Local UI state ----
     const adminMode = Writable.of(false);
-    const selectedPerson = Writable.of("");
-    const editingPerson = Writable.of("");
-    const editingSpot = Writable.of(-1);
-    const showAddPerson = Writable.of(false);
-    const showAddSpot = Writable.of(false);
+    // Views: "main" | "request-form" | "admin-persons" | "admin-spots" | "add-person" | "add-spot" | "edit-spot" | "edit-person" | "my-requests"
+    const currentView = Writable.of<string>("main");
+    const selectedPersonId = Writable.of<string>("");
 
-    // Form fields
-    const newPersonName = Writable.of("");
-    const newPersonEmail = Writable.of("");
-    const newPersonCommute = Writable.of("drive");
-    const newSpotNumber = Writable.of("");
-    const newSpotLabel = Writable.of("");
-    const newSpotNotes = Writable.of("");
-    const editSpotLabel = Writable.of("");
-    const editSpotNotes = Writable.of("");
-    const editPersonDefaultSpot = Writable.of(0);
-    // ---- Computed ----
-    const hasSpots = computed(() => spots.get().length > 0);
-    const hasPeople = computed(() => people.get().length > 0);
-    const isParking = computed(() => currentTab.get() === "parking");
-    const isRequests = computed(() => currentTab.get() === "requests");
-    const isAdmin = computed(() => currentTab.get() === "admin");
-    const noPeople = computed(() => people.get().length === 0);
-    const noSpots = computed(() => spots.get().length === 0);
+    // Request form state
+    const reqPersonId = Writable.of<string>("");
+    const reqDate = Writable.of<string>(TODAY);
+    const reqMessage = Writable.of<string>("");
+
+    // Add person form state
+    const newPersonName = Writable.of<string>("");
+    const newPersonEmail = Writable.of<string>("");
+    const newPersonCommute = Writable.of<CommuteMode>("drive");
+
+    // Add spot form state
+    const newSpotNumber = Writable.of<string>("");
+    const newSpotLabel = Writable.of<string>("");
+    const newSpotNotes = Writable.of<string>("");
+
+    // Edit spot form state
+    const editSpotId = Writable.of<string>("");
+    const editSpotLabel = Writable.of<string>("");
+    const editSpotNotes = Writable.of<string>("");
+
+    // Edit person form state (default spot + preferences)
+    const editPersonId = Writable.of<string>("");
+    const editPersonDefaultSpot = Writable.of<string>("");
+    const editPersonPrefs = Writable.of<string[]>([]);
+    const editPersonAddPrefSpotId = Writable.of<string>("");
 
     // ---- Actions ----
 
-    const requestSpot = action(
-      ({ personName, date }: { personName: string; date: string }) => {
-        if (!personName || !date) return;
-        if (date < todayDate) return;
-
-        // Check for duplicate active request
-        const existing = requests
-          .get()
-          .find(
-            (r) =>
-              r.personName === personName &&
-              r.requestedDate === date &&
-              r.status !== "cancelled" &&
-              r.status !== "denied",
-          );
-        if (existing) return;
-
-        // Auto-allocate
-        const allSpots = spots.get();
-        const allPeople = people.get();
-        const allRequests = requests.get();
-        const person = allPeople.find((p) => p.name === personName);
-        if (!person) return;
-
-        const takenSpots = allRequests
-          .filter(
-            (r) =>
-              r.requestedDate === date &&
-              r.status === "allocated" &&
-              r.assignedSpot > 0,
-          )
-          .map((r) => r.assignedSpot);
-
-        const isAvailable = (spotNum: number): boolean =>
-          allSpots.some((s) => s.number === spotNum) &&
-          !takenSpots.includes(spotNum);
-
-        let spotNum = 0;
-        // 1. Default spot
-        if (person.defaultSpot > 0 && isAvailable(person.defaultSpot)) {
-          spotNum = person.defaultSpot;
-        }
-        // 2. Preferences
-        if (spotNum === 0) {
-          const prefs = person.spotPreferences || [];
-          for (const pref of prefs) {
-            if (isAvailable(pref)) {
-              spotNum = pref;
-              break;
-            }
-          }
-        }
-        // 3. Any free
-        if (spotNum === 0) {
-          for (const s of allSpots) {
-            if (isAvailable(s.number)) {
-              spotNum = s.number;
-              break;
-            }
-          }
-        }
-
-        if (spotNum > 0) {
-          requests.push({
-            personName,
-            requestedDate: date,
-            status: "allocated" as const,
-            assignedSpot: spotNum,
-            autoAllocated: true,
-          });
-        } else {
-          requests.push({
-            personName,
-            requestedDate: date,
-            status: "denied" as const,
-            assignedSpot: 0,
-            autoAllocated: true,
-          });
-        }
-      },
-    );
-
-    const cancelRequest = action(
-      ({ personName, date }: { personName: string; date: string }) => {
-        const all = requests.get();
-        const updated = all.map((r) => {
-          if (
-            r.personName === personName &&
-            r.requestedDate === date &&
-            (r.status === "pending" || r.status === "allocated")
-          ) {
-            return { ...r, status: "cancelled" as const, assignedSpot: 0 };
-          }
-          return r;
-        });
-        requests.set(updated);
-      },
-    );
+    // --- Person CRUD ---
 
     const addPerson = action(
-      ({
-        name,
-        email,
-        commuteMode,
-      }: {
+      (event: {
         name: string;
         email: string;
-        commuteMode: string;
+        usualCommuteMode: CommuteMode;
       }) => {
-        const trimmed = name.trim();
-        if (!trimmed || !email.trim()) return;
-        if (people.get().some((p) => p.name === trimmed)) return;
-        people.push({
+        const trimmed = event.name.trim();
+        if (!trimmed) return;
+        const id = genId("person");
+        persons.push({
+          id,
           name: trimmed,
-          email: email.trim(),
-          commuteMode: (commuteMode || "drive") as "drive" | "transit" | "bike" | "wfh" | "other",
-          defaultSpot: 0,
+          email: event.email ?? "",
+          usualCommuteMode: event.usualCommuteMode ?? "drive",
           spotPreferences: [],
+          defaultSpotId: "",
+        });
+        // Add to bottom of priority list
+        const current = priorityOrder.get();
+        priorityOrder.set([...current, id]);
+      },
+    );
+
+    const removePerson = action((event: { personId: string }) => {
+      const { personId } = event;
+
+      // Remove from persons
+      const currentPersons = persons.get();
+      const filtered = currentPersons.filter((p: Person) => p.id !== personId);
+      persons.set(filtered);
+
+      // Remove from priority order
+      const currentPriority = priorityOrder.get();
+      priorityOrder.set(currentPriority.filter((id: string) => id !== personId));
+
+      // Cancel upcoming allocated requests for this person
+      const currentRequests = requests.get();
+      let requestsChanged = false;
+      const updated = currentRequests.map((r: SpotRequest) => {
+        if (
+          r.personId === personId &&
+          r.date >= TODAY &&
+          r.status === "allocated"
+        ) {
+          requestsChanged = true;
+          return { ...r, status: "cancelled" as RequestStatus, assignedSpotId: "" };
+        }
+        return r;
+      });
+      if (requestsChanged) {
+        requests.set(updated);
+      }
+    });
+
+    const setDefaultSpot = action(
+      (event: { personId: string; spotId: string }) => {
+        const currentPersons = persons.get();
+        persons.set(
+          currentPersons.map((p: Person) =>
+            p.id === event.personId
+              ? { ...p, defaultSpotId: event.spotId }
+              : p
+          ),
+        );
+      },
+    );
+
+    const setSpotPreferences = action(
+      (event: { personId: string; spotIds: string[] }) => {
+        const currentPersons = persons.get();
+        persons.set(
+          currentPersons.map((p: Person) =>
+            p.id === event.personId
+              ? { ...p, spotPreferences: event.spotIds }
+              : p
+          ),
+        );
+      },
+    );
+
+    const movePriorityUp = action((event: { personId: string }) => {
+      const current = priorityOrder.get();
+      const idx = current.indexOf(event.personId);
+      if (idx > 0) {
+        const updated = [...current];
+        [updated[idx - 1], updated[idx]] = [updated[idx], updated[idx - 1]];
+        priorityOrder.set(updated);
+      }
+    });
+
+    const movePriorityDown = action((event: { personId: string }) => {
+      const current = priorityOrder.get();
+      const idx = current.indexOf(event.personId);
+      if (idx >= 0 && idx < current.length - 1) {
+        const updated = [...current];
+        [updated[idx], updated[idx + 1]] = [updated[idx + 1], updated[idx]];
+        priorityOrder.set(updated);
+      }
+    });
+
+    // --- Spot CRUD ---
+
+    const addSpot = action(
+      (event: { number: string; label: string; notes: string }) => {
+        const trimmed = event.number.trim();
+        if (!trimmed) return;
+        // Check uniqueness
+        const existing = spots.get();
+        if (existing.some((s: ParkingSpot) => s.number === trimmed)) return;
+        spots.push({
+          id: genId("spot"),
+          number: trimmed,
+          label: event.label ?? "",
+          notes: event.notes ?? "",
         });
       },
     );
 
-    const removePerson = action(({ name }: { name: string }) => {
-      const allReqs = requests.get();
-      const updated = allReqs.map((r) => {
+    const removeSpot = action((event: { spotId: string }) => {
+      const { spotId } = event;
+      // Cancel upcoming allocated requests for this spot
+      const currentRequests = requests.get();
+      const updated = currentRequests.map((r: SpotRequest) => {
         if (
-          r.personName === name &&
-          (r.status === "pending" || r.status === "allocated")
+          (r.assignedSpotId as string) === spotId &&
+          r.date >= TODAY &&
+          r.status === "allocated"
         ) {
-          return { ...r, status: "cancelled" as const, assignedSpot: 0 };
+          return {
+            ...r,
+            status: "denied" as RequestStatus,
+            assignedSpotId: "",
+          };
         }
         return r;
       });
       requests.set(updated);
 
-      const current = people.get();
-      const idx = current.findIndex((p) => p.name === name);
-      if (idx >= 0) {
-        people.set(current.toSpliced(idx, 1));
+      // Remove from all persons' preferences and defaults (only if needed)
+      const currentPersons = persons.get();
+      let personsChanged = false;
+      const updatedPersons = currentPersons.map((p: Person) => {
+        const prefs = (p.spotPreferences as string[]) ?? [];
+        const defaultId = (p.defaultSpotId as string) ?? "";
+        const needsUpdate =
+          prefs.includes(spotId) || defaultId === spotId;
+        if (needsUpdate) {
+          personsChanged = true;
+          return {
+            ...p,
+            spotPreferences: prefs.filter((id: string) => id !== spotId),
+            defaultSpotId: defaultId === spotId ? "" : defaultId,
+          };
+        }
+        return p;
+      });
+      if (personsChanged) {
+        persons.set(updatedPersons);
       }
 
-      if (selectedPerson.get() === name) {
-        selectedPerson.set("");
+      // Remove the spot
+      const currentSpots = spots.get();
+      spots.set(currentSpots.filter((s: ParkingSpot) => s.id !== spotId));
+    });
+
+    const editSpotAction = action(
+      (event: { spotId: string; label: string; notes: string }) => {
+        const currentSpots = spots.get();
+        const idx = currentSpots.findIndex(
+          (s: ParkingSpot) => s.id === event.spotId,
+        );
+        if (idx < 0) return;
+        spots.set(
+          currentSpots.toSpliced(idx, 1, {
+            ...currentSpots[idx],
+            label: event.label,
+            notes: event.notes,
+          }),
+        );
+      },
+    );
+
+    // --- Request actions ---
+
+    const requestParking = action(
+      (event: { personId: string; date: string }) => {
+        const { personId, date } = event;
+        if (!personId || !date) return;
+
+        // Check for duplicate active request
+        const currentRequests = requests.get();
+        if (hasActiveRequest(currentRequests, personId, date)) return;
+
+        const allSpots = spots.get();
+        const allPersons = persons.get();
+
+        // Run auto-allocation
+        const assignedSpotId = allocateSpot(
+          personId,
+          date,
+          allSpots,
+          allPersons,
+          currentRequests,
+        );
+
+        const newRequest: SpotRequest = {
+          id: genId("req"),
+          personId,
+          date,
+          status: assignedSpotId ? "allocated" : "denied",
+          assignedSpotId: assignedSpotId || "",
+          autoAllocated: true,
+        };
+
+        console.log("[DEBUG requestParking] pushing request:", JSON.stringify(newRequest), "requests before push:", currentRequests.length);
+        requests.push(newRequest);
+        console.log("[DEBUG requestParking] requests after push:", requests.get().length);
+      },
+    );
+
+    const cancelRequest = action((event: { requestId: string }) => {
+      const currentRequests = requests.get();
+      requests.set(
+        currentRequests.map((r: SpotRequest) =>
+          r.id === event.requestId && r.status === "allocated"
+            ? { ...r, status: "cancelled" as RequestStatus, assignedSpotId: "" }
+            : r
+        ),
+      );
+    });
+
+    const manualOverride = action(
+      (event: { personId: string; date: string; spotId: string }) => {
+        const { personId, date, spotId } = event;
+        if (!personId || !date || !spotId) return;
+
+        // Check spot is available on that date
+        const currentRequests = requests.get();
+        const spotTaken = currentRequests.some(
+          (r: SpotRequest) =>
+            r.date === date &&
+            r.status === "allocated" &&
+            (r.assignedSpotId as string) === spotId,
+        );
+        if (spotTaken) return;
+
+        // Check if person already has an active request for this date
+        const hasExisting = currentRequests.some(
+          (r: SpotRequest) =>
+            r.personId === personId &&
+            r.date === date &&
+            (r.status === "allocated" || r.status === "pending"),
+        );
+
+        if (hasExisting) {
+          // Update existing request
+          requests.set(
+            currentRequests.map((r: SpotRequest) =>
+              r.personId === personId &&
+              r.date === date &&
+              (r.status === "allocated" || r.status === "pending")
+                ? {
+                    ...r,
+                    status: "allocated" as RequestStatus,
+                    assignedSpotId: spotId,
+                    autoAllocated: false,
+                  }
+                : r
+            ),
+          );
+        } else {
+          // Create new allocated request
+          requests.push({
+            id: genId("req"),
+            personId,
+            date,
+            status: "allocated" as RequestStatus,
+            assignedSpotId: spotId,
+            autoAllocated: false,
+          });
+        }
+      },
+    );
+
+    // ---- Computed values ----
+
+    const spotCount = computed(() => spots.get().length);
+    const personCount = computed(() => persons.get().length);
+    const requestCount = computed(() => requests.get().length);
+    const hasNoPersons = computed(() => persons.get().length === 0);
+
+    // Today's allocations: for each spot, who has it today
+    const todayAllocations = computed(() => {
+      const allSpots = spots.get();
+      const allPersons = persons.get();
+      const allRequests = requests.get();
+      console.log("[DEBUG todayAllocations] requests count:", allRequests.length, "allocated:", allRequests.filter((r: SpotRequest) => r?.status === "allocated").length);
+      return allSpots
+        .filter((spot: ParkingSpot) => spot && spot.id != null)
+        .map((spot: ParkingSpot) => {
+          const req = allRequests.find(
+            (r: SpotRequest) =>
+              r?.date === TODAY &&
+              r?.status === "allocated" &&
+              (r?.assignedSpotId as string) === spot.id,
+          );
+          const personName = req
+            ? (allPersons.find((p: Person) => p?.id === req.personId)?.name ?? "Unknown")
+            : null;
+          return {
+            spot,
+            personName,
+            requestId: req?.id ?? "",
+            occupied: !!req,
+          };
+        });
+    });
+
+    // Week-ahead data: 7 days starting from today
+    const weekDays = computed(() => {
+      const days: string[] = [];
+      for (let i = 0; i < 7; i++) {
+        days.push(getDateOffset(i));
+      }
+      return days;
+    });
+
+    const weekGrid = computed(() => {
+      const allSpots = spots.get();
+      const allPersons = persons.get();
+      const allRequests = requests.get();
+      const days: string[] = weekDays;
+      console.log("[DEBUG weekGrid] spots:", allSpots.length, "requests:", allRequests.length, "days:", Array.isArray(days) ? days.length : typeof days, "days value:", JSON.stringify(days));
+
+      return allSpots
+        .filter((spot: ParkingSpot) => spot && spot.id != null)
+        .map((spot: ParkingSpot) => {
+          const dayCells = days.map((day: string) => {
+            const req = allRequests.find(
+              (r: SpotRequest) =>
+                r?.date === day &&
+                r?.status === "allocated" &&
+                (r?.assignedSpotId as string) === spot.id,
+            );
+            const personName = req
+              ? (allPersons.find((p: Person) => p?.id === req.personId)?.name ??
+                "?")
+              : "";
+            return { day, personName, occupied: !!req };
+          });
+          return { spot, cells: dayCells };
+        });
+    });
+
+    // My requests (filtered by selected person)
+    const myRequests = computed(() => {
+      const pid = selectedPersonId.get();
+      if (!pid) return [];
+      const allRequests = requests.get();
+      const allSpots = spots.get();
+      return allRequests
+        .filter((r: SpotRequest) => r && r.personId === pid)
+        .map((r: SpotRequest) => {
+          const spot = allSpots.find(
+            (s: ParkingSpot) => s?.id === (r.assignedSpotId as string),
+          );
+          return {
+            ...r,
+            spotNumber: spot?.number ?? "-",
+          };
+        })
+        .sort((a: SpotRequest & { spotNumber: string }, b: SpotRequest & { spotNumber: string }) =>
+          (b?.date ?? "").localeCompare(a?.date ?? "")
+        );
+    });
+
+    // Priority list: persons in priority order with names
+    const priorityList = computed(() => {
+      const allPersons = persons.get();
+      const order = priorityOrder.get();
+      return order
+        .map((id: string) => allPersons.find((p: Person) => p.id === id))
+        .filter((p: Person | undefined): p is Person => !!p);
+    });
+
+    // Person options for select
+    const personOptions = computed(() => {
+      return [
+        { label: "Select person...", value: "" },
+        ...persons.get()
+          .filter((p: Person) => p && p.name != null)
+          .map((p: Person) => ({
+            label: p.name,
+            value: p.id,
+          })),
+      ];
+    });
+
+    // Spot options for select
+    const spotOptions = computed(() => {
+      return [
+        { label: "None", value: "" },
+        ...spots.get()
+          .filter((s: ParkingSpot) => s && s.number != null)
+          .map((s: ParkingSpot) => ({
+            label: `#${s.number}${(s.label as string) ? ` (${s.label})` : ""}`,
+            value: s.id,
+          })),
+      ];
+    });
+
+    const commuteOptions = [
+      { label: "Drive", value: "drive" },
+      { label: "Transit", value: "transit" },
+      { label: "Bike", value: "bike" },
+      { label: "WFH", value: "wfh" },
+      { label: "Other", value: "other" },
+    ];
+
+    // ---- UI Navigation actions ----
+
+    const openRequestForm = action(() => {
+      reqPersonId.set("");
+      reqDate.set(TODAY);
+      reqMessage.set("");
+      currentView.set("request-form");
+    });
+
+    const submitRequest = action(() => {
+      const personId = reqPersonId.get();
+      const date = reqDate.get();
+      if (!personId || !date) {
+        reqMessage.set("Please select a person and date.");
+        return;
+      }
+      if (date < TODAY) {
+        reqMessage.set("Cannot request parking for a past date.");
+        return;
+      }
+      // Check duplicate
+      const currentRequests = requests.get();
+      if (hasActiveRequest(currentRequests, personId, date)) {
+        reqMessage.set("This person already has an active request for this date.");
+        return;
+      }
+      // Compute the expected allocation result before sending
+      const allSpots = spots.get();
+      const allPersons = persons.get();
+      const assignedSpotId = allocateSpot(
+        personId,
+        date,
+        allSpots,
+        allPersons,
+        currentRequests,
+      );
+
+      requestParking.send({ personId, date });
+
+      // Show result and navigate back to main view on success
+      if (assignedSpotId) {
+        const spot = allSpots.find(
+          (s: ParkingSpot) => s.id === assignedSpotId,
+        );
+        reqMessage.set(`Allocated spot #${spot?.number ?? "?"}!`);
+        currentView.set("main");
+      } else {
+        reqMessage.set("Denied: no spots available for this date.");
       }
     });
 
-    const movePersonUp = action(({ name }: { name: string }) => {
-      const current = people.get();
-      const idx = current.findIndex((p) => p.name === name);
+    const openAddPerson = action(() => {
+      newPersonName.set("");
+      newPersonEmail.set("");
+      newPersonCommute.set("drive");
+      currentView.set("add-person");
+    });
+
+    const submitAddPerson = action(() => {
+      const name = newPersonName.get().trim();
+      if (!name) return;
+      addPerson.send({
+        name,
+        email: newPersonEmail.get(),
+        usualCommuteMode: newPersonCommute.get(),
+      });
+      currentView.set("admin-persons");
+    });
+
+    const openAddSpot = action(() => {
+      newSpotNumber.set("");
+      newSpotLabel.set("");
+      newSpotNotes.set("");
+      currentView.set("add-spot");
+    });
+
+    const submitAddSpot = action(() => {
+      const num = newSpotNumber.get().trim();
+      if (!num) return;
+      addSpot.send({
+        number: num,
+        label: newSpotLabel.get(),
+        notes: newSpotNotes.get(),
+      });
+      currentView.set("admin-spots");
+    });
+
+    const openEditSpot = action((event: { spotId: string }) => {
+      const spot = spots
+        .get()
+        .find((s: ParkingSpot) => s.id === event.spotId);
+      if (!spot) return;
+      editSpotId.set(spot.id);
+      editSpotLabel.set((spot.label as string) ?? "");
+      editSpotNotes.set((spot.notes as string) ?? "");
+      currentView.set("edit-spot");
+    });
+
+    const submitEditSpot = action(() => {
+      const spotId = editSpotId.get();
+      if (!spotId) return;
+      editSpotAction.send({
+        spotId,
+        label: editSpotLabel.get(),
+        notes: editSpotNotes.get(),
+      });
+      currentView.set("admin-spots");
+    });
+
+    // --- Edit person navigation ---
+
+    const openEditPerson = action((event: { personId: string }) => {
+      const person = persons
+        .get()
+        .find((p: Person) => p.id === event.personId);
+      if (!person) return;
+      editPersonId.set(person.id);
+      editPersonDefaultSpot.set((person.defaultSpotId as string) ?? "");
+      editPersonPrefs.set([...((person.spotPreferences as string[]) ?? [])]);
+      editPersonAddPrefSpotId.set("");
+      currentView.set("edit-person");
+    });
+
+    const saveEditPerson = action(() => {
+      const personId = editPersonId.get();
+      if (!personId) return;
+      setDefaultSpot.send({
+        personId,
+        spotId: editPersonDefaultSpot.get(),
+      });
+      setSpotPreferences.send({
+        personId,
+        spotIds: [...editPersonPrefs.get()],
+      });
+      currentView.set("admin-persons");
+    });
+
+    const addPrefSpot = action(() => {
+      const spotId = editPersonAddPrefSpotId.get();
+      if (!spotId) return;
+      const current = editPersonPrefs.get();
+      if (current.includes(spotId)) return; // already in list
+      editPersonPrefs.set([...current, spotId]);
+      editPersonAddPrefSpotId.set("");
+    });
+
+    const removePrefSpot = action((event: { spotId: string }) => {
+      const current = editPersonPrefs.get();
+      editPersonPrefs.set(current.filter((id: string) => id !== event.spotId));
+    });
+
+    const movePrefUp = action((event: { spotId: string }) => {
+      const current = editPersonPrefs.get();
+      const idx = current.indexOf(event.spotId);
       if (idx > 0) {
         const updated = [...current];
         [updated[idx - 1], updated[idx]] = [updated[idx], updated[idx - 1]];
-        people.set(updated);
+        editPersonPrefs.set(updated);
       }
     });
 
-    const movePersonDown = action(({ name }: { name: string }) => {
-      const current = people.get();
-      const idx = current.findIndex((p) => p.name === name);
+    const movePrefDown = action((event: { spotId: string }) => {
+      const current = editPersonPrefs.get();
+      const idx = current.indexOf(event.spotId);
       if (idx >= 0 && idx < current.length - 1) {
         const updated = [...current];
         [updated[idx], updated[idx + 1]] = [updated[idx + 1], updated[idx]];
-        people.set(updated);
+        editPersonPrefs.set(updated);
       }
     });
 
-    const setDefaultSpot = action(
-      ({
-        personName,
-        spotNumber,
-      }: {
-        personName: string;
-        spotNumber: number;
-      }) => {
-        const current = people.get();
-        const updated = current.map((p) =>
-          p.name === personName ? { ...p, defaultSpot: spotNumber } : p
-        );
-        people.set(updated);
-      },
-    );
+    // ---- View computed flags ----
+    const isMainView = computed(() => currentView.get() === "main");
+    const isRequestForm = computed(() => currentView.get() === "request-form");
+    const isAdminPersons = computed(() => currentView.get() === "admin-persons");
+    const isAdminSpots = computed(() => currentView.get() === "admin-spots");
+    const isAddPerson = computed(() => currentView.get() === "add-person");
+    const isAddSpot = computed(() => currentView.get() === "add-spot");
+    const isEditSpot = computed(() => currentView.get() === "edit-spot");
+    const isEditPerson = computed(() => currentView.get() === "edit-person");
+    const isMyRequests = computed(() => currentView.get() === "my-requests");
+    const isAdmin = computed(() => adminMode.get());
 
-    const setSpotPreferences = action(
-      ({
-        personName,
-        preferences,
-      }: {
-        personName: string;
-        preferences: number[];
-      }) => {
-        const current = people.get();
-        const updated = current.map((p) =>
-          p.name === personName ? { ...p, spotPreferences: preferences } : p
-        );
-        people.set(updated);
-      },
-    );
-
-    const addSpot = action(
-      ({
-        number: num,
-        label,
-        notes,
-      }: {
-        number: number;
-        label: string;
-        notes: string;
-      }) => {
-        if (num <= 0) return;
-        if (spots.get().some((s) => s.number === num)) return;
-        spots.push({ number: num, label: label || "", notes: notes || "" });
-      },
-    );
-
-    const editSpot = action(
-      ({
-        number: num,
-        label,
-        notes,
-      }: {
-        number: number;
-        label: string;
-        notes: string;
-      }) => {
-        const current = spots.get();
-        const updated = current.map((s) =>
-          s.number === num ? { ...s, label, notes } : s
-        );
-        spots.set(updated);
-      },
-    );
-
-    const removeSpot = action(({ number: num }: { number: number }) => {
-      const allReqs = requests.get();
-      const updatedReqs = allReqs.map((r) => {
-        if (r.assignedSpot === num && r.status === "allocated") {
-          return { ...r, status: "pending" as const, assignedSpot: 0 };
-        }
-        return r;
-      });
-      requests.set(updatedReqs);
-
-      const currentPeople = people.get();
-      const updatedPeople = currentPeople.map((p) => ({
-        ...p,
-        defaultSpot: p.defaultSpot === num ? 0 : p.defaultSpot,
-        spotPreferences: (p.spotPreferences || []).filter(
-          (pref) => pref !== num,
-        ),
-      }));
-      people.set(updatedPeople);
-
-      const current = spots.get();
-      const idx = current.findIndex((s) => s.number === num);
-      if (idx >= 0) {
-        spots.set(current.toSpliced(idx, 1));
-      }
+    /** Name of the person being edited, for the heading */
+    const editPersonName = computed(() => {
+      const pid = editPersonId.get();
+      if (!pid) return "";
+      const person = persons.get().find((p: Person) => p.id === pid);
+      return person?.name ?? "";
     });
 
-    const manualAssign = action(
-      ({
-        personName,
-        date,
-        spotNumber,
-      }: {
-        personName: string;
-        date: string;
-        spotNumber: number;
-      }) => {
-        const all = requests.get();
-        const updated = all.map((r) => {
-          if (
-            r.personName === personName &&
-            r.requestedDate === date &&
-            r.status === "pending"
-          ) {
-            return {
-              ...r,
-              status: "allocated" as const,
-              assignedSpot: spotNumber,
-              autoAllocated: false,
-            };
-          }
-          return r;
-        });
-        requests.set(updated);
-      },
-    );
-
-    // ---- Pre-computed week day data ----
-    const futureDates = weekDates.slice(1); // skip today
-
-    // ---- Computed views for My Requests ----
-    const myUpcoming = computed(() => {
-      const sel = selectedPerson.get();
-      if (!sel) return [];
-      return requests
-        .get()
-        .filter(
-          (r) =>
-            r.personName === sel &&
-            r.requestedDate >= todayDate &&
-            (r.status === "allocated" || r.status === "pending"),
-        )
-        .sort((a, b) => (a.requestedDate > b.requestedDate ? 1 : -1));
+    /** Spots available to add as preferences (not already in the pref list) */
+    const availablePrefSpots = computed(() => {
+      const current = editPersonPrefs.get() ?? [];
+      const allSpots = spots.get();
+      return [
+        { label: "Add spot...", value: "" },
+        ...allSpots
+          .filter((s: ParkingSpot) => s && !current.includes(s.id))
+          .map((s: ParkingSpot) => ({
+            label: `#${s.number}${(s.label as string) ? ` (${s.label})` : ""}`,
+            value: s.id,
+          })),
+      ];
     });
 
-    const myPast = computed(() => {
-      const sel = selectedPerson.get();
-      if (!sel) return [];
-      return requests
-        .get()
-        .filter(
-          (r) =>
-            r.personName === sel &&
-            (r.requestedDate < todayDate ||
-              r.status === "cancelled" ||
-              r.status === "denied"),
-        )
-        .sort((a, b) => (b.requestedDate > a.requestedDate ? 1 : -1));
+    /** The current preference list with spot details for display */
+    const editPersonPrefDetails = computed(() => {
+      const prefs = editPersonPrefs.get() ?? [];
+      const allSpots = spots.get();
+      return prefs
+        .map((spotId: string) => {
+          const spot = allSpots.find((s: ParkingSpot) => s.id === spotId);
+          return spot ? { id: spot.id, number: spot.number, label: (spot.label as string) ?? "" } : null;
+        })
+        .filter((s: { id: string; number: string; label: string } | null): s is { id: string; number: string; label: string } => !!s);
     });
 
-    // ---- Main UI ----
+    // ---- UI ----
 
     return {
       [NAME]: "Parking Coordinator",
       [UI]: (
         <ct-screen>
-          {/* Header */}
-          <ct-vstack slot="header" gap="2">
-            <ct-hstack justify="between" align="center">
-              <ct-heading level={4}>Parking Coordinator</ct-heading>
-              <ct-hstack gap="2" align="center">
-                <span style={{ fontSize: "0.8rem", color: "var(--ct-color-gray-500)" }}>
-                  Admin
-                </span>
-                <ct-checkbox $checked={adminMode} />
-              </ct-hstack>
-            </ct-hstack>
-
-            {/* Person selector */}
-            <ct-hstack gap="2" align="center">
-              <span style={{ fontSize: "0.875rem", fontWeight: "500" }}>
-                You are:
-              </span>
-              {hasPeople
-                ? (
-                  <ct-select
-                    $value={selectedPerson}
-                    items={computed(() => [
-                      { label: "Select yourself...", value: "" },
-                      ...people.get().map((p) => ({
-                        label: p.name,
-                        value: p.name,
-                      })),
-                    ])}
-                    style="flex: 1;"
-                  />
-                )
-                : (
-                  <span style={{ fontSize: "0.8rem", color: "var(--ct-color-gray-500)", fontStyle: "italic" }}>
-                    No team members added yet.
-                  </span>
-                )}
-            </ct-hstack>
-
-            {/* Tabs */}
-            <ct-hstack gap="0">
+          {/* ===== HEADER ===== */}
+          <ct-vstack slot="header" gap="1" style="overflow: hidden;">
+            <ct-hstack justify="between" align="center" style="min-width: 0;">
+              <ct-heading level={4} style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;">Parking Coordinator</ct-heading>
               <ct-button
-                variant={isParking ? "primary" : "secondary"}
-                onClick={() => currentTab.set("parking")}
+                variant={isAdmin ? "primary" : "ghost"}
+                onClick={() => adminMode.set(!adminMode.get())}
               >
-                Parking
+                Admin
+              </ct-button>
+            </ct-hstack>
+            {/* Nav tabs */}
+            <ct-hstack gap="0" style="border-bottom: 1px solid var(--ct-color-gray-200); overflow: hidden;">
+              <ct-button
+                variant={isMainView ? "primary" : "ghost"}
+                onClick={() => currentView.set("main")}
+                style="flex: 1; border-radius: 0; min-width: 0; overflow: hidden;"
+              >
+                Today
               </ct-button>
               <ct-button
-                variant={isRequests ? "primary" : "secondary"}
-                onClick={() => currentTab.set("requests")}
+                variant={isMyRequests ? "primary" : "ghost"}
+                onClick={() => currentView.set("my-requests")}
+                style="flex: 1; border-radius: 0; min-width: 0; overflow: hidden;"
               >
                 My Requests
               </ct-button>
-              {adminMode
+              {isAdmin
                 ? (
                   <ct-button
-                    variant={isAdmin ? "primary" : "secondary"}
-                    onClick={() => currentTab.set("admin")}
+                    variant={isAdminPersons ? "primary" : "ghost"}
+                    onClick={() => currentView.set("admin-persons")}
+                    style="flex: 1; border-radius: 0; min-width: 0; overflow: hidden;"
                   >
-                    Admin
+                    People
+                  </ct-button>
+                )
+                : null}
+              {isAdmin
+                ? (
+                  <ct-button
+                    variant={isAdminSpots ? "primary" : "ghost"}
+                    onClick={() => currentView.set("admin-spots")}
+                    style="flex: 1; border-radius: 0; min-width: 0; overflow: hidden;"
+                  >
+                    Spots
                   </ct-button>
                 )
                 : null}
             </ct-hstack>
           </ct-vstack>
 
-          {/* Content */}
           <ct-vscroll flex showScrollbar fadeEdges>
-            <ct-vstack gap="2" style="padding: 1rem;">
-              {/* ======= PARKING TAB ======= */}
-              {isParking
-                ? (
-                  <ct-vstack gap="3">
-                    {/* No spots message */}
-                    {noSpots
-                      ? (
-                        <div style={{ textAlign: "center", color: "var(--ct-color-gray-500)", padding: "2rem" }}>
-                          No parking spots configured. An admin needs to add
-                          spots in Admin mode.
-                        </div>
-                      )
-                      : (
-                        <ct-vstack gap="3">
-                          {/* Today Panel */}
-                          <ct-card>
-                            <ct-vstack gap="2">
-                              <ct-hstack justify="between" align="center">
-                                <span style={{ fontWeight: "600", fontSize: "1.1rem" }}>
-                                  Today - {formatDay(todayDate)}{" "}
-                                  {formatDate(todayDate)}
-                                </span>
-                                <span style={{ fontSize: "0.875rem", color: "var(--ct-color-gray-500)" }}>
-                                  {computed(() => {
-                                    const total = spots.get().length;
-                                    const taken = requests
-                                      .get()
-                                      .filter(
-                                        (r) =>
-                                          r.requestedDate === todayDate &&
-                                          r.status === "allocated" &&
-                                          r.assignedSpot > 0,
-                                      ).length;
-                                    return `${total - taken} of ${total} free`;
-                                  })}
-                                </span>
-                              </ct-hstack>
-
-                              {/* Spot list for today */}
-                              {spots.map((spot) => {
-                                const occupant = computed(() => {
-                                  const req = requests.get().find(
-                                    (r) =>
-                                      r.requestedDate === todayDate &&
-                                      r.assignedSpot === spot.number &&
-                                      r.status === "allocated",
-                                  );
-                                  return req ? req.personName : "";
-                                });
-                                const isFree = computed(() => occupant === "");
-
-                                return (
-                                  <ct-hstack
-                                    gap="2"
-                                    align="center"
-                                    style="padding: 4px 0;"
-                                  >
-                                    <span
-                                      style={{
-                                        width: "36px",
-                                        height: "36px",
-                                        borderRadius: "6px",
-                                        display: "flex",
-                                        alignItems: "center",
-                                        justifyContent: "center",
-                                        fontWeight: "600",
-                                        fontSize: "0.875rem",
-                                        backgroundColor: isFree
-                                          ? "#dcfce7"
-                                          : "#fee2e2",
-                                        color: isFree ? "#15803d" : "#b91c1c",
-                                      }}
-                                    >
-                                      #{spot.number}
-                                    </span>
-                                    <span style={{ flex: "1" }}>
-                                      {spot.label
-                                        ? (
-                                          <span style={{ fontSize: "0.8rem", color: "var(--ct-color-gray-500)" }}>
-                                            {spot.label}
-                                          </span>
-                                        )
-                                        : null}
-                                    </span>
-                                    <span
-                                      style={{
-                                        fontWeight: "500",
-                                        color: isFree ? "#16a34a" : "inherit",
-                                      }}
-                                    >
-                                      {isFree ? "Free" : occupant}
-                                    </span>
-                                  </ct-hstack>
-                                );
-                              })}
-
-                              {/* User status row */}
-                              {computed(() => !!selectedPerson.get())
+            {/* ===== MAIN VIEW: Today + Week Grid ===== */}
+            {isMainView
+              ? (
+                <ct-vstack gap="3" style="padding: 1rem;">
+                  {/* Request result message */}
+                  {reqMessage
+                    ? (
+                      <div
+                        style={{
+                          padding: "0.5rem",
+                          borderRadius: "4px",
+                          fontSize: "0.875rem",
+                          backgroundColor: "var(--ct-color-gray-100)",
+                          fontWeight: "500",
+                        }}
+                      >
+                        {reqMessage}
+                      </div>
+                    )
+                    : null}
+                  {/* Today's Status Panel */}
+                  <ct-heading level={5}>
+                    Today ({TODAY})
+                  </ct-heading>
+                  <ct-vstack gap="2">
+                    {todayAllocations.map(
+                      (alloc: {
+                        spot: ParkingSpot;
+                        personName: string | null;
+                        requestId: string;
+                        occupied: boolean;
+                      }) => (
+                        <ct-card
+                          style={alloc.occupied
+                            ? "border-left: 4px solid #dc2626;"
+                            : "border-left: 4px solid #16a34a;"}
+                        >
+                          <ct-hstack justify="between" align="center">
+                            <ct-vstack gap="0">
+                              <span style={{ fontWeight: "600" }}>
+                                Spot #{alloc.spot.number}
+                              </span>
+                              {(alloc.spot.label as string)
                                 ? (
-                                  <ct-hstack
-                                    gap="2"
-                                    align="center"
-                                    style="padding: 8px 0; border-top: 1px solid #e5e7eb; margin-top: 4px;"
-                                  >
-                                    <span style={{ fontWeight: "500" }}>
-                                      Your status:
-                                    </span>
-                                    {computed(() => {
-                                      const sel = selectedPerson.get();
-                                      const req = requests.get().find(
-                                        (r) =>
-                                          r.personName === sel &&
-                                          r.requestedDate === todayDate &&
-                                          r.status !== "cancelled",
-                                      );
-                                      if (
-                                        req &&
-                                        (req.status === "allocated" ||
-                                          req.status === "pending")
-                                      ) {
-                                        const statusText = req.status === "allocated"
-                                          ? `Allocated - Spot #${req.assignedSpot}`
-                                          : "Pending";
-                                        return (
-                                          <ct-hstack gap="2" align="center">
-                                            <span
-                                              style={{
-                                                padding: "2px 8px",
-                                                borderRadius: "12px",
-                                                fontSize: "0.75rem",
-                                                fontWeight: "500",
-                                                backgroundColor: "#22c55e20",
-                                                color: "#22c55e",
-                                              }}
-                                            >
-                                              {statusText}
-                                            </span>
-                                            <ct-button
-                                              variant="ghost"
-                                              onClick={() =>
-                                                cancelRequest.send({
-                                                  personName:
-                                                    selectedPerson.get(),
-                                                  date: todayDate,
-                                                })}
-                                            >
-                                              Cancel
-                                            </ct-button>
-                                          </ct-hstack>
-                                        );
-                                      }
-                                      if (req && req.status === "denied") {
-                                        return (
-                                          <span
-                                            style={{
-                                              padding: "2px 8px",
-                                              borderRadius: "12px",
-                                              fontSize: "0.75rem",
-                                              fontWeight: "500",
-                                              backgroundColor: "#ef444420",
-                                              color: "#ef4444",
-                                            }}
-                                          >
-                                            No spots available
-                                          </span>
-                                        );
-                                      }
-                                      return (
-                                        <ct-button
-                                          variant="primary"
-                                          onClick={() =>
-                                            requestSpot.send({
-                                              personName:
-                                                selectedPerson.get(),
-                                              date: todayDate,
-                                            })}
-                                        >
-                                          Request spot
-                                        </ct-button>
-                                      );
-                                    })}
-                                  </ct-hstack>
+                                  <span style={{ fontSize: "0.75rem", color: "var(--ct-color-gray-500)" }}>
+                                    {alloc.spot.label}
+                                  </span>
                                 )
-                                : (
-                                  <div style={{ padding: "8px", color: "var(--ct-color-gray-500)", fontStyle: "italic" }}>
-                                    Select yourself above to make requests.
-                                  </div>
-                                )}
+                                : null}
                             </ct-vstack>
-                          </ct-card>
-
-                          {/* Week Ahead */}
-                          <ct-vstack gap="1">
                             <span
                               style={{
-                                fontWeight: "600",
-                                fontSize: "1rem",
-                                padding: "4px 0",
+                                fontWeight: "500",
+                                color: alloc.occupied
+                                  ? "#dc2626"
+                                  : "#16a34a",
                               }}
                             >
-                              This Week
+                              {alloc.occupied ? alloc.personName : "Available"}
                             </span>
-                            {futureDates.map((dateStr: string) => {
-                              const free = computed(() => {
-                                const total = spots.get().length;
-                                const taken = requests
-                                  .get()
-                                  .filter(
-                                    (r) =>
-                                      r.requestedDate === dateStr &&
-                                      r.status === "allocated" &&
-                                      r.assignedSpot > 0,
-                                  ).length;
-                                return total - taken;
-                              });
-                              const totalSpots = computed(
-                                () => spots.get().length,
-                              );
-                              const dayLabel = `${formatDay(dateStr)} ${formatDate(dateStr)}`;
-                              const userStatus = computed(() => {
-                                const sel = selectedPerson.get();
-                                if (!sel) return "none";
-                                const req = requests.get().find(
-                                  (r) =>
-                                    r.personName === sel &&
-                                    r.requestedDate === dateStr &&
-                                    r.status !== "cancelled",
-                                );
-                                if (!req) return "none";
-                                if (
-                                  req.status === "allocated" ||
-                                  req.status === "pending"
-                                )
-                                  return "active";
-                                if (req.status === "denied") return "denied";
-                                return "none";
-                              });
-                              const userSpot = computed(() => {
-                                const sel = selectedPerson.get();
-                                if (!sel) return "";
-                                const req = requests.get().find(
-                                  (r) =>
-                                    r.personName === sel &&
-                                    r.requestedDate === dateStr &&
-                                    r.status === "allocated",
-                                );
-                                return req ? `#${req.assignedSpot}` : "";
-                              });
-
-                              return (
-                                <ct-hstack
-                                  gap="2"
-                                  align="center"
-                                  style="padding: 8px; border-bottom: 1px solid #f3f4f6;"
-                                >
-                                  <span style={{ width: "100px", fontWeight: "500" }}>
-                                    {dayLabel}
-                                  </span>
-                                  <span style={{ flex: "1", fontSize: "0.875rem", color: "var(--ct-color-gray-500)" }}>
-                                    {free} of {totalSpots} free
-                                  </span>
-                                  {computed(() => {
-                                    const sel = selectedPerson.get();
-                                    if (!sel) return null;
-                                    if (userStatus === "active") {
-                                      return (
-                                        <ct-hstack gap="1" align="center">
-                                          <span
-                                            style={{
-                                              padding: "2px 8px",
-                                              borderRadius: "12px",
-                                              fontSize: "0.75rem",
-                                              backgroundColor: "#22c55e20",
-                                              color: "#22c55e",
-                                            }}
-                                          >
-                                            {userSpot
-                                              ? userSpot
-                                              : "Pending"}
-                                          </span>
-                                          <ct-button
-                                            variant="ghost"
-                                            onClick={() =>
-                                              cancelRequest.send({
-                                                personName:
-                                                  selectedPerson.get(),
-                                                date: dateStr,
-                                              })}
-                                          >
-                                            x
-                                          </ct-button>
-                                        </ct-hstack>
-                                      );
-                                    }
-                                    if (userStatus === "denied") {
-                                      return (
-                                        <span
-                                          style={{
-                                            padding: "2px 8px",
-                                            borderRadius: "12px",
-                                            fontSize: "0.75rem",
-                                            backgroundColor: "#ef444420",
-                                            color: "#ef4444",
-                                          }}
-                                        >
-                                          Denied
-                                        </span>
-                                      );
-                                    }
-                                    return (
-                                      <ct-button
-                                        variant="secondary"
-                                        onClick={() =>
-                                          requestSpot.send({
-                                            personName:
-                                              selectedPerson.get(),
-                                            date: dateStr,
-                                          })}
-                                      >
-                                        Request
-                                      </ct-button>
-                                    );
-                                  })}
-                                </ct-hstack>
-                              );
-                            })}
-                          </ct-vstack>
-                        </ct-vstack>
-                      )}
+                          </ct-hstack>
+                        </ct-card>
+                      ),
+                    )}
                   </ct-vstack>
-                )
-                : null}
 
-              {/* ======= MY REQUESTS TAB ======= */}
-              {isRequests
-                ? (
-                  <ct-vstack gap="3">
-                    {computed(() => !selectedPerson.get())
-                      ? (
-                        <div style={{ textAlign: "center", color: "var(--ct-color-gray-500)", padding: "2rem" }}>
-                          Select who you are on the Parking tab to see your
-                          requests.
-                        </div>
-                      )
-                      : (
-                        <ct-vstack gap="3">
-                          {/* Upcoming */}
-                          <ct-vstack gap="1">
-                            <span style={{ fontWeight: "600" }}>Upcoming</span>
-                            {computed(
-                              () => myUpcoming.length === 0,
-                            )
-                              ? (
-                                <div style={{ color: "var(--ct-color-gray-500)", padding: "1rem", fontStyle: "italic" }}>
-                                  No upcoming requests.
-                                </div>
-                              )
-                              : myUpcoming.map((req: SpotRequest) => (
-                                  <ct-card>
-                                    <ct-hstack
-                                      gap="2"
-                                      align="center"
-                                      justify="between"
-                                    >
-                                      <ct-vstack gap="0">
-                                        <span style={{ fontWeight: "500" }}>
-                                          {formatDay(req.requestedDate)}{" "}
-                                          {formatDate(req.requestedDate)}
-                                        </span>
-                                        <span
-                                          style={{
-                                            padding: "2px 8px",
-                                            borderRadius: "12px",
-                                            fontSize: "0.75rem",
-                                            fontWeight: "500",
-                                            backgroundColor:
-                                              statusColor(req.status) + "20",
-                                            color: statusColor(req.status),
-                                          }}
-                                        >
-                                          {req.status === "allocated"
-                                            ? `Allocated - Spot #${req.assignedSpot}`
-                                            : req.status}
-                                        </span>
-                                      </ct-vstack>
-                                      <ct-button
-                                        variant="ghost"
-                                        onClick={() =>
-                                          cancelRequest.send({
-                                            personName: selectedPerson.get(),
-                                            date: req.requestedDate,
-                                          })}
-                                      >
-                                        Cancel
-                                      </ct-button>
-                                    </ct-hstack>
-                                  </ct-card>
-                                ))}
-                          </ct-vstack>
-
-                          {/* Past */}
-                          <ct-vstack gap="1">
-                            <span style={{ fontWeight: "600" }}>Past</span>
-                            {computed(
-                              () => myPast.length === 0,
-                            )
-                              ? (
-                                <div style={{ color: "var(--ct-color-gray-500)", padding: "1rem", fontStyle: "italic" }}>
-                                  No past requests.
-                                </div>
-                              )
-                              : myPast.map((req: SpotRequest) => (
-                                  <ct-card>
-                                    <ct-hstack
-                                      gap="2"
-                                      align="center"
-                                      justify="between"
-                                    >
-                                      <ct-vstack gap="0">
-                                        <span>
-                                          {formatDay(req.requestedDate)}{" "}
-                                          {formatDate(req.requestedDate)}
-                                        </span>
-                                        <span
-                                          style={{
-                                            padding: "2px 8px",
-                                            borderRadius: "12px",
-                                            fontSize: "0.75rem",
-                                            fontWeight: "500",
-                                            backgroundColor:
-                                              statusColor(req.status) + "20",
-                                            color: statusColor(req.status),
-                                          }}
-                                        >
-                                          {req.status === "allocated"
-                                            ? `Spot #${req.assignedSpot}`
-                                            : req.status}
-                                        </span>
-                                      </ct-vstack>
-                                    </ct-hstack>
-                                  </ct-card>
-                                ))}
-                          </ct-vstack>
-                        </ct-vstack>
-                      )}
-                  </ct-vstack>
-                )
-                : null}
-
-              {/* ======= ADMIN TAB ======= */}
-              {isAdmin
-                ? (
-                  <ct-vstack gap="4">
-                    {/* ---- People Section ---- */}
-                    <ct-vstack gap="2">
-                      <span style={{ fontWeight: "600", fontSize: "1rem" }}>
-                        People (priority order)
+                  {/* Week-Ahead Grid */}
+                  <ct-heading level={5}>Week Ahead ({requestCount} requests)</ct-heading>
+                  <ct-vstack gap="0" style="font-size: 0.8125rem;" key={requestCount}>
+                    {/* Header row */}
+                    <ct-hstack gap="0" style="border-bottom: 2px solid var(--ct-color-gray-300);">
+                      <span style={{ flex: "1", padding: "6px 8px", fontWeight: "600" }}>
+                        Spot
                       </span>
-
-                      {noPeople
-                        ? (
-                          <div style={{ color: "var(--ct-color-gray-500)", padding: "1rem" }}>
-                            No team members yet. Add the first person below.
-                          </div>
-                        )
-                        : people.map((person) => {
-                            const isEditingThis = computed(
-                              () => editingPerson.get() === person.name,
-                            );
-                            return (
-                              <ct-card>
-                                <ct-vstack gap="2">
-                                  <ct-hstack gap="2" align="center">
-                                    <ct-vstack gap="0" style="width: 24px;">
-                                      <ct-button
-                                        variant="ghost"
-                                        onClick={() =>
-                                          movePersonUp.send({
-                                            name: person.name,
-                                          })}
-                                      >
-                                        ^
-                                      </ct-button>
-                                      <ct-button
-                                        variant="ghost"
-                                        onClick={() =>
-                                          movePersonDown.send({
-                                            name: person.name,
-                                          })}
-                                      >
-                                        v
-                                      </ct-button>
-                                    </ct-vstack>
-                                    <ct-vstack gap="0" style="flex: 1;">
-                                      <span style={{ fontWeight: "500" }}>
-                                        {person.name}
-                                      </span>
-                                      <span style={{ fontSize: "0.8rem", color: "var(--ct-color-gray-500)" }}>
-                                        {person.email}
-                                      </span>
-                                    </ct-vstack>
-                                    <span
-                                      style={{
-                                        padding: "2px 8px",
-                                        borderRadius: "12px",
-                                        fontSize: "0.75rem",
-                                        backgroundColor: "#f3f4f6",
-                                      }}
-                                    >
-                                      {COMMUTE_LABELS[person.commuteMode] ||
-                                        person.commuteMode}
-                                    </span>
-                                    {computed(() => person.defaultSpot > 0)
-                                      ? (
-                                        <span style={{ fontSize: "0.8rem", color: "var(--ct-color-gray-500)" }}>
-                                          Default: #{person.defaultSpot}
-                                        </span>
-                                      )
-                                      : null}
-                                    <ct-button
-                                      variant="ghost"
-                                      onClick={() => {
-                                        if (
-                                          editingPerson.get() === person.name
-                                        ) {
-                                          editingPerson.set("");
-                                        } else {
-                                          editingPerson.set(person.name);
-                                          editPersonDefaultSpot.set(
-                                            person.defaultSpot || 0,
-                                          );
-                                        }
-                                      }}
-                                    >
-                                      {isEditingThis ? "Close" : "Edit"}
-                                    </ct-button>
-                                    <ct-button
-                                      variant="ghost"
-                                      onClick={() =>
-                                        removePerson.send({
-                                          name: person.name,
-                                        })}
-                                    >
-                                      Remove
-                                    </ct-button>
-                                  </ct-hstack>
-
-                                  {isEditingThis
-                                    ? (
-                                      <ct-vstack
-                                        gap="2"
-                                        style="padding: 8px; background: #f9fafb; border-radius: 8px;"
-                                      >
-                                        <ct-hstack gap="2" align="center">
-                                          <span style={{ fontSize: "0.875rem", width: "100px" }}>
-                                            Default Spot:
-                                          </span>
-                                          <ct-select
-                                            $value={editPersonDefaultSpot}
-                                            items={computed(() => [
-                                              { label: "None", value: 0 },
-                                              ...spots.get().map((s) => ({
-                                                label: `#${s.number}${s.label ? ` (${s.label})` : ""}`,
-                                                value: s.number,
-                                              })),
-                                            ])}
-                                          />
-                                          <ct-button
-                                            variant="primary"
-                                            onClick={() =>
-                                              setDefaultSpot.send({
-                                                personName: person.name,
-                                                spotNumber:
-                                                  editPersonDefaultSpot.get(),
-                                              })}
-                                          >
-                                            Save
-                                          </ct-button>
-                                        </ct-hstack>
-                                        <span style={{ fontSize: "0.8rem", color: "var(--ct-color-gray-500)" }}>
-                                          Preferences:{" "}
-                                          {computed(() => {
-                                            const prefs =
-                                              person.spotPreferences || [];
-                                            return prefs.length > 0
-                                              ? prefs
-                                                  .map((p: number) => `#${p}`)
-                                                  .join(", ")
-                                              : "None set";
-                                          })}
-                                        </span>
-                                        <ct-vstack gap="1">
-                                          <span style={{ fontSize: "0.8rem", fontWeight: "500" }}>
-                                            Set Spot Preferences:
-                                          </span>
-                                          {spots.map((s) => {
-                                            const isSelected = computed(() =>
-                                              (person.spotPreferences || []).some((p: number) => p === s.number)
-                                            );
-                                            return (
-                                              <ct-hstack gap="1" align="center">
-                                                <ct-checkbox
-                                                  $checked={isSelected}
-                                                  onct-change={() => {
-                                                    const currentPrefs = person.spotPreferences || [];
-                                                    const spotNum = s.number;
-                                                    let newPrefs: number[];
-                                                    if (currentPrefs.some((p: number) => p === spotNum)) {
-                                                      newPrefs = currentPrefs.filter((p: number) => p !== spotNum);
-                                                    } else {
-                                                      newPrefs = [...currentPrefs, spotNum];
-                                                    }
-                                                    setSpotPreferences.send({
-                                                      personName: person.name,
-                                                      preferences: newPrefs,
-                                                    });
-                                                  }}
-                                                />
-                                                <span style={{ fontSize: "0.8rem" }}>
-                                                  #{s.number}{s.label ? ` (${s.label})` : ""}
-                                                </span>
-                                              </ct-hstack>
-                                            );
-                                          })}
-                                        </ct-vstack>
-                                      </ct-vstack>
-                                    )
-                                    : null}
-                                </ct-vstack>
-                              </ct-card>
-                            );
-                          })}
-
-                      {/* Add person form */}
-                      {computed(() => showAddPerson.get())
-                        ? (
-                          <ct-card>
-                            <ct-vstack gap="2">
-                              <span style={{ fontWeight: "500" }}>
-                                Add Person
-                              </span>
-                              <ct-input
-                                $value={newPersonName}
-                                placeholder="Name"
-                              />
-                              <ct-input
-                                $value={newPersonEmail}
-                                placeholder="Email"
-                              />
-                              <ct-select
-                                $value={newPersonCommute}
-                                items={[
-                                  { label: "Drive", value: "drive" },
-                                  { label: "Transit", value: "transit" },
-                                  { label: "Bike", value: "bike" },
-                                  { label: "WFH", value: "wfh" },
-                                  { label: "Other", value: "other" },
-                                ]}
-                              />
-                              <ct-hstack gap="2">
-                                <ct-button
-                                  variant="primary"
-                                  onClick={() => {
-                                    addPerson.send({
-                                      name: newPersonName.get(),
-                                      email: newPersonEmail.get(),
-                                      commuteMode: newPersonCommute.get(),
-                                    });
-                                    newPersonName.set("");
-                                    newPersonEmail.set("");
-                                    newPersonCommute.set("drive");
-                                    showAddPerson.set(false);
-                                  }}
-                                >
-                                  Add
-                                </ct-button>
-                                <ct-button
-                                  variant="ghost"
-                                  onClick={() => showAddPerson.set(false)}
-                                >
-                                  Cancel
-                                </ct-button>
-                              </ct-hstack>
-                            </ct-vstack>
-                          </ct-card>
-                        )
-                        : (
-                          <ct-button
-                            variant="secondary"
-                            onClick={() => showAddPerson.set(true)}
-                          >
-                            + Add Person
-                          </ct-button>
-                        )}
-                    </ct-vstack>
-
-                    <div style={{ borderTop: "1px solid #e5e7eb", margin: "8px 0" }} />
-
-                    {/* ---- Spots Section ---- */}
-                    <ct-vstack gap="2">
-                      <span style={{ fontWeight: "600", fontSize: "1rem" }}>
-                        Parking Spots
-                      </span>
-
-                      {noSpots
-                        ? (
-                          <div style={{ color: "var(--ct-color-gray-500)", padding: "1rem" }}>
-                            No spots configured.
-                          </div>
-                        )
-                        : spots.map((spot) => {
-                            const isEditingThis = computed(
-                              () => editingSpot.get() === spot.number,
-                            );
-
-                            return (
-                              <ct-card>
-                                <ct-vstack gap="1">
-                                  <ct-hstack gap="2" align="center">
-                                    <span
-                                      style={{
-                                        fontWeight: "600",
-                                        fontSize: "1rem",
-                                      }}
-                                    >
-                                      #{spot.number}
-                                    </span>
-                                    <span style={{ flex: "1", color: "var(--ct-color-gray-500)", fontSize: "0.875rem" }}>
-                                      {spot.label}
-                                    </span>
-                                    <ct-button
-                                      variant="ghost"
-                                      onClick={() => {
-                                        if (
-                                          editingSpot.get() === spot.number
-                                        ) {
-                                          editingSpot.set(-1);
-                                        } else {
-                                          editingSpot.set(spot.number);
-                                          editSpotLabel.set(spot.label || "");
-                                          editSpotNotes.set(spot.notes || "");
-                                        }
-                                      }}
-                                    >
-                                      {isEditingThis ? "Close" : "Edit"}
-                                    </ct-button>
-                                    <ct-button
-                                      variant="ghost"
-                                      onClick={() =>
-                                        removeSpot.send({
-                                          number: spot.number,
-                                        })}
-                                    >
-                                      Remove
-                                    </ct-button>
-                                  </ct-hstack>
-                                  {spot.notes
-                                    ? (
-                                      <span style={{ fontSize: "0.8rem", color: "var(--ct-color-gray-400)" }}>
-                                        {spot.notes}
-                                      </span>
-                                    )
-                                    : null}
-
-                                  {isEditingThis
-                                    ? (
-                                      <ct-vstack
-                                        gap="2"
-                                        style="padding: 8px; background: #f9fafb; border-radius: 8px;"
-                                      >
-                                        <span style={{ fontSize: "0.8rem", color: "var(--ct-color-gray-500)" }}>
-                                          Spot #{spot.number} (number cannot be
-                                          changed)
-                                        </span>
-                                        <ct-input
-                                          $value={editSpotLabel}
-                                          placeholder="Label (e.g., Near entrance)"
-                                        />
-                                        <ct-input
-                                          $value={editSpotNotes}
-                                          placeholder="Notes"
-                                        />
-                                        <ct-hstack gap="2">
-                                          <ct-button
-                                            variant="primary"
-                                            onClick={() => {
-                                              editSpot.send({
-                                                number: spot.number,
-                                                label: editSpotLabel.get(),
-                                                notes: editSpotNotes.get(),
-                                              });
-                                              editingSpot.set(-1);
-                                            }}
-                                          >
-                                            Save
-                                          </ct-button>
-                                          <ct-button
-                                            variant="ghost"
-                                            onClick={() =>
-                                              editingSpot.set(-1)}
-                                          >
-                                            Cancel
-                                          </ct-button>
-                                        </ct-hstack>
-                                      </ct-vstack>
-                                    )
-                                    : null}
-                                </ct-vstack>
-                              </ct-card>
-                            );
-                          })}
-
-                      {/* Add spot form */}
-                      {computed(() => showAddSpot.get())
-                        ? (
-                          <ct-card>
-                            <ct-vstack gap="2">
-                              <span style={{ fontWeight: "500" }}>
-                                Add Spot
-                              </span>
-                              <ct-input
-                                $value={newSpotNumber}
-                                placeholder="Spot number"
-                              />
-                              <ct-input
-                                $value={newSpotLabel}
-                                placeholder="Label (optional)"
-                              />
-                              <ct-input
-                                $value={newSpotNotes}
-                                placeholder="Notes (optional)"
-                              />
-                              <ct-hstack gap="2">
-                                <ct-button
-                                  variant="primary"
-                                  onClick={() => {
-                                    const num = parseInt(newSpotNumber.get());
-                                    if (num > 0) {
-                                      addSpot.send({
-                                        number: num,
-                                        label: newSpotLabel.get(),
-                                        notes: newSpotNotes.get(),
-                                      });
-                                      newSpotNumber.set("");
-                                      newSpotLabel.set("");
-                                      newSpotNotes.set("");
-                                      showAddSpot.set(false);
-                                    }
-                                  }}
-                                >
-                                  Add
-                                </ct-button>
-                                <ct-button
-                                  variant="ghost"
-                                  onClick={() => showAddSpot.set(false)}
-                                >
-                                  Cancel
-                                </ct-button>
-                              </ct-hstack>
-                            </ct-vstack>
-                          </ct-card>
-                        )
-                        : (
-                          <ct-button
-                            variant="secondary"
-                            onClick={() => showAddSpot.set(true)}
-                          >
-                            + Add Spot
-                          </ct-button>
-                        )}
-                    </ct-vstack>
-
-                    <div style={{ borderTop: "1px solid #e5e7eb", margin: "8px 0" }} />
-
-                    {/* ---- Manual Assign Section ---- */}
-                    <ct-vstack gap="2">
-                      <span style={{ fontWeight: "600", fontSize: "1rem" }}>
-                        Manual Assignment
-                      </span>
-                      {computed(() => {
-                        const pendingReqs = requests.get().filter(
-                          (r) => r.status === "pending"
-                        );
-                        if (pendingReqs.length === 0) {
-                          return (
-                            <div style={{ color: "var(--ct-color-gray-500)", padding: "1rem" }}>
-                              No pending requests to assign.
-                            </div>
-                          );
+                      {weekDays.map((day: string) => (
+                        <span
+                          style={{
+                            flex: "1",
+                            padding: "6px 4px",
+                            textAlign: "center",
+                            fontWeight: day === TODAY ? "700" : "500",
+                            backgroundColor:
+                              day === TODAY
+                                ? "var(--ct-color-gray-100)"
+                                : "transparent",
+                          }}
+                        >
+                          {formatShortDate(day)}
+                        </span>
+                      ))}
+                    </ct-hstack>
+                    {/* Data rows */}
+                    {weekGrid.map(
+                      (row: {
+                        spot: ParkingSpot;
+                        cells: {
+                          day: string;
+                          personName: string;
+                          occupied: boolean;
+                        }[];
+                      }) => {
+                        const occupiedCells = row.cells.filter((c: { occupied: boolean }) => c.occupied);
+                        if (occupiedCells.length > 0) {
+                          console.log("[DEBUG weekGrid render]", row.spot.number, "occupied cells:", JSON.stringify(occupiedCells));
                         }
-                        return pendingReqs.map((req) => {
-                          const rowSpot = Writable.of(0);
-                          const taken = requests.get()
-                            .filter(
-                              (r) =>
-                                r.requestedDate === req.requestedDate &&
-                                r.status === "allocated" &&
-                                r.assignedSpot > 0,
-                            )
-                            .map((r) => r.assignedSpot);
-                          const freeSpots = spots.get().filter(
-                            (s) => !taken.includes(s.number)
-                          );
-                          const spotItems = [
-                            { label: "Select spot...", value: 0 },
-                            ...freeSpots.map((s) => ({
-                              label: `#${s.number}${s.label ? ` (${s.label})` : ""}`,
-                              value: s.number,
-                            })),
-                          ];
-                          return (
-                            <ct-card>
-                              <ct-hstack gap="2" align="center" justify="between">
-                                <ct-vstack gap="0">
-                                  <span style={{ fontWeight: "500" }}>
-                                    {req.personName}
-                                  </span>
-                                  <span style={{ fontSize: "0.8rem", color: "var(--ct-color-gray-500)" }}>
-                                    {formatDay(req.requestedDate)}{" "}
-                                    {formatDate(req.requestedDate)}
-                                  </span>
-                                </ct-vstack>
-                                <ct-hstack gap="1" align="center">
-                                  <ct-select
-                                    $value={rowSpot}
-                                    items={spotItems}
-                                  />
-                                  <ct-button
-                                    variant="primary"
-                                    onClick={() => {
-                                      const spotNum = rowSpot.get();
-                                      if (spotNum > 0) {
-                                        manualAssign.send({
-                                          personName: req.personName,
-                                          date: req.requestedDate,
-                                          spotNumber: spotNum,
-                                        });
-                                        rowSpot.set(0);
-                                      }
-                                    }}
-                                  >
-                                    Assign
-                                  </ct-button>
-                                </ct-hstack>
-                              </ct-hstack>
-                            </ct-card>
-                          );
-                        });
-                      })}
-                    </ct-vstack>
+                        return (
+                        <ct-hstack gap="0" style="border-bottom: 1px solid var(--ct-color-gray-200);">
+                          <span style={{ flex: "1", padding: "6px 8px", fontWeight: "500" }}>
+                            #{row.spot.number}
+                          </span>
+                          {row.cells.map(
+                            (cell: {
+                              day: string;
+                              personName: string;
+                              occupied: boolean;
+                            }) => (
+                              <span
+                                style={{
+                                  flex: "1",
+                                  padding: "6px 4px",
+                                  textAlign: "center",
+                                  backgroundColor: cell.occupied
+                                    ? "#fee2e2"
+                                    : cell.day === TODAY
+                                      ? "var(--ct-color-gray-50)"
+                                      : "transparent",
+                                  fontSize: "0.75rem",
+                                  color: cell.occupied
+                                    ? "#dc2626"
+                                    : "var(--ct-color-gray-400)",
+                                }}
+                              >
+                                {cell.occupied ? cell.personName : "-"}
+                              </span>
+                            ),
+                          )}
+                        </ct-hstack>
+                        );
+                      },
+                    )}
                   </ct-vstack>
-                )
-                : null}
-            </ct-vstack>
+                </ct-vstack>
+              )
+              : null}
+
+            {/* ===== REQUEST FORM ===== */}
+            {isRequestForm
+              ? (
+                <ct-vstack gap="3" style="padding: 1rem;">
+                  <ct-heading level={5}>Request Parking</ct-heading>
+
+                  {hasNoPersons
+                    ? (
+                      <div style={{ color: "var(--ct-color-gray-500)", padding: "1rem", textAlign: "center" }}>
+                        No people registered yet. Ask an admin to add team members.
+                      </div>
+                    )
+                    : null}
+
+                  <ct-vstack gap="1">
+                    <label>Person</label>
+                    <ct-select $value={reqPersonId} items={personOptions} />
+                  </ct-vstack>
+
+                  <ct-vstack gap="1">
+                    <label>Date</label>
+                    <ct-input $value={reqDate} type="date" min={TODAY} max={getDateOffset(30)} />
+                  </ct-vstack>
+
+                  {reqMessage
+                    ? (
+                      <div
+                        style={{
+                          padding: "0.5rem",
+                          borderRadius: "4px",
+                          fontSize: "0.875rem",
+                          backgroundColor: "var(--ct-color-gray-100)",
+                          fontWeight: "500",
+                        }}
+                      >
+                        {reqMessage}
+                      </div>
+                    )
+                    : null}
+
+                  <ct-hstack gap="2">
+                    <ct-button
+                      variant="primary"
+                      onClick={submitRequest}
+                      style="flex: 1;"
+                    >
+                      Submit Request
+                    </ct-button>
+                    <ct-button
+                      variant="secondary"
+                      onClick={() => currentView.set("main")}
+                    >
+                      Back
+                    </ct-button>
+                  </ct-hstack>
+                </ct-vstack>
+              )
+              : null}
+
+            {/* ===== MY REQUESTS ===== */}
+            {isMyRequests
+              ? (
+                <ct-vstack gap="3" style="padding: 1rem;">
+                  <ct-heading level={5}>My Requests</ct-heading>
+                  <ct-vstack gap="1">
+                    <label>Select your name</label>
+                    <ct-select
+                      $value={selectedPersonId}
+                      items={personOptions}
+                    />
+                  </ct-vstack>
+
+                  {myRequests.map(
+                    (r: SpotRequest & { spotNumber: string }) => (
+                      <ct-card>
+                        <ct-hstack justify="between" align="center">
+                          <ct-vstack gap="0">
+                            <span style={{ fontWeight: "500" }}>
+                              {r.date}
+                            </span>
+                            <span
+                              style={{
+                                fontSize: "0.75rem",
+                                color:
+                                  r.status === "allocated"
+                                    ? "#16a34a"
+                                    : r.status === "denied"
+                                      ? "#dc2626"
+                                      : "var(--ct-color-gray-500)",
+                              }}
+                            >
+                              {r.status === "allocated"
+                                ? `Spot #${r.spotNumber}`
+                                : r.status === "denied"
+                                  ? "Denied"
+                                  : r.status === "cancelled"
+                                    ? "Cancelled"
+                                    : "Pending"}
+                            </span>
+                          </ct-vstack>
+                          {r.status === "allocated" && r.date >= TODAY
+                            ? (
+                              <ct-button
+                                variant="ghost"
+                                onClick={() =>
+                                  cancelRequest.send({ requestId: r.id })}
+                              >
+                                Cancel
+                              </ct-button>
+                            )
+                            : null}
+                        </ct-hstack>
+                      </ct-card>
+                    ),
+                  )}
+                </ct-vstack>
+              )
+              : null}
+
+            {/* ===== ADMIN: PERSONS ===== */}
+            {isAdminPersons
+              ? (
+                <ct-vstack gap="3" style="padding: 1rem;">
+                  <ct-hstack justify="between" align="center">
+                    <ct-heading level={5}>
+                      Manage People ({personCount})
+                    </ct-heading>
+                    <ct-button variant="primary" onClick={openAddPerson}>
+                      + Add Person
+                    </ct-button>
+                  </ct-hstack>
+
+                  {/* Priority list */}
+                  <ct-heading level={6}>Priority Order</ct-heading>
+                  {priorityList.map((person: Person) => (
+                    <ct-card>
+                      <ct-vstack gap="1">
+                        <ct-hstack justify="between" align="center">
+                          <span style={{ fontWeight: "500" }}>
+                            {person.name}
+                          </span>
+                          <span style={{ fontSize: "0.75rem", color: "var(--ct-color-gray-500)" }}>
+                            {person.usualCommuteMode}
+                          </span>
+                        </ct-hstack>
+                        <ct-hstack gap="1" justify="end">
+                          <ct-button
+                            variant="ghost"
+                            onClick={() =>
+                              movePriorityUp.send({ personId: person.id })}
+                          >
+                            Up
+                          </ct-button>
+                          <ct-button
+                            variant="ghost"
+                            onClick={() =>
+                              movePriorityDown.send({ personId: person.id })}
+                          >
+                            Down
+                          </ct-button>
+                          <ct-button
+                            variant="ghost"
+                            onClick={() =>
+                              openEditPerson.send({ personId: person.id })}
+                          >
+                            Edit
+                          </ct-button>
+                          <ct-button
+                            variant="ghost"
+                            onClick={() =>
+                              removePerson.send({ personId: person.id })}
+                            style="color: #dc2626;"
+                          >
+                            Del
+                          </ct-button>
+                        </ct-hstack>
+                      </ct-vstack>
+                    </ct-card>
+                  ))}
+
+                  {hasNoPersons
+                    ? (
+                      <div style={{ textAlign: "center", color: "var(--ct-color-gray-500)", padding: "2rem" }}>
+                        No people added yet. Add team members to get started.
+                      </div>
+                    )
+                    : null}
+                </ct-vstack>
+              )
+              : null}
+
+            {/* ===== ADMIN: SPOTS ===== */}
+            {isAdminSpots
+              ? (
+                <ct-vstack gap="3" style="padding: 1rem;">
+                  <ct-hstack justify="between" align="center">
+                    <ct-heading level={5}>
+                      Manage Spots ({spotCount})
+                    </ct-heading>
+                    <ct-button variant="primary" onClick={openAddSpot}>
+                      + Add Spot
+                    </ct-button>
+                  </ct-hstack>
+
+                  {spots.map((spot: ParkingSpot) => (
+                    <ct-card>
+                      <ct-hstack justify="between" align="center">
+                        <ct-vstack gap="0">
+                          <span style={{ fontWeight: "500" }}>
+                            Spot #{spot.number}
+                          </span>
+                          {(spot.label as string)
+                            ? (
+                              <span style={{ fontSize: "0.75rem", color: "var(--ct-color-gray-500)" }}>
+                                {spot.label}
+                              </span>
+                            )
+                            : null}
+                          {(spot.notes as string)
+                            ? (
+                              <span style={{ fontSize: "0.75rem", color: "var(--ct-color-gray-400)" }}>
+                                {spot.notes}
+                              </span>
+                            )
+                            : null}
+                        </ct-vstack>
+                        <ct-hstack gap="1">
+                          <ct-button
+                            variant="ghost"
+                            onClick={() =>
+                              openEditSpot.send({ spotId: spot.id })}
+                          >
+                            Edit
+                          </ct-button>
+                          <ct-button
+                            variant="ghost"
+                            onClick={() =>
+                              removeSpot.send({ spotId: spot.id })}
+                            style="color: #dc2626;"
+                          >
+                            Remove
+                          </ct-button>
+                        </ct-hstack>
+                      </ct-hstack>
+                    </ct-card>
+                  ))}
+                </ct-vstack>
+              )
+              : null}
+
+            {/* ===== ADD PERSON FORM ===== */}
+            {isAddPerson
+              ? (
+                <ct-vstack gap="3" style="padding: 1rem;">
+                  <ct-heading level={5}>Add Person</ct-heading>
+                  <ct-vstack gap="1">
+                    <label>Name *</label>
+                    <ct-input $value={newPersonName} placeholder="e.g. Alice" />
+                  </ct-vstack>
+                  <ct-vstack gap="1">
+                    <label>Email (optional)</label>
+                    <ct-input
+                      $value={newPersonEmail}
+                      placeholder="alice@example.com"
+                    />
+                  </ct-vstack>
+                  <ct-vstack gap="1">
+                    <label>Usual Commute Mode</label>
+                    <ct-select
+                      $value={newPersonCommute}
+                      items={commuteOptions}
+                    />
+                  </ct-vstack>
+                  <ct-hstack gap="2">
+                    <ct-button
+                      variant="primary"
+                      onClick={submitAddPerson}
+                      style="flex: 1;"
+                    >
+                      Add Person
+                    </ct-button>
+                    <ct-button
+                      variant="secondary"
+                      onClick={() => currentView.set("admin-persons")}
+                    >
+                      Cancel
+                    </ct-button>
+                  </ct-hstack>
+                </ct-vstack>
+              )
+              : null}
+
+            {/* ===== ADD SPOT FORM ===== */}
+            {isAddSpot
+              ? (
+                <ct-vstack gap="3" style="padding: 1rem;">
+                  <ct-heading level={5}>Add Parking Spot</ct-heading>
+                  <ct-vstack gap="1">
+                    <label>Spot Number *</label>
+                    <ct-input $value={newSpotNumber} placeholder="e.g. 7" />
+                  </ct-vstack>
+                  <ct-vstack gap="1">
+                    <label>Label (optional)</label>
+                    <ct-input
+                      $value={newSpotLabel}
+                      placeholder="Near entrance"
+                    />
+                  </ct-vstack>
+                  <ct-vstack gap="1">
+                    <label>Notes (optional)</label>
+                    <ct-input
+                      $value={newSpotNotes}
+                      placeholder="Van accessible"
+                    />
+                  </ct-vstack>
+                  <ct-hstack gap="2">
+                    <ct-button
+                      variant="primary"
+                      onClick={submitAddSpot}
+                      style="flex: 1;"
+                    >
+                      Add Spot
+                    </ct-button>
+                    <ct-button
+                      variant="secondary"
+                      onClick={() => currentView.set("admin-spots")}
+                    >
+                      Cancel
+                    </ct-button>
+                  </ct-hstack>
+                </ct-vstack>
+              )
+              : null}
+
+            {/* ===== EDIT SPOT FORM ===== */}
+            {isEditSpot
+              ? (
+                <ct-vstack gap="3" style="padding: 1rem;">
+                  <ct-heading level={5}>Edit Parking Spot</ct-heading>
+                  <ct-vstack gap="1">
+                    <label>Label</label>
+                    <ct-input $value={editSpotLabel} placeholder="Optional label" />
+                  </ct-vstack>
+                  <ct-vstack gap="1">
+                    <label>Notes</label>
+                    <ct-input $value={editSpotNotes} placeholder="Optional notes" />
+                  </ct-vstack>
+                  <ct-hstack gap="2">
+                    <ct-button
+                      variant="primary"
+                      onClick={submitEditSpot}
+                      style="flex: 1;"
+                    >
+                      Save Changes
+                    </ct-button>
+                    <ct-button
+                      variant="secondary"
+                      onClick={() => currentView.set("admin-spots")}
+                      style="flex: 1;"
+                    >
+                      Cancel
+                    </ct-button>
+                  </ct-hstack>
+                </ct-vstack>
+              )
+              : null}
+
+            {/* ===== EDIT PERSON (Default Spot + Preferences) ===== */}
+            {isEditPerson
+              ? (
+                <ct-vstack gap="3" style="padding: 1rem;">
+                  <ct-heading level={5}>
+                    Edit {editPersonName}
+                  </ct-heading>
+
+                  {/* Default Spot */}
+                  <ct-vstack gap="1">
+                    <label>Default Spot</label>
+                    <ct-select
+                      $value={editPersonDefaultSpot}
+                      items={spotOptions}
+                    />
+                    <span style={{ fontSize: "0.75rem", color: "var(--ct-color-gray-500)" }}>
+                      This spot is tried first when this person requests parking.
+                    </span>
+                  </ct-vstack>
+
+                  {/* Spot Preferences */}
+                  <ct-vstack gap="1">
+                    <label>Spot Preferences (in order)</label>
+                    <span style={{ fontSize: "0.75rem", color: "var(--ct-color-gray-500)" }}>
+                      Tried in order when the default spot is unavailable.
+                    </span>
+
+                    {editPersonPrefDetails.map(
+                      (pref: { id: string; number: string; label: string }) => (
+                        <ct-card>
+                          <ct-vstack gap="1">
+                            <span style={{ fontWeight: "500" }}>
+                              #{pref.number}
+                              {pref.label ? ` (${pref.label})` : ""}
+                            </span>
+                            <ct-hstack gap="1" justify="end">
+                              <ct-button
+                                variant="ghost"
+                                onClick={() =>
+                                  movePrefUp.send({ spotId: pref.id })}
+                              >
+                                Up
+                              </ct-button>
+                              <ct-button
+                                variant="ghost"
+                                onClick={() =>
+                                  movePrefDown.send({ spotId: pref.id })}
+                              >
+                                Down
+                              </ct-button>
+                              <ct-button
+                                variant="ghost"
+                                onClick={() =>
+                                  removePrefSpot.send({ spotId: pref.id })}
+                                style="color: #dc2626;"
+                              >
+                                Remove
+                              </ct-button>
+                            </ct-hstack>
+                          </ct-vstack>
+                        </ct-card>
+                      ),
+                    )}
+
+                    {/* Add preference */}
+                    <ct-hstack gap="1" align="end">
+                      <ct-select
+                        $value={editPersonAddPrefSpotId}
+                        items={availablePrefSpots}
+                        style="flex: 1;"
+                      />
+                      <ct-button
+                        variant="secondary"
+                        onClick={addPrefSpot}
+                      >
+                        Add
+                      </ct-button>
+                    </ct-hstack>
+                  </ct-vstack>
+
+                  {/* Save / Cancel */}
+                  <ct-hstack gap="2">
+                    <ct-button
+                      variant="primary"
+                      onClick={saveEditPerson}
+                      style="flex: 1;"
+                    >
+                      Save
+                    </ct-button>
+                    <ct-button
+                      variant="secondary"
+                      onClick={() => currentView.set("admin-persons")}
+                    >
+                      Cancel
+                    </ct-button>
+                  </ct-hstack>
+                </ct-vstack>
+              )
+              : null}
           </ct-vscroll>
+
+          {/* ===== FOOTER ===== */}
+          <ct-hstack slot="footer" gap="2" style="padding: 1rem;">
+            <ct-button
+              variant="primary"
+              onClick={openRequestForm}
+              style="flex: 1;"
+            >
+              Request Parking
+            </ct-button>
+          </ct-hstack>
         </ct-screen>
       ),
+
+      // Exposed state
       spots,
-      people,
+      persons,
       requests,
-      requestSpot,
-      cancelRequest,
+      priorityOrder,
+
+      // Exposed actions (for testing via .send())
       addPerson,
       removePerson,
-      movePersonUp,
-      movePersonDown,
       setDefaultSpot,
       setSpotPreferences,
+      movePriorityUp,
+      movePriorityDown,
+
       addSpot,
-      editSpot,
       removeSpot,
-      manualAssign,
+      editSpot: editSpotAction,
+
+      requestParking,
+      cancelRequest,
+      manualOverride,
     };
   },
 );
