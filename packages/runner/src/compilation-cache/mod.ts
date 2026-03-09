@@ -1,0 +1,125 @@
+import type { JsScript } from "@commontools/js-compiler";
+import { getLogger } from "@commontools/utils/logger";
+import type { CompilationCacheStorage } from "./storage.ts";
+
+export type {
+  CompilationCacheEntry,
+  CompilationCacheStorage,
+} from "./storage.ts";
+export { MemoryCompilationCache } from "./memory-storage.ts";
+export { FileSystemCompilationCache } from "./fs-storage.ts";
+export { computeGitFingerprint } from "./git-fingerprint.ts";
+
+const logger = getLogger("compilation-cache");
+
+const DEFAULT_MAX_ENTRIES = 500;
+
+export interface CachedCompilerStats {
+  hits: number;
+  misses: number;
+  missReasons: { notFound: number; fingerprintMismatch: number };
+  writes: number;
+  writeErrors: number;
+  countEvictions: number;
+}
+
+export class CachedCompiler {
+  private stats: CachedCompilerStats = {
+    hits: 0,
+    misses: 0,
+    missReasons: { notFound: 0, fingerprintMismatch: 0 },
+    writes: 0,
+    writeErrors: 0,
+    countEvictions: 0,
+  };
+
+  private maxEntries: number;
+
+  constructor(
+    private cache: CompilationCacheStorage,
+    private fingerprint: string,
+    maxEntries?: number,
+  ) {
+    this.maxEntries = maxEntries ?? DEFAULT_MAX_ENTRIES;
+  }
+
+  /**
+   * Returns cached JsScript for the given program, or undefined on miss.
+   * Caller is responsible for compilation on miss and calling set().
+   */
+  async get(programHash: string): Promise<JsScript | undefined> {
+    const entry = await this.cache.get(programHash);
+    if (!entry) {
+      this.stats.misses++;
+      this.stats.missReasons.notFound++;
+      return undefined;
+    }
+    if (entry.fingerprint !== this.fingerprint) {
+      this.stats.misses++;
+      this.stats.missReasons.fingerprintMismatch++;
+      return undefined;
+    }
+    this.stats.hits++;
+    return entry.jsScript;
+  }
+
+  async set(programHash: string, jsScript: JsScript): Promise<void> {
+    try {
+      await this.cache.set(programHash, {
+        jsScript,
+        fingerprint: this.fingerprint,
+        cachedAt: Date.now(),
+      });
+      this.stats.writes++;
+      await this.evictByCount();
+    } catch (err) {
+      this.stats.writeErrors++;
+      logger.warn("compilation-cache", "Failed to write cache entry", err);
+    }
+  }
+
+  /** Evict entries from previous compiler versions. Call on startup. */
+  async evictStale(): Promise<void> {
+    const evicted = await this.cache.evictStale(this.fingerprint);
+    const remaining = await this.cache.count();
+    logger.info(
+      "compilation-cache",
+      `fingerprint=${
+        this.fingerprint.substring(0, 8)
+      } entries=${remaining} evicted=${evicted}`,
+    );
+  }
+
+  /** Clear the entire cache. */
+  async clear(): Promise<void> {
+    await this.cache.clear();
+  }
+
+  /** Get current stats snapshot. */
+  getStats(): Readonly<CachedCompilerStats> {
+    return { ...this.stats };
+  }
+
+  /** Get the fingerprint in use. */
+  getFingerprint(): string {
+    return this.fingerprint;
+  }
+
+  private async evictByCount(): Promise<void> {
+    const count = await this.cache.count();
+    if (count <= this.maxEntries) return;
+
+    // For count-based eviction, we re-evict stale first (cheap),
+    // then if still over, the storage implementations can handle
+    // oldest-first deletion. For now, stale eviction is sufficient
+    // since the primary growth vector is fingerprint changes.
+    const evicted = await this.cache.evictStale(this.fingerprint);
+    if (evicted > 0) {
+      this.stats.countEvictions += evicted;
+      logger.warn(
+        "compilation-cache",
+        `Count-based eviction: removed ${evicted} entries (cap=${this.maxEntries})`,
+      );
+    }
+  }
+}
