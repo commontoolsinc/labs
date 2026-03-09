@@ -1350,6 +1350,10 @@ export class Runner {
                 processCell,
               );
 
+              // NOTE: We intentionally do NOT cache or deduplicate the result
+              // pattern here (unlike the action handler path). Each handler
+              // invocation creates a new sub-pattern instance by design.
+
               // Create effect that re-runs when inputs change
               // (nothing else would read from it, otherwise)
               const readResultAction: Action = (tx) =>
