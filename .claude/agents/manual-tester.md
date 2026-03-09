@@ -207,7 +207,7 @@ Write the report to the provided output path with this structure:
 ```markdown
 # Manual Test Report: {Pattern Name}
 
-**Piece ID**: {id} **Space**: {space} **API URL**: http://localhost:8100
+**Piece ID**: {id} **Space**: {space} **API URL**: {api_url}
 **Date**: {date}
 
 ## CLI Verification
