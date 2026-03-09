@@ -194,7 +194,7 @@ export function toRichStorableValue(
       );
     }
 
-    case NATIVE_TAGS.StorableInstance:
+    case NATIVE_TAGS.StorableInstance: {
       // StorableInstance values (StorableError, UnknownStorable, etc.)
       // are already valid StorableValue members. Delegate frozenness to
       // the protocol's shallowClone method.
@@ -203,7 +203,9 @@ export function toRichStorableValue(
         freeze,
         tag,
       );
+    }
 
+    // deno-lint-ignore no-fallthrough
     case NATIVE_TAGS.Primitive: {
       // Non-object types: null, undefined, boolean, string, number,
       // bigint, symbol, function.
