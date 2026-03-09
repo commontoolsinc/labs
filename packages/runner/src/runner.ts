@@ -292,7 +292,11 @@ export class Runner {
           ? pattern.initial.internal
           : {},
       ),
-      isRecord(previousInternal) ? previousInternal : {},
+      isRecord(previousInternal)
+        ? (this.runtime.experimental.richStorableValues
+          ? cellAwareDeepCopy(previousInternal)
+          : previousInternal)
+        : {},
     ) as StorableDatum;
 
     // Still necessary until we consistently use schema for defaults.

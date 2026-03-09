@@ -582,6 +582,11 @@ class TransformObjectCreator
       // If we're an object, we may be missing some properties that have a
       // default.
       if (isObject(value) && link.schema.properties !== undefined) {
+        // When richStorableValues is ON, stored objects are deep-frozen.
+        // Shallow-clone before injecting default properties to avoid TypeError.
+        if (Object.isFrozen(value)) {
+          value = { ...value } as typeof value;
+        }
         const propertyEntries = Object.entries(link.schema.properties) as [
           string,
           JSONSchema,

@@ -137,7 +137,13 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
             `Value at path ${address.path.join("/")} is not an object`,
           );
         }
-        valueObj = currentValue as StorableObject;
+        // When richStorableValues is ON, stored objects are deep-frozen by
+        // toDeepRichStorableValue(). Shallow-clone before mutation to avoid
+        // TypeError on frozen objects. Note: a proper type-preserving clone
+        // via shallowCloneStorableValue() is planned as a follow-up.
+        valueObj = Object.isFrozen(currentValue)
+          ? { ...currentValue } as StorableObject
+          : currentValue as StorableObject;
       }
       const remainingPath = address.path.slice(lastExistingPath.length);
       if (remainingPath.length === 0) {
