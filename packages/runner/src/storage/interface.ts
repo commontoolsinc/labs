@@ -73,7 +73,9 @@ export interface IReadOptions {
   trackReadWithoutLoad?: boolean;
   /**
    * When true, the read is tracked as non-recursive for scheduler invalidation:
-   * parent/same-path writes invalidate, child writes invalidate only on key add.
+   * parent/same-path writes invalidate, child writes invalidate only on key
+   * add, since those modify the keys that were read from the object.
+   * We also invalidate if we set the length of an array.
    */
   nonRecursive?: boolean;
 }
