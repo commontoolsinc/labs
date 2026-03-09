@@ -37,41 +37,41 @@ function shallowCloneStorableValue(
   value: StorableValueLayer,
   frozen: boolean,
 ): StorableValueLayer {
-  // Non-object types (null, undefined, boolean, number, string, bigint)
-  // are unaffected by frozenness.
-  if (value === null || value === undefined || typeof value !== "object") {
-    return value;
-  }
+  switch (tagFromNativeValue(value)) {
+    // Primitives (null, undefined, boolean, number, string, bigint) are
+    // unaffected by frozenness.
+    case NATIVE_TAGS.Primitive:
+    // Special primitives behave like true primitives -- always frozen,
+    // returned as-is regardless of the `frozen` argument.
+    case NATIVE_TAGS.EpochNsec:
+    case NATIVE_TAGS.EpochDays:
+    case NATIVE_TAGS.ContentId:
+      return value;
 
-  // Special primitives behave like true primitives -- always frozen, returned
-  // as-is regardless of the `frozen` argument.
-  if (value instanceof SpecialPrimitiveValue) {
-    return value;
-  }
-
-  // StorableInstance values are protocol types -- their frozenness is managed
-  // by the protocol, not the conversion layer. Return as-is.
-  if (isStorableInstance(value)) {
-    return value;
-  }
-
-  const isFrozen = Object.isFrozen(value);
-
-  // No mismatch -- return as-is.
-  if (isFrozen === frozen) return value;
-
-  if (Array.isArray(value)) {
-    // Shallow-copy preserving sparse holes.
-    const copy = new Array(value.length);
-    for (let i = 0; i < value.length; i++) {
-      if (i in value) copy[i] = value[i];
+    case NATIVE_TAGS.Array: {
+      if (Object.isFrozen(value) === frozen) return value;
+      // Shallow-copy preserving sparse holes.
+      const arr = value as unknown[];
+      const copy = new Array(arr.length);
+      for (let i = 0; i < arr.length; i++) {
+        if (i in arr) copy[i] = arr[i];
+      }
+      return frozen ? Object.freeze(copy) : copy;
     }
-    return frozen ? Object.freeze(copy) : copy;
-  }
 
-  // Plain object -- shallow-copy via spread.
-  const copy = { ...value };
-  return frozen ? Object.freeze(copy) : copy;
+    case NATIVE_TAGS.Object: {
+      if (Object.isFrozen(value) === frozen) return value;
+      // Plain object -- shallow-copy via spread.
+      const copy = { ...(value as Record<string, unknown>) };
+      return frozen ? Object.freeze(copy) : copy;
+    }
+
+    default:
+      // StorableInstance values, HasToJSON results, and anything else:
+      // return as-is. StorableInstance frozenness is managed by the
+      // protocol, not the conversion layer.
+      return value;
+  }
 }
 
 /** Reject native objects with extra enumerable properties. */
