@@ -15,6 +15,65 @@ import {
 } from "./storable-native-instances.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./type-tags.ts";
 
+/**
+ * Shallow-clone a `StorableValueLayer` to achieve a desired frozenness.
+ *
+ * Given a value that is already a valid storable value (or layer), returns it
+ * with the requested frozenness, shallow-cloning only when the current
+ * frozenness mismatches the requested `frozen` flag.
+ *
+ * - Primitives (including `SpecialPrimitiveValue`) are returned as-is --
+ *   frozenness does not apply.
+ * - `StorableInstance` values: returned as-is. These are protocol types whose
+ *   frozenness is managed by the protocol, not by the conversion layer.
+ * - Arrays: shallow-copied (preserving sparse holes) when frozenness differs.
+ * - Plain objects: shallow-copied via spread when frozenness differs.
+ * - Anything else: returned as-is.
+ *
+ * This centralizes the clone-for-frozenness logic that was previously
+ * sprinkled across `toRichStorableValue`.
+ */
+function shallowCloneStorableValue(
+  value: StorableValueLayer,
+  frozen: boolean,
+): StorableValueLayer {
+  // Non-object types (null, undefined, boolean, number, string, bigint)
+  // are unaffected by frozenness.
+  if (value === null || value === undefined || typeof value !== "object") {
+    return value;
+  }
+
+  // Special primitives behave like true primitives -- always frozen, returned
+  // as-is regardless of the `frozen` argument.
+  if (value instanceof SpecialPrimitiveValue) {
+    return value;
+  }
+
+  // StorableInstance values are protocol types -- their frozenness is managed
+  // by the protocol, not the conversion layer. Return as-is.
+  if (isStorableInstance(value)) {
+    return value;
+  }
+
+  const isFrozen = Object.isFrozen(value);
+
+  // No mismatch -- return as-is.
+  if (isFrozen === frozen) return value;
+
+  if (Array.isArray(value)) {
+    // Shallow-copy preserving sparse holes.
+    const copy = new Array(value.length);
+    for (let i = 0; i < value.length; i++) {
+      if (i in value) copy[i] = value[i];
+    }
+    return frozen ? Object.freeze(copy) : copy;
+  }
+
+  // Plain object -- shallow-copy via spread.
+  const copy = { ...value };
+  return frozen ? Object.freeze(copy) : copy;
+}
+
 /** Reject native objects with extra enumerable properties. */
 function rejectExtraProperties(value: object, typeName: string): void {
   if (Object.keys(value).length > 0) {
@@ -52,12 +111,14 @@ export function toRichStorableValue(
   }
 
   // StorableInstance values (including StorableError, UnknownStorable, etc.)
-  // pass through as-is -- they are already valid StorableValue members.
-  // Note: we do NOT freeze the incoming value. Conversion functions must
-  // not modify the caller's argument. The deep conversion path creates
-  // its own copies when freezing is needed.
+  // are already valid StorableValue members. Use shallowCloneStorableValue
+  // to handle frozenness (it returns StorableInstance as-is since their
+  // frozenness is managed by the protocol).
   if (isStorableInstance(value)) {
-    return value as StorableValueLayer;
+    return shallowCloneStorableValue(
+      value as StorableValueLayer,
+      freeze,
+    );
   }
 
   // Object-type dispatch via tagFromNativeValue() -- a constructor switch
@@ -95,31 +156,15 @@ export function toRichStorableValue(
         return wrappedRegExp;
       }
 
-      case NATIVE_TAGS.Array: {
-        // Arrays pass through without converting `undefined` to `null` or
-        // densifying sparse arrays. When freezing, return a frozen shallow
-        // copy rather than freezing the caller's array in place.
-        const arr = value as unknown[];
-        if (freeze) {
-          if (Object.isFrozen(arr)) return arr;
-          const copy = new Array(arr.length);
-          for (let i = 0; i < arr.length; i++) {
-            if (i in arr) copy[i] = arr[i];
-          }
-          return Object.freeze(copy);
-        }
-        return arr;
-      }
-
+      case NATIVE_TAGS.Array:
       case NATIVE_TAGS.Object: {
-        // When freezing, return a frozen shallow copy rather than freezing
-        // the caller's object in place.
-        const obj = value as Record<string, unknown>;
-        if (freeze) {
-          if (Object.isFrozen(obj)) return obj;
-          return Object.freeze({ ...obj });
-        }
-        return obj;
+        // Arrays and plain objects: delegate frozenness handling to
+        // shallowCloneStorableValue, which clones only when the current
+        // frozenness doesn't match the requested `freeze` flag.
+        return shallowCloneStorableValue(
+          value as StorableValueLayer,
+          freeze,
+        );
       }
 
       case NATIVE_TAGS.HasToJSON: {
@@ -131,14 +176,10 @@ export function toRichStorableValue(
             `\`toJSON()\` on ${typeof value} returned something other than a storable value`,
           );
         }
-        if (freeze && converted !== null && typeof converted === "object") {
-          if (Object.isFrozen(converted)) return converted;
-          if (Array.isArray(converted)) {
-            return Object.freeze([...converted]) as StorableValueLayer;
-          }
-          return Object.freeze({ ...converted }) as StorableValueLayer;
-        }
-        return converted;
+        return shallowCloneStorableValue(
+          converted as StorableValueLayer,
+          freeze,
+        );
       }
 
       default:
@@ -156,11 +197,7 @@ export function toRichStorableValue(
   // Non-object types (primitives, bigint, functions) and unrecognized
   // object types (class instances with toJSON, etc.).
   const result = toRichStorableValueBase(value);
-  if (freeze && result !== null && typeof result === "object") {
-    if (Object.isFrozen(result)) return result;
-    return Object.freeze({ ...result });
-  }
-  return result;
+  return shallowCloneStorableValue(result, freeze);
 }
 
 /**
