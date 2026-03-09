@@ -22,7 +22,7 @@ export default pattern<Input>(({ messages }) => {
           const messageReactions = computed(() => (msg.reactions) || []);
           return (
             <div>
-              {messageReactions.map((reaction) => (
+              {messageReactions.map((reaction: any) => (
                 <button type="button" data-msg-id={msg.id}>
                   {reaction.emoji}
                 </button>
