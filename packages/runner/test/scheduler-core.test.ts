@@ -786,7 +786,7 @@ describe("scheduler", () => {
     expect(runCount).toBe(1);
 
     // Add a new direct key to docC — MUST trigger (non-recursive reads fire on key add).
-    docA.withTx(tx).set("hello");
+    docC.withTx(tx).key("fiz").set(2);
     tx.commit();
     tx = runtime.edit();
     await resultCell.pull();
