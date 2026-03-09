@@ -45,6 +45,20 @@ import { HandleMap } from "./handles.ts";
 
 const encoder = new TextEncoder();
 
+// Prevent uncaught errors from crashing the FUSE daemon.
+// Pattern recomputation and cell operations can throw from setTimeout
+// callbacks (e.g. "Cannot create cell link - space required"). These
+// errors should be logged, not fatal.
+globalThis.addEventListener("unhandledrejection", (e) => {
+  console.error("[FUSE] Unhandled promise rejection:", e.reason);
+  e.preventDefault();
+});
+
+globalThis.addEventListener("error", (e) => {
+  console.error("[FUSE] Uncaught error:", e.error ?? e.message);
+  e.preventDefault();
+});
+
 async function main() {
   const args = parseArgs(Deno.args, {
     string: ["api-url", "space", "identity"],
@@ -633,7 +647,7 @@ async function main() {
       }
 
       handles.write(fh, data, off);
-      fuse.symbols.fuse_reply_write(req, sz);
+      fuse.symbols.fuse_reply_write(req, BigInt(sz));
     },
   );
   callbacks.push(writeCb);
