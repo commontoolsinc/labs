@@ -392,6 +392,8 @@ function rewritePatternBody(
     }
   };
 
+  const callTargets = new WeakSet<ts.Node>();
+
   const visit = (node: ts.Node): ts.Node => {
     if (ts.isFunctionLike(node)) {
       if (node !== body) {
@@ -404,6 +406,13 @@ function rewritePatternBody(
       const rewritten = visitEachChildWithJsx(node, visit, context.tsContext);
       exitScope();
       return rewritten;
+    }
+
+    // Record call targets BEFORE visiting children so nested visits can
+    // determine whether a PropertyAccessExpression is a method-call callee
+    // without relying on parent pointers (which are absent on synthetic nodes).
+    if (ts.isCallExpression(node)) {
+      callTargets.add(node.expression);
     }
 
     const visited = visitEachChildWithJsx(node, visit, context.tsContext);
@@ -453,18 +462,16 @@ function rewritePatternBody(
         return visited;
       }
 
-      const parent = visited.parent;
       if (ts.isPropertyAccessExpression(visited)) {
-        const isCallParent = !!parent && ts.isCallExpression(parent) &&
-          parent.expression === visited;
+        const isCallTarget = callTargets.has(node);
 
-        if (KNOWN_PATH_TERMINAL_METHODS.has(visited.name.text)) {
-          if (!isCallParent) {
-            return visited;
-          }
-
+        if (
+          KNOWN_PATH_TERMINAL_METHODS.has(visited.name.text) && isCallTarget
+        ) {
+          const parentCall = visited.parent;
           if (
-            (parent as ts.CallExpression).questionDotToken ||
+            (parentCall && ts.isCallExpression(parentCall) &&
+              parentCall.questionDotToken) ||
             visited.questionDotToken
           ) {
             reportOnce(
@@ -494,9 +501,11 @@ function rewritePatternBody(
           return rewrittenMethod;
         }
 
-        if (isCallParent) {
+        if (isCallTarget) {
+          const parentCall = visited.parent;
           if (
-            (parent as ts.CallExpression).questionDotToken ||
+            (parentCall && ts.isCallExpression(parentCall) &&
+              parentCall.questionDotToken) ||
             visited.questionDotToken
           ) {
             reportOnce(

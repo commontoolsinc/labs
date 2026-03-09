@@ -1413,15 +1413,8 @@ const p = pattern<State>((state) => ({
   },
 );
 
-// TODO(CT-1301): state properties named 'map' or 'set' are not lowered to
-// .key() because they're in KNOWN_PATH_TERMINAL_METHODS. The capability-
-// lowering transformer can't distinguish property access from method calls
-// on synthetic nodes (which lack parent pointers). Fixing this requires
-// either setting parent pointers during transformation or tracking call
-// targets through a pre-visit WeakSet.
 Deno.test({
   name: "Capability-first: state property named 'map' is lowered to .key()",
-  ignore: true,
   fn: async () => {
     const source = `/// <cts-enable />
 import { pattern, UI } from "commontools";
@@ -1437,7 +1430,6 @@ const p = pattern<State>((state) => ({
 
 Deno.test({
   name: "Capability-first: state property named 'set' is lowered to .key()",
-  ignore: true,
   fn: async () => {
     const source = `/// <cts-enable />
 import { pattern, UI } from "commontools";
