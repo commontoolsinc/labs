@@ -552,7 +552,18 @@ export class ContextualFlowControl {
       fullSchema,
     );
     if (resolved === undefined) {
-      throw new Error(`Failed to resolve $ref in ${JSON.stringify(schemaObj)}`);
+      const ref = "$ref" in schemaObj
+        ? schemaObj.$ref
+        : JSON.stringify(schemaObj);
+      throw new Error(
+        `Failed to resolve $ref: ${ref}. ` +
+          (typeof ref === "string" && ref.startsWith("http")
+            ? `External $ref URLs must be registered in embeddedSchemas (packages/runner/src/cfc.ts). ` +
+              `If you added a new native type to NATIVE_TYPE_SCHEMAS in ` +
+              `packages/schema-generator/src/formatters/native-type-formatter.ts, ` +
+              `add its schema to embeddedSchemas as well.`
+            : `Schema: ${JSON.stringify(schemaObj)}`),
+      );
     }
     return resolved;
   }
