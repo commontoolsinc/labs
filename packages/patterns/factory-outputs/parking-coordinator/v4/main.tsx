@@ -1,12 +1,5 @@
 /// <cts-enable />
-import {
-  action,
-  computed,
-  NAME,
-  pattern,
-  UI,
-  Writable,
-} from "commontools";
+import { action, computed, NAME, pattern, UI, Writable } from "commontools";
 import type {
   Allocation,
   CommuteMode,
