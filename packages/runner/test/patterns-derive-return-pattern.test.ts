@@ -156,6 +156,88 @@ describe("Pattern Runner - Derive returning pattern (CT-1316)", () => {
     expect(deriveCallCount).toBeLessThan(20);
   });
 
+  it("should not re-run sub-pattern when derive returns the same pattern structure", async () => {
+    // Verifies that resultPatternCache deduplicates sub-pattern runs.
+    // When the derive callback is re-triggered (by changing its watched
+    // input) but returns the same pattern (identical JSON), the runner
+    // should skip calling this.run() again.
+    let deriveCallCount = 0;
+    let innerLiftRunCount = 0;
+
+    const innerPattern = pattern<{ value: number }>(({ value }) => {
+      const doubled = lift((x: number) => {
+        innerLiftRunCount++;
+        return x * 2;
+      })(value);
+      return { result: doubled };
+    });
+
+    // The outer pattern watches `trigger` in derive and reads it (so
+    // reactivity tracks it), but always returns the same
+    // innerPattern({ value: 42 }) regardless of trigger value.
+    // Changing trigger re-fires the derive callback, but the returned
+    // pattern structure is identical — the cache should prevent duplicate
+    // sub-pattern runs.
+    const outerPattern = pattern<{ trigger: number }>(({ trigger }) => {
+      return derive({ trigger }, ({ trigger: t }: { trigger: number }) => {
+        deriveCallCount++;
+        // Read `t` so the reactive system tracks it as a dependency,
+        // but don't use it in the returned pattern args.
+        if (t < 0) throw new Error("unreachable");
+        return innerPattern({ value: 42 });
+      });
+    });
+
+    // Create a mutable input cell so we can change trigger later
+    const inputCell = runtime.getCell<number>(
+      space,
+      "derive-pattern-cache-dedup-input",
+    );
+    inputCell.withTx(tx).set(1);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const resultCell = runtime.getCell<{ result: number }>(
+      space,
+      "derive-pattern-cache-dedup",
+      undefined,
+      tx,
+    );
+
+    const result = runtime.run(
+      tx,
+      outerPattern,
+      { trigger: inputCell },
+      resultCell,
+    );
+    await tx.commit();
+    await runtime.storageManager.synced();
+
+    const value1 = await result.pull();
+    expect(value1.result).toBe(84);
+
+    const deriveCallsAfterFirstRun = deriveCallCount;
+    const innerLiftsAfterFirstRun = innerLiftRunCount;
+    expect(deriveCallsAfterFirstRun).toBeGreaterThanOrEqual(1);
+    expect(innerLiftsAfterFirstRun).toBe(1);
+
+    // Now change trigger to re-fire the derive callback.
+    // The callback returns the same pattern structure, so the cache
+    // should prevent a second this.run() call.
+    tx = runtime.edit();
+    inputCell.withTx(tx).send(2);
+    await tx.commit();
+    await runtime.storageManager.synced();
+
+    const value2 = await result.pull();
+    expect(value2.result).toBe(84);
+
+    // Derive should have been called again (triggered by input change)
+    expect(deriveCallCount).toBeGreaterThan(deriveCallsAfterFirstRun);
+    // But inner pattern's lift should NOT have re-run (cache hit on pattern)
+    expect(innerLiftRunCount).toBe(innerLiftsAfterFirstRun);
+  });
+
   it("should handle derive conditionally returning plain value or pattern", async () => {
     // Tests the branch where derive sometimes returns a plain value
     // and sometimes returns a pattern instantiation.
