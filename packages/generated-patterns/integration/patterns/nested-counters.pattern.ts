@@ -38,8 +38,8 @@ const liftTotal = lift((values: { left: number; right: number }) =>
 
 export const nestedCounters = pattern<NestedCounterArgs>(
   ({ counters }) => {
-    const left = counters.key("left");
-    const right = counters.key("right");
+    const left = counters.left;
+    const right = counters.right;
 
     const total = liftTotal({
       left,

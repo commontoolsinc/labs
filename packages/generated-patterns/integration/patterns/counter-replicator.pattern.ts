@@ -1,13 +1,13 @@
 /// <cts-enable />
 import {
-  Cell,
+  type Cell,
   cell,
   Default,
   handler,
   lift,
   pattern,
   str,
-  toSchema,
+  type Writable,
 } from "commontools";
 
 interface ReplicatorArgs {
@@ -36,33 +36,27 @@ const adjustReplica = handler(
   },
 );
 
-const buildReplicas = lift(
-  toSchema<{ seeds: Cell<number[]> }>(),
-  toSchema<unknown>(),
-  ({ seeds }) => {
-    const raw = seeds.get();
-    const list = Array.isArray(raw) ? raw : [];
+const buildReplicas = lift<{ seeds: Writable<number[]> }>(({ seeds }) => {
+  const raw = seeds.get();
+  const list = Array.isArray(raw) ? raw : [];
 
-    return list.map((item, index) => {
-      const value = typeof item === "number" && Number.isFinite(item)
-        ? item
-        : 0;
-      const name = `Replica ${index + 1}`;
-      return {
-        index,
-        name,
-        value,
-        label: `${name}: ${value}`,
-        controls: {
-          increment: adjustReplica({
-            values: seeds,
-            index: cell(index),
-          }),
-        },
-      };
-    });
-  },
-);
+  return list.map((item, index) => {
+    const value = typeof item === "number" && Number.isFinite(item) ? item : 0;
+    const name = `Replica ${index + 1}`;
+    return {
+      index,
+      name,
+      value,
+      label: `${name}: ${value}`,
+      controls: {
+        increment: adjustReplica({
+          values: seeds,
+          index: cell(index),
+        }),
+      },
+    };
+  });
+});
 
 const liftCount = lift((items: unknown[] | undefined) => {
   return Array.isArray(items) ? items.length : 0;

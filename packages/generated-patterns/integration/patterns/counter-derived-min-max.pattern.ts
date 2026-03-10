@@ -7,7 +7,7 @@ import {
   lift,
   pattern,
   str,
-  toSchema,
+  type Writable,
 } from "commontools";
 
 interface DerivedMinMaxArgs {
@@ -79,21 +79,19 @@ const adjustCounter = handler(
   },
 );
 
-const computeLimits = lift(
-  toSchema<{ values: Cell<number[]>; current: Cell<number> }>(),
-  toSchema<{ min: number; max: number }>(),
-  ({ values, current }) => {
-    const entries = sanitizeHistory(values.get());
-    const baseline = toInteger(current.get());
-    if (entries.length === 0) {
-      return { min: baseline, max: baseline };
-    }
-    return {
-      min: minimumOf(entries),
-      max: maximumOf(entries),
-    };
-  },
-);
+const computeLimits = lift<
+  { values: Writable<number[]>; current: Writable<number> }
+>(({ values, current }) => {
+  const entries = sanitizeHistory([...values.get()]);
+  const baseline = toInteger(current.get());
+  if (entries.length === 0) {
+    return { min: baseline, max: baseline };
+  }
+  return {
+    min: minimumOf(entries),
+    max: maximumOf(entries),
+  };
+});
 
 const liftToInteger = lift((input: number | undefined) => toInteger(input));
 const liftSanitizeHistory = lift(sanitizeHistory);

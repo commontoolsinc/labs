@@ -217,9 +217,7 @@ export const counterWithAlternateInitialStates = pattern<
     (entries) => Array.isArray(entries.get()) ? entries.get().length : 0,
   );
 
-  const label = str`State ${
-    activeState.key("label")
-  }=${valueCell} (step ${stepCell})`;
+  const label = str`State ${activeState.label}=${valueCell} (step ${stepCell})`;
 
   return {
     value: valueCell,

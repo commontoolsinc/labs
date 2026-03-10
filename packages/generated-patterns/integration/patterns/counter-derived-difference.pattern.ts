@@ -8,7 +8,7 @@ import {
   lift,
   pattern,
   str,
-  toSchema,
+  type Writable,
 } from "commontools";
 
 interface DerivedDifferenceArgs {
@@ -148,19 +148,17 @@ const liftSanitizeInteger = lift((value: number | undefined) =>
 const liftSanitizeStep = lift((value: number | undefined) =>
   sanitizeStep(value, 1)
 );
-const liftDifferenceSummary = lift(
-  toSchema<{ primary: Cell<number>; secondary: Cell<number> }>(),
-  toSchema<{ primary: number; secondary: number; difference: number }>(),
-  ({ primary, secondary }) => {
-    const primaryValue = sanitizeInteger(primary.get(), 0);
-    const secondaryValue = sanitizeInteger(secondary.get(), 0);
-    return {
-      primary: primaryValue,
-      secondary: secondaryValue,
-      difference: primaryValue - secondaryValue,
-    };
-  },
-);
+const liftDifferenceSummary = lift<
+  { primary: Writable<number>; secondary: Writable<number> }
+>(({ primary, secondary }) => {
+  const primaryValue = sanitizeInteger(primary.get(), 0);
+  const secondaryValue = sanitizeInteger(secondary.get(), 0);
+  return {
+    primary: primaryValue,
+    secondary: secondaryValue,
+    difference: primaryValue - secondaryValue,
+  };
+});
 
 export const counterWithDerivedDifference = pattern<DerivedDifferenceArgs>(
   ({ primary, secondary, primaryStep, secondaryStep }) => {

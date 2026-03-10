@@ -7,7 +7,7 @@ import {
   lift,
   pattern,
   str,
-  toSchema,
+  type Writable,
 } from "commontools";
 
 const childIncrement = handler(
@@ -41,22 +41,16 @@ interface HandlerSpawnArgs {
   children: Default<SpawnedChildState[], []>;
 }
 
-const addChild = lift(
-  toSchema<
-    {
-      child: Cell<number>;
-      children: Cell<SpawnedChildState[]>;
-      initialized: Cell<boolean>;
-    }
-  >(),
-  toSchema<never>(),
-  ({ child, children, initialized }) => {
-    if (!initialized.get()) {
-      children.push(child);
-      initialized.set(true);
-    }
-  },
-);
+const addChild = lift<{
+  child: any;
+  children: Writable<SpawnedChildState[]>;
+  initialized: Writable<boolean>;
+}>(({ child, children, initialized }) => {
+  if (!initialized.get()) {
+    children.push(child);
+    initialized.set(true);
+  }
+});
 
 const spawnChild = handler(
   (

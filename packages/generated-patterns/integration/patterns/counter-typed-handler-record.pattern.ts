@@ -7,7 +7,7 @@ import {
   lift,
   pattern,
   str,
-  toSchema,
+  type Writable,
 } from "commontools";
 
 type HandlerKey = "increment" | "decrement" | "setExact";
@@ -208,36 +208,30 @@ const liftLastChangeLabel = lift((change: CounterChange | undefined) => {
   return `${sanitized.action}:${sanitized.previous}->${sanitized.next}`;
 });
 
-const liftHandlerCatalog = lift(
-  toSchema<
+const liftHandlerCatalog = lift<{
+  counts: Writable<HandlerInvocationCounts>;
+  step: Writable<number>;
+}>(({ counts, step }) => {
+  const record = sanitizeCounts(counts.get());
+  const stepValue = normalizeStep(step.get());
+  return [
     {
-      counts: Cell<HandlerInvocationCounts>;
-      step: Cell<number>;
-    }
-  >(),
-  toSchema<HandlerDescriptor[]>(),
-  ({ counts, step }) => {
-    const record = sanitizeCounts(counts.get());
-    const stepValue = normalizeStep(step.get());
-    return [
-      {
-        key: "increment" as const,
-        label: `Increment by ${stepValue}`,
-        calls: record.increment,
-      },
-      {
-        key: "decrement" as const,
-        label: `Decrement by ${stepValue}`,
-        calls: record.decrement,
-      },
-      {
-        key: "setExact" as const,
-        label: "Set exact value",
-        calls: record.setExact,
-      },
-    ];
-  },
-);
+      key: "increment" as const,
+      label: `Increment by ${stepValue}`,
+      calls: record.increment,
+    },
+    {
+      key: "decrement" as const,
+      label: `Decrement by ${stepValue}`,
+      calls: record.decrement,
+    },
+    {
+      key: "setExact" as const,
+      label: "Set exact value",
+      calls: record.setExact,
+    },
+  ];
+});
 
 const liftNormalizeStep = lift(normalizeStep);
 const liftSanitizeCounts = lift(sanitizeCounts);

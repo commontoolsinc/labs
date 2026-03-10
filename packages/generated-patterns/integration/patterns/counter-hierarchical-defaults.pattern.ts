@@ -87,11 +87,11 @@ export const counterWithHierarchicalDefaults = pattern<
 >(
   ({ value, settings }) => {
     const resolvedSettings = liftNormalizeSettings(settings);
-    const labelCell = resolvedSettings.key("label");
-    const stepCell = resolvedSettings.key("step");
-    const formattingCell = resolvedSettings.key("formatting");
-    const prefixCell = formattingCell.key("prefix");
-    const suffixCell = formattingCell.key("suffix");
+    const labelCell = resolvedSettings.label;
+    const stepCell = resolvedSettings.step;
+    const formattingCell = resolvedSettings.formatting;
+    const prefixCell = formattingCell.prefix;
+    const suffixCell = formattingCell.suffix;
 
     const display = str`${prefixCell} ${value} ${suffixCell}`;
     const summary = str`${labelCell}: ${value}`;
