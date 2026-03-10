@@ -72,7 +72,7 @@ import * as SubscriptionManager from "./subscription.ts";
 import * as Differential from "./differential.ts";
 import * as Address from "./transaction/address.ts";
 import { ACL_TYPE, ANYONE_USER } from "@commontools/memory/acl";
-import { toDeepStorableValue } from "@commontools/memory/storable-value-legacy";
+import { storableFromNativeValue } from "@commontools/memory/storable-value";
 
 export type { Result, Unit };
 export interface Selector<Key> extends Iterable<Key> {
@@ -1939,7 +1939,7 @@ export class Provider implements IStorageProvider {
     const facts: Fact[] = [];
     for (const { uri, value } of batch) {
       const newValue = value.value !== undefined
-        ? toDeepStorableValue({ value: value.value, source: value.source })
+        ? storableFromNativeValue({ value: value.value, source: value.source })
         : undefined;
 
       const current = workspace.get({ id: uri, type: this.the });

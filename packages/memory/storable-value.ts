@@ -25,7 +25,7 @@ import { toDeepStorableValue } from "./storable-value-legacy.ts";
  *   freeze.
  */
 export let storableFromNativeValue: (
-  value: StorableValue,
+  value: unknown,
   freeze?: boolean,
 ) => StorableValue;
 
@@ -64,7 +64,7 @@ function configureDispatch(): void {
     // ----- Rich storable value implementations -----
 
     storableFromNativeValue = (
-      value: StorableValue,
+      value: unknown,
       freeze = true,
     ): StorableValue => {
       return toDeepRichStorableValue(value, freeze);
@@ -79,7 +79,7 @@ function configureDispatch(): void {
   } else {
     // ----- Legacy conversion (flag OFF) -----
 
-    storableFromNativeValue = (value: StorableValue): StorableValue => {
+    storableFromNativeValue = (value: unknown): StorableValue => {
       return toDeepStorableValue(value);
     };
 
