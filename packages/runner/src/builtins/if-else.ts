@@ -28,8 +28,8 @@ export function ifElse(
     const ref = inputsWithLog.key(condition ? "ifTrue" : "ifFalse")
       .getAsLink({ base: result });
 
-    // When writing links, we need to use setRaw
-    resultWithLog.setRaw(ref);
+    // When writing links, we need to use setRawStorable (link doesn't match T)
+    resultWithLog.setRawStorable(ref);
   };
 
   // Only depend on the condition for initial scheduling.

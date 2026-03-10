@@ -185,7 +185,12 @@ declare module "@commontools/api" {
       },
     ): SigilWriteRedirectLink;
     getRaw(options?: IReadOptions): Immutable<T> | undefined;
-    setRaw(value: any): void;
+    /** Read the cell's raw storable value as a mutable deep copy. */
+    getRawMutable(options?: IReadOptions): T | undefined;
+    setRaw(value: T & StorableValue): void;
+    /** Write a raw StorableValue that may not match T (e.g., links, stream
+     *  markers). Use `setRaw` when the value matches the cell's schema type. */
+    setRawStorable(value: StorableValue): void;
     getSourceCell<T>(
       schema?: JSONSchema,
     ):
@@ -289,7 +294,9 @@ const cellMethods = new Set<
   "getAsLink",
   "getAsWriteRedirectLink",
   "getRaw",
+  "getRawMutable",
   "setRaw",
+  "setRawStorable",
   "getSourceCell",
   "setSourceCell",
   "getArgumentCell",
@@ -1190,15 +1197,25 @@ export class CellImpl<T extends StorableValue>
       | undefined;
   }
 
-  setRaw(value: any): void {
+  getRawMutable(options?: IReadOptions): T | undefined {
+    const raw = this.getRaw(options);
+    if (raw === undefined) return undefined;
+    return storableFromNativeValue(raw, false) as T;
+  }
+
+  setRaw(value: T & StorableValue): void {
+    this.setRawStorable(value);
+  }
+
+  setRawStorable(value: StorableValue): void {
     if (!this.tx) throw new Error("Transaction required for setRaw");
 
     // No await for the sync, just kicking this off, so we have the data to
     // retry on conflict.
     if (!this.synced) this.sync();
 
-    value = storableFromNativeValue(value);
-    this.tx.writeValueOrThrow(this.link, findAndInlineDataURILinks(value));
+    const storable = storableFromNativeValue(value);
+    this.tx.writeValueOrThrow(this.link, findAndInlineDataURILinks(storable));
   }
 
   getSourceCell<T>(

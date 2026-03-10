@@ -33,6 +33,6 @@ export function when(
       ? inputsWithLog.key("value").getAsLink({ base: result })
       : inputsWithLog.key("condition").getAsLink({ base: result });
 
-    resultWithLog.setRaw(ref);
+    resultWithLog.setRawStorable(ref);
   };
 }
