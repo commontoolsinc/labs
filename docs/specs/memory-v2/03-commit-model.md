@@ -280,9 +280,11 @@ the referenced pending commit is confirmed or rejected).
 **Why `localSeq` instead of commit hashes?** Pending-read tracking needs a
 cheap session-local handle for stacked optimistic writes, so the client assigns
 a monotonically increasing local index to each pending commit. The commit hash
-still exists as the stable content ID of the signed client commit; the server
-stores a translation from `localSeq` to the resulting `{ hash, seq }` once the
-commit is confirmed. That translation is separate from the signed payload.
+still exists as the stable content ID of the canonical `ClientCommit` payload;
+the server stores a translation from `localSeq` to the resulting `{ hash, seq }`
+once the commit is confirmed. The signed UCAN invocation and authorization that
+carried the payload are persisted separately and linked from the resulting
+commit record.
 
 ---
 
@@ -331,6 +333,11 @@ C2 (which depends on C1), C3 (which depends on C2), etc., all fail.
 When the server receives a commit, it validates all read dependencies before
 applying any writes. The validation uses **seq-based comparison** rather
 than strict hash comparison (CAS).
+
+This section focuses on the inner `ClientCommit` payload. On the wire, every
+`ClientCommit` arrives inside a signed UCAN invocation. The server verifies that
+outer invocation/authorization envelope first, then validates and stores the
+inner payload described here.
 
 ### 3.6.1 Validation Rule
 
@@ -461,8 +468,13 @@ resolution metadata.
 
 ```typescript
 interface CommitLogEntry {
-  // Content hash of the canonical client commit blob. Stable across replay.
+  // Content hash of the canonical ClientCommit payload. Stable across replay
+  // and independent of the outer UCAN wrapper.
   hash: Reference;
+
+  // Raw content-addressed references of the authenticated transport envelope.
+  invocationRef: Reference;
+  authorizationRef: Reference;
 
   // Server-issued logical session identifier for the submitting client/space.
   // Pending-read resolution is scoped to this session and survives reconnects.
@@ -471,7 +483,7 @@ interface CommitLogEntry {
   // The client-local pending index used on that session.
   localSeq: number;
 
-  // The original commit as submitted by the client (includes localSeq)
+  // The original semantic commit payload extracted from invocation.args
   original: ClientCommit;
 
   // Server-assigned resolution metadata
@@ -491,10 +503,12 @@ interface CommitLogEntry {
 ```
 
 **Why preserve the original?** The commit log is an audit trail. Preserving the
-original submission allows verifiers to replay the validation logic: given the
-server state at the time, was this commit valid? The resolution metadata records
-the server's decisions (seq assignment, submitting session, and pending-read
-resolution) so the outcome can be reproduced.
+semantic `ClientCommit` payload allows verifiers to replay validation logic:
+given the server state at the time, was this commit valid? The linked
+`invocationRef` and `authorizationRef` preserve who authorized that payload and
+under which proof. The resolution metadata records the server's decisions (seq
+assignment, submitting session, and pending-read resolution) so the outcome can
+be reproduced.
 
 ### 3.7.3 Seq Assignment
 
@@ -523,21 +537,28 @@ commit log entry with the matching seq.
 
 Each committed transaction has two identifiers with different roles:
 
-- **`hash`** — the content hash of the canonical `ClientCommit` blob. This is
-  stable across retransmission and is the identifier that corresponds to what
-  the client signed.
+- **`hash`** — the content hash of the canonical `ClientCommit` payload. This is
+  stable across retransmission and identifies the semantic mutation payload.
+- **`invocationRef`** — the content hash of the canonical UCAN invocation that
+  carried the `ClientCommit` over the wire.
+- **`authorizationRef`** — the content hash of the verified authorization blob
+  whose proof/signature covered `invocationRef`. Batched sibling invocations may
+  share this value.
 - **`(sessionId, localSeq)`** — the logical idempotence key for replay and
   pending-read resolution.
 - **`seq`** — the server-assigned canonical ordering position used by queries,
   subscriptions, and point-in-time reads.
 
-The server verifies the client's signature before accepting a commit, computes
-the canonical commit hash from the original `ClientCommit`, and stores both the
-original payload and the resolved `{ hash, seq }` translation. If a client
-replays the same commit after reconnecting, the server SHOULD deduplicate by
-`(sessionId, localSeq)` and verify that the replayed `hash` matches the stored
-row before returning the existing result. A mismatched hash for the same
-`(sessionId, localSeq)` is a protocol error.
+The server verifies the invocation/authorization envelope before accepting a
+commit, computes the canonical commit hash from the inner `ClientCommit`
+payload, computes `invocationRef` / `authorizationRef` from the outer blobs,
+and stores all three references together with the resolved `{ hash, seq }`
+translation. If a client replays the same commit after reconnecting, the server
+SHOULD deduplicate by `(sessionId, localSeq)` and verify that the replayed
+`hash` matches the stored row before returning the existing result. A mismatched
+hash for the same `(sessionId, localSeq)` is a protocol error. Replays MAY
+arrive inside a fresh invocation or authorization wrapper; that does not change
+the identity of the underlying `ClientCommit`.
 
 ### 3.7.5 Session Identity and Reconnect
 
@@ -553,7 +574,8 @@ On reconnect:
 2. The client replays any locally retained commits that were not acknowledged,
    plus any retained commits whose assigned `seq` may be newer than the
    server-visible cursor.
-3. The server deduplicates replays by commit `hash`.
+3. The server deduplicates replays by `(sessionId, localSeq)` and verifies the
+   retained commit `hash`.
 
 ---
 
@@ -727,6 +749,7 @@ v2 model described in this section.
 | Nursery | Pending | Same concept, standard name |
 | `since` | `seq` | Same concept, renamed for clarity |
 | `CommitData.transaction` | `CommitLogEntry.original` | Preserves original submission |
+| UCAN transport envelope | `CommitLogEntry.invocationRef` + `CommitLogEntry.authorizationRef` | New: preserves authenticated command wrapper separately from semantic commit payload |
 | *(implicit)* | `CommitLogEntry.resolution` | New: explicit server-side metadata |
 
 ---

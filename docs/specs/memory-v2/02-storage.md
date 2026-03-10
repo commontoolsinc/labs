@@ -185,13 +185,18 @@ were applied atomically.
 ```sql
 CREATE TABLE commit (
   seq         INTEGER NOT NULL PRIMARY KEY,  -- Lamport clock (same as facts in this commit)
-  hash        TEXT    NOT NULL,              -- Content hash of the canonical client commit blob
+  hash        TEXT    NOT NULL,              -- Content hash of the canonical ClientCommit payload
   branch      TEXT    NOT NULL DEFAULT '',   -- Branch this commit was applied to
   session_id  TEXT    NOT NULL,              -- Server-assigned session identifier
   local_seq   INTEGER NOT NULL,              -- Client-local pending index on that session
-  original    JSON    NOT NULL,              -- Canonical ClientCommit as submitted/signed
+  invocation_ref     TEXT    NOT NULL,       -- FK → invocation.ref (the UCAN invocation that carried this commit)
+  authorization_ref  TEXT    NOT NULL,       -- FK → authorization.ref (the verified auth blob covering that invocation)
+  original    JSON    NOT NULL,              -- Canonical ClientCommit payload extracted from invocation.args
   resolution  JSON    NOT NULL,              -- { seq, resolvedPendingReads: [{ localSeq, hash, seq }] }
-  created_at  TEXT    NOT NULL DEFAULT (datetime('now'))  -- Wall-clock timestamp
+  created_at  TEXT    NOT NULL DEFAULT (datetime('now')),  -- Wall-clock timestamp
+
+  FOREIGN KEY (invocation_ref) REFERENCES invocation(ref),
+  FOREIGN KEY (authorization_ref) REFERENCES authorization(ref)
 );
 
 -- Query commits by hash (for audit/replay lookups)
@@ -203,6 +208,9 @@ CREATE INDEX idx_commit_branch ON commit (branch);
 -- Resolve pending-read dependencies quickly
 CREATE UNIQUE INDEX idx_commit_session_local_seq
   ON commit (session_id, local_seq);
+
+-- Each successful transact invocation produces at most one commit
+CREATE UNIQUE INDEX idx_commit_invocation_ref ON commit (invocation_ref);
 ```
 
 **Column details:**
@@ -210,13 +218,73 @@ CREATE UNIQUE INDEX idx_commit_session_local_seq
 | Column | Description |
 |--------|-------------|
 | `seq` | The Lamport clock value assigned to this commit. Matches the `seq` on all facts in this commit. Also serves as the commit log's primary key. |
-| `hash` | Content hash of the canonical client commit blob. Stable across retransmission, but not globally unique across sessions. |
+| `hash` | Content hash of the canonical `ClientCommit` payload. Stable across retransmission and independent of the outer UCAN wrapper. |
 | `branch` | Which branch this commit targets. |
 | `session_id` | Identifies the logical client session that submitted the commit. Pending-read resolution is session-scoped and survives reconnects. |
 | `local_seq` | The client-local pending index on that session. Combined with `session_id`, this is the idempotent replay key. Every committed mutation is an ordinary client transaction, including merges. |
+| `invocation_ref` | Reference of the canonical UCAN invocation that carried this `ClientCommit` over the wire. |
+| `authorization_ref` | Reference of the verified `Authorization` object whose proof/signature covered that invocation. Batched sibling invocations may share this value. |
 | `original` | The canonical `ClientCommit` payload, preserved for audit, replay, and commit-hash verification. |
 | `resolution` | Server-side resolution metadata, including the assigned `seq` and the resolved `{ localSeq, hash, seq }` mapping for any pending-read dependencies. |
 | `created_at` | Wall-clock time for diagnostics. Not used for ordering. |
+
+**Design notes:**
+
+- The commit row stores the semantic mutation payload (`ClientCommit`) and
+  points to the authenticated transport envelope separately. This keeps
+  `commit.hash` stable even if the same logical commit is later replayed inside
+  a fresh invocation or authorization wrapper.
+- This split is intentionally close to later verifiable-receipt work: a future
+  receipt table can add code/input/output/policy commitments without redefining
+  commit identity or duplicating signatures.
+
+#### `invocation` — Persisted UCAN Invocations
+
+Stores the canonical invocation object for successful `/memory/transact`
+commands.
+
+```sql
+CREATE TABLE invocation (
+  ref         TEXT    NOT NULL PRIMARY KEY,  -- Merkle reference of the canonical invocation object
+  iss         TEXT    NOT NULL,              -- Signer / issuer DID declared by the invocation
+  aud         TEXT,                          -- Optional audience DID
+  cmd         TEXT    NOT NULL,              -- E.g. "/memory/transact"
+  sub         TEXT    NOT NULL,              -- Target space DID
+  invocation  JSON    NOT NULL,              -- Canonical invocation object
+  created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX idx_invocation_sub ON invocation (sub);
+CREATE INDEX idx_invocation_cmd ON invocation (cmd);
+CREATE INDEX idx_invocation_iss ON invocation (iss);
+```
+
+**Design notes:**
+
+- `ref` is the raw content-addressed invocation reference. The protocol-level
+  `job:<hash>` identifier is a presentation form derived from it.
+- Persisting the invocation preserves who submitted the command (`iss`), which
+  space it targeted (`sub`), and the exact command payload that was authorized.
+
+#### `authorization` — Verified Authorization Blobs
+
+Stores the verified authorization proof/signature object that covered one or
+more invocations.
+
+```sql
+CREATE TABLE authorization (
+  ref            TEXT    NOT NULL PRIMARY KEY,  -- Merkle reference of the canonical Authorization object
+  authorization  JSON    NOT NULL,              -- { signature, access }
+  created_at     TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+```
+
+**Design notes:**
+
+- One `authorization` row MAY be shared by many successful commits if multiple
+  invocations were batch-signed together.
+- The authorization object proves that a signer authorized a set of invocation
+  refs. The signer identity itself lives on the referenced invocation (`iss`).
 
 ### 3.5 `snapshot` — Periodic Full-Value Materializations
 
@@ -296,20 +364,45 @@ CREATE TABLE IF NOT EXISTS value (
 );
 INSERT OR IGNORE INTO value (hash, data) VALUES ('__empty__', NULL);
 
+CREATE TABLE IF NOT EXISTS authorization (
+  ref            TEXT    NOT NULL PRIMARY KEY,
+  authorization  JSON    NOT NULL,
+  created_at     TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS invocation (
+  ref         TEXT    NOT NULL PRIMARY KEY,
+  iss         TEXT    NOT NULL,
+  aud         TEXT,
+  cmd         TEXT    NOT NULL,
+  sub         TEXT    NOT NULL,
+  invocation  JSON    NOT NULL,
+  created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_invocation_sub ON invocation (sub);
+CREATE INDEX IF NOT EXISTS idx_invocation_cmd ON invocation (cmd);
+CREATE INDEX IF NOT EXISTS idx_invocation_iss ON invocation (iss);
+
 CREATE TABLE IF NOT EXISTS commit (
   seq         INTEGER NOT NULL PRIMARY KEY,
   hash        TEXT    NOT NULL,
   branch      TEXT    NOT NULL DEFAULT '',
   session_id  TEXT    NOT NULL,
   local_seq   INTEGER NOT NULL,
+  invocation_ref     TEXT    NOT NULL,
+  authorization_ref  TEXT    NOT NULL,
   original    JSON    NOT NULL,
   resolution  JSON    NOT NULL,
-  created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+  created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (invocation_ref) REFERENCES invocation(ref),
+  FOREIGN KEY (authorization_ref) REFERENCES authorization(ref)
 );
 CREATE INDEX IF NOT EXISTS idx_commit_hash ON commit (hash);
 CREATE INDEX IF NOT EXISTS idx_commit_branch ON commit (branch);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_commit_session_local_seq
   ON commit (session_id, local_seq);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_commit_invocation_ref
+  ON commit (invocation_ref);
 
 CREATE TABLE IF NOT EXISTS fact (
   hash        TEXT    NOT NULL PRIMARY KEY,
