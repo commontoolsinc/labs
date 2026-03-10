@@ -304,8 +304,11 @@ function runAssertions(
   assertions: ConversationFixtureAssertions,
   request: LLMRequest | LLMGenerateObjectRequest,
   entryIndex: number,
+  fixtureDescription?: string,
 ): void {
-  const label = `Fixture entry ${entryIndex}`;
+  const label = fixtureDescription
+    ? `Fixture "${fixtureDescription}" entry ${entryIndex}`
+    : `Fixture entry ${entryIndex}`;
 
   if (assertions.messageCount !== undefined) {
     if (request.messages.length !== assertions.messageCount) {
@@ -382,6 +385,8 @@ function runAssertions(
 export function loadConversationFixture(fixture: ConversationFixture): void {
   mockCatalog.enable();
 
+  const description = fixture.description;
+
   for (let i = 0; i < fixture.responses.length; i++) {
     const entry = fixture.responses[i];
     const entryIndex = i;
@@ -390,7 +395,9 @@ export function loadConversationFixture(fixture: ConversationFixture): void {
       const assertions = entry.assert;
       mockCatalog.addResponse(
         (request) => {
-          if (assertions) runAssertions(assertions, request, entryIndex);
+          if (assertions) {
+            runAssertions(assertions, request, entryIndex, description);
+          }
           return true;
         },
         entry.response,
@@ -399,7 +406,9 @@ export function loadConversationFixture(fixture: ConversationFixture): void {
       const assertions = entry.assert;
       mockCatalog.addObjectResponse(
         (request) => {
-          if (assertions) runAssertions(assertions, request, entryIndex);
+          if (assertions) {
+            runAssertions(assertions, request, entryIndex, description);
+          }
           return true;
         },
         entry.response,

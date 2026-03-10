@@ -205,10 +205,11 @@ describe("LLMClient test-environment guard", () => {
     resetMockMode();
   });
 
-  it("conversation fixture assertions throw on mismatch", async () => {
+  it("conversation fixture assertions throw on mismatch with description", async () => {
     resetMockMode();
 
     loadConversationFixture({
+      description: "my test conversation",
       responses: [
         {
           type: "sendRequest",
@@ -226,7 +227,9 @@ describe("LLMClient test-environment guard", () => {
         model: "test",
         stream: false,
       }),
-    ).rejects.toThrow('expected some message to contain "expected-keyword"');
+    ).rejects.toThrow(
+      'Fixture "my test conversation" entry 0: expected some message to contain "expected-keyword"',
+    );
 
     resetMockMode();
   });
