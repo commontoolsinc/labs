@@ -33,7 +33,13 @@ import type {
   ProviderDescriptor,
 } from "./oauth2-common/oauth2-common.types.ts";
 import { AirtableDescriptor } from "./airtable-oauth/airtable.descriptor.ts";
+import { DiscordDescriptor } from "./discord-oauth/discord.descriptor.ts";
+import { GitHubDescriptor } from "./github-oauth/github.descriptor.ts";
 import { GoogleDescriptor } from "./google-oauth/google.descriptor.ts";
+import { LinearDescriptor } from "./linear-oauth/linear.descriptor.ts";
+import { NotionDescriptor } from "./notion-oauth/notion.descriptor.ts";
+import { SpotifyDescriptor } from "./spotify-oauth/spotify.descriptor.ts";
+import { StravaDescriptor } from "./strava-oauth/strava.descriptor.ts";
 import { getLogger } from "@commontools/utils/logger";
 
 const logger = getLogger("provider-registry");
@@ -58,6 +64,12 @@ const OAUTH_CORS_CONFIG = {
 const DESCRIPTORS: ProviderDescriptor[] = [
   GoogleDescriptor,
   AirtableDescriptor,
+  GitHubDescriptor,
+  NotionDescriptor,
+  LinearDescriptor,
+  SpotifyDescriptor,
+  DiscordDescriptor,
+  StravaDescriptor,
 ];
 
 // ---------------------------------------------------------------------------
