@@ -177,22 +177,22 @@ CREATE INDEX idx_head_branch ON head (branch);
 - When an entity is deleted, the head still exists — it points to the Delete
   fact. An entity with no head row has never been written to (Empty state).
 
-### 3.4 `commit` — Transaction Log
+### 3.4 `commit` — Sequenced Write Log
 
-Records every committed transaction. A commit groups one or more facts that
-were applied atomically.
+Records every successful **write-class** command. A commit groups zero or more
+facts and/or branch metadata changes that were applied atomically.
 
 ```sql
 CREATE TABLE commit (
   seq         INTEGER NOT NULL PRIMARY KEY,  -- Lamport clock (same as facts in this commit)
-  hash        TEXT    NOT NULL,              -- Content hash of the canonical ClientCommit payload
+  hash        TEXT    NOT NULL,              -- Content hash of the canonical write payload
   branch      TEXT    NOT NULL DEFAULT '',   -- Branch this commit was applied to
   session_id  TEXT    NOT NULL,              -- Server-assigned session identifier
   local_seq   INTEGER NOT NULL,              -- Client-local pending index on that session
   invocation_ref     TEXT    NOT NULL,       -- FK → invocation.ref (the UCAN invocation that carried this commit)
   authorization_ref  TEXT    NOT NULL,       -- FK → authorization.ref (the verified auth blob covering that invocation)
-  original    JSON    NOT NULL,              -- Canonical ClientCommit payload extracted from invocation.args
-  resolution  JSON    NOT NULL,              -- { seq, resolvedPendingReads: [{ localSeq, hash, seq }] }
+  original    JSON    NOT NULL,              -- Canonical write payload normalized from invocation cmd + args
+  resolution  JSON    NOT NULL,              -- { seq, resolvedPendingReads?: [{ localSeq, hash, seq }] }
   created_at  TEXT    NOT NULL DEFAULT (datetime('now')),  -- Wall-clock timestamp
 
   FOREIGN KEY (invocation_ref) REFERENCES invocation(ref),
@@ -209,7 +209,7 @@ CREATE INDEX idx_commit_branch ON commit (branch);
 CREATE UNIQUE INDEX idx_commit_session_local_seq
   ON commit (session_id, local_seq);
 
--- Each successful transact invocation produces at most one commit
+-- Each successful write-class invocation produces at most one commit
 CREATE UNIQUE INDEX idx_commit_invocation_ref ON commit (invocation_ref);
 ```
 
@@ -218,30 +218,32 @@ CREATE UNIQUE INDEX idx_commit_invocation_ref ON commit (invocation_ref);
 | Column | Description |
 |--------|-------------|
 | `seq` | The Lamport clock value assigned to this commit. Matches the `seq` on all facts in this commit. Also serves as the commit log's primary key. |
-| `hash` | Content hash of the canonical `ClientCommit` payload. Stable across retransmission and independent of the outer UCAN wrapper. |
-| `branch` | Which branch this commit targets. |
+| `hash` | Content hash of the canonical write payload. For `/memory/transact` this is the `ClientCommit` hash; for branch lifecycle writes it is the hash of the normalized lifecycle payload including command type. Stable across retransmission and independent of the outer UCAN wrapper. |
+| `branch` | Which branch this commit targets. For branch lifecycle writes, this is the branch being created or deleted. |
 | `session_id` | Identifies the logical client session that submitted the commit. Pending-read resolution is session-scoped and survives reconnects. |
-| `local_seq` | The client-local pending index on that session. Combined with `session_id`, this is the idempotent replay key. Every committed mutation is an ordinary client transaction, including merges. |
-| `invocation_ref` | Reference of the canonical UCAN invocation that carried this `ClientCommit` over the wire. |
+| `local_seq` | The client-local pending index on that session. Combined with `session_id`, this is the idempotent replay key for write-class commands. |
+| `invocation_ref` | Reference of the canonical UCAN invocation that carried this write payload over the wire. |
 | `authorization_ref` | Reference of the verified `Authorization` object whose proof/signature covered that invocation. Batched sibling invocations may share this value. |
-| `original` | The canonical `ClientCommit` payload, preserved for audit, replay, and commit-hash verification. |
-| `resolution` | Server-side resolution metadata, including the assigned `seq` and the resolved `{ localSeq, hash, seq }` mapping for any pending-read dependencies. |
+| `original` | The canonical write payload, preserved for audit, replay, and commit-hash verification. For `/memory/transact` this is `ClientCommit`; for branch lifecycle writes it is a normalized payload that includes the command type plus its args. |
+| `resolution` | Server-side resolution metadata. For `/memory/transact` this includes the resolved `{ localSeq, hash, seq }` mapping for any pending-read dependencies. For branch lifecycle writes it still includes the assigned `seq` but has no pending-read entries. |
 | `created_at` | Wall-clock time for diagnostics. Not used for ordering. |
 
 **Design notes:**
 
-- The commit row stores the semantic mutation payload (`ClientCommit`) and
-  points to the authenticated transport envelope separately. This keeps
-  `commit.hash` stable even if the same logical commit is later replayed inside
-  a fresh invocation or authorization wrapper.
+- The commit row stores the semantic write payload and points to the
+  authenticated transport envelope separately. This keeps `commit.hash` stable
+  even if the same logical write is later replayed inside a fresh invocation or
+  authorization wrapper.
+- `/memory/transact` rows carry a `ClientCommit` payload and usually reference
+  one or more facts. `/memory/branch/create` and `/memory/branch/delete` rows
+  carry branch-lifecycle payloads and may reference zero facts.
 - This split is intentionally close to later verifiable-receipt work: a future
   receipt table can add code/input/output/policy commitments without redefining
   commit identity or duplicating signatures.
 
 #### `invocation` — Persisted UCAN Invocations
 
-Stores the canonical invocation object for successful `/memory/transact`
-commands.
+Stores the canonical invocation object for successful write-class commands.
 
 ```sql
 CREATE TABLE invocation (
@@ -315,7 +317,8 @@ CREATE TABLE branch (
   name            TEXT    NOT NULL PRIMARY KEY,  -- Branch name ('' = default/main)
   parent_branch   TEXT,                          -- Branch this was forked from (NULL for default)
   fork_seq        INTEGER,                       -- Seq at the time of fork
-  head_seq        INTEGER NOT NULL DEFAULT 0,    -- Latest seq on this branch
+  created_seq     INTEGER NOT NULL DEFAULT 0,    -- Seq at which the branch name came into existence
+  head_seq        INTEGER NOT NULL DEFAULT 0,    -- Latest seq at which branch-visible state was updated
   status          TEXT    NOT NULL DEFAULT 'active', -- 'active' | 'deleted'
   created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
   deleted_at      TEXT,
@@ -324,7 +327,8 @@ CREATE TABLE branch (
 );
 
 -- Seed the default branch
-INSERT OR IGNORE INTO branch (name, head_seq, status) VALUES ('', 0, 'active');
+INSERT OR IGNORE INTO branch (name, created_seq, head_seq, status)
+VALUES ('', 0, 0, 'active');
 ```
 
 ### 3.7 `blob_store` — Immutable Content-Addressed Binary Data
@@ -446,13 +450,15 @@ CREATE TABLE IF NOT EXISTS branch (
   name            TEXT    NOT NULL PRIMARY KEY,
   parent_branch   TEXT,
   fork_seq        INTEGER,
+  created_seq     INTEGER NOT NULL DEFAULT 0,
   head_seq        INTEGER NOT NULL DEFAULT 0,
   status          TEXT    NOT NULL DEFAULT 'active',
   created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
   deleted_at      TEXT,
   FOREIGN KEY (parent_branch) REFERENCES branch(name)
 );
-INSERT OR IGNORE INTO branch (name, head_seq, status) VALUES ('', 0, 'active');
+INSERT OR IGNORE INTO branch (name, created_seq, head_seq, status)
+VALUES ('', 0, 0, 'active');
 
 CREATE TABLE IF NOT EXISTS blob_store (
   hash          TEXT    NOT NULL PRIMARY KEY,
@@ -814,13 +820,16 @@ read performance. See §6.3 for the compaction query.
 Branches share the global `fact` table but maintain separate head pointers in
 the `head` table. The `branch` table tracks metadata.
 
-When a branch is created:
+When a `/memory/branch/create` write succeeds, its branch-table side effect is:
 
 ```sql
 -- Record the fork point
-INSERT INTO branch (name, parent_branch, fork_seq, head_seq)
-VALUES (:branch_name, :parent_branch, :fork_seq, :fork_seq);
+INSERT INTO branch (name, parent_branch, fork_seq, created_seq, head_seq)
+VALUES (:branch_name, :parent_branch, :fork_seq, :created_seq, :created_seq);
 ```
+
+This insert occurs in the same database transaction as the corresponding
+branch-creation commit-log insert.
 
 Head pointers are **not** eagerly copied from the parent branch. Instead, reads
 on a child branch resolve heads lazily: if no head exists for an entity on the
@@ -841,11 +850,13 @@ ON CONFLICT (branch, id) DO UPDATE SET fact_hash = :fact_hash, seq = :seq;
 ```
 
 The `commit` row records which branch was written to, plus the submitting
-session and the original/resolved commit payloads:
+session, invocation/auth references, and the original/resolved write payloads:
 
 ```sql
 INSERT INTO commit (
-  hash, seq, branch, session_id, local_seq, original, resolution
+  hash, seq, branch, session_id, local_seq,
+  invocation_ref, authorization_ref,
+  original, resolution
 )
 VALUES (
   :commit_hash,
@@ -853,10 +864,15 @@ VALUES (
   :branch_name,
   :session_id,
   :local_seq,
+  :invocation_ref,
+  :authorization_ref,
   :original_json,
   :resolution_json
 );
 ```
+
+Branch creation and branch deletion use the same commit-log insert pattern, but
+their write transaction updates the `branch` table rather than inserting facts.
 
 If a client replays a previously accepted transaction after reconnecting, the
 server resolves idempotence by `(session_id, local_seq)`. If a row already
@@ -869,9 +885,16 @@ exists for that pair:
 
 ### 8.3 Branch Seq Numbering
 
-Each branch maintains its own `head_seq` (= `headSeq` in TypeScript) in
-the `branch` table. When a commit is applied to a branch, `head_seq` is
-set to the commit's global seq number:
+Each branch maintains both `created_seq` and `head_seq` in the `branch` table:
+
+- `created_seq` (= `createdSeq`) is the global seq at which the branch name
+  came into existence.
+- `head_seq` (= `headSeq`) is the latest global seq at which the branch's
+  visible state was updated.
+
+At branch creation time, both columns are initialized to the creation command's
+global seq. Thereafter, when an entity-state commit is applied to a branch,
+`head_seq` is set to that commit's global seq number:
 
 ```sql
 UPDATE branch
@@ -880,9 +903,10 @@ WHERE name = :branch_name;
 ```
 
 The Lamport clock (`seq` column on facts and commits) is space-global —
-it increases across all branches. The branch's
-`head_seq` tracks the latest global seq applied to that branch, ensuring
-that seq numbers are globally unique and orderable, even across branches.
+it increases across all branches. `created_seq` tells you when the branch name
+became valid; `head_seq` tells you the latest seq whose entity-state effects are
+visible on that branch. Branch deletion gets its own commit-log `seq` but does
+not advance `head_seq`, because it does not change branch-visible entity state.
 
 ### 8.4 Branch Deletion
 
@@ -897,6 +921,8 @@ WHERE name = :branch_name
 
 Facts and commits are NOT deleted (shared history). Head and snapshot rows are
 also retained so child-branch ancestry and historical reads remain valid.
+This update occurs in the same database transaction as the corresponding
+branch-deletion commit-log insert.
 
 ---
 

@@ -206,9 +206,10 @@ interface SourceLink {
 //   on that entity/path on the target branch with seq > read.seq.
 ```
 
-Successful `/memory/transact` commands preserve two linked audit layers:
+Successful write-class commands (`/memory/transact`, `/memory/branch/create`,
+`/memory/branch/delete`) preserve two linked audit layers:
 
-- the semantic `ClientCommit` payload, hashed as `commit.hash`
+- the semantic write payload, hashed as `commit.hash`
 - the authenticated UCAN transport envelope (`invocation` + `authorization`),
   persisted separately and referenced from the resulting commit record
 

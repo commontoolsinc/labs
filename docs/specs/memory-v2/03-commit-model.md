@@ -504,7 +504,10 @@ atomicity.
 ### 3.7.2 CommitLogEntry
 
 The commit log preserves both the original client submission and the server's
-resolution metadata.
+resolution metadata. For `/memory/transact`, the stored entry has the following
+shape. Branch lifecycle writes (`/memory/branch/create` and
+`/memory/branch/delete`) are sequenced into the same storage commit log but use
+command-specific payloads and have no pending-read resolution data.
 
 ```typescript
 interface CommitLogEntry {

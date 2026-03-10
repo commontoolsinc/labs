@@ -35,7 +35,8 @@ interface Branch {
   name: BranchName;              // Unique name within the space
   parentBranch: BranchName;      // Branch this was forked from
   forkSeq: number;               // Seq at which the fork occurred
-  headSeq: number;               // Latest seq committed on this branch
+  createdSeq: number;            // Seq at which this branch name came into existence
+  headSeq: number;               // Latest seq at which this branch's visible state was updated
   createdAt: number;             // Timestamp of branch creation
   status: "active" | "deleted";  // Soft-delete flag
 }
@@ -82,10 +83,16 @@ See `02-storage.md` for the physical table layouts that support this model.
 
 A new branch is created from an existing branch at a specific seq.
 
+Branch creation is a **write-class** command even though it does not emit any
+entity facts. It is serialized with ordinary `/memory/transact` writes, uses
+`localSeq` for replay safety, receives a global `seq`, and records a commit-log
+entry for audit/idempotence.
+
 ### 6.3.1 API
 
 ```typescript
 interface CreateBranchRequest {
+  localSeq: number;              // Session-scoped idempotence key
   name: BranchName;              // Must be unique within the space
   fromBranch?: BranchName;       // Default: default branch
   atSeq?: number;                // Default: headSeq of fromBranch
@@ -93,12 +100,13 @@ interface CreateBranchRequest {
 
 interface CreateBranchResult {
   branch: Branch;
+  seq: number;                   // Global seq assigned to this branch-lifecycle write
 }
 ```
 
 ### 6.3.2 Semantics
 
-When `branch.create({ name, fromBranch, atSeq })` is called:
+When `branch.create({ localSeq, name, fromBranch, atSeq })` is called:
 
 1. **Validate** that `name` does not already exist (including soft-deleted
    branches -- names are permanently consumed).
@@ -107,20 +115,27 @@ When `branch.create({ name, fromBranch, atSeq })` is called:
 3. **Resolve the fork seq.** If `atSeq` is omitted, use the parent
    branch's current `headSeq`. If `atSeq` is specified, it must be
    <= the parent branch's `headSeq`.
-4. **Create the `Branch` record:**
+4. **Append a sequenced branch-lifecycle write.** The server assigns a new
+   global `seq`, records a commit-log entry for this successful command, and
+   applies the branch metadata mutation atomically with that log insert.
+5. **Create the `Branch` record:**
    ```
-   Branch {
-     name: name,
-     parentBranch: fromBranch,
-     forkSeq: atSeq,
-     headSeq: atSeq,
-     createdAt: now(),
-     status: "active"
-   }
+     Branch {
+       name: name,
+       parentBranch: fromBranch,
+       forkSeq: atSeq,
+       createdSeq: seq,
+       headSeq: seq,
+       createdAt: now(),
+       status: "active"
+     }
    ```
-5. The new branch starts with the same entity heads as the parent branch at the
+6. The new branch starts with the same entity heads as the parent branch at the
    fork seq. No head records are physically copied -- head resolution falls
    back to the parent (see 6.2.1).
+7. The branch-creation command's own `seq` becomes both `createdSeq` and the
+   initial `headSeq`, because it makes the inherited fork-state visible under
+   the new branch name.
 
 ### 6.3.3 Fork from a Fork
 
@@ -141,36 +156,45 @@ the head table is scoped to the target branch.
 ### 6.4.1 Commit Targeting
 
 ```typescript
-interface BranchCommit {
+type BranchCommit = ClientCommit & {
   branch?: BranchName;   // Omit for default branch
-  operations: Operation[];
-  reads: ReadSet;
-}
+};
 ```
 
 ### 6.4.2 Validation
 
-The commit validation rule (from `03-commit-model.md`) is applied against the
-branch-scoped heads:
+Ordinary entity writes on branches use the same validation rule as any other
+`ClientCommit`:
 
 ```
-For each entity touched by a commit:
-  commit.reads[entity].seq >= branch.head[entity].seq
+For each confirmed read in the commit:
+  there MUST NOT exist a later visible overlapping write on
+  (read.branch ?? commit.branch)
+  whose seq is > read.seq
 ```
 
-This means a commit is validated against the entity state **on the target
-branch**, not against any other branch. Two branches can independently modify
-the same entity without conflict until a merge is attempted.
+For normal branch writes, `read.branch` is omitted, so reads validate against
+the target branch's visible state. Merge proposals are the special case: they
+set `read.branch` explicitly for source/target/base observations. Two branches
+can independently modify the same entity without conflict until a merge is
+attempted.
 
 ### 6.4.3 Seq Assignment
 
-All branches share the Space's global seq counter (Lamport clock). A commit
-on branch A advances the global seq just as a commit on the default branch
-would. This ensures seqs are globally ordered across all branches, which is
-essential for point-in-time queries.
+All branches share the Space's global seq counter (Lamport clock). Every
+write-class command advances the global seq. Branch creation sets both
+`createdSeq` and the initial `headSeq`. Thereafter, entity-state writes
+(`/memory/transact`, including merge materialization) advance `headSeq`, while
+branch deletion does not. This ensures seqs are globally ordered across all
+branches, which is essential for point-in-time queries.
 
 ```
-commit on branch "feature-x":
+branch.create("feature-x"):
+  globalSeq++
+  branch["feature-x"].createdSeq = globalSeq
+  branch["feature-x"].headSeq = globalSeq
+
+entity-state commit on branch "feature-x":
   globalSeq++
   for each fact in commit:
     fact.seq = globalSeq
@@ -454,18 +478,37 @@ it is reported as a conflict. This is a deliberate simplicity trade-off:
 Branches are soft-deleted. The branch metadata is marked as `status: "deleted"`,
 but the branch record and its fact history remain.
 
+Branch deletion is also a **write-class** command. Like branch creation, it is
+serialized with ordinary writes, uses `localSeq` for replay safety, receives a
+global `seq`, and records a commit-log entry even though it does not emit
+entity facts.
+
 ### 6.9.1 API
 
 ```typescript
 interface DeleteBranchRequest {
+  localSeq: number;
   name: BranchName;
+}
+
+interface DeleteBranchResult {
+  seq: number;
 }
 ```
 
 ### 6.9.2 Semantics
 
 - The default branch cannot be deleted.
-- A deleted branch cannot be written to, read from, or merged.
+- A deleted branch cannot be written to or used as a merge target.
+- Ordinary reads and point-in-time reads against a deleted branch remain valid
+  for historical inspection and lineage traversal.
+- A deleted branch MAY still be used as a merge source, because that is a
+  read-only operation over preserved history.
+- `subscribe: true` on a deleted branch returns the current historical result as
+  a finite snapshot and then produces no future updates, because the branch can
+  no longer advance.
+- The branch-deletion command's own `seq` does **not** advance `headSeq`,
+  because it changes branch metadata but not the branch-visible entity state.
 - The branch name is permanently consumed -- a new branch with the same name
   cannot be created.
 - Facts committed on the branch remain in the shared fact history. They may be
@@ -497,11 +540,14 @@ state of the `feature-x` branch as it was at seq 42:
 1. **Seq bounds**: `atSeq` must be within the branch's seq range.
    - For the default branch, any seq from 0 to `headSeq` is valid.
    - For a non-default branch, valid seqs are those in the range
-     `[forkSeq, headSeq]` (the branch's own commits) plus any seq
-     in `[0, forkSeq]` (inherited from parent).
+     `[createdSeq, headSeq]`. A query before `createdSeq` is invalid because
+     the branch name did not exist yet.
 2. **Reconstruction**: the reconstruction algorithm from `05-queries.md` section
    5.5 applies, scoped to the branch. Only facts committed on the branch (or
    inherited from ancestors before fork) with seq <= `atSeq` are considered.
+   Even though the branch may have been created later than `forkSeq`, inherited
+   parent facts are still capped at `forkSeq` when reconstructing the branch's
+   visible state.
    Because merge results are materialized as ordinary target-branch writes, no
    extra merge-only read path is required.
 
@@ -534,9 +580,11 @@ interface BranchInfo {
   name: BranchName;
   parentBranch: BranchName;
   forkSeq: number;
+  createdSeq: number;
   headSeq: number;
   createdAt: number;
   status: "active" | "deleted";
+  deletedAt?: number;
   entityCount?: number;        // Number of entities with explicit heads
 }
 ```
@@ -551,12 +599,12 @@ A pattern can create a branch to develop a new feature without affecting the
 live data:
 
 ```
-1. branch.create("draft-v2")
+1. branch.create({ localSeq: nextLocalSeq(), name: "draft-v2" })
 2. commit({ branch: "draft-v2", operations: [...] })  // iterate on design
 3. commit({ branch: "draft-v2", operations: [...] })  // more changes
 4. proposal = merge({ source: "draft-v2", target: "main" })
 5. commit({ localSeq: nextLocalSeq(), ...proposal })   // ship it
-6. branch.delete("draft-v2")                           // clean up
+6. branch.delete({ localSeq: nextLocalSeq(), name: "draft-v2" }) // clean up
 ```
 
 ### 6.12.2 Undo/Redo via Branching
@@ -565,7 +613,7 @@ Branches provide a natural undo mechanism. Before a risky operation, create a
 branch:
 
 ```
-1. branch.create("before-migration")            // save point
+1. branch.create({ localSeq: nextLocalSeq(), name: "before-migration" }) // save point
 2. commit({ operations: [... migration ...] })   // run migration on main
 3. // If migration was wrong:
    merge({ source: "before-migration", target: "main" })  // revert
@@ -579,14 +627,14 @@ back to main.
 An LLM-driven pattern can use branches for speculative exploration:
 
 ```
-1. branch.create("speculation-1")
-2. branch.create("speculation-2")
+1. branch.create({ localSeq: nextLocalSeq(), name: "speculation-1" })
+2. branch.create({ localSeq: nextLocalSeq(), name: "speculation-2" })
 3. // Run different strategies in parallel on each branch
 4. // Evaluate results
 5. // Merge the winning branch
 6. merge({ source: "speculation-1", target: "main" })
-7. branch.delete("speculation-1")
-8. branch.delete("speculation-2")
+7. branch.delete({ localSeq: nextLocalSeq(), name: "speculation-1" })
+8. branch.delete({ localSeq: nextLocalSeq(), name: "speculation-2" })
 ```
 
 ### 6.12.4 Collaborative Editing
@@ -594,8 +642,8 @@ An LLM-driven pattern can use branches for speculative exploration:
 Multiple users can work on separate branches and merge their changes:
 
 ```
-1. branch.create("alice-edits")
-2. branch.create("bob-edits")
+1. branch.create({ localSeq: nextLocalSeq(), name: "alice-edits" })
+2. branch.create({ localSeq: nextLocalSeq(), name: "bob-edits" })
 3. // Alice and Bob work independently
 4. merge({ source: "alice-edits", target: "main" })    // Alice merges first
 5. merge({ source: "bob-edits", target: "main" })      // Bob may hit conflicts
