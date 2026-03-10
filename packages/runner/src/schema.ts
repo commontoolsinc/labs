@@ -6,7 +6,7 @@ import { ContextualFlowControl } from "./cfc.ts";
 import { type JSONSchema } from "./builder/types.ts";
 import type { JSONValue } from "@commontools/api";
 import { type StorableDatum } from "@commontools/memory/interface";
-import { shallowCloneIfNecessary } from "@commontools/memory/rich-storable-value";
+import { toStorableValue } from "@commontools/memory/storable-value";
 import { createCell, isCell } from "./cell.ts";
 import { readMaybeLink, resolveLink } from "./link-resolution.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
@@ -586,7 +586,7 @@ class TransformObjectCreator
         // When richStorableValues is ON, stored objects are deep-frozen.
         // Shallow-clone before injecting default properties to avoid TypeError.
         if (Object.isFrozen(value)) {
-          value = shallowCloneIfNecessary(value, false) as typeof value;
+          value = toStorableValue(value, false) as typeof value;
         }
         const propertyEntries = Object.entries(link.schema.properties) as [
           string,
