@@ -46,12 +46,10 @@ export default pattern((__ct_pattern_input) => {
                 type: "object",
                 properties: {
                     name: {
-                        type: "string",
-                        asOpaque: true
+                        type: "string"
                     },
                     active: {
-                        type: "boolean",
-                        asOpaque: true
+                        type: "boolean"
                     }
                 },
                 required: ["name", "active"]
@@ -65,12 +63,10 @@ export default pattern((__ct_pattern_input) => {
                         type: "object",
                         properties: {
                             name: {
-                                type: "string",
-                                asOpaque: true
+                                type: "string"
                             },
                             active: {
-                                type: "boolean",
-                                asOpaque: true
+                                type: "boolean"
                             }
                         },
                         required: ["name", "active"]
@@ -78,8 +74,7 @@ export default pattern((__ct_pattern_input) => {
                 },
                 required: ["element"]
             } as const satisfies __ctHelpers.JSONSchema, {
-                type: "boolean",
-                asOpaque: true
+                type: "boolean"
             } as const satisfies __ctHelpers.JSONSchema), {}).mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                 const entry = __ct_pattern_input.key("element");
                 return <span>{entry.key("name")}</span>;
@@ -90,16 +85,13 @@ export default pattern((__ct_pattern_input) => {
                         type: "object",
                         properties: {
                             name: {
-                                type: "string",
-                                asOpaque: true
+                                type: "string"
                             },
                             active: {
-                                type: "boolean",
-                                asOpaque: true
+                                type: "boolean"
                             }
                         },
-                        required: ["name", "active"],
-                        asOpaque: true
+                        required: ["name", "active"]
                     }
                 },
                 required: ["element"]
@@ -110,8 +102,7 @@ export default pattern((__ct_pattern_input) => {
                         type: "object",
                         properties: {}
                     }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
+                        $ref: "#/$defs/UIRenderable"
                     }],
                 $defs: {
                     UIRenderable: {
@@ -168,8 +159,7 @@ export default pattern((__ct_pattern_input) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

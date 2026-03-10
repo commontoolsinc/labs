@@ -66,7 +66,6 @@ export default pattern(() => {
                     }]
             } as const satisfies __ctHelpers.JSONSchema, {
                 $ref: "#/$defs/UIRenderable",
-                asOpaque: true,
                 $defs: {
                     UIRenderable: {
                         type: "object",
@@ -122,8 +121,7 @@ export default pattern(() => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

@@ -103,19 +103,16 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 name: {
-                                    type: "string",
-                                    asOpaque: true
+                                    type: "string"
                                 },
                                 profile: {
                                     type: "object",
                                     properties: {
                                         location: {
-                                            type: "string",
-                                            asOpaque: true
+                                            type: "string"
                                         },
                                         bio: {
-                                            type: "string",
-                                            asOpaque: true
+                                            type: "string"
                                         }
                                     },
                                     required: ["location", "bio"]
@@ -154,8 +151,7 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 age: {
-                                    type: "number",
-                                    asOpaque: true
+                                    type: "number"
                                 }
                             },
                             required: ["age"]
@@ -182,8 +178,7 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 age: {
-                                    type: "number",
-                                    asOpaque: true
+                                    type: "number"
                                 }
                             },
                             required: ["age"]
@@ -222,8 +217,7 @@ export default pattern((state) => {
         <p>
           Config summary: Dark mode{" "}
           {__ctHelpers.ifElse({
-            type: "boolean",
-            asOpaque: true
+            type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
@@ -274,8 +268,7 @@ export default pattern((state) => {
         {/* Conditional with multiple property accesses */}
         <p>
           Status: {__ctHelpers.ifElse({
-            type: "boolean",
-            asOpaque: true
+            type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
@@ -292,15 +285,13 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 name: {
-                                    type: "string",
-                                    asOpaque: true
+                                    type: "string"
                                 },
                                 settings: {
                                     type: "object",
                                     properties: {
                                         theme: {
-                                            type: "string",
-                                            asOpaque: true
+                                            type: "string"
                                         }
                                     },
                                     required: ["theme"]
@@ -333,8 +324,7 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 name: {
-                                    type: "string",
-                                    asOpaque: true
+                                    type: "string"
                                 }
                             },
                             required: ["name"]
@@ -371,16 +361,13 @@ export default pattern((state) => {
                                             type: "object",
                                             properties: {
                                                 small: {
-                                                    type: "number",
-                                                    asOpaque: true
+                                                    type: "number"
                                                 },
                                                 medium: {
-                                                    type: "number",
-                                                    asOpaque: true
+                                                    type: "number"
                                                 },
                                                 large: {
-                                                    type: "number",
-                                                    asOpaque: true
+                                                    type: "number"
                                                 }
                                             },
                                             required: ["small", "medium", "large"]
@@ -417,8 +404,7 @@ export default pattern((state) => {
         <p>
           Features:{" "}
           {__ctHelpers.ifElse({
-            type: "boolean",
-            asOpaque: true
+            type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
@@ -438,12 +424,10 @@ export default pattern((state) => {
                                     type: "object",
                                     properties: {
                                         darkMode: {
-                                            type: "boolean",
-                                            asOpaque: true
+                                            type: "boolean"
                                         },
                                         animations: {
-                                            type: "boolean",
-                                            asOpaque: true
+                                            type: "boolean"
                                         }
                                     },
                                     required: ["darkMode", "animations"]
@@ -457,8 +441,7 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: "boolean",
-            asOpaque: true
+            type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 config: {
                     features: {
@@ -482,8 +465,7 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 name: {
-                                    type: "string",
-                                    asOpaque: true
+                                    type: "string"
                                 }
                             },
                             required: ["name"]
@@ -510,8 +492,7 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 email: {
-                                    type: "string",
-                                    asOpaque: true
+                                    type: "string"
                                 }
                             },
                             required: ["email"]
@@ -554,8 +535,7 @@ export default pattern((state) => {
           Nested refs: {state.key("config", "theme", "colors", "primary")} in{" "}
           {state.key("config", "theme", "fonts", "body")} with{" "}
           {__ctHelpers.ifElse({
-            type: "boolean",
-            asOpaque: true
+            type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
@@ -608,8 +588,7 @@ export default pattern((state) => {
                     required: ["structure"]
                 }
             },
-            required: ["nested"],
-            asOpaque: true
+            required: ["nested"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
@@ -651,8 +630,7 @@ export default pattern((state) => {
                     required: ["with"]
                 }
             },
-            required: ["structure"],
-            asOpaque: true
+            required: ["structure"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
@@ -919,8 +897,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

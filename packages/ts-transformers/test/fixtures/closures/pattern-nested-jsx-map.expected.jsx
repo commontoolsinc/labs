@@ -23,15 +23,6 @@ interface PatternInput {
     items?: Cell<Default<Item[], [
     ]>>;
 }
-// FIXTURE: pattern-nested-jsx-map
-// Verifies: nested .map() calls in JSX both become mapWithPattern, including inside ifElse
-//   items.map((item) => ...) → items.mapWithPattern(pattern(...))
-//   item.tags.map((tag, i) => ...) → item.key("tags").mapWithPattern(pattern(...), { item: ... })
-//   hasItems ? items.map(...) : <p>No items</p> → ifElse(hasItems, items.mapWithPattern(...), <p>No items</p>)
-//   i === item.selectedIndex ? "* " : "" → ifElse(derive(...), "* ", "")
-// Context: Inner map on item.tags captures `item.selectedIndex` from the outer
-//   mapWithPattern, so it must be passed as a param. Ternaries become ifElse at
-//   both the outer and inner levels.
 export default pattern((__ct_pattern_input) => {
     const items = __ct_pattern_input.key("items");
     const hasItems = __ctHelpers.derive({
@@ -81,14 +72,12 @@ export default pattern((__ct_pattern_input) => {
     return {
         [UI]: (<div>
         {__ctHelpers.ifElse({
-            type: "boolean",
-            asOpaque: true
+            type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "array",
             items: {
                 $ref: "#/$defs/UIRenderable"
             },
-            asOpaque: true,
             $defs: {
                 UIRenderable: {
                     type: "object",
@@ -115,8 +104,7 @@ export default pattern((__ct_pattern_input) => {
                     type: "array",
                     items: {
                         $ref: "#/$defs/UIRenderable"
-                    },
-                    asOpaque: true
+                    }
                 }],
             $defs: {
                 UIRenderable: {
@@ -151,15 +139,13 @@ export default pattern((__ct_pattern_input) => {
                         type: "object",
                         properties: {
                             i: {
-                                type: "number",
-                                asOpaque: true
+                                type: "number"
                             },
                             item: {
                                 type: "object",
                                 properties: {
                                     selectedIndex: {
-                                        type: "number",
-                                        asOpaque: true
+                                        type: "number"
                                     }
                                 },
                                 required: ["selectedIndex"]
@@ -173,7 +159,31 @@ export default pattern((__ct_pattern_input) => {
                         item: {
                             selectedIndex: item.key("selectedIndex")
                         }
-                    }, ({ i, item }) => i === item.selectedIndex), "* ", "")}
+                    }, ({ i, item }) => __ctHelpers.derive({
+                        type: "object",
+                        properties: {
+                            i: {
+                                type: "number"
+                            },
+                            item: {
+                                type: "object",
+                                properties: {
+                                    selectedIndex: {
+                                        type: "number"
+                                    }
+                                },
+                                required: ["selectedIndex"]
+                            }
+                        },
+                        required: ["i", "item"]
+                    } as const satisfies __ctHelpers.JSONSchema, {
+                        type: "boolean"
+                    } as const satisfies __ctHelpers.JSONSchema, {
+                        i: i,
+                        item: {
+                            selectedIndex: item.selectedIndex
+                        }
+                    }, ({ i, item }) => i === item.selectedIndex)), "* ", "")}
                     {tag.key("name")}
                   </li>);
                 }, {
@@ -192,8 +202,7 @@ export default pattern((__ct_pattern_input) => {
                                     type: "object",
                                     properties: {
                                         selectedIndex: {
-                                            type: "number",
-                                            asOpaque: true
+                                            type: "number"
                                         }
                                     },
                                     required: ["selectedIndex"]
@@ -221,8 +230,7 @@ export default pattern((__ct_pattern_input) => {
                             type: "object",
                             properties: {}
                         }, {
-                            $ref: "#/$defs/UIRenderable",
-                            asOpaque: true
+                            $ref: "#/$defs/UIRenderable"
                         }],
                     $defs: {
                         UIRenderable: {
@@ -286,8 +294,7 @@ export default pattern((__ct_pattern_input) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }],
             $defs: {
                 UIRenderable: {
@@ -360,8 +367,7 @@ export default pattern((__ct_pattern_input) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

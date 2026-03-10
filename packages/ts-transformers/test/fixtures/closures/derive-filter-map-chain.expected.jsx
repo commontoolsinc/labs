@@ -66,8 +66,7 @@ export default pattern((state) => {
     type: "object",
     properties: {
         wishQuery: {
-            type: "string",
-            asOpaque: true
+            type: "string"
         }
     },
     required: ["wishQuery"]

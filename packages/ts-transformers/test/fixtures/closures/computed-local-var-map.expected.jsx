@@ -26,8 +26,7 @@ export default pattern((__ct_pattern_input) => {
                 type: "array",
                 items: {
                     $ref: "#/$defs/Item"
-                },
-                asOpaque: true
+                }
             }
         },
         required: ["items"],
@@ -48,8 +47,7 @@ export default pattern((__ct_pattern_input) => {
     } as const satisfies __ctHelpers.JSONSchema, {
         type: "array",
         items: {
-            $ref: "#/$defs/Item",
-            asOpaque: true
+            $ref: "#/$defs/Item"
         },
         $defs: {
             Item: {
@@ -74,10 +72,8 @@ export default pattern((__ct_pattern_input) => {
                     filtered: {
                         type: "array",
                         items: {
-                            $ref: "#/$defs/Item",
-                            asOpaque: true
-                        },
-                        asOpaque: true
+                            $ref: "#/$defs/Item"
+                        }
                     }
                 },
                 required: ["filtered"],
@@ -100,7 +96,6 @@ export default pattern((__ct_pattern_input) => {
                 items: {
                     $ref: "#/$defs/UIRenderable"
                 },
-                asOpaque: true,
                 $defs: {
                     UIRenderable: {
                         type: "object",
@@ -159,8 +154,7 @@ export default pattern((__ct_pattern_input) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

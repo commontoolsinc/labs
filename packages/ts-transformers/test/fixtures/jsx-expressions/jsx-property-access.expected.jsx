@@ -44,8 +44,7 @@ export default pattern((state) => {
         <h1>{state.key("user", "name")}</h1>
         <p>Age: {state.key("user", "age")}</p>
         <p>Active: {__ctHelpers.ifElse({
-            type: "boolean",
-            asOpaque: true
+            type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
@@ -61,8 +60,7 @@ export default pattern((state) => {
         <p>
           Notifications:{" "}
           {__ctHelpers.ifElse({
-            type: "boolean",
-            asOpaque: true
+            type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
@@ -83,8 +81,7 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 age: {
-                                    type: "number",
-                                    asOpaque: true
+                                    type: "number"
                                 }
                             },
                             required: ["age"]
@@ -112,8 +109,7 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 name: {
-                                    type: "string",
-                                    asOpaque: true
+                                    type: "string"
                                 }
                             },
                             required: ["name"]
@@ -153,8 +149,7 @@ export default pattern((state) => {
                                     type: "object",
                                     properties: {
                                         location: {
-                                            type: "string",
-                                            asOpaque: true
+                                            type: "string"
                                         }
                                     },
                                     required: ["location"]
@@ -189,12 +184,10 @@ export default pattern((state) => {
                             type: "array",
                             items: {
                                 type: "string"
-                            },
-                            asOpaque: true
+                            }
                         },
                         index: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["items", "index"]
@@ -205,8 +198,7 @@ export default pattern((state) => {
             anyOf: [{
                     type: "undefined"
                 }, {
-                    type: "string",
-                    asOpaque: true
+                    type: "string"
                 }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.key("items"),
@@ -223,8 +215,7 @@ export default pattern((state) => {
                             type: "array",
                             items: {
                                 type: "string"
-                            },
-                            asOpaque: true
+                            }
                         }
                     },
                     required: ["items"]
@@ -235,8 +226,7 @@ export default pattern((state) => {
             anyOf: [{
                     type: "undefined"
                 }, {
-                    type: "string",
-                    asOpaque: true
+                    type: "string"
                 }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.key("items")
@@ -251,12 +241,10 @@ export default pattern((state) => {
                             type: "array",
                             items: {
                                 type: "number"
-                            },
-                            asOpaque: true
+                            }
                         },
                         index: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["numbers", "index"]
@@ -267,8 +255,7 @@ export default pattern((state) => {
             anyOf: [{
                     type: "undefined"
                 }, {
-                    type: "number",
-                    asOpaque: true
+                    type: "number"
                 }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 numbers: state.key("numbers"),
@@ -291,8 +278,7 @@ export default pattern((state) => {
                                         type: "object",
                                         properties: {
                                             fontSize: {
-                                                type: "number",
-                                                asOpaque: true
+                                                type: "number"
                                             }
                                         },
                                         required: ["fontSize"]
@@ -319,8 +305,7 @@ export default pattern((state) => {
         </p>
         <div style={{
             backgroundColor: __ctHelpers.ifElse({
-                type: "boolean",
-                asOpaque: true
+                type: "boolean"
             } as const satisfies __ctHelpers.JSONSchema, {
                 type: "string"
             } as const satisfies __ctHelpers.JSONSchema, {
@@ -344,15 +329,13 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 name: {
-                                    type: "string",
-                                    asOpaque: true
+                                    type: "string"
                                 },
                                 profile: {
                                     type: "object",
                                     properties: {
                                         location: {
-                                            type: "string",
-                                            asOpaque: true
+                                            type: "string"
                                         }
                                     },
                                     required: ["location"]
@@ -388,8 +371,7 @@ export default pattern((state) => {
                                     type: "object",
                                     properties: {
                                         fontSize: {
-                                            type: "number",
-                                            asOpaque: true
+                                            type: "number"
                                         }
                                     },
                                     required: ["fontSize"]
@@ -414,8 +396,7 @@ export default pattern((state) => {
         <p>
           Has beta and dark mode:{" "}
           {__ctHelpers.ifElse({
-            type: "boolean",
-            asOpaque: true
+            type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
@@ -435,12 +416,10 @@ export default pattern((state) => {
                                     type: "object",
                                     properties: {
                                         beta: {
-                                            type: "boolean",
-                                            asOpaque: true
+                                            type: "boolean"
                                         },
                                         darkMode: {
-                                            type: "boolean",
-                                            asOpaque: true
+                                            type: "boolean"
                                         }
                                     },
                                     required: ["beta", "darkMode"]
@@ -454,8 +433,7 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: "boolean",
-            asOpaque: true
+            type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 config: {
                     features: {
@@ -583,8 +561,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

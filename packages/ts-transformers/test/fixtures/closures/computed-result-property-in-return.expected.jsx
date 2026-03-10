@@ -26,8 +26,7 @@ export default pattern((state) => {
                         type: "array",
                         items: {
                             type: "string"
-                        },
-                        asOpaque: true
+                        }
                     }
                 },
                 required: ["items"]
@@ -76,12 +75,10 @@ export default pattern((state) => {
     type: "object",
     properties: {
         summary: {
-            type: "string",
-            asOpaque: true
+            type: "string"
         },
         charCount: {
-            type: "number",
-            asOpaque: true
+            type: "number"
         }
     },
     required: ["summary", "charCount"]

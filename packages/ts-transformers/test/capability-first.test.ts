@@ -668,7 +668,10 @@ const p = pattern((input: Writable<{ foo: string; bar: string }>) => input.key("
       types: COMMONTOOLS_TYPES,
     });
 
-    assertStringIncludes(output, "asOpaque: true");
+    assert(
+      !output.includes("asOpaque: true"),
+      "output should not contain asOpaque: true",
+    );
     assertStringIncludes(output, '"foo"');
     assertStringIncludes(output, '"bar"');
   },
@@ -709,7 +712,10 @@ const p = pattern<Writable<{ foo: string; bar: string }>, { foo: string }>((inpu
       types: COMMONTOOLS_TYPES,
     });
 
-    assertStringIncludes(output, "asOpaque: true");
+    assert(
+      !output.includes("asOpaque: true"),
+      "output should not contain asOpaque: true",
+    );
     assertStringIncludes(output, '"foo"');
     assertStringIncludes(output, '"bar"');
   },
@@ -814,7 +820,10 @@ const fn = lift((input: Writable<{ foo: string; bar: string }>) => input);
       types: COMMONTOOLS_TYPES,
     });
 
-    assertStringIncludes(output, "asOpaque: true");
+    assert(
+      !output.includes("asOpaque: true"),
+      "output should not contain asOpaque: true",
+    );
     assertStringIncludes(output, '"foo"');
     assertStringIncludes(output, '"bar"');
   },
@@ -859,7 +868,10 @@ const p = pattern((input: Writable<{ foo: string; bar: string }>) => helper(inpu
       types: COMMONTOOLS_TYPES,
     });
 
-    assertStringIncludes(output, "asOpaque: true");
+    assert(
+      !output.includes("asOpaque: true"),
+      "output should not contain asOpaque: true",
+    );
     assertStringIncludes(output, '"foo"');
     assertStringIncludes(output, '"bar"');
   },
@@ -921,7 +933,10 @@ const p = pattern((input: Writable<{ foo: string; bar: string }>) => {
       types: COMMONTOOLS_TYPES,
     });
 
-    assertStringIncludes(output, "asOpaque: true");
+    assert(
+      !output.includes("asOpaque: true"),
+      "output should not contain asOpaque: true",
+    );
     assertStringIncludes(output, "asCell: true");
     assertStringIncludes(output, '"foo"');
     assertStringIncludes(output, 'required: ["foo"]');

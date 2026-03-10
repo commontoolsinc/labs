@@ -14,8 +14,7 @@ export default pattern((state) => {
             type: "object",
             properties: {
                 __ct_handler_event: {
-                    type: "string",
-                    asOpaque: true
+                    type: "string"
                 }
             },
             required: ["__ct_handler_event"]
@@ -49,8 +48,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { computed, pattern, UI } from "commontools";
+import { pattern, UI } from "commontools";
 interface State {
     text: string;
     searchTerm: string;
@@ -22,12 +22,6 @@ interface State {
     words: string[];
     separator: string;
 }
-// FIXTURE: method-chains
-// Verifies: chained method calls and array method chains in JSX are wrapped in derive()
-//   state.text.trim().toLowerCase()          → derive({text}, ...)
-//   state.items.filter(fn).map(fn)           → .filterWithPattern(...).mapWithPattern(...)
-//   state.prices.reduce(fn, 0)               → derive({prices, discount}, ...)
-// Context: Covers string chains, filter/map chains, reactive args, computed values, complex predicates
 export default pattern((state) => {
     return {
         [UI]: (<div>
@@ -40,8 +34,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         text: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         }
                     },
                     required: ["text"]
@@ -64,12 +57,10 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         text: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         },
                         searchTerm: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         }
                     },
                     required: ["text", "searchTerm"]
@@ -94,8 +85,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         text: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         }
                     },
                     required: ["text"]
@@ -123,8 +113,10 @@ export default pattern((state) => {
                             type: "array",
                             items: {
                                 type: "number"
-                            },
-                            asOpaque: true
+                            }
+                        },
+                        threshold: {
+                            type: "number"
                         }
                     },
                     required: ["items"]
@@ -153,8 +145,7 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 threshold: {
-                                    type: "number",
-                                    asOpaque: true
+                                    type: "number"
                                 }
                             },
                             required: ["threshold"]
@@ -182,15 +173,13 @@ export default pattern((state) => {
                 type: "object",
                 properties: {
                     x: {
-                        type: "number",
-                        asOpaque: true
+                        type: "number"
                     },
                     state: {
                         type: "object",
                         properties: {
                             threshold: {
-                                type: "number",
-                                asOpaque: true
+                                type: "number"
                             }
                         },
                         required: ["threshold"]
@@ -218,8 +207,7 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 threshold: {
-                                    type: "number",
-                                    asOpaque: true
+                                    type: "number"
                                 }
                             },
                             required: ["threshold"]
@@ -242,15 +230,13 @@ export default pattern((state) => {
                 type: "object",
                 properties: {
                     x: {
-                        type: "number",
-                        asOpaque: true
+                        type: "number"
                     },
                     state: {
                         type: "object",
                         properties: {
                             factor: {
-                                type: "number",
-                                asOpaque: true
+                                type: "number"
                             }
                         },
                         required: ["factor"]
@@ -269,8 +255,7 @@ export default pattern((state) => {
             type: "object",
             properties: {
                 element: {
-                    type: "number",
-                    asOpaque: true
+                    type: "number"
                 },
                 params: {
                     type: "object",
@@ -279,8 +264,7 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 factor: {
-                                    type: "number",
-                                    asOpaque: true
+                                    type: "number"
                                 }
                             },
                             required: ["factor"]
@@ -297,8 +281,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }],
             $defs: {
                 UIRenderable: {
@@ -331,8 +314,13 @@ export default pattern((state) => {
                             type: "array",
                             items: {
                                 type: "number"
-                            },
-                            asOpaque: true
+                            }
+                        },
+                        start: {
+                            type: "number"
+                        },
+                        end: {
+                            type: "number"
                         }
                     },
                     required: ["items"]
@@ -362,8 +350,7 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 start: {
-                                    type: "number",
-                                    asOpaque: true
+                                    type: "number"
                                 }
                             },
                             required: ["start"]
@@ -387,8 +374,7 @@ export default pattern((state) => {
             type: "object",
             properties: {
                 element: {
-                    type: "number",
-                    asOpaque: true
+                    type: "number"
                 },
                 params: {
                     type: "object",
@@ -397,8 +383,7 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 end: {
-                                    type: "number",
-                                    asOpaque: true
+                                    type: "number"
                                 }
                             },
                             required: ["end"]
@@ -430,16 +415,13 @@ export default pattern((state) => {
                             type: "array",
                             items: {
                                 type: "number"
-                            },
-                            asOpaque: true
+                            }
                         },
                         start: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         },
                         end: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["items", "start", "end"]
@@ -468,12 +450,10 @@ export default pattern((state) => {
                             type: "array",
                             items: {
                                 type: "string"
-                            },
-                            asOpaque: true
+                            }
                         },
                         prefix: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         }
                     },
                     required: ["names", "prefix"]
@@ -485,7 +465,40 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 names: state.key("names"),
                 prefix: state.key("prefix")
-            } }, ({ state }) => state.names.filter((n) => n.startsWith(state.prefix)).join(", "))}
+            } }, ({ state }) => state.key("names").filterWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+            const n = __ct_pattern_input.key("element");
+            const state = __ct_pattern_input.key("params", "state");
+            return n.startsWith(state.key("prefix"));
+        }, {
+            type: "object",
+            properties: {
+                element: {
+                    type: "string"
+                },
+                params: {
+                    type: "object",
+                    properties: {
+                        state: {
+                            type: "object",
+                            properties: {
+                                prefix: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["prefix"]
+                        }
+                    },
+                    required: ["state"]
+                }
+            },
+            required: ["element", "params"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema), {
+            state: {
+                prefix: state.prefix
+            }
+        }).join(", "))}
         </p>
 
         {/* Array find with reactive predicate */}
@@ -500,12 +513,10 @@ export default pattern((state) => {
                             type: "array",
                             items: {
                                 type: "string"
-                            },
-                            asOpaque: true
+                            }
                         },
                         searchTerm: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         }
                     },
                     required: ["names", "searchTerm"]
@@ -516,8 +527,7 @@ export default pattern((state) => {
             anyOf: [{
                     type: "undefined"
                 }, {
-                    type: "string",
-                    asOpaque: true
+                    type: "string"
                 }]
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 names: state.key("names"),
@@ -534,8 +544,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         name: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         }
                     },
                     required: ["name"]
@@ -557,8 +566,7 @@ export default pattern((state) => {
                         type: "object",
                         properties: {}
                     }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
+                        $ref: "#/$defs/UIRenderable"
                     }],
                 $defs: {
                     UIRenderable: {
@@ -586,12 +594,10 @@ export default pattern((state) => {
                             type: "array",
                             items: {
                                 type: "number"
-                            },
-                            asOpaque: true
+                            }
                         },
                         discount: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["prices", "discount"]
@@ -599,8 +605,7 @@ export default pattern((state) => {
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number",
-            asOpaque: true
+            type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 prices: state.key("prices"),
                 discount: state.key("discount")
@@ -620,12 +625,10 @@ export default pattern((state) => {
                             type: "array",
                             items: {
                                 type: "number"
-                            },
-                            asOpaque: true
+                            }
                         },
                         factor: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["items", "factor"]
@@ -654,12 +657,10 @@ export default pattern((state) => {
                             type: "array",
                             items: {
                                 type: "number"
-                            },
-                            asOpaque: true
+                            }
                         },
                         discount: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["prices", "discount"]
@@ -684,12 +685,10 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         text: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         },
                         prefix: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         }
                     },
                     required: ["text", "prefix"]
@@ -714,12 +713,10 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         text: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         },
                         prefix: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         }
                     },
                     required: ["text", "prefix"]
@@ -761,8 +758,10 @@ export default pattern((state) => {
                                     }
                                 },
                                 required: ["name", "age", "active"]
-                            },
-                            asOpaque: true
+                            }
+                        },
+                        minAge: {
+                            type: "number"
                         }
                     },
                     required: ["users"]
@@ -803,8 +802,7 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 minAge: {
-                                    type: "number",
-                                    asOpaque: true
+                                    type: "number"
                                 }
                             },
                             required: ["minAge"]
@@ -828,8 +826,7 @@ export default pattern((state) => {
           {state.key("users").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                 const u = __ct_pattern_input.key("element");
                 return (<li>{__ctHelpers.ifElse({
-                    type: "boolean",
-                    asOpaque: true
+                    type: "boolean"
                 } as const satisfies __ctHelpers.JSONSchema, {
                     type: "string"
                 } as const satisfies __ctHelpers.JSONSchema, {
@@ -843,8 +840,7 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 name: {
-                                    type: "string",
-                                    asOpaque: true
+                                    type: "string"
                                 }
                             },
                             required: ["name"]
@@ -862,8 +858,7 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 name: {
-                                    type: "string",
-                                    asOpaque: true
+                                    type: "string"
                                 }
                             },
                             required: ["name"]
@@ -902,8 +897,7 @@ export default pattern((state) => {
                         type: "object",
                         properties: {}
                     }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
+                        $ref: "#/$defs/UIRenderable"
                     }],
                 $defs: {
                     UIRenderable: {
@@ -952,12 +946,10 @@ export default pattern((state) => {
                                     }
                                 },
                                 required: ["name", "age", "active"]
-                            },
-                            asOpaque: true
+                            }
                         },
                         minAge: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["users", "minAge"]
@@ -1001,8 +993,7 @@ export default pattern((state) => {
                                     }
                                 },
                                 required: ["name", "age", "active"]
-                            },
-                            asOpaque: true
+                            }
                         }
                     },
                     required: ["users"]
@@ -1025,12 +1016,10 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         text: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         },
                         prefix: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         }
                     },
                     required: ["text", "prefix"]
@@ -1062,12 +1051,10 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         text: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         },
                         threshold: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["text", "threshold"]
@@ -1093,12 +1080,10 @@ export default pattern((state) => {
                             type: "array",
                             items: {
                                 type: "string"
-                            },
-                            asOpaque: true
+                            }
                         },
                         separator: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         }
                     },
                     required: ["words", "separator"]
@@ -1209,8 +1194,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

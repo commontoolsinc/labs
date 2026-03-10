@@ -30,8 +30,7 @@ export default pattern((state) => {
                         type: "object",
                         properties: {
                             element: {
-                                type: "string",
-                                asOpaque: true
+                                type: "string"
                             }
                         },
                         required: ["element"]
@@ -45,8 +44,7 @@ export default pattern((state) => {
                         type: "object",
                         properties: {}
                     }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
+                        $ref: "#/$defs/UIRenderable"
                     }],
                 $defs: {
                     UIRenderable: {
@@ -94,8 +92,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

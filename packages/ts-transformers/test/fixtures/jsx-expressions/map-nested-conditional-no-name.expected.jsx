@@ -40,8 +40,7 @@ export default pattern((_state: any) => {
                 const item = __ct_pattern_input.key("element");
                 return (<div>
                 {__ctHelpers.when({
-                    type: "string",
-                    asOpaque: true
+                    type: "string"
                 } as const satisfies __ctHelpers.JSONSchema, {
                     anyOf: [{}, {
                             type: "object",
@@ -75,8 +74,7 @@ export default pattern((_state: any) => {
                         type: "object",
                         properties: {}
                     }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
+                        $ref: "#/$defs/UIRenderable"
                     }],
                 $defs: {
                     UIRenderable: {
@@ -109,8 +107,7 @@ export default pattern((_state: any) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

@@ -28,12 +28,10 @@ export default pattern((state) => {
                                     }
                                 },
                                 required: ["value"]
-                            },
-                            asOpaque: true
+                            }
                         },
                         multiplier: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["items", "multiplier"]
@@ -88,8 +86,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

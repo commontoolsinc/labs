@@ -35,7 +35,6 @@ export default pattern((__ct_pattern_input) => {
             items: {
                 $ref: "#/$defs/UIRenderable"
             },
-            asOpaque: true,
             $defs: {
                 UIRenderable: {
                     type: "object",
@@ -78,8 +77,7 @@ export default pattern((__ct_pattern_input) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }],
             $defs: {
                 UIRenderable: {
@@ -138,8 +136,7 @@ export default pattern((__ct_pattern_input) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

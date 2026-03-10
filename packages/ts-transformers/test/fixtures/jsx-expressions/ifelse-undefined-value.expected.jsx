@@ -22,8 +22,7 @@ export default pattern(() => {
         type: "object",
         properties: {
             result: {
-                type: "unknown",
-                asOpaque: true
+                type: "unknown"
             }
         },
         required: ["result"]
@@ -34,23 +33,19 @@ export default pattern(() => {
                 type: "object",
                 properties: {
                     result: {
-                        type: "unknown",
-                        asOpaque: true
+                        type: "unknown"
                     }
                 },
                 required: ["result"]
-            }],
-        asOpaque: true
+            }]
     } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
         type: "object",
         properties: {
             pending: {
-                type: "boolean",
-                asOpaque: true
+                type: "boolean"
             },
             result: {
-                type: "unknown",
-                asOpaque: true
+                type: "unknown"
             }
         },
         required: ["pending", "result"]
@@ -67,8 +62,7 @@ export default pattern(() => {
         type: "object",
         properties: {
             data: {
-                type: "unknown",
-                asOpaque: true
+                type: "unknown"
             }
         },
         required: ["data"]
@@ -81,19 +75,16 @@ export default pattern(() => {
                 type: "object",
                 properties: {
                     data: {
-                        type: "unknown",
-                        asOpaque: true
+                        type: "unknown"
                     }
                 },
                 required: ["data"]
-            }],
-        asOpaque: true
+            }]
     } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
         type: "object",
         properties: {
             result: {
-                type: "unknown",
-                asOpaque: true
+                type: "unknown"
             }
         },
         required: ["result"]
@@ -126,8 +117,7 @@ export default pattern(() => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

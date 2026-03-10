@@ -38,8 +38,7 @@ export default pattern((state) => {
                                 }
                             },
                             required: ["name", "done"]
-                        },
-                        asOpaque: true
+                        }
                     }
                 },
                 required: ["items"]
@@ -72,12 +71,10 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         count: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         },
                         total: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["count", "total"]
@@ -128,8 +125,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

@@ -31,12 +31,10 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 price: {
-                                    type: "number",
-                                    asOpaque: true
+                                    type: "number"
                                 },
                                 quantity: {
-                                    type: "number",
-                                    asOpaque: true
+                                    type: "number"
                                 }
                             },
                             required: ["price", "quantity"]
@@ -45,12 +43,10 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 discount: {
-                                    type: "number",
-                                    asOpaque: true
+                                    type: "number"
                                 },
                                 taxRate: {
-                                    type: "number",
-                                    asOpaque: true
+                                    type: "number"
                                 }
                             },
                             required: ["discount", "taxRate"]
@@ -87,12 +83,10 @@ export default pattern((state) => {
                                 type: "object",
                                 properties: {
                                     discount: {
-                                        type: "number",
-                                        asOpaque: true
+                                        type: "number"
                                     },
                                     taxRate: {
-                                        type: "number",
-                                        asOpaque: true
+                                        type: "number"
                                     }
                                 },
                                 required: ["discount", "taxRate"]
@@ -126,8 +120,7 @@ export default pattern((state) => {
                         type: "object",
                         properties: {}
                     }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
+                        $ref: "#/$defs/UIRenderable"
                     }],
                 $defs: {
                     UIRenderable: {
@@ -196,8 +189,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

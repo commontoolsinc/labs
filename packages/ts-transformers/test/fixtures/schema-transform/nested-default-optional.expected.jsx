@@ -115,8 +115,7 @@ export default pattern((__ct_pattern_input) => {
     type: "object",
     properties: {
         state: {
-            $ref: "#/$defs/NestedOptionalState",
-            asOpaque: true
+            $ref: "#/$defs/NestedOptionalState"
         },
         increment: {
             type: "unknown",

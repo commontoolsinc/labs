@@ -46,8 +46,7 @@ export default pattern((__ct_pattern_input) => {
                 type: "object",
                 properties: {
                     description: {
-                        type: "string",
-                        asOpaque: true
+                        type: "string"
                     }
                 },
                 required: ["description"]
@@ -89,19 +88,16 @@ export default pattern((__ct_pattern_input) => {
                     type: "object",
                     properties: {
                         title: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         },
                         description: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         }
                     },
                     required: ["title", "description"]
                 },
                 hasDescription: {
-                    type: "boolean",
-                    asOpaque: true
+                    type: "boolean"
                 },
                 startEditing: {
                     asStream: true
@@ -115,8 +111,7 @@ export default pattern((__ct_pattern_input) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }],
             $defs: {
                 UIRenderable: {
@@ -193,8 +188,7 @@ export default pattern((__ct_pattern_input) => {
             $ref: "#/$defs/JSXElement"
         },
         card: {
-            $ref: "#/$defs/Card",
-            asOpaque: true
+            $ref: "#/$defs/Card"
         }
     },
     required: ["$UI", "card"],
@@ -218,8 +212,7 @@ export default pattern((__ct_pattern_input) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

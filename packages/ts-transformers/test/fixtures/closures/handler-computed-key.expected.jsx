@@ -24,8 +24,7 @@ export default pattern((state) => {
                     additionalProperties: {
                         type: "number",
                         asCell: true
-                    },
-                    asOpaque: true
+                    }
                 }
             },
             required: ["recordMap"]
@@ -64,8 +63,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

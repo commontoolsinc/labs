@@ -59,8 +59,7 @@ export default pattern((_) => {
                             $ref: "#/$defs/Question"
                         }, {
                             type: "null"
-                        }],
-                    asOpaque: true
+                        }]
                 }
             },
             required: ["topQuestion"],
@@ -82,13 +81,7 @@ export default pattern((_) => {
                 }
             }
         } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "string",
-                    asOpaque: true
-                }, {
-                    type: "string",
-                    "enum": [""]
-                }]
+            type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { topQuestion: topQuestion }, ({ topQuestion }) => topQuestion?.question || "")}</p>
 
         {/* WORKAROUND: Explicit null check preserves nullability */}
@@ -101,8 +94,7 @@ export default pattern((_) => {
                             $ref: "#/$defs/Question"
                         }, {
                             type: "null"
-                        }],
-                    asOpaque: true
+                        }]
                 }
             },
             required: ["topQuestion"],
@@ -124,13 +116,7 @@ export default pattern((_) => {
                 }
             }
         } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "string",
-                    asOpaque: true
-                }, {
-                    type: "string",
-                    "enum": [""]
-                }]
+            type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { topQuestion: topQuestion }, ({ topQuestion }) => topQuestion === null ? "" : topQuestion.question)}</p>
 
         {/* Same issue with category field */}
@@ -142,8 +128,7 @@ export default pattern((_) => {
                             $ref: "#/$defs/Question"
                         }, {
                             type: "null"
-                        }],
-                    asOpaque: true
+                        }]
                 }
             },
             required: ["topQuestion"],
@@ -165,13 +150,7 @@ export default pattern((_) => {
                 }
             }
         } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "string",
-                    asOpaque: true
-                }, {
-                    type: "string",
-                    "enum": [""]
-                }]
+            type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { topQuestion: topQuestion }, ({ topQuestion }) => topQuestion?.category || "")}</span>
         <span>Category (works): {__ctHelpers.derive({
             type: "object",
@@ -181,8 +160,7 @@ export default pattern((_) => {
                             $ref: "#/$defs/Question"
                         }, {
                             type: "null"
-                        }],
-                    asOpaque: true
+                        }]
                 }
             },
             required: ["topQuestion"],
@@ -204,13 +182,7 @@ export default pattern((_) => {
                 }
             }
         } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "string",
-                    asOpaque: true
-                }, {
-                    type: "string",
-                    "enum": [""]
-                }]
+            type: "string"
         } as const satisfies __ctHelpers.JSONSchema, { topQuestion: topQuestion }, ({ topQuestion }) => topQuestion === null ? "" : topQuestion.category)}</span>
       </div>),
     };
@@ -233,8 +205,7 @@ export default pattern((_) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

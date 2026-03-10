@@ -244,9 +244,8 @@ export class CommonToolsFormatter implements TypeFormatter {
         };
         if (wrapperKind === "Cell") {
           itemsOverride.asCell = true;
-        } else if (wrapperKind === "OpaqueRef") {
-          itemsOverride.asOpaque = true;
         }
+        // OpaqueRef needs no items override — it's just T
         childContext = { ...context, arrayItemsOverride: itemsOverride };
       }
     }
@@ -369,9 +368,8 @@ export class CommonToolsFormatter implements TypeFormatter {
         const itemsOverride: SchemaDefinition = { type: "unknown" };
         if (wrapperKind === "Cell") {
           itemsOverride.asCell = true;
-        } else if (wrapperKind === "OpaqueRef") {
-          itemsOverride.asOpaque = true;
         }
+        // OpaqueRef needs no items override — it's just T
         childContext = { ...context, arrayItemsOverride: itemsOverride };
       }
     }
@@ -907,11 +905,12 @@ export class CommonToolsFormatter implements TypeFormatter {
     schema: SchemaDefinition,
     wrapperKind: WrapperKind,
   ): SchemaDefinition {
-    const propertyName = wrapperKind === "Stream"
-      ? "asStream"
-      : wrapperKind === "Cell"
-      ? "asCell"
-      : "asOpaque";
+    // OpaqueRef is just T — no wrapper semantics needed
+    if (wrapperKind === "OpaqueRef") {
+      return schema;
+    }
+
+    const propertyName = wrapperKind === "Stream" ? "asStream" : "asCell";
 
     if (typeof schema === "boolean") {
       return schema === false

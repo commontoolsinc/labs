@@ -67,8 +67,7 @@ export default pattern((state) => {
                         type: "object",
                         properties: {}
                     }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
+                        $ref: "#/$defs/UIRenderable"
                     }],
                 $defs: {
                     UIRenderable: {
@@ -140,8 +139,7 @@ export default pattern((state) => {
             $ref: "#/$defs/JSXElement"
         },
         card: {
-            $ref: "#/$defs/Card",
-            asOpaque: true
+            $ref: "#/$defs/Card"
         }
     },
     required: ["$UI", "card"],
@@ -165,8 +163,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

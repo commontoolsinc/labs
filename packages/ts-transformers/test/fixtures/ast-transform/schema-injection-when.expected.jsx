@@ -14,14 +14,11 @@ export default pattern((__ct_pattern_input) => {
     const message = __ct_pattern_input.key("message");
     // when(condition, value) - returns value if condition is truthy, else condition
     const result = when({
-        type: "boolean",
-        asOpaque: true
+        type: "boolean"
     } as const satisfies __ctHelpers.JSONSchema, {
-        type: "string",
-        asOpaque: true
+        type: "string"
     } as const satisfies __ctHelpers.JSONSchema, {
-        type: ["boolean", "string"],
-        asOpaque: true
+        type: ["boolean", "string"]
     } as const satisfies __ctHelpers.JSONSchema, enabled, message);
     return {
         [NAME]: "when schema test",
@@ -57,8 +54,7 @@ export default pattern((__ct_pattern_input) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

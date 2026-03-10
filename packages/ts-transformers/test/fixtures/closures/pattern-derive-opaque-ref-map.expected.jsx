@@ -16,8 +16,7 @@ export default pattern((items) => {
                 type: "array",
                 items: {
                     type: "number"
-                },
-                asOpaque: true
+                }
             }
         },
         required: ["items"]
@@ -25,8 +24,7 @@ export default pattern((items) => {
         type: "array",
         items: {
             type: "number"
-        },
-        asOpaque: true
+        }
     } as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => items.map((n) => n * 2));
     return doubled;
 }, {
@@ -38,8 +36,7 @@ export default pattern((items) => {
     type: "array",
     items: {
         type: "number"
-    },
-    asOpaque: true
+    }
 } as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }

@@ -14,8 +14,7 @@ export default pattern((__ct_pattern_input) => {
                     type: "array",
                     items: {
                         type: "string"
-                    },
-                    asOpaque: true
+                    }
                 }
             },
             required: ["list"]
@@ -48,8 +47,7 @@ export default pattern((__ct_pattern_input) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

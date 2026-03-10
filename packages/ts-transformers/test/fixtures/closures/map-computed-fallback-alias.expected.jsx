@@ -38,8 +38,7 @@ export default pattern((__ct_pattern_input) => {
                                                     items: {
                                                         $ref: "#/$defs/Reaction"
                                                     }
-                                                }],
-                                            asOpaque: true
+                                                }]
                                         }]
                                 }
                             }
@@ -96,8 +95,7 @@ export default pattern((__ct_pattern_input) => {
                                         type: "object",
                                         properties: {
                                             id: {
-                                                type: "string",
-                                                asOpaque: true
+                                                type: "string"
                                             }
                                         },
                                         required: ["id"]
@@ -125,8 +123,7 @@ export default pattern((__ct_pattern_input) => {
                                 type: "object",
                                 properties: {}
                             }, {
-                                $ref: "#/$defs/UIRenderable",
-                                asOpaque: true
+                                $ref: "#/$defs/UIRenderable"
                             }],
                         $defs: {
                             UIRenderable: {
@@ -186,8 +183,7 @@ export default pattern((__ct_pattern_input) => {
                         type: "object",
                         properties: {}
                     }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
+                        $ref: "#/$defs/UIRenderable"
                     }],
                 $defs: {
                     UIRenderable: {
@@ -256,8 +252,7 @@ export default pattern((__ct_pattern_input) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

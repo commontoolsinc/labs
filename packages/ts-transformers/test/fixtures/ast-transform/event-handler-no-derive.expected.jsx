@@ -37,8 +37,7 @@ export default pattern((__ct_pattern_input) => {
             type: "object",
             properties: {
                 count: {
-                    type: "number",
-                    asOpaque: true
+                    type: "number"
                 }
             },
             required: ["count"]
@@ -74,8 +73,7 @@ export default pattern((__ct_pattern_input) => {
             $ref: "#/$defs/JSXElement"
         },
         count: {
-            type: "number",
-            asOpaque: true
+            type: "number"
         }
     },
     required: ["$UI", "count"],
@@ -87,8 +85,7 @@ export default pattern((__ct_pattern_input) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

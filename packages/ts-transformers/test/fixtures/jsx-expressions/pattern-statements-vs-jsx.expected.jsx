@@ -31,13 +31,16 @@ const decrement = handler(false as const satisfies __ctHelpers.JSONSchema, {
 }) => {
     state.value.set(state.value.get() - 1);
 });
-// FIXTURE: pattern-statements-vs-jsx
-// Verifies: only JSX-context expressions are transformed; statement-context expressions are left alone
-//   const next = state.value + 1    → NOT transformed (statement context)
-//   <p>{state.value + 1}</p>        → derive({value}, ({state}) => state.value + 1) (JSX context)
-//   state.value > 10 ? "High":"Low" → ifElse(derive(...), "High", "Low") (JSX context)
-// Context: Ensures the transformer distinguishes between statement and JSX expression contexts
 export default pattern((state) => {
+    // These should NOT be transformed (statement context)
+    const next = state.key("value") + 1;
+    const previous = state.key("value") - 1;
+    const doubled = state.key("value") * 2;
+    const _isHigh = state.key("value") > 10;
+    // This should NOT be transformed (statement context)
+    if (state.key("value") > 100) {
+        console.log("Too high!");
+    }
     return {
         // This template literal SHOULD be transformed (builder function context)
         [NAME]: str `Simple counter: ${state.key("value")}`,
@@ -54,8 +57,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         value: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["value"]
@@ -75,8 +77,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         value: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["value"]
@@ -96,8 +97,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         value: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["value"]
@@ -125,8 +125,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         value: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["value"]
@@ -143,6 +142,12 @@ export default pattern((state) => {
       </div>),
         // Direct property access - no transformation needed
         value: state.key("value"),
+        // These should NOT be transformed (object literal in statement context)
+        metadata: {
+            next: next,
+            previous: previous,
+            doubled: doubled,
+        },
     };
 }, {
     type: "object",
@@ -156,18 +161,31 @@ export default pattern((state) => {
     type: "object",
     properties: {
         $NAME: {
-            type: "string",
-            asOpaque: true
+            type: "string"
         },
         $UI: {
             $ref: "#/$defs/JSXElement"
         },
         value: {
-            type: "number",
-            asOpaque: true
+            type: "number"
+        },
+        metadata: {
+            type: "object",
+            properties: {
+                next: {
+                    type: "number"
+                },
+                previous: {
+                    type: "number"
+                },
+                doubled: {
+                    type: "number"
+                }
+            },
+            required: ["next", "previous", "doubled"]
         }
     },
-    required: ["$NAME", "$UI", "value"],
+    required: ["$NAME", "$UI", "value", "metadata"],
     $defs: {
         JSXElement: {
             anyOf: [{
@@ -176,8 +194,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

@@ -49,8 +49,7 @@ export default pattern((state) => {
         <ct-button onClick={decrement(state)}>-</ct-button>
         <ul>
           <li>next number: {__ctHelpers.ifElse({
-            type: "number",
-            asOpaque: true
+            type: "number"
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, {
@@ -64,8 +63,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         value: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["value"]
@@ -95,15 +93,13 @@ export default pattern((state) => {
     type: "object",
     properties: {
         $NAME: {
-            type: "string",
-            asOpaque: true
+            type: "string"
         },
         $UI: {
             $ref: "#/$defs/JSXElement"
         },
         value: {
-            type: "number",
-            asOpaque: true
+            type: "number"
         }
     },
     required: ["$NAME", "$UI", "value"],
@@ -115,8 +111,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

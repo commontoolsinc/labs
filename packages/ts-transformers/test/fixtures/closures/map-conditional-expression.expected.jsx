@@ -27,8 +27,7 @@ export default pattern((state) => {
                 } as const satisfies __ctHelpers.JSONSchema, {
                     type: "number"
                 } as const satisfies __ctHelpers.JSONSchema, {
-                    type: "number",
-                    asOpaque: true
+                    type: "number"
                 } as const satisfies __ctHelpers.JSONSchema, {
                     type: "number"
                 } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
@@ -38,8 +37,7 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 price: {
-                                    type: "number",
-                                    asOpaque: true
+                                    type: "number"
                                 }
                             },
                             required: ["price"]
@@ -48,8 +46,7 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 threshold: {
-                                    type: "number",
-                                    asOpaque: true
+                                    type: "number"
                                 }
                             },
                             required: ["threshold"]
@@ -72,8 +69,7 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 price: {
-                                    type: "number",
-                                    asOpaque: true
+                                    type: "number"
                                 }
                             },
                             required: ["price"]
@@ -82,8 +78,7 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 discount: {
-                                    type: "number",
-                                    asOpaque: true
+                                    type: "number"
                                 }
                             },
                             required: ["discount"]
@@ -114,12 +109,10 @@ export default pattern((state) => {
                                 type: "object",
                                 properties: {
                                     threshold: {
-                                        type: "number",
-                                        asOpaque: true
+                                        type: "number"
                                     },
                                     discount: {
-                                        type: "number",
-                                        asOpaque: true
+                                        type: "number"
                                     }
                                 },
                                 required: ["threshold", "discount"]
@@ -150,8 +143,7 @@ export default pattern((state) => {
                         type: "object",
                         properties: {}
                     }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
+                        $ref: "#/$defs/UIRenderable"
                     }],
                 $defs: {
                     UIRenderable: {
@@ -219,8 +211,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

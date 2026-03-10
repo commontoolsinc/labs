@@ -1,54 +1,62 @@
 import * as __ctHelpers from "commontools";
-import { pattern, UI } from "commontools";
-interface State {
-    items: Array<{
-        name: string;
-    }>;
+import { pattern, UI, OpaqueRef } from "commontools";
+interface Item {
+    id: number;
+    name: string;
 }
-// FIXTURE: map-capture-object-literal
-// Verifies: plain object literal closed over in .map() is captured as a non-reactive param
-//   .map(fn) → .mapWithPattern(pattern(...), { style: style })
-//   style (object literal) → params.style accessed via .params (not .key) since it is non-reactive
+interface State {
+    items: any; // Type will be asserted
+    prefix: string;
+}
 export default pattern((state) => {
-    const style = { color: "red", fontSize: 14 };
+    // Type assertion to OpaqueRef<Item[]>
+    const typedItems = state.key("items") as OpaqueRef<Item[]>;
     return {
         [UI]: (<div>
-        {state.key("items").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+        {/* Map on type-asserted reactive array */}
+        {typedItems.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
                 const item = __ct_pattern_input.key("element");
-                const style = __ct_pattern_input.params.style;
-                return (<span style={style}>{item.key("name")}</span>);
+                const state = __ct_pattern_input.key("params", "state");
+                return (<div>
+            {state.key("prefix")}: {item.key("name")}
+          </div>);
             }, {
                 type: "object",
                 properties: {
                     element: {
-                        type: "object",
-                        properties: {
-                            name: {
-                                type: "string"
-                            }
-                        },
-                        required: ["name"]
+                        $ref: "#/$defs/Item"
                     },
                     params: {
                         type: "object",
                         properties: {
-                            style: {
+                            state: {
                                 type: "object",
                                 properties: {
-                                    color: {
+                                    prefix: {
                                         type: "string"
-                                    },
-                                    fontSize: {
-                                        type: "number"
                                     }
                                 },
-                                required: ["color", "fontSize"]
+                                required: ["prefix"]
                             }
                         },
-                        required: ["style"]
+                        required: ["state"]
                     }
                 },
-                required: ["element", "params"]
+                required: ["element", "params"],
+                $defs: {
+                    Item: {
+                        type: "object",
+                        properties: {
+                            id: {
+                                type: "number"
+                            },
+                            name: {
+                                type: "string"
+                            }
+                        },
+                        required: ["id", "name"]
+                    }
+                }
             } as const satisfies __ctHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"
@@ -70,27 +78,21 @@ export default pattern((state) => {
                     }
                 }
             } as const satisfies __ctHelpers.JSONSchema), {
-                style: style
+                state: {
+                    prefix: state.key("prefix")
+                }
             })}
       </div>),
     };
 }, {
     type: "object",
     properties: {
-        items: {
-            type: "array",
-            items: {
-                type: "object",
-                properties: {
-                    name: {
-                        type: "string"
-                    }
-                },
-                required: ["name"]
-            }
+        items: true,
+        prefix: {
+            type: "string"
         }
     },
-    required: ["items"]
+    required: ["items", "prefix"]
 } as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {

@@ -22,8 +22,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         count: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["count"]
@@ -42,8 +41,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         count: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["count"]
@@ -62,8 +60,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         count: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["count"]
@@ -82,8 +79,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         price: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["price"]
@@ -102,8 +98,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         count: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["count"]
@@ -124,12 +119,10 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         price: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         },
                         discount: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["price", "discount"]
@@ -149,12 +142,10 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         price: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         },
                         quantity: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["price", "quantity"]
@@ -174,12 +165,10 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         price: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         },
                         quantity: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["price", "quantity"]
@@ -200,20 +189,16 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         count: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         },
                         quantity: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         },
                         price: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         },
                         discount: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["count", "quantity", "price", "discount"]
@@ -239,8 +224,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         count: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["count"]
@@ -259,8 +243,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         price: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["price"]
@@ -278,8 +261,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         price: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["price"]
@@ -326,8 +308,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {

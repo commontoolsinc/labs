@@ -1,5 +1,5 @@
 import * as __ctHelpers from "commontools";
-import { computed, pattern, UI } from "commontools";
+import { pattern, UI } from "commontools";
 interface Item {
     id: number;
     name: string;
@@ -12,13 +12,6 @@ interface State {
     discount: number;
     taxRate: number;
 }
-// FIXTURE: jsx-complex-mixed
-// Verifies: mixed transforms -- map, filter, arithmetic, ternary/ifElse, attribute bindings in one pattern
-//   .filter(fn)              → .filterWithPattern(pattern(...), {captures})
-//   .map(fn)                 → .mapWithPattern(pattern(...), {captures})
-//   ternary cond ? a : b     → ifElse(derive(cond), a, b)
-//   {state.discount * 100}   → derive({discount}, ...)
-// Context: Comprehensive fixture combining array methods, conditionals, derive, and attributes
 export default pattern((state) => {
     return {
         [UI]: (<div>
@@ -36,12 +29,10 @@ export default pattern((state) => {
                             type: "array",
                             items: {
                                 $ref: "#/$defs/Item"
-                            },
-                            asOpaque: true
+                            }
                         },
                         filter: {
-                            type: "string",
-                            asOpaque: true
+                            type: "string"
                         }
                     },
                     required: ["items", "filter"]
@@ -73,7 +64,60 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, { state: {
                 items: state.key("items"),
                 filter: state.key("filter")
-            } }, ({ state }) => state.items.filter((i) => i.name.includes(state.filter)).length)}
+            } }, ({ state }) => state.key("items").filterWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+            const i = __ct_pattern_input.key("element");
+            const state = __ct_pattern_input.key("params", "state");
+            return i.name.includes(state.key("filter"));
+        }, {
+            type: "object",
+            properties: {
+                element: {
+                    $ref: "#/$defs/Item"
+                },
+                params: {
+                    type: "object",
+                    properties: {
+                        state: {
+                            type: "object",
+                            properties: {
+                                filter: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["filter"]
+                        }
+                    },
+                    required: ["state"]
+                }
+            },
+            required: ["element", "params"],
+            $defs: {
+                Item: {
+                    type: "object",
+                    properties: {
+                        id: {
+                            type: "number"
+                        },
+                        name: {
+                            type: "string"
+                        },
+                        price: {
+                            type: "number"
+                        },
+                        active: {
+                            type: "boolean"
+                        }
+                    },
+                    required: ["id", "name", "price", "active"]
+                }
+            }
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema), {
+            state: {
+                filter: state.filter
+            }
+        }).length)}
         </p>
 
         <h3>Array with Complex Expressions</h3>
@@ -92,8 +136,7 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 price: {
-                                    type: "number",
-                                    asOpaque: true
+                                    type: "number"
                                 }
                             },
                             required: ["price"]
@@ -102,8 +145,7 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 discount: {
-                                    type: "number",
-                                    asOpaque: true
+                                    type: "number"
                                 }
                             },
                             required: ["discount"]
@@ -130,8 +172,7 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 price: {
-                                    type: "number",
-                                    asOpaque: true
+                                    type: "number"
                                 }
                             },
                             required: ["price"]
@@ -140,12 +181,10 @@ export default pattern((state) => {
                             type: "object",
                             properties: {
                                 discount: {
-                                    type: "number",
-                                    asOpaque: true
+                                    type: "number"
                                 },
                                 taxRate: {
-                                    type: "number",
-                                    asOpaque: true
+                                    type: "number"
                                 }
                             },
                             required: ["discount", "taxRate"]
@@ -179,12 +218,10 @@ export default pattern((state) => {
                                 type: "object",
                                 properties: {
                                     discount: {
-                                        type: "number",
-                                        asOpaque: true
+                                        type: "number"
                                     },
                                     taxRate: {
-                                        type: "number",
-                                        asOpaque: true
+                                        type: "number"
                                     }
                                 },
                                 required: ["discount", "taxRate"]
@@ -221,8 +258,7 @@ export default pattern((state) => {
                         type: "object",
                         properties: {}
                     }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
+                        $ref: "#/$defs/UIRenderable"
                     }],
                 $defs: {
                     UIRenderable: {
@@ -255,8 +291,7 @@ export default pattern((state) => {
                             type: "array",
                             items: {
                                 $ref: "#/$defs/Item"
-                            },
-                            asOpaque: true
+                            }
                         }
                     },
                     required: ["items"]
@@ -319,8 +354,7 @@ export default pattern((state) => {
                 }
             }
         } as const satisfies __ctHelpers.JSONSchema, {
-            type: "boolean",
-            asOpaque: true
+            type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema), {}).length)}</p>
 
         <h3>Simple Operations</h3>
@@ -331,8 +365,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         discount: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["discount"]
@@ -351,8 +384,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {
                         taxRate: {
-                            type: "number",
-                            asOpaque: true
+                            type: "number"
                         }
                     },
                     required: ["taxRate"]
@@ -384,8 +416,7 @@ export default pattern((state) => {
                             type: "array",
                             items: {
                                 $ref: "#/$defs/Item"
-                            },
-                            asOpaque: true
+                            }
                         }
                     },
                     required: ["items"]
@@ -435,8 +466,7 @@ export default pattern((state) => {
                             type: "array",
                             items: {
                                 $ref: "#/$defs/Item"
-                            },
-                            asOpaque: true
+                            }
                         }
                     },
                     required: ["items"]
@@ -488,8 +518,7 @@ export default pattern((state) => {
                             type: "array",
                             items: {
                                 $ref: "#/$defs/Item"
-                            },
-                            asOpaque: true
+                            }
                         }
                     },
                     required: ["items"]
@@ -611,8 +640,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
+                    $ref: "#/$defs/UIRenderable"
                 }]
         },
         UIRenderable: {
