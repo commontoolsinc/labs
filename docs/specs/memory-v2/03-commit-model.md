@@ -213,6 +213,7 @@ type SessionId = string;  // Server-issued opaque identifier, resumable across r
 interface MergeContext {
   sourceBranch: BranchId;
   sourceSeq: number;
+  baseBranch: BranchId;
   baseSeq: number;
 }
 
@@ -256,6 +257,7 @@ interface MergeProposal {
 // Version-based only — no hash comparison needed.
 interface ConfirmedRead {
   id: EntityId;          // Entity that was read
+  branch?: BranchId;     // Defaults to commit.branch; set explicitly for merge source/base reads
   path: ReadPath;        // Relative to EntityDocument.value; [] = root
   seq: number;           // Seq number at which that path was observed
 }
@@ -277,10 +279,18 @@ Read paths are relative to the entity's `value` payload, not the enclosing
 server re-roots these paths under `"value"` internally when it walks the stored
 document.
 
+Confirmed reads are also optionally **branch-scoped**. When `branch` is
+omitted, the read is validated against `commit.branch`. Merge proposals use
+explicit `branch` values to validate source, target, and merge-base observations
+against the correct branch heads.
+
 **Why separate confirmed and pending reads?** The server needs to know which
 reads are against confirmed state (so it can validate freshness using seq
 comparison) and which are against pending state (so it can resolve them once
 the referenced pending commit is confirmed or rejected).
+
+In v1 terminology, these read dependencies are the semantic replacement for
+`claims`. v2 does not define a separate claim operation on the wire.
 
 **Why `localSeq` instead of commit hashes?** Pending-read tracking needs a
 cheap session-local handle for stacked optimistic writes, so the client assigns
@@ -348,14 +358,15 @@ inner payload described here.
 
 ```
 For each confirmed read in the commit:
-  there MUST NOT exist a later visible fact on the target branch
+  there MUST NOT exist a later visible fact on
+  (read.branch ?? commit.branch)
   whose write footprint overlaps (read.id, read.path)
   and whose seq is > read.seq
 ```
 
 In prose: the commit's confirmed reads must be **at least as fresh as the latest
-overlapping write** on the target branch. A later write to some unrelated path
-of the same entity does not invalidate the read.
+overlapping write** on the branch where the read was taken. A later write to
+some unrelated path of the same entity does not invalidate the read.
 
 **Why seq-based instead of hash-based?** Strict CAS rejects a commit if
 *any* concurrent write touches the same entity, even if the concurrent write
@@ -392,7 +403,7 @@ function validate(
   // 1. Validate confirmed reads
   for (const read of commit.reads.confirmed) {
     const overlappingWrite = serverState.findLatestOverlappingWrite({
-      branch: commit.branch,
+      branch: read.branch ?? commit.branch,
       id: read.id,
       path: read.path,
       afterSeq: read.seq,
@@ -443,6 +454,9 @@ interface ConflictError extends Error {
 interface ConflictDetail {
   // Entity where the conflict occurred
   id: EntityId;
+
+  // Branch on which the conflicting read was validated
+  branch: BranchId;
 
   // Specific value-relative path that conflicted
   path: ReadPath;
@@ -637,13 +651,17 @@ The client provider fires three types of notifications to the scheduler:
 - For a **rejected** commit, the "commit" notification was already fired
   (synchronously). A "revert" notification fires when the rejection arrives,
   **before** the commit promise resolves with the error.
-- When a "revert" and an "integrate" overlap (the server rejects our commit
-  but also delivers an external update for the same entity), the provider
-  performs a **partial revert**: it skips entities that were already superseded
-  by the integrate, reverting only the remaining entities.
 - "Integrate" notifications for external changes MUST NOT be fired for
-  entities that are in pending state on this client. Wait until the pending
-  commit for that entity is resolved (confirmed or rejected) first.
+  entities/paths whose currently visible state is still shadowed by a more
+  advanced local pending state on this client. The provider MAY merge those
+  external revisions into a non-current confirmed/heap tier, but it MUST NOT
+  notify the scheduler until the pending local state for that entity/path is no
+  longer current.
+- When a rejected commit rolls back while a later local pending state still
+  shadows part of the same entity/path, the resulting "revert" notification is
+  based on the **visible** state change only. In practice this can produce a
+  partial revert for the subset of entity paths whose visible state actually
+  changed after the rejected pending entries were removed.
 
 ---
 

@@ -113,11 +113,11 @@ CREATE TABLE fact (
   parent      TEXT,                          -- Hash of previous fact (NULL for first write)
   branch      TEXT    NOT NULL DEFAULT '',   -- Branch this fact was committed on (denormalized)
   seq     INTEGER NOT NULL,             -- Lamport clock at commit time
-  commit_ref  TEXT    NOT NULL,             -- FK → commit.hash
+  commit_seq  INTEGER NOT NULL,             -- FK → commit.seq
   fact_type   TEXT    NOT NULL,             -- 'set' | 'patch' | 'delete'
 
   FOREIGN KEY (value_ref)  REFERENCES value(hash),
-  FOREIGN KEY (commit_ref) REFERENCES commit(hash)
+  FOREIGN KEY (commit_seq) REFERENCES commit(seq)
 );
 
 -- Query facts by seq range (for subscriptions and point-in-time reads)
@@ -130,7 +130,7 @@ CREATE INDEX idx_fact_id ON fact (id);
 CREATE INDEX idx_fact_id_seq ON fact (id, seq);
 
 -- Query facts by commit (for commit inspection)
-CREATE INDEX idx_fact_commit ON fact (commit_ref);
+CREATE INDEX idx_fact_commit ON fact (commit_seq);
 
 -- Query facts by branch (for branch-scoped reads)
 CREATE INDEX idx_fact_branch ON fact (branch);
@@ -146,7 +146,7 @@ CREATE INDEX idx_fact_branch ON fact (branch);
 | `parent` | Hash of the previous fact for this entity. `NULL` when this is the entity's first fact (parent is the Empty reference, which is implicit). |
 | `branch` | Branch this fact was committed on. Denormalized from the commit for efficient branch-scoped queries. Default `''` (main branch). |
 | `seq` | Space-global Lamport clock, assigned at commit time. All facts in the same commit share the same seq. |
-| `commit_ref` | Hash of the commit that included this fact. |
+| `commit_seq` | Seq of the commit that included this fact. Join through `commit.seq` to recover commit hash or payload. |
 | `fact_type` | Discriminant: `'set'`, `'patch'`, or `'delete'`. |
 
 ### 3.3 `head` — Current State Pointer
@@ -411,15 +411,15 @@ CREATE TABLE IF NOT EXISTS fact (
   parent      TEXT,
   branch      TEXT    NOT NULL DEFAULT '',
   seq     INTEGER NOT NULL,
-  commit_ref  TEXT    NOT NULL,
+  commit_seq  INTEGER NOT NULL,
   fact_type   TEXT    NOT NULL,
   FOREIGN KEY (value_ref)  REFERENCES value(hash),
-  FOREIGN KEY (commit_ref) REFERENCES commit(hash)
+  FOREIGN KEY (commit_seq) REFERENCES commit(seq)
 );
 CREATE INDEX IF NOT EXISTS idx_fact_seq    ON fact (seq);
 CREATE INDEX IF NOT EXISTS idx_fact_id         ON fact (id);
 CREATE INDEX IF NOT EXISTS idx_fact_id_seq ON fact (id, seq);
-CREATE INDEX IF NOT EXISTS idx_fact_commit     ON fact (commit_ref);
+CREATE INDEX IF NOT EXISTS idx_fact_commit     ON fact (commit_seq);
 CREATE INDEX IF NOT EXISTS idx_fact_branch     ON fact (branch);
 
 CREATE TABLE IF NOT EXISTS head (
@@ -516,8 +516,8 @@ INSERT OR IGNORE INTO value (hash, data)
 VALUES (:ops_hash, :ops_json);
 
 -- Step 2: Insert the fact
-INSERT INTO fact (hash, id, value_ref, parent, branch, seq, commit_ref, fact_type)
-VALUES (:fact_hash, :entity_id, :ops_hash, :parent_hash, :branch, :seq, :commit_hash, 'patch');
+INSERT INTO fact (hash, id, value_ref, parent, branch, seq, commit_seq, fact_type)
+VALUES (:fact_hash, :entity_id, :ops_hash, :parent_hash, :branch, :seq, :commit_seq, 'patch');
 
 -- Step 3: Update (or insert) the head pointer
 INSERT INTO head (branch, id, fact_hash, seq)
@@ -533,8 +533,8 @@ INSERT OR IGNORE INTO value (hash, data)
 VALUES (:value_hash, :value_json);
 
 -- Step 2: Insert the fact
-INSERT INTO fact (hash, id, value_ref, parent, branch, seq, commit_ref, fact_type)
-VALUES (:fact_hash, :entity_id, :value_hash, :parent_hash, :branch, :seq, :commit_hash, 'set');
+INSERT INTO fact (hash, id, value_ref, parent, branch, seq, commit_seq, fact_type)
+VALUES (:fact_hash, :entity_id, :value_hash, :parent_hash, :branch, :seq, :commit_seq, 'set');
 
 -- Step 3: Update the head pointer
 INSERT INTO head (branch, id, fact_hash, seq)
@@ -546,8 +546,8 @@ ON CONFLICT (branch, id) DO UPDATE SET fact_hash = :fact_hash, seq = :seq;
 
 ```sql
 -- Step 1: Insert the fact (value_ref = __empty__ sentinel)
-INSERT INTO fact (hash, id, value_ref, parent, branch, seq, commit_ref, fact_type)
-VALUES (:fact_hash, :entity_id, '__empty__', :parent_hash, :branch, :seq, :commit_hash, 'delete');
+INSERT INTO fact (hash, id, value_ref, parent, branch, seq, commit_seq, fact_type)
+VALUES (:fact_hash, :entity_id, '__empty__', :parent_hash, :branch, :seq, :commit_seq, 'delete');
 
 -- Step 2: Update the head pointer to the delete fact
 INSERT INTO head (branch, id, fact_hash, seq)

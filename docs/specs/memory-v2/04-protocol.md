@@ -262,6 +262,7 @@ interface TransactCommand {
 //
 // Read dependencies are path-aware:
 //   { id, path: [], seq }
+//   { id, branch: "feature", path: [], seq }   // Optional branch override for merge proposals
 //   { id, path: ["profile", "name"], localSeq }
 //
 // Wire operations are parent-free (UserOperation format):
@@ -485,13 +486,16 @@ interface MergeBranchResult {
     merged?: number;                  // Number of entities in the proposal
     conflicts?: BranchConflict[];     // Present when status === "conflict"
     sourceSeq: number;
+    baseBranch: BranchName;
     baseSeq: number;
   };
 }
 
 // This command does not mutate storage directly. It computes conflicts and, if
 // possible, returns a MergeProposal that the client wraps in a normal
-// ClientCommit and submits via /memory/transact.
+// ClientCommit and submits via /memory/transact. The returned proposal already
+// includes any branch-scoped confirmed reads needed to revalidate source,
+// target, and merge-base observations at apply time.
 
 // Delete a branch
 interface DeleteBranchCommand {
@@ -636,7 +640,7 @@ are hierarchical: `OWNER` implies `WRITE`, which implies `READ`.
 | Command | Required Capability |
 |---------|---------------------|
 | `session.open` | `READ` |
-| `query.subscribe`, `graph.query`, `query` (deprecated) | `READ` |
+| `query.subscribe`, `graph.query`, `query` (deprecated), `branch/list` | `READ` |
 | `transact` | `WRITE` |
 | `branch/create`, `branch/merge`, `branch/delete` | `WRITE` |
 | ACL modifications | `OWNER` |
@@ -764,8 +768,10 @@ The scheduler receives notifications as follows:
    where a second notification occurs for the same transaction.
 
 3. **On external changes** (subscription updates from other clients): An
-   "integrate" notification fires when server data arrives, so the scheduler
-   re-evaluates affected cells.
+   "integrate" notification fires when server data becomes the **visible**
+   current state, so the scheduler re-evaluates affected cells. If a more
+   advanced local pending state still shadows that entity/path, the provider MAY
+   record the external revision internally but MUST suppress the notification.
 
 The key invariant: for a successful local commit, there is exactly ONE
 synchronous notification. The provider must suppress any additional
