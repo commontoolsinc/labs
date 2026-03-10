@@ -645,7 +645,7 @@ export abstract class BaseObjectTraverser {
   traverseDAGCalls = 0;
   getDocAtPathCalls = 0;
   abstract traverse(
-    doc: IMemorySpaceValueAttestation,
+    doc: IMemorySpaceAttestation,
   ): TraverseResult<Immutable<StorableValue>>;
   /**
    * Attempt to traverse the document as a directed acyclic graph.
@@ -1823,7 +1823,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
   }
 
   override traverse(
-    doc: IMemorySpaceValueAttestation,
+    doc: IMemorySpaceAttestation,
     link?: NormalizedFullLink,
   ): TraverseResult<Immutable<StorableValue>> {
     // Reset per-traverse stats (but NOT the shared memo)
@@ -1849,12 +1849,19 @@ export class SchemaObjectTraverser<V extends StorableDatum>
     this.schemaTracker.deepEqualCalls = 0;
     this.schemaTracker.deepEqualMs = 0;
 
+    if (doc.address.path.length < 1 || doc.address.path[0] !== "value") {
+      return {
+        error: new Error(
+          'Invalid doc address path. Path must start with "value".',
+        ),
+      };
+    }
     logger.timeStart("traverse");
     this.schemaTracker.add(getTrackerKey(doc.address), this.selector);
     // Flag the top level read of doc for the scheduler
     this.tx.readOrThrow(doc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
     const rv = this.traverseWithSelector(
-      doc,
+      doc as IMemorySpaceValueAttestation,
       this.selector,
       link,
     );
@@ -1896,7 +1903,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         "Call to traverse failed validation",
         doc,
         JSON.stringify(this.selector?.schema, undefined, 2),
-        this.getDebugValue(doc),
+        this.getDebugValue(doc as IMemorySpaceValueAttestation),
       ]);
     }
     return rv;

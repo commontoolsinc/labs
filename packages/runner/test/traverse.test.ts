@@ -33,6 +33,7 @@ import {
   IMemorySpaceAddress,
   IMemorySpaceAttestation,
 } from "../src/storage/interface.ts";
+import { IMemorySpaceValueAttestation } from "../src/traverse.ts";
 
 // Helper function to get the SchemaObjectTraverser backed by a store map
 function getTraverser(
@@ -623,7 +624,7 @@ for (const canonicalHashing of [false, true]) {
           };
           const [curDoc, _selector1] = getAtPath(
             tx,
-            docAFoo,
+            docAFoo as IMemorySpaceValueAttestation,
             [],
             tracker,
             cfc,
@@ -632,7 +633,7 @@ for (const canonicalHashing of [false, true]) {
           );
           const [redirDoc, _selector2] = getAtPath(
             tx,
-            docAFoo,
+            docAFoo as IMemorySpaceValueAttestation,
             [],
             tracker,
             cfc,
@@ -687,7 +688,7 @@ for (const canonicalHashing of [false, true]) {
           const docASelector = { path: ["value", "current"], schema: true };
           const [curDoc, _selector1] = getAtPath(
             tx,
-            docACurrent,
+            docACurrent as IMemorySpaceValueAttestation,
             [],
             tracker,
             cfc,
@@ -696,7 +697,7 @@ for (const canonicalHashing of [false, true]) {
           );
           const [redirDoc, _selector2] = getAtPath(
             tx,
-            docACurrent,
+            docACurrent as IMemorySpaceValueAttestation,
             [],
             tracker,
             cfc,
@@ -758,7 +759,7 @@ for (const canonicalHashing of [false, true]) {
           };
           const [curDoc, _selector1] = getAtPath(
             tx,
-            docACurrent,
+            docACurrent as IMemorySpaceValueAttestation,
             [],
             tracker,
             cfc,
@@ -767,7 +768,7 @@ for (const canonicalHashing of [false, true]) {
           );
           const [redirDoc, redirDocSelector] = getAtPath(
             tx,
-            docACurrent,
+            docACurrent as IMemorySpaceValueAttestation,
             [],
             tracker,
             cfc,
@@ -838,7 +839,7 @@ for (const canonicalHashing of [false, true]) {
         // Navigate with invalid index "01"
         const [result1] = getAtPath(
           tx,
-          doc,
+          doc as IMemorySpaceValueAttestation,
           ["01"],
           tracker,
           cfc,
@@ -848,7 +849,7 @@ for (const canonicalHashing of [false, true]) {
         // Navigate with valid index "1"
         const [result2] = getAtPath(
           tx,
-          doc,
+          doc as IMemorySpaceValueAttestation,
           ["1"],
           tracker,
           cfc,

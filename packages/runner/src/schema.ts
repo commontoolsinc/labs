@@ -455,12 +455,7 @@ export function validateAndTransform(
 
   // Link paths don't include value, but doc address should
   const { space, id, type, path } = ref;
-  const address: IMemorySpaceValueAddress = {
-    space,
-    id,
-    type,
-    path: ["value", ...path],
-  };
+  const address = { space, id, type, path: ["value", ...path] };
   // Get the full value without telling the scheduler. The traverse method will
   // notify the scheduler for shallow reads as they occur.
   const value = tx.readOrThrow(address, { meta: ignoreReadForScheduling });
