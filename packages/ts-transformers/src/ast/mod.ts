@@ -1,12 +1,17 @@
 export { type CallKind, detectCallKind } from "./call-kind.ts";
 export * from "./dataflow.ts";
 export {
+  classifyReactiveContext,
   findEnclosingCallbackContext,
   isInRestrictedReactiveContext,
   isInsideRestrictedContext,
   isInsideSafeCallbackWrapper,
   isInsideSafeWrapper,
   isStandaloneFunctionDefinition,
+  type ReactiveContextInfo,
+  type ReactiveContextKind,
+  type ReactiveContextLookup,
+  type ReactiveContextOwner,
   RESTRICTED_CONTEXT_BUILDERS,
   SAFE_WRAPPER_BUILDERS,
 } from "./reactive-context.ts";
@@ -39,6 +44,7 @@ export {
   isAnyOrUnknownType,
   isDeriveCall,
   isReactiveArrayMapCall,
+  isReactiveArrayMethodCall,
   registerSyntheticCallType,
   typeToSchemaTypeNode,
   typeToTypeNode,

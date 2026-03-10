@@ -28,7 +28,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                count: state.count
+                count: state.key("count")
             } }, ({ state }) => state.count + 1)}</p>
         <p>Count - 1: {__ctHelpers.derive({
             type: "object",
@@ -48,7 +48,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                count: state.count
+                count: state.key("count")
             } }, ({ state }) => state.count - 1)}</p>
         <p>Count * 2: {__ctHelpers.derive({
             type: "object",
@@ -68,7 +68,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                count: state.count
+                count: state.key("count")
             } }, ({ state }) => state.count * 2)}</p>
         <p>Price / 2: {__ctHelpers.derive({
             type: "object",
@@ -88,7 +88,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                price: state.price
+                price: state.key("price")
             } }, ({ state }) => state.price / 2)}</p>
         <p>Count % 3: {__ctHelpers.derive({
             type: "object",
@@ -108,7 +108,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                count: state.count
+                count: state.key("count")
             } }, ({ state }) => state.count % 3)}</p>
 
         <h3>Complex Expressions</h3>
@@ -134,8 +134,8 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                price: state.price,
-                discount: state.discount
+                price: state.key("price"),
+                discount: state.key("discount")
             } }, ({ state }) => state.price - (state.price * state.discount))}</p>
         <p>Total: {__ctHelpers.derive({
             type: "object",
@@ -159,8 +159,8 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                price: state.price,
-                quantity: state.quantity
+                price: state.key("price"),
+                quantity: state.key("quantity")
             } }, ({ state }) => state.price * state.quantity)}</p>
         <p>With Tax (8%): {__ctHelpers.derive({
             type: "object",
@@ -184,8 +184,8 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                price: state.price,
-                quantity: state.quantity
+                price: state.key("price"),
+                quantity: state.key("quantity")
             } }, ({ state }) => (state.price * state.quantity) * 1.08)}</p>
         <p>
           Complex: {__ctHelpers.derive({
@@ -218,10 +218,10 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                count: state.count,
-                quantity: state.quantity,
-                price: state.price,
-                discount: state.discount
+                count: state.key("count"),
+                quantity: state.key("quantity"),
+                price: state.key("price"),
+                discount: state.key("discount")
             } }, ({ state }) => (state.count + state.quantity) * state.price -
             (state.price * state.discount))}
         </p>
@@ -245,7 +245,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                count: state.count
+                count: state.key("count")
             } }, ({ state }) => state.count * state.count * state.count)}</p>
         <p>Price Range: ${__ctHelpers.derive({
             type: "object",
@@ -265,7 +265,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                price: state.price
+                price: state.key("price")
             } }, ({ state }) => state.price - 10)} - ${__ctHelpers.derive({
             type: "object",
             properties: {
@@ -284,7 +284,7 @@ export default pattern((state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __ctHelpers.JSONSchema, { state: {
-                price: state.price
+                price: state.key("price")
             } }, ({ state }) => state.price + 10)}</p>
       </div>),
     };

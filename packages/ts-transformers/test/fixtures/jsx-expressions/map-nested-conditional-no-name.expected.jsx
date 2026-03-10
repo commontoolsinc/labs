@@ -32,22 +32,25 @@ export default pattern((_state: any) => {
                     properties: {}
                 }]
         } as const satisfies __ctHelpers.JSONSchema, showList, <div>
-            {items.mapWithPattern(__ctHelpers.pattern(({ element: item, params: {} }) => (<div>
+            {items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const item = __ct_pattern_input.key("element");
+                return (<div>
                 {__ctHelpers.when({
-                type: "string",
-                asOpaque: true
-            } as const satisfies __ctHelpers.JSONSchema, {
-                anyOf: [{}, {
-                        type: "object",
-                        properties: {}
-                    }]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                anyOf: [{}, {
-                        type: "object",
-                        properties: {}
-                    }]
-            } as const satisfies __ctHelpers.JSONSchema, item.name, <span>{item.name}</span>)}
-              </div>), {
+                    type: "string",
+                    asOpaque: true
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    anyOf: [{}, {
+                            type: "object",
+                            properties: {}
+                        }]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    anyOf: [{}, {
+                            type: "object",
+                            properties: {}
+                        }]
+                } as const satisfies __ctHelpers.JSONSchema, item.key("name"), <span>{item.key("name")}</span>)}
+              </div>);
+            }, {
                 type: "object",
                 properties: {
                     element: {
@@ -58,13 +61,9 @@ export default pattern((_state: any) => {
                             }
                         },
                         required: ["name"]
-                    },
-                    params: {
-                        type: "object",
-                        properties: {}
                     }
                 },
-                required: ["element", "params"]
+                required: ["element"]
             } as const satisfies __ctHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"

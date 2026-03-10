@@ -41,8 +41,8 @@ export default pattern((state) => {
             console.log(scaled);
         })({
             state: {
-                items: state.items,
-                multiplier: state.multiplier
+                items: state.key("items"),
+                multiplier: state.key("multiplier")
             }
         })}>
         Compute

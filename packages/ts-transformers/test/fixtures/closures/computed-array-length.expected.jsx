@@ -84,18 +84,17 @@ export default pattern(() => {
                 length: allCharms.length
             } }, ({ allCharms }) => allCharms.length)}</span>
         <ul>
-          {allCharms.mapWithPattern(__ctHelpers.pattern(({ element: charm, params: {} }) => (<li>{charm.name}</li>), {
+          {allCharms.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const charm = __ct_pattern_input.key("element");
+                return (<li>{charm.key("name")}</li>);
+            }, {
                 type: "object",
                 properties: {
                     element: {
                         $ref: "#/$defs/Charm"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {}
                     }
                 },
-                required: ["element", "params"],
+                required: ["element"],
                 $defs: {
                     Charm: {
                         type: "object",

@@ -59,7 +59,11 @@ export default pattern((_state) => {
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, { people: people }, ({ people }) => people.get().length > 0), <ul>
-            {people.mapWithPattern(__ctHelpers.pattern(({ element: person, index, params: {} }) => (<li key={index}>{person.name}</li>), {
+            {people.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const person = __ct_pattern_input.key("element");
+                const index = __ct_pattern_input.key("index");
+                return (<li key={index}>{person.key("name")}</li>);
+            }, {
                 type: "object",
                 properties: {
                     element: {
@@ -76,13 +80,9 @@ export default pattern((_state) => {
                     },
                     index: {
                         type: "number"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {}
                     }
                 },
-                required: ["element", "params"]
+                required: ["element"]
             } as const satisfies __ctHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"

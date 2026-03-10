@@ -8,7 +8,10 @@ interface State {
 export default pattern((state) => {
     return {
         [UI]: (<div>
-        {state.entries.mapWithPattern(__ctHelpers.pattern(({ element: { 0: first }, params: {} }) => (<span>{first}</span>), {
+        {state.key("entries").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const first = __ct_pattern_input.key("element", "0");
+                return (<span>{first}</span>);
+            }, {
                 type: "object",
                 properties: {
                     element: {
@@ -19,13 +22,9 @@ export default pattern((state) => {
                             }
                         },
                         required: ["0"]
-                    },
-                    params: {
-                        type: "object",
-                        properties: {}
                     }
                 },
-                required: ["element", "params"]
+                required: ["element"]
             } as const satisfies __ctHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"

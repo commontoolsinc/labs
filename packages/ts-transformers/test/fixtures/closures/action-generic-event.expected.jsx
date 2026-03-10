@@ -6,7 +6,8 @@ interface MyEvent {
 interface State {
     value: Cell<string>;
 }
-export default pattern(({ value }) => {
+export default pattern((__ct_pattern_input) => {
+    const value = __ct_pattern_input.key("value");
     return {
         // Test action<MyEvent>((e) => ...) variant (type parameter instead of inline annotation)
         update: __ctHelpers.handler({

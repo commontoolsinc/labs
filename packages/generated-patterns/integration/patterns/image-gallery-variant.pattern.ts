@@ -148,7 +148,9 @@ const updateDeviceVariant = handler(
 );
 
 // Module-scope lift definitions
-const liftSanitizeModes = lift((value: unknown) => sanitizeModes(value));
+const liftSanitizeModes = lift((value: string[] | undefined) =>
+  sanitizeModes(value)
+);
 
 const liftSanitizeVariants = lift((input: {
   entries: VariantInput[] | undefined;

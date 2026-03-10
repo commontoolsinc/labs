@@ -5,7 +5,10 @@ interface Problem {
     discount: number;
     tax: number;
 }
-export default pattern(({ price, discount, tax }) => {
+export default pattern((__ct_pattern_input) => {
+    const price = __ct_pattern_input.key("price");
+    const discount = __ct_pattern_input.key("discount");
+    const tax = __ct_pattern_input.key("tax");
     return {
         [UI]: (<div>
           <p>Price: {price}</p>

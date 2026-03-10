@@ -43,7 +43,9 @@ const removeItem = handler(true as const satisfies __ctHelpers.JSONSchema, {
         items.set(currentItems.toSpliced(index, 1));
     }
 });
-export default pattern(({ items, hasItems }) => {
+export default pattern((__ct_pattern_input) => {
+    const items = __ct_pattern_input.key("items");
+    const hasItems = __ct_pattern_input.key("hasItems");
     // CT-1035: Map inside ifElse branches should transform to mapWithPattern
     // The handler closure should work correctly with the map iterator variable
     return {
@@ -76,10 +78,14 @@ export default pattern(({ items, hasItems }) => {
                     }
                 }
             } as const satisfies __ctHelpers.JSONSchema, hasItems, <div>
-              {items.mapWithPattern(__ctHelpers.pattern(({ element: item, params: { items } }) => (<div>
-                  <span>{item.name}</span>
+              {items.mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                    const item = __ct_pattern_input.key("element");
+                    const items = __ct_pattern_input.key("params", "items");
+                    return (<div>
+                  <span>{item.key("name")}</span>
                   <button type="button" onClick={removeItem({ items, item })}>Remove</button>
-                </div>), {
+                </div>);
+                }, {
                     type: "object",
                     properties: {
                         element: {

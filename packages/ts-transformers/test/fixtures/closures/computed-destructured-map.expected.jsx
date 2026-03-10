@@ -11,7 +11,8 @@ interface Item {
     name: string;
     done: boolean;
 }
-export default pattern(({ items }) => {
+export default pattern((__ct_pattern_input) => {
+    const items = __ct_pattern_input.key("items");
     const result = __ctHelpers.derive({
         type: "object",
         properties: {

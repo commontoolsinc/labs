@@ -3,7 +3,8 @@ import { Cell, pattern, action } from "commontools";
 interface State {
     count: Cell<number>;
 }
-export default pattern(({ count }) => {
+export default pattern((__ct_pattern_input) => {
+    const count = __ct_pattern_input.key("count");
     return {
         inc: __ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
             type: "object",

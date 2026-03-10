@@ -33,6 +33,7 @@ export function toJSONWithLegacyAliases(
   paths: Map<OpaqueRef<any>, PropertyKey[]>,
   ignoreSelfAliases: boolean = false,
   path: PropertyKey[] = [],
+  seen?: WeakSet<object>,
 ): JSONValue | undefined {
   // Turn strongly typed builder values into legacy JSON structures while
   // preserving alias metadata for consumers that still rely on it.
@@ -91,12 +92,18 @@ export function toJSONWithLegacyAliases(
   // If this is an array, process each element recursively.
   if (Array.isArray(value)) {
     return (value as Opaque<any>).map((v: Opaque<any>, i: number) =>
-      toJSONWithLegacyAliases(v, paths, ignoreSelfAliases, [...path, i])
+      toJSONWithLegacyAliases(v, paths, ignoreSelfAliases, [...path, i], seen)
     );
   }
 
   // If this is an object or a pattern, process each key recursively.
   if (isRecord(value) || isPattern(value)) {
+    // Guard against circular object references (e.g. schema objects with
+    // shared identity between $defs and sibling properties).
+    if (!seen) seen = new WeakSet();
+    if (seen.has(value as object)) return {};
+    seen.add(value as object);
+
     // If this is a pattern, call its toJSON method to get the properly
     // serialized version.
     const valueToProcess = (isPattern(value) &&
@@ -111,6 +118,7 @@ export function toJSONWithLegacyAliases(
         paths,
         ignoreSelfAliases,
         [...path, key],
+        seen,
       );
       if (jsonValue !== undefined) {
         result[key] = jsonValue;

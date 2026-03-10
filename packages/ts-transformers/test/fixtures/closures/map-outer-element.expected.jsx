@@ -5,10 +5,15 @@ interface State {
     highlight: string;
 }
 export default pattern((state) => {
-    const element = state.highlight;
+    const element = state.key("highlight");
     return {
         [UI]: (<div>
-        {state.items.mapWithPattern(__ctHelpers.pattern(({ element: _, index, params: { element } }) => (<span key={index}>{element}</span>), {
+        {state.key("items").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const _ = __ct_pattern_input.key("element");
+                const index = __ct_pattern_input.key("index");
+                const element = __ct_pattern_input.key("params", "element");
+                return (<span key={index}>{element}</span>);
+            }, {
                 type: "object",
                 properties: {
                     element: {

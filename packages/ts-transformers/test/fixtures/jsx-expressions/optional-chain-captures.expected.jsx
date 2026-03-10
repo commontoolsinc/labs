@@ -14,51 +14,50 @@ interface State {
 export default pattern((state) => {
     return {
         [UI]: (<div>
-        <span>{state.maybe?.value}</span>
-        {state.items.mapWithPattern(__ctHelpers.pattern(({ element: item, params: {} }) => (<span>{__ctHelpers.derive({
-                type: "object",
-                properties: {
-                    item: {
-                        type: "object",
-                        properties: {
-                            maybe: {
-                                anyOf: [{
-                                        type: "undefined"
-                                    }, {
-                                        anyOf: [{
-                                                type: "undefined"
-                                            }, {
-                                                type: "object",
-                                                properties: {
-                                                    value: {
-                                                        type: "number"
-                                                    }
-                                                },
-                                                required: ["value"]
-                                            }],
-                                        asOpaque: true
-                                    }]
+        <span>{state.key("maybe", "value")}</span>
+        {state.key("items").mapWithPattern(__ctHelpers.pattern(__ct_pattern_input => {
+                const item = __ct_pattern_input.key("element");
+                return (<span>{__ctHelpers.derive({
+                    type: "object",
+                    properties: {
+                        item: {
+                            type: "object",
+                            properties: {
+                                maybe: {
+                                    anyOf: [{
+                                            type: "undefined"
+                                        }, {
+                                            anyOf: [{
+                                                    type: "undefined"
+                                                }, {
+                                                    type: "object",
+                                                    properties: {
+                                                        value: {
+                                                            type: "number"
+                                                        }
+                                                    },
+                                                    required: ["value"]
+                                                }],
+                                            asOpaque: true
+                                        }]
+                                }
                             }
                         }
-                    }
-                },
-                required: ["item"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "number"
-            } as const satisfies __ctHelpers.JSONSchema, { item: {
-                    maybe: item.maybe
-                } }, ({ item }) => item.maybe?.value ?? 0)}</span>), {
+                    },
+                    required: ["item"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "number"
+                } as const satisfies __ctHelpers.JSONSchema, { item: {
+                        maybe: item.key("maybe")
+                    } }, ({ item }) => item.maybe?.value ?? 0)}</span>);
+            }, {
                 type: "object",
                 properties: {
                     element: {
                         $ref: "#/$defs/Item"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {}
                     }
                 },
-                required: ["element", "params"],
+                required: ["element"],
                 $defs: {
                     Item: {
                         type: "object",

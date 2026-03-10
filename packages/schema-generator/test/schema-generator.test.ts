@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import ts from "typescript";
 import { SchemaGenerator } from "../src/schema-generator.ts";
 import { getTypeFromCode } from "./utils.ts";
 
@@ -91,6 +92,35 @@ type CalculatorRequest = {
       const schema = generator.generateSchema(type, checker, typeNode);
       // unknown returns true (accept any value - type safety at compile time)
       expect(schema).toEqual(true);
+    });
+  });
+
+  describe("synthetic type literals", () => {
+    it("preserves numeric literal property names", async () => {
+      const generator = new SchemaGenerator();
+      const { checker } = await getTypeFromCode(
+        "type Dummy = unknown;",
+        "Dummy",
+      );
+      const typeNode = ts.factory.createTypeLiteralNode([
+        ts.factory.createPropertySignature(
+          undefined,
+          ts.factory.createNumericLiteral("0"),
+          undefined,
+          ts.factory.createKeywordTypeNode(ts.SyntaxKind.NumberKeyword),
+        ),
+      ]);
+
+      const schema = generator.generateSchemaFromSyntheticTypeNode(
+        typeNode,
+        checker,
+      ) as Record<string, unknown>;
+
+      expect(schema.type).toBe("object");
+      expect(schema.properties).toEqual({
+        "0": { type: "number" },
+      });
+      expect(schema.required).toEqual(["0"]);
     });
   });
 
