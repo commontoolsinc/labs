@@ -60,12 +60,12 @@ layer** — the strongly typed core. Raw native JS objects (`Error`, `Map`, `Set
 layer (Section 8) and represented in `StorableValue` trees as `StorableInstance`
 wrapper classes (Section 1.4).
 
-> **Package note:** The TypeScript stubs in this spec use `packages/common/` as
-> a placeholder package path. A more specific name (e.g., `packages/data-model`
-> or `packages/storable`) may be preferable. In the current codebase, the
-> storable-value types live in `packages/memory/interface.ts` and the conversion
-> functions in `packages/memory/storable-value.ts`. The final package name and
-> location is an implementation decision; nothing in this spec depends on it.
+> **Package note:** The implementation lives in `packages/memory/`. The
+> storable-value types are defined in `packages/memory/interface.ts`, the
+> protocol types in `packages/memory/storable-protocol.ts`, and the conversion
+> functions in `packages/memory/storable-value.ts`. Some code stubs in this
+> spec still use `packages/common/` as a placeholder path; these are
+> equivalent to the `packages/memory/` paths.
 
 ```typescript
 // file: packages/common/storable-value.ts
@@ -233,8 +233,11 @@ implement `[DECONSTRUCT]`, `[RECONSTRUCT]`, or carry a `typeTag` property.
 
 Each wrapper class above:
 
-- **Implements `StorableInstance`** with a `[DECONSTRUCT]` method that extracts
-  essential state from the wrapped native object.
+- **Extends `StorableNativeWrapper<T>`** (which in turn extends
+  `StorableInstance`), inheriting the `shallowClone()` frozenness-management
+  method and providing a `toNativeValue(frozen)` method for unwrapping.
+- **Has a `[DECONSTRUCT]` method** that extracts essential state from the
+  wrapped native object.
 - **Has a static `[RECONSTRUCT]` method** (following the `StorableClass<T>`
   pattern) that returns an instance of the wrapper class — **not** the raw
   native type. Callers who need the underlying native object use
@@ -243,9 +246,53 @@ Each wrapper class above:
   serialization context for tag resolution, following the pattern established
   by `UnknownStorable` and `ProblematicStorable`.
 
+##### `StorableNativeWrapper<T>` Base Class
+
+All native object wrappers share an abstract base class that extends
+`StorableInstance` and adds methods for unwrapping back to native form:
+
+```typescript
+// file: packages/memory/storable-native-instances.ts
+
+/**
+ * Abstract base class for `StorableInstance` wrappers that bridge native JS
+ * objects (Error, Map, Set, RegExp, Uint8Array) into the `StorableValue`
+ * layer. Provides a common `toNativeValue()` method used by the unwrap
+ * functions (`nativeValueFromStorableValue`, Section 8.5), replacing
+ * `instanceof` cascades with a single `instanceof StorableNativeWrapper`
+ * check.
+ */
+abstract class StorableNativeWrapper<T extends object>
+  extends StorableInstance {
+  abstract readonly typeTag: string;
+
+  /** The wrapped native value, used by `toNativeValue` for freeze-state checks. */
+  protected abstract get wrappedValue(): T;
+
+  /** Convert the wrapped value to frozen form (only called on state mismatch). */
+  protected abstract toNativeFrozen(): T;
+
+  /** Convert the wrapped value to thawed form (only called on state mismatch). */
+  protected abstract toNativeThawed(): T;
+
+  /** Return the underlying native value, optionally frozen. */
+  toNativeValue(frozen: boolean): T {
+    const value = this.wrappedValue;
+    if (frozen === Object.isFrozen(value)) return value;
+    return frozen ? this.toNativeFrozen() : this.toNativeThawed();
+  }
+}
+```
+
+The `toNativeValue(frozen)` method returns the original wrapped value when
+its freeze state already matches the `frozen` argument, and constructs a new
+instance only when a freeze-state change is needed. This avoids defensive
+copying in the common case and centralizes the freeze-state logic for all
+wrapper types.
+
 Unlike the wrappers above, the special primitive types (`StorableEpochNsec`,
 `StorableEpochDays`, `StorableContentId`) are **direct members of
-`StorableDatum`** and do not implement `StorableInstance`. They all extend
+`StorableDatum`** and do not extend `StorableInstance`. They all extend
 `SpecialPrimitiveValue` (Section 1.4.6), which provides always-frozen semantics.
 See Sections 1.4.6 through 1.4.9.
 
@@ -278,21 +325,24 @@ these native types have no established convention for custom properties.
 #### 1.4.2 `StorableError`
 
 ```typescript
-// file: packages/common/storable-native-wrappers.ts
+// file: packages/memory/storable-native-instances.ts
 
 import {
   DECONSTRUCT, RECONSTRUCT,
-  type StorableInstance, type ReconstructionContext,
+  StorableInstance, type ReconstructionContext,
 } from './storable-protocol';
 
 /**
- * Wrapper for native `Error` values. Implements `StorableInstance` so that
- * errors participate in the standard serialization and hashing paths.
+ * Wrapper for native `Error` values. Extends `StorableNativeWrapper<Error>`
+ * so that errors participate in the standard serialization, hashing, and
+ * unwrapping paths.
  */
-export class StorableError implements StorableInstance {
+export class StorableError extends StorableNativeWrapper<Error> {
   readonly typeTag = 'Error@1';
 
-  constructor(readonly error: Error) {}
+  constructor(readonly error: Error) {
+    super();
+  }
 
   [DECONSTRUCT](): StorableValue {
     // IMPORTANT: By the time [DECONSTRUCT] is called, all nested values
@@ -363,10 +413,13 @@ export class StorableError implements StorableInstance {
 #### 1.4.3 `StorableMap`
 
 ```typescript
-export class StorableMap implements StorableInstance {
+export class StorableMap
+  extends StorableNativeWrapper<Map<StorableValue, StorableValue>> {
   readonly typeTag = 'Map@1';
 
-  constructor(readonly map: Map<StorableValue, StorableValue>) {}
+  constructor(readonly map: Map<StorableValue, StorableValue>) {
+    super();
+  }
 
   [DECONSTRUCT](): StorableValue {
     return [...this.map.entries()] as StorableValue;
@@ -385,10 +438,12 @@ export class StorableMap implements StorableInstance {
 #### 1.4.4 `StorableSet`
 
 ```typescript
-export class StorableSet implements StorableInstance {
+export class StorableSet extends StorableNativeWrapper<Set<StorableValue>> {
   readonly typeTag = 'Set@1';
 
-  constructor(readonly set: Set<StorableValue>) {}
+  constructor(readonly set: Set<StorableValue>) {
+    super();
+  }
 
   [DECONSTRUCT](): StorableValue {
     return [...this.set] as StorableValue;
@@ -407,17 +462,17 @@ export class StorableSet implements StorableInstance {
 #### 1.4.5 `StorableRegExp`
 
 ```typescript
-// file: packages/common/storable-native-wrappers.ts
+// file: packages/memory/storable-native-instances.ts
 
 import {
   DECONSTRUCT, RECONSTRUCT,
-  type StorableInstance, type ReconstructionContext,
+  StorableInstance, type ReconstructionContext,
 } from './storable-protocol';
 
 /**
- * Wrapper for native `RegExp` values. Implements `StorableInstance` so that
- * regular expressions participate in the standard serialization and hashing
- * paths.
+ * Wrapper for native `RegExp` values. Extends `StorableNativeWrapper<RegExp>`
+ * so that regular expressions participate in the standard serialization,
+ * hashing, and unwrapping paths.
  *
  * Essential state is the pattern `source` string, the `flags` string, and
  * the `flavor` string identifying the regex dialect. The only initially
@@ -435,18 +490,20 @@ import {
  * immutable-forward design — callers who need stateful matching should
  * construct a new `RegExp` from the source and flags.
  */
-export class StorableRegExp implements StorableInstance {
+export class StorableRegExp extends StorableNativeWrapper<RegExp> {
   readonly typeTag = 'RegExp@1';
 
   constructor(
-    readonly regexp: RegExp,
+    readonly regex: RegExp,
     readonly flavor: string = 'es2025',
-  ) {}
+  ) {
+    super();
+  }
 
   [DECONSTRUCT](): StorableValue {
     return {
-      source: this.regexp.source,
-      flags: this.regexp.flags,
+      source: this.regex.source,
+      flags: this.regex.flags,
       flavor: this.flavor,
     };
   }
@@ -598,10 +655,13 @@ different algorithm tags are distinct values.
 #### 1.4.10 `StorableUint8Array`
 
 ```typescript
-export class StorableUint8Array implements StorableInstance {
+export class StorableUint8Array
+  extends StorableNativeWrapper<Blob | Uint8Array> {
   readonly typeTag = 'Bytes@1';
 
-  constructor(readonly bytes: Uint8Array) {}
+  constructor(readonly bytes: Uint8Array) {
+    super();
+  }
 
   [DECONSTRUCT](): StorableValue {
     return base64urlEncode(this.bytes);
@@ -718,7 +778,7 @@ deserialize custom types without central registration at the type level.
 ### 2.2 Symbols
 
 ```typescript
-// file: packages/common/storable-protocol.ts
+// file: packages/memory/storable-protocol.ts
 
 /**
  * Well-known symbol for deconstructing a storable instance into its
@@ -740,44 +800,84 @@ export const RECONSTRUCT = Symbol.for('common.reconstruct');
 ### 2.3 Instance Protocol
 
 ```typescript
-// file: packages/common/storable-protocol.ts
+// file: packages/memory/storable-protocol.ts
 
 /**
- * A value that knows how to deconstruct itself into essential state
- * for serialization. The presence of `[DECONSTRUCT]` serves as the brand --
- * no separate marker is needed.
+ * Abstract base class for values that participate in the storable protocol.
+ *
+ * Subclasses must implement:
+ * - `[DECONSTRUCT]()` -- returns essential state for serialization.
+ * - `shallowUnfrozenClone()` -- returns a new unfrozen copy of this instance.
+ *
+ * `shallowClone(frozen)` is an effectively-final method that manages the
+ * frozenness contract:
+ * - `shallowClone(true)` on a frozen instance returns `this` (identity).
+ * - `shallowClone(true)` on an unfrozen instance returns a frozen clone.
+ * - `shallowClone(false)` always returns a new unfrozen clone -- even if the
+ *   instance is already unfrozen. The caller gets a distinct, mutable object.
  *
  * The native object wrapper classes (`StorableError`, `StorableMap`,
- * `StorableSet`, `StorableRegExp`, `StorableUint8Array`) implement this interface, as do
- * user-defined types (`Cell`, `Stream`) and system types
+ * `StorableSet`, `StorableRegExp`, `StorableUint8Array`) extend this class, as
+ * do user-defined types (`Cell`, `Stream`) and system types
  * (`UnknownStorable`, `ProblematicStorable`).
  *
  * Note: `SpecialPrimitiveValue` subclasses (`StorableEpochNsec`,
  * `StorableEpochDays`, `StorableContentId`) are direct `StorableDatum`
- * members and do NOT implement this interface.
+ * members and do NOT extend this class.
  */
-export interface StorableInstance {
+export abstract class StorableInstance {
   /**
    * Returns the essential state of this instance as a `StorableValue`. The
    * returned value may contain any `StorableValue`, including other
    * `StorableInstance`s, primitives, and plain objects/arrays.
    *
-   * The implementation must NOT recursively deconstruct nested values --
+   * Implementations must NOT recursively deconstruct nested values --
    * the serialization system handles that.
    */
-  [DECONSTRUCT](): StorableValue;
+  abstract [DECONSTRUCT](): StorableValue;
+
+  /**
+   * Returns a new unfrozen copy of this instance with the same data. Called
+   * by `shallowClone()` when a new instance is needed.
+   */
+  protected abstract shallowUnfrozenClone(): StorableInstance;
+
+  /**
+   * Returns a shallow clone of this instance with the requested frozenness.
+   *
+   * When `frozen` is `true` and this instance is already frozen, returns
+   * `this` (identity optimization -- freezing is idempotent). In all other
+   * cases, creates a new instance via `shallowUnfrozenClone()` and freezes
+   * it if requested.
+   */
+  shallowClone(frozen: boolean): StorableInstance {
+    if (frozen && Object.isFrozen(this)) return this;
+    const copy = this.shallowUnfrozenClone();
+    return frozen ? Object.freeze(copy) as StorableInstance : copy;
+  }
 }
 ```
 
-> **Return type rationale:** The return type is `StorableValue` rather than
-> `unknown` to make the contract explicit: a deconstructor must return a value
-> that the serialization system can process. Returning a non-storable value
-> (e.g., a `WeakMap` or a DOM node) would be a bug.
+> **Return type rationale:** The return type of `[DECONSTRUCT]` is
+> `StorableValue` rather than `unknown` to make the contract explicit: a
+> deconstructor must return a value that the serialization system can process.
+> Returning a non-storable value (e.g., a `WeakMap` or a DOM node) would be a
+> bug.
+
+> **Why an abstract class, not an interface?** The earlier spec defined
+> `StorableInstance` as an interface with `[DECONSTRUCT]` as the sole method.
+> The current design uses an abstract class so that `shallowClone()` can be
+> an effectively-final method on the base class, encapsulating the
+> frozenness-management contract (clone-if-necessary, freeze-if-requested) in
+> one place. Subclasses implement only `shallowUnfrozenClone()` (the
+> type-specific copy logic) and `[DECONSTRUCT]` (the serialization state
+> extraction). The `isStorableInstance()` type guard (Section 2.6) uses
+> `instanceof StorableInstance` instead of a property-brand check.
 
 ### 2.4 Class Protocol
 
 ```typescript
-// file: packages/common/storable-protocol.ts
+// file: packages/memory/storable-protocol.ts
 
 /**
  * A class that can reconstruct instances from essential state. This is a
@@ -803,7 +903,7 @@ export interface StorableClass<T extends StorableInstance> {
 ### 2.5 Reconstruction Context
 
 ```typescript
-// file: packages/common/storable-protocol.ts
+// file: packages/memory/storable-protocol.ts
 
 /**
  * The minimal interface that `[RECONSTRUCT]` implementations may depend on.
@@ -835,18 +935,23 @@ export interface ReconstructionContext {
 ### 2.6 Brand Detection
 
 ```typescript
-// file: packages/common/storable-protocol.ts
+// file: packages/memory/storable-protocol.ts
 
 /**
- * Type guard: checks whether a value implements the storable protocol.
- * The presence of `[DECONSTRUCT]` is the brand.
+ * Type guard: checks whether a value is a `StorableInstance`.
+ * Uses `instanceof` against the abstract base class.
  */
 export function isStorableInstance(value: unknown): value is StorableInstance {
-  return value != null
-    && typeof value === 'object'
-    && DECONSTRUCT in value;
+  return value instanceof StorableInstance;
 }
 ```
+
+> **`instanceof` vs. property-brand check.** The earlier spec used a
+> property-brand check (`DECONSTRUCT in value`) because `StorableInstance` was
+> an interface. Now that `StorableInstance` is an abstract class, `instanceof`
+> is the natural and more robust check. It avoids false positives from objects
+> that happen to have a `[DECONSTRUCT]` property without extending the base
+> class.
 
 ### 2.7 Example: Temperature (Illustrative)
 
@@ -864,18 +969,24 @@ serialization system can round-trip it back to a real `Temperature` instance.
 import {
   DECONSTRUCT,
   RECONSTRUCT,
-  type StorableInstance,
+  StorableInstance,
   type StorableValue,
   type ReconstructionContext,
 } from '@common/storable-protocol';
 
 type TemperatureUnit = "C" | "F" | "K";
 
-class Temperature implements StorableInstance {
+class Temperature extends StorableInstance {
   constructor(
     readonly value: number,
     readonly unit: TemperatureUnit,
-  ) {}
+  ) {
+    super();
+  }
+
+  protected shallowUnfrozenClone(): Temperature {
+    return new Temperature(this.value, this.unit);
+  }
 
   /** Convert to Celsius for comparison. */
   toCelsius(): number {
@@ -995,38 +1106,41 @@ enabling a single `instanceof ExplicitTagStorable` check where code needs to
 handle both subtypes uniformly (e.g., serialization dispatch).
 
 ```typescript
-// file: packages/common/explicit-tag-storable.ts
+// file: packages/memory/explicit-tag-storable.ts
 
 /**
  * Base class for storable types that carry an explicit wire-format tag.
  * Used by UnknownStorable (unrecognized types) and ProblematicStorable
  * (failed deconstruction/reconstruction). Enables a single instanceof
  * check where code needs to handle both.
+ *
+ * Extends `StorableInstance` so subclasses inherit the `shallowClone()`
+ * method.
  */
-export abstract class ExplicitTagStorable {
+export abstract class ExplicitTagStorable extends StorableInstance {
   constructor(
     /** The original type tag, e.g. `"FutureType@2"`. */
     readonly typeTag: string,
     /** The raw state, already recursively processed by the deserializer. */
     readonly state: StorableValue,
-  ) {}
+  ) {
+    super();
+  }
 }
 ```
 
-Each subclass implements `StorableInstance` (providing `[DECONSTRUCT]`) and a
-static `[RECONSTRUCT]` independently. The base class holds only the shared
-fields — `DECONSTRUCT` stays on each subclass since the deconstruction payloads
-differ in shape.
+Each subclass provides `[DECONSTRUCT]` and a static `[RECONSTRUCT]`
+independently. The base class holds only the shared fields — `DECONSTRUCT`
+stays on each subclass since the deconstruction payloads differ in shape.
 
 ### 3.3 `UnknownStorable`
 
 ```typescript
-// file: packages/common/unknown-storable.ts
+// file: packages/memory/unknown-storable.ts
 
 import {
   DECONSTRUCT,
   RECONSTRUCT,
-  type StorableInstance,
   type ReconstructionContext,
 } from './storable-protocol';
 import { ExplicitTagStorable } from './explicit-tag-storable';
@@ -1037,8 +1151,7 @@ import { ExplicitTagStorable } from './explicit-tag-storable';
  * tag, it wraps the tag and state here; on re-serialization, it uses the
  * preserved `typeTag` to produce the original wire format.
  */
-export class UnknownStorable extends ExplicitTagStorable
-  implements StorableInstance {
+export class UnknownStorable extends ExplicitTagStorable {
   constructor(typeTag: string, state: StorableValue) {
     super(typeTag, state);
   }
@@ -1074,12 +1187,11 @@ failures — for example, a type whose `[RECONSTRUCT]` throws can be preserved a
 a `ProblematicStorable` with the original tag, state, and error information.
 
 ```typescript
-// file: packages/common/problematic-storable.ts
+// file: packages/memory/problematic-storable.ts
 
 import {
   DECONSTRUCT,
   RECONSTRUCT,
-  type StorableInstance,
   type ReconstructionContext,
 } from './storable-protocol';
 import { ExplicitTagStorable } from './explicit-tag-storable';
@@ -1088,8 +1200,7 @@ import { ExplicitTagStorable } from './explicit-tag-storable';
  * Holds a value whose deconstruction or reconstruction failed. Preserves
  * the original tag and raw state for round-tripping and debugging.
  */
-export class ProblematicStorable extends ExplicitTagStorable
-  implements StorableInstance {
+export class ProblematicStorable extends ExplicitTagStorable {
   constructor(
     typeTag: string,
     state: StorableValue,
@@ -1427,50 +1538,69 @@ In `space.ts`, the dispatch functions replace direct `JSON.stringify` /
 ### 4.9 Storable Value Dispatch
 
 The native-to-storable value boundary is managed by a similar flag-gated
-dispatch module (`packages/memory/storable-value-dispatch.ts`). This module
-provides `toStorable()` / `fromStorable()` functions that bridge the left layer
-(JS wild west) and the middle layer (`StorableValue`) at the `Cell` read/write
-boundary.
+dispatch module (`packages/memory/storable-value.ts`). This consolidated module
+provides `storableFromNativeValue()` / `nativeFromStorableValue()` functions
+that bridge the left layer (JS wild west) and the middle layer
+(`StorableValue`) at the `Cell` read/write boundary.
+
+The module also re-exports flag-dispatched type-check functions
+(`isStorableValue()`, `canBeStored()`), a shallow conversion function
+(`shallowStorableFromNativeValue()`), and a comparison function
+(`valueEqual()`).
 
 ```typescript
-// file: packages/memory/storable-value-dispatch.ts
+// file: packages/memory/storable-value.ts
 
 /**
- * Convert a native JS value to storable form. When the flag is ON,
- * wraps native types (Error, Date, RegExp, etc.) into storable wrappers
- * and deep-freezes. When OFF, performs legacy deep conversion via
- * `toDeepStorableValue`.
+ * Convert a native JS value to storable form (deep, recursive).
+ * When the flag is ON, wraps native types (Error, Date, RegExp, etc.)
+ * into storable wrappers and deep-freezes. When OFF, performs legacy
+ * deep conversion via `toDeepStorableValueLegacy`.
  */
-let toStorable: (value: StorableValue) => StorableValue;
+let storableFromNativeValue: (value: unknown, freeze?: boolean) => StorableValue;
 
 /**
  * Convert a storable value back to native form. When the flag is ON,
- * unwraps storable wrappers (StorableError, StorableMap, etc.) back to
- * native JS types. When OFF, identity passthrough.
+ * deeply unwraps storable wrappers (StorableError, StorableMap, etc.)
+ * back to native JS types. When OFF, identity passthrough.
  */
-let fromStorable: (value: StorableValue) => StorableValue;
+let nativeFromStorableValue: (value: StorableValue, frozen?: boolean) => StorableValue;
 ```
 
-The dispatch is configured by `setStorableValueConfig(enabled)` /
+The dispatch is configured by `setStorableValueConfig(config)` /
 `resetStorableValueConfig()`, called from the `Runtime` constructor and
 `Runtime.dispose()` respectively:
 
-- **Flag OFF (default):** `toStorable` routes through `toDeepStorableValue`
-  (the legacy conversion function). `fromStorable` is an identity passthrough.
-- **Flag ON:** `toStorable` routes through `toDeepRichStorableValue` (which
-  wraps native objects into `StorableInstance` wrappers per Section 8.2).
-  `fromStorable` routes through `deepNativeValueFromStorableValue` (which
-  unwraps `StorableInstance` wrappers back to native JS types per Section 8.5).
+- **Flag OFF (default):** `storableFromNativeValue` routes through
+  `toDeepStorableValueLegacy` (the legacy conversion function).
+  `nativeFromStorableValue` is an identity passthrough.
+- **Flag ON:** `storableFromNativeValue` routes through
+  `toDeepRichStorableValue` (which wraps native objects into
+  `StorableInstance` wrappers per Section 8.2). `nativeFromStorableValue`
+  routes through `deepNativeValueFromStorableValue` (which unwraps
+  `StorableInstance` wrappers back to native JS types per Section 8.5).
+
+#### Module structure
+
+The implementation is split across several files for separation of concerns:
+
+| File | Purpose |
+|------|---------|
+| `storable-value.ts` | Dispatch module: flag-gated public API, config lifecycle |
+| `storable-value-modern.ts` | Rich (flag-ON) conversion: `toRichStorableValue`, `toDeepRichStorableValue`, `isRichStorableValue`, `canBeStored` |
+| `storable-value-legacy.ts` | Legacy (flag-OFF) conversion: `toDeepStorableValueLegacy`, `isStorableValueLegacy`, `canBeStoredLegacy` |
+| `storable-value-utils.ts` | Pure utilities shared by both paths: `isArrayIndexPropertyName`, `isArrayWithOnlyIndexProperties` |
+| `storable-native-instances.ts` | Native object wrapper classes (`StorableError`, `StorableMap`, etc.) and unwrap functions (`nativeValueFromStorableValue`, `deepNativeValueFromStorableValue`) |
 
 In the `Cell` implementation:
 
-- **Read path:** `Cell.getRaw()` calls `fromStorable(value)` to unwrap
-  storable wrappers before returning values to the JS wild west.
-- **Write path:** `Cell.setRaw()` calls `toStorable(value)` to wrap native
-  types into storable form before storing.
+- **Read path:** `Cell.getRaw()` calls `nativeFromStorableValue(value)` to
+  unwrap storable wrappers before returning values to the JS wild west.
+- **Write path:** `Cell.setRaw()` calls `storableFromNativeValue(value)` to
+  wrap native types into storable form before storing.
 
 > **Config lifecycle.** Both dispatch modules (`json-encoding-dispatch` and
-> `storable-value-dispatch`) follow the same lifecycle pattern: the `Runtime`
+> `storable-value`) follow the same lifecycle pattern: the `Runtime`
 > constructor calls the `set*Config()` function to activate the dispatch based
 > on `ExperimentalOptions`, and `Runtime.dispose()` calls `reset*Config()` to
 > restore defaults. This prevents flag leakage between runtime instances or
@@ -2124,6 +2254,29 @@ export function toDeepStorableValue(
 | `StorableValue[]` | Shallow: returned as-is (frozen if `freeze` is true). Deep: elements recursively converted (frozen at each level if `freeze` is true). |
 | `{ [key: string]: StorableValue }` | Shallow: returned as-is (frozen if `freeze` is true). Deep: values recursively converted (frozen at each level if `freeze` is true). |
 
+> **Implementation: tag-based type dispatch.** The conversion functions use a
+> tag-based dispatch mechanism (`tagFromNativeValue()` in
+> `packages/memory/type-tags.ts`) to classify values in O(1) via a `switch` on
+> the value's constructor. This replaces sequential `instanceof` chains with a
+> single constructor lookup that returns a tag string (e.g., `"Error"`,
+> `"Date"`, `"RegExp"`, `"Array"`, `"Object"`, `"Primitive"`,
+> `"StorableInstance"`). The conversion function then switches on the tag to
+> route to the appropriate wrapping logic. Fallback paths handle exotic Error
+> subclasses (via `Error.isError()`), cross-realm arrays (via
+> `Array.isArray()`), null-prototype objects, and objects with `toJSON()`
+> methods.
+
+> **Implementation: centralized shallow-clone utility.** The conversion
+> functions use a centralized `shallowCloneIfNecessary()` utility (in
+> `packages/memory/storable-value-modern.ts`) to handle frozenness adjustment
+> for values that are already valid `StorableValue` but whose freeze state
+> does not match the requested `freeze` argument. This function dispatches on
+> the same native tag to clone primitives (no-op), arrays (shallow copy
+> preserving sparse holes), plain objects (spread copy), and
+> `StorableInstance` values (via the protocol's `shallowClone()` method from
+> Section 2.3). It centralizes clone-for-frozenness logic that was previously
+> duplicated across conversion call sites.
+
 #### Freeze Semantics
 
 The immutable-forward design requires that `StorableValue` trees produced by
@@ -2143,6 +2296,17 @@ data structures without side effects — the caller's objects remain mutable
 after the call returns. (Wrapper objects like `StorableError` are freshly
 constructed by the conversion function, so freezing them is not a mutation of
 caller state.)
+
+**`deepFreeze` at schema merge/combine sites.** The `deepFreeze()` utility
+(in `packages/memory/deep-freeze.ts`) recursively freezes an object tree in
+place. At sites where schema objects are merged or combined (e.g., schema
+`merge()` and `combine()` functions), pass-through paths — where the input is
+returned as the result without structural modification — must copy the value
+before freezing to avoid mutating caller-owned schema objects. The general
+principle: `deepFreeze()` freezes in place, so if the caller retains a
+reference to a mutable object, the function must not freeze that object as a
+side effect. Callers at these sites should copy before freezing rather than
+relying on the input being "safe to freeze."
 
 **Always-frozen types bypass the `freeze` option.** JS primitives (`null`,
 `boolean`, `number`, `string`, `undefined`, `bigint`) are inherently immutable
@@ -2372,6 +2536,16 @@ export function deepNativeValueFromStorableValue(
 The output type is `StorableValue | StorableNativeObject`, reflecting that the
 result may contain native JS types at any depth.
 
+> **Implementation: `StorableNativeWrapper` dispatch.** The unwrapping
+> functions use a single `instanceof StorableNativeWrapper` check to identify
+> all native object wrappers, then delegate to `toNativeValue(frozen)` on the
+> base class. This replaces the previous pattern of per-wrapper `instanceof`
+> cascades (`instanceof StorableError`, `instanceof StorableMap`, etc.) with
+> a single branch. The `toNativeValue()` method (defined on
+> `StorableNativeWrapper`, Section 1.4.1) handles the freeze-state check and
+> delegates to the subclass's `toNativeFrozen()` or `toNativeThawed()` when a
+> state change is needed.
+
 **The `frozen` parameter is always honored.** The freeze state of every value in
 the output tree matches the `frozen` argument. Specifically:
 
@@ -2502,3 +2676,17 @@ spec from being implementable.
   types cast to a broader interface? Recommendation: extend the interface as
   needed; the indirection through an interface (rather than depending on
   `Runtime` directly) makes this straightforward.
+
+- **`getRaw()` / `setRaw()` middle-layer contract**: Emerging consensus is
+  that `Cell.getRaw()` and `Cell.setRaw()` should traffic in `StorableValue`
+  (middle layer), not arbitrary native JS values (wild west). A usage survey
+  of all call sites in the codebase found that every existing caller operates
+  on well-defined storable data (plain objects, arrays, strings, links, stream
+  markers) — no call site stores or retrieves raw native types like `Error`,
+  `Date`, `RegExp`, `Map`, `Set`, or `Uint8Array` through these methods.
+  Formalizing this contract (e.g., refining the type parameter `T` of
+  `IAnyCell` to `extends StorableValue`) would make the implicit expectation
+  explicit without breaking any current caller. The `fromStorable()` /
+  `toStorable()` dispatch in these methods (Section 4.9) is correct but
+  forward-looking: it will become load-bearing when user-facing patterns
+  start storing rich types through the schema-aware `set()` path.
