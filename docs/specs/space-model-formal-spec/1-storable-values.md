@@ -2686,7 +2686,7 @@ spec from being implementable.
   `Date`, `RegExp`, `Map`, `Set`, or `Uint8Array` through these methods.
   Formalizing this contract (e.g., refining the type parameter `T` of
   `IAnyCell` to `extends StorableValue`) would make the implicit expectation
-  explicit without breaking any current caller. The `fromStorable()` /
-  `toStorable()` dispatch in these methods (Section 4.9) is correct but
+  explicit without breaking any current caller. The `nativeFromStorableValue()` /
+  `storableFromNativeValue()` dispatch in these methods (Section 4.9) is correct but
   forward-looking: it will become load-bearing when user-facing patterns
   start storing rich types through the schema-aware `set()` path.
