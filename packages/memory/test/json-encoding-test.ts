@@ -1,4 +1,4 @@
-import { describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { JsonEncodingContext } from "../json-encoding.ts";
 import type { ReconstructionContext } from "../storable-protocol.ts";
@@ -22,10 +22,11 @@ import {
   StorableSet,
 } from "../storable-native-instances.ts";
 import { FrozenMap, FrozenSet } from "../frozen-builtins.ts";
-import { canBeStored, toRichStorableValue } from "../storable-value-modern.ts";
 import {
-  resetExperimentalStorableConfig,
-  setExperimentalStorableConfig,
+  canBeStored,
+  resetStorableValueConfig,
+  setStorableValueConfig,
+  shallowStorableFromNativeValue,
 } from "../storable-value.ts";
 
 /** Creates a standard test context (non-lenient) and a mock runtime. */
@@ -539,45 +540,45 @@ describe("json encoding", () => {
 
   describe("Date -> StorableEpochNsec conversion", () => {
     it("converts Date(0) to StorableEpochNsec(0n)", () => {
-      setExperimentalStorableConfig({ richStorableValues: true });
+      setStorableValueConfig({ richStorableValues: true });
       try {
         const date = new Date(0);
-        const result = toRichStorableValue(
+        const result = shallowStorableFromNativeValue(
           date,
         ) as unknown as StorableEpochNsec;
         expect(result).toBeInstanceOf(StorableEpochNsec);
         expect(result.value).toBe(0n);
       } finally {
-        resetExperimentalStorableConfig();
+        resetStorableValueConfig();
       }
     });
 
     it("converts Date to nanoseconds (msec * 1_000_000)", () => {
-      setExperimentalStorableConfig({ richStorableValues: true });
+      setStorableValueConfig({ richStorableValues: true });
       try {
         const date = new Date("2024-01-01T00:00:00.000Z");
-        const result = toRichStorableValue(
+        const result = shallowStorableFromNativeValue(
           date,
         ) as unknown as StorableEpochNsec;
         expect(result).toBeInstanceOf(StorableEpochNsec);
         const expectedNsec = BigInt(date.getTime()) * 1_000_000n;
         expect(result.value).toBe(expectedNsec);
       } finally {
-        resetExperimentalStorableConfig();
+        resetStorableValueConfig();
       }
     });
 
     it("converts negative Date to negative nanoseconds", () => {
-      setExperimentalStorableConfig({ richStorableValues: true });
+      setStorableValueConfig({ richStorableValues: true });
       try {
         const date = new Date(-86400000); // -1 day
-        const result = toRichStorableValue(
+        const result = shallowStorableFromNativeValue(
           date,
         ) as unknown as StorableEpochNsec;
         expect(result).toBeInstanceOf(StorableEpochNsec);
         expect(result.value).toBe(-86400000000000n);
       } finally {
-        resetExperimentalStorableConfig();
+        resetStorableValueConfig();
       }
     });
   });
@@ -1767,6 +1768,13 @@ describe("json encoding", () => {
   // --------------------------------------------------------------------------
 
   describe("canBeStored", () => {
+    beforeEach(() => {
+      setStorableValueConfig({ richStorableValues: true });
+    });
+    afterEach(() => {
+      resetStorableValueConfig();
+    });
+
     // -- Primitives that ARE storable --
     it("accepts null", () => {
       expect(canBeStored(null)).toBe(true);

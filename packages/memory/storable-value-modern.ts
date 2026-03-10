@@ -21,7 +21,7 @@ import {
   type NativeTag,
   tagFromNativeValue,
 } from "./type-tags.ts";
-import { isArrayWithOnlyIndexProperties } from "./storable-value-legacy.ts";
+import { isArrayWithOnlyIndexProperties } from "./storable-value-utils.ts";
 
 /**
  * Shallow-clone a `StorableValueLayer` to achieve a desired frozenness.

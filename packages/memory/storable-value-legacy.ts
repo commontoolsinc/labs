@@ -4,6 +4,7 @@ import type {
   StorableValue,
   StorableValueLayer,
 } from "./interface.ts";
+import { isArrayWithOnlyIndexProperties } from "./storable-value-utils.ts";
 
 /**
  * Converts specially-recognized class instances to their designated storable
@@ -295,8 +296,10 @@ function toDeepStorableValueInternal(
       converted.set(original, value);
     }
     // `undefined` at non-top-level should be omitted (matches JSON.stringify).
+    // In arrays, return `null` instead of OMIT to match JSON.stringify semantics
+    // (which coerces undefined to null in array positions).
     if (value === undefined && converted.size > 0) {
-      return OMIT;
+      return inArray ? null : OMIT;
     }
     // At this point, value is a primitive (null, boolean, number, string) or
     // undefined - all valid StorableValue types.
@@ -329,30 +332,6 @@ function toDeepStorableValueInternal(
   }
 
   return result;
-}
-
-/**
- * Helper which accepts an array and checks to see whether all of its enumerable
- * own properties are numeric indices (that is, it has no named properties).
- * Unlike {@link isStorableArray}, this returns `true` even for sparse arrays.
- *
- * @param array The array to check.
- * @returns `true` if the array has only numeric properties, `false` otherwise.
- */
-export function isArrayWithOnlyIndexProperties(array: unknown[]): boolean {
-  const len = array.length;
-  const keys = Object.keys(array);
-
-  // Quick check: more keys than length means there must be named properties.
-  if (keys.length > len) {
-    return false;
-  }
-
-  // Verify all keys are valid indices (non-negative integers < length).
-  return !keys.some((k) => {
-    const n = Number(k);
-    return !Number.isInteger(n) || n < 0 || n >= len;
-  });
 }
 
 /**

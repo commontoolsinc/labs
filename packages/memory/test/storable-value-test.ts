@@ -3,8 +3,8 @@ import { expect } from "@std/expect";
 import {
   isArrayIndexPropertyName,
   isStorableValue,
-  resetExperimentalStorableConfig,
-  setExperimentalStorableConfig,
+  resetStorableValueConfig,
+  setStorableValueConfig,
   shallowStorableFromNativeValue,
   storableFromNativeValue,
 } from "../storable-value.ts";
@@ -16,10 +16,10 @@ describe("storable-value", () => {
   // default. The rich-path describe blocks override this in their own
   // beforeEach.
   beforeEach(() => {
-    setExperimentalStorableConfig({ richStorableValues: false });
+    setStorableValueConfig({ richStorableValues: false });
   });
   afterEach(() => {
-    resetExperimentalStorableConfig();
+    resetStorableValueConfig();
   });
 
   describe("isArrayIndexPropertyName", () => {
@@ -41,11 +41,13 @@ describe("storable-value", () => {
         expect(isArrayIndexPropertyName("999999999")).toBe(true);
       });
 
-      it("accepts max valid index (2**31 - 1)", () => {
-        expect(isArrayIndexPropertyName("2147483647")).toBe(true);
+      it("accepts values in the upper range (2**31 and above, below 2**32 - 1)", () => {
+        expect(isArrayIndexPropertyName("2147483647")).toBe(true); // 2**31 - 1
+        expect(isArrayIndexPropertyName("2147483648")).toBe(true); // 2**31
+        expect(isArrayIndexPropertyName("4294967294")).toBe(true); // 2**32 - 2 (max valid)
       });
 
-      it("accepts 10-digit numbers below 2**31", () => {
+      it("accepts 10-digit numbers below 2**32 - 1", () => {
         expect(isArrayIndexPropertyName("1000000000")).toBe(true);
         expect(isArrayIndexPropertyName("2147483646")).toBe(true); // 2**31 - 2
       });
@@ -99,11 +101,10 @@ describe("storable-value", () => {
         expect(isArrayIndexPropertyName("+0")).toBe(false);
       });
 
-      it("rejects values >= 2**31", () => {
-        expect(isArrayIndexPropertyName("2147483648")).toBe(false); // 2**31
-        expect(isArrayIndexPropertyName("2147483649")).toBe(false); // 2**31 + 1
-        expect(isArrayIndexPropertyName("4294967295")).toBe(false); // 2**32 - 1
-        expect(isArrayIndexPropertyName("9999999999")).toBe(false); // way > 2**31
+      it("rejects values >= 2**32 - 1", () => {
+        expect(isArrayIndexPropertyName("4294967295")).toBe(false); // 2**32 - 1 (not a valid index)
+        expect(isArrayIndexPropertyName("4294967296")).toBe(false); // 2**32
+        expect(isArrayIndexPropertyName("9999999999")).toBe(false); // way > 2**32
         expect(isArrayIndexPropertyName("10000000000")).toBe(false); // 11 digits
       });
     });
@@ -921,11 +922,11 @@ describe("storable-value", () => {
 
   describe("freeze parameter (rich path)", () => {
     beforeEach(() => {
-      setExperimentalStorableConfig({ richStorableValues: true });
+      setStorableValueConfig({ richStorableValues: true });
     });
 
     afterEach(() => {
-      resetExperimentalStorableConfig();
+      resetStorableValueConfig();
     });
 
     describe("shallowStorableFromNativeValue", () => {
@@ -1174,10 +1175,10 @@ describe("storable-value", () => {
 
   describe("Error internals deep conversion (rich path)", () => {
     beforeEach(() => {
-      setExperimentalStorableConfig({ richStorableValues: true });
+      setStorableValueConfig({ richStorableValues: true });
     });
     afterEach(() => {
-      resetExperimentalStorableConfig();
+      resetStorableValueConfig();
     });
 
     it("converts Error with raw Error cause into nested StorableError", () => {

@@ -21,7 +21,11 @@ import {
   StorableUint8Array,
 } from "../storable-native-instances.ts";
 import { FrozenMap, FrozenSet } from "../frozen-builtins.ts";
-import { toRichStorableValue } from "../storable-value-modern.ts";
+import {
+  resetStorableValueConfig,
+  setStorableValueConfig,
+  shallowStorableFromNativeValue,
+} from "../storable-value.ts";
 import {
   NATIVE_TAGS,
   tagFromNativeClass,
@@ -924,12 +928,17 @@ describe("storable-native-instances", () => {
       expect(Object.isFrozen(new StorableEpochDays(100n))).toBe(true);
     });
 
-    it("passes through toRichStorableValue unchanged even with freeze=false", () => {
-      const nsec = new StorableEpochNsec(123n);
-      const days = new StorableEpochDays(456n);
-      // freeze=false should still return the same instance (not a copy).
-      expect(toRichStorableValue(nsec, false)).toBe(nsec);
-      expect(toRichStorableValue(days, false)).toBe(days);
+    it("passes through shallowStorableFromNativeValue unchanged even with freeze=false", () => {
+      setStorableValueConfig({ richStorableValues: true });
+      try {
+        const nsec = new StorableEpochNsec(123n);
+        const days = new StorableEpochDays(456n);
+        // freeze=false should still return the same instance (not a copy).
+        expect(shallowStorableFromNativeValue(nsec, false)).toBe(nsec);
+        expect(shallowStorableFromNativeValue(days, false)).toBe(days);
+      } finally {
+        resetStorableValueConfig();
+      }
     });
   });
 });

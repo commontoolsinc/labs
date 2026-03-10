@@ -2,8 +2,8 @@ import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   nativeFromStorableValue,
-  resetExperimentalStorableConfig,
-  setExperimentalStorableConfig,
+  resetStorableValueConfig,
+  setStorableValueConfig,
   storableFromNativeValue,
 } from "../storable-value.ts";
 import type { StorableValue } from "../interface.ts";
@@ -21,7 +21,7 @@ function roundTrip(value: StorableValue): StorableValue {
 describe("storable-value-dispatch", () => {
   // Always reset after each test to avoid leaking flag state.
   afterEach(() => {
-    resetExperimentalStorableConfig();
+    resetStorableValueConfig();
   });
 
   // --------------------------------------------------------------------------
@@ -68,7 +68,7 @@ describe("storable-value-dispatch", () => {
 
   describe("flag ON: rich storable value conversion", () => {
     it("round-trip preserves primitives", () => {
-      setExperimentalStorableConfig({ richStorableValues: true });
+      setStorableValueConfig({ richStorableValues: true });
       expect(roundTrip(42 as StorableValue)).toBe(42);
       expect(roundTrip("hello" as StorableValue)).toBe("hello");
       expect(roundTrip(null)).toBe(null);
@@ -76,36 +76,36 @@ describe("storable-value-dispatch", () => {
     });
 
     it("round-trip preserves undefined", () => {
-      setExperimentalStorableConfig({ richStorableValues: true });
+      setStorableValueConfig({ richStorableValues: true });
       expect(roundTrip(undefined)).toBe(undefined);
     });
 
     it("round-trip preserves bigint", () => {
-      setExperimentalStorableConfig({ richStorableValues: true });
+      setStorableValueConfig({ richStorableValues: true });
       expect(roundTrip(42n as StorableValue)).toBe(42n);
     });
 
     it("round-trip preserves plain objects", () => {
-      setExperimentalStorableConfig({ richStorableValues: true });
+      setStorableValueConfig({ richStorableValues: true });
       const value = { a: 1, b: "two" } as StorableValue;
       expect(roundTrip(value)).toEqual({ a: 1, b: "two" });
     });
 
     it("round-trip preserves arrays", () => {
-      setExperimentalStorableConfig({ richStorableValues: true });
+      setStorableValueConfig({ richStorableValues: true });
       const value = [1, "two", null] as StorableValue;
       expect(roundTrip(value)).toEqual([1, "two", null]);
     });
 
     it("storableFromNativeValue wraps Error into StorableError", () => {
-      setExperimentalStorableConfig({ richStorableValues: true });
+      setStorableValueConfig({ richStorableValues: true });
       const error = new Error("test error");
       const stored = storableFromNativeValue(error as unknown as StorableValue);
       expect(stored).toBeInstanceOf(StorableError);
     });
 
     it("nativeFromStorableValue unwraps StorableError back to Error", () => {
-      setExperimentalStorableConfig({ richStorableValues: true });
+      setStorableValueConfig({ richStorableValues: true });
       const error = new Error("test error");
       const stored = storableFromNativeValue(error as unknown as StorableValue);
       const restored = nativeFromStorableValue(stored);
@@ -114,14 +114,14 @@ describe("storable-value-dispatch", () => {
     });
 
     it("storableFromNativeValue deep-freezes result", () => {
-      setExperimentalStorableConfig({ richStorableValues: true });
+      setStorableValueConfig({ richStorableValues: true });
       const value = { a: 1, b: [2, 3] } as StorableValue;
       const stored = storableFromNativeValue(value);
       expect(Object.isFrozen(stored)).toBe(true);
     });
 
     it("round-trip preserves nested structure", () => {
-      setExperimentalStorableConfig({ richStorableValues: true });
+      setStorableValueConfig({ richStorableValues: true });
       const value = {
         name: "test",
         count: 42n,
@@ -139,16 +139,16 @@ describe("storable-value-dispatch", () => {
   // --------------------------------------------------------------------------
 
   describe("config lifecycle", () => {
-    it("setExperimentalStorableConfig({ richStorableValues: true }) enables conversion", () => {
-      setExperimentalStorableConfig({ richStorableValues: true });
+    it("setStorableValueConfig({ richStorableValues: true }) enables conversion", () => {
+      setStorableValueConfig({ richStorableValues: true });
       const error = new Error("test");
       const stored = storableFromNativeValue(error as unknown as StorableValue);
       expect(stored).toBeInstanceOf(StorableError);
     });
 
-    it("resetExperimentalStorableConfig() restores legacy conversion", () => {
-      setExperimentalStorableConfig({ richStorableValues: true });
-      resetExperimentalStorableConfig();
+    it("resetStorableValueConfig() restores legacy conversion", () => {
+      setStorableValueConfig({ richStorableValues: true });
+      resetStorableValueConfig();
       const error = new Error("reset test");
       const stored = storableFromNativeValue(error as unknown as StorableValue);
       // Back to legacy path: Error becomes @Error object, not StorableError.
@@ -159,7 +159,7 @@ describe("storable-value-dispatch", () => {
 
     it("multiple set/reset cycles work correctly", () => {
       // Cycle 1: ON — rich conversion
-      setExperimentalStorableConfig({ richStorableValues: true });
+      setStorableValueConfig({ richStorableValues: true });
       const error1 = new Error("test1");
       expect(storableFromNativeValue(error1 as unknown as StorableValue))
         .toBeInstanceOf(
@@ -167,7 +167,7 @@ describe("storable-value-dispatch", () => {
         );
 
       // Cycle 1: OFF — legacy conversion
-      resetExperimentalStorableConfig();
+      resetStorableValueConfig();
       const error1b = new Error("test1b");
       const stored1 = storableFromNativeValue(
         error1b as unknown as StorableValue,
@@ -176,7 +176,7 @@ describe("storable-value-dispatch", () => {
       expect((stored1 as Record<string, unknown>)["@Error"]).toBeDefined();
 
       // Cycle 2: ON — rich conversion
-      setExperimentalStorableConfig({ richStorableValues: true });
+      setStorableValueConfig({ richStorableValues: true });
       const error2 = new Error("test2");
       expect(storableFromNativeValue(error2 as unknown as StorableValue))
         .toBeInstanceOf(
@@ -184,7 +184,7 @@ describe("storable-value-dispatch", () => {
         );
 
       // Cycle 2: OFF — legacy conversion
-      resetExperimentalStorableConfig();
+      resetStorableValueConfig();
       const error2b = new Error("test2b");
       const stored2 = storableFromNativeValue(
         error2b as unknown as StorableValue,
@@ -193,9 +193,9 @@ describe("storable-value-dispatch", () => {
       expect((stored2 as Record<string, unknown>)["@Error"]).toBeDefined();
     });
 
-    it("setExperimentalStorableConfig({ richStorableValues: false }) after true restores legacy conversion", () => {
-      setExperimentalStorableConfig({ richStorableValues: true });
-      setExperimentalStorableConfig({ richStorableValues: false });
+    it("setStorableValueConfig({ richStorableValues: false }) after true restores legacy conversion", () => {
+      setStorableValueConfig({ richStorableValues: true });
+      setStorableValueConfig({ richStorableValues: false });
       const error = new Error("toggle test");
       const stored = storableFromNativeValue(error as unknown as StorableValue);
       expect(stored).not.toBeInstanceOf(StorableError);
