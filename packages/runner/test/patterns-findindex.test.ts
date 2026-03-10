@@ -188,6 +188,9 @@ describe("Pattern Runner - findIndex", () => {
     }, resultCell);
     tx.commit();
 
+    // Wait for the scheduler to process the action (and hit the TypeError)
+    await runtime.idle();
+
     // The pattern errors out — idx is never set
     const value = resultCell.get();
     expect((value as any)?.idx).toBeUndefined();
