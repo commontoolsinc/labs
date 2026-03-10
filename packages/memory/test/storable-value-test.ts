@@ -4,11 +4,11 @@ import {
   isArrayIndexPropertyName,
   isStorableValue,
   shallowStorableFromNativeValue,
-  toDeepStorableValue,
 } from "../storable-value-legacy.ts";
 import {
   resetExperimentalStorableConfig,
   setExperimentalStorableConfig,
+  toDeepStorableValue,
 } from "../storable-value.ts";
 import { StorableError } from "../storable-native-instances.ts";
 

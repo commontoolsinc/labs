@@ -7,7 +7,6 @@ import type {
 import {
   canBeStored as canBeStoredRich,
   isRichStorableValue,
-  toDeepRichStorableValue,
   toRichStorableValue,
 } from "./storable-value-modern.ts";
 import { getExperimentalStorableConfig } from "./storable-value.ts";
@@ -328,30 +327,14 @@ const OMIT = Symbol("OMIT");
 const PROCESSING = Symbol("PROCESSING");
 
 /**
- * Recursively converts a value to storable (JSON-encodable) form. Like
- * `shallowStorableFromNativeValue()` but also recursively processes array elements and object
- * properties.
+ * Legacy implementation of deep storable value conversion for the JSON-only
+ * type system. Recursively converts a value to storable (JSON-encodable) form.
  *
  * @param value - The value to convert.
- * @param freeze - When `true` (default), deep-freezes the result tree.
- *   When `false`, wrapping and validation still occur but the result is
- *   left mutable. Only applies when `richStorableValues` is ON; the legacy
- *   path does not freeze.
  * @returns The storable value (original or converted).
  * @throws Error if the value (or any nested value) can't be converted.
  */
-export function toDeepStorableValue(
-  value: unknown,
-  freeze = true,
-): StorableValue {
-  if (getExperimentalStorableConfig().richStorableValues) {
-    return toDeepRichStorableValue(value, freeze);
-  }
-  return toDeepStorableValueLegacy(value);
-}
-
-/** Legacy implementation of `toDeepStorableValue()` for the JSON-only type system. */
-function toDeepStorableValueLegacy(value: unknown): StorableValue {
+export function toDeepStorableValueLegacy(value: unknown): StorableValue {
   // The internal helper can return OMIT for nested values that should be
   // omitted, but at the top level this never happens (OMIT is only returned
   // when converted.size > 0, i.e., in nested calls).

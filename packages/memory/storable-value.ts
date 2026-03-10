@@ -2,14 +2,14 @@ import { deepEqual } from "@commontools/utils/deep-equal";
 import type { StorableValue } from "./interface.ts";
 import { toDeepRichStorableValue } from "./storable-value-modern.ts";
 import { deepNativeValueFromStorableValue } from "./storable-native-instances.ts";
-import { toDeepStorableValue } from "./storable-value-legacy.ts";
+import { toDeepStorableValueLegacy } from "./storable-value-legacy.ts";
 
 // ---------------------------------------------------------------------------
 // Flag-dispatched public API
 //
 // These two symbols are reassigned by `configureDispatch()` whenever the
 // storable value conversion flag changes. When OFF (default),
-// `storableFromNativeValue` routes through `toDeepStorableValue` (legacy
+// `storableFromNativeValue` routes through `toDeepStorableValueLegacy` (legacy
 // conversion) and `nativeFromStorableValue` is an identity passthrough. When ON, they
 // route through the rich storable value conversion functions.
 // ---------------------------------------------------------------------------
@@ -19,7 +19,7 @@ import { toDeepStorableValue } from "./storable-value-legacy.ts";
  *
  * When the flag is ON, wraps native types (Error, Date, RegExp, etc.) into
  * storable wrappers and deep-freezes. When OFF, performs legacy deep
- * conversion via `toDeepStorableValue`.
+ * conversion via `toDeepStorableValueLegacy`.
  *
  * @param freeze - When `true` (default), deep-freezes the result. Only
  *   applies when `richStorableValues` is ON; the legacy path does not
@@ -124,13 +124,40 @@ function configureDispatch(): void {
     // ----- Legacy conversion (flag OFF) -----
 
     storableFromNativeValue = (value: unknown): StorableValue => {
-      return toDeepStorableValue(value);
+      return toDeepStorableValueLegacy(value);
     };
 
     nativeFromStorableValue = (value: StorableValue): StorableValue => {
       return value;
     };
   }
+}
+
+// ---------------------------------------------------------------------------
+// Flag-dispatched deep conversion
+// ---------------------------------------------------------------------------
+
+/**
+ * Recursively converts a value to storable form (deep, recursive).
+ *
+ * When the flag is ON, wraps native types (Error, Date, RegExp, etc.) into
+ * storable wrappers and deep-freezes. When OFF, performs legacy deep
+ * conversion via `toDeepStorableValueLegacy`.
+ *
+ * @param value - The value to convert.
+ * @param freeze - When `true` (default), deep-freezes the result. Only
+ *   applies when `richStorableValues` is ON; the legacy path does not freeze.
+ * @returns The storable value (original or converted).
+ * @throws Error if the value (or any nested value) can't be converted.
+ */
+export function toDeepStorableValue(
+  value: unknown,
+  freeze = true,
+): StorableValue {
+  if (currentConfig.richStorableValues) {
+    return toDeepRichStorableValue(value, freeze);
+  }
+  return toDeepStorableValueLegacy(value);
 }
 
 // ---------------------------------------------------------------------------
