@@ -92,7 +92,7 @@ export type CallKind =
   | { kind: "when"; symbol?: ts.Symbol }
   | { kind: "unless"; symbol?: ts.Symbol }
   | { kind: "builder"; symbol?: ts.Symbol; builderName: string }
-  | { kind: "array-map"; symbol?: ts.Symbol }
+  | { kind: "array-method"; symbol?: ts.Symbol }
   | { kind: "derive"; symbol?: ts.Symbol }
   | { kind: "cell-factory"; symbol?: ts.Symbol; factoryName: string }
   | { kind: "cell-for"; symbol?: ts.Symbol }
@@ -178,7 +178,7 @@ function resolveExpressionKind(
       // Plain Array.prototype methods should not be treated as reactive.
       const receiverType = checker.getTypeAtLocation(target.expression);
       if (isOpaqueRefType(receiverType, checker)) {
-        return { kind: "array-map" };
+        return { kind: "array-method" };
       }
     }
     if (name === "derive") {
@@ -265,7 +265,7 @@ function resolveSymbolKind(
       isArrayMethodDeclaration(declaration) ||
       isOpaqueRefMethodDeclaration(declaration)
     ) {
-      return { kind: "array-map", symbol: resolved };
+      return { kind: "array-method", symbol: resolved };
     }
     if (
       ts.isVariableDeclaration(declaration) &&
@@ -355,7 +355,7 @@ function resolveSymbolKind(
   }
 
   if (ARRAY_METHOD_NAMES.has(name)) {
-    return { kind: "array-map", symbol: resolved };
+    return { kind: "array-method", symbol: resolved };
   }
 
   return undefined;

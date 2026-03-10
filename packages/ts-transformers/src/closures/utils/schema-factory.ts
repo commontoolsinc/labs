@@ -19,11 +19,11 @@ export class SchemaFactory {
   ) {}
 
   /**
-   * Build a TypeNode for a map callback parameter.
+   * Build a TypeNode for an array method callback parameter.
    * Returns: { element: T, index?: number, array?: T[], params: {...} }
    */
-  createMapCallbackSchema(
-    mapCall: ts.CallExpression,
+  createArrayMethodCallbackSchema(
+    methodCall: ts.CallExpression,
     elemParam: ts.ParameterDeclaration | undefined,
     indexParam: ts.ParameterDeclaration | undefined,
     arrayParam: ts.ParameterDeclaration | undefined,
@@ -42,7 +42,7 @@ export class SchemaFactory {
     } else {
       // Infer from map call
       const inferred = inferArrayElementType(
-        (mapCall.expression as ts.PropertyAccessExpression).expression,
+        (methodCall.expression as ts.PropertyAccessExpression).expression,
         { ...this.context, typeRegistry },
       );
 

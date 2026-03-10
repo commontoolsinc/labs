@@ -20,8 +20,11 @@ import {
   normalizeBindingName,
   reserveIdentifier,
 } from "../../utils/identifiers.ts";
-import { analyzeElementBinding, rewriteCallbackBody } from "./map-utils.ts";
-import type { ComputedAliasInfo } from "./map-utils.ts";
+import {
+  analyzeElementBinding,
+  rewriteCallbackBody,
+} from "./array-method-utils.ts";
+import type { ComputedAliasInfo } from "./array-method-utils.ts";
 import { CaptureCollector } from "../capture-collector.ts";
 import { PatternBuilder } from "../utils/pattern-builder.ts";
 import { SchemaFactory } from "../utils/schema-factory.ts";
@@ -39,7 +42,7 @@ const METHOD_TO_WITH_PATTERN: Record<string, string> = {
   flatMap: "flatMapWithPattern",
 };
 
-export class MapStrategy implements ClosureTransformationStrategy {
+export class ArrayMethodStrategy implements ClosureTransformationStrategy {
   canTransform(
     node: ts.Node,
     _context: TransformationContext,
@@ -58,8 +61,8 @@ export class MapStrategy implements ClosureTransformationStrategy {
 
     const callback = node.arguments[0];
     if (callback && isFunctionLikeExpression(callback)) {
-      if (shouldTransformMap(node, context)) {
-        return transformMapCallback(node, callback, context, visitor);
+      if (shouldTransformArrayMethod(node, context)) {
+        return transformArrayMethodCallback(node, callback, context, visitor);
       }
     }
     return undefined;
@@ -87,29 +90,29 @@ export function buildCapturePropertyAssignments(
 }
 
 /**
- * Check if a map call should be transformed to mapWithPattern.
+ * Check if an array method call should be transformed to its WithPattern variant.
  *
  * Type-based approach with context awareness (CT-1186 fix):
  * 1. derive() calls always return OpaqueRef at runtime -> TRANSFORM
  * 2. Inside safe wrappers (computed/derive/etc), OpaqueRef gets auto-unwrapped
- *    to a plain array, so we should NOT transform OpaqueRef .map() calls there.
+ *    to a plain array, so we should NOT transform OpaqueRef method calls there.
  *    However, Cell and Stream do NOT get auto-unwrapped, so we still transform those.
  * 3. Outside safe wrappers, transform all cell-like types (OpaqueRef, Cell, Stream).
  */
-function shouldTransformMap(
-  mapCall: ts.CallExpression,
+function shouldTransformArrayMethod(
+  methodCall: ts.CallExpression,
   context: TransformationContext,
 ): boolean {
-  if (!ts.isPropertyAccessExpression(mapCall.expression)) return false;
+  if (!ts.isPropertyAccessExpression(methodCall.expression)) return false;
 
-  const methodName = mapCall.expression.name.text;
+  const methodName = methodCall.expression.name.text;
   if (!Object.hasOwn(METHOD_TO_WITH_PATTERN, methodName)) {
     return false;
   }
 
-  const mapTarget = mapCall.expression.expression;
+  const mapTarget = methodCall.expression.expression;
   const contextInfo = classifyReactiveContext(
-    mapCall,
+    methodCall,
     context.checker,
     context,
   );
@@ -127,7 +130,7 @@ function shouldTransformMap(
   }
 
   const targetType = getTypeAtLocationWithFallback(
-    mapTarget,
+    mapTarget, // the receiver of the array method call
     context.checker,
     context.options.typeRegistry,
     context.options.logger,
@@ -464,7 +467,7 @@ function isReactiveMapOrigin(
  * Create the final pattern call with params object.
  */
 function createPatternCallWithParams(
-  mapCall: ts.CallExpression,
+  methodCall: ts.CallExpression,
   callback: ts.ArrowFunction | ts.FunctionExpression,
   transformedBody: ts.ConciseBody,
   elemParam: ts.ParameterDeclaration | undefined,
@@ -555,12 +558,12 @@ function createPatternCallWithParams(
 
   // Build the new callback
   const newCallback = builder.buildCallback(callback, rewrittenBody, "params");
-  context.markAsMapCallback(newCallback);
+  context.markAsArrayMethodCallback(newCallback);
 
   // Build schema using SchemaFactory
   const schemaFactory = new SchemaFactory(context);
-  const callbackParamTypeNode = schemaFactory.createMapCallbackSchema(
-    mapCall,
+  const callbackParamTypeNode = schemaFactory.createArrayMethodCallbackSchema(
+    methodCall,
     elemParam,
     indexParam,
     arrayParam,
@@ -631,25 +634,25 @@ function createPatternCallWithParams(
     paramProperties.length > 0,
   );
 
-  if (!ts.isPropertyAccessExpression(mapCall.expression)) {
+  if (!ts.isPropertyAccessExpression(methodCall.expression)) {
     throw new Error(
-      "Expected mapCall.expression to be a PropertyAccessExpression",
+      "Expected methodCall.expression to be a PropertyAccessExpression",
     );
   }
 
   // Visit the array expression
   const visitedArrayExpr = ts.visitNode(
-    mapCall.expression.expression,
+    methodCall.expression.expression,
     visitor,
     ts.isExpression,
-  ) ?? mapCall.expression.expression;
+  ) ?? methodCall.expression.expression;
   const loweredArrayExpr = lowerMapReceiverMemberAccess(
     visitedArrayExpr,
     context,
   );
 
   const originalMethodName =
-    (mapCall.expression as ts.PropertyAccessExpression).name.text;
+    (methodCall.expression as ts.PropertyAccessExpression).name.text;
   const targetMethodName = METHOD_TO_WITH_PATTERN[originalMethodName] ??
     "mapWithPattern";
   const mapWithPatternAccess = factory.createPropertyAccessExpression(
@@ -658,9 +661,9 @@ function createPatternCallWithParams(
   );
 
   const args: ts.Expression[] = [patternCall, paramsObject];
-  if (mapCall.arguments.length > 1) {
+  if (methodCall.arguments.length > 1) {
     const thisArg = ts.visitNode(
-      mapCall.arguments[1],
+      methodCall.arguments[1],
       visitor,
       ts.isExpression,
     );
@@ -671,7 +674,7 @@ function createPatternCallWithParams(
 
   const mapWithPatternCall = factory.createCallExpression(
     mapWithPatternAccess,
-    mapCall.typeArguments,
+    methodCall.typeArguments,
     args,
   );
 
@@ -679,7 +682,7 @@ function createPatternCallWithParams(
   // can find it when this call is used inside ifElse branches
   if (typeRegistry) {
     // The result type of mapWithPattern is the same as the original map call
-    const mapResultType = context.checker.getTypeAtLocation(mapCall);
+    const mapResultType = context.checker.getTypeAtLocation(methodCall);
     registerSyntheticCallType(mapWithPatternCall, mapResultType, typeRegistry);
   }
 
@@ -687,12 +690,12 @@ function createPatternCallWithParams(
 }
 
 /**
- * Transform a map callback for OpaqueRef arrays.
- * Always transforms to use pattern + mapWithPattern, even with no captures,
- * to ensure callback parameters become opaque.
+ * Transform an array method callback for OpaqueRef arrays.
+ * Always transforms to use pattern + the WithPattern variant, even with no
+ * captures, to ensure callback parameters become opaque.
  */
-export function transformMapCallback(
-  mapCall: ts.CallExpression,
+export function transformArrayMethodCallback(
+  methodCall: ts.CallExpression,
   callback: ts.ArrowFunction | ts.FunctionExpression,
   context: TransformationContext,
   visitor: ts.Visitor,
@@ -700,9 +703,9 @@ export function transformMapCallback(
   const { checker } = context;
 
   // Mark the authored callback before visiting nested expressions so context
-  // classification during this transform can treat nested map calls as being
-  // inside a transformed map callback.
-  context.markAsMapCallback(callback);
+  // classification during this transform can treat nested array method calls as
+  // being inside a transformed array method callback.
+  context.markAsArrayMethodCallback(callback);
 
   // Collect captured variables from the callback
   const collector = new CaptureCollector(checker);
@@ -714,7 +717,7 @@ export function transformMapCallback(
   const indexParam = originalParams[1]; // May be undefined
   const arrayParam = originalParams[2]; // May be undefined
 
-  // IMPORTANT: First, recursively transform any nested map callbacks BEFORE we change
+  // IMPORTANT: First, recursively transform any nested array method callbacks BEFORE we change
   // parameter names. This ensures nested callbacks can properly detect captures from
   // parent callback scope. Reuse the same visitor for consistency.
   const transformedBody = ts.visitNode(
@@ -724,7 +727,7 @@ export function transformMapCallback(
 
   // Create the final pattern call with params
   return createPatternCallWithParams(
-    mapCall,
+    methodCall,
     callback,
     transformedBody,
     elemParam,

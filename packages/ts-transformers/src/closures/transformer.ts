@@ -2,7 +2,7 @@ import ts from "typescript";
 import { TransformationContext, Transformer } from "../core/mod.ts";
 import { visitEachChildWithJsx } from "../ast/mod.ts";
 import { ActionStrategy } from "./strategies/action-strategy.ts";
-import { MapStrategy } from "./strategies/map-strategy.ts";
+import { ArrayMethodStrategy } from "./strategies/array-method-strategy.ts";
 import { DeriveStrategy } from "./strategies/derive-strategy.ts";
 import { HandlerStrategy } from "./strategies/handler-strategy.ts";
 import { PatternToolStrategy } from "./strategies/patternTool-strategy.ts";
@@ -24,7 +24,7 @@ function createClosureTransformVisitor(
   const strategies: ClosureTransformationStrategy[] = [
     new HandlerStrategy(),
     new ActionStrategy(),
-    new MapStrategy(),
+    new ArrayMethodStrategy(),
     new PatternToolStrategy(),
     new DeriveStrategy(),
   ];

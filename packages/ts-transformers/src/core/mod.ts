@@ -8,13 +8,13 @@
  * TypeRegistry (WeakMap<ts.Node, ts.Type>)
  *   Preserves original Type when schema-injection creates synthetic TypeNodes
  *   that may not survive round-tripping through checker.getTypeFromTypeNode().
- *   Writers: derive-strategy, map-utils, builtins/derive, opaque-ref/helpers
+ *   Writers: derive-strategy, array-method-utils, builtins/derive, opaque-ref/helpers
  *   Readers: computed transformer, schema-generator, type-inference, ast/utils
  *
  * mapCallbackRegistry (WeakSet<ts.Node>)
- *   Marks arrow functions created by ClosureTransformer as map callbacks.
- *   Writers: context.markAsMapCallback() (called by map-strategy)
- *   Readers: context.isMapCallback() (called by capability-lowering,
+ *   Marks arrow functions created by ClosureTransformer as array method callbacks.
+ *   Writers: context.markAsArrayMethodCallback() (called by array-method-strategy)
+ *   Readers: context.isArrayMethodCallback() (called by capability-lowering,
  *            reactive-context classifier)
  *
  * SchemaHints (WeakMap<ts.Node, SchemaHint>)

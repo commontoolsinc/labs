@@ -107,19 +107,20 @@ export class TransformationContext {
   }
 
   /**
-   * Mark an arrow function as a map callback created by ClosureTransformer.
-   * This allows later transformers to identify synthetic map callback scopes.
+   * Mark an arrow function as an array method callback created by
+   * ClosureTransformer. This allows later transformers to identify synthetic
+   * array method callback scopes.
    */
-  markAsMapCallback(node: ts.Node): void {
+  markAsArrayMethodCallback(node: ts.Node): void {
     if (this.options.mapCallbackRegistry) {
       this.options.mapCallbackRegistry.add(node);
     }
   }
 
   /**
-   * Check if a node is a map callback created by ClosureTransformer.
+   * Check if a node is an array method callback created by ClosureTransformer.
    */
-  isMapCallback(node: ts.Node): boolean {
+  isArrayMethodCallback(node: ts.Node): boolean {
     return this.options.mapCallbackRegistry?.has(node) ?? false;
   }
 }
