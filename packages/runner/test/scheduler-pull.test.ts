@@ -9,6 +9,7 @@ import { type Action, type EventHandler } from "../src/scheduler.ts";
 import { type JSONSchema } from "../src/builder/types.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { LINK_V1_TAG } from "../src/sigil-types.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -705,6 +706,52 @@ describe("pull mode with references", () => {
     expect(outerRuns).toBe(2);
     expect(effectRuns).toBe(2);
     expect(effectResult.get()).toBe("apple");
+  });
+
+  it("should re-run a schema sink when a followed link target appears later", async () => {
+    const source = runtime.getCell(space, "missing-link-source", undefined, tx);
+    const missingId = "missing-link-target";
+
+    source.set({
+      profile: {
+        "/": {
+          [LINK_V1_TAG]: {
+            id: missingId,
+            path: [],
+          },
+        },
+      },
+    });
+
+    await tx.commit();
+    tx = runtime.edit();
+
+    const profileName = source.key("profile").key("name").asSchema({
+      type: "string",
+    } as const satisfies JSONSchema);
+
+    const seen: Array<string | undefined> = [];
+    const cancel = profileName.sink((value) => {
+      seen.push(value);
+    });
+
+    await runtime.idle();
+    expect(seen).toEqual([undefined]);
+
+    const target = runtime.getCell<{ name: string }>(
+      space,
+      missingId,
+      undefined,
+      tx,
+    );
+    target.set({ name: "Ada" });
+
+    await tx.commit();
+    tx = runtime.edit();
+    await runtime.idle();
+
+    expect(seen).toEqual([undefined, "Ada"]);
+    cancel();
   });
 });
 
