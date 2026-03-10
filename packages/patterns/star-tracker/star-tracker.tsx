@@ -286,12 +286,6 @@ export const RepoCard = pattern<RepoCardInput>(
 
     const stars = computed(() => repoInfo.result?.stargazers_count ?? 0);
 
-    const pageUrl0 = computed(() => starPageUrl(owner, repo, 0, stars));
-    const pageUrl1 = computed(() => starPageUrl(owner, repo, 1, stars));
-    const pageUrl2 = computed(() => starPageUrl(owner, repo, 2, stars));
-    const pageUrl3 = computed(() => starPageUrl(owner, repo, 3, stars));
-    const pageUrl4 = computed(() => starPageUrl(owner, repo, 4, stars));
-
     const starOpts = computed(() => {
       const h: Record<string, string> = {
         Accept: "application/vnd.github.v3.star+json",
@@ -300,32 +294,32 @@ export const RepoCard = pattern<RepoCardInput>(
       return { headers: h };
     });
 
-    // Use mode:"text" + JSON.parse to avoid proxy entity decomposition of arrays
-    const page0 = fetchData<string>({
-      url: pageUrl0,
-      mode: "text",
-      options: starOpts,
-    });
-    const page1 = fetchData<string>({
-      url: pageUrl1,
-      mode: "text",
-      options: starOpts,
-    });
-    const page2 = fetchData<string>({
-      url: pageUrl2,
-      mode: "text",
-      options: starOpts,
-    });
-    const page3 = fetchData<string>({
-      url: pageUrl3,
-      mode: "text",
-      options: starOpts,
-    });
-    const page4 = fetchData<string>({
-      url: pageUrl4,
-      mode: "text",
-      options: starOpts,
-    });
+    // Chain stargazer page fetches sequentially: each page URL gates on the
+    // previous page's result being loaded. This turns 5 simultaneous requests
+    // per repo into a progressive chain, reducing the initial burst from ~150
+    // to ~25 concurrent requests across all visible repos.
+    const pageUrl0 = computed(() => starPageUrl(owner, repo, 0, stars));
+    const page0 = fetchData<string>({ url: pageUrl0, mode: "text", options: starOpts });
+
+    const pageUrl1 = computed(() =>
+      page0.result || page0.error ? starPageUrl(owner, repo, 1, stars) : ""
+    );
+    const page1 = fetchData<string>({ url: pageUrl1, mode: "text", options: starOpts });
+
+    const pageUrl2 = computed(() =>
+      page1.result || page1.error ? starPageUrl(owner, repo, 2, stars) : ""
+    );
+    const page2 = fetchData<string>({ url: pageUrl2, mode: "text", options: starOpts });
+
+    const pageUrl3 = computed(() =>
+      page2.result || page2.error ? starPageUrl(owner, repo, 3, stars) : ""
+    );
+    const page3 = fetchData<string>({ url: pageUrl3, mode: "text", options: starOpts });
+
+    const pageUrl4 = computed(() =>
+      page3.result || page3.error ? starPageUrl(owner, repo, 4, stars) : ""
+    );
+    const page4 = fetchData<string>({ url: pageUrl4, mode: "text", options: starOpts });
 
     const createdAt = computed(() => repoInfo.result?.created_at ?? "");
 
