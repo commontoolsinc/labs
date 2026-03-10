@@ -96,7 +96,12 @@ export class PatternContextValidationTransformer extends Transformer {
         // the map-on-fallback pattern fails even inside JSX expressions (which are "safe" for
         // other validations but still need this check).
         if (isInsideRestrictedContext(node, checker, context)) {
-          this.validateMapOnFallbackExpression(node, context, checker, analyze);
+          this.validateArrayMethodOnFallbackExpression(
+            node,
+            context,
+            checker,
+            analyze,
+          );
         }
 
         // Check for .get() calls
@@ -289,8 +294,8 @@ export class PatternContextValidationTransformer extends Transformer {
     // derive is a safe wrapper
     if (callKind.kind === "derive") return true;
 
-    // array-map on cells/opaques is transformed, so callbacks are allowed
-    if (callKind.kind === "array-map") return true;
+    // array method calls on cells/opaques are transformed, so callbacks are allowed
+    if (callKind.kind === "array-method") return true;
 
     // patternTool handles closure capture for its callback
     if (callKind.kind === "pattern-tool") return true;
@@ -396,7 +401,7 @@ export class PatternContextValidationTransformer extends Transformer {
    * This pattern fails at runtime because the transformer can't properly detect that
    * the result needs mapWithPattern transformation.
    */
-  private validateMapOnFallbackExpression(
+  private validateArrayMethodOnFallbackExpression(
     node: ts.CallExpression,
     context: TransformationContext,
     _checker: ts.TypeChecker,
@@ -522,9 +527,9 @@ export class PatternContextValidationTransformer extends Transformer {
             return;
           }
 
-          // Check for .map() on CellLike types
-          if (callKind.kind === "array-map") {
-            // Check if this is a map on a CellLike type (not a plain array)
+          // Check for array method on CellLike types
+          if (callKind.kind === "array-method") {
+            // Check if this is an array method on a CellLike type (not a plain array)
             if (ts.isPropertyAccessExpression(node.expression)) {
               const receiverType = checker.getTypeAtLocation(
                 node.expression.expression,

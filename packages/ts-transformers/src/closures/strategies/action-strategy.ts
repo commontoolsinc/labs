@@ -5,7 +5,7 @@ import { detectCallKind, registerSyntheticCallType } from "../../ast/mod.ts";
 import { CaptureCollector } from "../capture-collector.ts";
 import { PatternBuilder } from "../utils/pattern-builder.ts";
 import { SchemaFactory } from "../utils/schema-factory.ts";
-import { buildCapturePropertyAssignments } from "./map-strategy.ts";
+import { buildCapturePropertyAssignments } from "./array-method-strategy.ts";
 import { unwrapArrowFunction } from "../utils/ast-helpers.ts";
 
 /**

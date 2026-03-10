@@ -43,7 +43,6 @@ export {
   inferWidenedTypeFromExpression,
   isAnyOrUnknownType,
   isDeriveCall,
-  isReactiveArrayMapCall,
   isReactiveArrayMethodCall,
   registerSyntheticCallType,
   typeToSchemaTypeNode,

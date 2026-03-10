@@ -698,7 +698,7 @@ function isNonReactiveCapture(
     nonReactiveCaptures.has(captureName);
 }
 
-function isReactiveMapBinding(
+function isReactiveArrayMethodBinding(
   binding: DestructureBinding,
   nonReactiveCaptures?: ReadonlySet<string>,
 ): boolean {
@@ -719,7 +719,7 @@ function isReactiveMapBinding(
 function transformPatternCallback(
   callback: ts.ArrowFunction | ts.FunctionExpression,
   context: TransformationContext,
-  isMapCallback = false,
+  isArrayMethodCallback = false,
   nonReactiveCaptures?: ReadonlySet<string>,
 ): ts.ArrowFunction | ts.FunctionExpression {
   const factory = context.factory;
@@ -807,12 +807,13 @@ function transformPatternCallback(
           );
         }
 
-        // For map callback captures that are non-reactive in the outer scope
+        // For array method callback captures that are non-reactive in the outer scope
         // (e.g. a local `const` object), skip .key() and build a chained
         // property access so the runtime provides the concrete value instead
         // of wrapping it in an opaque cell ref.
         if (
-          isMapCallback && isNonReactiveCapture(binding, nonReactiveCaptures)
+          isArrayMethodCallback &&
+          isNonReactiveCapture(binding, nonReactiveCaptures)
         ) {
           initializer = factory.createIdentifier(inputIdentifier.text);
           for (const segment of binding.path) {
@@ -845,7 +846,8 @@ function transformPatternCallback(
         // body rewriting does not transform their property accesses to .key()
         // calls or flag their spreads as non-lowerable.
         if (
-          isMapCallback && !isReactiveMapBinding(binding, nonReactiveCaptures)
+          isArrayMethodCallback &&
+          !isReactiveArrayMethodBinding(binding, nonReactiveCaptures)
         ) {
           continue;
         }
@@ -1001,7 +1003,7 @@ export class CapabilityLoweringTransformer extends Transformer {
     // This information is consumed by transformPatternCallback to decide
     // whether a capture should use .key() (reactive) or direct property
     // access (non-reactive, e.g. a local `const` object literal).
-    const mapPatternCallNodes = new Set<ts.Node>();
+    const arrayMethodPatternCallNodes = new Set<ts.Node>();
     const nonReactiveCapturesByMapPattern = new Map<
       ts.Node,
       Set<string>
@@ -1101,7 +1103,7 @@ export class CapabilityLoweringTransformer extends Transformer {
           ts.isCallExpression(node.arguments[0])
         ) {
           const innerPattern = node.arguments[0];
-          mapPatternCallNodes.add(innerPattern);
+          arrayMethodPatternCallNodes.add(innerPattern);
 
           // Determine non-reactive captures: a capture is non-reactive
           // when its original binding is not opaque/reactive in the
@@ -1158,14 +1160,14 @@ export class CapabilityLoweringTransformer extends Transformer {
       if (isPatternBuilderCall(visitedNode, context.checker)) {
         const callbackArg = visitedNode.arguments[0];
         if (callbackArg && isFunctionLikeExpression(callbackArg)) {
-          const isMapCallback = mapPatternCallNodes.has(node);
-          const nonReactiveCaptures = isMapCallback
+          const isArrayMethodCallback = arrayMethodPatternCallNodes.has(node);
+          const nonReactiveCaptures = isArrayMethodCallback
             ? nonReactiveCapturesByMapPattern.get(node)
             : undefined;
           const transformedCallback = transformPatternCallback(
             callbackArg,
             context,
-            isMapCallback,
+            isArrayMethodCallback,
             nonReactiveCaptures,
           );
           const rewritten = context.factory.updateCallExpression(

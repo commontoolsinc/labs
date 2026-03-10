@@ -40,7 +40,7 @@ export interface DataFlowGraph {
 
 export type RewriteHint =
   | { kind: "call-if-else"; predicate: ts.Expression }
-  | { kind: "skip-call-rewrite"; reason: "array-map" | "builder" }
+  | { kind: "skip-call-rewrite"; reason: "array-method" | "builder" }
   | undefined;
 
 export interface DataFlowAnalysis {
@@ -190,7 +190,7 @@ export function createDataFlowAnalyzer(
 
     // Array-map calls preserve requiresRewrite from the callee
     // to handle cases like state.items.filter(...).map(...)
-    if (callKind?.kind === "array-map") {
+    if (callKind?.kind === "array-method") {
       return {
         ...merged,
         requiresRewrite: callee.requiresRewrite,
@@ -281,7 +281,7 @@ export function createDataFlowAnalyzer(
 
     const getOpaqueParameterCallKind = (
       symbol: ts.Symbol | undefined,
-    ): "builder" | "array-map" | undefined => {
+    ): "builder" | "array-method" | undefined => {
       if (!symbol) return undefined;
       const declarations = symbol.getDeclarations();
       if (!declarations) return undefined;
@@ -299,7 +299,7 @@ export function createDataFlowAnalyzer(
         if (!candidate) continue;
         const callExpression = candidate as ts.CallExpression;
         const callKind = detectCallKind(callExpression, checker);
-        if (callKind?.kind === "builder" || callKind?.kind === "array-map") {
+        if (callKind?.kind === "builder" || callKind?.kind === "array-method") {
           return callKind.kind;
         }
       }
@@ -697,8 +697,8 @@ export function createDataFlowAnalyzer(
         if (callKind?.kind === "builder") {
           return { kind: "skip-call-rewrite", reason: "builder" };
         }
-        if (callKind?.kind === "array-map") {
-          return { kind: "skip-call-rewrite", reason: "array-map" };
+        if (callKind?.kind === "array-method") {
+          return { kind: "skip-call-rewrite", reason: "array-method" };
         }
         return undefined;
       })();

@@ -909,6 +909,3 @@ export function isReactiveArrayMethodCall(
   return isOpaqueRefType(targetType, checker) &&
     hasArrayTypeArgument(targetType, checker);
 }
-
-/** @deprecated Use isReactiveArrayMethodCall */
-export const isReactiveArrayMapCall = isReactiveArrayMethodCall;

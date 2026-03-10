@@ -6,7 +6,7 @@ export type ReactiveContextKind = "pattern" | "compute" | "neutral";
 export type ReactiveContextOwner =
   | "pattern"
   | "render"
-  | "array-map"
+  | "array-method"
   | "jsx-callback"
   | "computed"
   | "derive"
@@ -23,7 +23,7 @@ export interface ReactiveContextInfo {
 }
 
 export interface ReactiveContextLookup {
-  isMapCallback(node: ts.Node): boolean;
+  isArrayMethodCallback(node: ts.Node): boolean;
 }
 
 /**
@@ -182,8 +182,8 @@ export function classifyReactiveContext(
     if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
       // Transformed mapWithPattern callbacks are explicitly tracked and should
       // always be treated as pattern callbacks, regardless of symbol lookup.
-      if (lookup?.isMapCallback(current)) {
-        return { kind: "pattern", owner: "array-map", inJsxExpression };
+      if (lookup?.isArrayMethodCallback(current)) {
+        return { kind: "pattern", owner: "array-method", inJsxExpression };
       }
 
       if (isInlineJsxEventHandler(current)) {
@@ -217,7 +217,7 @@ export function classifyReactiveContext(
           return { kind: "compute", owner: "unknown", inJsxExpression };
         }
 
-        if (callKind?.kind === "array-map") {
+        if (callKind?.kind === "array-method") {
           // Non-transformed map callbacks inherit the parent context.
           current = current.parent;
           continue;
