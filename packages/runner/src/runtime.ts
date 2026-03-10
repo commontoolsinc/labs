@@ -40,6 +40,7 @@ import type {
   IStorageManager,
   IStorageProvider,
   MemorySpace,
+  MemoryVersion,
 } from "./storage/interface.ts";
 import { type Cell, createCell } from "./cell.ts";
 import { createRef, EntityId } from "./create-ref.ts";
@@ -155,6 +156,7 @@ export interface ExperimentalOptions {
 export interface RuntimeOptions {
   apiUrl: URL;
   storageManager: IStorageManager;
+  memoryVersion?: MemoryVersion;
   consoleHandler?: ConsoleHandler;
   errorHandlers?: ErrorHandler[];
   patternEnvironment?: PatternEnvironment;
@@ -247,6 +249,7 @@ export class Runtime {
   readonly cfc: ContextualFlowControl;
   readonly staticCache: StaticCache;
   readonly storageManager: IStorageManager;
+  readonly memoryVersion: MemoryVersion;
   readonly telemetry: RuntimeTelemetry;
   readonly cachedCompiler?: CachedCompiler;
   /** Resolved experimental flags (all properties present, defaulting to `false`). */
@@ -258,6 +261,17 @@ export class Runtime {
   private writeDebugContext = new WriteDebugContextStorage<string>();
 
   constructor(options: RuntimeOptions) {
+    this.memoryVersion = options.memoryVersion ?? "v1";
+    const storageManagerMemoryVersion = options.storageManager.memoryVersion ??
+      "v1";
+
+    if (storageManagerMemoryVersion !== this.memoryVersion) {
+      throw new Error(
+        "Runtime memoryVersion does not match storage manager memoryVersion: " +
+          `${this.memoryVersion} !== ${storageManagerMemoryVersion}`,
+      );
+    }
+
     this.experimental = {
       modernDataModel: undefined,
       unifiedJsonEncoding: undefined,
@@ -343,6 +357,7 @@ export class Runtime {
     if (options.debug) {
       console.log("Runtime initialized with services:", {
         scheduler: !!this.scheduler,
+        memoryVersion: this.memoryVersion,
         storageManager: !!this.storageManager,
         patternManager: !!this.patternManager,
         moduleRegistry: !!this.moduleRegistry,

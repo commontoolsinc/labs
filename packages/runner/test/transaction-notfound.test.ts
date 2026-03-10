@@ -38,6 +38,7 @@ class MockReplica implements ISpaceReplica {
 // Mock storage manager
 class MockStorageManager implements IStorageManager {
   id = "test-storage";
+  memoryVersion = "v1" as const;
   replicas = new Map<MemorySpace, MockReplica>();
   as = { did: () => "did:test:user" as const } as unknown as Signer;
 

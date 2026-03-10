@@ -40,6 +40,7 @@ export type {
 };
 
 export type ChangeGroup = unknown;
+export type MemoryVersion = "v1" | "v2";
 
 /**
  * Base interface for storage errors. These are lightweight objects (not Error
@@ -98,6 +99,7 @@ export type OptStorageValue<T extends FabricValue = FabricValue> =
 
 export interface IStorageManager extends IStorageSubscriptionCapability {
   id: string;
+  readonly memoryVersion: MemoryVersion;
 
   /**
    * The signer used for authenticating storage operations.
@@ -213,7 +215,7 @@ export interface IStorageProviderWithReplica extends IStorageProvider {
  * {@link IStorageManager} in the future. It provides capability to subscribe
  * to the storage notifications.
  */
-export interface IStorageSubscriptionCapability {
+export interface IStorageNotificationCapability {
   /**
    * Subscribes to the storage manager's notifications.
    *
@@ -241,13 +243,13 @@ export interface IStorageSubscriptionCapability {
    * storage.subscribe(log(5));
    * ```
    */
-  subscribe(subscription: IStorageSubscription): void;
+  subscribe(subscription: IStorageNotification): void;
 }
 
 /**
  * Subscription that can be used to receive storage notifications.
  */
-export interface IStorageSubscription {
+export interface IStorageNotification {
   /**
    * Called with a next notification, if returns `{ done: true }` or throws an
    * exception, subscription will be cancelled and method will not be called
@@ -259,6 +261,19 @@ export interface IStorageSubscription {
     notification: StorageNotification,
   ): Omit<IteratorResult<unknown, unknown>, "value"> | undefined;
 }
+
+/**
+ * Backward-compatible alias retained while the v1 naming is still used
+ * throughout the runner.
+ */
+export interface IStorageSubscriptionCapability
+  extends IStorageNotificationCapability {}
+
+/**
+ * Backward-compatible alias retained while the v1 naming is still used
+ * throughout the runner.
+ */
+export interface IStorageSubscription extends IStorageNotification {}
 
 /**
  * Notification produced by the underlying storage. It is a variant type
