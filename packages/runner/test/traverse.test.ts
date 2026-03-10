@@ -29,10 +29,6 @@ import type { JSONSchema } from "../src/builder/types.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { Immutable } from "@commontools/utils/types";
 import { ContextualFlowControl } from "@commontools/runner";
-import {
-  IMemorySpaceAddress,
-  IMemorySpaceAttestation,
-} from "../src/storage/interface.ts";
 import { IMemorySpaceValueAttestation } from "../src/traverse.ts";
 
 // Helper function to get the SchemaObjectTraverser backed by a store map
@@ -609,13 +605,13 @@ for (const canonicalHashing of [false, true]) {
           >();
           const cfc = new ContextualFlowControl();
           const schemaTracker = new MapSet<string, SchemaPathSelector>();
-          const docAFoo = {
+          const docAFoo: IMemorySpaceValueAttestation = {
             address: {
               id: revA.of,
               type: revA.the,
               path: ["value", "foo"],
               space: "did:null:null",
-            } as IMemorySpaceAddress,
+            },
             value: (revA.is as any).value.foo as StorableDatum,
           };
           const docASelector = {
@@ -624,7 +620,7 @@ for (const canonicalHashing of [false, true]) {
           };
           const [curDoc, _selector1] = getAtPath(
             tx,
-            docAFoo as IMemorySpaceValueAttestation,
+            docAFoo,
             [],
             tracker,
             cfc,
@@ -633,7 +629,7 @@ for (const canonicalHashing of [false, true]) {
           );
           const [redirDoc, _selector2] = getAtPath(
             tx,
-            docAFoo as IMemorySpaceValueAttestation,
+            docAFoo,
             [],
             tracker,
             cfc,
@@ -676,19 +672,19 @@ for (const canonicalHashing of [false, true]) {
           >();
           const cfc = new ContextualFlowControl();
           const schemaTracker = new MapSet<string, SchemaPathSelector>();
-          const docACurrent = {
+          const docACurrent: IMemorySpaceValueAttestation = {
             address: {
               id: revA.of,
               type: revA.the,
               path: ["value", "current"],
               space: "did:null:null",
-            } as IMemorySpaceAddress,
+            },
             value: (revA.is as any).value.current as StorableDatum,
           };
           const docASelector = { path: ["value", "current"], schema: true };
           const [curDoc, _selector1] = getAtPath(
             tx,
-            docACurrent as IMemorySpaceValueAttestation,
+            docACurrent,
             [],
             tracker,
             cfc,
@@ -697,7 +693,7 @@ for (const canonicalHashing of [false, true]) {
           );
           const [redirDoc, _selector2] = getAtPath(
             tx,
-            docACurrent as IMemorySpaceValueAttestation,
+            docACurrent,
             [],
             tracker,
             cfc,
@@ -744,13 +740,13 @@ for (const canonicalHashing of [false, true]) {
           >();
           const cfc = new ContextualFlowControl();
           const schemaTracker = new MapSet<string, SchemaPathSelector>();
-          const docACurrent = {
+          const docACurrent: IMemorySpaceValueAttestation = {
             address: {
               id: revA.of,
               type: revA.the,
               path: ["value", "current"],
               space: "did:null:null",
-            } as IMemorySpaceAddress,
+            },
             value: (revA.is as any).value.current as StorableDatum,
           };
           const docASelector = {
@@ -759,7 +755,7 @@ for (const canonicalHashing of [false, true]) {
           };
           const [curDoc, _selector1] = getAtPath(
             tx,
-            docACurrent as IMemorySpaceValueAttestation,
+            docACurrent,
             [],
             tracker,
             cfc,
@@ -768,7 +764,7 @@ for (const canonicalHashing of [false, true]) {
           );
           const [redirDoc, redirDocSelector] = getAtPath(
             tx,
-            docACurrent as IMemorySpaceValueAttestation,
+            docACurrent,
             [],
             tracker,
             cfc,
@@ -826,7 +822,7 @@ for (const canonicalHashing of [false, true]) {
         const cfc = new ContextualFlowControl();
         const schemaTracker = new MapSet<string, SchemaPathSelector>(true);
 
-        const doc: IMemorySpaceAttestation = {
+        const doc: IMemorySpaceValueAttestation = {
           address: {
             space: "did:null:null",
             id: docUri,
@@ -839,7 +835,7 @@ for (const canonicalHashing of [false, true]) {
         // Navigate with invalid index "01"
         const [result1] = getAtPath(
           tx,
-          doc as IMemorySpaceValueAttestation,
+          doc,
           ["01"],
           tracker,
           cfc,
@@ -849,7 +845,7 @@ for (const canonicalHashing of [false, true]) {
         // Navigate with valid index "1"
         const [result2] = getAtPath(
           tx,
-          doc as IMemorySpaceValueAttestation,
+          doc,
           ["1"],
           tracker,
           cfc,

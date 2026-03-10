@@ -8,10 +8,7 @@ import type { JSONValue } from "@commontools/api";
 import { type StorableDatum } from "@commontools/memory/interface";
 import { createCell, isCell } from "./cell.ts";
 import { readMaybeLink, resolveLink } from "./link-resolution.ts";
-import {
-  type IExtendedStorageTransaction,
-  IMemorySpaceAddress,
-} from "./storage/interface.ts";
+import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { getTransactionForChildCells } from "./storage/extended-storage-transaction.ts";
 import { type Runtime } from "./runtime.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
@@ -22,7 +19,6 @@ import {
 import { toCell } from "./back-to-cell.ts";
 import {
   combineSchema,
-  IMemorySpaceValueAddress,
   IObjectCreator,
   mergeAnyOfMatches,
   mergeSchemaFlags,

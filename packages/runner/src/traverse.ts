@@ -1856,15 +1856,14 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         ),
       };
     }
+    // Since we know the path value starts with "value", we know the doc is
+    // IMemorySpaceValueAttestation.
+    const attestation = doc as IMemorySpaceValueAttestation;
     logger.timeStart("traverse");
     this.schemaTracker.add(getTrackerKey(doc.address), this.selector);
     // Flag the top level read of doc for the scheduler
     this.tx.readOrThrow(doc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
-    const rv = this.traverseWithSelector(
-      doc as IMemorySpaceValueAttestation,
-      this.selector,
-      link,
-    );
+    const rv = this.traverseWithSelector(attestation, this.selector, link);
     const { error } = rv;
     const elapsed = logger.timeEnd("traverse") ?? 0;
     if (elapsed > 100) {
@@ -1903,7 +1902,7 @@ export class SchemaObjectTraverser<V extends StorableDatum>
         "Call to traverse failed validation",
         doc,
         JSON.stringify(this.selector?.schema, undefined, 2),
-        this.getDebugValue(doc as IMemorySpaceValueAttestation),
+        this.getDebugValue(attestation),
       ]);
     }
     return rv;

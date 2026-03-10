@@ -10,7 +10,6 @@ import {
   createSchemaMemo,
   getAtPath,
   type IAttestation,
-  IMemorySpaceValueAddress,
   IMemorySpaceValueAttestation,
   loadSource,
   ManagedStorageTransaction,
@@ -57,7 +56,6 @@ import {
   toSelection,
 } from "./space.ts";
 import { ExtendedStorageTransaction } from "../runner/src/storage/extended-storage-transaction.ts";
-import { IMemorySpaceAttestation } from "../runner/src/storage/interface.ts";
 
 export type * from "./interface.ts";
 
